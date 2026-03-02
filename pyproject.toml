@@ -62,3 +62,24 @@ known-first-party = ["training", "common", "inference"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = [
+    "src/**/conftest.py",
+    "src/**/__init__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
