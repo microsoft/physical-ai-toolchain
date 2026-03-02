@@ -27,7 +27,8 @@
 		"**/.mega-linter.yml",
 		"*megalinter_file_names_cspell.txt",
 		"**/.terraform/**",
-		"**/.terraform.lock.hcl"
+		"**/.terraform.lock.hcl",
+		"**/scripts/tests/Fixtures/**"
 	],
 	"dictionaryDefinitions": [
 		{
