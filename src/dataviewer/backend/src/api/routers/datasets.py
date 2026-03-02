@@ -92,7 +92,7 @@ async def get_dataset_capabilities(
                 episodes = hdf5_loader.list_episodes()
                 episode_count = max(episode_count, len(episodes))
             except Exception:
-                pass
+                pass  # Best-effort; loader may not support listing
     elif is_lerobot:
         # Get episode count from LeRobot loader
         lerobot_loader = service._get_lerobot_loader(dataset_id)
@@ -101,7 +101,7 @@ async def get_dataset_capabilities(
                 episodes = lerobot_loader.list_episodes()
                 episode_count = max(episode_count, len(episodes))
             except Exception:
-                pass
+                pass  # Best-effort; loader may not support listing
 
     return DatasetCapabilities(
         hdf5_support=service.has_hdf5_support(),
@@ -209,7 +209,7 @@ async def get_episode_frame(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to load frame: {str(e)}",
+            detail=f"Failed to load frame: {e!s}",
         )
 
 

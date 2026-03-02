@@ -231,9 +231,7 @@ class TestHuggingFaceHubAdapter(TestCase):
             repo_id=self.repo_id,
             cache_dir=self.temp_dir,
         )
-        with patch(
-            "src.api.storage.huggingface.asyncio.to_thread", wraps=asyncio.to_thread
-        ) as mock_to_thread:
+        with patch("src.api.storage.huggingface.asyncio.to_thread", wraps=asyncio.to_thread) as mock_to_thread:
             asyncio.run(adapter._download_file("meta/info.json"))
             assert mock_to_thread.call_count >= 1
 

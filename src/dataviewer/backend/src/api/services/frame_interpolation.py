@@ -16,9 +16,9 @@ if TYPE_CHECKING:
     from ..models.datasources import TrajectoryPoint
 
 __all__ = [
-    "interpolate_trajectory",
-    "interpolate_image",
     "interpolate_frame_data",
+    "interpolate_image",
+    "interpolate_trajectory",
 ]
 
 
@@ -43,16 +43,13 @@ def interpolate_trajectory(
         timestamp=point1.timestamp + t * (point2.timestamp - point1.timestamp),
         frame=int((point1.frame + point2.frame) / 2),
         joint_positions=[
-            p1 + t * (p2 - p1)
-            for p1, p2 in zip(point1.joint_positions, point2.joint_positions, strict=True)
+            p1 + t * (p2 - p1) for p1, p2 in zip(point1.joint_positions, point2.joint_positions, strict=True)
         ],
         joint_velocities=[
-            v1 + t * (v2 - v1)
-            for v1, v2 in zip(point1.joint_velocities, point2.joint_velocities, strict=True)
+            v1 + t * (v2 - v1) for v1, v2 in zip(point1.joint_velocities, point2.joint_velocities, strict=True)
         ],
         end_effector_pose=[
-            e1 + t * (e2 - e1)
-            for e1, e2 in zip(point1.end_effector_pose, point2.end_effector_pose, strict=True)
+            e1 + t * (e2 - e1) for e1, e2 in zip(point1.end_effector_pose, point2.end_effector_pose, strict=True)
         ],
         gripper_state=point1.gripper_state if t < 0.5 else point2.gripper_state,
     )

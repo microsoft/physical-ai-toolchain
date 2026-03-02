@@ -218,12 +218,10 @@ class HDF5Exporter:
             insertion_count = 0
             if inserted_frames:
                 for ins in inserted_frames:
-                    try:
+                    if ins.after_frame_index in valid_indices:
                         pos = valid_indices.index(ins.after_frame_index)
                         if pos < len(valid_indices) - 1:
                             insertion_count += 1
-                    except ValueError:
-                        pass
             output_frames = len(valid_indices) + insertion_count
 
             if progress_callback:
@@ -234,7 +232,7 @@ class HDF5Exporter:
                         current_frame=0,
                         total_frames=output_frames,
                         percentage=10,
-                        status=f"Exporting {output_frames} frames (removed {total_frames - output_frames})...",  # noqa: E501
+                        status=f"Exporting {output_frames} frames (removed {total_frames - output_frames})...",
                     )
                 )
 
@@ -740,7 +738,7 @@ def parse_edit_operations(data: dict) -> EpisodeEditOperations:
         EpisodeEditOperations instance.
     """
     global_transform = None
-    if "globalTransform" in data and data["globalTransform"]:
+    if data.get("globalTransform"):
         gt = data["globalTransform"]
         global_transform = ImageTransform(
             crop=CropRegion(**gt["crop"]) if gt.get("crop") else None,
@@ -748,7 +746,7 @@ def parse_edit_operations(data: dict) -> EpisodeEditOperations:
         )
 
     camera_transforms = None
-    if "cameraTransforms" in data and data["cameraTransforms"]:
+    if data.get("cameraTransforms"):
         camera_transforms = {}
         for camera, ct in data["cameraTransforms"].items():
             camera_transforms[camera] = ImageTransform(
@@ -757,11 +755,11 @@ def parse_edit_operations(data: dict) -> EpisodeEditOperations:
             )
 
     removed_frames = None
-    if "removedFrames" in data and data["removedFrames"]:
+    if data.get("removedFrames"):
         removed_frames = set(data["removedFrames"])
 
     inserted_frames = None
-    if "insertedFrames" in data and data["insertedFrames"]:
+    if data.get("insertedFrames"):
         inserted_frames = [
             FrameInsertion(
                 after_frame_index=ins["afterFrameIndex"],
@@ -771,7 +769,7 @@ def parse_edit_operations(data: dict) -> EpisodeEditOperations:
         ]
 
     subtasks = None
-    if "subtasks" in data and data["subtasks"]:
+    if data.get("subtasks"):
         subtasks = [
             SubtaskSegment(
                 id=st["id"],

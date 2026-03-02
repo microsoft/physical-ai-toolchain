@@ -57,9 +57,7 @@ class TestTrajectoryAnalyzer:
         for idx in [0, 15, 30, 63]:
             ep = loader.load_episode(idx)
             metrics = analyzer.analyze(ep.joint_positions, ep.timestamps)
-            assert 1 <= metrics.overall_score <= 5, (
-                f"Episode {idx} score out of range: {metrics.overall_score}"
-            )
+            assert 1 <= metrics.overall_score <= 5, f"Episode {idx} score out of range: {metrics.overall_score}"
 
 
 class TestAnomalyDetector:

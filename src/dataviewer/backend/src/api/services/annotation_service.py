@@ -36,9 +36,7 @@ class AnnotationService:
         """
         self._storage = LocalStorageAdapter(base_path)
 
-    async def get_annotation(
-        self, dataset_id: str, episode_idx: int
-    ) -> EpisodeAnnotationFile | None:
+    async def get_annotation(self, dataset_id: str, episode_idx: int) -> EpisodeAnnotationFile | None:
         """
         Get annotations for an episode.
 
@@ -91,9 +89,7 @@ class AnnotationService:
         await self._storage.save_annotation(dataset_id, episode_idx, annotation_file)
         return annotation_file
 
-    async def delete_annotation(
-        self, dataset_id: str, episode_idx: int, annotator_id: str | None = None
-    ) -> bool:
+    async def delete_annotation(self, dataset_id: str, episode_idx: int, annotator_id: str | None = None) -> bool:
         """
         Delete annotations for an episode.
 
@@ -116,9 +112,7 @@ class AnnotationService:
             return False
 
         original_count = len(annotation_file.annotations)
-        annotation_file.annotations = [
-            a for a in annotation_file.annotations if a.annotator_id != annotator_id
-        ]
+        annotation_file.annotations = [a for a in annotation_file.annotations if a.annotator_id != annotator_id]
 
         if len(annotation_file.annotations) == original_count:
             return False  # Annotator not found
@@ -131,9 +125,7 @@ class AnnotationService:
         await self._storage.save_annotation(dataset_id, episode_idx, annotation_file)
         return True
 
-    async def run_auto_analysis(
-        self, dataset_id: str, episode_idx: int, episode: EpisodeData
-    ) -> AutoQualityAnalysis:
+    async def run_auto_analysis(self, dataset_id: str, episode_idx: int, episode: EpisodeData) -> AutoQualityAnalysis:
         """
         Run automatic quality analysis on an episode.
 

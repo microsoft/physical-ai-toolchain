@@ -189,9 +189,7 @@ class TestGetVideo:
     """GET /api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}"""
 
     def test_video_stream(self, client):
-        resp = client.get(
-            f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera"
-        )
+        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera")
         assert resp.status_code == 200
         assert "video" in resp.headers.get("content-type", "")
 

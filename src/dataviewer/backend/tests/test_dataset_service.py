@@ -140,10 +140,7 @@ class TestGetEpisode:
     async def test_episode_has_video_urls(self, service):
         ep = await service.get_episode(DATASET_ID, 0)
         assert "observation.images.il-camera" in ep.video_urls
-        assert (
-            f"/api/datasets/{DATASET_ID}/episodes/0/video/"
-            in ep.video_urls["observation.images.il-camera"]
-        )
+        assert f"/api/datasets/{DATASET_ID}/episodes/0/video/" in ep.video_urls["observation.images.il-camera"]
 
     @pytest.mark.asyncio
     async def test_trajectory_length_matches_meta(self, service):

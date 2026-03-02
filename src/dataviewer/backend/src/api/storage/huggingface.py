@@ -55,8 +55,7 @@ class HuggingFaceHubAdapter(StorageAdapter):
         """
         if not HF_AVAILABLE:
             raise ImportError(
-                "Hugging Face Hub support requires huggingface_hub package. "
-                "Install with: pip install huggingface_hub"
+                "Hugging Face Hub support requires huggingface_hub package. Install with: pip install huggingface_hub"
             )
 
         self.repo_id = repo_id
@@ -239,8 +238,7 @@ class HuggingFaceHubAdapter(StorageAdapter):
                     video_path = f"videos/{chunk_name}/{feature_name}/{ep_idx_str}"
                     # Return Hub URL for the video
                     video_urls[camera_name] = (
-                        f"https://huggingface.co/datasets/{self.repo_id}/resolve/"
-                        f"{self.revision}/{video_path}"
+                        f"https://huggingface.co/datasets/{self.repo_id}/resolve/{self.revision}/{video_path}"
                     )
 
             return EpisodeData(
@@ -278,18 +276,12 @@ class HuggingFaceHubAdapter(StorageAdapter):
         feature_name = f"observation.images.{camera_name}"
         video_path = f"videos/{chunk_name}/{feature_name}/episode_{episode_index:06d}.mp4"
 
-        return (
-            f"https://huggingface.co/datasets/{self.repo_id}/resolve/{self.revision}/{video_path}"
-        )
+        return f"https://huggingface.co/datasets/{self.repo_id}/resolve/{self.revision}/{video_path}"
 
-    async def get_annotation(
-        self, dataset_id: str, episode_index: int
-    ) -> EpisodeAnnotationFile | None:
+    async def get_annotation(self, dataset_id: str, episode_index: int) -> EpisodeAnnotationFile | None:
         raise NotImplementedError("HuggingFaceHubAdapter is read-only")
 
-    async def save_annotation(
-        self, dataset_id: str, episode_index: int, annotation: EpisodeAnnotationFile
-    ) -> None:
+    async def save_annotation(self, dataset_id: str, episode_index: int, annotation: EpisodeAnnotationFile) -> None:
         raise NotImplementedError("HuggingFaceHubAdapter is read-only")
 
     async def list_annotated_episodes(self, dataset_id: str) -> list[int]:

@@ -27,9 +27,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 class TrajectoryData(BaseModel):
     """Trajectory data for analysis."""
 
-    positions: list[list[float]] = Field(
-        description="Joint positions array of shape (N, num_joints)"
-    )
+    positions: list[list[float]] = Field(description="Joint positions array of shape (N, num_joints)")
     timestamps: list[float] = Field(description="Timestamps for each position")
     gripper_states: list[float] | None = Field(default=None, description="Optional gripper states")
 
@@ -93,9 +91,7 @@ class AnomalyDetectionRequest(BaseModel):
     timestamps: list[float] = Field(description="Timestamps")
     forces: list[list[float]] | None = Field(default=None, description="Optional force/torque data")
     gripper_states: list[float] | None = Field(default=None, description="Optional gripper states")
-    gripper_commands: list[float] | None = Field(
-        default=None, description="Optional gripper commands"
-    )
+    gripper_commands: list[float] | None = Field(default=None, description="Optional gripper commands")
 
 
 class AnomalyDetectionResponse(BaseModel):
@@ -110,9 +106,7 @@ class ClusterRequest(BaseModel):
     """Request for episode clustering."""
 
     trajectories: list[list[list[float]]] = Field(description="List of trajectory arrays")
-    num_clusters: int | None = Field(
-        default=None, ge=2, le=20, description="Optional fixed number of clusters"
-    )
+    num_clusters: int | None = Field(default=None, ge=2, le=20, description="Optional fixed number of clusters")
 
 
 class ClusterAssignmentResponse(BaseModel):
@@ -145,9 +139,7 @@ class AnnotationSuggestion(BaseModel):
     """AI-suggested annotation."""
 
     task_completion_rating: int = Field(ge=1, le=5, description="Suggested task completion rating")
-    trajectory_quality_score: int = Field(
-        ge=1, le=5, description="Suggested trajectory quality score"
-    )
+    trajectory_quality_score: int = Field(ge=1, le=5, description="Suggested trajectory quality score")
     suggested_flags: list[str] = Field(description="Suggested quality flags")
     detected_anomalies: list[AnomalyResponse] = Field(description="Detected anomalies")
     confidence: float = Field(ge=0, le=1, description="Overall suggestion confidence")
@@ -169,9 +161,7 @@ async def analyze_trajectory(data: TrajectoryData) -> TrajectoryMetricsResponse:
         raise HTTPException(status_code=400, detail="Trajectory must have at least 3 positions")
 
     if len(data.positions) != len(data.timestamps):
-        raise HTTPException(
-            status_code=400, detail="Positions and timestamps must have same length"
-        )
+        raise HTTPException(status_code=400, detail="Positions and timestamps must have same length")
 
     positions = np.array(data.positions)
     timestamps = np.array(data.timestamps)
@@ -230,9 +220,7 @@ async def cluster_episodes(request: ClusterRequest) -> ClusterResponse:
     episodes with similar motion patterns.
     """
     if len(request.trajectories) < 2:
-        raise HTTPException(
-            status_code=400, detail="At least 2 trajectories required for clustering"
-        )
+        raise HTTPException(status_code=400, detail="At least 2 trajectories required for clustering")
 
     trajectories = [np.array(t) for t in request.trajectories]
 

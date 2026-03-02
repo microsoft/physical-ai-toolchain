@@ -33,9 +33,7 @@ class Detection(BaseModel):
     class_id: int = Field(ge=0, description="COCO class ID")
     class_name: str = Field(description="Human-readable class name")
     confidence: float = Field(ge=0.0, le=1.0, description="Detection confidence score")
-    bbox: tuple[float, float, float, float] = Field(
-        description="Bounding box as (x1, y1, x2, y2) in pixels"
-    )
+    bbox: tuple[float, float, float, float] = Field(description="Bounding box as (x1, y1, x2, y2) in pixels")
 
 
 class DetectionResult(BaseModel):

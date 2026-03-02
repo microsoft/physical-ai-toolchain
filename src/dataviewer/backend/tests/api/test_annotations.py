@@ -119,9 +119,7 @@ class TestAnnotationEndpoints:
         assert data["annotations"][0]["annotator_id"] == "test-user"
 
     @pytest.mark.asyncio
-    async def test_save_annotation_updates_existing(
-        self, client, registered_dataset, sample_annotation
-    ):
+    async def test_save_annotation_updates_existing(self, client, registered_dataset, sample_annotation):
         """Test that saving updates existing annotation from same user."""
         # Save initial annotation
         client.put(
@@ -142,9 +140,7 @@ class TestAnnotationEndpoints:
         assert data["annotations"][0]["notes"] == "Updated notes"
 
     @pytest.mark.asyncio
-    async def test_save_annotation_multiple_annotators(
-        self, client, registered_dataset, sample_annotation
-    ):
+    async def test_save_annotation_multiple_annotators(self, client, registered_dataset, sample_annotation):
         """Test multiple annotators can annotate same episode."""
         # Save first annotation
         client.put(
@@ -190,9 +186,7 @@ class TestAnnotationEndpoints:
         assert get_response.json()["annotations"] == []
 
     @pytest.mark.asyncio
-    async def test_delete_annotations_specific_annotator(
-        self, client, registered_dataset, sample_annotation
-    ):
+    async def test_delete_annotations_specific_annotator(self, client, registered_dataset, sample_annotation):
         """Test deleting annotations from specific annotator."""
         # Save annotations from two users
         client.put(
@@ -206,9 +200,7 @@ class TestAnnotationEndpoints:
         )
 
         # Delete only test-user's annotation
-        response = client.delete(
-            "/api/datasets/test-dataset/episodes/5/annotations?annotator_id=test-user"
-        )
+        response = client.delete("/api/datasets/test-dataset/episodes/5/annotations?annotator_id=test-user")
         assert response.status_code == 200
 
         # Verify only other-user remains
@@ -233,9 +225,7 @@ class TestAnnotationSummaryEndpoint:
         assert data["annotated_episodes"] == 0
 
     @pytest.mark.asyncio
-    async def test_get_summary_with_annotations(
-        self, client, registered_dataset, sample_annotation
-    ):
+    async def test_get_summary_with_annotations(self, client, registered_dataset, sample_annotation):
         """Test summary aggregates annotation metrics."""
         # Save some annotations
         for idx in [0, 5, 10]:

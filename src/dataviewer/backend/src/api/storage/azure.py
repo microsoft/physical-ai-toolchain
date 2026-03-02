@@ -22,8 +22,8 @@ try:
 
     AZURE_AVAILABLE = True
 except ImportError:
-    HttpResponseError = None
-    ResourceNotFoundError = None
+    HttpResponseError = Exception
+    ResourceNotFoundError = Exception
     RetryPolicy = None
     DefaultAzureCredential = None
     ContentSettings = None
@@ -104,9 +104,7 @@ class AzureBlobStorageAdapter(StorageAdapter):
         """Get the blob path for an episode's annotations."""
         return f"{dataset_id}/annotations/episodes/episode_{episode_index:06d}.json"
 
-    async def get_annotation(
-        self, dataset_id: str, episode_index: int
-    ) -> EpisodeAnnotationFile | None:
+    async def get_annotation(self, dataset_id: str, episode_index: int) -> EpisodeAnnotationFile | None:
         """
         Retrieve annotations for an episode from Azure Blob Storage.
 
@@ -135,16 +133,13 @@ class AzureBlobStorageAdapter(StorageAdapter):
             raise StorageError(f"Invalid JSON in blob {blob_path}: {e}", cause=e)
         except HttpResponseError as e:
             raise StorageError(
-                f"Azure HTTP error reading blob {blob_path}: "
-                f"status={e.status_code} error_code={e.error_code}",
+                f"Azure HTTP error reading blob {blob_path}: status={e.status_code} error_code={e.error_code}",
                 cause=e,
             )
         except Exception as e:
             raise StorageError(f"Failed to read blob {blob_path}: {e}", cause=e)
 
-    async def save_annotation(
-        self, dataset_id: str, episode_index: int, annotation: EpisodeAnnotationFile
-    ) -> None:
+    async def save_annotation(self, dataset_id: str, episode_index: int, annotation: EpisodeAnnotationFile) -> None:
         """
         Save annotations for an episode to Azure Blob Storage.
 
@@ -179,8 +174,7 @@ class AzureBlobStorageAdapter(StorageAdapter):
 
         except HttpResponseError as e:
             raise StorageError(
-                f"Azure HTTP error saving blob {blob_path}: "
-                f"status={e.status_code} error_code={e.error_code}",
+                f"Azure HTTP error saving blob {blob_path}: status={e.status_code} error_code={e.error_code}",
                 cause=e,
             )
         except Exception as e:
@@ -251,8 +245,7 @@ class AzureBlobStorageAdapter(StorageAdapter):
             return False
         except HttpResponseError as e:
             raise StorageError(
-                f"Azure HTTP error deleting blob {blob_path}: "
-                f"status={e.status_code} error_code={e.error_code}",
+                f"Azure HTTP error deleting blob {blob_path}: status={e.status_code} error_code={e.error_code}",
                 cause=e,
             )
         except Exception as e:

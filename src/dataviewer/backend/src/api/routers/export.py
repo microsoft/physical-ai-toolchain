@@ -73,16 +73,12 @@ class EpisodeEditRequest(BaseModel):
     """Edit operations for a single episode."""
 
     episodeIndex: int = Field(..., description="Episode index")
-    globalTransform: ImageTransformRequest | None = Field(
-        None, description="Transform applied to all cameras"
-    )
+    globalTransform: ImageTransformRequest | None = Field(None, description="Transform applied to all cameras")
     cameraTransforms: dict[str, ImageTransformRequest] | None = Field(
         None, description="Per-camera transform overrides"
     )
     removedFrames: list[int] | None = Field(None, description="Frame indices to exclude")
-    insertedFrames: list[FrameInsertionRequest] | None = Field(
-        None, description="Interpolated frame insertions"
-    )
+    insertedFrames: list[FrameInsertionRequest] | None = Field(None, description="Interpolated frame insertions")
     subtasks: list[SubtaskRequest] | None = Field(None, description="Sub-task segments")
 
 
@@ -92,9 +88,7 @@ class ExportRequest(BaseModel):
     episodeIndices: list[int] = Field(..., description="Episode indices to export", min_length=1)
     outputPath: str = Field(..., description="Output directory path")
     applyEdits: bool = Field(True, description="Whether to apply edit operations")
-    edits: dict[int, EpisodeEditRequest] | None = Field(
-        None, description="Edit operations by episode index"
-    )
+    edits: dict[int, EpisodeEditRequest] | None = Field(None, description="Edit operations by episode index")
 
 
 class ExportResultResponse(BaseModel):
@@ -161,21 +155,15 @@ async def export_episodes(
                     {
                         "datasetId": dataset_id,
                         "episodeIndex": edit_req.episodeIndex,
-                        "globalTransform": edit_req.globalTransform.model_dump()
-                        if edit_req.globalTransform
-                        else None,
-                        "cameraTransforms": {
-                            k: v.model_dump() for k, v in edit_req.cameraTransforms.items()
-                        }
+                        "globalTransform": edit_req.globalTransform.model_dump() if edit_req.globalTransform else None,
+                        "cameraTransforms": {k: v.model_dump() for k, v in edit_req.cameraTransforms.items()}
                         if edit_req.cameraTransforms
                         else None,
                         "removedFrames": edit_req.removedFrames,
                         "insertedFrames": [i.model_dump() for i in edit_req.insertedFrames]
                         if edit_req.insertedFrames
                         else None,
-                        "subtasks": [s.model_dump() for s in edit_req.subtasks]
-                        if edit_req.subtasks
-                        else None,
+                        "subtasks": [s.model_dump() for s in edit_req.subtasks] if edit_req.subtasks else None,
                     }
                 )
 
@@ -266,18 +254,14 @@ async def export_episodes_stream(
                             "globalTransform": edit_req.globalTransform.model_dump()
                             if edit_req.globalTransform
                             else None,
-                            "cameraTransforms": {
-                                k: v.model_dump() for k, v in edit_req.cameraTransforms.items()
-                            }
+                            "cameraTransforms": {k: v.model_dump() for k, v in edit_req.cameraTransforms.items()}
                             if edit_req.cameraTransforms
                             else None,
                             "removedFrames": edit_req.removedFrames,
                             "insertedFrames": [i.model_dump() for i in edit_req.insertedFrames]
                             if edit_req.insertedFrames
                             else None,
-                            "subtasks": [s.model_dump() for s in edit_req.subtasks]
-                            if edit_req.subtasks
-                            else None,
+                            "subtasks": [s.model_dump() for s in edit_req.subtasks] if edit_req.subtasks else None,
                         }
                     )
 

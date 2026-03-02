@@ -58,12 +58,10 @@ build-backend = "hatchling.build"
 packages = ["backend/src"]
 
 [tool.ruff]
-target-version = "py311"
-line-length = 100
+extend = "../../pyproject.toml"
 
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["B008", "B905", "B904"]
+[tool.ruff.lint.isort]
+known-first-party = ["datasetanalysistool"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

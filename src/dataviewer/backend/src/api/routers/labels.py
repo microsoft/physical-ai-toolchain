@@ -51,8 +51,14 @@ def _get_base_path() -> str:
 
 
 def _labels_path(dataset_id: str) -> Path:
-    base = Path(_get_base_path())
-    return base / dataset_id / "meta" / "episode_labels.json"
+    safe_id = os.path.basename(dataset_id)
+    if not safe_id or safe_id != dataset_id:
+        raise HTTPException(status_code=400, detail="Invalid dataset ID")
+    base_dir = os.path.realpath(_get_base_path())
+    target = os.path.realpath(os.path.join(base_dir, safe_id, "meta", "episode_labels.json"))
+    if not target.startswith(base_dir + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid dataset ID")
+    return Path(target)
 
 
 async def _load_labels(dataset_id: str) -> DatasetLabelsFile:
@@ -110,9 +116,7 @@ async def get_episode_labels(dataset_id: str, episode_idx: int) -> EpisodeLabels
 
 
 @router.put("/{dataset_id}/episodes/{episode_idx}/labels")
-async def set_episode_labels(
-    dataset_id: str, episode_idx: int, body: BulkLabelUpdate
-) -> EpisodeLabels:
+async def set_episode_labels(dataset_id: str, episode_idx: int, body: BulkLabelUpdate) -> EpisodeLabels:
     """Set labels for a specific episode (replaces existing labels)."""
     labels_file = await _load_labels(dataset_id)
     key = str(episode_idx)

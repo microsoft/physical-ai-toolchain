@@ -63,9 +63,7 @@ async def run_detection(
 
     # Create frame image getter
     async def get_frame_image(frame_idx: int) -> bytes | None:
-        return await dataset_service.get_frame_image(
-            dataset_id, episode_idx, frame_idx, "il-camera"
-        )
+        return await dataset_service.get_frame_image(dataset_id, episode_idx, frame_idx, "il-camera")
 
     try:
         summary = await detection_service.detect_episode(
@@ -85,7 +83,7 @@ async def run_detection(
         logger.exception("Detection failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Detection failed: {str(e)}",
+            detail=f"Detection failed: {e!s}",
         )
 
 

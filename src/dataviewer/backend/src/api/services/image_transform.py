@@ -111,9 +111,7 @@ def apply_crop(
     if crop.x + crop.width > w:
         raise ImageTransformError(f"Crop width exceeds image bounds: {crop.x} + {crop.width} > {w}")
     if crop.y + crop.height > h:
-        raise ImageTransformError(
-            f"Crop height exceeds image bounds: {crop.y} + {crop.height} > {h}"
-        )
+        raise ImageTransformError(f"Crop height exceeds image bounds: {crop.y} + {crop.height} > {h}")
     if crop.width <= 0 or crop.height <= 0:
         raise ImageTransformError(f"Crop dimensions must be positive: {crop.width}x{crop.height}")
 
@@ -139,9 +137,7 @@ def apply_resize(
         ImageTransformError: If PIL is not available or resize fails.
     """
     if not PIL_AVAILABLE:
-        raise ImageTransformError(
-            "PIL (Pillow) is required for resize operations. Install with: pip install Pillow"
-        )
+        raise ImageTransformError("PIL (Pillow) is required for resize operations. Install with: pip install Pillow")
 
     if size.width <= 0 or size.height <= 0:
         raise ImageTransformError(f"Resize dimensions must be positive: {size.width}x{size.height}")
@@ -181,9 +177,7 @@ def apply_brightness(
         ImageTransformError: If PIL is not available.
     """
     if not PIL_AVAILABLE:
-        raise ImageTransformError(
-            "PIL (Pillow) is required for color operations. Install with: pip install Pillow"
-        )
+        raise ImageTransformError("PIL (Pillow) is required for color operations. Install with: pip install Pillow")
 
     try:
         pil_image = Image.fromarray(frame)
@@ -213,9 +207,7 @@ def apply_contrast(
         ImageTransformError: If PIL is not available.
     """
     if not PIL_AVAILABLE:
-        raise ImageTransformError(
-            "PIL (Pillow) is required for color operations. Install with: pip install Pillow"
-        )
+        raise ImageTransformError("PIL (Pillow) is required for color operations. Install with: pip install Pillow")
 
     try:
         pil_image = Image.fromarray(frame)
@@ -245,9 +237,7 @@ def apply_saturation(
         ImageTransformError: If PIL is not available.
     """
     if not PIL_AVAILABLE:
-        raise ImageTransformError(
-            "PIL (Pillow) is required for color operations. Install with: pip install Pillow"
-        )
+        raise ImageTransformError("PIL (Pillow) is required for color operations. Install with: pip install Pillow")
 
     try:
         pil_image = Image.fromarray(frame)
@@ -308,9 +298,7 @@ def apply_hue_rotation(
         ImageTransformError: If PIL is not available or operation fails.
     """
     if not PIL_AVAILABLE:
-        raise ImageTransformError(
-            "PIL (Pillow) is required for color operations. Install with: pip install Pillow"
-        )
+        raise ImageTransformError("PIL (Pillow) is required for color operations. Install with: pip install Pillow")
 
     if frame.ndim != 3 or frame.shape[2] != 3:
         raise ImageTransformError(f"Hue rotation requires RGB image, got shape: {frame.shape}")
@@ -354,9 +342,7 @@ def apply_color_filter(
         return frame
 
     if not PIL_AVAILABLE:
-        raise ImageTransformError(
-            "PIL (Pillow) is required for color operations. Install with: pip install Pillow"
-        )
+        raise ImageTransformError("PIL (Pillow) is required for color operations. Install with: pip install Pillow")
 
     try:
         if filter_name == "grayscale":
@@ -547,9 +533,7 @@ def apply_camera_transforms(
         transform = camera_transforms.get(camera, global_transform)
 
         if transform:
-            results[camera] = apply_transforms_batch(
-                frames, transform, make_camera_progress(camera)
-            )
+            results[camera] = apply_transforms_batch(frames, transform, make_camera_progress(camera))
         else:
             results[camera] = frames
 

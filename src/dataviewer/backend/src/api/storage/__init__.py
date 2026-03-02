@@ -9,9 +9,9 @@ from .base import StorageAdapter, StorageError
 from .local import LocalStorageAdapter
 
 __all__ = [
+    "LocalStorageAdapter",
     "StorageAdapter",
     "StorageError",
-    "LocalStorageAdapter",
 ]
 
 

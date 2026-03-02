@@ -122,10 +122,7 @@ class EpisodeClusterer:
             labels = clustering.fit_predict(features_normalized)
 
             # Compute silhouette score
-            if len(set(labels)) > 1:
-                sil_score = silhouette_score(features_normalized, labels)
-            else:
-                sil_score = 1.0
+            sil_score = silhouette_score(features_normalized, labels) if len(set(labels)) > 1 else 1.0
 
             # Compute similarity scores (distance to cluster centroid)
             assignments = []
@@ -212,10 +209,7 @@ class EpisodeClusterer:
         features.append(float(len(trajectory)))
 
         # Total displacement
-        if len(trajectory) > 1:
-            displacement = np.linalg.norm(trajectory[-1] - trajectory[0])
-        else:
-            displacement = 0.0
+        displacement = np.linalg.norm(trajectory[-1] - trajectory[0]) if len(trajectory) > 1 else 0.0
         features.append(displacement)
 
         return np.array(features[:31])  # Fixed size
@@ -259,9 +253,7 @@ class EpisodeClusterer:
         """
         # Random initial centroids
         np.random.seed(42)
-        centroid_indices = np.random.choice(
-            len(features), min(num_clusters, len(features)), replace=False
-        )
+        centroid_indices = np.random.choice(len(features), min(num_clusters, len(features)), replace=False)
         centroids = features[centroid_indices]
 
         # Assign to nearest centroid

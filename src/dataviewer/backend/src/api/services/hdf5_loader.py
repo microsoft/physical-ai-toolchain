@@ -218,9 +218,7 @@ class HDF5Loader:
     ) -> HDF5EpisodeData:
         """Parse an HDF5 file and extract episode data."""
         # Load joint positions (required) - check multiple formats
-        joint_positions = self._load_array(
-            f, ["data/qpos", "qpos", "observations/qpos", "observation/state"]
-        )
+        joint_positions = self._load_array(f, ["data/qpos", "qpos", "observations/qpos", "observation/state"])
         if joint_positions is None:
             raise HDF5LoaderError(f"No joint position data found in episode {episode_index}")
 
@@ -238,9 +236,7 @@ class HDF5Loader:
         end_effector_pose = self._load_array(
             f, ["data/ee_pose", "ee_pose", "observations/ee_pose", "data/cartesian_pos"]
         )
-        gripper_states = self._load_array(
-            f, ["data/gripper", "gripper", "observations/gripper", "data/gripper_state"]
-        )
+        gripper_states = self._load_array(f, ["data/gripper", "gripper", "observations/gripper", "data/gripper_state"])
         actions = self._load_array(f, ["data/action", "action", "actions"])
 
         # Load images if requested
@@ -276,9 +272,7 @@ class HDF5Loader:
                 return np.asarray(data, dtype=np.float64)
         return None
 
-    def _load_images(
-        self, f: "h5py.File", cameras: list[str] | None
-    ) -> dict[str, NDArray[np.uint8]]:
+    def _load_images(self, f: "h5py.File", cameras: list[str] | None) -> dict[str, NDArray[np.uint8]]:
         """Load image data from the HDF5 file."""
         images: dict[str, NDArray[np.uint8]] = {}
 

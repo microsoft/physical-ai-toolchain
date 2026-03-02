@@ -266,8 +266,7 @@ class AnomalyDetector:
             window_size = 20
             for i in range(0, len(zero_crossings) - self.oscillation_min_cycles):
                 window_crossings = zero_crossings[
-                    (zero_crossings >= zero_crossings[i])
-                    & (zero_crossings < zero_crossings[i] + window_size)
+                    (zero_crossings >= zero_crossings[i]) & (zero_crossings < zero_crossings[i] + window_size)
                 ]
 
                 if len(window_crossings) >= self.oscillation_min_cycles * 2:

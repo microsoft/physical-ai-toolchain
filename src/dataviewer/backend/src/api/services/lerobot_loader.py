@@ -123,9 +123,7 @@ class LeRobotLoader:
             LeRobotLoaderError: If the dataset structure is invalid.
         """
         if not PARQUET_AVAILABLE:
-            raise ImportError(
-                "LeRobot support requires pyarrow package. Install with: pip install pyarrow"
-            )
+            raise ImportError("LeRobot support requires pyarrow package. Install with: pip install pyarrow")
 
         self.base_path = Path(base_path)
         self._info: LeRobotDatasetInfo | None = None
@@ -231,9 +229,7 @@ class LeRobotLoader:
         self._episode_index_cache[episode_index] = (chunk_idx, file_idx)
         return chunk_idx, file_idx
 
-    def _format_path(
-        self, template: str, chunk_index: int, file_index: int, video_key: str = ""
-    ) -> str:
+    def _format_path(self, template: str, chunk_index: int, file_index: int, video_key: str = "") -> str:
         """Format a path template with indices."""
         return template.format(chunk_index=chunk_index, file_index=file_index, video_key=video_key)
 
@@ -285,16 +281,10 @@ class LeRobotLoader:
             length = len(df)
 
             # Extract timestamps
-            timestamps = (
-                df["timestamp"].values
-                if "timestamp" in df.columns
-                else np.arange(length) / info.fps
-            )
+            timestamps = df["timestamp"].values if "timestamp" in df.columns else np.arange(length) / info.fps
 
             # Extract frame indices
-            frame_indices = (
-                df["frame_index"].values if "frame_index" in df.columns else np.arange(length)
-            )
+            frame_indices = df["frame_index"].values if "frame_index" in df.columns else np.arange(length)
 
             # Extract observation state (joint positions)
             joint_positions: NDArray[np.float64]
@@ -314,11 +304,9 @@ class LeRobotLoader:
                 joint_velocities = np.stack(df["qvel"].values)
 
             # Extract actions
-            actions: NDArray[np.float64]
-            if "action" in df.columns:
-                actions = np.stack(df["action"].values)
-            else:
-                actions = np.zeros_like(joint_positions)
+            actions: NDArray[np.float64] = (
+                np.stack(df["action"].values) if "action" in df.columns else np.zeros_like(joint_positions)
+            )
 
             # Get task index
             task_index = int(df["task_index"].iloc[0]) if "task_index" in df.columns else 0
@@ -328,9 +316,7 @@ class LeRobotLoader:
             for feature_name, feature_info in info.features.items():
                 if feature_info.get("dtype") == "video":
                     video_key = feature_name
-                    video_rel_path = self._format_path(
-                        info.video_path, chunk_idx, file_idx, video_key
-                    )
+                    video_rel_path = self._format_path(info.video_path, chunk_idx, file_idx, video_key)
                     video_full_path = self.base_path / video_rel_path
                     if video_full_path.exists():
                         video_paths[video_key] = video_full_path
@@ -400,9 +386,7 @@ class LeRobotLoader:
             }
 
         except Exception as e:
-            raise LeRobotLoaderError(
-                f"Failed to get info for episode {episode_index}: {e}", cause=e
-            )
+            raise LeRobotLoaderError(f"Failed to get info for episode {episode_index}: {e}", cause=e)
 
     def get_video_path(self, episode_index: int, camera_key: str) -> Path | None:
         """

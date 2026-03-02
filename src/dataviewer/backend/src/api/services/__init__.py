@@ -19,21 +19,21 @@ from .trajectory_analysis import TrajectoryAnalyzer, TrajectoryMetrics
 __all__ = [
     # Dataset and Annotation Services
     "AnnotationService",
-    "DatasetService",
-    "get_annotation_service",
-    "get_dataset_service",
-    # Trajectory Analysis
-    "TrajectoryAnalyzer",
-    "TrajectoryMetrics",
     # Anomaly Detection
     "AnomalyDetector",
-    "AnomalyType",
     "AnomalySeverity",
+    "AnomalyType",
+    "ClusterAssignment",
+    "ClusteringResult",
+    "DatasetService",
     "DetectedAnomaly",
     # Clustering
     "EpisodeClusterer",
-    "ClusterAssignment",
-    "ClusteringResult",
+    # Trajectory Analysis
+    "TrajectoryAnalyzer",
+    "TrajectoryMetrics",
+    "get_annotation_service",
+    "get_dataset_service",
 ]
 
 

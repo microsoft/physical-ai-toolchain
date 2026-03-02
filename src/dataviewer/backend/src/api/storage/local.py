@@ -54,9 +54,7 @@ class LocalStorageAdapter(StorageAdapter):
         except OSError as e:
             raise StorageError(f"Failed to create directory {path}: {e}", cause=e)
 
-    async def get_annotation(
-        self, dataset_id: str, episode_index: int
-    ) -> EpisodeAnnotationFile | None:
+    async def get_annotation(self, dataset_id: str, episode_index: int) -> EpisodeAnnotationFile | None:
         """
         Retrieve annotations for an episode from local filesystem.
 
@@ -83,9 +81,7 @@ class LocalStorageAdapter(StorageAdapter):
         except Exception as e:
             raise StorageError(f"Failed to read annotation file {file_path}: {e}", cause=e)
 
-    async def save_annotation(
-        self, dataset_id: str, episode_index: int, annotation: EpisodeAnnotationFile
-    ) -> None:
+    async def save_annotation(self, dataset_id: str, episode_index: int, annotation: EpisodeAnnotationFile) -> None:
         """
         Save annotations for an episode using atomic write.
 

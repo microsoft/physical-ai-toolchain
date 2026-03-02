@@ -117,9 +117,7 @@ class TrajectoryAnalyzer:
         flags = self._determine_flags(smoothness, jitter, hesitation_count, correction_count)
 
         # Compute overall score
-        overall_score = self._compute_overall_score(
-            smoothness, efficiency, jitter, hesitation_count, correction_count
-        )
+        overall_score = self._compute_overall_score(smoothness, efficiency, jitter, hesitation_count, correction_count)
 
         return TrajectoryMetrics(
             smoothness=smoothness,
@@ -225,7 +223,7 @@ class TrajectoryAnalyzer:
         hesitation_count = 0
         consecutive = 0
 
-        for stopped in is_stopped:
+        for stopped in is_stopped.tolist():
             if stopped:
                 consecutive += 1
             else:

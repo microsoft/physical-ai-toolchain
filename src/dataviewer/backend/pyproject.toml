@@ -55,15 +55,17 @@ build-backend = "hatchling.build"
 packages = ["src"]
 
 [tool.ruff]
-target-version = "py311"
-line-length = 100
+extend = "../../../pyproject.toml"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
-# B008: Depends() in FastAPI is a valid pattern
-# B905: zip() without strict= is fine for most use cases
-# B904: Exception chaining - we pass cause to constructor
-ignore = ["B008", "B905", "B904"]
+ignore = [
+    "B008",   # Depends() in function defaults is a FastAPI pattern
+    "B905",   # zip() without strict= is acceptable
+    "B904",   # Exception cause via constructor, not raise-from
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
