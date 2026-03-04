@@ -1,0 +1,68 @@
+# LeRobot Inference/Evaluation Job Template
+#
+# This is a STRUCTURAL TEMPLATE used by submit-azureml-lerobot-inference.sh.
+# Values below are placeholders and will be overridden at submission time.
+#
+# The submission script is responsible for:
+# - Setting the environment (LeRobot PyTorch image)
+# - Setting compute target and instance type
+# - Building the command with all evaluation parameters
+# - Setting all input values (policy, dataset, Azure context, etc.)
+#
+# This file defines:
+# - The job structure and schema
+# - Input/output specifications
+# - Environment variable mappings for evaluation and MLflow
+# - Identity configuration for Azure ML model download and registration
+#
+# To submit a job, use submit-azureml-lerobot-inference.sh with appropriate flags.
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: LeRobot Inference Evaluation
+description: LeRobot imitation learning inference (ACT/Diffusion) with MLflow trajectory plots and model registration.
+experiment_name: lerobot-inference
+identity:
+  type: managed_identity
+
+# All values below are placeholders and will be overridden by submit-azureml-lerobot-inference.sh
+code: .
+environment: azureml:lerobot-inference-env:latest
+compute: azureml:cpu-inference
+
+command: >-
+  cp -r scripts /tmp/scripts &&
+  chmod +x lerobot-infer-entry.sh &&
+  bash lerobot-infer-entry.sh
+
+inputs:
+  policy_repo_id: none
+  policy_type: act
+  dataset_repo_id: none
+  job_name: lerobot-eval
+  output_dir: /workspace/outputs/eval
+  eval_episodes: "10"
+  eval_batch_size: "10"
+  lerobot_version: none
+  record_video: "false"
+  mlflow_enable: "false"
+  experiment_name: none
+  register_model: none
+  aml_model_name: none
+  aml_model_version: none
+  blob_storage_account: none
+  blob_storage_container: datasets
+  blob_prefix: none
+  subscription_id: placeholder
+  resource_group: placeholder
+  workspace_name: placeholder
+  mlflow_token_refresh_retries: "5"
+  mlflow_http_request_timeout: "600"
+
+# Environment variables are set directly by submit-azureml-lerobot-inference.sh
+# via --set environment_variables.XXX=value flags.
+
+outputs:
+  eval_results:
+    type: uri_folder
+    mode: upload

@@ -156,8 +156,13 @@ require_tools osmo zip base64
 if [[ "$from_aml_model" == "true" ]]; then
   [[ -z "$model_name" ]]    && fatal "--model-name is required with --from-aml-model"
   [[ -z "$model_version" ]] && fatal "--model-version is required with --from-aml-model"
-  # Use model_name as policy_repo_id placeholder for the workflow
   policy_repo_id="${model_name}:${model_version}"
+elif [[ "$policy_repo_id" == *:* ]]; then
+  # Auto-detect AzureML model registry format (name:version)
+  model_name="${policy_repo_id%%:*}"
+  model_version="${policy_repo_id##*:}"
+  from_aml_model=true
+  info "Auto-detected AzureML model: ${model_name} version ${model_version}"
 else
   [[ -z "$policy_repo_id" ]] && fatal "--policy-repo-id is required (or use --from-aml-model)"
 fi
