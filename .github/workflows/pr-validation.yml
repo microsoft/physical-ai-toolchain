@@ -96,7 +96,9 @@ jobs:
     name: Pester Tests
     uses: ./.github/workflows/pester-tests.yml
     with:
-      changed-files-only: true
+      code-coverage: true
+      changed-files-only: false
+      soft-fail: false
     permissions:
       contents: read
       id-token: write
@@ -112,6 +114,8 @@ jobs:
   pytest-tests:
     name: Pytest Tests
     uses: ./.github/workflows/pytest-tests.yml
+    with:
+      code-coverage: true
     permissions:
       contents: read
       id-token: write

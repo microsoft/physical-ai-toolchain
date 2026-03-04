@@ -31,13 +31,6 @@ BeforeAll {
     . (Join-Path $lintingDir 'Invoke-FrontmatterValidation.ps1')
 }
 
-AfterAll {
-    Remove-Module FrontmatterValidation -Force -ErrorAction SilentlyContinue
-    Remove-Module CIHelpers -Force -ErrorAction SilentlyContinue
-    Remove-Module LintingHelpers -Force -ErrorAction SilentlyContinue
-    Remove-Module GitMocks -Force -ErrorAction SilentlyContinue
-}
-
 #region Initialize-JsonSchemaValidation
 
 Describe 'Initialize-JsonSchemaValidation' -Tag 'Unit' {

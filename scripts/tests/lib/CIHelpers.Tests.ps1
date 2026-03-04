@@ -11,11 +11,6 @@ BeforeAll {
     Import-Module $gitMocksPath -Force
 }
 
-AfterAll {
-    Remove-Module CIHelpers -Force -ErrorAction SilentlyContinue
-    Remove-Module GitMocks -Force -ErrorAction SilentlyContinue
-}
-
 #region ConvertTo-GitHubActionsEscaped
 
 Describe 'ConvertTo-GitHubActionsEscaped' -Tag 'Unit' {

@@ -7,10 +7,6 @@ BeforeAll {
     Import-Module $modulePath -Force
 }
 
-AfterAll {
-    Remove-Module 'LintingHelpers' -Force -ErrorAction SilentlyContinue
-}
-
 #region Get-ChangedFilesFromGit Tests
 
 Describe 'Get-ChangedFilesFromGit' -Tag 'Unit' {

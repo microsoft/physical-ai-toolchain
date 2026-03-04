@@ -52,10 +52,6 @@ BeforeAll {
     #endregion
 }
 
-AfterAll {
-    Remove-Module FrontmatterValidation -Force -ErrorAction SilentlyContinue
-}
-
 #region ValidationIssue Class
 
 Describe 'ValidationIssue Class' -Tag 'Unit' {

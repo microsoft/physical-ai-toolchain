@@ -578,4 +578,8 @@ Describe 'Invoke-VerifiedDownload' {
             } | Should -Throw '*tar extraction failed*'
         }
     }
+
+    AfterAll {
+        $global:LASTEXITCODE = 0
+    }
 }

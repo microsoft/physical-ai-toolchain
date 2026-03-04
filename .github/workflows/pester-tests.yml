@@ -117,7 +117,11 @@ jobs:
         if: "!inputs.changed-files-only || steps.changed-files.outputs.has-changes == 'true'"
         continue-on-error: ${{ inputs.soft-fail }}
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
+          # Capture workspace root before Pester — test mocks may clear $env:GITHUB_WORKSPACE
+          $workspaceRoot = $env:GITHUB_WORKSPACE
+          $ciHelpersPath = Join-Path $workspaceRoot 'scripts/lib/Modules/CIHelpers.psm1'
+
+          Import-Module $ciHelpersPath
 
           $env:PESTER_FAILED = 'false'
 
@@ -136,9 +140,10 @@ jobs:
             $config = & scripts/tests/pester.config.ps1 -CI @configParams
             $config.Run.Exit = $false
             $result = Invoke-Pester -Configuration $config
+            $global:LASTEXITCODE = 0
 
             # Re-import CIHelpers — Pester module isolation unloads it during test execution
-            Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1 -Force
+            Import-Module $ciHelpersPath -Force
 
             if ($result.FailedCount -gt 0) {
               $env:PESTER_FAILED = 'true'
@@ -151,8 +156,9 @@ jobs:
             }
           }
           catch {
+            $global:LASTEXITCODE = 0
             $env:PESTER_FAILED = 'true'
-            Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1 -Force -ErrorAction SilentlyContinue
+            Import-Module $ciHelpersPath -Force -ErrorAction SilentlyContinue
             Set-CIOutput -Name 'pester-failed' -Value 'true'
             Write-Error "Pester execution failed: $_"
           }

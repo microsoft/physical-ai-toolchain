@@ -25,6 +25,7 @@ BeforeAll {
 
 AfterAll {
     $env:ARM_SUBSCRIPTION_ID = $script:SavedArmSubId
+    $global:LASTEXITCODE = 0
 }
 
 Describe 'Get-CurrentSubscriptionId' -Tag 'Unit' {
