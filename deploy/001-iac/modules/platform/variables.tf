@@ -158,6 +158,72 @@ variable "should_enable_storage_shared_access_key" {
 }
 
 /*
+ * Storage Lifecycle Management Variables
+ */
+
+variable "should_enable_raw_bags_lifecycle_policy" {
+  type        = bool
+  description = "Whether to enable lifecycle policy for raw ROS bags (auto-delete after retention period)"
+  default     = true
+}
+
+variable "raw_bags_retention_days" {
+  type        = number
+  description = "Number of days to retain raw ROS bags before automatic deletion. Set to -1 to disable deletion"
+  default     = 30
+
+  validation {
+    condition     = var.raw_bags_retention_days == -1 || (var.raw_bags_retention_days >= 0 && var.raw_bags_retention_days <= 99999)
+    error_message = "raw_bags_retention_days must be -1 (disabled) or between 0 and 99999"
+  }
+}
+
+variable "should_enable_converted_datasets_lifecycle_policy" {
+  type        = bool
+  description = "Whether to enable lifecycle policy for converted LeRobot datasets (auto-tier to cool storage)"
+  default     = true
+}
+
+variable "converted_datasets_cool_tier_days" {
+  type        = number
+  description = "Number of days before tiering converted datasets to cool storage. Set to -1 to disable tiering"
+  default     = 90
+
+  validation {
+    condition     = var.converted_datasets_cool_tier_days == -1 || (var.converted_datasets_cool_tier_days >= 0 && var.converted_datasets_cool_tier_days <= 99999)
+    error_message = "converted_datasets_cool_tier_days must be -1 (disabled) or between 0 and 99999"
+  }
+}
+
+variable "should_enable_reports_lifecycle_policy" {
+  type        = bool
+  description = "Whether to enable lifecycle policy for validation reports (auto-tier to cool then archive)"
+  default     = true
+}
+
+variable "reports_cool_tier_days" {
+  type        = number
+  description = "Number of days before tiering validation reports to cool storage"
+  default     = 30
+
+  validation {
+    condition     = var.reports_cool_tier_days >= 0 && var.reports_cool_tier_days <= 99999
+    error_message = "reports_cool_tier_days must be between 0 and 99999"
+  }
+}
+
+variable "reports_archive_tier_days" {
+  type        = number
+  description = "Number of days before tiering validation reports to archive storage. Must be greater than reports_cool_tier_days"
+  default     = 180
+
+  validation {
+    condition     = var.reports_archive_tier_days >= 0 && var.reports_archive_tier_days <= 99999
+    error_message = "reports_archive_tier_days must be between 0 and 99999"
+  }
+}
+
+/*
  * Observability Feature Flags
  */
 

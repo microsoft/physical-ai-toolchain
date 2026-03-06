@@ -30,7 +30,7 @@ workflows/
 ## ⚖️ Platform Comparison
 
 | Feature       | AzureML                   | OSMO                     |
-| ------------- | ------------------------- | ------------------------ |
+|---------------|---------------------------|--------------------------|
 | Orchestration | Azure ML Job Service      | OSMO Workflow Engine     |
 | Scheduling    | Azure ML Compute          | KAI Scheduler / Volcano  |
 | Multi-node    | Azure ML distributed jobs | OSMO workflow DAGs       |
@@ -79,7 +79,7 @@ workflows/
 The `train-dataset.yaml` template uploads `src/training/` as a versioned OSMO dataset instead of base64-encoding it inline.
 
 | Aspect         | train.yaml             | train-dataset.yaml    |
-| -------------- | ---------------------- | --------------------- |
+|----------------|------------------------|-----------------------|
 | Payload method | Base64-encoded archive | Dataset folder upload |
 | Size limit     | ~1MB                   | Unlimited             |
 | Versioning     | None                   | Automatic             |
@@ -101,7 +101,7 @@ The `train-dataset.yaml` template uploads `src/training/` as a versioned OSMO da
 ### Dataset Parameters
 
 | Parameter          | Default         | Description                   |
-| ------------------ | --------------- | ----------------------------- |
+|--------------------|-----------------|-------------------------------|
 | `--dataset-bucket` | `training`      | OSMO bucket for training code |
 | `--dataset-name`   | `training-code` | Dataset name (auto-versioned) |
 | `--training-path`  | `src/training`  | Local folder to upload        |
@@ -115,7 +115,7 @@ The `lerobot-train.yaml` workflow trains behavioral cloning policies using the L
 ### LeRobot Features
 
 | Feature         | Description                                           |
-| --------------- | ----------------------------------------------------- |
+|-----------------|-------------------------------------------------------|
 | Policy types    | ACT, Diffusion                                        |
 | Dataset source  | HuggingFace Hub (e.g., `lerobot/aloha_sim_insertion`) |
 | Logging         | Azure MLflow                                          |
@@ -125,7 +125,7 @@ The `lerobot-train.yaml` workflow trains behavioral cloning policies using the L
 ### LeRobot Parameters
 
 | Parameter               | Default    | Description                          |
-| ----------------------- | ---------- | ------------------------------------ |
+|-------------------------|------------|--------------------------------------|
 | `--dataset-repo-id`     | (required) | HuggingFace dataset repository ID    |
 | `--policy-type`         | `act`      | Policy: `act`, `diffusion`           |
 | `--mlflow-enable`       | disabled   | Azure ML MLflow logging              |
@@ -153,7 +153,7 @@ The `lerobot-infer.yaml` workflow evaluates trained LeRobot policies from Huggin
 ### Inference Features
 
 | Feature            | Description                               |
-| ------------------ | ----------------------------------------- |
+|--------------------|-------------------------------------------|
 | Policy source      | HuggingFace Hub repositories              |
 | Policy types       | ACT, Diffusion                            |
 | Model registration | Optional Azure ML model registration      |
@@ -162,7 +162,7 @@ The `lerobot-infer.yaml` workflow evaluates trained LeRobot policies from Huggin
 ### Inference Parameters
 
 | Parameter          | Default    | Description                          |
-| ------------------ | ---------- | ------------------------------------ |
+|--------------------|------------|--------------------------------------|
 | `--policy-repo-id` | (required) | HuggingFace policy repository        |
 | `--policy-type`    | `act`      | Policy: `act`, `diffusion`           |
 | `--eval-episodes`  | `10`       | Number of evaluation episodes        |
@@ -189,7 +189,7 @@ The inference workflow exports trained checkpoints to deployment-ready formats (
 ### Supported Model Formats
 
 | Format      | Extension | Use Case                                   |
-| ----------- | --------- | ------------------------------------------ |
+|-------------|-----------|--------------------------------------------|
 | ONNX        | `.onnx`   | Cross-platform deployment, ONNX Runtime    |
 | TorchScript | `.pt`     | PyTorch-native deployment, JIT compilation |
 | Both        | —         | Export and validate both formats (default) |
@@ -199,7 +199,7 @@ The inference workflow exports trained checkpoints to deployment-ready formats (
 The workflow accepts checkpoints from multiple sources:
 
 | Source       | URI Format                                                   | Example                                                                       |
-| ------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+|--------------|--------------------------------------------------------------|-------------------------------------------------------------------------------|
 | MLflow run   | `runs:/<run_id>/<artifact_path>`                             | `runs:/b906b426-078e-4539-b907-aecb3121a76d/checkpoints/final/model_99.pt`    |
 | MLflow model | `models:/<model_name>/<version>`                             | `models:/anymal-rough-terrain/1`                                              |
 | Azure Blob   | `https://<account>.blob.core.windows.net/<container>/<path>` | `https://stosmorbt3dev001.blob.core.windows.net/azureml/checkpoints/model.pt` |
@@ -216,7 +216,7 @@ The workflow accepts checkpoints from multiple sources:
 ### OSMO Inference Parameters
 
 | Parameter          | Default        | Description                |
-| ------------------ | -------------- | -------------------------- |
+|--------------------|----------------|----------------------------|
 | `--checkpoint-uri` | (required)     | URI to training checkpoint |
 | `--task`           | `Isaac-Ant-v0` | Isaac Lab task name        |
 | `--format`         | `both`         | `onnx`, `jit`, or `both`   |
@@ -282,7 +282,7 @@ runs:/b906b426-078e-4539-b907-aecb3121a76d/checkpoints/final/model_99.pt
 The inference workflow produces:
 
 | Artifact                    | Description                               |
-| --------------------------- | ----------------------------------------- |
+|-----------------------------|-------------------------------------------|
 | `exported/policy.onnx`      | ONNX-exported policy model                |
 | `exported/policy.pt`        | TorchScript-exported policy model         |
 | `metrics/onnx_metrics.json` | ONNX inference performance metrics        |
@@ -293,7 +293,7 @@ The inference workflow produces:
 ## 📋 Prerequisites
 
 | Requirement                   | Setup                    |
-| ----------------------------- | ------------------------ |
+|-------------------------------|--------------------------|
 | Infrastructure deployed       | `deploy/001-iac/`        |
 | Setup scripts completed       | `deploy/002-setup/`      |
 | Azure CLI authenticated       | `az login`               |
@@ -304,7 +304,7 @@ The inference workflow produces:
 Scripts resolve values in order:
 
 | Precedence  | Source                | Example                          |
-| ----------- | --------------------- | -------------------------------- |
+|-------------|-----------------------|----------------------------------|
 | 1 (highest) | CLI arguments         | `--resource-group rg-custom`     |
 | 2           | Environment variables | `AZURE_RESOURCE_GROUP=rg-custom` |
 | 3 (default) | Terraform outputs     | `deploy/001-iac/`                |

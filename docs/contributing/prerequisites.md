@@ -21,19 +21,19 @@ Tools, Azure access, and build validation requirements for contributing to the A
 
 Install these tools before contributing:
 
-| Tool        | Minimum Version | Installation                                              |
-|-------------|-----------------|-----------------------------------------------------------|
-| Terraform   | 1.9.8           | <https://developer.hashicorp.com/terraform/install>       |
-| Azure CLI   | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli> |
-| kubectl     | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                 |
-| Helm        | 3.16            | <https://helm.sh/docs/intro/install/>                     |
-| Node.js/npm | 20+ LTS         | <https://nodejs.org/>                                     |
-| Python      | 3.11+           | <https://www.python.org/downloads/>                       |
-| shellcheck  | 0.10+           | <https://www.shellcheck.net/>                             |
-| uv          | latest          | <https://docs.astral.sh/uv/>                              |
+| Tool        | Minimum Version | Installation                                                          |
+|-------------|-----------------|-----------------------------------------------------------------------|
+| Terraform   | 1.9.8           | <https://developer.hashicorp.com/terraform/install>                   |
+| Azure CLI   | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>             |
+| kubectl     | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
+| Helm        | 3.16            | <https://helm.sh/docs/intro/install/>                                 |
+| Node.js/npm | 20+ LTS         | <https://nodejs.org/>                                                 |
+| Python      | 3.11+           | <https://www.python.org/downloads/>                                   |
+| shellcheck  | 0.10+           | <https://www.shellcheck.net/>                                         |
+| uv          | latest          | <https://docs.astral.sh/uv/>                                          |
 | Docker      | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit) |
-| OSMO CLI    | latest          | <https://developer.nvidia.com/osmo>                       |
-| hve-core    | latest          | <https://github.com/microsoft/hve-core>                   |
+| OSMO CLI    | latest          | <https://developer.nvidia.com/osmo>                                   |
+| hve-core    | latest          | <https://github.com/microsoft/hve-core>                               |
 
 ## Azure Access Requirements
 

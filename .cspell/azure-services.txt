@@ -62,3 +62,4 @@ eastu
 AADSSH
 rtxprogpu
 RTXPRO
+stnvidiadev
