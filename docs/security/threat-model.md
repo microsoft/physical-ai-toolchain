@@ -413,7 +413,7 @@ Goal Structuring Notation (GSN) elements supporting the security posture claim.
 
 * [SECURITY.md](../../SECURITY.md) — Microsoft security policy and deployer additions
 * [Security Guide](security-guide.md) — security configuration inventory and hardening checklist
-* [STRIDE Threat Modeling](https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats) — Microsoft STRIDE reference
+* [STRIDE Threat Modeling](https://learn.microsoft.com/azure/security/develop/threat-modeling-tool-threats) — Microsoft STRIDE reference
 * [OpenSSF Best Practices](https://www.bestpractices.dev/en/criteria) — badge criteria
 * [CIS Kubernetes Benchmark](https://www.cisecurity.org/benchmark/kubernetes) — AKS hardening baseline
 

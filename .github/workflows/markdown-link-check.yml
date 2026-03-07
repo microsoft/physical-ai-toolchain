@@ -33,9 +33,9 @@ jobs:
         id: changed-files
         run: |
           if ('${{ github.event_name }}' -eq 'pull_request') {
-            $changedFiles = (git diff --name-only --diff-filter=ACMRT '${{ github.event.pull_request.base.sha }}' '${{ github.sha }}' -- '*.md') -join ' '
+            $changedFiles = (git diff --name-only --diff-filter=ACMRT '${{ github.event.pull_request.base.sha }}' '${{ github.sha }}' -- '*.md' ':!scripts/tests/') -join ' '
           } else {
-            $changedFiles = (git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD -- '*.md') -join ' '
+            $changedFiles = (git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD -- '*.md' ':!scripts/tests/') -join ' '
           }
           "files=$changedFiles" >> $env:GITHUB_OUTPUT
           if ([string]::IsNullOrWhiteSpace($changedFiles)) {
