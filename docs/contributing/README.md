@@ -110,7 +110,7 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/):
 <type>(<scope>): <subject>
 ```
 
-Types: `feat` (new feature), `fix` (bug fix), `docs` (documentation), `refactor` (code refactoring), `chore` (maintenance), `ci` (CI/CD changes)
+Types: `feat` (new feature), `fix` (bug fix), `docs` (documentation), `refactor` (code refactoring), `chore` (maintenance), `ci` (CI/CD changes), `security` (CVE fixes)
 
 Scopes: `terraform`, `k8s`, `azureml`, `osmo`, `scripts`, `docs`, `deploy`
 

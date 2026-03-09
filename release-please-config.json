@@ -22,7 +22,8 @@
         {"type": "perf", "section": "⚡ Performance", "hidden": false},
         {"type": "build", "section": "📦 Build System", "hidden": false},
         {"type": "ops", "section": "🔧 Operations", "hidden": false},
-        {"type": "chore", "section": "🔧 Miscellaneous", "hidden": false}
+        {"type": "chore", "section": "🔧 Miscellaneous", "hidden": false},
+        {"type": "security", "section": "🔒 Security", "hidden": false}
       ],
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,

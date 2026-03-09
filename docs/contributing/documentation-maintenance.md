@@ -101,6 +101,7 @@ This project uses [release-please](https://github.com/googleapis/release-please)
 | `feat:`            | Minor        | `feat(terraform): add GPU monitoring module` |
 | `fix:`             | Patch        | `fix(scripts): correct AKS credential path`  |
 | `BREAKING CHANGE:` | Major        | Footer in commit triggers major bump         |
+| `security:`        | Patch        | `security: fix CVE-2024-XXXX input validation` |
 | `docs:`, `chore:`  | None         | Appears in changelog without version bump    |
 
 `CHANGELOG.md` is updated automatically by release-please when a release PR merges.
