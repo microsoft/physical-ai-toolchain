@@ -188,9 +188,14 @@ function Invoke-PSScriptAnalyzerCore {
 "@
     Write-CIStepSummary -Content $summary
 
-    if ($errorCount -gt 0) {
+    if ($errorCount -gt 0 -or $warningCount -gt 0) {
         Set-CIEnv -Name "PSSCRIPTANALYZER_FAILED" -Value "true"
-        Write-CIAnnotation -Message "PSScriptAnalyzer found $errorCount error(s). Fix the issues above." -Level Error
+        if ($errorCount -gt 0) {
+            Write-CIAnnotation -Message "PSScriptAnalyzer found $errorCount error(s) and $warningCount warning(s). Fix the issues above." -Level Error
+        }
+        else {
+            Write-CIAnnotation -Message "PSScriptAnalyzer found $warningCount warning(s). Fix the issues above." -Level Warning
+        }
         return 1
     }
 

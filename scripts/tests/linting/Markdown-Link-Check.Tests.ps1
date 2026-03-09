@@ -215,6 +215,70 @@ Describe 'Invoke-MarkdownLinkCheckCore' -Tag 'Unit' {
             Should -Invoke Push-Location -Times 1
         }
     }
+
+    Context 'Config path validation' {
+        It 'Throws when ConfigPath cannot be resolved' {
+            { Invoke-MarkdownLinkCheckCore -Path @('file.md') -ConfigPath (Join-Path $TestDrive 'nonexistent-config.json') } |
+                Should -Throw
+        }
+    }
+
+    Context 'Multiple markdown targets' {
+        It 'Iterates all files returned by Get-MarkdownTarget' {
+            Mock Get-MarkdownTarget { return @('first.md', 'second.md') }
+            Mock Resolve-Path { return [PSCustomObject]@{ Path = $script:RepoRoot } }
+            Mock Test-Path { return $true } -ParameterFilter { $LiteralPath -and $LiteralPath -like '*markdown-link-check*' }
+            Mock Push-Location { }
+            Mock Pop-Location { }
+            Mock Resolve-Path { return [PSCustomObject]@{ Path = "$TestDrive/first.md" } } -ParameterFilter { $LiteralPath -eq 'first.md' }
+            Mock Resolve-Path { return [PSCustomObject]@{ Path = "$TestDrive/second.md" } } -ParameterFilter { $LiteralPath -eq 'second.md' }
+            Mock New-Item { } -ParameterFilter { $ItemType -eq 'Directory' }
+            Mock Set-Content { }
+            Mock Write-Host { }
+            Mock Write-Output { }
+            Mock Write-Warning { }
+            Mock Write-Error { }
+            Mock Remove-Item { }
+            Mock Test-Path { return $false } -ParameterFilter { $Path -and $Path -like '*.xml' }
+
+            try {
+                Invoke-MarkdownLinkCheckCore -Path @('.') -ConfigPath $script:FixtureConfig
+            }
+            catch { $null = $_ }
+
+            Should -Invoke Resolve-Path -ParameterFilter { $LiteralPath -eq 'first.md' } -Times 1
+            Should -Invoke Resolve-Path -ParameterFilter { $LiteralPath -eq 'second.md' } -Times 1
+        }
+    }
+
+    Context 'JUnit XML fixture structure' {
+        It 'Contains alive, dead, and ignored link statuses' {
+            $xmlPath = Join-Path $script:FixtureDir 'link-check-results.xml'
+            [xml]$xml = Get-Content $xmlPath -Raw -Encoding utf8
+
+            $testcases = @($xml.testsuites.testsuite.testcase)
+            $testcases.Count | Should -Be 3
+
+            $statuses = $testcases | ForEach-Object {
+                ($_.properties.property | Where-Object { $_.name -eq 'status' }).value
+            }
+            $statuses | Should -Contain 'alive'
+            $statuses | Should -Contain 'dead'
+            $statuses | Should -Contain 'ignored'
+        }
+
+        It 'Dead link entry has expected status code and URL' {
+            $xmlPath = Join-Path $script:FixtureDir 'link-check-results.xml'
+            [xml]$xml = Get-Content $xmlPath -Raw -Encoding utf8
+
+            $dead = @($xml.testsuites.testsuite.testcase) | Where-Object {
+                ($_.properties.property | Where-Object { $_.name -eq 'status' }).value -eq 'dead'
+            }
+
+            ($dead.properties.property | Where-Object { $_.name -eq 'statusCode' }).value | Should -Be '404'
+            ($dead.properties.property | Where-Object { $_.name -eq 'url' }).value | Should -Not -BeNullOrEmpty
+        }
+    }
 }
 
 #endregion

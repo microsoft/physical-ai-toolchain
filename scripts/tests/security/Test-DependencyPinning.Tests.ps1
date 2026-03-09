@@ -711,3 +711,199 @@ Describe 'Get-NpmDependencyViolations' -Tag 'Unit' {
         }
     }
 }
+
+Describe 'Get-RemediationSuggestion' -Tag 'Unit' {
+    BeforeAll {
+        $script:BaseViolation = [DependencyViolation]::new()
+        $script:BaseViolation.Type = 'github-actions'
+        $script:BaseViolation.Name = 'actions/checkout'
+        $script:BaseViolation.Version = 'v4'
+        $script:BaseViolation.Severity = 'High'
+    }
+
+    It 'Returns generic message without -Remediate flag' {
+        $result = Get-RemediationSuggestion -Violation $script:BaseViolation
+        $result | Should -Be 'Enable -Remediate flag for specific SHA suggestions'
+    }
+
+    It 'Returns SHA suggestion for github-actions with -Remediate' {
+        Mock Invoke-RestMethod {
+            return @{ sha = 'abc123def456abc123def456abc123def456abcd' }
+        }
+
+        $result = Get-RemediationSuggestion -Violation $script:BaseViolation -Remediate
+        $result | Should -BeLike 'Pin to SHA: uses: actions/checkout@abc123def456abc123def456abc123def456abcd*'
+        Should -Invoke -CommandName Invoke-RestMethod -Times 1 -Exactly
+    }
+
+    It 'Returns generic message for non-github-actions type with -Remediate' {
+        $npmViolation = [DependencyViolation]::new()
+        $npmViolation.Type = 'npm'
+        $npmViolation.Name = 'lodash'
+        $npmViolation.Version = '^4.17.0'
+
+        $result = Get-RemediationSuggestion -Violation $npmViolation -Remediate
+        $result | Should -BeLike '*Research and pin*npm*'
+    }
+
+    It 'Returns fallback message on API error' {
+        Mock Invoke-RestMethod { throw 'API rate limit exceeded' }
+
+        $result = Get-RemediationSuggestion -Violation $script:BaseViolation -Remediate
+        $result[-1] | Should -Be 'Manually research and pin to immutable reference'
+    }
+
+    It 'Sends Bearer token header when GITHUB_TOKEN is set' {
+        $originalToken = $env:GITHUB_TOKEN
+        try {
+            $env:GITHUB_TOKEN = 'test-token-value'
+            Mock Invoke-RestMethod {
+                return @{ sha = 'deadbeef12345678901234567890123456789012' }
+            } -ParameterFilter {
+                $Headers -and $Headers['Authorization'] -eq 'Bearer test-token-value'
+            }
+
+            $result = Get-RemediationSuggestion -Violation $script:BaseViolation -Remediate
+            $result | Should -BeLike 'Pin to SHA:*'
+            Should -Invoke -CommandName Invoke-RestMethod -Times 1 -Exactly
+        }
+        finally {
+            if ($null -eq $originalToken) {
+                Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+            }
+            else {
+                $env:GITHUB_TOKEN = $originalToken
+            }
+        }
+    }
+
+    It 'Returns fallback when API returns null SHA' {
+        Mock Invoke-RestMethod { return @{ sha = $null } }
+
+        $result = Get-RemediationSuggestion -Violation $script:BaseViolation -Remediate
+        $result | Should -Be 'Manually research and pin to immutable reference'
+    }
+}
+
+Describe 'Export-CICDArtifact' -Tag 'Unit' {
+    BeforeAll {
+        Import-Module (Join-Path $PSScriptRoot '../Mocks/GitMocks.psm1') -Force
+        Initialize-MockCIEnvironment -Workspace $TestDrive
+
+        $script:TestReport = [ComplianceReport]::new()
+        $script:TestReport.ComplianceScore = 85.5
+        $script:TestReport.UnpinnedDependencies = 3
+        $script:TestReport.TotalDependencies = 20
+        $script:TestReport.ScanPath = $TestDrive
+
+        $script:TestReportPath = Join-Path $TestDrive 'test-report.json'
+        '{}' | Set-Content -Path $script:TestReportPath
+    }
+
+    AfterAll {
+        Clear-MockCIEnvironment
+    }
+
+    It 'Sets correct CI outputs for score and unpinned count' {
+        Mock Get-CIPlatform { return 'local' }
+        Mock Set-CIOutput { }
+        Mock Write-CIStepSummary { }
+        Mock Publish-CIArtifact { }
+
+        Export-CICDArtifact -Report $script:TestReport -ReportPath $script:TestReportPath
+
+        Should -Invoke -CommandName Set-CIOutput -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'compliance-score' -and $Value -eq 85.5
+        }
+        Should -Invoke -CommandName Set-CIOutput -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'unpinned-count' -and $Value -eq 3
+        }
+        Should -Invoke -CommandName Set-CIOutput -Times 1 -Exactly -ParameterFilter {
+            $Name -eq 'dependency-report'
+        }
+    }
+
+    It 'Writes step summary with compliance data' {
+        Mock Get-CIPlatform { return 'local' }
+        Mock Set-CIOutput { }
+        Mock Write-CIStepSummary { } -Verifiable
+        Mock Publish-CIArtifact { }
+
+        Export-CICDArtifact -Report $script:TestReport -ReportPath $script:TestReportPath
+
+        Should -Invoke -CommandName Write-CIStepSummary -Times 1 -Exactly -ParameterFilter {
+            $Content -like '*85.5%*' -and $Content -like '*3*'
+        }
+    }
+
+    It 'Creates artifact directory on GitHub platform' {
+        Mock Get-CIPlatform { return 'github' }
+        Mock Set-CIOutput { }
+        Mock Write-CIStepSummary { }
+        Mock Publish-CIArtifact { }
+
+        Push-Location $TestDrive
+        try {
+            Export-CICDArtifact -Report $script:TestReport -ReportPath $script:TestReportPath
+
+            $artifactDir = Join-Path $TestDrive 'dependency-pinning-artifacts'
+            $artifactDir | Should -Exist
+        }
+        finally {
+            Pop-Location
+        }
+    }
+}
+
+Describe 'Main Block Parameters' -Tag 'Unit' {
+    BeforeAll {
+        $script:TestScript = Join-Path $PSScriptRoot '../../security/Test-DependencyPinning.ps1'
+    }
+
+    It 'Rejects threshold values outside 0-100 range' {
+        $stdoutPath = Join-Path $TestDrive 'vr-stdout.txt'
+        $stderrPath = Join-Path $TestDrive 'vr-stderr.txt'
+        $proc = Start-Process -FilePath 'pwsh' `
+            -ArgumentList @('-NoProfile', '-File', $script:TestScript, '-Path', $TestDrive, '-Threshold', '150') `
+            -Wait -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+        $proc.ExitCode | Should -Not -Be 0
+    }
+
+    It 'Parses comma-separated IncludeTypes correctly' {
+        $workDir = Join-Path $TestDrive 'include-types-test'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        $jsonPath = Join-Path $TestDrive 'include-types-output.json'
+
+        & $script:TestScript -Path $workDir -IncludeTypes 'github-actions,npm' -Format 'json' -OutputPath $jsonPath *>&1 | Out-Null
+
+        Test-Path $jsonPath | Should -BeTrue
+        $report = Get-Content $jsonPath | ConvertFrom-Json
+        $report.PSObject.Properties.Name | Should -Contain 'ComplianceScore'
+    }
+
+    It 'Exits with code 1 when FailOnUnpinned is set and score is below threshold' {
+        $workDir = Join-Path $TestDrive 'fail-test'
+        $workflowDir = Join-Path $workDir '.github/workflows'
+        New-Item -ItemType Directory -Path $workflowDir -Force | Out-Null
+
+        # Create workflow with unpinned action to generate violations
+        $content = @'
+name: Test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+'@
+        Set-Content -Path (Join-Path $workflowDir 'test.yml') -Value $content
+
+        $jsonPath = Join-Path $TestDrive 'fail-output.json'
+        pwsh -Command "& '$script:TestScript' -Path '$workDir' -Format 'json' -OutputPath '$jsonPath' -FailOnUnpinned -Threshold 100 2>&1" | Out-Null
+
+        $LASTEXITCODE | Should -Be 1
+    }
+}
