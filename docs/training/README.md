@@ -55,7 +55,7 @@ LeRobot behavioral cloning on OSMO:
 - [LeRobot Inference](../inference/lerobot-inference.md) for running trained policies
 - [AzureML Workflows](../../workflows/azureml/README.md) for job template reference
 - [OSMO Workflows](../../workflows/osmo/README.md) for workflow template reference
-- [Scripts Reference](../../scripts/README.md) for CLI usage
+- [Scripts Reference](../reference/scripts.md) for CLI usage
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

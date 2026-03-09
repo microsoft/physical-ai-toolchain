@@ -211,7 +211,7 @@ The `run-lerobot-pipeline.sh` script orchestrates the full lifecycle on OSMO:
 - [Experiment Tracking](experiment-tracking.md) for MLflow and WANDB configuration
 - [AzureML Workflows](../../workflows/azureml/README.md) for job template reference
 - [OSMO Workflows](../../workflows/osmo/README.md) for workflow template reference
-- [Scripts Reference](../../scripts/README.md) for full CLI parameter tables
+- [Scripts Reference](../reference/scripts.md) for full CLI parameter tables
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

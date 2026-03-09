@@ -158,7 +158,7 @@ The script stages files to exclude `__pycache__` and build artifacts via `.amlig
 - [MLflow Integration](mlflow-integration.md) for SKRL metric logging internals
 - [AzureML Workflows](../../workflows/azureml/README.md) for job template reference
 - [OSMO Workflows](../../workflows/osmo/README.md) for workflow template reference
-- [Scripts Reference](../../scripts/README.md) for full CLI parameter tables
+- [Scripts Reference](../reference/scripts.md) for full CLI parameter tables
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

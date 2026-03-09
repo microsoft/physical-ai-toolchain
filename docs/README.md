@@ -21,7 +21,7 @@ Documentation spans the full lifecycle — from provisioning Azure infrastructur
 |------------------------|------------------------------------------------------------------|
 | First-time deployer    | Getting Started (coming soon), then [Deploy](../deploy/)         |
 | ML / Robotics engineer | Training (coming soon) and Inference (coming soon)               |
-| Platform operator      | Operations (coming soon) and [Security Guide](security-guide.md) |
+| Platform operator      | Operations (coming soon) and [Security Guide](security/security-guide.md) |
 | Contributor            | [Contributing](contributing/README.md)                           |
 
 ## 📖 Documentation Index
@@ -35,6 +35,7 @@ Documentation spans the full lifecycle — from provisioning Azure infrastructur
 | Workflows                              | AzureML and OSMO job templates, pipeline configuration, and submission scripts     | Coming soon |
 | Operations                             | Monitoring, scaling, troubleshooting, and cost management for running clusters     | Coming soon |
 | Security                               | Identity, networking, compliance, and hardening for production deployments         | Coming soon |
+| [Reference](reference/README.md)      | CLI parameter tables, script usage, workflow templates, and configuration reference | Available   |
 | [Contributing](contributing/README.md) | Contribution guidelines, PR process, deployment validation, and coding conventions | Available   |
 
 ## 📄 Current Guides
@@ -44,14 +45,14 @@ Standalone guides available now. These cover common tasks and will move into the
 | Guide                                                                   | Description                                                                                                         |
 |-------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
 | [AzureML Validation Job Debugging](azureml-validation-job-debugging.md) | Diagnosing and resolving AzureML validation job failures on AKS, including pod scheduling and resource quota issues |
-| [LeRobot Inference](lerobot-inference.md)                               | Running LeRobot inference workloads with pre-trained policies on Azure infrastructure                               |
-| [MLflow Integration](mlflow-integration.md)                             | Configuring MLflow experiment tracking for SKRL training agents with automatic metric logging to Azure ML           |
-| [Security Guide](security-guide.md)                                     | Security configuration inventory, deployment responsibilities, and hardening checklist for robotics workloads       |
+| [LeRobot Inference](inference/lerobot-inference.md)                               | Running LeRobot inference workloads with pre-trained policies on Azure infrastructure                               |
+| [MLflow Integration](training/mlflow-integration.md)                             | Configuring MLflow experiment tracking for SKRL training agents with automatic metric logging to Azure ML           |
+| [Security Guide](security/security-guide.md)                                     | Security configuration inventory, deployment responsibilities, and hardening checklist for robotics workloads       |
 
 ## 🚀 Next Steps
 
 * Review the [deployment guide](../deploy/README.md) for infrastructure provisioning and cluster setup
-* Explore [MLflow Integration](mlflow-integration.md) to set up experiment tracking for training runs
+* Explore [MLflow Integration](training/mlflow-integration.md) to set up experiment tracking for training runs
 * Read the [Contributing](contributing/README.md) guide to get involved with the project
 
 <!-- markdownlint-disable MD036 -->
