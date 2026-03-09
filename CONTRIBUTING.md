@@ -39,6 +39,7 @@ Detailed documentation lives in [`docs/contributing/`](docs/contributing/):
 | [Cost Considerations](docs/contributing/cost-considerations.md)             | Component costs, budgeting, regional pricing                  |
 | [Security Review](docs/contributing/security-review.md)                     | Security checklist, credential handling, dependency updates   |
 | [Accessibility](docs/contributing/accessibility.md)                         | Accessibility scope, documentation and CLI output guidelines  |
+| [Updating External Components](docs/contributing/component-updates.md)      | Process for updating reused externally-maintained components  |
 | [Documentation Maintenance](docs/contributing/documentation-maintenance.md) | Documentation update triggers, ownership, freshness policy    |
 
 ## I Have a Question
@@ -139,6 +140,12 @@ npm run spell-check    # cspell
 ```
 
 For Terraform and shell script validation, see the [Prerequisites](docs/contributing/prerequisites.md#build-and-validation-requirements) guide.
+
+## Updating External Components
+
+Reused externally-maintained components (Helm charts, container images, Terraform providers, Python packages, GitHub Actions) require periodic updates for security patches and compatibility. Dependabot automates updates for Python, Terraform, and GitHub Actions ecosystems. Helm charts and container images require manual updates.
+
+See the [Updating External Components](docs/contributing/component-updates.md) guide for the full process including component inventory, vetting criteria, and breaking change handling.
 
 ## Issue Title Conventions
 

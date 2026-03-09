@@ -39,6 +39,7 @@ Contributions can include:
 | [Cost Considerations](cost-considerations.md)             | Component costs, budgeting, regional pricing                     |
 | [Security Review](security-review.md)                     | Security checklist, credential handling, dependency updates      |
 | [Accessibility](accessibility.md)                         | Accessibility scope, documentation and CLI output guidelines     |
+| [Updating External Components](component-updates.md)      | Process for updating reused externally-maintained components     |
 | [Documentation Maintenance](documentation-maintenance.md) | Update triggers, ownership, review criteria, freshness policy    |
 | [Roadmap](ROADMAP.md)                                     | 12-month project roadmap, priorities, and success metrics        |
 
