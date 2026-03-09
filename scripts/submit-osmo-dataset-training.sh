@@ -57,6 +57,7 @@ AZURE CONTEXT:
 OTHER:
     -s, --run-smoke-test          Enable Azure connectivity smoke test
         --use-local-osmo          Use local osmo-dev CLI instead of production osmo
+        --config-preview          Print configuration and exit
     -h, --help                    Show this help message
 
 Values resolved: CLI > Environment variables > Terraform outputs
@@ -130,6 +131,7 @@ workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
 
 run_smoke="${RUN_AZURE_SMOKE_TEST:-0}"
 use_local_osmo=false
+config_preview=false
 forward_args=()
 
 #------------------------------------------------------------------------------
@@ -161,6 +163,7 @@ while [[ $# -gt 0 ]]; do
     --azure-workspace-name)       workspace_name="$2"; shift 2 ;;
     -s|--run-smoke-test)          run_smoke="1"; shift ;;
     --use-local-osmo)             use_local_osmo=true; shift ;;
+    --config-preview)             config_preview=true; shift ;;
     --)                           shift; forward_args=("$@"); break ;;
     *)                            forward_args+=("$1"); shift ;;
   esac
@@ -185,6 +188,30 @@ if [[ "$skip_register" == "false" && -z "$register_checkpoint" ]]; then
 fi
 
 [[ "$skip_register" == "true" ]] && register_checkpoint=""
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Task" "$task"
+  print_kv "Backend" "$backend"
+  print_kv "Image" "$image"
+  print_kv "Num Envs" "$num_envs"
+  print_kv "Max Iterations" "${max_iterations:-<not set>}"
+  print_kv "GPU" "$gpu"
+  print_kv "CPU" "$cpu"
+  print_kv "Memory" "$memory"
+  print_kv "Storage" "$storage"
+  print_kv "Dataset Bucket" "$dataset_bucket"
+  print_kv "Dataset Name" "$dataset_name"
+  print_kv "Training Path" "$training_path"
+  print_kv "Checkpoint Mode" "$checkpoint_mode"
+  print_kv "Checkpoint URI" "${checkpoint_uri:-<not set>}"
+  print_kv "Register Model" "${register_checkpoint:-<none>}"
+  print_kv "Workflow" "$workflow"
+  print_kv "Subscription" "${subscription_id:-<not set>}"
+  print_kv "Resource Group" "${resource_group:-<not set>}"
+  print_kv "Workspace" "${workspace_name:-<not set>}"
+  exit 0
+fi
 
 #------------------------------------------------------------------------------
 # Stage Training Folder (exclude cache and build artifacts)
@@ -256,6 +283,20 @@ fi
 #------------------------------------------------------------------------------
 
 osmo "${submit_args[@]}" || fatal "Failed to submit workflow"
+
+#------------------------------------------------------------------------------
+# Summary
+#------------------------------------------------------------------------------
+section "Deployment Summary"
+print_kv "Task" "$task"
+print_kv "Backend" "$backend"
+print_kv "Image" "$image"
+print_kv "Num Envs" "$num_envs"
+print_kv "GPU" "$gpu"
+print_kv "Dataset" "$dataset_bucket/$dataset_name"
+print_kv "Checkpoint Mode" "$checkpoint_mode"
+print_kv "Register Model" "${register_checkpoint:-<none>}"
+print_kv "Workflow" "$workflow"
 
 info "Workflow submitted successfully"
 info "Dataset uploaded: $dataset_bucket/$dataset_name"

@@ -54,6 +54,7 @@ Azure context overrides (resolved from Terraform outputs if not provided):
 
 General:
       --use-local-osmo        Use local osmo-dev CLI instead of production osmo
+      --config-preview        Print configuration and exit
   -h, --help              Show this help message and exit
 
 Environment overrides:
@@ -82,6 +83,7 @@ if ! command -v base64 >/dev/null 2>&1; then
 fi
 
 use_local_osmo=false
+config_preview=false
 
 WORKFLOW_TEMPLATE=${WORKFLOW_TEMPLATE:-"$REPO_ROOT/workflows/osmo/infer.yaml"}
 TMP_DIR=${TMP_DIR:-"$SCRIPT_DIR/.tmp"}
@@ -160,6 +162,10 @@ while [[ $# -gt 0 ]]; do
       use_local_osmo=true
       shift
       ;;
+    --config-preview)
+      config_preview=true
+      shift
+      ;;
     --)
       shift
       forward_args+=("$@")
@@ -193,6 +199,24 @@ fi
 if [[ ! -f "$REPO_ROOT/src/inference/scripts/export_policy.py" ]]; then
   echo "Export script src/inference/scripts/export_policy.py not found under $REPO_ROOT" >&2
   exit 1
+fi
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Checkpoint URI" "$CHECKPOINT_URI_VALUE"
+  print_kv "Task" "$TASK_VALUE"
+  print_kv "Num Envs" "$NUM_ENVS_VALUE"
+  print_kv "Max Steps" "$MAX_STEPS_VALUE"
+  print_kv "Video Length" "$VIDEO_LENGTH_VALUE"
+  print_kv "Format" "$INFERENCE_FORMAT_VALUE"
+  print_kv "Image" "$IMAGE_VALUE"
+  print_kv "Payload Root" "$PAYLOAD_ROOT_VALUE"
+  print_kv "Workflow" "$WORKFLOW_TEMPLATE"
+  print_kv "Subscription" "${AZURE_SUBSCRIPTION_ID_VALUE:-(not set)}"
+  print_kv "Resource Group" "${AZURE_RESOURCE_GROUP_VALUE:-(not set)}"
+  print_kv "Workspace" "${AZURE_WORKSPACE_NAME_VALUE:-(not set)}"
+  print_kv "Storage Account" "${AZURE_STORAGE_ACCOUNT_VALUE:-(not set)}"
+  exit 0
 fi
 
 mkdir -p "$TMP_DIR"
@@ -266,5 +290,18 @@ if ! osmo "${submit_args[@]}"; then
   echo "Failed to submit workflow to OSMO" >&2
   exit 1
 fi
+
+#------------------------------------------------------------------------------
+# Summary
+#------------------------------------------------------------------------------
+section "Deployment Summary"
+print_kv "Checkpoint" "$CHECKPOINT_URI_VALUE"
+print_kv "Task" "$TASK_VALUE"
+print_kv "Format" "$INFERENCE_FORMAT_VALUE"
+print_kv "Image" "$IMAGE_VALUE"
+print_kv "Num Envs" "$NUM_ENVS_VALUE"
+print_kv "Subscription" "${AZURE_SUBSCRIPTION_ID_VALUE:-(not set)}"
+print_kv "Resource Group" "${AZURE_RESOURCE_GROUP_VALUE:-(not set)}"
+print_kv "Workspace" "${AZURE_WORKSPACE_NAME_VALUE:-(not set)}"
 
 echo "Inference workflow submitted successfully"
