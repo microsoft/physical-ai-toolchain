@@ -24,7 +24,7 @@ This is an open-source reference architecture maintained by Microsoft and commun
 | Security Vulnerability     | Security issues (see [SECURITY.md](SECURITY.md)) | 24 hours (via MSRC)  |
 | Critical                   | Blocking issues preventing deployment            | 1-2 business days    |
 | Major                      | Significant issues affecting functionality       | 3-5 business days    |
-| General Issues & Questions | Bug reports, feature requests, questions         | Best effort          |
+| General Issues & Questions | Bug reports, feature requests, questions         | 14 calendar days     |
 
 **Note**: Response times indicate initial acknowledgment. Resolution time varies based on issue complexity and community availability.
 

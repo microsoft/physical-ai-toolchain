@@ -60,6 +60,8 @@ Triage contributors assist maintainers by managing issue flow and initial assess
 | Initial assessment | Identify duplicates, request clarification, verify reproduction steps |
 | Community support  | Answer questions and direct contributors to resources                 |
 
+Triage contributors target the response times documented in [SUPPORT.md](SUPPORT.md) for initial issue acknowledgment.
+
 ### Contributors
 
 Contributors improve the project through code, documentation, and community engagement.
