@@ -6,7 +6,8 @@
     ".venv/**",
     "**/.venv/**",
     "external/**",
-    "scripts/tests/Fixtures/**"
+    "scripts/tests/Fixtures/**",
+    "logs/**"
   ],
   "config": {
     "default": true,
