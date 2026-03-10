@@ -41,6 +41,7 @@ Detailed documentation lives in [`docs/contributing/`](docs/contributing/):
 | [Accessibility](docs/contributing/accessibility.md)                         | Accessibility scope, documentation and CLI output guidelines  |
 | [Updating External Components](docs/contributing/component-updates.md)      | Process for updating reused externally-maintained components  |
 | [Documentation Maintenance](docs/contributing/documentation-maintenance.md) | Documentation update triggers, ownership, freshness policy    |
+| [Deprecation Policy](docs/deprecation-policy.md)                            | Interface deprecation lifecycle, announcements, migration     |
 
 ## I Have a Question
 
@@ -210,6 +211,12 @@ This project uses [release-please](https://github.com/googleapis/release-please)
 After merging to `main`, release-please automatically creates a release PR with updated `CHANGELOG.md` and version bumps. Merging that PR creates a GitHub Release and git tag.
 
 For commit message format details, see [commit-message.instructions.md](.github/instructions/commit-message.instructions.md).
+
+## Deprecation Policy
+
+External interfaces follow a formal deprecation lifecycle before removal. The policy covers shell script arguments, environment variables, Terraform variables and outputs, configuration schemas, and workflow templates.
+
+No external interface is removed without a deprecation notice in a prior release. See the [Deprecation Policy](docs/deprecation-policy.md) for scope, deprecation periods, announcement channels, and migration guidance.
 
 ## Testing Requirements
 

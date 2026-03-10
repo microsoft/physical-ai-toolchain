@@ -81,6 +81,12 @@ This reference architecture builds upon:
 
 Microsoft encourages customers to review its Responsible AI Standard when developing AI-enabled systems to ensure ethical, safe, and inclusive AI practices. Learn more at [Microsoft's Responsible AI](https://www.microsoft.com/ai/responsible-ai).
 
+## ⚠️ Deprecations
+
+No interfaces are currently deprecated. When deprecations are announced, they appear here with migration guidance and removal timelines.
+
+See the [Deprecation Policy](docs/deprecation-policy.md) for how interface changes are communicated and managed.
+
 ## Legal
 
 This project is licensed under the [MIT License](./LICENSE).

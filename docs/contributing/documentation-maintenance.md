@@ -123,6 +123,8 @@ Deprecation requires advance notice to give users time to adapt:
 * Update affected guides with a `> [!WARNING]` alert indicating the deprecation timeline and replacement.
 * Remove deprecated functionality only after the announced milestone.
 
+For the complete deprecation lifecycle, scope, and deprecation period definitions, see the [Deprecation Policy](../deprecation-policy.md).
+
 ### Breaking Changes
 
 Breaking changes require explicit communication and migration support:
