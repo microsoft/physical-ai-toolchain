@@ -58,6 +58,7 @@ asctime
 asgs
 assetguidance
 asyncio
+attestations
 attunity
 audiologs
 auditability
@@ -772,6 +773,7 @@ mqttbridgeconnector
 mqttbroker
 mqtts
 msdn
+msdate
 msgraph
 msi
 msvideo
@@ -1079,6 +1081,7 @@ reimplementing
 reintegrate
 reintegrating
 relabelling
+Rekor
 Remotable
 renumbered
 reoccur
@@ -1170,6 +1173,7 @@ siem
 sigalrm
 signalr
 signingkey
+sigstore
 signup
 Silverlight
 Simbolic

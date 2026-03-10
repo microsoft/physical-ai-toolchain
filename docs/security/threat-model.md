@@ -4,6 +4,13 @@ description: STRIDE-based threat model covering infrastructure-as-code component
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-22
 ms.topic: concept
+keywords:
+  - threat model
+  - STRIDE
+  - security
+  - trust boundaries
+  - remediation
+  - risk assessment
 ---
 
 STRIDE-based threat analysis of the Azure NVIDIA Robotics Reference Architecture covering infrastructure-as-code components, trust boundaries, and a prioritized remediation roadmap.
@@ -385,7 +392,7 @@ Goal Structuring Notation (GSN) elements supporting the security posture claim.
 | G4      | Supply chain integrity is maintained through SHA-pinned actions and dependency review                 |
 | E1      | 19 STRIDE threats identified; 7 Accepted with compensating controls, 12 Open with remediation roadmap |
 | E2      | OpenSSF Passing ~85%; 25 Silver criteria assessed (5 Met, 5 Delegated, 13 N/A, 1 Gap)                 |
-| A1      | Deployer follows `docs/security/security-guide.md` hardening checklist                                |
+| A1      | Deployer follows `docs/operations/security-guide.md` hardening checklist                              |
 | A2      | OSMO vendor provides auth/rate-limiting enablement path in future releases                            |
 
 ## Remediation Roadmap
@@ -412,8 +419,8 @@ Goal Structuring Notation (GSN) elements supporting the security posture claim.
 ## References
 
 * [SECURITY.md](../../SECURITY.md) — Microsoft security policy and deployer additions
-* [Security Guide](security-guide.md) — security configuration inventory and hardening checklist
-* [STRIDE Threat Modeling](https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats) — Microsoft STRIDE reference
+* [Security Guide](../operations/security-guide.md) — security configuration inventory and hardening checklist
+* [STRIDE Threat Modeling](https://learn.microsoft.com/azure/security/develop/threat-modeling-tool-threats) — Microsoft STRIDE reference
 * [OpenSSF Best Practices](https://www.bestpractices.dev/en/criteria) — badge criteria
 * [CIS Kubernetes Benchmark](https://www.cisecurity.org/benchmark/kubernetes) — AKS hardening baseline
 

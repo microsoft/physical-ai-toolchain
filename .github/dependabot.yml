@@ -37,6 +37,42 @@ updates:
       prefix: "chore"
       include: "scope"
 
+  # Python dependencies for common
+  - package-ecosystem: "pip"
+    directory: "/src/common"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      common-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Python dependencies for inference
+  - package-ecosystem: "pip"
+    directory: "/src/inference"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      inference-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
   # Terraform modules
   - package-ecosystem: "terraform"
     directory: "/deploy/001-iac"
@@ -79,6 +115,39 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Docker base images for AzureML workflows
+  - package-ecosystem: "docker"
+    directory: "/workflows/azureml"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Python dependencies for LeRobot inference
+  - package-ecosystem: "pip"
+    directory: "/workflows/azureml"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      lerobot-inference-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "python"
+      - "inference"
     commit-message:
       prefix: "chore"
       include: "scope"

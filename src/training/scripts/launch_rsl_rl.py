@@ -11,7 +11,6 @@ import sys
 import tempfile
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from pathlib import Path
 
 from training.utils import AzureConfigError, AzureMLContext, bootstrap_azure_ml
 
@@ -128,11 +127,7 @@ def _run_training(
     args: argparse.Namespace,
     hydra_args: Sequence[str],
 ) -> None:
-    train_script = Path(__file__).parent / "rsl_rl" / "train.py"
-    if not train_script.exists():
-        raise SystemExit(f"Training script not found: {train_script}")
-
-    cmd = [sys.executable, str(train_script)]
+    cmd = [sys.executable, "-m", "training.scripts.rsl_rl.train"]
 
     if args.task:
         cmd.extend(["--task", args.task])

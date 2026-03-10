@@ -48,6 +48,7 @@ AZURE CONTEXT:
 
 GENERAL:
     -h, --help                    Show this help message
+        --config-preview          Print configuration and exit
 
 Values resolved: CLI > Environment variables > Terraform outputs
 EOF
@@ -113,6 +114,7 @@ instance_type="gpuspot"
 experiment_name=""
 job_name=""
 stream_logs=false
+config_preview=false
 
 #------------------------------------------------------------------------------
 # Parse Arguments
@@ -139,6 +141,7 @@ while [[ $# -gt 0 ]]; do
     --experiment-name)      experiment_name="$2"; shift 2 ;;
     --job-name)             job_name="$2"; shift 2 ;;
     --stream)               stream_logs=true; shift ;;
+    --config-preview)       config_preview=true; shift ;;
     --subscription-id)      subscription_id="$2"; shift 2 ;;
     --resource-group)       resource_group="$2"; shift 2 ;;
     --workspace-name)       workspace_name="$2"; shift 2 ;;
@@ -165,6 +168,25 @@ fi
 code_path="$REPO_ROOT/src"
 [[ -d "$code_path/training" ]] || fatal "Training source not found: $code_path/training"
 [[ -f "$code_path/.amlignore" ]] || warn "No .amlignore found; __pycache__ may be included in snapshot"
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Model" "${model_name}:${model_version}"
+  print_kv "Task" "$task"
+  print_kv "Framework" "${framework:-<from model>}"
+  print_kv "Episodes" "$episodes"
+  print_kv "Num Envs" "$num_envs"
+  print_kv "Threshold" "${threshold:-<from model>}"
+  print_kv "Headless" "$headless"
+  print_kv "Subscription" "$subscription_id"
+  print_kv "Resource Group" "$resource_group"
+  print_kv "Workspace" "$workspace_name"
+  print_kv "Compute" "${compute:-<not set>}"
+  print_kv "Instance Type" "$instance_type"
+  print_kv "Job File" "$job_file"
+  print_kv "Environment" "${environment_name}:${environment_version}"
+  exit 0
+fi
 
 #------------------------------------------------------------------------------
 # Resolve Model Version
@@ -271,3 +293,17 @@ if [[ "$stream_logs" == "true" ]]; then
   az ml job stream --name "$job_result" \
     --resource-group "$resource_group" --workspace-name "$workspace_name" || true
 fi
+
+#------------------------------------------------------------------------------
+# Summary
+#------------------------------------------------------------------------------
+section "Deployment Summary"
+print_kv "Job Name" "$job_result"
+print_kv "Model" "$model_uri"
+print_kv "Task" "$task"
+print_kv "Framework" "${framework:-auto}"
+print_kv "Episodes" "$episodes"
+print_kv "Threshold" "${threshold:--1.0}"
+print_kv "Compute" "${compute:-<not set>}"
+print_kv "Instance Type" "$instance_type"
+print_kv "Workspace" "$workspace_name"

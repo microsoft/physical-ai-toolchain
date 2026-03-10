@@ -2,7 +2,7 @@
 title: Documentation Maintenance Policy
 description: Update triggers, ownership, review criteria, freshness policy, and release lifecycle for project documentation
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-25
+ms.date: 2026-03-09
 ms.topic: reference
 keywords:
   - documentation
@@ -71,7 +71,27 @@ Documentation freshness is tracked through the `ms.date` frontmatter field.
 * Report stale or inaccurate content using the [documentation issue template](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues/new?template=05-documentation.yml). Include the file path and a description of the inaccuracy.
 
 > [!NOTE]
-> Automated `ms.date` freshness checking (GitHub Actions) is planned for a future milestone.
+> Automated `ms.date` freshness checking runs in two contexts:
+>
+> * **Weekly scans**: [weekly-validation.yml](../../.github/workflows/weekly-validation.yml) runs every Monday at 9 AM UTC, checking all markdown files and failing on stale documentation (90+ days since last update). Creates one GitHub issue per stale file with automatic duplicate detection.
+> * **Pull request checks**: [pr-validation.yml](../../.github/workflows/pr-validation.yml) checks only modified files during PR review and blocks merges when stale documentation is detected
+>
+> When stale files are detected:
+>
+> * Weekly runs create or update GitHub issues tagged with `stale-docs`, `documentation`, `automated`, and `needs-triage` labels
+> * PR validation fails and must be resolved before merging (update `ms.date` in the PR)
+> * Download artifacts (msdate-freshness-results.json) or view job summaries for detailed file lists
+
+### Fixing Stale Documentation
+
+When files exceed the 90-day freshness threshold:
+
+1. Review the file content for accuracy and relevance
+2. Update any outdated information, links, or examples
+3. Update the `ms.date` field in frontmatter to today's date (YYYY-MM-DD format)
+4. Commit changes with a descriptive message referencing the content updates
+
+The `ms.date` field should be updated on every substantive content edit, not just when flagged by the freshness check. This tracking helps readers assess documentation currency.
 
 ## PR Documentation Requirements
 
@@ -96,12 +116,13 @@ This section defines versioning, release notes, deprecation notices, and breakin
 
 This project uses [release-please](https://github.com/googleapis/release-please) for automated semantic versioning. Version bumps follow conventional commit types:
 
-| Commit Type        | Version Bump | Example                                      |
-|--------------------|--------------|----------------------------------------------|
-| `feat:`            | Minor        | `feat(terraform): add GPU monitoring module` |
-| `fix:`             | Patch        | `fix(scripts): correct AKS credential path`  |
-| `BREAKING CHANGE:` | Major        | Footer in commit triggers major bump         |
-| `docs:`, `chore:`  | None         | Appears in changelog without version bump    |
+| Commit Type        | Version Bump | Example                                        |
+|--------------------|--------------|------------------------------------------------|
+| `feat:`            | Minor        | `feat(terraform): add GPU monitoring module`   |
+| `fix:`             | Patch        | `fix(scripts): correct AKS credential path`    |
+| `BREAKING CHANGE:` | Major        | Footer in commit triggers major bump           |
+| `security:`        | Patch        | `security: fix CVE-2024-XXXX input validation` |
+| `docs:`, `chore:`  | None         | Appears in changelog without version bump      |
 
 `CHANGELOG.md` is updated automatically by release-please when a release PR merges.
 
@@ -121,6 +142,8 @@ Deprecation requires advance notice to give users time to adapt:
 * Document the deprecation in `CHANGELOG.md` under a Deprecated section.
 * Update affected guides with a `> [!WARNING]` alert indicating the deprecation timeline and replacement.
 * Remove deprecated functionality only after the announced milestone.
+
+For the complete deprecation lifecycle, scope, and deprecation period definitions, see the [Deprecation Policy](../deprecation-policy.md).
 
 ### Breaking Changes
 

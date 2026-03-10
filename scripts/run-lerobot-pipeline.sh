@@ -71,6 +71,7 @@ AZURE CONTEXT:
 
 GENERAL:
         --use-local-osmo          Use local osmo-dev CLI instead of production osmo
+        --config-preview          Print configuration and exit
     -h, --help                    Show this help message
 
 EXAMPLES:
@@ -130,6 +131,7 @@ poll_interval="${POLL_INTERVAL:-60}"
 timeout_mins="${TIMEOUT_MINS:-720}"
 skip_wait=false
 use_local_osmo=false
+config_preview=false
 
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
@@ -165,6 +167,7 @@ while [[ $# -gt 0 ]]; do
     --timeout)                    timeout_mins="$2"; shift 2 ;;
     --skip-wait)                  skip_wait=true; shift ;;
     --use-local-osmo)             use_local_osmo=true; shift ;;
+    --config-preview)             config_preview=true; shift ;;
     --azure-subscription-id)      subscription_id="$2"; shift 2 ;;
     --azure-resource-group)       resource_group="$2"; shift 2 ;;
     --azure-workspace-name)       workspace_name="$2"; shift 2 ;;
@@ -199,6 +202,30 @@ fi
 
 train_job_name="${job_name}-train"
 eval_job_name="${job_name}-eval"
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Dataset" "$dataset_repo_id"
+  print_kv "Policy Repo" "${policy_repo_id:-<not set>}"
+  print_kv "Policy Type" "$policy_type"
+  print_kv "Training Job" "${job_name}-train"
+  print_kv "Inference Job" "${job_name}-eval"
+  print_kv "Training Steps" "${training_steps:-<default>}"
+  print_kv "Batch Size" "${batch_size:-<default>}"
+  print_kv "Save Freq" "$save_freq"
+  print_kv "Eval Episodes" "$eval_episodes"
+  print_kv "WANDB" "$wandb_enable"
+  print_kv "MLflow" "$mlflow_enable"
+  print_kv "Skip Inference" "$skip_inference"
+  print_kv "Skip Wait" "$skip_wait"
+  print_kv "Poll Interval" "${poll_interval}s"
+  print_kv "Timeout" "${timeout_mins}m"
+  print_kv "Register Model" "${register_model:-<none>}"
+  print_kv "Subscription" "${subscription_id:-<not set>}"
+  print_kv "Resource Group" "${resource_group:-<not set>}"
+  print_kv "Workspace" "${workspace_name:-<not set>}"
+  exit 0
+fi
 
 #------------------------------------------------------------------------------
 # Stage 1: Submit Training
@@ -251,7 +278,7 @@ bash "${train_args[@]}" || fatal "Training submission failed"
 info "Training workflow submitted: $train_job_name"
 
 if [[ "$skip_wait" == "true" ]]; then
-  section "Pipeline Complete (Async)"
+  section "Deployment Summary"
   print_kv "Mode" "async (training submitted, not waiting)"
   print_kv "Training Job" "$train_job_name"
   print_kv "Monitor" "osmo workflow status $train_job_name"
@@ -353,7 +380,7 @@ fi
 # Summary
 #------------------------------------------------------------------------------
 
-section "Pipeline Complete"
+section "Deployment Summary"
 print_kv "Dataset" "$dataset_repo_id"
 print_kv "Policy Type" "$policy_type"
 print_kv "Training Job" "$train_job_name"

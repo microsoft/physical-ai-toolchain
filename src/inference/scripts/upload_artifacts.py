@@ -6,7 +6,6 @@ the same bootstrap_azure_ml utility as training.
 
 import json
 import os
-import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -263,10 +262,6 @@ def upload_to_blob_fallback(
 
 def main() -> None:
     """Main entry point for artifact upload."""
-    src_root = os.environ.get("SRC_ROOT", "")
-    if src_root and src_root not in sys.path:
-        sys.path.insert(0, src_root)
-
     from training.utils import set_env_defaults
 
     set_env_defaults(

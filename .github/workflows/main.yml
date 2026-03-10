@@ -81,7 +81,9 @@ jobs:
     uses: ./.github/workflows/dependency-pinning-scan.yml
     permissions:
       contents: read
-      security-events: write
+      security-events: write  # Required for SARIF upload to Security tab
+    with:
+      upload-sarif: true
 
   # PowerShell Pester test execution
   pester-tests:
@@ -227,10 +229,60 @@ jobs:
             Write-Output "Git tag $tag already exists"
           }
 
+  # Sign release artifacts and generate SBOM attestation
+  attest-release:
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    needs: [release-please]
+    name: Attest Release
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+
+      - name: Create source archive
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: git archive --format=tar.gz --prefix="${TAG}/" HEAD -o "source-${TAG}.tar.gz"
+        shell: bash
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@57aae528053a48a3f6235f2d9461b05fbcb7366d  # v0.23.1
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          artifact-name: ''
+
+      - name: Attest build provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        with:
+          subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
+
+      - name: Attest SBOM
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        with:
+          subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
+          sbom-path: sbom.spdx.json
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          gh release upload "${TAG}" \
+            "source-${TAG}.tar.gz" \
+            sbom.spdx.json \
+            --clobber
+        shell: bash
+
   # Promote draft release to published
   publish-release:
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    needs: [release-please]
+    needs: [release-please, attest-release]
     name: Publish Release
     runs-on: ubuntu-latest
     concurrency:

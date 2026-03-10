@@ -4,14 +4,9 @@
 # Flags:
 #   pester — PowerShell tests covering scripts/
 #   pytest — Python tests covering src/
-#
-# Requires: Issue #423 (pytest upload) and #427 (orchestrator flags)
-# to be deployed before or with this file for after_n_builds: 2 to work.
 
 codecov:
-  require_ci_to_pass: true
-  notify:
-    after_n_builds: 2
+  require_ci_to_pass: false
 
 coverage:
   precision: 2
@@ -54,7 +49,7 @@ parsers:
 comment:
   layout: "header, diff, flags, files"
   behavior: default
-  require_changes: true
+  require_changes: false
   show_carryforward_flags: true
 
 ignore:

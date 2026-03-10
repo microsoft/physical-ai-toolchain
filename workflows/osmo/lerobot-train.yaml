@@ -81,7 +81,7 @@ workflow:
 
             # Install UV package manager
             echo "Installing UV package manager..."
-            pip install --quiet uv
+            pip install --quiet uv==0.7.12
 
             # Unpack training scripts from base64-encoded payload
             ARCHIVE_PATH="/tmp/lerobot_payload.zip"

@@ -1,4 +1,4 @@
-# Documentation ownership for OpenSSF documentation_current compliance
+# Code ownership for review enforcement on critical paths
 # Last matching pattern takes precedence - order general to specific
 
 # Default: all markdown files require team review
@@ -12,6 +12,15 @@
 
 # Component-level READMEs
 /deploy/**/README.md        @Azure-Samples/edge-ai-core-dev
+
+# Source code
+/src/                       @Azure-Samples/edge-ai-core-dev
+
+# Infrastructure as code
+/deploy/                    @Azure-Samples/edge-ai-core-dev
+
+# CI/CD workflows
+/.github/workflows/         @Azure-Samples/edge-ai-core-dev
 
 # Protect ownership file itself
 /.github/CODEOWNERS         @Azure-Samples/edge-ai-core-dev

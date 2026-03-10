@@ -54,7 +54,7 @@ run_python() {
 
 if ! command -v uv &>/dev/null; then
   echo "Installing uv package manager..."
-  if curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null; then
+  if curl -LsSf https://astral.sh/uv/0.10.9/install.sh | sh 2>/dev/null; then
     export PATH="${HOME}/.local/bin:${PATH}"
   fi
 fi

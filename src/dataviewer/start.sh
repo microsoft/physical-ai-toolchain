@@ -164,9 +164,9 @@ start_frontend() {
     if [[ ! -d "${FRONTEND_DIR}/node_modules" ]]; then
         log_warn "node_modules not found"
         log_info "Installing dependencies..."
-        (cd "${FRONTEND_DIR}" && npm install)
+        (cd "${FRONTEND_DIR}" && npm ci)
     fi
-    
+
     (
         cd "${FRONTEND_DIR}"
         npm run dev -- --port "${FRONTEND_PORT}" 2>&1

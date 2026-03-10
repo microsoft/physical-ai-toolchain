@@ -4,9 +4,13 @@ description: Index of security documentation including threat model and deployme
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-22
 ms.topic: overview
+keywords:
+  - security
+  - threat model
+  - deployment
+  - vulnerability
+  - compliance
 ---
-
-<!-- cspell:words deployers -->
 
 ## 📋 Overview
 
@@ -14,11 +18,12 @@ Security documentation for the Azure NVIDIA Robotics Reference Architecture cove
 
 ## 📄 Documents
 
-| Document                                          | Description                                                      |
-|---------------------------------------------------|------------------------------------------------------------------|
-| [Threat Model](threat-model.md)                   | STRIDE-based threat analysis and remediation roadmap             |
-| [Security Guide for Deployers](security-guide.md) | Security configuration inventory and deployment responsibilities |
-| [SECURITY.md](../../SECURITY.md)                  | Vulnerability disclosure and reporting process                   |
+| Document                                                     | Description                                                      |
+|--------------------------------------------------------------|------------------------------------------------------------------|
+| [Threat Model](threat-model.md)                              | STRIDE-based threat analysis and remediation roadmap             |
+| [Deployment Security Guide](../operations/security-guide.md) | Security configuration inventory and deployment responsibilities |
+| [Release Verification](release-verification.md)              | Verify release artifact provenance and SBOM attestations         |
+| [SECURITY.md](../../SECURITY.md)                             | Vulnerability disclosure and reporting process                   |
 
 ## 🔒 Security Posture
 
@@ -31,10 +36,10 @@ The [threat model](threat-model.md) documents:
 - Trust boundary analysis across IaC, cluster, and ML pipeline layers
 - Prioritized remediation roadmap
 
-The [security guide](security-guide.md) documents:
+The [security guide](../operations/security-guide.md) documents:
 
 - Default security configurations shipped with the architecture
-- Deployer responsibilities before, during, and after deployment
+- Deployment team responsibilities before, during, and after provisioning
 - Security considerations checklist with Azure documentation references
 
 ## 🔗 Related Resources

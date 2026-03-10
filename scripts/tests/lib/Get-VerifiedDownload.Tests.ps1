@@ -580,6 +580,47 @@ Describe 'Invoke-VerifiedDownload' {
         }
     }
 
+    Describe 'Main Execution Block' -Tag 'Integration' {
+        BeforeAll {
+            $script:scriptPath = Join-Path $PSScriptRoot '../../lib/Get-VerifiedDownload.ps1'
+        }
+
+        It 'Exits 1 when required parameters are missing' {
+            $proc = Start-Process -FilePath 'pwsh' `
+                -ArgumentList '-NoProfile', '-File', $script:scriptPath `
+                -Wait -PassThru -NoNewWindow `
+                -RedirectStandardOutput (Join-Path $TestDrive 'stdout.txt') `
+                -RedirectStandardError (Join-Path $TestDrive 'stderr.txt')
+
+            $proc.ExitCode | Should -Be 1
+        }
+
+        It 'Exits 1 when Url is provided but ExpectedSHA256 and OutputPath are missing' {
+            $proc = Start-Process -FilePath 'pwsh' `
+                -ArgumentList '-NoProfile', '-File', $script:scriptPath, '-Url', 'https://example.com/file.bin' `
+                -Wait -PassThru -NoNewWindow `
+                -RedirectStandardOutput (Join-Path $TestDrive 'stdout.txt') `
+                -RedirectStandardError (Join-Path $TestDrive 'stderr.txt')
+
+            $proc.ExitCode | Should -Be 1
+        }
+
+        It 'Exits 1 when download fails with invalid URL' {
+            $outputPath = Join-Path $TestDrive 'download-output.bin'
+
+            $proc = Start-Process -FilePath 'pwsh' `
+                -ArgumentList '-NoProfile', '-File', $script:scriptPath, `
+                    '-Url', 'https://invalid.test.example/nonexistent.bin', `
+                    '-ExpectedSHA256', 'abc123', `
+                    '-OutputPath', $outputPath `
+                -Wait -PassThru -NoNewWindow `
+                -RedirectStandardOutput (Join-Path $TestDrive 'stdout.txt') `
+                -RedirectStandardError (Join-Path $TestDrive 'stderr.txt')
+
+            $proc.ExitCode | Should -Be 1
+        }
+    }
+
     AfterAll {
         $global:LASTEXITCODE = 0
     }

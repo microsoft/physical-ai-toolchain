@@ -78,6 +78,7 @@ ADVANCED:
 
 GENERAL:
     -h, --help                    Show this help message
+        --config-preview          Print configuration and exit
 
 Values resolved: CLI > Environment variables > Terraform outputs
 Additional arguments after -- are forwarded to az ml job create.
@@ -177,6 +178,7 @@ instance_type="gpuspot"
 experiment_name=""
 display_name=""
 stream_logs=false
+config_preview=false
 forward_args=()
 
 #------------------------------------------------------------------------------
@@ -215,6 +217,7 @@ while [[ $# -gt 0 ]]; do
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
     --stream)                     stream_logs=true; shift ;;
+    --config-preview)             config_preview=true; shift ;;
     --)                           shift; forward_args=("$@"); break ;;
     *)                            fatal "Unknown option: $1" ;;
   esac
@@ -236,6 +239,27 @@ case "$policy_type" in
   act|diffusion) ;;
   *) fatal "Unsupported policy type: $policy_type (use: act, diffusion)" ;;
 esac
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Dataset" "$dataset_repo_id"
+  print_kv "Policy Type" "$policy_type"
+  print_kv "Job Name" "$job_name"
+  print_kv "Image" "$image"
+  print_kv "Output Dir" "$output_dir"
+  print_kv "Training Steps" "${training_steps:-<default>}"
+  print_kv "Batch Size" "${batch_size:-<default>}"
+  print_kv "Save Freq" "$save_freq"
+  print_kv "WANDB" "$wandb_enable"
+  print_kv "Register Model" "${register_checkpoint:-<none>}"
+  print_kv "Subscription" "$subscription_id"
+  print_kv "Resource Group" "$resource_group"
+  print_kv "Workspace" "$workspace_name"
+  print_kv "Compute" "${compute:-<not set>}"
+  print_kv "Instance Type" "$instance_type"
+  print_kv "Environment" "${environment_name}:${environment_version}"
+  exit 0
+fi
 
 #------------------------------------------------------------------------------
 # Register Environment
@@ -425,3 +449,16 @@ if [[ "$stream_logs" == "true" ]]; then
   az ml job stream --name "$job_result" \
     --resource-group "$resource_group" --workspace-name "$workspace_name" || true
 fi
+
+#------------------------------------------------------------------------------
+# Summary
+#------------------------------------------------------------------------------
+section "Deployment Summary"
+print_kv "Job Name" "$job_result"
+print_kv "Dataset" "$dataset_repo_id"
+print_kv "Policy Type" "$policy_type"
+print_kv "Image" "$image"
+print_kv "Compute" "${compute:-<not set>}"
+print_kv "Instance Type" "$instance_type"
+print_kv "Environment" "${environment_name}:${environment_version}"
+print_kv "Workspace" "$workspace_name"

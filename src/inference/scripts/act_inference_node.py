@@ -29,15 +29,7 @@ Usage:
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import numpy as np
-
-# Add src/ to path for inference module
-_SRC_DIR = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_SRC_DIR))
-
 import rclpy
 from builtin_interfaces.msg import Duration
 from cv_bridge import CvBridge

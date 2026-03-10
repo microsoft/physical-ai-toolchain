@@ -25,6 +25,7 @@ Types MUST be one of the following:
 - `build` - Changes that affect the build system or external dependencies
 - `ops` - Changes to operational components
 - `chore` - Other changes that don't modify src or test files
+- `security` - CVE fixes and vulnerability remediations
 
 ## Scopes
 

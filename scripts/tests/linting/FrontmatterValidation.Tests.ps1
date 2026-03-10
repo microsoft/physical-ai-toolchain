@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+﻿#Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0' }
 
 using module ..\..\..\scripts\linting\Modules\FrontmatterValidation.psm1

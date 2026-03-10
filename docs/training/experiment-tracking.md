@@ -150,7 +150,7 @@ Training supports four checkpoint initialization modes:
 - [MLflow Integration](mlflow-integration.md) for SKRL metric logging internals
 - [Isaac Lab Training](isaac-lab-training.md) for RL training workflows
 - [LeRobot Training](lerobot-training.md) for behavioral cloning workflows
-- [Scripts Reference](../../scripts/README.md) for full CLI parameter tables
+- [Scripts Reference](../reference/scripts.md) for full CLI parameter tables
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

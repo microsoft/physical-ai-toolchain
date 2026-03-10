@@ -186,6 +186,8 @@ jobs:
           use_oidc: true
           files: logs/coverage.xml
           flags: pester
+          name: pester-coverage
+          verbose: true
           fail_ci_if_error: false
 
       - name: Coverage Threshold Check
@@ -201,8 +203,8 @@ jobs:
                 if (($missed + $covered) -gt 0) { [math]::Round(($covered / ($missed + $covered)) * 100, 2) } else { 0 }
               }
             
-            # Baseline threshold (18%) — increase as coverage grows
-            $threshold = 18
+            # Matches CoveragePercentTarget in pester.config.ps1
+            $threshold = 80
             
             Write-Host "Line coverage: $lineRate%"
             Write-Host "Threshold: $threshold%"

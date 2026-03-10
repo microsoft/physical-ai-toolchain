@@ -3,6 +3,9 @@
 
 using module ..\..\..\scripts\linting\Modules\FrontmatterValidation.psm1
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '')]
+param()
+
 BeforeDiscovery {
     $lintingDir = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'linting'
     $schemaDir = Join-Path $lintingDir 'schemas' 'frontmatter'
@@ -817,6 +820,135 @@ Describe 'Schema Validation End-to-End' -Tag 'Unit' {
                 ($result.Errors | Where-Object { $_ -match 'Additional property not allowed' }) | Should -Not -BeNullOrEmpty
             }
         }
+    }
+}
+
+#region Get-JsonSchemaPointerValue
+
+Describe 'Get-JsonSchemaPointerValue' -Tag 'Unit' {
+    BeforeAll {
+        $schema = @{
+            type = 'object'
+            properties = @{
+                'name/with~special' = @{ type = 'string' }
+                nested = @{ deeper = @{ value = 42 } }
+            }
+        }
+        $psSchema = '{"type":"object","properties":{"name":{"type":"string"}}}' |
+            ConvertFrom-Json -Depth 10
+    }
+
+    It 'Returns entire schema for whitespace pointer' {
+        Get-JsonSchemaPointerValue -Schema $schema -Pointer ' ' | Should -Be $schema
+    }
+
+    It 'Returns entire schema for root pointer' {
+        Get-JsonSchemaPointerValue -Schema $schema -Pointer '/' | Should -Be $schema
+    }
+
+    It 'Navigates single segment' {
+        $result = Get-JsonSchemaPointerValue -Schema $schema -Pointer '/type'
+        $result | Should -Be 'object'
+    }
+
+    It 'Navigates multiple segments' {
+        $result = Get-JsonSchemaPointerValue -Schema $schema -Pointer '/properties/nested/deeper/value'
+        $result | Should -Be 42
+    }
+
+    It 'Decodes tilde escaping for slash (~1) and tilde (~0)' {
+        $result = Get-JsonSchemaPointerValue -Schema $schema -Pointer '/properties/name~1with~0special'
+        $result | Should -Not -BeNullOrEmpty
+        $result.type | Should -Be 'string'
+    }
+
+    It 'Accesses IDictionary input (hashtable)' {
+        $result = Get-JsonSchemaPointerValue -Schema $schema -Pointer '/type'
+        $result | Should -Be 'object'
+    }
+
+    It 'Accesses PSObject properties' {
+        $result = Get-JsonSchemaPointerValue -Schema $psSchema -Pointer '/properties/name/type'
+        $result | Should -Be 'string'
+    }
+
+    It 'Returns null for missing key in IDictionary' {
+        $result = Get-JsonSchemaPointerValue -Schema $schema -Pointer '/nonexistent'
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Returns null for missing PSObject property' {
+        $result = Get-JsonSchemaPointerValue -Schema $psSchema -Pointer '/missing'
+        $result | Should -BeNullOrEmpty
+    }
+}
+
+#region Resolve-JsonSchemaRef
+
+Describe 'Resolve-JsonSchemaRef' -Tag 'Unit' {
+    BeforeAll {
+        $rootSchema = @{
+            definitions = @{
+                foo = @{ type = 'string' }
+                bar = @{ type = 'number' }
+            }
+        }
+        $externalSchema = @{
+            definitions = @{
+                baz = @{ type = 'boolean' }
+            }
+        }
+        $schemaContext = @{
+            RootSchema = $rootSchema
+            Schemas = @{
+                'external.json' = $externalSchema
+            }
+        }
+    }
+
+    It 'Resolves internal $ref with #/definitions/foo' {
+        $result = Resolve-JsonSchemaRef -Ref '#/definitions/foo' -RootSchema $rootSchema -SchemaContext $schemaContext
+        $result.type | Should -Be 'string'
+    }
+
+    It 'Resolves internal $ref with root pointer #/' {
+        $result = Resolve-JsonSchemaRef -Ref '#/' -RootSchema $rootSchema -SchemaContext $schemaContext
+        $result | Should -Not -BeNullOrEmpty
+        $result.definitions | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Resolves external file $ref without pointer' {
+        $result = Resolve-JsonSchemaRef -Ref 'external.json' -RootSchema $rootSchema -SchemaContext $schemaContext
+        $result | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Resolves external file $ref with pointer' {
+        $result = Resolve-JsonSchemaRef -Ref 'external.json#/definitions/baz' -RootSchema $rootSchema -SchemaContext $schemaContext
+        $result.type | Should -Be 'boolean'
+    }
+
+    It 'Falls back to filesystem when not in Schemas cache' {
+        $tempFile = Join-Path $TestDrive 'fallback.json'
+        '{"type":"array"}' | Set-Content $tempFile
+        $ctx = @{ RootSchema = @{}; Schemas = @{}; BasePath = $TestDrive }
+        $result = Resolve-JsonSchemaRef -Ref 'fallback.json' -RootSchema @{} -SchemaContext $ctx
+        $result | Should -Not -BeNullOrEmpty
+    }
+
+    It 'Returns null for missing external schema' {
+        $ctx = @{ RootSchema = @{}; Schemas = @{}; BasePath = $TestDrive }
+        $result = Resolve-JsonSchemaRef -Ref 'nonexistent.json' -RootSchema @{} -SchemaContext $ctx
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Returns null for null SchemaContext with external $ref' {
+        $result = Resolve-JsonSchemaRef -Ref 'external.json' -RootSchema @{} -SchemaContext $null
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Returns entire external schema for empty pointer part' {
+        $result = Resolve-JsonSchemaRef -Ref 'external.json#/' -RootSchema $rootSchema -SchemaContext $schemaContext
+        $result | Should -Not -BeNullOrEmpty
     }
 }
 

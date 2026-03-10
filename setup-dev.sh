@@ -46,7 +46,7 @@ section "UV Package Manager Setup"
 
 if ! command -v uv &>/dev/null; then
   info "Installing uv package manager..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+  curl -LsSf https://astral.sh/uv/0.10.9/install.sh | sh
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
 

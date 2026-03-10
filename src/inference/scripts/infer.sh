@@ -262,7 +262,7 @@ run_onnx_inference() {
     return 1
   fi
 
-  if run_isaaclab "${SCRIPT_DIR}/play_policy.py" \
+  if run_isaaclab -m inference.scripts.play_policy \
       --task "${TASK}" \
       --model "${onnx_model}" \
       --format onnx \
@@ -290,7 +290,7 @@ run_jit_inference() {
     return 1
   fi
 
-  if run_isaaclab "${SCRIPT_DIR}/play_policy.py" \
+  if run_isaaclab -m inference.scripts.play_policy \
       --task "${TASK}" \
       --model "${jit_model}" \
       --format jit \
@@ -341,7 +341,7 @@ export MAX_STEPS
 export VIDEO_LENGTH
 export INFERENCE_FORMAT
 
-run_python "${SCRIPT_DIR}/upload_artifacts.py"
+run_python -m inference.scripts.upload_artifacts
 
 echo "=============================================="
 echo "Inference workflow complete"

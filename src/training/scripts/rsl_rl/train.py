@@ -18,12 +18,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Add the src directory to the path for common module import
-_SRC_DIR = Path(__file__).resolve().parents[3]  # src/ directory
-_TRAINING_DIR = Path(__file__).resolve().parents[2]  # src/training directory
-sys.path.insert(0, str(_SRC_DIR))
-sys.path.insert(0, str(_TRAINING_DIR))
-
 from isaaclab.app import AppLauncher
 
 from common import cli_args
@@ -132,22 +126,12 @@ if version.parse(installed_version) < version.parse(RSL_RL_VERSION):
     )
     exit(1)
 
+import contextlib
 import statistics
 
 import gymnasium as gym
 import omni
 import torch
-from rsl_rl.runners import DistillationRunner, OnPolicyRunner
-from tensordict import TensorDict
-
-_CURRENT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _CURRENT_DIR.parents[2]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-import contextlib
-
-import isaaclab_tasks  # noqa: F401
 from isaaclab.envs import (
     DirectMARLEnv,
     DirectMARLEnvCfg,
@@ -160,6 +144,8 @@ from isaaclab.utils.io import dump_yaml
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
+from rsl_rl.runners import DistillationRunner, OnPolicyRunner
+from tensordict import TensorDict
 
 try:
     import isaaclab_aeon.tasks  # noqa: F401

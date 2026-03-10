@@ -113,6 +113,8 @@ Deployment script creates VNet and subnet but appears to skip role assignment fo
 
 </details>
 
+After submission, expect initial acknowledgment within the timeframes documented in [SUPPORT.md](../../SUPPORT.md).
+
 ## Suggesting Enhancements
 
 ### Before Submitting an Enhancement

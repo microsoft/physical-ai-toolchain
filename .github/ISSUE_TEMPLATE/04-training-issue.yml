@@ -92,7 +92,7 @@ body:
     attributes:
       label: Checklist
       options:
-        - label: I have verified my environment matches [requirements.txt](requirements.txt)
+        - label: I have verified my environment is synced with `uv sync`
           required: true
         - label: I have tested with a minimal configuration
           required: false

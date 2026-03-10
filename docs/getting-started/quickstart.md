@@ -147,7 +147,7 @@ cd scripts
 bash submit-osmo-training.sh
 ```
 
-Scripts auto-detect configuration from Terraform outputs. Override values with CLI arguments or environment variables as needed. See [Scripts](../../scripts/README.md) for all submission options.
+Scripts auto-detect configuration from Terraform outputs. Override values with CLI arguments or environment variables as needed. See [Scripts Reference](../reference/scripts.md) for all submission options.
 
 ## Step 8: Verify Results
 
@@ -176,9 +176,9 @@ See [Cost Considerations](../contributing/cost-considerations.md) for detailed p
 
 ## Next Steps
 
-| Resource                                        | Description                               |
-|-------------------------------------------------|-------------------------------------------|
-| [LeRobot Inference](../lerobot-inference.md)    | Run inference with trained LeRobot models |
-| [MLflow Integration](../mlflow-integration.md)  | Track experiments with MLflow             |
-| [Deployment Guide](../../deploy/README.md)      | Full deployment reference and options     |
-| [Contributing Guide](../contributing/README.md) | Development workflow and code standards   |
+| Resource                                                | Description                               |
+|---------------------------------------------------------|-------------------------------------------|
+| [LeRobot Inference](../inference/lerobot-inference.md)  | Run inference with trained LeRobot models |
+| [MLflow Integration](../training/mlflow-integration.md) | Track experiments with MLflow             |
+| [Deployment Guide](../../deploy/README.md)              | Full deployment reference and options     |
+| [Contributing Guide](../contributing/README.md)         | Development workflow and code standards   |

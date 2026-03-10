@@ -101,8 +101,10 @@ helm repo update
 helm search repo nvidia-gpu-operator --versions
 
 # Update Python dependencies
-pip install -r requirements.txt --upgrade
+uv sync
 ```
+
+After merging Dependabot dependency PRs that update Python manifests, run `uv lock` and commit `uv.lock` when it changes. Dependabot does not regenerate `uv.lock` in this repository workflow.
 
 ### Migration Approach
 

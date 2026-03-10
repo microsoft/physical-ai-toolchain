@@ -1,14 +1,18 @@
 ---
-title: Security Guide for Deployers
+title: Deployment Security Guide
 description: Security configuration inventory, deployment responsibilities, and considerations for the Azure NVIDIA Robotics Reference Architecture
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-10
 ms.topic: concept
+keywords:
+  - security
+  - deployment
+  - network
+  - identity
+  - kubernetes
 ---
 
-<!-- cspell:words deployers -->
-
-Security configurations included in this reference architecture and responsibilities for deployers operating in production environments.
+Security configurations included in this reference architecture and responsibilities for teams operating in production environments.
 
 > [!IMPORTANT]
 > This document provides security guidance for informational purposes only. It does
@@ -124,7 +128,7 @@ For team environments or production deployments, consider migrating to a remote 
 | [AKS baseline architecture](https://learn.microsoft.com/azure/architecture/reference-architectures/containers/aks/baseline-aks) | Production-ready AKS security and networking patterns |
 | [Azure compliance documentation](https://learn.microsoft.com/azure/compliance/)                                                 | Compliance offerings and certifications               |
 | [Terraform Azure backend](https://developer.hashicorp.com/terraform/language/backend/azurerm)                                   | Remote state backend configuration                    |
-| [Threat Model](threat-model.md)                                                                                                 | STRIDE-based threat analysis and remediation roadmap  |
+| [Threat Model](../security/threat-model.md)                                                                                     | STRIDE-based threat analysis and remediation roadmap  |
 | [Contributing security review](../contributing/security-review.md)                                                              | Contributor security checklist for pull requests      |
 
 ---

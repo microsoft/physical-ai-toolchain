@@ -132,7 +132,7 @@ def plot_summary_panel(predicted, ground_truth, inference_times, episode, fps):
     ax.set_title("Per-Dimension Mean Absolute Error", fontsize=10)
     ax.tick_params(axis="x", rotation=45, labelsize=6 if n_joints > 8 else 8)
     ax.grid(True, alpha=0.3, axis="y")
-    for bar, val in zip(bars, per_joint_mae):
+    for bar, val in zip(bars, per_joint_mae, strict=False):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{val:.4f}", ha="center", va="bottom", fontsize=7)
     fig.tight_layout()
     return fig

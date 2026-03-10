@@ -64,6 +64,7 @@ AZURE CONTEXT:
 
 OTHER:
         --use-local-osmo          Use local osmo-dev CLI instead of production osmo
+        --config-preview          Print configuration and exit
     -h, --help                    Show this help message
 
 Values resolved: CLI > Environment variables > Terraform outputs
@@ -91,6 +92,7 @@ mlflow_enable="${MLFLOW_ENABLE:-false}"
 experiment_name="${EXPERIMENT_NAME:-}"
 register_model="${REGISTER_MODEL:-}"
 use_local_osmo=false
+config_preview=false
 
 from_aml_model=false
 model_name="${AML_MODEL_NAME:-}"
@@ -138,6 +140,7 @@ while [[ $# -gt 0 ]]; do
     --azure-resource-group)       resource_group="$2"; shift 2 ;;
     --azure-workspace-name)       workspace_name="$2"; shift 2 ;;
     --use-local-osmo)             use_local_osmo=true; shift ;;
+    --config-preview)             config_preview=true; shift ;;
     --)                           shift; forward_args=("$@"); break ;;
     *)                            forward_args+=("$1"); shift ;;
   esac
@@ -188,6 +191,27 @@ if [[ -n "$register_model" || "$mlflow_enable" == "true" || "$from_aml_model" ==
   [[ -z "$subscription_id" ]] && fatal "Azure subscription ID required for model registry / MLflow"
   [[ -z "$resource_group" ]] && fatal "Azure resource group required for model registry / MLflow"
   [[ -z "$workspace_name" ]] && fatal "Azure ML workspace name required for model registry / MLflow"
+fi
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Policy" "$policy_repo_id"
+  print_kv "Policy Type" "$policy_type"
+  print_kv "Job Name" "$job_name"
+  print_kv "Image" "$image"
+  print_kv "Eval Episodes" "$eval_episodes"
+  print_kv "Eval Batch Size" "$eval_batch_size"
+  print_kv "Record Video" "$record_video"
+  print_kv "MLflow" "$mlflow_enable"
+  [[ -n "$dataset_repo_id" ]] && print_kv "Dataset" "$dataset_repo_id"
+  [[ "$from_blob_dataset" == "true" ]] && print_kv "Blob Source" "$storage_account/$storage_container/$blob_prefix"
+  [[ "$from_aml_model" == "true" ]] && print_kv "Model Source" "AzureML (${model_name}:${model_version})"
+  print_kv "Register Model" "${register_model:-<none>}"
+  print_kv "Subscription" "${subscription_id:-<not set>}"
+  print_kv "Resource Group" "${resource_group:-<not set>}"
+  print_kv "Workspace" "${workspace_name:-<not set>}"
+  print_kv "Workflow" "$workflow"
+  exit 0
 fi
 
 #------------------------------------------------------------------------------
@@ -280,5 +304,20 @@ info "  Image: $image"
 [[ -n "$register_model" ]] && info "  Register model: $register_model"
 
 osmo "${submit_args[@]}" || fatal "Failed to submit workflow"
+
+#------------------------------------------------------------------------------
+# Summary
+#------------------------------------------------------------------------------
+section "Deployment Summary"
+print_kv "Policy" "$policy_repo_id"
+print_kv "Policy Type" "$policy_type"
+print_kv "Job Name" "$job_name"
+print_kv "Image" "$image"
+print_kv "Eval Episodes" "$eval_episodes"
+print_kv "MLflow" "$mlflow_enable"
+[[ -n "$dataset_repo_id" ]] && print_kv "Dataset" "$dataset_repo_id"
+[[ "$from_aml_model" == "true" ]] && print_kv "Model Source" "AzureML (${model_name}:${model_version})"
+print_kv "Register Model" "${register_model:-<none>}"
+print_kv "Workflow" "$workflow"
 
 info "Workflow submitted successfully"

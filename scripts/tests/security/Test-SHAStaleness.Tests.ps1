@@ -12,6 +12,9 @@
     Uses dot-source guard pattern for function isolation.
 #>
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '')]
+param()
+
 BeforeAll {
     $scriptPath = Join-Path $PSScriptRoot '../../security/Test-SHAStaleness.ps1'
     . $scriptPath
@@ -133,6 +136,114 @@ Describe 'Invoke-GitHubAPIWithRetry' -Tag 'Unit' {
 
             $headers = @{ 'Authorization' = 'Bearer test' }
             { Invoke-GitHubAPIWithRetry -Uri 'https://api.github.com/graphql' -Method 'POST' -Headers $headers -Body '{}' } | Should -Throw
+        }
+    }
+
+    Context 'Rate limit retry and recovery' {
+        It 'Retries on HTTP 429 and succeeds on subsequent attempt' {
+            $script:retryCallCount = 0
+            Mock Invoke-RestMethod {
+                $script:retryCallCount++
+                if ($script:retryCallCount -eq 1) {
+                    $response = [PSCustomObject]@{ StatusCode = 429 }
+                    $exception = [System.Exception]::new('Rate limit exceeded')
+                    $exception | Add-Member -NotePropertyName 'Response' -NotePropertyValue $response -Force
+                    throw $exception
+                }
+                return @{ data = 'success' }
+            }
+            Mock Start-Sleep { }
+            Mock Write-SecurityLog { }
+
+            $headers = @{ 'Authorization' = 'Bearer test' }
+            $result = Invoke-GitHubAPIWithRetry -Uri 'https://api.github.com/graphql' -Method 'POST' -Headers $headers -Body '{}'
+            $result.data | Should -Be 'success'
+            Should -Invoke Invoke-RestMethod -Times 2
+        }
+
+        It 'Retries on HTTP 403 rate limit errors' {
+            $script:retryCallCount = 0
+            Mock Invoke-RestMethod {
+                $script:retryCallCount++
+                if ($script:retryCallCount -le 2) {
+                    $response = [PSCustomObject]@{ StatusCode = 403 }
+                    $exception = [System.Exception]::new('Forbidden - rate limit')
+                    $exception | Add-Member -NotePropertyName 'Response' -NotePropertyValue $response -Force
+                    throw $exception
+                }
+                return @{ data = 'recovered' }
+            }
+            Mock Start-Sleep { }
+            Mock Write-SecurityLog { }
+
+            $headers = @{ 'Authorization' = 'Bearer test' }
+            $result = Invoke-GitHubAPIWithRetry -Uri 'https://api.github.com/graphql' -Method 'POST' -Headers $headers -Body '{}'
+            $result.data | Should -Be 'recovered'
+            Should -Invoke Invoke-RestMethod -Times 3
+        }
+    }
+
+    Context 'Exponential backoff timing' {
+        It 'Doubles delay between each retry attempt' {
+            Mock Invoke-RestMethod {
+                $response = [PSCustomObject]@{ StatusCode = 429 }
+                $exception = [System.Exception]::new('Rate limit exceeded')
+                $exception | Add-Member -NotePropertyName 'Response' -NotePropertyValue $response -Force
+                throw $exception
+            }
+            Mock Start-Sleep { }
+            Mock Write-SecurityLog { }
+
+            $headers = @{ 'Authorization' = 'Bearer test' }
+            { Invoke-GitHubAPIWithRetry -Uri 'https://api.github.com/graphql' -Method 'POST' -Headers $headers -Body '{}' -MaxRetries 3 -InitialDelaySeconds 2 } | Should -Throw
+
+            Should -Invoke Start-Sleep -Times 1 -ParameterFilter { $Seconds -eq 2 }
+            Should -Invoke Start-Sleep -Times 1 -ParameterFilter { $Seconds -eq 4 }
+        }
+    }
+
+    Context 'Maximum retry exhaustion' {
+        It 'Throws after exhausting all retry attempts on rate limit' {
+            Mock Invoke-RestMethod {
+                $response = [PSCustomObject]@{ StatusCode = 429 }
+                $exception = [System.Exception]::new('Rate limit exceeded')
+                $exception | Add-Member -NotePropertyName 'Response' -NotePropertyValue $response -Force
+                throw $exception
+            }
+            Mock Start-Sleep { }
+            Mock Write-SecurityLog { }
+
+            $headers = @{ 'Authorization' = 'Bearer test' }
+            { Invoke-GitHubAPIWithRetry -Uri 'https://api.github.com/graphql' -Method 'POST' -Headers $headers -Body '{}' -MaxRetries 2 } | Should -Throw
+            Should -Invoke Invoke-RestMethod -Times 2
+            Should -Invoke Start-Sleep -Times 1
+        }
+
+        It 'Respects custom MaxRetries parameter' {
+            Mock Invoke-RestMethod {
+                $response = [PSCustomObject]@{ StatusCode = 429 }
+                $exception = [System.Exception]::new('Rate limit exceeded')
+                $exception | Add-Member -NotePropertyName 'Response' -NotePropertyValue $response -Force
+                throw $exception
+            }
+            Mock Start-Sleep { }
+            Mock Write-SecurityLog { }
+
+            $headers = @{ 'Authorization' = 'Bearer test' }
+            { Invoke-GitHubAPIWithRetry -Uri 'https://api.github.com/graphql' -Method 'POST' -Headers $headers -Body '{}' -MaxRetries 1 } | Should -Throw
+            Should -Invoke Invoke-RestMethod -Times 1
+            Should -Invoke Start-Sleep -Times 0
+        }
+    }
+
+    Context 'Request without body' {
+        It 'Succeeds when Body parameter is omitted' {
+            Mock Invoke-RestMethod { return @{ data = 'no-body' } }
+
+            $headers = @{ 'Authorization' = 'Bearer test' }
+            $result = Invoke-GitHubAPIWithRetry -Uri 'https://api.github.com/graphql' -Method 'GET' -Headers $headers
+            $result.data | Should -Be 'no-body'
+            Should -Invoke Invoke-RestMethod -Times 1
         }
     }
 }
@@ -788,6 +899,103 @@ Describe 'Get-BulkGitHubActionsStaleness' -Tag 'Unit' {
             }
 
             @($result).Count | Should -Be 0
+        }
+    }
+
+    Context 'Subpath action parsing' {
+        BeforeEach {
+            $env:GITHUB_TOKEN = 'ghp_test_subpath'
+            $env:SYSTEM_ACCESSTOKEN = ''
+            $env:GH_TOKEN = ''
+            $env:BUILD_REPOSITORY_PROVIDER = ''
+        }
+
+        It 'Extracts owner and repo from actions with subpaths' {
+            Mock Test-GitHubToken { return @{ Valid = $true; Authenticated = $true; RateLimit = @{ remaining = 5000 }; Message = '' } }
+            Mock Write-SecurityLog { }
+
+            $sha = 'aaaa' * 10
+            $latestSha = 'bbbb' * 10
+
+            Mock Invoke-GitHubAPIWithRetry {
+                return @{
+                    data = @{
+                        rateLimit = @{ remaining = 5000 }
+                        repo0     = @{ defaultBranchRef = @{ target = @{ oid = $latestSha; committedDate = (Get-Date).ToString('o') } } }
+                    }
+                }
+            } -ParameterFilter { $Body -match 'defaultBranchRef' }
+
+            $commitResult = [PSCustomObject]@{
+                data = [PSCustomObject]@{
+                    rateLimit = @{ remaining = 4999; cost = 1 }
+                }
+            }
+            $commitResult.data | Add-Member -NotePropertyName 'commit0' -NotePropertyValue @{
+                object = @{ oid = $sha; committedDate = (Get-Date).AddDays(-5).ToString('o') }
+            }
+            Mock Invoke-GitHubAPIWithRetry { return $commitResult } -ParameterFilter { $Body -match 'commit0' }
+
+            $result = Get-BulkGitHubActionsStaleness -ActionRepos @('github/codeql-action/upload-sarif') -ShaToActionMap @{
+                "github/codeql-action/upload-sarif@$sha" = @{ Repo = 'github/codeql-action/upload-sarif'; SHA = $sha; File = 'ci.yml' }
+            }
+
+            Should -Invoke Invoke-GitHubAPIWithRetry -Times 2
+        }
+    }
+
+    Context 'Invalid repo format' {
+        BeforeEach {
+            $env:GITHUB_TOKEN = 'ghp_test_invalid'
+            $env:SYSTEM_ACCESSTOKEN = ''
+            $env:GH_TOKEN = ''
+            $env:BUILD_REPOSITORY_PROVIDER = ''
+        }
+
+        It 'Skips single-word repo names without owner/repo format' {
+            Mock Test-GitHubToken { return @{ Valid = $true; Authenticated = $true; RateLimit = @{ remaining = 5000 }; Message = '' } }
+            Mock Write-SecurityLog { }
+            Mock Invoke-GitHubAPIWithRetry {
+                return @{
+                    data = @{
+                        rateLimit = @{ remaining = 5000; limit = 5000; used = 0; resetAt = (Get-Date).AddHours(1).ToString('o') }
+                    }
+                }
+            }
+
+            $sha = 'aaaa' * 10
+            $result = Get-BulkGitHubActionsStaleness -ActionRepos @('invalidrepo') -ShaToActionMap @{
+                "invalidrepo@$sha" = @{ Repo = 'invalidrepo'; SHA = $sha; File = 'test.yml' }
+            }
+
+            @($result).Count | Should -Be 0
+        }
+    }
+
+    Context 'Rate limit fallback on GraphQL query' {
+        BeforeEach {
+            $env:GITHUB_TOKEN = 'ghp_test_ratelimit'
+            $env:SYSTEM_ACCESSTOKEN = ''
+            $env:GH_TOKEN = ''
+            $env:BUILD_REPOSITORY_PROVIDER = ''
+        }
+
+        It 'Throws on rate limit during repository query' {
+            Mock Test-GitHubToken { return @{ Valid = $true; Authenticated = $true; RateLimit = @{ remaining = 5000 }; Message = '' } }
+            Mock Write-SecurityLog { }
+            Mock Invoke-GitHubAPIWithRetry {
+                $response = [PSCustomObject]@{ StatusCode = 429 }
+                $exception = [System.Exception]::new('Rate limit exceeded')
+                $exception | Add-Member -NotePropertyName 'Response' -NotePropertyValue $response -Force
+                throw $exception
+            }
+
+            $sha = 'aaaa' * 10
+            { Get-BulkGitHubActionsStaleness -ActionRepos @('owner/repo') -ShaToActionMap @{
+                    "owner/repo@$sha" = @{ Repo = 'owner/repo'; SHA = $sha; File = 'test.yml' }
+                } } | Should -Throw
+
+            Should -Invoke Write-SecurityLog -ParameterFilter { $Message -match 'rate limit' }
         }
     }
 }

@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg
 
 
-def add_rsl_rl_args(parser: argparse.ArgumentParser):
+def add_rsl_rl_args(parser: argparse.ArgumentParser) -> None:
     """Add RSL-RL arguments to the parser.
 
     Args:
@@ -77,7 +77,7 @@ def parse_rsl_rl_cfg(task_name: str, args_cli: argparse.Namespace) -> RslRlBaseR
     return rslrl_cfg
 
 
-def update_rsl_rl_cfg(agent_cfg: RslRlBaseRunnerCfg, args_cli: argparse.Namespace):
+def update_rsl_rl_cfg(agent_cfg: RslRlBaseRunnerCfg, args_cli: argparse.Namespace) -> RslRlBaseRunnerCfg:
     """Update configuration for RSL-RL agent based on inputs.
 
     Args:

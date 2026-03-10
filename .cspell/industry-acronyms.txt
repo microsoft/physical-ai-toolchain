@@ -36,8 +36,10 @@ rbac
 RAGRS
 RAGZRS
 Rego
+SBOM
 SCIM
 SCOR
+SPDX
 STIX
 Subvolume
 Subvolumes

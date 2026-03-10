@@ -83,6 +83,7 @@ ADVANCED:
 
 GENERAL:
     -h, --help                    Show this help message
+        --config-preview          Print configuration and exit
 
 Values resolved: CLI > Environment variables > Terraform outputs
 Additional arguments after -- are forwarded to az ml job create.
@@ -181,6 +182,7 @@ compute="${AZUREML_COMPUTE:-$(get_compute_target)}"
 instance_type="gpuspot"
 display_name=""
 stream_logs=false
+config_preview=false
 forward_args=()
 
 #------------------------------------------------------------------------------
@@ -223,6 +225,7 @@ while [[ $# -gt 0 ]]; do
     --instance-type)              instance_type="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
     --stream)                     stream_logs=true; shift ;;
+    --config-preview)             config_preview=true; shift ;;
     --)                           shift; forward_args=("$@"); break ;;
     *)                            fatal "Unknown option: $1" ;;
   esac
@@ -266,6 +269,28 @@ esac
 
 if [[ "$assets_only" != "true" ]]; then
   [[ -f "$job_file" ]] || fatal "Job file not found: $job_file"
+fi
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Policy" "$policy_repo_id"
+  print_kv "Policy Type" "$policy_type"
+  print_kv "Job Name" "$job_name"
+  print_kv "Image" "$image"
+  print_kv "Eval Episodes" "$eval_episodes"
+  print_kv "Eval Batch Size" "$eval_batch_size"
+  print_kv "Record Video" "$record_video"
+  print_kv "MLflow" "$mlflow_enable"
+  print_kv "Dataset" "${dataset_repo_id:-<not set>}"
+  [[ "$from_blob" == "true" ]] && print_kv "Blob Source" "$storage_account/$storage_container/$blob_prefix"
+  [[ "$from_aml_model" == "true" ]] && print_kv "Model Source" "AzureML (${model_name}:${model_version})"
+  print_kv "Register Model" "${register_model:-<none>}"
+  print_kv "Subscription" "$subscription_id"
+  print_kv "Resource Group" "$resource_group"
+  print_kv "Workspace" "$workspace_name"
+  print_kv "Compute" "${compute:-<not set>}"
+  print_kv "Environment" "${environment_name}:${environment_version}"
+  exit 0
 fi
 
 #------------------------------------------------------------------------------
@@ -387,3 +412,16 @@ if [[ "$stream_logs" == "true" ]]; then
   az ml job stream --name "$job_result" \
     --resource-group "$resource_group" --workspace-name "$workspace_name" || true
 fi
+
+#------------------------------------------------------------------------------
+# Summary
+#------------------------------------------------------------------------------
+section "Deployment Summary"
+print_kv "Job Name" "$job_result"
+print_kv "Policy" "$policy_repo_id"
+print_kv "Policy Type" "$policy_type"
+print_kv "Eval Episodes" "$eval_episodes"
+print_kv "MLflow" "$mlflow_enable"
+print_kv "Compute" "${compute:-<not set>}"
+print_kv "Environment" "${environment_name}:${environment_version}"
+print_kv "Workspace" "$workspace_name"

@@ -148,7 +148,7 @@ def _load_normalizer_stats(policy: torch.nn.Module, model_dir: Path) -> None:
         parts = stat_key.rsplit(".", 1)
         if len(parts) != 2:
             continue
-        feature, stat_type = parts
+        _feature, stat_type = parts
         if stat_type not in ("mean", "std", "min", "max"):
             continue
 
@@ -375,7 +375,7 @@ def run_evaluation(args: argparse.Namespace) -> None:
         ax.set_title("Per-Dimension MAE")
         ax.tick_params(axis="x", rotation=45, labelsize=6 if n_dims > 8 else 8)
         ax.grid(True, alpha=0.3, axis="y")
-        for bar, val in zip(bars, per_dim_mae):
+        for bar, val in zip(bars, per_dim_mae, strict=False):
             ax.text(
                 bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{val:.4f}", ha="center", va="bottom", fontsize=7
             )

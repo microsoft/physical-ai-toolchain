@@ -356,7 +356,7 @@ Post-processing or LeRobot conversion fails with codec errors (`zstd: error` in 
 ## Related Documentation
 
 - [LeRobot Inference](../inference/lerobot-inference.md) for policy deployment after training on recorded data
-- [Security Guide](../security/security-guide.md) for data encryption of recorded bags at rest
+- [Security Guide](../operations/security-guide.md) for data encryption of recorded bags at rest
 
 ## Sources
 

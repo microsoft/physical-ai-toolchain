@@ -74,6 +74,7 @@ AZURE CONTEXT:
 
 OTHER:
         --use-local-osmo          Use local osmo-dev CLI instead of production osmo
+        --config-preview          Print configuration and exit
     -h, --help                    Show this help message
 
 Values resolved: CLI > Environment variables > Terraform outputs
@@ -150,6 +151,7 @@ B64_PATH="$TMP_DIR/osmo-lerobot-training.b64"
 payload_root="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
 
 use_local_osmo=false
+config_preview=false
 forward_args=()
 
 #------------------------------------------------------------------------------
@@ -186,6 +188,7 @@ while [[ $# -gt 0 ]]; do
     --azure-resource-group)       resource_group="$2"; shift 2 ;;
     --azure-workspace-name)       workspace_name="$2"; shift 2 ;;
     --use-local-osmo)             use_local_osmo=true; shift ;;
+    --config-preview)             config_preview=true; shift ;;
     --)                           shift; forward_args=("$@"); break ;;
     *)                            forward_args+=("$1"); shift ;;
   esac
@@ -220,6 +223,28 @@ esac
 [[ -z "$workspace_name" ]] && fatal "Azure ML workspace name required (set AZUREML_WORKSPACE_NAME or deploy infra)"
 
 [[ "$val_split_enabled" == "false" ]] && val_split="0"
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Dataset" "$dataset_repo_id"
+  print_kv "Policy Type" "$policy_type"
+  print_kv "Job Name" "$job_name"
+  print_kv "Image" "$image"
+  print_kv "Output Dir" "$output_dir"
+  print_kv "Training Steps" "$training_steps"
+  print_kv "Batch Size" "$batch_size"
+  print_kv "Learning Rate" "$learning_rate"
+  print_kv "Save Freq" "$save_freq"
+  print_kv "Val Split" "$val_split"
+  print_kv "System Metrics" "$system_metrics"
+  [[ "$from_blob" == "true" ]] && print_kv "Blob Source" "$storage_account/$storage_container/$blob_prefix"
+  print_kv "Register Model" "${register_checkpoint:-<none>}"
+  print_kv "Subscription" "$subscription_id"
+  print_kv "Resource Group" "$resource_group"
+  print_kv "Workspace" "$workspace_name"
+  print_kv "Workflow" "$workflow"
+  exit 0
+fi
 
 #------------------------------------------------------------------------------
 # Package Training Payload
@@ -311,5 +336,20 @@ info "  Payload: ${archive_size} bytes"
 [[ -n "$register_checkpoint" ]] && info "  Register model: $register_checkpoint"
 
 osmo "${submit_args[@]}" || fatal "Failed to submit workflow"
+
+#------------------------------------------------------------------------------
+# Summary
+#------------------------------------------------------------------------------
+section "Deployment Summary"
+print_kv "Dataset" "$dataset_repo_id"
+print_kv "Policy Type" "$policy_type"
+print_kv "Job Name" "$job_name"
+print_kv "Image" "$image"
+print_kv "Training Steps" "$training_steps"
+print_kv "Batch Size" "$batch_size"
+print_kv "Learning Rate" "$learning_rate"
+print_kv "Val Split" "$val_split"
+print_kv "Register Model" "${register_checkpoint:-<none>}"
+print_kv "Workflow" "$workflow"
 
 info "Workflow submitted successfully"

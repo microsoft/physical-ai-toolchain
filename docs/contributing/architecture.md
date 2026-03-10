@@ -34,14 +34,13 @@ Training scripts and Python code act as integration shims between NVIDIA's open-
 
 ### Python Dependencies
 
-The root `pyproject.toml` and `requirements.txt` serve a dual purpose:
+The root `pyproject.toml` serves local development dependency management:
 
-| Context           | Usage                                                                                        |
-|-------------------|----------------------------------------------------------------------------------------------|
-| OSMO/AzureML jobs | Installing additional dependencies not bundled with the Isaac Lab container image at startup |
-| Local development | Providing module availability for intellisense and local verification                        |
+| Context           | Usage                                                           |
+|-------------------|-----------------------------------------------------------------|
+| Local development | Providing module availability for intellisense and verification |
 
-These files are not intended for building publishable Python packages. The `pyproject.toml` build target only packages `src/training` into a wheel for in-container use.
+This setup is not intended for building publishable Python packages. The `pyproject.toml` build target only packages `src/training` into a wheel for in-container use.
 
 ## Future and Ongoing Architecture
 
