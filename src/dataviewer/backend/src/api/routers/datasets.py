@@ -7,7 +7,7 @@ and accessing episode information with HDF5 and LeRobot parquet support.
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
@@ -222,19 +222,29 @@ async def get_episode_cameras(
     return cameras
 
 
-@router.get("/{dataset_id}/episodes/{episode_idx}/video/{camera}", response_model=None)
+@router.get(
+    "/{dataset_id}/episodes/{episode_idx}/video/{camera}",
+    response_model=None,
+)
+@router.head(
+    "/{dataset_id}/episodes/{episode_idx}/video/{camera}",
+    response_model=None,
+    include_in_schema=False,
+)
 async def get_episode_video(
+    request: Request,
     episode_idx: int,
     dataset_id: str = Depends(validated_dataset_id),
     camera: str = Depends(validated_camera_name),
     service: DatasetService = Depends(get_dataset_service),
-) -> FileResponse | StreamingResponse:
+) -> FileResponse | StreamingResponse | Response:
     """
     Get video file for an episode and camera.
 
-    Returns the video file for streaming. Supports LeRobot parquet datasets
-    with video files stored alongside the parquet data, as well as datasets
-    stored in Azure Blob Storage (streamed directly from blob).
+    Returns the video file for streaming with HTTP Range support for
+    seeking. Supports LeRobot parquet datasets with video files stored
+    alongside the parquet data, as well as datasets stored in Azure
+    Blob Storage.
 
     Note: camera parameter can include dots (e.g., 'observation.images.color')
     """
@@ -271,11 +281,22 @@ async def get_episode_video(
                 detail=f"Video not found in blob storage for episode {episode_idx}, camera '{camera}'",
             )
 
-        stream_result = await service.get_blob_video_stream(blob_path)
+        offset, length = _parse_range_header(request.headers.get("range"))
+        stream_result = await service.get_blob_video_stream(blob_path, offset=offset, length=length)
         if stream_result is not None:
             headers, media_type, stream = stream_result
+            status_code = 206 if offset is not None else 200
+
+            if request.method == "HEAD":
+                return Response(
+                    status_code=status_code,
+                    headers=headers,
+                    media_type=media_type,
+                )
+
             return StreamingResponse(
                 stream,
+                status_code=status_code,
                 media_type=media_type,
                 headers=headers,
             )
@@ -284,6 +305,23 @@ async def get_episode_video(
         status_code=404,
         detail=f"Video not found for episode {episode_idx}, camera '{camera}'",
     )
+
+
+def _parse_range_header(range_header: str | None) -> tuple[int | None, int | None]:
+    """Parse an HTTP Range header into (offset, length). Supports 'bytes=START-END' and 'bytes=START-'."""
+    if not range_header or not range_header.startswith("bytes="):
+        return None, None
+
+    range_spec = range_header[6:]
+    parts = range_spec.split("-", 1)
+    if not parts[0]:
+        return None, None
+
+    start = int(parts[0])
+    if parts[1]:
+        end = int(parts[1])
+        return start, end - start + 1
+    return start, None
 
 
 class EpisodeCacheStats(BaseModel):

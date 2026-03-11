@@ -272,6 +272,8 @@ class BlobDatasetProvider:
         self,
         blob_path: str,
         chunk_size: int = 1024 * 1024,
+        offset: int | None = None,
+        length: int | None = None,
     ) -> AsyncIterator[bytes]:
         """
         Stream video bytes from blob in chunks.
@@ -279,6 +281,8 @@ class BlobDatasetProvider:
         Args:
             blob_path: Full blob path within the container.
             chunk_size: Streaming chunk size in bytes (default 1 MiB).
+            offset: Starting byte offset for partial download.
+            length: Number of bytes to download from offset.
 
         Yields:
             Bytes chunks of the video stream.
@@ -286,7 +290,11 @@ class BlobDatasetProvider:
         client = await self._get_client()
         container = client.get_container_client(self.container_name)
         blob_client = container.get_blob_client(blob_path)
-        download = await blob_client.download_blob(max_concurrency=4)
+        download = await blob_client.download_blob(
+            offset=offset,
+            length=length,
+            max_concurrency=4,
+        )
         async for chunk in download.chunks():
             yield chunk
 
