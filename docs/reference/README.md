@@ -1,4 +1,5 @@
 ---
+sidebar_position: 2
 title: Reference
 description: Technical reference documentation for scripts, workflows, variables, and configuration used in the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team

@@ -1,4 +1,5 @@
 ---
+sidebar_position: 1
 title: Training Guide
 description: Training workflows, experiment tracking, and ML pipeline documentation for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team

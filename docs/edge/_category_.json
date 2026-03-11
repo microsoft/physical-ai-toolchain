@@ -1,0 +1,8 @@
+{
+  "label": "Edge",
+  "position": 5,
+  "link": {
+    "type": "generated-index",
+    "description": "Edge deployment for robotics workloads."
+  }
+}

@@ -1,4 +1,5 @@
 ---
+sidebar_position: 5
 title: LeRobot Training
 description: Behavioral cloning training with ACT and Diffusion policies on Azure ML and OSMO platforms
 author: Microsoft Robotics-AI Team

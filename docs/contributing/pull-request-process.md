@@ -1,4 +1,5 @@
 ---
+sidebar_position: 5
 title: Pull Request Process
 description: PR workflow, reviewer assignment, review cycles, approval criteria, and update process
 author: Microsoft Robotics-AI Team

@@ -1,0 +1,60 @@
+name: Copyright Headers
+
+on:
+  pull_request:
+    paths:
+      - 'docs/docusaurus/src/**'
+      - '.github/workflows/copyright-headers.yml'
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Whether to continue on copyright header violations'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  copyright-headers:
+    name: Copyright Header Validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate copyright headers
+        id: validate
+        shell: bash
+        run: |
+          MISSING=0
+          HEADER_PATTERN="Copyright (c) Microsoft Corporation"
+
+          echo "Checking copyright headers in docs/docusaurus/src/..."
+          while IFS= read -r -d '' file; do
+            if ! head -5 "$file" | grep -q "$HEADER_PATTERN"; then
+              echo "::warning file=${file}::Missing copyright header: ${file}"
+              MISSING=$((MISSING + 1))
+            fi
+          done < <(find docs/docusaurus/src -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' -o -name '*.css' \) -print0)
+
+          echo "Files missing headers: $MISSING"
+          if [ "$MISSING" -gt 0 ]; then
+            echo "COPYRIGHT_FAILED=true" >> "$GITHUB_ENV"
+          fi
+        continue-on-error: ${{ inputs.soft-fail }}
+
+      - name: Check results
+        if: ${{ !inputs.soft-fail }}
+        shell: bash
+        run: |
+          if [ "$COPYRIGHT_FAILED" = "true" ]; then
+            echo "::error::Copyright header validation found violations"
+            exit 1
+          fi

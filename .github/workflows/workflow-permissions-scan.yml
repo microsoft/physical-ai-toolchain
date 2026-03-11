@@ -1,0 +1,67 @@
+name: Workflow Permissions Scan
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/workflows/workflow-permissions-scan.yml'
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Continue on violations instead of failing'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  permissions-check:
+    name: Workflow Permissions Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate workflow permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VIOLATIONS=0
+          TOTAL=0
+
+          echo "Scanning workflow files for top-level permissions blocks..."
+          for wf in .github/workflows/*.yml; do
+            TOTAL=$((TOTAL + 1))
+            if ! grep -q "^permissions:" "$wf"; then
+              echo "::warning file=${wf}::Missing top-level permissions block: ${wf}"
+              VIOLATIONS=$((VIOLATIONS + 1))
+            fi
+          done
+
+          COMPLIANT=$((TOTAL - VIOLATIONS))
+          if [ "$TOTAL" -gt 0 ]; then
+            SCORE=$(( (COMPLIANT * 100) / TOTAL ))
+          else
+            SCORE=100
+          fi
+
+          echo "Total workflows: $TOTAL"
+          echo "Compliant: $COMPLIANT"
+          echo "Violations: $VIOLATIONS"
+          echo "Compliance score: ${SCORE}%"
+
+          if [ "$VIOLATIONS" -gt 0 ]; then
+            echo "::error::${VIOLATIONS} workflow(s) missing top-level permissions blocks"
+            if [ "${{ inputs.soft-fail }}" != "true" ]; then
+              exit 1
+            fi
+          else
+            echo "All workflows have top-level permissions blocks."
+          fi

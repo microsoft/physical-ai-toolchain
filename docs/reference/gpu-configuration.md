@@ -1,6 +1,8 @@
 ---
-title: GPU Configuration Guide
-description: GPU driver architecture, MIG strategy, and runtime behavior for mixed GPU node pools in Azure AKS
+title: GPU Configuration
+sidebar_label: GPU Configuration
+sidebar_position: 1
+description: GPU driver and operator configuration for H100 and RTX PRO 6000 nodes.
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-23
 ms.topic: concept

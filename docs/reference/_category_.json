@@ -1,0 +1,8 @@
+{
+  "label": "Reference",
+  "position": 8,
+  "link": {
+    "type": "generated-index",
+    "description": "Reference documentation for GPU configuration and integrations."
+  }
+}

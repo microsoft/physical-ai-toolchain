@@ -1,4 +1,14 @@
-# AzureML Validation Job Debugging Summary
+---
+title: AzureML Validation Job Debugging
+sidebar_label: Validation Job Debugging
+sidebar_position: 2
+description: Troubleshooting guide for AzureML validation job failures and common issues.
+author: Microsoft Robotics-AI Team
+ms.date: 2025-12-03
+ms.topic: troubleshooting
+---
+
+## AzureML Validation Job Debugging Summary
 
 **Date**: December 3, 2025
 **Branch**: `feat/azureml-job-support`

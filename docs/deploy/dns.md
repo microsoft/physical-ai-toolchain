@@ -1,4 +1,5 @@
 ---
+sidebar_position: 8
 title: Private DNS Configuration
 description: DNS zone setup for OSMO UI access through private endpoints
 author: Microsoft Robotics-AI Team

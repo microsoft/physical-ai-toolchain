@@ -1,4 +1,5 @@
 ---
+sidebar_position: 10
 title: Security Review Process
 description: Security checklist, credential handling, and vulnerability reporting for contributions
 author: Microsoft Robotics-AI Team

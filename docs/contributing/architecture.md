@@ -1,4 +1,5 @@
 ---
+sidebar_position: 2
 title: Repository Architecture
 description: Current state analysis and target architecture for the Physical AI Toolchain, organized around physical AI lifecycle domains with Agent Skill specifications.
 ms.date: 2026-02-24

@@ -1,4 +1,5 @@
 ---
+sidebar_position: 3
 title: Deployment Security Guide
 description: Security configuration inventory, deployment responsibilities, and considerations for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team

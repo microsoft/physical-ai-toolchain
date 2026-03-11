@@ -1,4 +1,5 @@
 ---
+sidebar_position: 2
 title: LeRobot ACT Policy Inference
 description: Run a trained ACT policy locally, on OSMO with MLflow plots, or on a UR10E robot via ROS2
 author: Microsoft Robotics-AI Team

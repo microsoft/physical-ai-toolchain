@@ -1,4 +1,5 @@
 ---
+sidebar_position: 1
 title: Inference Guide
 description: Run trained robotics policies in simulation and on physical hardware using Azure ML and NVIDIA OSMO
 author: Microsoft Robotics-AI Team

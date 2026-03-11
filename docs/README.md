@@ -1,4 +1,5 @@
 ---
+sidebar_position: 1
 title: Documentation
 description: Index of all documentation for the Physical AI Toolchain
 author: Edge AI Team

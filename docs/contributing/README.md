@@ -1,4 +1,5 @@
 ---
+sidebar_position: 1
 title: Contributing to Physical AI Toolchain
 description: Guide for contributing including prerequisites, deployment validation, and style conventions
 author: Microsoft Robotics-AI Team
@@ -82,7 +83,7 @@ Search existing resources before asking questions:
 * Search [GitHub Issues](https://github.com/microsoft/physical-ai-toolchain/issues) for similar questions or problems
 * Check [GitHub Discussions](https://github.com/microsoft/physical-ai-toolchain/discussions) for community Q&A
 * Review [docs/](../) for troubleshooting guides
-* See [azureml-validation-job-debugging.md](../azureml-validation-job-debugging.md) for common deployment and workflow issues
+* See [azureml-validation-job-debugging.md](../operations/azureml-validation-job-debugging.md) for common deployment and workflow issues
 
 If you cannot find an answer:
 

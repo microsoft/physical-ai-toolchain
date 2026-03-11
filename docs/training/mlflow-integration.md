@@ -1,4 +1,5 @@
 ---
+sidebar_position: 6
 title: MLflow Integration for SKRL Training
 description: Metric logging integration for SKRL agent training during Isaac Lab runs using monkey-patching
 author: Microsoft Robotics-AI Team

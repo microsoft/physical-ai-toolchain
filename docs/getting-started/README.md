@@ -1,4 +1,5 @@
 ---
+sidebar_position: 1
 title: Getting Started
 description: Entry point for deploying the Physical AI Toolchain
 author: Microsoft Robotics-AI Team

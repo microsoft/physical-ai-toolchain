@@ -1,4 +1,5 @@
 ---
+sidebar_position: 3
 title: Infrastructure Deployment
 description: Terraform configuration and deployment for AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team

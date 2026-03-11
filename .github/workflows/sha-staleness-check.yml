@@ -1,0 +1,86 @@
+name: SHA Staleness Check
+
+on:
+  schedule:
+    - cron: '30 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      max-age-days:
+        description: 'Maximum SHA age in days before considered stale'
+        required: false
+        type: number
+        default: 30
+  workflow_call:
+    inputs:
+      max-age-days:
+        description: 'Maximum SHA age in days before considered stale'
+        required: false
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+jobs:
+  check-staleness:
+    name: Check Action SHA Staleness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run SHA Staleness Check
+        id: staleness
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $thresholdDays = if ('${{ inputs.max-age-days }}') {
+            [int]'${{ inputs.max-age-days }}'
+          } else {
+            30
+          }
+
+          Write-Host "Running SHA staleness check with $thresholdDays day threshold..."
+
+          & scripts/security/Test-SHAStaleness.ps1 `
+            -MaxAge $thresholdDays `
+            -OutputFormat github `
+            -OutputPath logs/sha-staleness-results.json
+
+          if (Test-Path logs/sha-staleness-results.json) {
+            $report = Get-Content logs/sha-staleness-results.json | ConvertFrom-Json
+            $staleCount = ($report.Dependencies | Where-Object { $_.DaysOld -gt $thresholdDays } | Measure-Object).Count
+            "stale-count=$staleCount" >> $env:GITHUB_OUTPUT
+            "has-stale=$(if ($staleCount -gt 0) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+
+            Write-Host "Stale Dependencies Found: $staleCount"
+
+            foreach ($staleDep in $report.Dependencies) {
+              if ($staleDep.DaysOld -gt $thresholdDays) {
+                Write-Output "::warning file=$($staleDep.File)::Stale SHA detected: $($staleDep.Action)@$($staleDep.CurrentVersion) is $($staleDep.DaysOld) days old (latest: $($staleDep.LatestVersion))"
+              }
+            }
+          } else {
+            "stale-count=0" >> $env:GITHUB_OUTPUT
+            "has-stale=false" >> $env:GITHUB_OUTPUT
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Some GitHub Actions have stale SHA pins. Review the warnings above."
+            Write-Host "::warning::GitHub Actions with stale SHA pins detected. This is informational only."
+          } else {
+            Write-Host "All GitHub Actions SHA pins are up to date."
+          }
+
+      - name: Upload staleness report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sha-staleness-results
+          path: logs/sha-staleness-results.json
+          retention-days: 90
