@@ -1,0 +1,159 @@
+.card {
+  box-shadow:
+    0 1.6px 3.6px rgba(0, 0, 0, 0.13),
+    0 0.3px 0.9px rgba(0, 0, 0, 0.11);
+  border-radius: 2px;
+  min-height: 100px;
+}
+
+.card:hover .cardTitle {
+  text-decoration: underline;
+}
+
+/* ================================================================
+   Icon Card layout
+   ================================================================ */
+
+.iconCardLayout {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+  padding: 16px 16px 0;
+  margin: -16px 0 18px;
+}
+
+.iconContainer {
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  color: var(--ms-learn-card-accent);
+}
+
+.iconCardContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.supertitle {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 3.6px;
+  margin: 16px 0 0;
+}
+
+.cardTitle {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--ifm-color-primary);
+  position: relative;
+}
+
+.cardTitle::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.cardTitle:visited {
+  color: var(--ms-learn-visited-link);
+}
+
+.cardDescription {
+  font-size: 0.875rem;
+  color: var(--ms-learn-text-subtle);
+}
+
+/* ================================================================
+   Box Card
+   ================================================================ */
+
+.boxCard {
+  box-shadow:
+    0 1.6px 3.6px rgba(0, 0, 0, 0.13),
+    0 0.3px 0.9px rgba(0, 0, 0, 0.11);
+  padding: 1.5rem;
+  border-radius: 0;
+}
+
+.boxCardIcon {
+  margin-bottom: 0.75rem;
+}
+
+.boxCardIcon img {
+  width: 48px;
+  height: 48px;
+}
+
+.boxCardTitle {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+
+.boxCardLinks {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.boxCardLinks li {
+  padding: 0.25rem 0;
+}
+
+.boxCardLinks a {
+  font-size: 0.875rem;
+}
+
+/* ================================================================
+   Card Grids
+   ================================================================ */
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+.cardGridTwo {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+
+.cardGridFour {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+}
+
+/* ================================================================
+   Responsive
+   ================================================================ */
+
+@media (max-width: 996px) {
+  .cardGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .cardGridFour {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .iconContainer {
+    display: none;
+  }
+}
+
+@media (max-width: 576px) {
+  .cardGrid {
+    grid-template-columns: 1fr;
+  }
+  .cardGridTwo {
+    grid-template-columns: 1fr;
+  }
+  .cardGridFour {
+    grid-template-columns: 1fr;
+  }
+}
