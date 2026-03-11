@@ -290,6 +290,28 @@ if [[ "$auth_enabled" == "true" && "$skip_update" == "false" ]]; then
     --redirect-provider azureactivedirectory \
     --output none
 
+elif [[ "$auth_enabled" == "false" && "$skip_update" == "false" ]]; then
+
+  section "Disabling Authentication"
+
+  info "Setting auth-disabled env vars on $backend_app..."
+  az containerapp update \
+    --name "$backend_app" \
+    --resource-group "$rg" \
+    --set-env-vars "DATAVIEWER_AUTH_DISABLED=true" \
+    --remove-env-vars \
+      DATAVIEWER_AUTH_PROVIDER \
+      DATAVIEWER_AZURE_TENANT_ID \
+      DATAVIEWER_AZURE_CLIENT_ID \
+    --output none
+
+  info "Allowing anonymous access on $frontend_app..."
+  az containerapp auth update \
+    --name "$frontend_app" \
+    --resource-group "$rg" \
+    --enabled false \
+    --output none
+
 fi
 
 #------------------------------------------------------------------------------
