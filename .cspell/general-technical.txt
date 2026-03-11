@@ -8,6 +8,7 @@ acunetix
 adobe
 adrm
 adrs
+agentic
 agentless
 agile
 anom
@@ -160,6 +161,7 @@ chatbot
 chatbots
 chatmode
 chatmodes
+chatlog
 cheatham
 checkbox
 checkboxes
