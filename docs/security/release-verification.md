@@ -1,6 +1,6 @@
 ---
 title: Release Verification
-description: Verify release artifact provenance and SBOM attestations for the Azure NVIDIA Robotics Reference Architecture
+description: Verify release artifact provenance and SBOM attestations for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
 ms.date: 2026-03-07
 ms.topic: reference
@@ -22,7 +22,7 @@ Download the release artifact from the GitHub Releases page, then verify its pro
 
 ```bash
 gh attestation verify source-v1.2.3.tar.gz \
-  --repo Azure-Samples/azure-nvidia-robotics-reference-architecture
+  --repo microsoft/physical-ai-toolchain
 ```
 
 Replace `source-v1.2.3.tar.gz` with the actual release artifact filename.
@@ -31,7 +31,7 @@ To verify the SBOM attestation specifically:
 
 ```bash
 gh attestation verify source-v1.2.3.tar.gz \
-  --repo Azure-Samples/azure-nvidia-robotics-reference-architecture \
+  --repo microsoft/physical-ai-toolchain \
   --predicate-type https://spdx.dev/Document
 ```
 
@@ -49,7 +49,7 @@ Each release includes an SPDX SBOM attestation. Download and inspect the SBOM co
 
 ```bash
 gh attestation verify source-v1.2.3.tar.gz \
-  --repo Azure-Samples/azure-nvidia-robotics-reference-architecture \
+  --repo microsoft/physical-ai-toolchain \
   --predicate-type https://spdx.dev/Document \
   --format json | jq '.verificationResult.statement.predicate'
 ```

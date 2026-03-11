@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/schemas/root-community-frontmatter.schema.json",
+  "$id": "https://github.com/microsoft/physical-ai-toolchain/schemas/root-community-frontmatter.schema.json",
   "title": "Root/Community Markdown Frontmatter",
   "description": "Schema for root-level community markdown files (CONTRIBUTING, SECURITY, SUPPORT, etc.)",
   "type": "object",

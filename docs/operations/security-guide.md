@@ -1,6 +1,6 @@
 ---
 title: Deployment Security Guide
-description: Security configuration inventory, deployment responsibilities, and considerations for the Azure NVIDIA Robotics Reference Architecture
+description: Security configuration inventory, deployment responsibilities, and considerations for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-10
 ms.topic: concept

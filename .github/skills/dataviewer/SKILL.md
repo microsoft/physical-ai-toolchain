@@ -384,4 +384,4 @@ The React app has these key areas for Playwright interaction:
 | Slider not responding to Playwright | Use `browser_evaluate` with native input value setter and dispatch `input` + `change` events |
 | Sidebar not scrolling | Scroll the `aside ul` element directly via `browser_evaluate` with `element.scrollTop = N` |
 
-> Brought to you by azure-nvidia-robotics-reference-architecture
+> Brought to you by physical-ai-toolchain

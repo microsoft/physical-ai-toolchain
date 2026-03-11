@@ -13,7 +13,7 @@ keywords:
 estimated_reading_time: 5
 ---
 
-Azure NVIDIA Robotics Reference Architecture uses a liberal contribution model where active contributors are recognized for current work. Microsoft maintains stewardship of the project while welcoming community contributions and leadership.
+Physical AI Toolchain uses a liberal contribution model where active contributors are recognized for current work. Microsoft maintains stewardship of the project while welcoming community contributions and leadership.
 
 ## Governance Model
 
@@ -48,7 +48,7 @@ Maintainers guide project direction, manage releases, and resolve conflicts.
 | Community health    | Enforce code of conduct and foster inclusive participation  |
 | Access management   | Grant and revoke repository permissions                     |
 
-Current maintainers are members of the [@Azure-Samples/edge-ai-core-dev](https://github.com/orgs/Azure-Samples/teams/edge-ai-core-dev) team.
+Current maintainers are members of the [@microsoft/edge-ai-core-dev](https://github.com/orgs/microsoft/teams/edge-ai-core-dev) team.
 
 ### Triage Contributors
 

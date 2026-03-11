@@ -1,6 +1,6 @@
 ---
 title: Training Guide
-description: Training workflows, experiment tracking, and ML pipeline documentation for the Azure NVIDIA Robotics Reference Architecture
+description: Training workflows, experiment tracking, and ML pipeline documentation for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-23
 ms.topic: overview

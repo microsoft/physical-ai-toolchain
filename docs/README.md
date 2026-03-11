@@ -1,6 +1,6 @@
 ---
 title: Documentation
-description: Index of all documentation for the Azure NVIDIA Robotics Reference Architecture
+description: Index of all documentation for the Physical AI Toolchain
 author: Edge AI Team
 ms.date: 2026-02-22
 ms.topic: overview

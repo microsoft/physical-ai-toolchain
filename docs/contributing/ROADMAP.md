@@ -1,5 +1,5 @@
 ---
-title: "Azure NVIDIA Robotics Reference Architecture Roadmap"
+title: "Physical AI Toolchain Roadmap"
 description: "Project roadmap covering documentation, testing, CI/CD, governance, security, and OpenSSF compliance through Q1 2027."
 author: wberry
 ms.date: 2026-02-10
@@ -14,7 +14,7 @@ keywords:
 estimated_reading_time: 8
 ---
 
-This roadmap covers planned work for the Azure NVIDIA Robotics Reference Architecture through Q1 2027.
+This roadmap covers planned work for the Physical AI Toolchain through Q1 2027.
 Six priority areas align to milestones v0.2.0 through v0.7.0, progressing from documentation through security hardening.
 An additional v0.8.0 milestone covers dependency update automation.
 The Architecture Domain Rollout priority phases the repository reorganization around eight lifecycle domains defined in the [Future and Ongoing Architecture](architecture.md#future-and-ongoing-architecture).

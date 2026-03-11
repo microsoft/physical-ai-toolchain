@@ -1,6 +1,6 @@
 ---
 title: Reference
-description: Technical reference documentation for scripts, workflows, variables, and configuration used in the Azure NVIDIA Robotics Reference Architecture.
+description: Technical reference documentation for scripts, workflows, variables, and configuration used in the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
 ms.date: 2026-03-08
 ms.topic: overview

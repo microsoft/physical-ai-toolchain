@@ -15,7 +15,7 @@ keywords:
 > [!NOTE]
 > This guide expands on the [Prerequisites](README.md#-prerequisites) section of the main contributing guide.
 
-Tools, Azure access, and build validation requirements for contributing to the Azure NVIDIA Robotics Reference Architecture.
+Tools, Azure access, and build validation requirements for contributing to the Physical AI Toolchain.
 
 ## Required Tools
 

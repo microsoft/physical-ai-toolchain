@@ -6,7 +6,7 @@
 
 <#
 .SYNOPSIS
-    Development environment setup for azure-nvidia-robotics-reference-architecture.
+    Development environment setup for physical-ai-toolchain.
 .DESCRIPTION
     Verifies required tools, installs uv, sets up Python virtual environment,
     clones IsaacLab, and checks for hve-core.

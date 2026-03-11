@@ -1,10 +1,10 @@
-# Azure NVIDIA Robotics Reference Architecture
+# Physical AI Toolchain
 
 <!-- markdownlint-disable MD013 -->
-[![CI Status](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/actions/workflows/main.yml/badge.svg)](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/actions/workflows/main.yml)
-[![CodeQL](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/actions/workflows/codeql-analysis.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/badge)](https://scorecard.dev/viewer/?uri=github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture)
-[![License](https://img.shields.io/github/license/Azure-Samples/azure-nvidia-robotics-reference-architecture)](./LICENSE)
+[![CI Status](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/main.yml/badge.svg)](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/main.yml)
+[![CodeQL](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/codeql-analysis.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/microsoft/physical-ai-toolchain/badge)](https://scorecard.dev/viewer/?uri=github.com/microsoft/physical-ai-toolchain)
+[![License](https://img.shields.io/github/license/microsoft/physical-ai-toolchain)](./LICENSE)
 <!-- markdownlint-enable MD013 -->
 
 Production-ready framework for orchestrating robotics and AI workloads on [Microsoft Azure](https://azure.microsoft.com/) using NVIDIA [Isaac Lab](https://developer.nvidia.com/isaac/lab), [Isaac Sim](https://developer.nvidia.com/isaac/sim), and [OSMO](https://developer.nvidia.com/osmo).
@@ -62,7 +62,7 @@ See [Architecture Overview](docs/contributing/architecture.md) for the full desi
 Contributions are welcome. Whether fixing documentation or adding new training tasks:
 
 1. Read the [Contributing Guide](CONTRIBUTING.md)
-2. Review [open issues](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues)
+2. Review [open issues](https://github.com/microsoft/physical-ai-toolchain/issues)
 3. See the [prerequisites](docs/contributing/prerequisites.md) for required tools
 
 ## Roadmap

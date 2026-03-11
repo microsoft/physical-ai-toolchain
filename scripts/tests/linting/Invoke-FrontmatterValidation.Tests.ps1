@@ -380,7 +380,7 @@ Describe 'Test-JsonSchemaValidation' -Tag 'Unit' {
 Describe 'Get-MarkdownFiles' -Tag 'Unit' {
     BeforeAll {
         Save-CIEnvironment
-        $script:MockCIFiles = Initialize-MockCIEnvironment -Repository 'Azure-Samples/azure-nvidia-robotics-reference-architecture'
+        $script:MockCIFiles = Initialize-MockCIEnvironment -Repository 'microsoft/physical-ai-toolchain'
     }
 
     AfterAll {
@@ -503,7 +503,7 @@ Describe 'Get-MarkdownFiles' -Tag 'Unit' {
 Describe 'Invoke-Validation' -Tag 'Unit' {
     BeforeAll {
         Save-CIEnvironment
-        $script:MockCIFiles = Initialize-MockCIEnvironment -Repository 'Azure-Samples/azure-nvidia-robotics-reference-architecture'
+        $script:MockCIFiles = Initialize-MockCIEnvironment -Repository 'microsoft/physical-ai-toolchain'
     }
 
     AfterAll {

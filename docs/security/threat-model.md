@@ -1,5 +1,5 @@
 ---
-title: Threat Model — Azure NVIDIA Robotics Reference Architecture
+title: Threat Model — Physical AI Toolchain
 description: STRIDE-based threat model covering infrastructure-as-code components, trust boundaries, and remediation roadmap
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-22
@@ -13,11 +13,11 @@ keywords:
   - risk assessment
 ---
 
-STRIDE-based threat analysis of the Azure NVIDIA Robotics Reference Architecture covering infrastructure-as-code components, trust boundaries, and a prioritized remediation roadmap.
+STRIDE-based threat analysis of the Physical AI Toolchain covering infrastructure-as-code components, trust boundaries, and a prioritized remediation roadmap.
 
 ## Executive Summary
 
-This threat model applies the STRIDE framework to the Azure NVIDIA Robotics Reference Architecture. The architecture deploys AKS clusters with GPU node pools, Azure Machine Learning, and NVIDIA OSMO for robotics training and inference workloads. All components are infrastructure-as-code artifacts; no hosted service or user-facing application exists.
+This threat model applies the STRIDE framework to the Physical AI Toolchain. The architecture deploys AKS clusters with GPU node pools, Azure Machine Learning, and NVIDIA OSMO for robotics training and inference workloads. All components are infrastructure-as-code artifacts; no hosted service or user-facing application exists.
 
 | Area              | Status                                 | Evidence                                           |
 |-------------------|----------------------------------------|----------------------------------------------------|

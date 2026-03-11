@@ -6,7 +6,7 @@ labels: ["needs-triage"]
 ---
 
 <!--
-Thank you for contributing to the Azure NVIDIA Robotics Reference Architecture!
+Thank you for contributing to the Physical AI Toolchain!
 Please fill out the sections below to help us understand your issue.
 
 **Title format**: Use one of these prefixes:
@@ -71,5 +71,5 @@ Include any relevant information:
 
 **Before submitting:**
 
-- [ ] I have searched [existing issues](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues) for duplicates
+- [ ] I have searched [existing issues](https://github.com/microsoft/physical-ai-toolchain/issues) for duplicates
 - [ ] I have reviewed the [README](../../README.md) and [documentation](../../docs/)

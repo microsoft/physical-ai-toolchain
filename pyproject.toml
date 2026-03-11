@@ -1,7 +1,7 @@
 [project]
-name = "azure-nvidia-robotics-reference-architecture"
+name = "physical-ai-toolchain"
 version = "0.4.0"
-description = "Azure NVIDIA Robotics Reference Architecture for Isaac Lab training"
+description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
 requires-python = ">=3.11"
 

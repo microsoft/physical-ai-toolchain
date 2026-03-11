@@ -2,25 +2,25 @@
 # Last matching pattern takes precedence - order general to specific
 
 # Default: all markdown files require team review
-*.md                        @Azure-Samples/edge-ai-core-dev
+*.md                        @microsoft/edge-ai-core-dev
 
 # Documentation directory
-/docs/                      @Azure-Samples/edge-ai-core-dev
+/docs/                      @microsoft/edge-ai-core-dev
 
 # Contributing guides
-/docs/contributing/         @Azure-Samples/edge-ai-core-dev
+/docs/contributing/         @microsoft/edge-ai-core-dev
 
 # Component-level READMEs
-/deploy/**/README.md        @Azure-Samples/edge-ai-core-dev
+/deploy/**/README.md        @microsoft/edge-ai-core-dev
 
 # Source code
-/src/                       @Azure-Samples/edge-ai-core-dev
+/src/                       @microsoft/edge-ai-core-dev
 
 # Infrastructure as code
-/deploy/                    @Azure-Samples/edge-ai-core-dev
+/deploy/                    @microsoft/edge-ai-core-dev
 
 # CI/CD workflows
-/.github/workflows/         @Azure-Samples/edge-ai-core-dev
+/.github/workflows/         @microsoft/edge-ai-core-dev
 
 # Protect ownership file itself
-/.github/CODEOWNERS         @Azure-Samples/edge-ai-core-dev
+/.github/CODEOWNERS         @microsoft/edge-ai-core-dev

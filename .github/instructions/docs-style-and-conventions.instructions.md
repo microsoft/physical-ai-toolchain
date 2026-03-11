@@ -1,5 +1,5 @@
 ---
-description: Required instructions for all markdown (*.md) documents in azure-nvidia-robotics-reference-architecture
+description: Required instructions for all markdown (*.md) documents in physical-ai-toolchain
 applyTo: "**/*.md"
 ---
 

@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         ## Thank you for reporting a bug!
-        Please search [existing issues](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues) before submitting.
+        Please search [existing issues](https://github.com/microsoft/physical-ai-toolchain/issues) before submitting.
 
         **Title format**: `fix(scope): Brief description`
         **Scopes**: terraform, scripts, training, workflows, ci, deploy, docs, security
