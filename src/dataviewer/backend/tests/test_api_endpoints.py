@@ -195,3 +195,34 @@ class TestGetVideo:
     def test_video_nonexistent_camera(self, client):
         resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/video/fake_camera")
         assert resp.status_code == 404
+
+    def test_video_accept_ranges_header(self, client):
+        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera")
+        assert resp.headers.get("accept-ranges") == "bytes"
+
+    def test_video_range_request(self, client):
+        resp = client.get(
+            f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera",
+            headers={"Range": "bytes=0-1023"},
+        )
+        assert resp.status_code == 206
+        assert "content-range" in resp.headers
+        assert resp.headers["content-range"].startswith("bytes 0-1023/")
+        assert len(resp.content) == 1024
+
+    def test_video_range_open_ended(self, client):
+        full = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera")
+        total = len(full.content)
+
+        resp = client.get(
+            f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera",
+            headers={"Range": f"bytes={total - 100}-"},
+        )
+        assert resp.status_code == 206
+        assert len(resp.content) == 100
+
+    def test_video_head_request(self, client):
+        resp = client.head(f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera")
+        assert resp.status_code == 200
+        assert resp.headers.get("accept-ranges") == "bytes"
+        assert int(resp.headers.get("content-length", 0)) > 0

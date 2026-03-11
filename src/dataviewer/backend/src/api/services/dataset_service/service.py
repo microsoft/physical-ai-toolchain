@@ -215,22 +215,38 @@ class DatasetService:
             return None
         return await self._blob_provider.resolve_video_blob_path(dataset_id, episode_idx, camera)
 
-    async def get_blob_video_stream(self, blob_path: str) -> tuple[dict[str, str], str, "AsyncIterator"] | None:
-        """Stream video from blob storage. Returns (headers, media_type, async_iterator) or None."""
+    async def get_blob_video_stream(
+        self,
+        blob_path: str,
+        offset: int | None = None,
+        length: int | None = None,
+    ) -> tuple[dict[str, str], str, "AsyncIterator"] | None:
+        """Stream video from blob storage with optional byte-range support.
+
+        Returns (headers, media_type, async_iterator) or None.
+        """
         if self._blob_provider is None:
             return None
 
         props = await self._blob_provider.get_blob_properties(blob_path)
-        headers: dict[str, str] = {}
+        headers: dict[str, str] = {"Accept-Ranges": "bytes"}
         media_type = "video/mp4"
         if props:
-            headers["Content-Length"] = str(props["size"])
+            total_size = props["size"]
             mime = props.get("content_type", "")
             if mime and mime.startswith("video/"):
                 media_type = mime
 
+            if offset is not None:
+                actual_length = length if length is not None else (total_size - offset)
+                end_byte = offset + actual_length - 1
+                headers["Content-Length"] = str(actual_length)
+                headers["Content-Range"] = f"bytes {offset}-{end_byte}/{total_size}"
+            else:
+                headers["Content-Length"] = str(total_size)
+
         async def _stream():
-            async for chunk in self._blob_provider.stream_video(blob_path):
+            async for chunk in self._blob_provider.stream_video(blob_path, offset=offset, length=length):
                 yield chunk
 
         return headers, media_type, _stream()
@@ -595,6 +611,8 @@ class DatasetService:
                 raise ValueError(f"Invalid dataset path: {dataset_id}")
 
         base = Path(os.path.realpath(self.base_path))
+        if not base.is_dir():
+            raise ValueError(f"Base path not found: {self.base_path}")
         current = base
         for part in parts:
             found = False
