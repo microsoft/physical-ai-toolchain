@@ -32,8 +32,8 @@ See [Prerequisites](../contributing/prerequisites.md) for installation commands 
 Clone the repository and initialize the development environment.
 
 ```bash
-git clone https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture.git
-cd azure-nvidia-robotics-reference-architecture
+git clone https://github.com/microsoft/physical-ai-toolchain.git
+cd physical-ai-toolchain
 ```
 
 Use the devcontainer (recommended) or run local setup:

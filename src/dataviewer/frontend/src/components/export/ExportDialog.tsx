@@ -1,4 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useMemo,useState } from 'react';
+
+import type { ExportRequestWithEdits } from '@/api/export';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -7,15 +11,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { useExport } from '@/hooks/use-export';
-import { useEditStore, getEffectiveFrameCount } from '@/stores';
+import { getEffectiveFrameCount,useEditStore } from '@/stores';
 import { useEpisodeStore } from '@/stores';
+
 import { ExportProgress } from './ExportProgress';
-import type { ExportRequestWithEdits } from '@/api/export';
 
 interface ExportDialogProps {
   open: boolean;
@@ -55,9 +57,6 @@ export function ExportDialog({
 
   const handleExport = () => {
     const edits = applyEdits ? getEditOperations() : null;
-    console.log('Export - edits from store:', edits);
-    console.log('Export - insertedFrames:', edits?.insertedFrames);
-    console.log('Export - removedFrames:', edits?.removedFrames);
     const request: ExportRequestWithEdits = {
       episodeIndices,
       outputPath,
@@ -66,7 +65,6 @@ export function ExportDialog({
       format: 'hdf5',
       edits: edits ? { [edits.episodeIndex]: edits } : undefined,
     };
-    console.log('Export request:', JSON.stringify(request, null, 2));
     startExport(request);
   };
 

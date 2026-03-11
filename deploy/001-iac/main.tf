@@ -139,6 +139,48 @@ module "platform" {
 }
 
 // ============================================================
+// Dataviewer Module - Container Apps Deployment
+// ============================================================
+
+module "dataviewer" {
+  source = "./modules/dataviewer"
+  count  = var.should_deploy_dataviewer ? 1 : 0
+
+  depends_on = [module.platform]
+
+  // Core variables
+  environment     = var.environment
+  resource_prefix = var.resource_prefix
+  instance        = var.instance
+  resource_group  = local.resource_group
+
+  // Dependencies from platform module
+  virtual_network         = module.platform.virtual_network
+  network_security_group  = module.platform.network_security_group
+  nat_gateway             = module.platform.nat_gateway
+  log_analytics_workspace = module.platform.log_analytics_workspace
+  container_registry      = module.platform.container_registry
+  storage_account         = module.platform.storage_account
+
+  // Networking
+  should_enable_nat_gateway = var.should_enable_nat_gateway
+  subnet_address_prefix     = var.dataviewer_config.subnet_address_prefix
+  should_enable_internal    = var.dataviewer_config.should_enable_internal
+
+  // Container images
+  backend_image  = var.dataviewer_config.backend_image
+  frontend_image = var.dataviewer_config.frontend_image
+
+  // Storage
+  storage_dataset_container    = var.dataviewer_config.storage_dataset_container
+  storage_annotation_container = var.dataviewer_config.storage_annotation_container
+
+  // Auth
+  should_deploy_dataviewer_auth = var.dataviewer_config.should_deploy_auth
+  dataviewer_redirect_uris      = var.dataviewer_config.redirect_uris
+}
+
+// ============================================================
 // SiL Module - AKS + AzureML Extension
 // ============================================================
 

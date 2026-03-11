@@ -1,5 +1,5 @@
 ---
-description: Required instructions for shell script implementation in azure-nvidia-robotics-reference-architecture
+description: Required instructions for shell script implementation in physical-ai-toolchain
 applyTo: "**/*.sh"
 ---
 

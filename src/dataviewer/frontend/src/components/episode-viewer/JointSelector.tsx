@@ -1,153 +1,502 @@
 /**
  * Joint selector for trajectory visualization.
+ *
+ * Renders grouped toggle chips organized by actuator category,
+ * with per-group and global selection controls. Supports inline editing,
+ * context menus, and drag-and-drop reordering when editable.
  */
 
-import { useState, useRef, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { ChevronDown, Check } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import {
+  DndContext,
+  type DragEndEvent,
+  DragOverlay,
+  type DragStartEvent,
+  PointerSensor,
+  pointerWithin,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import { horizontalListSortingStrategy, SortableContext, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { Settings } from 'lucide-react'
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
 
-// Labels for bimanual task-space observations
-const OBSERVATION_LABELS: Record<number, string> = {
-  0: 'Right X',
-  1: 'Right Y',
-  2: 'Right Z',
-  3: 'Right Qx',
-  4: 'Right Qy',
-  5: 'Right Qz',
-  6: 'Right Qw',
-  7: 'Right Gripper',
-  8: 'Left X',
-  9: 'Left Y',
-  10: 'Left Z',
-  11: 'Left Qx',
-  12: 'Left Qy',
-  13: 'Left Qz',
-  14: 'Left Qw',
-  15: 'Left Gripper',
-};
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+import { cn } from '@/lib/utils'
+
+import { getJointColor, getJointLabel, JOINT_GROUPS, type JointGroup } from './joint-constants'
 
 interface JointSelectorProps {
-  /** Total number of joints available */
-  jointCount: number;
-  /** Currently selected joint indices */
-  selectedJoints: number[];
-  /** Callback when selection changes */
-  onSelectJoints: (joints: number[]) => void;
-  /** Color palette for joints */
-  colors: string[];
+  jointCount: number
+  selectedJoints: number[]
+  onSelectJoints: (joints: number[]) => void
+  colors: string[]
+  groups?: JointGroup[]
+  labels?: Record<string, string>
+  editable?: boolean
+  onEditJointLabel?: (index: number, label: string) => void
+  onEditGroupLabel?: (groupId: string, label: string) => void
+  onCreateGroup?: (label: string, jointIndices: number[]) => void
+  onDeleteGroup?: (groupId: string) => void
+  onMoveJoint?: (jointIndex: number, fromGroupId: string, toGroupId: string, toPosition: number) => void
+  onOpenDefaults?: () => void
 }
 
-/**
- * Multi-select dropdown for choosing which joints to display.
- */
+function InlineEdit({
+  value,
+  onCommit,
+  onCancel,
+}: {
+  value: string
+  onCommit: (val: string) => void
+  onCancel: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [text, setText] = useState(value)
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [])
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const trimmed = text.trim()
+      if (trimmed) onCommit(trimmed)
+      else onCancel()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      onCancel()
+    }
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={handleKeyDown}
+      onBlur={onCancel}
+      className="bg-transparent border-b border-primary text-xs outline-none w-20"
+    />
+  )
+}
+
+function SortableChip({
+  idx,
+  isSelected,
+  color,
+  label,
+  editable,
+  editingJoint,
+  onToggle,
+  onStartEdit,
+  onCommitEdit,
+  onCancelEdit,
+  onCreateGroup,
+}: {
+  idx: number
+  isSelected: boolean
+  color: string
+  label: string
+  editable?: boolean
+  editingJoint: number | null
+  onToggle: () => void
+  onStartEdit: () => void
+  onCommitEdit: (val: string) => void
+  onCancelEdit: () => void
+  onCreateGroup?: (jointIdx: number) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: `joint-${idx}`,
+    disabled: !editable || editingJoint === idx,
+  })
+
+  const style = {
+    color,
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+  }
+
+  const chipClasses = cn(
+    'inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border transition-all',
+    isSelected
+      ? 'border-current font-medium'
+      : 'border-transparent opacity-40 hover:opacity-70',
+  )
+
+  if (editingJoint === idx) {
+    return (
+      <div
+        ref={setNodeRef}
+        data-joint-chip
+        className={chipClasses}
+        style={style}
+      >
+        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+        <InlineEdit value={label} onCommit={onCommitEdit} onCancel={onCancelEdit} />
+      </div>
+    )
+  }
+
+  const chip = (
+    <button
+      ref={setNodeRef}
+      type="button"
+      data-joint-chip
+      onClick={onToggle}
+      className={chipClasses}
+      style={style}
+      {...attributes}
+      {...listeners}
+    >
+      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+      {label}
+    </button>
+  )
+
+  if (!editable) return chip
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{chip}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[140px]" onCloseAutoFocus={(event) => event.preventDefault()}>
+          <ContextMenuItem className="text-xs" onSelect={onStartEdit}>
+            Edit Name
+          </ContextMenuItem>
+          {onCreateGroup && (
+            <ContextMenuItem className="text-xs" onSelect={() => onCreateGroup(idx)}>
+              New Grouping
+            </ContextMenuItem>
+          )}
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+/** Droppable group container — each group is a separate drop target. */
+function DroppableGroup({
+  groupId,
+  children,
+  items,
+}: {
+  groupId: string
+  children: React.ReactNode
+  items: string[]
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `group-${groupId}` })
+
+  return (
+    <SortableContext items={items} strategy={horizontalListSortingStrategy}>
+      <div
+        ref={setNodeRef}
+        data-group-id={groupId}
+        className={cn(
+          'flex items-center gap-1 rounded px-0.5 transition-colors',
+          isOver && 'bg-accent/40',
+        )}
+      >
+        {children}
+      </div>
+    </SortableContext>
+  )
+}
+
 export function JointSelector({
   jointCount,
   selectedJoints,
   onSelectJoints,
   colors,
+  groups = JOINT_GROUPS,
+  labels,
+  editable,
+  onEditJointLabel,
+  onEditGroupLabel,
+  onCreateGroup,
+  onDeleteGroup,
+  onMoveJoint,
+  onOpenDefaults,
 }: JointSelectorProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [editingJoint, setEditingJoint] = useState<number | null>(null)
+  const [editingGroup, setEditingGroup] = useState<string | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(null)
 
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node)
-      ) {
-        setIsOpen(false);
-      }
-    };
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const resolveLabel = useCallback(
+    (idx: number) => labels?.[String(idx)] ?? getJointLabel(idx),
+    [labels],
+  )
 
   const toggleJoint = (jointIdx: number) => {
     if (selectedJoints.includes(jointIdx)) {
-      onSelectJoints(selectedJoints.filter((j) => j !== jointIdx));
+      onSelectJoints(selectedJoints.filter((j) => j !== jointIdx))
     } else {
-      onSelectJoints([...selectedJoints, jointIdx].sort((a, b) => a - b));
+      onSelectJoints([...selectedJoints, jointIdx].sort((a, b) => a - b))
     }
-  };
-
-  const selectAll = () => {
-    onSelectJoints(Array.from({ length: jointCount }, (_, i) => i));
-  };
-
-  const clearAll = () => {
-    onSelectJoints([]);
-  };
-
-  if (jointCount === 0) {
-    return (
-      <span className="text-sm text-muted-foreground">No joints available</span>
-    );
   }
 
-  return (
-    <div className="relative" ref={dropdownRef}>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2"
-      >
-        <span>
-          {selectedJoints.length} / {jointCount} Joints
-        </span>
-        <ChevronDown
-          className={cn(
-            'h-4 w-4 transition-transform',
-            isOpen && 'rotate-180'
-          )}
+  const selectAll = () => {
+    onSelectJoints(Array.from({ length: jointCount }, (_, i) => i))
+  }
+
+  const clearAll = () => {
+    onSelectJoints([])
+  }
+
+  const toggleGroup = (indices: number[]) => {
+    const valid = indices.filter((i) => i < jointCount)
+    const allSelected = valid.every((i) => selectedJoints.includes(i))
+    if (allSelected) {
+      onSelectJoints(selectedJoints.filter((j) => !valid.includes(j)))
+    } else {
+      const merged = new Set([...selectedJoints, ...valid])
+      onSelectJoints([...merged].sort((a, b) => a - b))
+    }
+  }
+
+  const handleCreateGroup = useCallback(
+    (jointIdx: number) => {
+      onCreateGroup?.('New Group', [jointIdx])
+    },
+    [onCreateGroup],
+  )
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string)
+  }
+
+  const findGroupForJoint = useCallback(
+    (jointIdx: number): string => {
+      for (const g of groups) {
+        if (g.indices.includes(jointIdx)) return g.id
+      }
+      return 'other'
+    },
+    [groups],
+  )
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setActiveId(null)
+    const { active, over } = event
+    if (!over || !onMoveJoint) return
+
+    const activeIdx = parseInt((active.id as string).replace('joint-', ''), 10)
+    const overId = over.id as string
+
+    const fromGroupId = findGroupForJoint(activeIdx)
+
+    // Dropped on a group container
+    if (overId.startsWith('group-')) {
+      const toGroupId = overId.replace('group-', '')
+      if (fromGroupId === toGroupId) return
+      const toGroup = groups.find((g) => g.id === toGroupId)
+      onMoveJoint(activeIdx, fromGroupId, toGroupId, toGroup?.indices.length ?? 0)
+      return
+    }
+
+    // Dropped on another joint chip
+    if (overId.startsWith('joint-')) {
+      const overIdx = parseInt(overId.replace('joint-', ''), 10)
+      if (activeIdx === overIdx) return
+      const toGroupId = findGroupForJoint(overIdx)
+      const toGroup = groups.find((g) => g.id === toGroupId)
+      if (!toGroup) return
+      const toPosition = toGroup.indices.indexOf(overIdx)
+      onMoveJoint(activeIdx, fromGroupId, toGroupId, toPosition)
+    }
+  }
+
+  if (jointCount === 0) {
+    return <span className="text-sm text-muted-foreground">No joints available</span>
+  }
+
+  const allGroupedIndices = new Set(groups.flatMap((g) => g.indices))
+  const visibleGroups = groups
+    .map((g) => ({ ...g, indices: g.indices.filter((i) => i < jointCount) }))
+    .filter((g) => g.indices.length > 0)
+
+  const otherIndices = Array.from({ length: jointCount }, (_, i) => i).filter(
+    (i) => !allGroupedIndices.has(i),
+  )
+
+  const renderGroupLabel = (group: { id: string; label: string; indices: number[] }) => {
+    const allActive = group.indices.every((i) => selectedJoints.includes(i))
+
+    if (editingGroup === group.id) {
+      return (
+        <InlineEdit
+          value={group.label}
+          onCommit={(val) => {
+            onEditGroupLabel?.(group.id, val)
+            setEditingGroup(null)
+          }}
+          onCancel={() => setEditingGroup(null)}
         />
-      </Button>
+      )
+    }
 
-      {isOpen && (
-        <div className="absolute top-full left-0 mt-1 z-50 min-w-[200px] bg-popover border rounded-md shadow-lg">
-          {/* Quick actions */}
-          <div className="flex gap-2 p-2 border-b">
-            <button
-              onClick={selectAll}
-              className="text-xs text-primary hover:underline"
-            >
-              Select All
-            </button>
-            <span className="text-muted-foreground">|</span>
-            <button
-              onClick={clearAll}
-              className="text-xs text-primary hover:underline"
-            >
-              Clear
-            </button>
-          </div>
+    const labelButton = (
+      <button
+        onClick={() => toggleGroup(group.indices)}
+        className={cn(
+          'text-xs font-medium transition-colors whitespace-nowrap',
+          allActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+        )}
+      >
+        {group.label}
+      </button>
+    )
 
-          {/* Joint list */}
-          <div className="max-h-48 overflow-y-auto">
-            {Array.from({ length: jointCount }, (_, idx) => (
-              <button
-                key={idx}
-                onClick={() => toggleJoint(idx)}
-                className="w-full px-3 py-2 flex items-center gap-2 hover:bg-accent transition-colors"
-              >
-                <div
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: colors[idx % colors.length] }}
-                />
-                <span className="flex-1 text-left text-sm">
-                  {OBSERVATION_LABELS[idx] || `Channel ${idx}`}
-                </span>
-                {selectedJoints.includes(idx) && (
-                  <Check className="h-4 w-4 text-primary" />
-                )}
-              </button>
-            ))}
-          </div>
+    if (!editable) return labelButton
+
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{labelButton}</ContextMenuTrigger>
+        <ContextMenuContent className="min-w-[140px]" onCloseAutoFocus={(event) => event.preventDefault()}>
+            <ContextMenuItem className="text-xs" onSelect={() => setEditingGroup(group.id)}>
+              Edit Name
+            </ContextMenuItem>
+            {onDeleteGroup && (
+              <ContextMenuItem className="text-xs text-destructive focus:text-destructive" onSelect={() => onDeleteGroup(group.id)}>
+                Delete Grouping
+              </ContextMenuItem>
+            )}
+        </ContextMenuContent>
+      </ContextMenu>
+    )
+  }
+
+  const renderChips = (indices: number[]) =>
+    indices.map((idx) => (
+      <SortableChip
+        key={idx}
+        idx={idx}
+        isSelected={selectedJoints.includes(idx)}
+        color={getJointColor(idx, colors)}
+        label={resolveLabel(idx)}
+        editable={editable}
+        editingJoint={editingJoint}
+        onToggle={() => toggleJoint(idx)}
+        onStartEdit={() => setEditingJoint(idx)}
+        onCommitEdit={(val) => {
+          onEditJointLabel?.(idx, val)
+          setEditingJoint(null)
+        }}
+        onCancelEdit={() => setEditingJoint(null)}
+        onCreateGroup={onCreateGroup ? handleCreateGroup : undefined}
+      />
+    ))
+
+  const activeIdx = activeId ? parseInt(activeId.replace('joint-', ''), 10) : null
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={pointerWithin}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="flex flex-col gap-1">
+        {/* Global controls */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={selectAll}
+            className={cn(
+              'px-2 py-0.5 text-xs rounded border transition-colors',
+              selectedJoints.length === jointCount
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-muted text-muted-foreground border-transparent hover:border-border',
+            )}
+          >
+            All
+          </button>
+          <button
+            onClick={clearAll}
+            className={cn(
+              'px-2 py-0.5 text-xs rounded border transition-colors',
+              selectedJoints.length === 0
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-muted text-muted-foreground border-transparent hover:border-border',
+            )}
+          >
+            None
+          </button>
+          {onOpenDefaults && (
+            <button
+              onClick={onOpenDefaults}
+              className="px-1.5 py-0.5 text-xs rounded border transition-colors bg-muted text-muted-foreground border-transparent hover:border-border"
+              aria-label="Edit joint defaults"
+              title="Edit joint defaults"
+            >
+              <Settings className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
-      )}
-    </div>
-  );
+        <div className="flex flex-wrap gap-x-3 gap-y-1">
+          {visibleGroups.map((group) => (
+            <DroppableGroup
+              key={group.id}
+              groupId={group.id}
+              items={group.indices.map((i) => `joint-${i}`)}
+            >
+              <div data-testid={`joint-group-${group.id}`} className="flex items-center gap-1">
+                {renderGroupLabel(group)}
+                {renderChips(group.indices)}
+              </div>
+            </DroppableGroup>
+          ))}
+
+          {otherIndices.length > 0 && (
+            <DroppableGroup
+              groupId="other"
+              items={otherIndices.map((i) => `joint-${i}`)}
+            >
+              <div data-testid="joint-group-other" className="flex items-center gap-1">
+                <button
+                  onClick={() => toggleGroup(otherIndices)}
+                  className={cn(
+                    'text-xs font-medium transition-colors whitespace-nowrap',
+                    otherIndices.every((i) => selectedJoints.includes(i))
+                      ? 'text-foreground'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  Other
+                </button>
+                {renderChips(otherIndices)}
+              </div>
+            </DroppableGroup>
+          )}
+        </div>
+      </div>
+
+      <DragOverlay>
+        {activeIdx !== null && (
+          <button
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border border-current font-medium shadow-lg"
+            style={{ color: getJointColor(activeIdx, colors) }}
+          >
+            <span
+              className="w-2 h-2 rounded-full flex-shrink-0"
+              style={{ backgroundColor: getJointColor(activeIdx, colors) }}
+            />
+            {resolveLabel(activeIdx)}
+          </button>
+        )}
+      </DragOverlay>
+    </DndContext>
+  )
 }

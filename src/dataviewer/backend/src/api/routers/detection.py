@@ -10,7 +10,6 @@ import sys
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..auth import require_auth
 from ..csrf import require_csrf_token
 from ..models.detection import DetectionRequest, EpisodeDetectionSummary
 from ..services.dataset_service import DatasetService, get_dataset_service
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 @router.post(
     "/{dataset_id}/episodes/{episode_idx}/detect",
     response_model=EpisodeDetectionSummary,
-    dependencies=[Depends(require_auth), Depends(require_csrf_token)],
+    dependencies=[Depends(require_csrf_token)],
 )
 async def run_detection(
     episode_idx: int,

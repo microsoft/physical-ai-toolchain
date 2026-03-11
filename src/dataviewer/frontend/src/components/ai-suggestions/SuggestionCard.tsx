@@ -2,25 +2,32 @@
  * Card displaying AI annotation suggestions with accept/reject actions.
  */
 
-import { cn } from '@/lib/utils';
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Flag,
+  Info,
+  Sparkles,
+  Star,
+  X,
+} from 'lucide-react';
+import { useState } from 'react';
+
+import type { AnnotationSuggestion, DetectedAnomaly } from '@/api/ai-analysis';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import {
-  Check,
-  X,
-  Sparkles,
-  AlertTriangle,
-  Star,
-  Flag,
-  ChevronDown,
-  ChevronUp,
-  Info,
-} from 'lucide-react';
-import { useState } from 'react';
-import type { AnnotationSuggestion, DetectedAnomaly } from '@/api/ai-analysis';
+  getAnomalySeverityTone,
+  getSemanticToneClasses,
+} from '@/lib/semantic-state';
+import { cn } from '@/lib/utils';
 
 export interface SuggestionCardProps {
   /** AI suggestion data */
@@ -66,28 +73,17 @@ function StarRatingDisplay({ rating, max = 5 }: { rating: number; max?: number }
 
 /** Anomaly item display */
 function AnomalyItem({ anomaly }: { anomaly: DetectedAnomaly }) {
-  const severityColors = {
-    low: 'bg-yellow-100 text-yellow-700',
-    medium: 'bg-orange-100 text-orange-700',
-    high: 'bg-red-100 text-red-700',
-  };
+  const severityTone = getAnomalySeverityTone(anomaly.severity);
 
   return (
     <div className="flex items-start gap-2 text-sm">
       <AlertTriangle
-        className={cn(
-          'h-4 w-4 mt-0.5 shrink-0',
-          anomaly.severity === 'high'
-            ? 'text-red-500'
-            : anomaly.severity === 'medium'
-              ? 'text-orange-500'
-              : 'text-yellow-500'
-        )}
+        className={cn('h-4 w-4 mt-0.5 shrink-0', getSemanticToneClasses('icon', severityTone))}
       />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium truncate">{anomaly.type.replace(/_/g, ' ')}</span>
-          <Badge variant="outline" className={cn('text-xs', severityColors[anomaly.severity])}>
+          <Badge variant="status" tone={severityTone} className="text-xs">
             {anomaly.severity}
           </Badge>
         </div>
@@ -96,6 +92,35 @@ function AnomalyItem({ anomaly }: { anomaly: DetectedAnomaly }) {
           Frames {anomaly.frame_start} - {anomaly.frame_end}
         </p>
       </div>
+    </div>
+  );
+}
+
+interface SuggestionFieldToggleProps {
+  field: SuggestionField;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  children: React.ReactNode;
+}
+
+function SuggestionFieldToggle({
+  field,
+  checked,
+  onCheckedChange,
+  children,
+}: SuggestionFieldToggleProps) {
+  const id = `suggestion-field-${field}`;
+
+  return (
+    <div className="flex items-center gap-2">
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={(nextChecked) => onCheckedChange(nextChecked === true)}
+      />
+      <Label htmlFor={id} className="text-sm font-medium">
+        {children}
+      </Label>
     </div>
   );
 }
@@ -118,14 +143,17 @@ export function SuggestionCard({
     new Set(['task_completion', 'trajectory_quality', 'flags', 'anomalies'])
   );
 
-  const toggleField = (field: SuggestionField) => {
-    const newSet = new Set(selectedFields);
-    if (newSet.has(field)) {
-      newSet.delete(field);
-    } else {
-      newSet.add(field);
-    }
-    setSelectedFields(newSet);
+  const setFieldSelected = (field: SuggestionField, checked: boolean) => {
+    setSelectedFields((currentFields) => {
+      const nextFields = new Set(currentFields);
+      if (checked) {
+        nextFields.add(field);
+      } else {
+        nextFields.delete(field);
+      }
+
+      return nextFields;
+    });
   };
 
   const handlePartialAccept = () => {
@@ -165,14 +193,15 @@ export function SuggestionCard({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {onPartialAccept && (
-              <input
-                type="checkbox"
+              <SuggestionFieldToggle
+                field="task_completion"
                 checked={selectedFields.has('task_completion')}
-                onChange={() => toggleField('task_completion')}
-                className="h-4 w-4 rounded border-gray-300"
-              />
+                onCheckedChange={(checked) => setFieldSelected('task_completion', checked)}
+              >
+                Task Completion
+              </SuggestionFieldToggle>
             )}
-            <span className="text-sm font-medium">Task Completion</span>
+            {!onPartialAccept && <span className="text-sm font-medium">Task Completion</span>}
           </div>
           <StarRatingDisplay rating={suggestion.task_completion_rating} />
         </div>
@@ -181,14 +210,15 @@ export function SuggestionCard({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {onPartialAccept && (
-              <input
-                type="checkbox"
+              <SuggestionFieldToggle
+                field="trajectory_quality"
                 checked={selectedFields.has('trajectory_quality')}
-                onChange={() => toggleField('trajectory_quality')}
-                className="h-4 w-4 rounded border-gray-300"
-              />
+                onCheckedChange={(checked) => setFieldSelected('trajectory_quality', checked)}
+              >
+                Trajectory Quality
+              </SuggestionFieldToggle>
             )}
-            <span className="text-sm font-medium">Trajectory Quality</span>
+            {!onPartialAccept && <span className="text-sm font-medium">Trajectory Quality</span>}
           </div>
           <StarRatingDisplay rating={suggestion.trajectory_quality_score} />
         </div>
@@ -198,14 +228,15 @@ export function SuggestionCard({
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               {onPartialAccept && (
-                <input
-                  type="checkbox"
+                <SuggestionFieldToggle
+                  field="flags"
                   checked={selectedFields.has('flags')}
-                  onChange={() => toggleField('flags')}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
+                  onCheckedChange={(checked) => setFieldSelected('flags', checked)}
+                >
+                  Suggested Flags
+                </SuggestionFieldToggle>
               )}
-              <span className="text-sm font-medium">Suggested Flags</span>
+              {!onPartialAccept && <span className="text-sm font-medium">Suggested Flags</span>}
             </div>
             <div className="flex flex-wrap gap-1 ml-6">
               {suggestion.suggested_flags.map((flag) => (
@@ -224,16 +255,19 @@ export function SuggestionCard({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {onPartialAccept && (
-                  <input
-                    type="checkbox"
+                  <SuggestionFieldToggle
+                    field="anomalies"
                     checked={selectedFields.has('anomalies')}
-                    onChange={() => toggleField('anomalies')}
-                    className="h-4 w-4 rounded border-gray-300"
-                  />
+                    onCheckedChange={(checked) => setFieldSelected('anomalies', checked)}
+                  >
+                    Detected Anomalies ({suggestion.detected_anomalies.length})
+                  </SuggestionFieldToggle>
                 )}
-                <span className="text-sm font-medium">
-                  Detected Anomalies ({suggestion.detected_anomalies.length})
-                </span>
+                {!onPartialAccept && (
+                  <span className="text-sm font-medium">
+                    Detected Anomalies ({suggestion.detected_anomalies.length})
+                  </span>
+                )}
               </div>
               <Button
                 variant="ghost"

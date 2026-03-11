@@ -2,8 +2,16 @@
  * Conflict resolution dialog for offline sync conflicts.
  */
 
+import {
+  AlertTriangle,
+  Check,
+  Clock,
+  Cloud,
+  Laptop,
+} from 'lucide-react';
 import { useState } from 'react';
-import { cn } from '@/lib/utils';
+
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -13,17 +21,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  AlertTriangle,
-  Cloud,
-  Laptop,
-  Clock,
-  Check,
-} from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export interface ConflictVersion {
   source: 'local' | 'server';
@@ -112,7 +113,10 @@ export function ConflictResolution({
                 'rounded-lg border p-4 cursor-pointer transition-colors',
                 choice === 'local' && 'border-primary bg-primary/5'
               )}
+              role="button"
+              tabIndex={0}
               onClick={() => setChoice('local')}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setChoice('local'); }}
             >
               <div className="flex items-center gap-2 mb-3">
                 <RadioGroupItem value="local" id="local" />
@@ -139,7 +143,10 @@ export function ConflictResolution({
                 'rounded-lg border p-4 cursor-pointer transition-colors',
                 choice === 'server' && 'border-primary bg-primary/5'
               )}
+              role="button"
+              tabIndex={0}
               onClick={() => setChoice('server')}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setChoice('server'); }}
             >
               <div className="flex items-center gap-2 mb-3">
                 <RadioGroupItem value="server" id="server" />

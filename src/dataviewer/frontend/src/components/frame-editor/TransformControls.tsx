@@ -2,14 +2,15 @@
  * Transform controls for resize and reset operations.
  */
 
-import { useState, useCallback } from 'react';
+import { Check,Lock, Unlock } from 'lucide-react';
+import { useCallback,useState } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useTransformState } from '@/stores';
 import { cn } from '@/lib/utils';
+import { useTransformState } from '@/stores';
 import type { ResizeDimensions } from '@/types/episode-edit';
-import { Lock, Unlock, RotateCcw, Check } from 'lucide-react';
 
 interface TransformControlsProps {
   /** Original image dimensions for aspect ratio calculation */
@@ -40,7 +41,6 @@ export function TransformControls({
     globalTransform,
     setGlobalTransform,
     setCameraTransform,
-    clearTransforms,
   } = useTransformState();
 
   // Get current resize from store
@@ -132,13 +132,6 @@ export function TransformControls({
       );
     }
   }, [cameraName, globalTransform, setGlobalTransform, setCameraTransform]);
-
-  // Reset all transforms
-  const handleResetAll = useCallback(() => {
-    setWidth('');
-    setHeight('');
-    clearTransforms();
-  }, [clearTransforms]);
 
   // Set common presets
   const handlePreset = useCallback(
@@ -254,10 +247,6 @@ export function TransformControls({
         </Button>
         <Button variant="outline" size="sm" onClick={handleResetResize}>
           Reset Size
-        </Button>
-        <Button variant="outline" size="sm" onClick={handleResetAll}>
-          <RotateCcw className="h-4 w-4 mr-1" />
-          Reset All
         </Button>
       </div>
 

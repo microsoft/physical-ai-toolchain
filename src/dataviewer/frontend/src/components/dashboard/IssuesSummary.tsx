@@ -2,11 +2,12 @@
  * Issues summary card showing top issues by frequency.
  */
 
-import { cn } from '@/lib/utils';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { AlertCircle, AlertTriangle, Flag } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { AlertTriangle, AlertCircle, Flag } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export interface IssueItem {
   name: string;

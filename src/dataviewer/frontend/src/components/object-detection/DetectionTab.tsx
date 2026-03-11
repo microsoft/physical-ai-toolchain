@@ -2,17 +2,19 @@
  * Detection tab wrapper component for AnnotationWorkspace.
  */
 
+import { AlertTriangle,BarChart3, Eye, Filter, Loader2, Scan } from 'lucide-react';
 import { useMemo } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Scan, BarChart3, Filter, Eye, Loader2, AlertTriangle } from 'lucide-react';
 import { useObjectDetection } from '@/hooks/use-object-detection';
 import { useDatasetStore, useEpisodeStore, usePlaybackControls } from '@/stores';
-import { DetectionViewer } from './DetectionViewer';
-import { DetectionTimeline } from './DetectionTimeline';
-import { DetectionFilters } from './DetectionFilters';
+
 import { DetectionCharts } from './DetectionCharts';
+import { DetectionFilters } from './DetectionFilters';
+import { DetectionTimeline } from './DetectionTimeline';
+import { DetectionViewer } from './DetectionViewer';
 
 export function DetectionTab() {
   const currentDataset = useDatasetStore((state) => state.currentDataset);

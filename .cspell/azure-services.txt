@@ -38,6 +38,7 @@ azmon
 azuredevops
 azuremonitor
 azureml
+containerapp
 cosmosdb
 deviceregistry
 eastus
@@ -63,3 +64,4 @@ AADSSH
 rtxprogpu
 RTXPRO
 stnvidiadev
+azureactivedirectory

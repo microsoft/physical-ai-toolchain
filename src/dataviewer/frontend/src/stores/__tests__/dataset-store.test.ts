@@ -10,8 +10,8 @@ const mockDatasets: DatasetInfo[] = [
     name: 'Pick and Place',
     totalEpisodes: 100,
     fps: 30,
-    features: { observation: { type: 'video', shape: [480, 640, 3] } },
-    tasks: [{ name: 'pick_cube', description: 'Pick up a cube' }],
+    features: { observation: { dtype: 'video', shape: [480, 640, 3] } },
+    tasks: [{ taskIndex: 0, description: 'Pick up a cube' }],
   },
   {
     id: 'ds-2',

@@ -2,10 +2,11 @@
  * TanStack Query hooks for episode label operations.
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useCallback } from 'react';
-import { useLabelStore } from '@/stores/label-store';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback,useEffect } from 'react';
+
 import { useDatasetStore } from '@/stores';
+import { useLabelStore } from '@/stores/label-store';
 
 const API_BASE = '/api';
 
@@ -61,11 +62,14 @@ async function addLabelOption(datasetId: string, label: string): Promise<string[
     return res.json();
 }
 
-async function saveAllLabels(datasetId: string): Promise<DatasetLabelsResponse> {
-    const res = await fetch(`${API_BASE}/datasets/${datasetId}/labels/save`, {
-        method: 'POST',
-    });
-    if (!res.ok) throw new Error('Failed to save labels');
+async function removeLabelOption(datasetId: string, label: string): Promise<string[]> {
+    const res = await fetch(
+        `${API_BASE}/datasets/${datasetId}/labels/options/${encodeURIComponent(label.trim().toUpperCase())}`,
+        {
+            method: 'DELETE',
+        },
+    );
+    if (!res.ok) throw new Error('Failed to delete label option');
     return res.json();
 }
 
@@ -101,7 +105,7 @@ export function useDatasetLabels() {
  */
 export function useSaveEpisodeLabels() {
     const currentDataset = useDatasetStore((state) => state.currentDataset);
-    const setEpisodeLabelsInStore = useLabelStore((state) => state.setEpisodeLabels);
+    const commitEpisodeLabels = useLabelStore((state) => state.commitEpisodeLabels);
     const queryClient = useQueryClient();
 
     const mutation = useMutation({
@@ -110,7 +114,7 @@ export function useSaveEpisodeLabels() {
             return setEpisodeLabels(currentDataset.id, episodeIdx, labels);
         },
         onSuccess: (data) => {
-            setEpisodeLabelsInStore(data.episode_index, data.labels);
+            commitEpisodeLabels(data.episode_index, data.labels);
             if (currentDataset) {
                 queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) });
             }
@@ -145,18 +149,22 @@ export function useAddLabelOption() {
 }
 
 /**
- * Hook to explicitly save all labels to disk.
+ * Hook to delete a label option from the current dataset.
  */
-export function useSaveAllLabels() {
+export function useRemoveLabelOption() {
     const currentDataset = useDatasetStore((state) => state.currentDataset);
+    const removeLabelOptionInStore = useLabelStore((state) => state.removeLabelOption);
+    const setAvailableLabels = useLabelStore((state) => state.setAvailableLabels);
     const queryClient = useQueryClient();
 
     const mutation = useMutation({
-        mutationFn: () => {
+        mutationFn: (label: string) => {
             if (!currentDataset) throw new Error('No dataset selected');
-            return saveAllLabels(currentDataset.id);
+            return removeLabelOption(currentDataset.id, label);
         },
-        onSuccess: () => {
+        onSuccess: (data, label) => {
+            removeLabelOptionInStore(label);
+            setAvailableLabels(data);
             if (currentDataset) {
                 queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) });
             }
@@ -172,20 +180,14 @@ export function useSaveAllLabels() {
 export function useCurrentEpisodeLabels(episodeIndex: number) {
     const episodeLabels = useLabelStore((state) => state.episodeLabels);
     const toggleLabel = useLabelStore((state) => state.toggleLabel);
-    const saveLabels = useSaveEpisodeLabels();
 
     const currentLabels = episodeLabels[episodeIndex] || [];
 
     const toggle = useCallback(
-        (label: string) => {
+        async (label: string) => {
             toggleLabel(episodeIndex, label);
-            const current = episodeLabels[episodeIndex] || [];
-            const updated = current.includes(label)
-                ? current.filter((l) => l !== label)
-                : [...current, label];
-            saveLabels.mutate({ episodeIdx: episodeIndex, labels: updated });
         },
-        [episodeIndex, episodeLabels, toggleLabel, saveLabels],
+        [episodeIndex, toggleLabel],
     );
 
     return { currentLabels, toggle };

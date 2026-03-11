@@ -2,18 +2,19 @@
  * Batch action toolbar for applying annotations to selected episodes.
  */
 
+import {
+  AlertTriangle,
+  Check,
+  CheckSquare,
+  Loader2,
+  Square,
+  Star,
+  X,
+} from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  CheckSquare,
-  Square,
-  Check,
-  Star,
-  AlertTriangle,
-  X,
-  Loader2,
-} from 'lucide-react';
 // Utility import removed - using direct class names
 import type { TaskCompletenessRating } from '@/types';
 

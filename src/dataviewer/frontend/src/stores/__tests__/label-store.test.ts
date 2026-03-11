@@ -11,6 +11,7 @@ describe('useLabelStore', () => {
     const state = useLabelStore.getState()
     expect(state.availableLabels).toEqual(['SUCCESS', 'FAILURE', 'PARTIAL'])
     expect(state.episodeLabels).toEqual({})
+    expect(state.savedEpisodeLabels).toEqual({})
     expect(state.isLoaded).toBe(false)
     expect(state.filterLabels).toEqual([])
   })
@@ -39,15 +40,39 @@ describe('useLabelStore', () => {
     })
   })
 
+  describe('removeLabelOption', () => {
+    it('removes a label from options, episode assignments, and filters', () => {
+      const store = useLabelStore.getState()
+
+      store.setAvailableLabels(['SUCCESS', 'REVIEW'])
+      store.setAllEpisodeLabels({ '1': ['SUCCESS', 'REVIEW'], '2': ['REVIEW'] })
+      store.setEpisodeLabels(1, ['SUCCESS', 'REVIEW'])
+      store.setEpisodeLabels(2, ['REVIEW'])
+      store.setFilterLabels(['REVIEW'])
+
+      store.removeLabelOption('review')
+
+      const state = useLabelStore.getState()
+      expect(state.availableLabels).toEqual(['SUCCESS'])
+      expect(state.episodeLabels[1]).toEqual(['SUCCESS'])
+      expect(state.episodeLabels[2]).toEqual([])
+      expect(state.savedEpisodeLabels[1]).toEqual(['SUCCESS'])
+      expect(state.savedEpisodeLabels[2]).toEqual([])
+      expect(state.filterLabels).toEqual([])
+    })
+  })
+
   describe('setAllEpisodeLabels', () => {
     it('parses string keys to numeric indices', () => {
       useLabelStore
         .getState()
         .setAllEpisodeLabels({ '0': ['SUCCESS'], '5': ['FAILURE', 'PARTIAL'] })
 
-      const labels = useLabelStore.getState().episodeLabels
-      expect(labels[0]).toEqual(['SUCCESS'])
-      expect(labels[5]).toEqual(['FAILURE', 'PARTIAL'])
+      const state = useLabelStore.getState()
+      expect(state.episodeLabels[0]).toEqual(['SUCCESS'])
+      expect(state.episodeLabels[5]).toEqual(['FAILURE', 'PARTIAL'])
+      expect(state.savedEpisodeLabels[0]).toEqual(['SUCCESS'])
+      expect(state.savedEpisodeLabels[5]).toEqual(['FAILURE', 'PARTIAL'])
     })
   })
 
@@ -55,6 +80,18 @@ describe('useLabelStore', () => {
     it('sets labels for a specific episode', () => {
       useLabelStore.getState().setEpisodeLabels(3, ['SUCCESS'])
       expect(useLabelStore.getState().episodeLabels[3]).toEqual(['SUCCESS'])
+      expect(useLabelStore.getState().savedEpisodeLabels[3]).toBeUndefined()
+    })
+
+    it('can commit the saved label baseline for a specific episode', () => {
+      useLabelStore.getState().setAllEpisodeLabels({ '3': ['SUCCESS'] })
+      useLabelStore.getState().setEpisodeLabels(3, ['FAILURE'])
+
+      useLabelStore.getState().commitEpisodeLabels(3)
+
+      const state = useLabelStore.getState()
+      expect(state.episodeLabels[3]).toEqual(['FAILURE'])
+      expect(state.savedEpisodeLabels[3]).toEqual(['FAILURE'])
     })
   })
 
@@ -113,6 +150,7 @@ describe('useLabelStore', () => {
       const state = useLabelStore.getState()
       expect(state.availableLabels).toEqual(['SUCCESS', 'FAILURE', 'PARTIAL'])
       expect(state.episodeLabels).toEqual({})
+      expect(state.savedEpisodeLabels).toEqual({})
       expect(state.isLoaded).toBe(false)
     })
   })

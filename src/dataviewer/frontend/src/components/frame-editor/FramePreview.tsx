@@ -7,69 +7,10 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+
+import { buildCssFilter } from '@/lib/css-filters';
 import { cn } from '@/lib/utils';
-import type { ImageTransform, ColorAdjustment, ColorFilterPreset } from '@/types/episode-edit';
-
-/**
- * Generate CSS filter string from color adjustment parameters.
- *
- * Maps color adjustment values to equivalent CSS filter functions
- * for real-time preview. Note: gamma has no CSS equivalent and is
- * approximated using brightness.
- */
-function getPreviewFilter(
-  colorAdjustment?: ColorAdjustment,
-  colorFilter?: ColorFilterPreset
-): string {
-  const filters: string[] = [];
-
-  if (colorAdjustment) {
-    if (colorAdjustment.brightness !== undefined && colorAdjustment.brightness !== 0) {
-      // CSS brightness: 0 = black, 1 = normal, 2 = 2x bright
-      filters.push(`brightness(${1 + colorAdjustment.brightness})`);
-    }
-    if (colorAdjustment.contrast !== undefined && colorAdjustment.contrast !== 0) {
-      // CSS contrast: 0 = gray, 1 = normal, 2 = 2x contrast
-      filters.push(`contrast(${1 + colorAdjustment.contrast})`);
-    }
-    if (colorAdjustment.saturation !== undefined && colorAdjustment.saturation !== 0) {
-      // CSS saturate: 0 = grayscale, 1 = normal, 2 = 2x saturated
-      filters.push(`saturate(${1 + colorAdjustment.saturation})`);
-    }
-    if (colorAdjustment.hue !== undefined && colorAdjustment.hue !== 0) {
-      filters.push(`hue-rotate(${colorAdjustment.hue}deg)`);
-    }
-    // Note: gamma correction has no direct CSS equivalent
-    // We approximate it with brightness adjustment for preview only
-    if (colorAdjustment.gamma !== undefined && colorAdjustment.gamma !== 1) {
-      // Gamma < 1 brightens, > 1 darkens; approximate with brightness
-      const gammaBrightness = Math.pow(0.5, 1 / colorAdjustment.gamma) / 0.5;
-      filters.push(`brightness(${gammaBrightness.toFixed(2)})`);
-    }
-  }
-
-  if (colorFilter && colorFilter !== 'none') {
-    switch (colorFilter) {
-      case 'grayscale':
-        filters.push('grayscale(1)');
-        break;
-      case 'sepia':
-        filters.push('sepia(1)');
-        break;
-      case 'invert':
-        filters.push('invert(1)');
-        break;
-      case 'warm':
-        filters.push('sepia(0.3) saturate(1.2)');
-        break;
-      case 'cool':
-        filters.push('hue-rotate(180deg) saturate(0.7)');
-        break;
-    }
-  }
-
-  return filters.join(' ');
-}
+import type { ImageTransform } from '@/types/episode-edit';
 
 interface FramePreviewProps {
   /** Source frame URL */
@@ -190,7 +131,7 @@ export function FramePreview({
   }, [frameUrl, transform, maxWidth, maxHeight]);
 
   // Generate CSS filter for color preview
-  const cssFilter = getPreviewFilter(transform?.colorAdjustment, transform?.colorFilter);
+  const cssFilter = buildCssFilter(transform?.colorAdjustment, transform?.colorFilter);
 
   return (
     <div className={cn('flex flex-col gap-2', className)}>

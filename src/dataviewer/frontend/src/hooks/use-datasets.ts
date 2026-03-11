@@ -3,9 +3,10 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { fetchDatasets, fetchDataset, fetchEpisodes, fetchEpisode } from '@/lib/api-client';
-import { useDatasetStore } from '@/stores';
 import { useEffect } from 'react';
+
+import { fetchCacheStats, fetchCapabilities,fetchDataset, fetchDatasets, fetchEpisode, fetchEpisodes } from '@/lib/api-client';
+import { useDatasetStore } from '@/stores';
 
 /**
  * Query key factory for datasets.
@@ -20,6 +21,11 @@ export const datasetKeys = {
     [...datasetKeys.detail(datasetId), 'episodes'] as const,
   episode: (datasetId: string, episodeIndex: number) =>
     [...datasetKeys.episodes(datasetId), episodeIndex] as const,
+};
+
+export const capabilityKeys = {
+  all: ['capabilities'] as const,
+  detail: (datasetId: string) => [...capabilityKeys.all, datasetId] as const,
 };
 
 /**
@@ -38,7 +44,10 @@ export function useDatasets() {
   const query = useQuery({
     queryKey: datasetKeys.list(),
     queryFn: fetchDatasets,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
   // Sync query state with Zustand store
@@ -110,6 +119,7 @@ export function useEpisodes(
     queryFn: () => fetchEpisodes(datasetId!, options),
     enabled: !!datasetId,
     staleTime: 1 * 60 * 1000, // 1 minute
+    gcTime: 30 * 60 * 1000, // 30 minutes
   });
 }
 
@@ -133,5 +143,38 @@ export function useEpisode(
     queryFn: () => fetchEpisode(datasetId!, episodeIndex!),
     enabled: !!datasetId && episodeIndex !== undefined && episodeIndex >= 0,
     staleTime: 30 * 1000, // 30 seconds
+    gcTime: 30 * 60 * 1000, // 30 minutes
+  });
+}
+
+/**
+ * Hook to fetch capabilities for a dataset.
+ *
+ * @param datasetId - Dataset ID
+ */
+export function useCapabilities(datasetId: string | undefined) {
+  return useQuery({
+    queryKey: capabilityKeys.detail(datasetId ?? ''),
+    queryFn: () => fetchCapabilities(datasetId!),
+    enabled: !!datasetId,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+export const cacheStatsKeys = {
+  all: ['cache-stats'] as const,
+};
+
+/**
+ * Hook to fetch episode cache performance stats.
+ * Polls every 10 seconds when diagnostics are visible.
+ */
+export function useCacheStats(enabled: boolean) {
+  return useQuery({
+    queryKey: cacheStatsKeys.all,
+    queryFn: fetchCacheStats,
+    enabled,
+    staleTime: 5 * 1000,
+    refetchInterval: 10 * 1000,
   });
 }

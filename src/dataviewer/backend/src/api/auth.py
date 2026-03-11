@@ -16,9 +16,10 @@ import logging
 import os
 import secrets
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
 
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,52 @@ class JwtProvider(AuthProvider):
 
 
 # ============================================================================
+# Easy Auth provider (Azure Container Apps)
+# ============================================================================
+
+
+class EasyAuthProvider(AuthProvider):
+    """Reads identity from Azure Container Apps Easy Auth X-MS-CLIENT-PRINCIPAL header."""
+
+    async def authenticate(self, request: Request) -> dict[str, Any] | None:
+        principal = request.headers.get("X-MS-CLIENT-PRINCIPAL", "")
+        if not principal:
+            return None
+        import base64
+        import json
+
+        try:
+            claims_json = json.loads(base64.b64decode(principal))
+        except (ValueError, json.JSONDecodeError):
+            return None
+
+        claims = claims_json.get("claims", [])
+        name_id = ""
+        name = ""
+        roles: list[str] = []
+        for claim in claims:
+            typ = claim.get("typ", "")
+            val = claim.get("val", "")
+            if "nameidentifier" in typ:
+                name_id = val
+            elif typ == "name":
+                name = val
+            elif typ == "roles":
+                roles.append(val)
+
+        return {
+            "sub": name_id,
+            "name": name,
+            "roles": roles,
+            "auth_method": "easy_auth",
+        }
+
+    @property
+    def www_authenticate(self) -> str:
+        return 'EasyAuth realm="DataViewer API"'
+
+
+# ============================================================================
 # Provider factory
 # ============================================================================
 
@@ -151,6 +198,9 @@ def _build_provider() -> AuthProvider:
         jwks_uri = f"https://{domain}/.well-known/jwks.json"
         issuer = f"https://{domain}/"
         return JwtProvider(jwks_uri=jwks_uri, audience=audience, issuer=issuer)
+
+    if provider_name == "easy_auth":
+        return EasyAuthProvider()
 
     logger.error("Unknown DATAVIEWER_AUTH_PROVIDER value: %s; falling back to API-key", provider_name)
     return ApiKeyProvider(os.environ.get("DATAVIEWER_API_KEY", ""))
@@ -205,3 +255,27 @@ async def require_auth(request: Request) -> dict[str, Any] | None:
         )
 
     return user
+
+
+def require_role(required_role: str) -> Callable:
+    """FastAPI dependency that enforces an app role from JWT claims.
+
+    When auth is disabled (``DATAVIEWER_AUTH_DISABLED=true``), this dependency
+    passes through without checking roles.  When auth is enabled, the user's
+    JWT ``roles`` claim must contain *required_role* or HTTP 403 is raised.
+    """
+
+    async def _check_role(
+        user: dict[str, Any] | None = Depends(require_auth),
+    ) -> dict[str, Any] | None:
+        if user is None:
+            return user
+        roles: list[str] = user.get("roles", [])
+        if required_role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return user
+
+    return _check_role

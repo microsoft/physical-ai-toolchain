@@ -2,10 +2,11 @@
  * Help overlay component showing keyboard shortcuts.
  */
 
+import { Keyboard,X } from 'lucide-react';
 import { useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
 import { Button } from '@/components/ui/button';
-import { X, Keyboard } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatShortcut, type KeyboardShortcut } from '@/hooks/use-keyboard-shortcuts';
 
 interface HelpOverlayProps {
@@ -94,9 +95,9 @@ export function HelpOverlay({ open, onClose, shortcuts = [] }: HelpOverlayProps)
           {title}
         </h3>
         <div className="grid gap-1">
-          {items.map((item, idx) => (
+          {items.map((item) => (
             <div
-              key={idx}
+              key={`${item.key}-${item.description}`}
               className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/50"
             >
               <span className="text-sm">{'description' in item ? item.description : ''}</span>
@@ -119,7 +120,10 @@ export function HelpOverlay({ open, onClose, shortcuts = [] }: HelpOverlayProps)
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      role="button"
+      tabIndex={0}
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') onClose(); }}
     >
       <Card
         className="w-full max-w-2xl max-h-[80vh] overflow-hidden"

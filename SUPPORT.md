@@ -1,6 +1,6 @@
 ---
 title: Support
-description: How to get help, report issues, and find resources for the Azure NVIDIA Robotics Reference Architecture
+description: How to get help, report issues, and find resources for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
 ms.date: 2026-03-06
 ms.topic: reference
@@ -11,7 +11,7 @@ keywords:
   - troubleshooting
 ---
 
-Thank you for using the Azure NVIDIA Robotics Reference Architecture! This document explains how to get help with issues, questions, and contributions.
+Thank you for using the Physical AI Toolchain! This document explains how to get help with issues, questions, and contributions.
 
 ## How to Get Support
 
@@ -32,8 +32,8 @@ This is an open-source reference architecture maintained by Microsoft and commun
 
 ### General Issues, Bugs, and Feature Requests
 
-1. **Search existing issues** in our [GitHub Issues](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues)
-2. **Create a new issue** if yours isn't already tracked: [New Issue](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues/new/choose)
+1. **Search existing issues** in our [GitHub Issues](https://github.com/microsoft/physical-ai-toolchain/issues)
+2. **Create a new issue** if yours isn't already tracked: [New Issue](https://github.com/microsoft/physical-ai-toolchain/issues/new/choose)
 3. **Provide details**:
    - Clear description of the problem or request
    - Steps to reproduce (for bugs)

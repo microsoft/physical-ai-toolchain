@@ -3,84 +3,82 @@
  */
 
 export {
-  useDatasets,
-  useDataset,
-  useEpisodes,
-  useEpisode,
-  datasetKeys,
-} from './use-datasets';
-
+  aiAnalysisKeys,
+  type AnnotationSuggestion,
+  type AnomalyDetectionResponse,
+  type SuggestAnnotationRequest,
+  type TrajectoryMetrics,
+  useAISuggestion,
+  useAnomalyDetection,
+  useRequestAISuggestion,
+  useTrajectoryAnalysis,
+} from './use-ai-analysis';
+export { useAnnotationWorkflow } from './use-annotation-workflow';
 export {
-  useEpisodeList,
-  useCurrentEpisode,
-  useEpisodeNavigationWithPrefetch,
-  episodeKeys,
-} from './use-episodes';
-
-export {
+  annotationKeys,
+  useAnnotationSummary,
+  useAutoAnalysis,
+  useCurrentEpisodeAutoAnalysis,
+  useDeleteAnnotation,
   useEpisodeAnnotations,
   useSaveAnnotation,
   useSaveCurrentAnnotation,
-  useDeleteAnnotation,
-  useAutoAnalysis,
-  useCurrentEpisodeAutoAnalysis,
-  useAnnotationSummary,
-  annotationKeys,
 } from './use-annotations';
-
-export {
-  useKeyboardShortcuts,
-  useAnnotationShortcuts,
-  formatShortcut,
-  type KeyboardShortcut,
-} from './use-keyboard-shortcuts';
-
-export { useAnnotationWorkflow } from './use-annotation-workflow';
-
 export {
   useBatchSelection,
   useBatchSelectionStore,
 } from './use-batch-selection';
-
 export {
-  useAISuggestion,
-  useTrajectoryAnalysis,
-  useAnomalyDetection,
-  useRequestAISuggestion,
-  aiAnalysisKeys,
-  type AnnotationSuggestion,
-  type TrajectoryMetrics,
-  type AnomalyDetectionResponse,
-  type SuggestAnnotationRequest,
-} from './use-ai-analysis';
-
-export {
-  useDashboardStats,
-  useDashboardMetrics,
+  type ActivityItem,
+  type AnnotatorStats,
   dashboardKeys,
   type DashboardStats,
-  type AnnotatorStats,
-  type ActivityItem,
+  useDashboardMetrics,
+  useDashboardStats,
 } from './use-dashboard';
-
 export {
-  useOfflineAnnotations,
+  capabilityKeys,
+  datasetKeys,
+  useCapabilities,
+  useDataset,
+  useDatasets,
+  useEpisode,
+  useEpisodes,
+} from './use-datasets';
+export {
+  episodeKeys,
+  useCurrentEpisode,
+  useEpisodeList,
+  useEpisodeNavigationWithPrefetch,
+} from './use-episodes';
+export { useExport } from './use-export';
+export {
+  jointConfigKeys,
+  useJointConfig,
+  useJointConfigDefaults,
+  useSaveJointConfig,
+  useSaveJointConfigDefaults,
+} from './use-joint-config';
+export {
+  formatShortcut,
+  type KeyboardShortcut,
+  useAnnotationShortcuts,
+  useKeyboardShortcuts,
+} from './use-keyboard-shortcuts';
+export {
+  labelKeys,
+  useAddLabelOption,
+  useCurrentEpisodeLabels,
+  useDatasetLabels,
+  useRemoveLabelOption,
+  useSaveEpisodeLabels,
+} from './use-labels';
+export {
+  detectionKeys,
+  useObjectDetection,
+} from './use-object-detection';
+export {
   type OfflineAnnotation,
+  useOfflineAnnotations,
   type UseOfflineAnnotationsResult,
 } from './use-offline-annotations';
-
-export { useExport } from './use-export';
-
-export {
-  useObjectDetection,
-  detectionKeys,
-} from './use-object-detection';
-
-export {
-  useDatasetLabels,
-  useSaveEpisodeLabels,
-  useAddLabelOption,
-  useSaveAllLabels,
-  useCurrentEpisodeLabels,
-  labelKeys,
-} from './use-labels';

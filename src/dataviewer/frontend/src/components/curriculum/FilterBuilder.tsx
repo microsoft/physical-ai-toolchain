@@ -2,10 +2,13 @@
  * Filter condition builder for curriculum generation.
  */
 
+import { Filter,Plus, X } from 'lucide-react';
 import { useCallback } from 'react';
-import { cn } from '@/lib/utils';
+
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
@@ -13,9 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Plus, X, Filter } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export type FilterField =
   | 'task_completion_rating'

@@ -2,14 +2,19 @@
  * Badge showing AI suggestion confidence level.
  */
 
-import { cn } from '@/lib/utils';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Loader2,Sparkles } from 'lucide-react';
+
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  getAISuggestionTone,
+  getSemanticToneClasses,
+} from '@/lib/semantic-state';
+import { cn } from '@/lib/utils';
 
 export interface AISuggestionBadgeProps {
   /** Confidence level 0-1 */
@@ -37,25 +42,12 @@ export function AISuggestionBadge({
   className,
   onClick,
 }: AISuggestionBadgeProps) {
-  // Determine color based on state and confidence
-  const getColorClasses = () => {
-    if (hasError) {
-      return 'bg-red-100 text-red-700 border-red-200';
-    }
-    if (isAccepted) {
-      return 'bg-green-100 text-green-700 border-green-200';
-    }
-    if (isLoading || confidence === undefined) {
-      return 'bg-gray-100 text-gray-500 border-gray-200';
-    }
-    if (confidence >= 0.8) {
-      return 'bg-blue-100 text-blue-700 border-blue-200';
-    }
-    if (confidence >= 0.5) {
-      return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-    }
-    return 'bg-orange-100 text-orange-700 border-orange-200';
-  };
+  const tone = getAISuggestionTone({
+    confidence,
+    hasError,
+    isAccepted,
+    isLoading,
+  });
 
   const getConfidenceLabel = () => {
     if (hasError) return 'Error';
@@ -85,7 +77,7 @@ export function AISuggestionBadge({
             disabled={isLoading || hasError}
             className={cn(
               'inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border transition-colors',
-              getColorClasses(),
+              getSemanticToneClasses('badge', tone),
               onClick && !isLoading && !hasError && 'hover:opacity-80 cursor-pointer',
               (isLoading || hasError) && 'cursor-default',
               className

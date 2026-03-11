@@ -5,16 +5,18 @@
  * and live preview feedback.
  */
 
-import { useState, useCallback, useRef } from 'react';
-import ReactCrop, { type Crop, type PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
+
+import { Lock, RotateCcw,Unlock } from 'lucide-react';
+import { useCallback, useRef,useState } from 'react';
+import ReactCrop, { type Crop, type PixelCrop } from 'react-image-crop';
+
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { useTransformState } from '@/stores';
+import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { useTransformState } from '@/stores';
 import type { CropRegion } from '@/types/episode-edit';
-import { Lock, Unlock, RotateCcw } from 'lucide-react';
 
 interface FrameCropToolProps {
   /** URL of the frame image to crop */

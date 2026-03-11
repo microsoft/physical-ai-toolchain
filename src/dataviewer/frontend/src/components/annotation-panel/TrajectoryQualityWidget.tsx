@@ -5,12 +5,14 @@
  * plus flag toggles for trajectory issues.
  */
 
-import { useEffect } from 'react';
-import { useAnnotationStore } from '@/stores';
+import { useCallback, useEffect } from 'react';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { StarRating } from './StarRating';
-import { FlagToggle } from './FlagToggle';
+import { useAnnotationStore } from '@/stores';
 import type { TrajectoryFlag } from '@/types';
+
+import { FlagToggle } from './FlagToggle';
+import { StarRating } from './StarRating';
 
 /**
  * Widget for annotating trajectory quality with star ratings and flags.
@@ -32,7 +34,7 @@ export function TrajectoryQualityWidget() {
 
   const trajectoryQuality = currentAnnotation?.trajectoryQuality;
 
-  const toggleFlag = (flag: TrajectoryFlag) => {
+  const toggleFlag = useCallback((flag: TrajectoryFlag) => {
     const currentFlags = trajectoryQuality?.flags ?? [];
     const hasFlag = currentFlags.includes(flag);
     updateTrajectoryQuality({
@@ -40,7 +42,7 @@ export function TrajectoryQualityWidget() {
         ? currentFlags.filter((f) => f !== flag)
         : [...currentFlags, flag],
     });
-  };
+  }, [trajectoryQuality?.flags, updateTrajectoryQuality]);
 
   // Keyboard shortcuts for overall rating
   useEffect(() => {

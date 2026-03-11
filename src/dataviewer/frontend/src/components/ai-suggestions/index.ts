@@ -5,11 +5,9 @@
  * annotation suggestions.
  */
 
-export { AISuggestionBadge } from './AISuggestionBadge';
 export type { AISuggestionBadgeProps } from './AISuggestionBadge';
-
-export { SuggestionCard } from './SuggestionCard';
-export type { SuggestionCardProps, SuggestionField } from './SuggestionCard';
-
-export { AISuggestionPanel } from './AISuggestionPanel';
+export { AISuggestionBadge } from './AISuggestionBadge';
 export type { AISuggestionPanelProps } from './AISuggestionPanel';
+export { AISuggestionPanel } from './AISuggestionPanel';
+export type { SuggestionCardProps, SuggestionField } from './SuggestionCard';
+export { SuggestionCard } from './SuggestionCard';

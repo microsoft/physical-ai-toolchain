@@ -20,6 +20,7 @@ dev = [
     "httpx>=0.28.0",
 ]
 azure = [
+    "aiohttp>=3.13.3,<4.0.0",
     "azure-storage-blob>=12.24.0",
     "azure-identity>=1.19.0",
 ]

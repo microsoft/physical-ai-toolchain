@@ -1,6 +1,7 @@
-import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
+import * as React from "react"
 
+import { getSemanticToneClasses, type SemanticTone } from "@/lib/semantic-state"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
@@ -15,22 +16,60 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
         outline: "text-foreground",
+        status: "",
+      },
+      tone: {
+        neutral: "",
+        info: "",
+        success: "",
+        warning: "",
+        danger: "",
       },
     },
+    compoundVariants: [
+      {
+        variant: "status",
+        tone: "neutral",
+        className: getSemanticToneClasses("badge", "neutral"),
+      },
+      {
+        variant: "status",
+        tone: "info",
+        className: getSemanticToneClasses("badge", "info"),
+      },
+      {
+        variant: "status",
+        tone: "success",
+        className: getSemanticToneClasses("badge", "success"),
+      },
+      {
+        variant: "status",
+        tone: "warning",
+        className: getSemanticToneClasses("badge", "warning"),
+      },
+      {
+        variant: "status",
+        tone: "danger",
+        className: getSemanticToneClasses("badge", "danger"),
+      },
+    ],
     defaultVariants: {
       variant: "default",
+      tone: "neutral",
     },
   }
 )
 
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
+    VariantProps<typeof badgeVariants> {
+  tone?: SemanticTone
+}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
+function Badge({ className, variant, tone, ...props }: BadgeProps) {
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+    <div className={cn(badgeVariants({ variant, tone }), className)} {...props} />
   )
 }
 
-export { Badge, badgeVariants }
+export { Badge }

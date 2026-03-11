@@ -2,28 +2,29 @@
  * Hook for fetching and managing AI analysis suggestions.
  */
 
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useMutation,useQuery } from '@tanstack/react-query';
+
 import {
-  getAnnotationSuggestion,
   analyzeTrajectory,
-  detectAnomalies,
   type AnnotationSuggestion,
-  type TrajectoryMetrics,
-  type AnomalyDetectionResponse,
-  type TrajectoryData,
   type AnomalyDetectionRequest,
+  type AnomalyDetectionResponse,
+  detectAnomalies,
+  getAnnotationSuggestion,
   type SuggestAnnotationRequest,
+  type TrajectoryData,
+  type TrajectoryMetrics,
 } from '@/api/ai-analysis';
 
 /** Query key factory for AI analysis */
 export const aiAnalysisKeys = {
   all: ['ai-analysis'] as const,
-  suggestion: (datasetId: string, episodeId: string) =>
-    [...aiAnalysisKeys.all, 'suggestion', datasetId, episodeId] as const,
-  trajectory: (datasetId: string, episodeId: string) =>
-    [...aiAnalysisKeys.all, 'trajectory', datasetId, episodeId] as const,
-  anomalies: (datasetId: string, episodeId: string) =>
-    [...aiAnalysisKeys.all, 'anomalies', datasetId, episodeId] as const,
+  suggestion: (datasetId: string, episodeId: string, data?: unknown) =>
+    [...aiAnalysisKeys.all, 'suggestion', datasetId, episodeId, data] as const,
+  trajectory: (datasetId: string, episodeId: string, data?: unknown) =>
+    [...aiAnalysisKeys.all, 'trajectory', datasetId, episodeId, data] as const,
+  anomalies: (datasetId: string, episodeId: string, data?: unknown) =>
+    [...aiAnalysisKeys.all, 'anomalies', datasetId, episodeId, data] as const,
 };
 
 /** Options for AI suggestion hook */
@@ -44,7 +45,7 @@ export function useAISuggestion({
   enabled = true,
 }: UseAISuggestionOptions) {
   return useQuery({
-    queryKey: aiAnalysisKeys.suggestion(datasetId, episodeId),
+    queryKey: aiAnalysisKeys.suggestion(datasetId, episodeId, trajectoryData),
     queryFn: () => {
       if (!trajectoryData) {
         throw new Error('Trajectory data required');
@@ -75,7 +76,7 @@ export function useTrajectoryAnalysis({
   enabled = true,
 }: UseTrajectoryAnalysisOptions) {
   return useQuery({
-    queryKey: aiAnalysisKeys.trajectory(datasetId, episodeId),
+    queryKey: aiAnalysisKeys.trajectory(datasetId, episodeId, trajectoryData),
     queryFn: () => {
       if (!trajectoryData) {
         throw new Error('Trajectory data required');
@@ -106,7 +107,7 @@ export function useAnomalyDetection({
   enabled = true,
 }: UseAnomalyDetectionOptions) {
   return useQuery({
-    queryKey: aiAnalysisKeys.anomalies(datasetId, episodeId),
+    queryKey: aiAnalysisKeys.anomalies(datasetId, episodeId, trajectoryData),
     queryFn: () => {
       if (!trajectoryData) {
         throw new Error('Trajectory data required');
@@ -125,18 +126,17 @@ export function useAnomalyDetection({
 export function useRequestAISuggestion() {
   return useMutation({
     mutationFn: getAnnotationSuggestion,
-    onSuccess: (data) => {
-      // Could cache the result if we had episode context
-      console.log('AI suggestion received:', data);
+    onSuccess: (_data) => {
+      // Result available via mutation return value
     },
   });
 }
 
 export type {
   AnnotationSuggestion,
-  TrajectoryMetrics,
-  AnomalyDetectionResponse,
-  TrajectoryData,
   AnomalyDetectionRequest,
+  AnomalyDetectionResponse,
   SuggestAnnotationRequest,
+  TrajectoryData,
+  TrajectoryMetrics,
 };

@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Entry point for deploying the Azure NVIDIA Robotics Reference Architecture
+description: Entry point for deploying the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-22
 ms.topic: overview
@@ -11,7 +11,7 @@ keywords:
   - onboarding
 ---
 
-Deploy the Azure NVIDIA Robotics Reference Architecture and submit your first training job. This hub guides you through setup, deployment, and verification.
+Deploy the Physical AI Toolchain and submit your first training job. This hub guides you through setup, deployment, and verification.
 
 ## 🚀 Guides
 

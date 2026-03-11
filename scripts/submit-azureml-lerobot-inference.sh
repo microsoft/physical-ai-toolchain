@@ -43,7 +43,7 @@ DATASET SOURCE:
         --from-blob               Download dataset from Azure Blob Storage
         --storage-account NAME    Azure storage account (default: from Terraform)
         --storage-container NAME  Blob container name (default: datasets)
-        --blob-prefix PREFIX      Blob path prefix (e.g., hexagon_lerobot)
+        --blob-prefix PREFIX      Blob path prefix (e.g., lerobot)
 
 AZUREML ASSET OPTIONS:
         --environment-name NAME   AzureML environment name (default: lerobot-inference-env)
@@ -96,7 +96,7 @@ EXAMPLES:
       --model-version 3 \
       --from-blob \
       --storage-account stosmorbt3dev001 \
-      --blob-prefix hexagon_lerobot \
+      --blob-prefix lerobot \
       --mlflow-enable \
       --eval-episodes 10
 

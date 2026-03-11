@@ -2,11 +2,23 @@
  * Dialog for adding a new data quality issue.
  */
 
+import { X } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { X } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import type { DataQualityIssue, DataQualityIssueType, IssueSeverity } from '@/types';
+
+import { FormSection } from './FormSection';
 
 interface AddIssueDialogProps {
   /** Whether the dialog is open */
@@ -84,25 +96,27 @@ export function AddIssueDialog({
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Issue type */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Issue Type</label>
-              <select
+            <FormSection label="Issue Type" htmlFor="issue-type">
+              <Select
                 value={type}
-                onChange={(e) => setType(e.target.value as DataQualityIssueType)}
-                className="w-full p-2 text-sm border rounded-md bg-background"
+                onValueChange={(value) => setType(value as DataQualityIssueType)}
               >
-                {issueTypes.map((t) => (
-                  <option key={t} value={t}>
-                    {t.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <SelectTrigger id="issue-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {issueTypes.map((issueType) => (
+                    <SelectItem key={issueType} value={issueType}>
+                      {issueType.replace(/-/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase())}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormSection>
 
             {/* Severity */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Severity</label>
-              <div className="flex gap-2">
+            <FormSection label="Severity" labelId="issue-severity-label">
+              <div className="flex gap-2" role="group" aria-labelledby="issue-severity-label">
                 {(['minor', 'major', 'critical'] as const).map((s) => (
                   <Button
                     key={s}
@@ -116,40 +130,47 @@ export function AddIssueDialog({
                   </Button>
                 ))}
               </div>
-            </div>
+            </FormSection>
 
             {/* Frame range */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Affected Frames</label>
-              <div className="flex gap-2 items-center">
-                <input
-                  type="number"
-                  value={frameStart}
-                  onChange={(e) => setFrameStart(parseInt(e.target.value) || 0)}
-                  min={0}
-                  className="flex-1 p-2 text-sm border rounded-md bg-background"
-                />
+            <FormSection label="Affected Frames" labelId="issue-frames-label">
+              <div className="flex gap-2 items-center" role="group" aria-labelledby="issue-frames-label">
+                <div className="flex-1 space-y-1">
+                  <span className="text-xs text-muted-foreground">Start frame</span>
+                  <Input
+                    id="issue-frame-start"
+                    type="number"
+                    aria-label="Start frame"
+                    value={frameStart}
+                    onChange={(e) => setFrameStart(parseInt(e.target.value, 10) || 0)}
+                    min={0}
+                  />
+                </div>
                 <span className="text-muted-foreground">to</span>
-                <input
-                  type="number"
-                  value={frameEnd}
-                  onChange={(e) => setFrameEnd(parseInt(e.target.value) || 0)}
-                  min={0}
-                  className="flex-1 p-2 text-sm border rounded-md bg-background"
-                />
+                <div className="flex-1 space-y-1">
+                  <span className="text-xs text-muted-foreground">End frame</span>
+                  <Input
+                    id="issue-frame-end"
+                    type="number"
+                    aria-label="End frame"
+                    value={frameEnd}
+                    onChange={(e) => setFrameEnd(parseInt(e.target.value, 10) || 0)}
+                    min={0}
+                  />
+                </div>
               </div>
-            </div>
+            </FormSection>
 
             {/* Description */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Notes (optional)</label>
-              <textarea
+            <FormSection label="Notes (optional)" htmlFor="issue-notes">
+              <Textarea
+                id="issue-notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Describe the issue..."
-                className="w-full p-2 text-sm border rounded-md bg-background min-h-[60px] resize-none"
+                className="min-h-[60px] resize-none"
               />
-            </div>
+            </FormSection>
 
             {/* Actions */}
             <div className="flex gap-2 pt-2">

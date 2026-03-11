@@ -2,9 +2,10 @@
  * Camera selector dropdown for multi-camera episode viewing.
  */
 
-import { Button } from '@/components/ui/button';
 import { Camera, ChevronDown } from 'lucide-react';
-import { useState, useRef, useEffect } from 'react';
+import { useEffect,useRef, useState } from 'react';
+
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 interface CameraSelectorProps {

@@ -8,7 +8,7 @@
     { "pattern": "^mailto:" },
     { "pattern": "^tel:" },
     {
-      "pattern": "^https://github\\.com/Azure-Samples/azure-nvidia-robotics-reference-architecture"
+      "pattern": "^https://github\\.com/microsoft/physical-ai-toolchain"
     },
     {
       "pattern": "^https://developer\\.hashicorp\\.com/"

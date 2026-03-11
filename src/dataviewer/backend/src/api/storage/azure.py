@@ -15,8 +15,7 @@ from .serializers import DateTimeEncoder
 # Azure SDK imports are optional - only required when using this adapter
 try:
     from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
-    from azure.core.pipeline.policies import RetryPolicy
-    from azure.identity import DefaultAzureCredential
+    from azure.identity.aio import DefaultAzureCredential
     from azure.storage.blob import ContentSettings
     from azure.storage.blob.aio import BlobServiceClient
 
@@ -24,7 +23,6 @@ try:
 except ImportError:
     HttpResponseError = Exception
     ResourceNotFoundError = Exception
-    RetryPolicy = None
     DefaultAzureCredential = None
     ContentSettings = None
     BlobServiceClient = None
@@ -78,24 +76,17 @@ class AzureBlobStorageAdapter(StorageAdapter):
         """Get or create the blob service client."""
         if self._client is None:
             account_url = f"https://{self.account_name}.blob.core.windows.net"
-            retry_policy = RetryPolicy(
-                retry_total=3,
-                retry_backoff_factor=0.8,
-                retry_backoff_max=60,
-            )
 
             if self.sas_token:
                 self._client = BlobServiceClient(
                     account_url=account_url,
                     credential=self.sas_token,
-                    retry_policy=retry_policy,
                 )
             else:
                 credential = DefaultAzureCredential()
                 self._client = BlobServiceClient(
                     account_url=account_url,
                     credential=credential,
-                    retry_policy=retry_policy,
                 )
 
         return self._client

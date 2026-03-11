@@ -2,9 +2,9 @@
  * Object detection component exports.
  */
 
-export { DetectionViewer } from './DetectionViewer';
-export { DetectionTimeline } from './DetectionTimeline';
-export { DetectionFilters } from './DetectionFilters';
 export { DetectionCharts } from './DetectionCharts';
-export { DetectionTab } from './DetectionTab';
+export { DetectionFilters } from './DetectionFilters';
 export { DetectionPanel } from './DetectionPanel';
+export { DetectionTab } from './DetectionTab';
+export { DetectionTimeline } from './DetectionTimeline';
+export { DetectionViewer } from './DetectionViewer';

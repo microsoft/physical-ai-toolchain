@@ -4,12 +4,17 @@
  * Supports multiple cameras, custom playback controls, and keyboard shortcuts.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactPlayer from 'react-player';
-import { useEpisodeStore, usePlaybackControls } from '@/stores';
-import { PlaybackControls } from './PlaybackControls';
-import { CameraSelector } from './CameraSelector';
+
+import { ViewerDisplayControls } from '@/components/viewer-display';
+import { buildCssFilter } from '@/lib/css-filters';
+import { computeEffectiveFps } from '@/lib/playback-utils';
 import { cn } from '@/lib/utils';
+import { useEpisodeStore, usePlaybackControls, useViewerDisplay } from '@/stores';
+
+import { CameraSelector } from './CameraSelector';
+import { PlaybackControls } from './PlaybackControls';
 
 interface VideoPlayerProps {
   /** Additional CSS classes */
@@ -34,11 +39,20 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
   const [selectedCamera, setSelectedCamera] = useState<string>('');
   const [duration, setDuration] = useState(0);
   const [isReady, setIsReady] = useState(false);
+  const { displayAdjustment, isActive: displayActive } = useViewerDisplay();
+
+  const displayFilter = useMemo(
+    () => (displayActive ? buildCssFilter(displayAdjustment) : undefined),
+    [displayAdjustment, displayActive],
+  );
 
   // Get available cameras from episode data
   const cameras = Object.keys(currentEpisode?.videoUrls ?? {});
   const videoUrl = currentEpisode?.videoUrls[selectedCamera] ?? '';
-  const fps = 30; // Default FPS, would come from dataset metadata
+
+  // Derive fps from actual video duration to handle metadata mismatches.
+  const episodeFrameCount = currentEpisode?.meta.length ?? 0;
+  const fps = computeEffectiveFps(episodeFrameCount, duration, 30);
 
   // Select first camera by default
   useEffect(() => {
@@ -78,6 +92,22 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
       playerRef.current.seekTo(currentTime, 'seconds');
     }
   }, [currentFrame, currentTime, isReady, isPlaying]);
+
+  // When starting playback, ensure the player is at the correct position
+  // to prevent restart-from-beginning when the video ended.
+  useEffect(() => {
+    if (playerRef.current && isReady && isPlaying) {
+      const internalPlayer = playerRef.current.getInternalPlayer();
+      if (internalPlayer && typeof internalPlayer.currentTime === 'number') {
+        const targetTime = currentFrame / fps;
+        if (Math.abs(internalPlayer.currentTime - targetTime) > 0.5 / fps) {
+          playerRef.current.seekTo(targetTime, 'seconds');
+        }
+      }
+    }
+  // Only trigger on play state transitions, not frame changes during playback
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, isReady]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -148,8 +178,14 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
         </span>
       </div>
 
+      {/* Viewer display settings */}
+      <ViewerDisplayControls />
+
       {/* Video player */}
-      <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
+      <div
+        className="relative aspect-video bg-black rounded-lg overflow-hidden"
+        style={displayFilter ? { filter: displayFilter } : undefined}
+      >
         {videoUrl ? (
           <ReactPlayer
             ref={playerRef}

@@ -5,15 +5,17 @@
  * managing a list of specific issues.
  */
 
+import { Plus } from 'lucide-react';
 import { useState } from 'react';
-import { useAnnotationStore, usePlaybackControls } from '@/stores';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { IssueList } from './IssueList';
-import { AddIssueDialog } from './AddIssueDialog';
-import { Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { DataQualityLevel, DataQualityIssue } from '@/types';
+import { useAnnotationStore, usePlaybackControls } from '@/stores';
+import type { DataQualityIssue,DataQualityLevel } from '@/types';
+
+import { AddIssueDialog } from './AddIssueDialog';
+import { IssueList } from './IssueList';
 
 /**
  * Widget for annotating data quality with overall rating and issue list.
@@ -88,8 +90,8 @@ export function DataQualityWidget() {
       <CardContent className="space-y-4">
         {/* Overall quality rating */}
         <div className="space-y-2">
-          <label className="text-sm font-medium">Overall Quality</label>
-          <div className="grid grid-cols-4 gap-2">
+          <span id="quality-rating-label" className="text-sm font-medium">Overall Quality</span>
+          <div className="grid grid-cols-4 gap-2" role="group" aria-labelledby="quality-rating-label">
             {ratingOptions.map((option) => (
               <Button
                 key={option.value}

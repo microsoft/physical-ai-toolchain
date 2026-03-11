@@ -16,7 +16,7 @@ from ..models.annotations import (
     TrajectoryFlag,
 )
 from ..models.datasources import EpisodeData
-from ..storage import LocalStorageAdapter
+from ..storage import LocalStorageAdapter, StorageAdapter
 
 
 class AnnotationService:
@@ -27,14 +27,21 @@ class AnnotationService:
     across storage backends.
     """
 
-    def __init__(self, base_path: str = "./data"):
+    def __init__(self, base_path: str = "./data", storage_adapter: StorageAdapter | None = None):
         """
         Initialize the annotation service.
 
         Args:
-            base_path: Base path for annotation storage.
+            base_path: Base path for local annotation storage. Ignored when
+                       storage_adapter is provided.
+            storage_adapter: Pre-configured storage adapter. When provided,
+                             base_path is ignored and this adapter is used directly.
+                             Supports LocalStorageAdapter or AzureBlobStorageAdapter.
         """
-        self._storage = LocalStorageAdapter(base_path)
+        if storage_adapter is not None:
+            self._storage = storage_adapter
+        else:
+            self._storage = LocalStorageAdapter(base_path)
 
     async def get_annotation(self, dataset_id: str, episode_idx: int) -> EpisodeAnnotationFile | None:
         """
@@ -298,10 +305,17 @@ def get_annotation_service() -> AnnotationService:
     """
     Get the global annotation service instance.
 
+    On first call, reads application config and creates the appropriate
+    storage adapter (local filesystem or Azure Blob Storage).
+
     Returns:
         AnnotationService singleton.
     """
     global _annotation_service
     if _annotation_service is None:
-        _annotation_service = AnnotationService()
+        from ..config import create_annotation_storage, get_app_config
+
+        config = get_app_config()
+        storage = create_annotation_storage(config)
+        _annotation_service = AnnotationService(storage_adapter=storage)
     return _annotation_service

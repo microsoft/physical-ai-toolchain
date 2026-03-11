@@ -5,11 +5,13 @@
  * labeled sub-task regions.
  */
 
-import { useMemo, useCallback } from 'react';
-import { useSubtaskState, usePlaybackControls, useEpisodeStore } from '@/stores';
-import { SubtaskSegmentSlider } from './SubtaskSegmentSlider';
+import { useCallback,useMemo } from 'react';
+
 import { cn } from '@/lib/utils';
+import { useEpisodeStore,usePlaybackControls, useSubtaskState } from '@/stores';
 import type { SubtaskSegment } from '@/types/episode-edit';
+
+import { SubtaskSegmentSlider } from './SubtaskSegmentSlider';
 
 interface SubtaskTimelineTrackProps {
   /** Total frames in the episode */
@@ -20,6 +22,10 @@ interface SubtaskTimelineTrackProps {
   className?: string;
   /** Callback when a segment is clicked */
   onSegmentClick?: (segment: SubtaskSegment) => void;
+  /** Active selected segment id */
+  selectedSegmentId?: string | null;
+  /** Draft graph range awaiting subtask creation */
+  draftRange?: [number, number] | null;
 }
 
 /**
@@ -39,6 +45,8 @@ export function SubtaskTimelineTrack({
   editable = false,
   className,
   onSegmentClick,
+  selectedSegmentId,
+  draftRange = null,
 }: SubtaskTimelineTrackProps) {
   const { subtasks, updateSubtask, validationErrors } = useSubtaskState();
   const { setCurrentFrame } = usePlaybackControls();
@@ -79,14 +87,24 @@ export function SubtaskTimelineTrack({
   }
 
   return (
-    <div className={cn('flex flex-col gap-1', className)}>
+    <div className={cn('flex flex-col gap-1', className)} data-keep-playback-selection="true">
       {/* Segment track */}
       <div className="relative h-6 bg-muted/50 rounded">
+        {draftRange && (
+          <div
+            className="absolute bottom-0 top-0 rounded border border-dashed border-primary/70 bg-primary/10"
+            style={{
+              left: `${frameToPercent(draftRange[0])}%`,
+              width: `${Math.max(frameToPercent(draftRange[1] - draftRange[0]), 0.5)}%`,
+            }}
+          />
+        )}
         {sortedSegments.map((segment) => {
           const left = frameToPercent(segment.frameRange[0]);
           const width = frameToPercent(
             segment.frameRange[1] - segment.frameRange[0]
           );
+          const isSelected = segment.id === selectedSegmentId;
 
           if (editable) {
             return (
@@ -96,6 +114,7 @@ export function SubtaskTimelineTrack({
                 totalFrames={totalFrames}
                 onRangeChange={(range) => handleRangeChange(segment.id, range)}
                 onClick={() => handleSegmentClick(segment)}
+                isActive={isSelected}
               />
             );
           }
@@ -103,7 +122,10 @@ export function SubtaskTimelineTrack({
           return (
             <button
               key={segment.id}
-              className="absolute top-1 bottom-1 rounded-sm transition-opacity hover:opacity-80 cursor-pointer"
+              className={cn(
+                'absolute top-1 bottom-1 rounded-sm transition-opacity hover:opacity-80 cursor-pointer',
+                isSelected && 'ring-2 ring-primary ring-offset-1 ring-offset-background',
+              )}
               style={{
                 left: `${left}%`,
                 width: `${Math.max(width, 0.5)}%`,
@@ -124,7 +146,10 @@ export function SubtaskTimelineTrack({
           {sortedSegments.map((segment) => (
             <button
               key={segment.id}
-              className="flex items-center gap-1 hover:opacity-80 transition-opacity"
+              className={cn(
+                'flex items-center gap-1 rounded px-1.5 py-0.5 hover:opacity-80 transition-opacity',
+                segment.id === selectedSegmentId && 'bg-primary/10 text-primary',
+              )}
               onClick={() => handleSegmentClick(segment)}
             >
               <div
@@ -140,8 +165,8 @@ export function SubtaskTimelineTrack({
       {/* Validation errors */}
       {validationErrors.length > 0 && (
         <div className="text-xs text-destructive">
-          {validationErrors.map((error, idx) => (
-            <div key={idx}>⚠ {error}</div>
+          {validationErrors.map((error) => (
+            <div key={error}>⚠ {error}</div>
           ))}
         </div>
       )}

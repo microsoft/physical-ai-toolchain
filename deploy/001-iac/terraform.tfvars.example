@@ -140,3 +140,25 @@ reports_archive_tier_days              = 180
 
 // DNS Zones
 // should_include_aks_dns_zone = true
+
+// Dataviewer Application (disabled by default)
+// Deploy the dataset analysis tool on Azure Container Apps.
+// Container images must be pushed to ACR before enabling.
+// should_deploy_dataviewer = false
+// dataviewer_config = {
+//   backend_image  = "acrosmorbt4dev001.azurecr.io/dataviewer-backend:latest"
+//   frontend_image = "acrosmorbt4dev001.azurecr.io/dataviewer-frontend:latest"
+// }
+
+// Public deployment with Entra ID authentication:
+// should_deploy_dataviewer = true
+// dataviewer_config = {
+//   backend_image          = "acrosmorbt4dev001.azurecr.io/dataviewer-backend:latest"
+//   frontend_image         = "acrosmorbt4dev001.azurecr.io/dataviewer-frontend:latest"
+//   should_enable_internal = false
+//   should_deploy_auth     = true
+//   redirect_uris          = [
+//     "http://localhost:5173/",
+//     "https://ca-frontend-nvidia-dev-001.westus2.azurecontainerapps.io/",
+//   ]
+// }

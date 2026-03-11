@@ -1,4 +1,5 @@
-import type { ExportResult, ExportProgress, EpisodeEditOperations } from '@/types';
+import { handleResponse, mutationHeaders, requestHeaders } from '@/lib/api-client';
+import type { EpisodeEditOperations,ExportProgress, ExportResult } from '@/types';
 
 export interface ExportPreviewStats {
   totalEpisodes: number;
@@ -17,8 +18,7 @@ export interface ExportRequestWithEdits {
   edits?: Record<number, EpisodeEditOperations>;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const DATASETS_API = `${API_BASE_URL}/api/datasets`;
+const API_BASE = '/api';
 
 /**
  * Start a synchronous export operation
@@ -27,15 +27,15 @@ export async function exportEpisodes(
   datasetId: string,
   request: ExportRequestWithEdits
 ): Promise<ExportResult> {
-  const response = await fetch(`${DATASETS_API}/${datasetId}/export`, {
+  const response = await fetch(`${API_BASE}/datasets/${datasetId}/export`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await mutationHeaders()),
+    },
     body: JSON.stringify(request),
   });
-  if (!response.ok) {
-    throw new Error(`Export failed: ${response.statusText}`);
-  }
-  return response.json();
+  return handleResponse<ExportResult>(response);
 }
 
 /**
@@ -52,12 +52,10 @@ export async function getExportPreview(
     params.set('removed_frames', removedFrames.join(','));
   }
   const response = await fetch(
-    `${DATASETS_API}/${datasetId}/export/preview?${params.toString()}`
+    `${API_BASE}/datasets/${datasetId}/export/preview?${params.toString()}`,
+    { headers: await requestHeaders() }
   );
-  if (!response.ok) {
-    throw new Error(`Preview failed: ${response.statusText}`);
-  }
-  return response.json();
+  return handleResponse<ExportPreviewStats>(response);
 }
 
 /**
@@ -71,8 +69,7 @@ export function createExportStream(
   onComplete: (result: ExportResult) => void,
   onError: (error: string) => void
 ): () => void {
-  // Using fetch with ReadableStream for SSE with POST body
-  const url = `${DATASETS_API}/${datasetId}/export/stream`;
+  const url = `${API_BASE}/datasets/${datasetId}/export/stream`;
 
   const abortController = new AbortController();
 
@@ -83,6 +80,7 @@ export function createExportStream(
         headers: {
           'Content-Type': 'application/json',
           Accept: 'text/event-stream',
+          ...(await mutationHeaders()),
         },
         body: JSON.stringify(request),
         signal: abortController.signal,

@@ -146,8 +146,17 @@ class TestApiKeyAuth:
         # Auth and CSRF passed; request was processed (not 401 or 403)
         assert resp.status_code not in (401, 403)
 
-    def test_read_endpoint_accessible_without_key(self, client_with_auth):
+    def test_read_endpoint_requires_auth(self, client_with_auth):
+        """GET endpoints require authentication when auth is enabled."""
         resp = client_with_auth.get("/api/datasets")
+        assert resp.status_code == 401
+
+    def test_read_endpoint_accessible_with_key(self, client_with_auth):
+        resp = client_with_auth.get("/api/datasets", headers={"X-API-Key": "test-secret-key"})
+        assert resp.status_code == 200
+
+    def test_csrf_endpoint_accessible_without_key(self, client_with_auth):
+        resp = client_with_auth.get("/api/csrf-token")
         assert resp.status_code == 200
 
     def test_health_accessible_without_key(self, client_with_auth):
@@ -238,6 +247,67 @@ class TestApiKeyProvider:
 
         provider = ApiKeyProvider("key")
         assert "ApiKey" in provider.www_authenticate
+
+
+# ============================================================================
+# EasyAuthProvider unit tests
+# ============================================================================
+
+
+class TestEasyAuthProvider:
+    @pytest.mark.asyncio
+    async def test_authenticate_valid_principal(self):
+        import base64
+        import json
+        from unittest.mock import MagicMock
+
+        from src.api.auth import EasyAuthProvider
+
+        provider = EasyAuthProvider()
+        claims = {
+            "claims": [
+                {"typ": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier", "val": "user-123"},
+                {"typ": "name", "val": "Test User"},
+                {"typ": "roles", "val": "Dataviewer.Admin"},
+            ]
+        }
+        encoded = base64.b64encode(json.dumps(claims).encode()).decode()
+        request = MagicMock()
+        request.headers = {"X-MS-CLIENT-PRINCIPAL": encoded}
+        result = await provider.authenticate(request)
+        assert result is not None
+        assert result["auth_method"] == "easy_auth"
+        assert "Dataviewer.Admin" in result["roles"]
+
+    @pytest.mark.asyncio
+    async def test_authenticate_missing_header(self):
+        from unittest.mock import MagicMock
+
+        from src.api.auth import EasyAuthProvider
+
+        provider = EasyAuthProvider()
+        request = MagicMock()
+        request.headers = {}
+        result = await provider.authenticate(request)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_authenticate_invalid_base64(self):
+        from unittest.mock import MagicMock
+
+        from src.api.auth import EasyAuthProvider
+
+        provider = EasyAuthProvider()
+        request = MagicMock()
+        request.headers = {"X-MS-CLIENT-PRINCIPAL": "not-valid-base64!!!"}
+        result = await provider.authenticate(request)
+        assert result is None
+
+    def test_www_authenticate_header(self):
+        from src.api.auth import EasyAuthProvider
+
+        provider = EasyAuthProvider()
+        assert "EasyAuth" in provider.www_authenticate
 
 
 # ============================================================================

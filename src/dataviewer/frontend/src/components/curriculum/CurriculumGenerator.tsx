@@ -2,19 +2,21 @@
  * Main curriculum generator page component.
  */
 
-import { useState, useCallback, useMemo } from 'react';
-import { cn } from '@/lib/utils';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { GraduationCap, RefreshCw, Save } from 'lucide-react';
+import { useCallback, useMemo,useState } from 'react';
+
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+
+import { CurriculumPreview, type EpisodePreviewItem } from './CurriculumPreview';
+import { type ExportOptions,ExportPanel } from './ExportPanel';
 import {
   FilterBuilder,
   type FilterCondition,
 } from './FilterBuilder';
-import { CurriculumPreview, type EpisodePreviewItem } from './CurriculumPreview';
-import { ExportPanel, type ExportOptions } from './ExportPanel';
-import { GraduationCap, RefreshCw, Save } from 'lucide-react';
 
 export interface CurriculumGeneratorProps {
   /** Dataset identifier */

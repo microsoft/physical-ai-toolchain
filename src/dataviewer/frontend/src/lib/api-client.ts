@@ -5,19 +5,20 @@
  */
 
 import type {
-  DatasetInfo,
-  EpisodeMeta,
-  EpisodeData,
-  EpisodeAnnotationFile,
-  EpisodeAnnotation,
   AnnotationSummary,
-  AutoQualityAnalysis,
   ApiError,
+  AutoQualityAnalysis,
+  DatasetCapabilities,
+  DatasetInfo,
+  EpisodeAnnotation,
+  EpisodeAnnotationFile,
+  EpisodeData,
+  EpisodeMeta,
 } from '@/types';
 
-const API_BASE = '/api';
+import { getAuthHeaders } from './auth-headers';
 
-const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const API_BASE = '/api';
 
 /** Cached CSRF token fetched from the server. */
 let _csrfToken: string | null = null;
@@ -47,8 +48,18 @@ async function getCsrfToken(): Promise<string> {
   return _csrfTokenFetch;
 }
 
-async function mutationHeaders(): Promise<Record<string, string>> {
-  return { 'X-CSRF-Token': await getCsrfToken() };
+export async function requestHeaders(): Promise<Record<string, string>> {
+  return { ...(await getAuthHeaders()) };
+}
+
+export async function mutationHeaders(): Promise<Record<string, string>> {
+  return { 'X-CSRF-Token': await getCsrfToken(), ...(await getAuthHeaders()) };
+}
+
+/** Reset cached CSRF token (for testing). */
+export function _resetCsrfToken(): void {
+  _csrfToken = null;
+  _csrfTokenFetch = null;
 }
 
 /**
@@ -91,7 +102,7 @@ export class ApiClientError extends Error {
 /**
  * Handle API response, throwing on error.
  */
-async function handleResponse<T>(response: Response): Promise<T> {
+export async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let error: ApiError;
     try {
@@ -122,7 +133,9 @@ async function handleResponse<T>(response: Response): Promise<T> {
  * Fetch all available datasets.
  */
 export async function fetchDatasets(): Promise<DatasetInfo[]> {
-  const response = await fetch(`${API_BASE}/datasets`);
+  const response = await fetch(`${API_BASE}/datasets`, {
+    headers: await requestHeaders(),
+  });
   return handleResponse<DatasetInfo[]>(response);
 }
 
@@ -130,8 +143,21 @@ export async function fetchDatasets(): Promise<DatasetInfo[]> {
  * Fetch a specific dataset by ID.
  */
 export async function fetchDataset(datasetId: string): Promise<DatasetInfo> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}`);
+  const response = await fetch(`${API_BASE}/datasets/${datasetId}`, {
+    headers: await requestHeaders(),
+  });
   return handleResponse<DatasetInfo>(response);
+}
+
+/**
+ * Fetch capabilities for a dataset.
+ */
+export async function fetchCapabilities(datasetId: string): Promise<DatasetCapabilities> {
+  const response = await fetch(`${API_BASE}/datasets/${datasetId}/capabilities`, {
+    headers: await requestHeaders(),
+  });
+  const data = await handleResponse<unknown>(response);
+  return transformKeys<DatasetCapabilities>(data);
 }
 
 /**
@@ -164,7 +190,9 @@ export async function fetchEpisodes(
   const query = params.toString();
   const url = `${API_BASE}/datasets/${datasetId}/episodes${query ? `?${query}` : ''}`;
 
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: await requestHeaders(),
+  });
   const data = await handleResponse<unknown>(response);
   return transformKeys<EpisodeMeta[]>(data);
 }
@@ -177,7 +205,8 @@ export async function fetchEpisode(
   episodeIndex: number
 ): Promise<EpisodeData> {
   const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}`
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}`,
+    { headers: await requestHeaders() }
   );
   const data = await handleResponse<unknown>(response);
   return transformKeys<EpisodeData>(data);
@@ -195,7 +224,8 @@ export async function fetchAnnotations(
   episodeIndex: number
 ): Promise<EpisodeAnnotationFile> {
   const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
+    { headers: await requestHeaders() }
   );
   return handleResponse<EpisodeAnnotationFile>(response);
 }
@@ -265,7 +295,43 @@ export async function fetchAnnotationSummary(
   datasetId: string
 ): Promise<AnnotationSummary> {
   const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/annotations/summary`
+    `${API_BASE}/datasets/${datasetId}/annotations/summary`,
+    { headers: await requestHeaders() }
   );
   return handleResponse<AnnotationSummary>(response);
+}
+
+// ============================================================================
+// Cache Stats API
+// ============================================================================
+
+export interface CacheStats {
+  capacity: number;
+  size: number;
+  hits: number;
+  misses: number;
+  hitRate: number;
+  totalBytes: number;
+  maxMemoryBytes: number;
+}
+
+/**
+ * Fetch episode cache performance metrics.
+ */
+export async function fetchCacheStats(): Promise<CacheStats> {
+  const response = await fetch(`${API_BASE}/datasets/cache/stats`, {
+    headers: await requestHeaders(),
+  });
+  const data = await handleResponse<unknown>(response);
+  return transformKeys<CacheStats>(data);
+}
+
+/**
+ * Warm the episode cache for a dataset by preloading the first N episodes.
+ */
+export async function warmCache(datasetId: string, count = 5): Promise<void> {
+  await fetch(`${API_BASE}/datasets/${datasetId}/cache/warm?count=${count}`, {
+    method: 'POST',
+    headers: await mutationHeaders(),
+  });
 }

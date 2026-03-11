@@ -24,8 +24,8 @@ cd backend
 uv venv --python 3.11
 source .venv/bin/activate
 
-# Install dependencies
-uv pip install -e ".[dev,analysis,export]"
+# Install dependencies (include 'azure' extra for blob storage support)
+uv pip install -e ".[dev,analysis,export,azure]"
 ```
 
 ### Frontend Setup
@@ -37,13 +37,127 @@ npm install
 
 ## Configuration
 
-Create or edit `backend/.env` to configure your data path:
+Copy `backend/.env.example` to `backend/.env` and set values for your environment.
+
+### Local File Storage (default)
 
 ```env
-# Path to the directory containing datasets
-# Each subdirectory is treated as a dataset_id
+HMI_STORAGE_BACKEND=local
 HMI_DATA_PATH=/path/to/your/datasets
 ```
+
+### Azure Blob Storage
+
+Use this mode when datasets live in Azure Blob Storage. Authentication uses
+[DefaultAzureCredential](https://learn.microsoft.com/azure/developer/python/sdk/authentication-overview),
+which supports managed identity, workload identity, and Azure CLI credentials
+automatically — no SAS token required in AKS or Container Apps.
+
+```env
+HMI_STORAGE_BACKEND=azure
+AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
+AZURE_STORAGE_DATASET_CONTAINER=datasets
+AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
+# Leave AZURE_STORAGE_SAS_TOKEN unset to use managed identity (MSI)
+```
+
+Expected blob structure:
+
+```text
+{dataset_id}/meta/info.json
+{dataset_id}/meta/tasks.parquet
+{dataset_id}/data/chunk-000/file-000.parquet
+{dataset_id}/videos/{camera}/chunk-000/file-000.mp4
+{dataset_id}/annotations/episodes/episode_000000.json
+```
+
+### Full Environment Variable Reference
+
+| Variable | Default | Description |
+|---|---|---|
+| `HMI_STORAGE_BACKEND` | `local` | Storage backend: `local` or `azure` |
+| `HMI_DATA_PATH` | `./data` | Local dataset directory (local mode) |
+| `AZURE_STORAGE_ACCOUNT_NAME` | — | Azure Storage account name (azure mode) |
+| `AZURE_STORAGE_DATASET_CONTAINER` | — | Blob container for dataset files |
+| `AZURE_STORAGE_ANNOTATION_CONTAINER` | — | Blob container for annotations (defaults to dataset container) |
+| `AZURE_STORAGE_SAS_TOKEN` | — | SAS token (omit to use DefaultAzureCredential / MSI) |
+| `BACKEND_HOST` | `127.0.0.1` | Bind address (`0.0.0.0` for containers) |
+| `BACKEND_PORT` | `8000` | API server port |
+| `FRONTEND_PORT` | `5173` | Dev server port |
+| `CORS_ORIGINS` | localhost ports | Comma-separated allowed CORS origins |
+
+## 🔒 Authentication with Entra ID
+
+The application supports Microsoft Entra ID (Azure AD) authentication for public-facing deployments. When auth is disabled (the default for local development), all requests bypass authentication. When enabled, the frontend uses MSAL.js to acquire tokens via PKCE, and the backend validates JWT tokens against the Entra ID JWKS endpoint.
+
+### Entra ID Prerequisites
+
+1. An [Azure AD app registration](https://learn.microsoft.com/entra/identity-platform/quickstart-register-app) with:
+   - **Single-page application** redirect URI set to your frontend URL (e.g., `http://localhost:5173` for local dev, `https://your-app.azurecontainerapps.io` for production)
+   - An **API scope** named `access_as_user` under "Expose an API" (`api://<client-id>/access_as_user`)
+   - Optional **App roles** defined for role-based access control (e.g., `Dataviewer.Viewer`, `Dataviewer.Annotator`, `Dataviewer.Admin`)
+
+2. Note the **Application (client) ID** and **Directory (tenant) ID** from the app registration.
+
+### Backend Configuration
+
+Set these environment variables in `backend/.env` (or as container environment variables):
+
+```env
+DATAVIEWER_AUTH_DISABLED=false
+DATAVIEWER_AUTH_PROVIDER=azure_ad
+DATAVIEWER_AZURE_TENANT_ID=<your-tenant-id>
+DATAVIEWER_AZURE_CLIENT_ID=<your-client-id>
+DATAVIEWER_SECURE_COOKIES=true   # Set to true when behind HTTPS
+```
+
+The backend validates incoming `Authorization: Bearer <token>` headers using RS256 and the Entra ID JWKS endpoint. When `DATAVIEWER_AUTH_DISABLED=true` (default), all authentication checks are bypassed.
+
+### Frontend Configuration
+
+The frontend uses build-time environment variables to configure MSAL.js. Set these before building:
+
+```env
+VITE_AZURE_CLIENT_ID=<your-client-id>
+VITE_AZURE_TENANT_ID=<your-tenant-id>
+```
+
+When `VITE_AZURE_CLIENT_ID` is set, the app wraps in an `MsalProvider` and attaches Bearer tokens to all API requests. When unset, MSAL is not initialized and the app runs without authentication (suitable for VPN-only access).
+
+### Docker Compose with Auth
+
+```bash
+export DATAVIEWER_AUTH_DISABLED=false
+export VITE_AZURE_CLIENT_ID=<your-client-id>
+export VITE_AZURE_TENANT_ID=<your-tenant-id>
+docker compose up --build
+```
+
+The frontend Dockerfile passes `VITE_AZURE_CLIENT_ID` and `VITE_AZURE_TENANT_ID` as build arguments. The backend receives `DATAVIEWER_AUTH_DISABLED` as a runtime environment variable.
+
+### Auth Environment Variable Reference
+
+| Variable | Location | Description |
+|---|---|---|
+| `DATAVIEWER_AUTH_DISABLED` | Backend | Set to `false` to enable auth (`true` disables all checks) |
+| `DATAVIEWER_AUTH_PROVIDER` | Backend | Auth provider: `apikey`, `azure_ad`, or `auth0` |
+| `DATAVIEWER_AZURE_TENANT_ID` | Backend | Entra ID tenant ID (GUID) |
+| `DATAVIEWER_AZURE_CLIENT_ID` | Backend | App registration client ID (GUID) |
+| `DATAVIEWER_SECURE_COOKIES` | Backend | Set to `true` for HTTPS deployments |
+| `VITE_AZURE_CLIENT_ID` | Frontend (build-time) | Same client ID — enables MSAL.js when set |
+| `VITE_AZURE_TENANT_ID` | Frontend (build-time) | Same tenant ID — used for authority URL |
+
+### Token Flow
+
+```text
+Browser → Entra ID (MSAL.js PKCE) → access_token
+   ↓
+   Bearer token → FastAPI backend (JWT validation)
+   ↓
+   Backend → Azure Storage (Managed Identity, not user token)
+```
+
+The backend accesses Azure Storage using managed identity, not the user's token. User authentication and storage authentication are independent.
 
 ## Running the Application
 
@@ -62,11 +176,6 @@ This launches both backend and frontend in the correct order, with health checki
 ./start.sh --frontend  # Start frontend only
 ./start.sh --help      # Show all options
 ```
-
-**Environment variables:**
-
-- `BACKEND_PORT` - Backend port (default: 8000)
-- `FRONTEND_PORT` - Frontend port (default: 5173)
 
 ### Manual Start
 
@@ -87,25 +196,84 @@ npm run dev
 
 The application will be available at `http://localhost:5173`.
 
+## Container Deployment
+
+### Docker Compose (local)
+
+```bash
+# Local storage mode (mount datasets directory)
+HMI_LOCAL_DATA_PATH=/path/to/datasets docker compose up --build
+
+# Azure Blob Storage mode
+export HMI_STORAGE_BACKEND=azure
+export AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
+export AZURE_STORAGE_DATASET_CONTAINER=datasets
+export AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
+docker compose up --build
+```
+
+### Azure Kubernetes Service (AKS) / Container Apps
+
+For AKS with workload identity or Container Apps with managed identity, set:
+
+```env
+HMI_STORAGE_BACKEND=azure
+AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
+AZURE_STORAGE_DATASET_CONTAINER=datasets
+BACKEND_HOST=0.0.0.0
+CORS_ORIGINS=https://your-frontend-url.example.com
+```
+
+`AZURE_STORAGE_SAS_TOKEN` is **not** needed — `DefaultAzureCredential` automatically
+uses the pod/container managed identity when running in Azure.
+
+### Building Images
+
+```bash
+# Backend
+docker build -t dataviewer-backend ./backend
+
+# Frontend
+docker build -t dataviewer-frontend ./frontend
+```
+
 ## Development
 
 ### Backend Development
 
 ```bash
-# Run tests
 cd backend
+source .venv/bin/activate
+
+# Run tests
 pytest
 
 # Lint
 ruff check src/
+
+# Lint with auto-fix
+ruff check src/ --fix
 ```
 
 ### Frontend Development
 
+All frontend validation runs through npm scripts in `src/dataviewer/frontend/`.
+
 ```bash
 cd frontend
-npm run lint
-npm run build
+
+# Full validation (type-check + lint + test)
+npm run validate
+
+# Individual checks
+npm run type-check   # TypeScript compilation
+npm run lint         # ESLint
+npm run lint:fix     # ESLint with auto-fix
+npm run test         # Vitest unit tests
+npm run test:watch   # Vitest in watch mode
+npm run format       # Prettier check
+npm run format:fix   # Prettier auto-fix
+npm run build        # Production build
 ```
 
 ## API Documentation

@@ -8,6 +8,8 @@
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
     --primary: 222.2 47.4% 11.2%;
     --primary-foreground: 210 40% 98%;
     --secondary: 210 40% 96.1%;
@@ -22,6 +24,37 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
     --radius: 0.5rem;
+
+    --status-neutral: 215 16% 47%;
+    --status-neutral-foreground: 222 47% 20%;
+    --status-neutral-subtle: 210 40% 96.1%;
+    --status-neutral-border: 214 32% 88%;
+
+    --status-info: 217 91% 60%;
+    --status-info-foreground: 221 83% 32%;
+    --status-info-subtle: 214 95% 93%;
+    --status-info-border: 214 89% 84%;
+
+    --status-success: 142 71% 45%;
+    --status-success-foreground: 142 72% 24%;
+    --status-success-subtle: 138 76% 97%;
+    --status-success-border: 141 54% 84%;
+
+    --status-warning: 35 92% 52%;
+    --status-warning-foreground: 27 96% 32%;
+    --status-warning-subtle: 47 100% 96%;
+    --status-warning-border: 40 94% 82%;
+
+    --status-danger: 0 84% 60%;
+    --status-danger-foreground: 0 72% 35%;
+    --status-danger-subtle: 0 93% 94%;
+    --status-danger-border: 0 85% 88%;
+
+    --chart-1: 221 83% 53%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 32 95% 44%;
+    --chart-4: 271 81% 56%;
+    --chart-5: 343 75% 55%;
   }
 }
 

@@ -2,14 +2,15 @@
  * TanStack Query hooks for object detection.
  */
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
-import { runDetection, getDetections, clearDetections } from '@/api/detection';
-import { useDatasetStore, useEpisodeStore, useEditDirtyState } from '@/stores';
+
+import { clearDetections,getDetections, runDetection } from '@/api/detection';
+import { useDatasetStore, useEditDirtyState,useEpisodeStore } from '@/stores';
 import type {
+  DetectionFilters,
   DetectionRequest,
   EpisodeDetectionSummary,
-  DetectionFilters,
 } from '@/types/detection';
 
 /**
@@ -58,15 +59,14 @@ export function useObjectDetection() {
   // Run detection mutation
   const runMutation = useMutation({
     mutationFn: (request: DetectionRequest) => {
-      console.log('[useObjectDetection] Running detection', { datasetId, episodeIdx, request });
       return runDetection(datasetId, episodeIdx, request);
     },
     onSuccess: (data) => {
-      console.log('[useObjectDetection] Detection success', { totalDetections: data.total_detections });
       queryClient.setQueryData(detectionKeys.episode(datasetId, episodeIdx), data);
       setNeedsRerun(false);
     },
     onError: (error) => {
+      // eslint-disable-next-line no-console
       console.error('[useObjectDetection] Detection failed', error);
     },
   });

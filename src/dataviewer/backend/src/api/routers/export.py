@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..auth import require_auth
 from ..csrf import require_csrf_token
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.hdf5_exporter import (
@@ -107,7 +106,7 @@ class ExportResultResponse(BaseModel):
 @router.post(
     "/{dataset_id}/export",
     response_model=ExportResultResponse,
-    dependencies=[Depends(require_auth), Depends(require_csrf_token)],
+    dependencies=[Depends(require_csrf_token)],
 )
 async def export_episodes(
     dataset_id: str = Depends(validated_dataset_id),
@@ -221,7 +220,7 @@ async def export_episodes(
         )
 
 
-@router.post("/{dataset_id}/export/stream", dependencies=[Depends(require_auth), Depends(require_csrf_token)])
+@router.post("/{dataset_id}/export/stream", dependencies=[Depends(require_csrf_token)])
 async def export_episodes_stream(
     dataset_id: str = Depends(validated_dataset_id),
     request: ExportRequest = ...,

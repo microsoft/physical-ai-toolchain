@@ -9,7 +9,6 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..auth import require_auth
 from ..csrf import require_csrf_token
 from ..services import (
     AnomalyDetector,
@@ -154,7 +153,7 @@ class AnnotationSuggestion(BaseModel):
 @router.post(
     "/trajectory-analysis",
     response_model=TrajectoryMetricsResponse,
-    dependencies=[Depends(require_auth), Depends(require_csrf_token)],
+    dependencies=[Depends(require_csrf_token)],
 )
 async def analyze_trajectory(data: TrajectoryData) -> TrajectoryMetricsResponse:
     """
@@ -182,7 +181,7 @@ async def analyze_trajectory(data: TrajectoryData) -> TrajectoryMetricsResponse:
 @router.post(
     "/anomaly-detection",
     response_model=AnomalyDetectionResponse,
-    dependencies=[Depends(require_auth), Depends(require_csrf_token)],
+    dependencies=[Depends(require_csrf_token)],
 )
 async def detect_anomalies(request: AnomalyDetectionRequest) -> AnomalyDetectionResponse:
     """
@@ -224,7 +223,7 @@ async def detect_anomalies(request: AnomalyDetectionRequest) -> AnomalyDetection
 @router.post(
     "/cluster",
     response_model=ClusterResponse,
-    dependencies=[Depends(require_auth), Depends(require_csrf_token)],
+    dependencies=[Depends(require_csrf_token)],
 )
 async def cluster_episodes(request: ClusterRequest) -> ClusterResponse:
     """
@@ -259,7 +258,7 @@ async def cluster_episodes(request: ClusterRequest) -> ClusterResponse:
 @router.post(
     "/suggest-annotation",
     response_model=AnnotationSuggestion,
-    dependencies=[Depends(require_auth), Depends(require_csrf_token)],
+    dependencies=[Depends(require_csrf_token)],
 )
 async def suggest_annotation(request: SuggestAnnotationRequest) -> AnnotationSuggestion:
     """

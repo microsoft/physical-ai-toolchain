@@ -1,6 +1,6 @@
 ---
 title: Deployment Guide
-description: Infrastructure deployment and cluster configuration for the Azure NVIDIA Robotics Reference Architecture
+description: Infrastructure deployment and cluster configuration for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-22
 ms.topic: overview

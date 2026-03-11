@@ -1,6 +1,6 @@
 ---
 title: Repository Architecture
-description: Current state analysis and target architecture for the Azure NVIDIA Robotics Reference Architecture, organized around physical AI lifecycle domains with Agent Skill specifications.
+description: Current state analysis and target architecture for the Physical AI Toolchain, organized around physical AI lifecycle domains with Agent Skill specifications.
 ms.date: 2026-02-24
 ms.topic: concept
 ---
@@ -220,7 +220,7 @@ A training domain specification might define:
 ## Proposed Directory Structure
 
 ```text
-azure-nvidia-robotics-reference-architecture/
+physical-ai-toolchain/
 ├── infrastructure/                        # Shared Azure IaC and cluster setup
 │   ├── terraform/                         # Terraform modules and root configurations
 │   ├── setup/                             # Post-IaC Kubernetes and OSMO setup scripts

@@ -35,13 +35,13 @@ Documentation ownership maps areas to responsible teams. The `.github/CODEOWNERS
 
 | Area                                           | Owner                                                      |
 |------------------------------------------------|------------------------------------------------------------|
-| `/docs/**/*.md`                                | Repository maintainers (`@Azure-Samples/edge-ai-core-dev`) |
-| `/deploy/**/README.md`                         | Repository maintainers (`@Azure-Samples/edge-ai-core-dev`) |
-| `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md` | Repository maintainers (`@Azure-Samples/edge-ai-core-dev`) |
-| Root `README.md`                               | Repository maintainers (`@Azure-Samples/edge-ai-core-dev`) |
+| `/docs/**/*.md`                                | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
+| `/deploy/**/README.md`                         | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
+| `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md` | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
+| Root `README.md`                               | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
 
 > [!TIP]
-> Full role definitions and governance structure are tracked in [#98](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues/98) and [#99](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues/99). Current CODEOWNERS configuration uses the `@Azure-Samples/edge-ai-core-dev` team as code owners for all documentation paths.
+> Full role definitions and governance structure are tracked in [#98](https://github.com/microsoft/physical-ai-toolchain/issues/98) and [#99](https://github.com/microsoft/physical-ai-toolchain/issues/99). Current CODEOWNERS configuration uses the `@microsoft/edge-ai-core-dev` team as code owners for all documentation paths.
 
 ## Review Process
 
@@ -68,7 +68,7 @@ Documentation freshness is tracked through the `ms.date` frontmatter field.
 
 * Update `ms.date` on every edit to a Markdown file.
 * A full documentation review occurs at each milestone release. Maintainers verify all guides against current deployment behavior and update `ms.date` for reviewed files.
-* Report stale or inaccurate content using the [documentation issue template](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues/new?template=05-documentation.yml). Include the file path and a description of the inaccuracy.
+* Report stale or inaccurate content using the [documentation issue template](https://github.com/microsoft/physical-ai-toolchain/issues/new?template=05-documentation.yml). Include the file path and a description of the inaccuracy.
 
 > [!NOTE]
 > Automated `ms.date` freshness checking runs in two contexts:
@@ -158,7 +158,7 @@ Breaking changes require explicit communication and migration support:
 
 * [Pull Request Process](pull-request-process.md) - PR workflow, reviewer assignment, approval criteria
 * [Contributing Guide](README.md) - Prerequisites, workflow, commit messages
-* [Documentation Issue Template](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues/new?template=05-documentation.yml) - Report stale or inaccurate content
+* [Documentation Issue Template](https://github.com/microsoft/physical-ai-toolchain/issues/new?template=05-documentation.yml) - Report stale or inaccurate content
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

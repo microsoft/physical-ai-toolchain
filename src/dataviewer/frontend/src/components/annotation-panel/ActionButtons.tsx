@@ -2,14 +2,15 @@
  * Action buttons for the annotation panel workflow.
  */
 
-import { Button } from '@/components/ui/button';
 import {
-  Save,
-  SkipForward,
+  AlertCircle,
   Flag,
   Loader2,
-  AlertCircle,
+  Save,
+  SkipForward,
 } from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 interface ActionButtonsProps {

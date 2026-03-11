@@ -14,7 +14,7 @@ keywords:
 
 ## 📋 Overview
 
-Security documentation for the Azure NVIDIA Robotics Reference Architecture covering threat analysis, deployment hardening, and vulnerability reporting.
+Security documentation for the Physical AI Toolchain covering threat analysis, deployment hardening, and vulnerability reporting.
 
 ## 📄 Documents
 

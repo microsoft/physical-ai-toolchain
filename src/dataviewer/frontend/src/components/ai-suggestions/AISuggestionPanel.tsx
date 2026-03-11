@@ -2,19 +2,21 @@
  * Panel displaying AI suggestions for the current episode.
  */
 
-import { useState, useCallback } from 'react';
-import { cn } from '@/lib/utils';
+import { AlertCircle,RefreshCw, Sparkles } from 'lucide-react';
+import { useCallback,useState } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Sparkles, RefreshCw, AlertCircle } from 'lucide-react';
-import { AISuggestionBadge } from './AISuggestionBadge';
-import { SuggestionCard, type SuggestionField } from './SuggestionCard';
 import {
+  type SuggestAnnotationRequest,
   useAISuggestion,
   useRequestAISuggestion,
-  type SuggestAnnotationRequest,
 } from '@/hooks/use-ai-analysis';
+import { cn } from '@/lib/utils';
+
+import { AISuggestionBadge } from './AISuggestionBadge';
+import { SuggestionCard, type SuggestionField } from './SuggestionCard';
 
 export interface AISuggestionPanelProps {
   /** Dataset identifier */

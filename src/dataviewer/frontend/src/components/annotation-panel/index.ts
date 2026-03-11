@@ -2,17 +2,17 @@
  * Annotation panel component exports.
  */
 
+export { ActionButtons } from './ActionButtons';
+export { AddAnomalyDialog } from './AddAnomalyDialog';
+export { AddIssueDialog } from './AddIssueDialog';
+export { AnomalyList } from './AnomalyList';
+export { AnomalyWidget } from './AnomalyWidget';
+export { DataQualityWidget } from './DataQualityWidget';
+export { FlagToggle } from './FlagToggle';
+export { IssueList } from './IssueList';
+export { LabelFilter } from './LabelFilter';
+export { LabelPanel } from './LabelPanel';
+export { StarRating } from './StarRating';
 export { TaskCompletenessWidget } from './TaskCompletenessWidget';
 export { TrajectoryQualityWidget } from './TrajectoryQualityWidget';
-export { StarRating } from './StarRating';
-export { FlagToggle } from './FlagToggle';
-export { DataQualityWidget } from './DataQualityWidget';
-export { IssueList } from './IssueList';
-export { AddIssueDialog } from './AddIssueDialog';
-export { AnomalyWidget } from './AnomalyWidget';
-export { AnomalyList } from './AnomalyList';
-export { AddAnomalyDialog } from './AddAnomalyDialog';
-export { ActionButtons } from './ActionButtons';
 export { UnsavedChangesDialog } from './UnsavedChangesDialog';
-export { LabelPanel } from './LabelPanel';
-export { LabelFilter } from './LabelFilter';

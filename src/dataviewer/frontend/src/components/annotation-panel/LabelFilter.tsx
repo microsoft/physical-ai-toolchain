@@ -2,11 +2,12 @@
  * LabelFilter - filter episodes by label in the sidebar.
  */
 
-import { Badge } from '@/components/ui/badge';
-import { useLabelStore } from '@/stores/label-store';
 import { X } from 'lucide-react';
 
-export function LabelFilter() {
+import { Badge } from '@/components/ui/badge';
+import { useLabelStore } from '@/stores/label-store';
+
+export function LabelFilter({ compact = false }: { compact?: boolean }) {
     const availableLabels = useLabelStore((state) => state.availableLabels);
     const filterLabels = useLabelStore((state) => state.filterLabels);
     const toggleFilterLabel = useLabelStore((state) => state.toggleFilterLabel);
@@ -15,7 +16,7 @@ export function LabelFilter() {
     if (!isLoaded || availableLabels.length === 0) return null;
 
     return (
-        <div className="px-2 py-2 border-b space-y-1">
+        <div className={compact ? 'space-y-1' : 'space-y-1 border-b px-2 py-2'}>
             <div className="text-xs font-medium text-muted-foreground">Filter by label</div>
             <div className="flex flex-wrap gap-1">
                 {availableLabels.map((label) => {

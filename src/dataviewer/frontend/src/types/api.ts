@@ -44,6 +44,8 @@ export interface DatasetInfo {
   features: Record<string, FeatureSchema>;
   /** Available tasks in the dataset */
   tasks: TaskInfo[];
+  /** Parent folder group for nested datasets */
+  group?: string | null;
 }
 
 /** Capabilities available for a dataset */
@@ -52,6 +54,10 @@ export interface DatasetCapabilities {
   hdf5Support: boolean;
   /** Whether this dataset has HDF5 episode files */
   hasHdf5Files: boolean;
+  /** Whether pyarrow is installed and available on backend */
+  lerobotSupport: boolean;
+  /** Whether this dataset is in LeRobot parquet format */
+  isLerobotDataset: boolean;
   /** Number of episodes detected */
   episodeCount: number;
 }
@@ -102,6 +108,8 @@ export interface EpisodeData {
   meta: EpisodeMeta;
   /** Video URLs by camera name */
   videoUrls: Record<string, string>;
+  /** Available camera names */
+  cameras: string[];
   /** Trajectory data points */
   trajectoryData: TrajectoryPoint[];
 }

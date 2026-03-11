@@ -128,6 +128,7 @@ class LeRobotLoader:
         self.base_path = Path(base_path)
         self._info: LeRobotDatasetInfo | None = None
         self._episode_index_cache: dict[int, tuple[int, int]] = {}  # episode -> (chunk, file)
+        self._episodes_meta_cache: dict[int, dict[str, Any]] | None = None
 
     def _load_info(self) -> LeRobotDatasetInfo:
         """Load and cache dataset info from meta/info.json."""
@@ -243,6 +244,61 @@ class LeRobotLoader:
         info = self._load_info()
         return list(range(info.total_episodes))
 
+    def list_episodes_with_meta(self) -> dict[int, dict[str, Any]]:
+        """
+        Load per-episode metadata from meta/episodes/ parquet files.
+
+        Reads length and task_index for all episodes from the episode metadata
+        parquet files, avoiding the full-frame data parquet files. Results are
+        cached in-memory after the first call.
+
+        Returns:
+            Dict mapping episode_index -> {length, task_index, cameras, fps, robot_type}.
+            Falls back to zero-filled placeholders if meta/episodes/ is absent.
+        """
+        if self._episodes_meta_cache is not None:
+            return self._episodes_meta_cache
+
+        info = self._load_info()
+        cameras = [k for k, v in info.features.items() if v.get("dtype") == "video"]
+        meta_episodes_dir = self.base_path / "meta" / "episodes"
+        result: dict[int, dict[str, Any]] = {}
+
+        if meta_episodes_dir.exists():
+            for chunk_dir in sorted(meta_episodes_dir.iterdir()):
+                if not chunk_dir.is_dir() or not chunk_dir.name.startswith("chunk-"):
+                    continue
+                for parquet_file in sorted(chunk_dir.glob("*.parquet")):
+                    try:
+                        table = pq.read_table(parquet_file)
+                        df = table.to_pandas()
+                        for _, row in df.iterrows():
+                            idx = int(row["episode_index"]) if "episode_index" in df.columns else int(row.name)
+                            result[idx] = {
+                                "length": int(row.get("length", 0)),
+                                "task_index": int(row.get("task_index", 0)),
+                                "cameras": cameras,
+                                "fps": info.fps,
+                                "robot_type": info.robot_type,
+                            }
+                    except Exception:
+                        continue
+
+        if not result:
+            result = {
+                idx: {
+                    "length": 0,
+                    "task_index": 0,
+                    "cameras": cameras,
+                    "fps": info.fps,
+                    "robot_type": info.robot_type,
+                }
+                for idx in range(info.total_episodes)
+            }
+
+        self._episodes_meta_cache = result
+        return result
+
     def load_episode(self, episode_index: int) -> LeRobotEpisodeData:
         """
         Load episode data from parquet files.
@@ -347,16 +403,27 @@ class LeRobotLoader:
         """
         Get metadata for an episode without loading full data.
 
+        Reads from meta/episodes/ parquet files when available, avoiding the
+        full frame data parquet. Falls back to the data parquet only when the
+        episodes metadata directory is absent.
+
         Args:
             episode_index: Episode index.
 
         Returns:
             Dictionary with episode metadata.
         """
+        meta_episodes_dir = self.base_path / "meta" / "episodes"
+        if meta_episodes_dir.exists():
+            episodes_meta = self.list_episodes_with_meta()
+            if episode_index in episodes_meta:
+                result = episodes_meta[episode_index].copy()
+                result["episode_index"] = episode_index
+                return result
+
         info = self._load_info()
         chunk_idx, file_idx = self._find_episode_location(episode_index)
 
-        # Load minimal data from parquet
         data_path = self._format_path(info.data_path, chunk_idx, file_idx)
         full_path = self.base_path / data_path
 
@@ -370,7 +437,6 @@ class LeRobotLoader:
             length = len(df)
             task_index = int(df["task_index"].iloc[0]) if "task_index" in df.columns else 0
 
-            # Find cameras from video features
             cameras: list[str] = []
             for feature_name, feature_info in info.features.items():
                 if feature_info.get("dtype") == "video":

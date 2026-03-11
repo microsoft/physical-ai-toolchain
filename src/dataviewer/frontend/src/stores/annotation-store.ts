@@ -4,12 +4,13 @@
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+
 import type {
+  Anomaly,
+  DataQualityAnnotation,
   EpisodeAnnotation,
   TaskCompletenessAnnotation,
   TrajectoryQualityAnnotation,
-  DataQualityAnnotation,
-  Anomaly,
 } from '@/types';
 
 interface AnnotationState {

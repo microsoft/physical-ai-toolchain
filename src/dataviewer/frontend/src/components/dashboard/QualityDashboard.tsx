@@ -2,17 +2,19 @@
  * Main quality dashboard page component.
  */
 
+import { AlertCircle, RefreshCw } from 'lucide-react';
+
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useDashboardMetrics } from '@/hooks/use-dashboard';
 import { cn } from '@/lib/utils';
+
+import { ActivityFeed } from './ActivityFeed';
+import { AnnotatorLeaderboard } from './AnnotatorLeaderboard';
+import { IssuesSummary } from './IssuesSummary';
 import { ProgressOverview } from './ProgressOverview';
 import { RatingDistribution } from './RatingDistribution';
-import { IssuesSummary } from './IssuesSummary';
-import { AnnotatorLeaderboard } from './AnnotatorLeaderboard';
-import { ActivityFeed } from './ActivityFeed';
-import { useDashboardMetrics } from '@/hooks/use-dashboard';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { AlertCircle, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 
 export interface QualityDashboardProps {
   /** Dataset identifier */

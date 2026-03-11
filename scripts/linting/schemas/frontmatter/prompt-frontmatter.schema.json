@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/schemas/prompt-frontmatter.schema.json",
+  "$id": "https://github.com/microsoft/physical-ai-toolchain/schemas/prompt-frontmatter.schema.json",
   "title": "Prompt File Frontmatter Schema",
   "description": "Frontmatter schema for .prompt.md files per VS Code Copilot specification",
   "type": "object",

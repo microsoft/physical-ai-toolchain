@@ -3,6 +3,6 @@
  */
 
 export * from './annotations';
-export * from './datasources';
 export * from './api';
+export * from './datasources';
 export * from './episode-edit';

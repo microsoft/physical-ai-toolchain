@@ -2,9 +2,9 @@
  * Detection filter controls.
  */
 
-import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import type { DetectionFilters as FilterState } from '@/types/detection';
 
 interface DetectionFiltersProps {

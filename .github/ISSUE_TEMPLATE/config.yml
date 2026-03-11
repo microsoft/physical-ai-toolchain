@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name:  Documentation
-    url: https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture#readme
+    url: https://github.com/microsoft/physical-ai-toolchain#readme
     about: Read the project documentation
   - name: ☁️ Azure Support
     url: https://azure.microsoft.com/support/

@@ -2,10 +2,11 @@
  * Progress overview card showing annotation completion status.
  */
 
-import { cn } from '@/lib/utils';
+import { CheckCircle2, Clock, FileText, TrendingUp } from 'lucide-react';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle2, Clock, FileText, TrendingUp } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export interface ProgressOverviewProps {
   /** Total number of episodes */

@@ -5,8 +5,6 @@ Tests dataset info loading, episode listing, episode data loading,
 video path resolution, and camera discovery.
 """
 
-import os
-
 import numpy as np
 import pytest
 
@@ -16,17 +14,17 @@ from src.api.services.lerobot_loader import (
     is_lerobot_dataset,
 )
 
+from .conftest import TEST_DATASET_ID, TEST_DATASET_PATH
+
 
 @pytest.fixture(scope="module")
 def dataset_dir():
     """Path to the test LeRobot dataset directory."""
-    base = os.environ.get(
-        "TEST_DATASET_PATH",
-        "/home/alizaidi/dev/rl/azure-nvidia-robotics-reference-architecture/datasets",
-    )
-    dataset_id = os.environ.get("TEST_DATASET_ID", "sample_lerobot")
-    path = os.path.join(base, dataset_id)
-    assert os.path.isdir(path), f"LeRobot dataset not found: {path}"
+    import os
+
+    path = os.path.join(TEST_DATASET_PATH, TEST_DATASET_ID)
+    if not os.path.isdir(path):
+        pytest.skip(f"LeRobot dataset not found: {path}")
     return path
 
 

@@ -3,7 +3,8 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '@/api/client';
+
+import { handleResponse, requestHeaders } from '@/lib/api-client';
 
 /** Dashboard statistics */
 export interface DashboardStats {
@@ -43,13 +44,16 @@ export const dashboardKeys = {
   progress: (datasetId: string) => [...dashboardKeys.all, 'progress', datasetId] as const,
 };
 
+const API_BASE = '/api';
+
 /**
  * Fetch dashboard statistics.
  */
 async function fetchDashboardStats(datasetId: string): Promise<DashboardStats> {
-  return apiClient.get<DashboardStats>(
-    `/api/datasets/${datasetId}/stats`
-  );
+  const response = await fetch(`${API_BASE}/datasets/${datasetId}/stats`, {
+    headers: await requestHeaders(),
+  });
+  return handleResponse<DashboardStats>(response);
 }
 
 /**

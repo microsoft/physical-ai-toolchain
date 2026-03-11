@@ -31,7 +31,7 @@ def main() -> int:
         schema = RecordingConfig.model_json_schema()
         schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
         schema["$id"] = (
-            "https://raw.githubusercontent.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/main/config/recording_config.schema.json"
+            "https://raw.githubusercontent.com/microsoft/physical-ai-toolchain/main/config/recording_config.schema.json"
         )
 
         output_path = Path("config/recording_config.schema.json")

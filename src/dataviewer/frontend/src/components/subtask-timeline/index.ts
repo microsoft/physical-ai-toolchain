@@ -2,6 +2,7 @@
  * Subtask timeline component exports.
  */
 
-export { SubtaskTimelineTrack } from './SubtaskTimelineTrack';
+export { SubtaskList } from './SubtaskList';
 export { SubtaskSegmentSlider } from './SubtaskSegmentSlider';
+export { SubtaskTimelineTrack } from './SubtaskTimelineTrack';
 export { SubtaskToolbar } from './SubtaskToolbar';

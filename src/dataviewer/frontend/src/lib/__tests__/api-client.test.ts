@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  _resetCsrfToken,
   ApiClientError,
   deleteAnnotations,
   fetchAnnotations,
@@ -15,8 +16,16 @@ import {
 
 const mockFetch = vi.fn()
 
+/** Mock a successful CSRF token response followed by the API response. */
+function mockMutationFetch(apiResponse: ReturnType<typeof jsonResponse>) {
+  mockFetch
+    .mockResolvedValueOnce(jsonResponse({ csrf_token: 'test-token' }))
+    .mockResolvedValueOnce(apiResponse)
+}
+
 beforeEach(() => {
   mockFetch.mockReset()
+  _resetCsrfToken()
   vi.stubGlobal('fetch', mockFetch)
 })
 
@@ -51,7 +60,7 @@ describe('fetchDatasets', () => {
 
     const result = await fetchDatasets()
     expect(result).toEqual(datasets)
-    expect(mockFetch).toHaveBeenCalledWith('/api/datasets')
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets', { headers: {} })
   })
 
   it('throws ApiClientError on failure', async () => {
@@ -68,7 +77,7 @@ describe('fetchDataset', () => {
 
     const result = await fetchDataset('ds-1')
     expect(result).toEqual(ds)
-    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1')
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1', { headers: {} })
   })
 })
 
@@ -112,7 +121,7 @@ describe('fetchEpisodes', () => {
     mockFetch.mockResolvedValueOnce(jsonResponse([]))
 
     await fetchEpisodes('ds-1')
-    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes')
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes', { headers: {} })
   })
 })
 
@@ -140,44 +149,43 @@ describe('fetchAnnotations', () => {
 
     const result = await fetchAnnotations('ds-1', 0)
     expect(result).toEqual(data)
-    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0/annotations')
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0/annotations', {
+      headers: {},
+    })
   })
 })
 
 describe('saveAnnotation', () => {
   it('calls PUT with annotation body', async () => {
     const annotation = { annotatorId: 'u1' }
-    mockFetch.mockResolvedValueOnce(jsonResponse({ success: true }))
+    mockMutationFetch(jsonResponse({ success: true }))
 
     await saveAnnotation('ds-1', 0, annotation as never)
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      '/api/datasets/ds-1/episodes/0/annotations',
-      expect.objectContaining({
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(annotation),
-      }),
-    )
+    const apiCall = mockFetch.mock.calls[1]
+    expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
+    expect(apiCall[1]).toMatchObject({
+      method: 'PUT',
+      body: JSON.stringify(annotation),
+    })
   })
 })
 
 describe('deleteAnnotations', () => {
   it('calls DELETE without annotatorId', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ deleted: true, episodeIndex: 0 }))
+    mockMutationFetch(jsonResponse({ deleted: true, episodeIndex: 0 }))
 
     await deleteAnnotations('ds-1', 0)
-    expect(mockFetch).toHaveBeenCalledWith(
-      '/api/datasets/ds-1/episodes/0/annotations',
-      expect.objectContaining({ method: 'DELETE' }),
-    )
+    const apiCall = mockFetch.mock.calls[1]
+    expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
+    expect(apiCall[1]).toMatchObject({ method: 'DELETE' })
   })
 
   it('includes annotator_id query param when provided', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ deleted: true, episodeIndex: 0 }))
+    mockMutationFetch(jsonResponse({ deleted: true, episodeIndex: 0 }))
 
     await deleteAnnotations('ds-1', 0, 'u1')
-    const url = mockFetch.mock.calls[0][0] as string
+    const url = mockFetch.mock.calls[1][0] as string
     expect(url).toContain('annotator_id=u1')
   })
 })
@@ -185,14 +193,13 @@ describe('deleteAnnotations', () => {
 describe('triggerAutoAnalysis', () => {
   it('calls POST auto-analysis endpoint', async () => {
     const analysis = { episodeIndex: 0, suggestedRating: 4 }
-    mockFetch.mockResolvedValueOnce(jsonResponse(analysis))
+    mockMutationFetch(jsonResponse(analysis))
 
     const result = await triggerAutoAnalysis('ds-1', 0)
     expect(result).toEqual(analysis)
-    expect(mockFetch).toHaveBeenCalledWith(
-      '/api/datasets/ds-1/episodes/0/annotations/auto',
-      expect.objectContaining({ method: 'POST' }),
-    )
+    const apiCall = mockFetch.mock.calls[1]
+    expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations/auto')
+    expect(apiCall[1]).toMatchObject({ method: 'POST' })
   })
 })
 
@@ -203,7 +210,9 @@ describe('fetchAnnotationSummary', () => {
 
     const result = await fetchAnnotationSummary('ds-1')
     expect(result).toEqual(summary)
-    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/annotations/summary')
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/annotations/summary', {
+      headers: {},
+    })
   })
 })
 

@@ -1,6 +1,6 @@
 ---
 name: osmo-lerobot-training
-description: 'Submit, monitor, analyze, and evaluate LeRobot imitation learning training jobs on OSMO with Azure ML MLflow integration and inference evaluation - Brought to you by microsoft/azure-nvidia-robotics-reference-architecture'
+description: 'Submit, monitor, analyze, and evaluate LeRobot imitation learning training jobs on OSMO with Azure ML MLflow integration and inference evaluation - Brought to you by microsoft/physical-ai-toolchain'
 ---
 
 # OSMO LeRobot Training
@@ -320,4 +320,4 @@ pkill -f poll-and-eval-checkpoints
 
 See [references/REFERENCE.md](references/REFERENCE.md) for detailed debugging commands.
 
-> Brought to you by microsoft/azure-nvidia-robotics-reference-architecture
+> Brought to you by microsoft/physical-ai-toolchain

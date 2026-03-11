@@ -5,12 +5,13 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .auth import require_auth
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token
-from .routers import analysis, annotations, datasets, detection, export, labels
+from .routers import analysis, annotations, datasets, detection, export, joint_config, labels
 from .routes import ai_analysis
 
 # Configure logging to show INFO level
@@ -19,9 +20,16 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
-# Load environment variables from .env file
+# Load .env before any config or service singletons are initialized so that
+# all env vars are available to get_app_config() on first access.
 env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path)
+
+# Read config once at module load. CORS origins must be known before the app object
+# is created, and all service singletons share this same config instance.
+from .config import load_config  # noqa: E402
+
+_config = load_config()
 
 app = FastAPI(
     title="LeRobot Annotation API",
@@ -49,29 +57,26 @@ app = FastAPI(
     },
 )
 
-# Configure CORS for frontend
+# Configure CORS — origins are read from CORS_ORIGINS env var (comma-separated)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "http://localhost:5176",
-        "http://localhost:5177",
-    ],
+    allow_origins=_config.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers - export must come before datasets to match longer paths first
-app.include_router(export.router, prefix="/api/datasets", tags=["export"])
-app.include_router(detection.router, prefix="/api/datasets", tags=["detection"])
-app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
-app.include_router(annotations.router, prefix="/api", tags=["annotations"])
-app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
-app.include_router(ai_analysis.router, prefix="/api", tags=["ai"])
-app.include_router(labels.router, prefix="/api/datasets", tags=["labels"])
+# All /api/* routes require authentication (health and csrf-token are on app directly)
+api_auth = [Depends(require_auth)]
+app.include_router(export.router, prefix="/api/datasets", tags=["export"], dependencies=api_auth)
+app.include_router(detection.router, prefix="/api/datasets", tags=["detection"], dependencies=api_auth)
+app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"], dependencies=api_auth)
+app.include_router(annotations.router, prefix="/api", tags=["annotations"], dependencies=api_auth)
+app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"], dependencies=api_auth)
+app.include_router(ai_analysis.router, prefix="/api", tags=["ai"], dependencies=api_auth)
+app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], dependencies=api_auth)
+app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"], dependencies=api_auth)
+app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
 
 
 @app.get("/health")

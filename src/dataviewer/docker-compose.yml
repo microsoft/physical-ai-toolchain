@@ -1,0 +1,53 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      BACKEND_HOST: "0.0.0.0"
+      BACKEND_PORT: "8000"
+
+      # Storage backend: local | azure
+      HMI_STORAGE_BACKEND: "${HMI_STORAGE_BACKEND:-local}"
+
+      # Local storage (used when HMI_STORAGE_BACKEND=local)
+      HMI_DATA_PATH: "/data"
+
+      # Azure Blob Storage (required when HMI_STORAGE_BACKEND=azure)
+      AZURE_STORAGE_ACCOUNT_NAME: "${AZURE_STORAGE_ACCOUNT_NAME:-}"
+      AZURE_STORAGE_DATASET_CONTAINER: "${AZURE_STORAGE_DATASET_CONTAINER:-}"
+      AZURE_STORAGE_ANNOTATION_CONTAINER: "${AZURE_STORAGE_ANNOTATION_CONTAINER:-}"
+      # Leave AZURE_STORAGE_SAS_TOKEN unset to use DefaultAzureCredential (MSI)
+      AZURE_STORAGE_SAS_TOKEN: "${AZURE_STORAGE_SAS_TOKEN:-}"
+
+      # CORS: allow requests from the frontend container
+      CORS_ORIGINS: "http://localhost:${FRONTEND_PORT:-5173},http://frontend"
+
+      # Authentication
+      DATAVIEWER_AUTH_DISABLED: "${DATAVIEWER_AUTH_DISABLED:-true}"
+    volumes:
+      # Mount local dataset directory when using local storage backend
+      - "${HMI_LOCAL_DATA_PATH:-./datasets}:/data:ro"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_AZURE_CLIENT_ID: "${VITE_AZURE_CLIENT_ID:-}"
+        VITE_AZURE_TENANT_ID: "${VITE_AZURE_TENANT_ID:-}"
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    environment:
+      NGINX_BACKEND_HOST: "backend:8000"
+    depends_on:
+      backend:
+        condition: service_healthy

@@ -3,8 +3,9 @@
  */
 
 import { useCallback, useState } from 'react';
-import { useAnnotationStore, useEpisodeStore } from '@/stores';
+
 import { useSaveCurrentAnnotation } from '@/hooks/use-annotations';
+import { useAnnotationStore, useEpisodeStore } from '@/stores';
 
 export interface UseAnnotationWorkflowOptions {
   /** Callback after successful save */

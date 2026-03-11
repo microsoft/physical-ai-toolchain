@@ -5,10 +5,11 @@
  * change selection state. Only re-renders when own props change.
  */
 
-import { useState, memo, useCallback } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
+import { AlertTriangle, Check, Play,Star } from 'lucide-react';
+import { memo, useCallback,useState } from 'react';
+
 import { Button } from '@/components/ui/button';
-import { Check, Star, AlertTriangle, Play } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { EpisodeMeta, TaskCompletenessRating } from '@/types';
 

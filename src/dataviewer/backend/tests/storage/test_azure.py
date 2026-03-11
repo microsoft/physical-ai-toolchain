@@ -151,8 +151,7 @@ class TestAzureBlobStorageAdapter(TestCase):
         )
         adapter._client = mock_client
 
-        with patch("src.api.storage.azure.RetryPolicy", MagicMock()):
-            result = asyncio.run(adapter.list_annotated_episodes(self.dataset_id))
+        result = asyncio.run(adapter.list_annotated_episodes(self.dataset_id))
 
         assert result == [1, 3, 5]
 
@@ -238,8 +237,8 @@ class TestAzureBlobStorageAdapter(TestCase):
         assert path == "my-dataset/annotations/episodes/episode_000042.json"
 
     @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
-    def test_client_has_retry_policy(self):
-        """Verify BlobServiceClient is created with a retry policy."""
+    def test_get_client_uses_sas_token_when_provided(self):
+        """Verify BlobServiceClient uses the SAS token credential."""
         from src.api.storage.azure import AzureBlobStorageAdapter
 
         adapter = AzureBlobStorageAdapter(
@@ -247,17 +246,16 @@ class TestAzureBlobStorageAdapter(TestCase):
             container_name="testcontainer",
             sas_token="test-sas",
         )
-        with (
-            unittest.mock.patch("src.api.storage.azure.BlobServiceClient") as mock_cls,
-            unittest.mock.patch("src.api.storage.azure.RetryPolicy"),
-        ):
+        with unittest.mock.patch("src.api.storage.azure.BlobServiceClient") as mock_cls:
             asyncio.run(adapter._get_client())
-            call_kwargs = mock_cls.call_args
-            assert "retry_policy" in call_kwargs.kwargs
+            mock_cls.assert_called_once_with(
+                account_url="https://testaccount.blob.core.windows.net",
+                credential="test-sas",
+            )
 
     @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
-    def test_retry_policy_configuration(self):
-        """Verify retry policy uses expected parameters."""
+    def test_get_client_reuses_cached_client(self):
+        """Verify the client is only created once and then cached."""
         from src.api.storage.azure import AzureBlobStorageAdapter
 
         adapter = AzureBlobStorageAdapter(
@@ -265,16 +263,12 @@ class TestAzureBlobStorageAdapter(TestCase):
             container_name="testcontainer",
             sas_token="test-sas",
         )
-        with (
-            unittest.mock.patch("src.api.storage.azure.BlobServiceClient"),
-            unittest.mock.patch("src.api.storage.azure.RetryPolicy") as mock_retry_cls,
-        ):
-            asyncio.run(adapter._get_client())
-            mock_retry_cls.assert_called_once_with(
-                retry_total=3,
-                retry_backoff_factor=0.8,
-                retry_backoff_max=60,
-            )
+        with unittest.mock.patch("src.api.storage.azure.BlobServiceClient") as mock_cls:
+            first_client = asyncio.run(adapter._get_client())
+            second_client = asyncio.run(adapter._get_client())
+
+            assert first_client is second_client
+            mock_cls.assert_called_once()
 
 
 if __name__ == "__main__":

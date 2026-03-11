@@ -1,10 +1,11 @@
+import { Plus, Timer,Trash2, Undo2 } from 'lucide-react';
 import { useState } from 'react';
+
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Trash2, Undo2, Plus, Timer } from 'lucide-react';
 import { useEditStore, useEpisodeStore } from '@/stores';
 
 /**

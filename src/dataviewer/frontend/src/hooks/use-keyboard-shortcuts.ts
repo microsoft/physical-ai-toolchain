@@ -5,7 +5,7 @@
  * support for modifier keys and input field filtering.
  */
 
-import { useEffect, useCallback } from 'react';
+import { useCallback,useEffect } from 'react';
 
 export interface KeyboardShortcut {
   /** Key to listen for */

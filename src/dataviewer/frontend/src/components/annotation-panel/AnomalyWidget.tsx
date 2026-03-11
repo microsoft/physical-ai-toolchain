@@ -5,14 +5,16 @@
  * auto-detected anomalies and manual additions.
  */
 
+import { CheckCircle,Plus, Zap } from 'lucide-react';
 import { useState } from 'react';
-import { useAnnotationStore, usePlaybackControls } from '@/stores';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { AnomalyList } from './AnomalyList';
-import { AddAnomalyDialog } from './AddAnomalyDialog';
-import { Plus, Zap, CheckCircle } from 'lucide-react';
+import { useAnnotationStore, usePlaybackControls } from '@/stores';
 import type { Anomaly } from '@/types';
+
+import { AddAnomalyDialog } from './AddAnomalyDialog';
+import { AnomalyList } from './AnomalyList';
 
 /**
  * Widget for managing anomaly annotations.

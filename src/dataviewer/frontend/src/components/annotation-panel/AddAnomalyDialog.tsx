@@ -2,11 +2,23 @@
  * Dialog for adding a new anomaly.
  */
 
-import { useState, useEffect } from 'react';
+import { MapPin, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { X, MapPin } from 'lucide-react';
-import type { Anomaly, AnomalyType, AnomalySeverity } from '@/types';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import type { Anomaly, AnomalySeverity, AnomalyType } from '@/types';
+
+import { FormSection } from './FormSection';
 
 interface AddAnomalyDialogProps {
   /** Whether the dialog is open */
@@ -112,25 +124,27 @@ export function AddAnomalyDialog({
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Anomaly type */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Anomaly Type</label>
-              <select
+            <FormSection label="Anomaly Type" htmlFor="anomaly-type">
+              <Select
                 value={type}
-                onChange={(e) => setType(e.target.value as AnomalyType)}
-                className="w-full p-2 text-sm border rounded-md bg-background"
+                onValueChange={(value) => setType(value as AnomalyType)}
               >
-                {anomalyTypes.map((t) => (
-                  <option key={t} value={t}>
-                    {t.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <SelectTrigger id="anomaly-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {anomalyTypes.map((anomalyType) => (
+                    <SelectItem key={anomalyType} value={anomalyType}>
+                      {anomalyType.replace(/-/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase())}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormSection>
 
             {/* Severity */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Severity</label>
-              <div className="flex gap-2">
+            <FormSection label="Severity" labelId="anomaly-severity-label">
+              <div className="flex gap-2" role="group" aria-labelledby="anomaly-severity-label">
                 {(['low', 'medium', 'high'] as const).map((s) => (
                   <Button
                     key={s}
@@ -144,20 +158,31 @@ export function AddAnomalyDialog({
                   </Button>
                 ))}
               </div>
-            </div>
+            </FormSection>
 
             {/* Frame range */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Frame Range</label>
-              <div className="flex gap-2 items-center">
+            <FormSection
+              label="Frame Range"
+              labelId="anomaly-frame-range-label"
+              description={
+                <>
+                  Current frame: {currentFrame}. Click pin icons to set from video position.
+                </>
+              }
+            >
+              <div className="flex gap-2 items-center" role="group" aria-labelledby="anomaly-frame-range-label">
                 <div className="flex-1 flex gap-1">
-                  <input
-                    type="number"
-                    value={frameStart}
-                    onChange={(e) => setFrameStart(parseInt(e.target.value) || 0)}
-                    min={0}
-                    className="flex-1 p-2 text-sm border rounded-md bg-background"
-                  />
+                  <div className="flex-1 space-y-1">
+                    <span className="text-xs text-muted-foreground">Start frame</span>
+                    <Input
+                      id="anomaly-frame-start"
+                      type="number"
+                      aria-label="Start frame"
+                      value={frameStart}
+                      onChange={(e) => setFrameStart(parseInt(e.target.value, 10) || 0)}
+                      min={0}
+                    />
+                  </div>
                   <Button
                     type="button"
                     variant="outline"
@@ -171,13 +196,17 @@ export function AddAnomalyDialog({
                 </div>
                 <span className="text-muted-foreground">to</span>
                 <div className="flex-1 flex gap-1">
-                  <input
-                    type="number"
-                    value={frameEnd}
-                    onChange={(e) => setFrameEnd(parseInt(e.target.value) || 0)}
-                    min={0}
-                    className="flex-1 p-2 text-sm border rounded-md bg-background"
-                  />
+                  <div className="flex-1 space-y-1">
+                    <span className="text-xs text-muted-foreground">End frame</span>
+                    <Input
+                      id="anomaly-frame-end"
+                      type="number"
+                      aria-label="End frame"
+                      value={frameEnd}
+                      onChange={(e) => setFrameEnd(parseInt(e.target.value, 10) || 0)}
+                      min={0}
+                    />
+                  </div>
                   <Button
                     type="button"
                     variant="outline"
@@ -190,21 +219,18 @@ export function AddAnomalyDialog({
                   </Button>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Current frame: {currentFrame}. Click pin icons to set from video position.
-              </p>
-            </div>
+            </FormSection>
 
             {/* Description */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Description</label>
-              <textarea
+            <FormSection label="Description" htmlFor="anomaly-description">
+              <Textarea
+                id="anomaly-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Describe the anomaly..."
-                className="w-full p-2 text-sm border rounded-md bg-background min-h-[60px] resize-none"
+                className="min-h-[60px] resize-none"
               />
-            </div>
+            </FormSection>
 
             {/* Actions */}
             <div className="flex gap-2 pt-2">

@@ -1,6 +1,6 @@
 ---
 title: Contributing
-description: How to contribute to the Azure NVIDIA Robotics Reference Architecture
+description: How to contribute to the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-11
 ms.topic: how-to
@@ -47,11 +47,11 @@ Detailed documentation lives in [`docs/contributing/`](docs/contributing/):
 
 Search existing resources before asking:
 
-- Search [GitHub Issues](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues) for similar questions or problems
-- Check [GitHub Discussions](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/discussions) for community Q&A
+- Search [GitHub Issues](https://github.com/microsoft/physical-ai-toolchain/issues) for similar questions or problems
+- Check [GitHub Discussions](https://github.com/microsoft/physical-ai-toolchain/discussions) for community Q&A
 - Review the [docs/](docs/) directory for troubleshooting guides
 
-If you cannot find an answer, open a [new discussion](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/discussions/new) in the Q&A category. Provide context about what you are trying to accomplish, what you have tried, and any error messages. For bugs or feature requests, use [GitHub Issues](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues/new) instead.
+If you cannot find an answer, open a [new discussion](https://github.com/microsoft/physical-ai-toolchain/discussions/new) in the Q&A category. Provide context about what you are trying to accomplish, what you have tried, and any error messages. For bugs or feature requests, use [GitHub Issues](https://github.com/microsoft/physical-ai-toolchain/issues/new) instead.
 
 ## Development Environment
 

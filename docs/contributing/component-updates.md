@@ -118,7 +118,7 @@ Apply this checklist before merging any component update.
 3. Create migration steps in the PR description
 4. Update affected documentation (README files, deployment guides, workflow templates)
 5. Add `breaking-change` label to the PR
-6. Request review from infrastructure owners (`@Azure-Samples/edge-ai-core-dev`)
+6. Request review from infrastructure owners (`@microsoft/edge-ai-core-dev`)
 
 ## CI Validation for Dependency PRs
 

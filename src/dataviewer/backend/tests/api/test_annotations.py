@@ -2,6 +2,8 @@
 Integration tests for annotation API endpoints.
 """
 
+import os
+import tempfile
 from datetime import datetime
 
 import pytest
@@ -21,13 +23,28 @@ from src.api.models.annotations import (
     TrajectoryQualityMetrics,
 )
 from src.api.models.datasources import DatasetInfo, FeatureSchema
-from src.api.services.dataset_service import get_dataset_service
 
 
 @pytest.fixture
 def client():
-    """Create test client."""
-    return TestClient(app)
+    """Create test client with isolated singletons and empty temp data path."""
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["HMI_DATA_PATH"] = tmp
+
+        import src.api.config as config_mod
+        import src.api.services.annotation_service as ann_mod
+        import src.api.services.dataset_service as ds_mod
+
+        config_mod._app_config = None
+        ds_mod._dataset_service = None
+        ann_mod._annotation_service = None
+
+        with TestClient(app) as c:
+            yield c
+
+        config_mod._app_config = None
+        ds_mod._dataset_service = None
+        ann_mod._annotation_service = None
 
 
 @pytest.fixture
@@ -46,12 +63,13 @@ def sample_dataset():
 
 
 @pytest.fixture
-async def registered_dataset(sample_dataset):
+async def registered_dataset(client, sample_dataset):
     """Register a sample dataset before tests."""
-    service = get_dataset_service()
+    import src.api.services.dataset_service as ds_mod
+
+    service = ds_mod.get_dataset_service()
     await service.register_dataset(sample_dataset)
     yield sample_dataset
-    # Cleanup
     service._datasets.clear()
 
 

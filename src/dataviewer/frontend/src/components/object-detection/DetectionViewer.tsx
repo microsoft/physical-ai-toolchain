@@ -2,7 +2,8 @@
  * Detection viewer with canvas bounding box overlay.
  */
 
-import { useRef, useEffect } from 'react';
+import { useEffect,useRef } from 'react';
+
 import type { Detection } from '@/types/detection';
 
 interface DetectionViewerProps {

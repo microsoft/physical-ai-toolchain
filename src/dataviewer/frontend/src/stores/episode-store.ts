@@ -4,7 +4,8 @@
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import type { EpisodeMeta, EpisodeData } from '@/types';
+
+import type { EpisodeData,EpisodeMeta } from '@/types';
 
 interface EpisodeState {
   /** List of episode metadata for current dataset */

@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dataviewer: Backend",
+      "type": "npm",
+      "script": "dev:backend",
+      "path": "src/dataviewer",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "dataviewer"
+      }
+    },
+    {
+      "label": "Dataviewer: Frontend",
+      "type": "npm",
+      "script": "dev:frontend",
+      "path": "src/dataviewer",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "dataviewer"
+      }
+    },
+    {
+      "label": "Dataviewer: Start All",
+      "dependsOn": ["Dataviewer: Backend", "Dataviewer: Frontend"],
+      "problemMatcher": []
+    }
+  ]
+}

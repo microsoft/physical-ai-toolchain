@@ -2,14 +2,16 @@
  * Batch annotation grid component.
  */
 
-import { useState, useMemo, useCallback } from 'react';
-import { EpisodePreviewCard } from './EpisodePreviewCard';
-import { BatchActions } from './BatchActions';
-import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, Grid2X2, Grid3X3, LayoutGrid } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { useCallback,useMemo, useState } from 'react';
+
+import { Button } from '@/components/ui/button';
 import { useBatchSelection } from '@/hooks/use-batch-selection';
+import { cn } from '@/lib/utils';
 import type { EpisodeMeta, TaskCompletenessRating } from '@/types';
+
+import { BatchActions } from './BatchActions';
+import { EpisodePreviewCard } from './EpisodePreviewCard';
 
 interface BatchGridProps {
   /** List of episodes to display */

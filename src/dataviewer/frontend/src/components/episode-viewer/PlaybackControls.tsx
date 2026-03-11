@@ -2,16 +2,18 @@
  * Custom playback controls for the video player.
  */
 
-import { usePlaybackControls } from '@/stores';
-import { Button } from '@/components/ui/button';
 import {
+  ChevronLeft,
+  ChevronRight,
   Pause,
   Play,
   SkipBack,
   SkipForward,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
+
+import { SpeedControl } from '@/components/playback/SpeedControl';
+import { Button } from '@/components/ui/button';
+import { usePlaybackControls } from '@/stores';
 
 interface PlaybackControlsProps {
   /** Current frame number */
@@ -49,7 +51,6 @@ export function PlaybackControls({
   };
 
   const currentTime = currentFrame / fps;
-  const speedOptions = [0.25, 0.5, 1, 1.5, 2];
 
   return (
     <div className="flex items-center gap-4 p-2 bg-muted rounded-lg">
@@ -119,22 +120,7 @@ export function PlaybackControls({
       <div className="flex-1" />
 
       {/* Speed control */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">Speed:</span>
-        <div className="flex gap-1">
-          {speedOptions.map((speed) => (
-            <Button
-              key={speed}
-              variant={playbackSpeed === speed ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setPlaybackSpeed(speed)}
-              className="px-2 h-7 text-xs"
-            >
-              {speed}x
-            </Button>
-          ))}
-        </div>
-      </div>
+      <SpeedControl speed={playbackSpeed} onSpeedChange={setPlaybackSpeed} />
     </div>
   );
 }

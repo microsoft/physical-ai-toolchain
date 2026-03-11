@@ -2,20 +2,22 @@
  * Hook for offline-first annotation with sync queue.
  */
 
-import { useState, useEffect, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useCallback,useEffect, useState } from 'react';
+
 import {
-  saveAnnotationLocal,
-  getAnnotationLocal,
-  getAnnotationsBySyncStatus,
   addToSyncQueue,
   deleteAnnotationLocal,
+  getAnnotationLocal,
+  getAnnotationsBySyncStatus,
+  saveAnnotationLocal,
 } from '@/lib/offline-storage';
 import {
-  syncQueueManager,
   isOnline,
+  syncQueueManager,
   type SyncResult,
 } from '@/lib/sync-queue';
+
 import { annotationKeys } from './use-annotations';
 
 export interface OfflineAnnotation {
@@ -86,8 +88,8 @@ export function useOfflineAnnotations(): UseOfflineAnnotationsResult {
     try {
       const pending = await getAnnotationsBySyncStatus('pending');
       setPendingCount(pending.length);
-    } catch (error) {
-      console.error('Failed to get pending count:', error);
+    } catch {
+      // Silently ignore count refresh failures
     }
   }, []);
 

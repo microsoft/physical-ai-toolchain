@@ -2,7 +2,9 @@
  * API client for AI analysis endpoints.
  */
 
-import { apiClient } from './client';
+import { handleResponse, mutationHeaders } from '@/lib/api-client';
+
+const API_BASE = '/api';
 
 /** Trajectory data for analysis */
 export interface TrajectoryData {
@@ -95,10 +97,15 @@ export interface AnnotationSuggestion {
 export async function analyzeTrajectory(
   data: TrajectoryData
 ): Promise<TrajectoryMetrics> {
-  return apiClient.post<TrajectoryMetrics>(
-    '/api/ai/trajectory-analysis',
-    data
-  );
+  const response = await fetch(`${API_BASE}/ai/trajectory-analysis`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await mutationHeaders()),
+    },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<TrajectoryMetrics>(response);
 }
 
 /**
@@ -107,10 +114,15 @@ export async function analyzeTrajectory(
 export async function detectAnomalies(
   request: AnomalyDetectionRequest
 ): Promise<AnomalyDetectionResponse> {
-  return apiClient.post<AnomalyDetectionResponse>(
-    '/api/ai/anomaly-detection',
-    request
-  );
+  const response = await fetch(`${API_BASE}/ai/anomaly-detection`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await mutationHeaders()),
+    },
+    body: JSON.stringify(request),
+  });
+  return handleResponse<AnomalyDetectionResponse>(response);
 }
 
 /**
@@ -119,10 +131,15 @@ export async function detectAnomalies(
 export async function clusterEpisodes(
   request: ClusterRequest
 ): Promise<ClusterResponse> {
-  return apiClient.post<ClusterResponse>(
-    '/api/ai/cluster',
-    request
-  );
+  const response = await fetch(`${API_BASE}/ai/cluster`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await mutationHeaders()),
+    },
+    body: JSON.stringify(request),
+  });
+  return handleResponse<ClusterResponse>(response);
 }
 
 /**
@@ -131,8 +148,13 @@ export async function clusterEpisodes(
 export async function getAnnotationSuggestion(
   request: SuggestAnnotationRequest
 ): Promise<AnnotationSuggestion> {
-  return apiClient.post<AnnotationSuggestion>(
-    '/api/ai/suggest-annotation',
-    request
-  );
+  const response = await fetch(`${API_BASE}/ai/suggest-annotation`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(await mutationHeaders()),
+    },
+    body: JSON.stringify(request),
+  });
+  return handleResponse<AnnotationSuggestion>(response);
 }

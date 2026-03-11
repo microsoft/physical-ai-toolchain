@@ -13,6 +13,7 @@ const mockEpisodes: EpisodeMeta[] = [
 const mockEpisodeData: EpisodeData = {
   meta: mockEpisodes[1],
   videoUrls: { front: '/video/front.mp4', wrist: '/video/wrist.mp4' },
+  cameras: ['front', 'wrist'],
   trajectoryData: [
     {
       timestamp: 0,

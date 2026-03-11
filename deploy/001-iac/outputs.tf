@@ -181,3 +181,18 @@ output "osmo_workload_identity" {
   description = "OSMO workload identity for deployment scripts"
   value       = module.platform.osmo_workload_identity
 }
+
+// ============================================================
+// Dataviewer Outputs (Optional)
+// ============================================================
+
+output "dataviewer" {
+  description = "Dataviewer Container Apps deployment details. Null when dataviewer is not deployed."
+  value = var.should_deploy_dataviewer ? {
+    environment = module.dataviewer[0].container_app_environment
+    backend     = module.dataviewer[0].backend
+    frontend    = module.dataviewer[0].frontend
+    identity    = module.dataviewer[0].dataviewer_identity
+    entra_id    = module.dataviewer[0].entra_id
+  } : null
+}

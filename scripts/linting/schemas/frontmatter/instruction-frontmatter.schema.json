@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/schemas/instruction-frontmatter.schema.json",
+  "$id": "https://github.com/microsoft/physical-ai-toolchain/schemas/instruction-frontmatter.schema.json",
   "title": "Instruction File Frontmatter Schema",
   "description": "Frontmatter schema for .instructions.md files per VS Code Copilot specification",
   "type": "object",

@@ -1,19 +1,26 @@
 /**
  * Timeline component with episode scrubber and annotation markers.
- * 
+ *
  * Performance optimizations:
  * - Marker clustering to prevent overlapping renders
  * - Maximum marker limit with smart filtering by severity
  * - Memoized position calculations
  */
 
-import { useMemo, useRef, useCallback } from 'react';
-import { useEpisodeStore, usePlaybackControls, useAnnotationStore, useEditStore } from '@/stores';
-import { useFrameInsertionState, useTrajectoryAdjustmentState } from '@/stores/edit-store';
-import { TimelineMarker } from './TimelineMarker';
-import { FrameInsertionMarker } from '@/components/frame-editor/FrameInsertionMarker';
+import { useCallback,useMemo, useRef } from 'react';
+
 import { cn } from '@/lib/utils';
+import {
+  useAnnotationStore,
+  useEditStore,
+  useEpisodeStore,
+  useFrameInsertionState,
+  usePlaybackControls,
+  useTrajectoryAdjustmentState,
+} from '@/stores';
 import type { Anomaly } from '@/types';
+
+import { TimelineMarker } from './TimelineMarker';
 
 /** Maximum number of markers to render before clustering */
 const MAX_VISIBLE_MARKERS = 50;
@@ -53,7 +60,7 @@ export function Timeline({ className }: TimelineProps) {
   const { currentFrame, setCurrentFrame } = usePlaybackControls();
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation);
   const removedFrames = useEditStore((state) => state.removedFrames);
-  const { insertedFrames, insertFrame, removeInsertedFrame } = useFrameInsertionState();
+  const { insertedFrames } = useFrameInsertionState();
   const { trajectoryAdjustments } = useTrajectoryAdjustmentState();
 
   // Total frames (use episode length or estimate from trajectory data)
@@ -68,13 +75,13 @@ export function Timeline({ className }: TimelineProps) {
   }, [currentEpisode]);
 
   // Get anomalies from current annotation - memoized for stable reference
-  const anomalies = useMemo(() => 
-    currentAnnotation?.anomalies.anomalies ?? [], 
+  const anomalies = useMemo(() =>
+    currentAnnotation?.anomalies.anomalies ?? [],
     [currentAnnotation?.anomalies.anomalies]
   );
 
   // Get data quality issues - memoized for stable reference
-  const dataQualityIssues = useMemo(() => 
+  const dataQualityIssues = useMemo(() =>
     currentAnnotation?.dataQuality.issues ?? [],
     [currentAnnotation?.dataQuality.issues]
   );
@@ -82,12 +89,12 @@ export function Timeline({ className }: TimelineProps) {
   // Convert removed frames Set to sorted ranges for efficient rendering
   const removedFrameRanges = useMemo((): Array<[number, number]> => {
     if (removedFrames.size === 0) return [];
-    
+
     const sorted = [...removedFrames].sort((a, b) => a - b);
     const ranges: Array<[number, number]> = [];
     let rangeStart = sorted[0];
     let rangeEnd = sorted[0];
-    
+
     for (let i = 1; i < sorted.length; i++) {
       if (sorted[i] === rangeEnd + 1) {
         rangeEnd = sorted[i];
@@ -137,17 +144,17 @@ export function Timeline({ className }: TimelineProps) {
         } else {
           // Finalize current cluster
           const severityOrder = { high: 0, medium: 1, low: 2 };
-          currentCluster.sort((a, b) => 
+          currentCluster.sort((a, b) =>
             severityOrder[a.anomaly.severity] - severityOrder[b.anomaly.severity]
           );
-          
+
           clusters.push({
             anomaly: currentCluster[0].anomaly,
             position: currentCluster.reduce((sum, m) => sum + m.position, 0) / currentCluster.length,
             count: currentCluster.length,
             clusterIds: currentCluster.map((m) => m.anomaly.id),
           });
-          
+
           currentCluster = [marker];
         }
       }
@@ -156,10 +163,10 @@ export function Timeline({ className }: TimelineProps) {
     // Don't forget the last cluster
     if (currentCluster.length > 0) {
       const severityOrder = { high: 0, medium: 1, low: 2 };
-      currentCluster.sort((a, b) => 
+      currentCluster.sort((a, b) =>
         severityOrder[a.anomaly.severity] - severityOrder[b.anomaly.severity]
       );
-      
+
       clusters.push({
         anomaly: currentCluster[0].anomaly,
         position: currentCluster.reduce((sum, m) => sum + m.position, 0) / currentCluster.length,
@@ -222,13 +229,22 @@ export function Timeline({ className }: TimelineProps) {
       <div
         ref={timelineRef}
         className="relative h-8 bg-muted rounded cursor-pointer"
+        role="slider"
+        tabIndex={0}
+        aria-valuenow={currentFrame}
+        aria-valuemin={0}
+        aria-valuemax={totalFrames - 1}
         onClick={handleTimelineClick}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft') setCurrentFrame(Math.max(0, currentFrame - 1));
+          else if (e.key === 'ArrowRight') setCurrentFrame(Math.min(totalFrames - 1, currentFrame + 1));
+        }}
         onMouseMove={handleMouseMove}
       >
         {/* Removed frame ranges - shown as striped red overlay */}
-        {removedFrameRanges.map(([start, end], idx) => (
+        {removedFrameRanges.map(([start, end]) => (
           <div
-            key={`removed-${idx}`}
+            key={`removed-${start}-${end}`}
             className="absolute top-0 bottom-0 bg-red-500/20 border-l border-r border-red-500/40"
             style={{
               left: `${frameToPercent(start)}%`,
@@ -240,12 +256,12 @@ export function Timeline({ className }: TimelineProps) {
         ))}
 
         {/* Data quality issue ranges */}
-        {dataQualityIssues.map((issue, idx) => {
+        {dataQualityIssues.map((issue) => {
           if (!issue.affectedFrames) return null;
           const [start, end] = issue.affectedFrames;
           return (
             <div
-              key={`issue-${idx}`}
+              key={`issue-${issue.type}-${issue.severity}-${start}-${end}`}
               className={cn(
                 'absolute top-0 bottom-0 opacity-30',
                 issue.severity === 'critical'
@@ -273,22 +289,6 @@ export function Timeline({ className }: TimelineProps) {
           />
         ))}
 
-        {/* Frame insertion markers - shown between frames */}
-        {Array.from({ length: totalFrames - 1 }, (_, i) => {
-          // Skip if this frame or the next is removed
-          if (removedFrames.has(i) || removedFrames.has(i + 1)) return null;
-          return (
-            <FrameInsertionMarker
-              key={`insert-marker-${i}`}
-              afterFrameIndex={i}
-              isInserted={insertedFrames.has(i)}
-              position={frameToPercent(i + 1)}
-              onClick={() => insertFrame(i)}
-              onRemove={() => removeInsertedFrame(i)}
-            />
-          );
-        })}
-
         {/* Inserted frame indicators */}
         {Array.from(insertedFrames.entries()).map(([afterIdx, insertion]) => {
           if (removedFrames.has(afterIdx)) return null;
@@ -309,9 +309,17 @@ export function Timeline({ className }: TimelineProps) {
             className="absolute top-0 w-1.5 h-1.5 bg-orange-500 rounded-full -translate-x-1/2 cursor-pointer hover:scale-150 transition-transform"
             style={{ left: `${frameToPercent(frameIdx)}%` }}
             title={`Trajectory adjustment at frame ${frameIdx}`}
+            role="button"
+            tabIndex={0}
             onClick={(e) => {
               e.stopPropagation();
               setCurrentFrame(frameIdx);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.stopPropagation();
+                setCurrentFrame(frameIdx);
+              }
             }}
           />
         ))}

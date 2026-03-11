@@ -71,6 +71,7 @@ class DatasetInfo(BaseModel):
 
     id: str = Field(description="Unique dataset identifier")
     name: str = Field(description="Human-readable dataset name")
+    group: str | None = Field(default=None, description="Parent folder group for nested datasets")
     total_episodes: int = Field(ge=0, description="Total number of episodes")
     fps: float = Field(gt=0, description="Frames per second")
     features: dict[str, FeatureSchema] = Field(default_factory=dict, description="Feature schemas by name")
@@ -122,6 +123,7 @@ class EpisodeData(BaseModel):
 
     meta: EpisodeMeta
     video_urls: dict[str, str] = Field(default_factory=dict, description="Video URLs by camera name")
+    cameras: list[str] = Field(default_factory=list, description="Available camera names")
     trajectory_data: list[TrajectoryPoint] = Field(default_factory=list, description="Trajectory data points")
 
 

@@ -1,5 +1,7 @@
+import { waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { clearPersistedEditDraftsForTests } from '@/lib/edit-draft-storage'
 import type { FrameInsertion } from '@/types/episode-edit'
 
 import {
@@ -99,7 +101,8 @@ describe('edit-store pure functions', () => {
 })
 
 describe('useEditStore', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await clearPersistedEditDraftsForTests()
     useEditStore.getState().clear()
   })
 
@@ -246,6 +249,25 @@ describe('useEditStore', () => {
       expect(useEditStore.getState().globalTransform).toBeNull()
       expect(useEditStore.getState().cameraTransforms).toEqual({})
     })
+
+    it('isDirty returns false after clearTransforms when only transforms were changed', () => {
+      useEditStore.getState().setGlobalTransform({ resize: { width: 320, height: 240 } })
+      expect(useEditStore.getState().isDirty).toBe(true)
+
+      useEditStore.getState().clearTransforms()
+      expect(useEditStore.getState().isDirty).toBe(false)
+    })
+
+    it('isDirty returns false after setting globalTransform back to null', () => {
+      useEditStore.getState().setGlobalTransform({
+        colorAdjustment: { brightness: 0.5 },
+        colorFilter: 'grayscale',
+      })
+      expect(useEditStore.getState().isDirty).toBe(true)
+
+      useEditStore.getState().setGlobalTransform(null)
+      expect(useEditStore.getState().isDirty).toBe(false)
+    })
   })
 
   describe('markSaved / resetEdits', () => {
@@ -265,6 +287,75 @@ describe('useEditStore', () => {
 
       expect(useEditStore.getState().removedFrames.size).toBe(0)
       expect(useEditStore.getState().isDirty).toBe(false)
+    })
+
+    it('reloads saved edits when returning to an episode', () => {
+      useEditStore.getState().initializeEdit('ds-1', 0)
+      useEditStore.getState().toggleFrameRemoval(5)
+      useEditStore.getState().saveEpisodeDraft()
+
+      useEditStore.getState().initializeEdit('ds-1', 1)
+      expect(useEditStore.getState().removedFrames.size).toBe(0)
+
+      useEditStore.getState().initializeEdit('ds-1', 0)
+      expect(useEditStore.getState().removedFrames.has(5)).toBe(true)
+      expect(useEditStore.getState().isDirty).toBe(false)
+    })
+
+    it('restores a saved draft after the in-memory store is cleared', async () => {
+      useEditStore.getState().initializeEdit('ds-1', 0)
+      useEditStore.getState().toggleFrameRemoval(5)
+      useEditStore.getState().addSubtaskFromRange(10, 20)
+      useEditStore.getState().saveEpisodeDraft()
+
+      useEditStore.getState().clear()
+      useEditStore.getState().initializeEdit('ds-1', 0)
+
+      await waitFor(() => {
+        expect(useEditStore.getState().removedFrames.has(5)).toBe(true)
+        expect(useEditStore.getState().subtasks).toHaveLength(1)
+      })
+    })
+
+    it('restores in-progress edits after the in-memory store is cleared without an explicit save', async () => {
+      useEditStore.getState().initializeEdit('ds-1', 2)
+      useEditStore.getState().addSubtaskFromRange(15, 30)
+
+      useEditStore.getState().clear()
+      useEditStore.getState().initializeEdit('ds-1', 2)
+
+      await waitFor(() => {
+        expect(useEditStore.getState().subtasks).toHaveLength(1)
+        expect(useEditStore.getState().subtasks[0]?.frameRange).toEqual([15, 30])
+      })
+    })
+
+    it('resetEdits clears subtasks, transforms, and trajectory adjustments', () => {
+      useEditStore.getState().initializeEdit('ds-1', 0)
+
+      useEditStore.getState().setGlobalTransform({
+        colorAdjustment: { brightness: 0.5 },
+      })
+      useEditStore.getState().addSubtaskFromRange(10, 50)
+      useEditStore.getState().insertFrame(3)
+      useEditStore.getState().setTrajectoryAdjustment(7, {
+        rightArmDelta: [0.1, 0, 0],
+      })
+
+      expect(useEditStore.getState().isDirty).toBe(true)
+      expect(useEditStore.getState().subtasks).toHaveLength(1)
+      expect(useEditStore.getState().globalTransform).not.toBeNull()
+      expect(useEditStore.getState().insertedFrames.size).toBe(1)
+      expect(useEditStore.getState().trajectoryAdjustments.size).toBe(1)
+
+      useEditStore.getState().resetEdits()
+
+      expect(useEditStore.getState().isDirty).toBe(false)
+      expect(useEditStore.getState().subtasks).toHaveLength(0)
+      expect(useEditStore.getState().globalTransform).toBeNull()
+      expect(useEditStore.getState().insertedFrames.size).toBe(0)
+      expect(useEditStore.getState().removedFrames.size).toBe(0)
+      expect(useEditStore.getState().trajectoryAdjustments.size).toBe(0)
     })
   })
 

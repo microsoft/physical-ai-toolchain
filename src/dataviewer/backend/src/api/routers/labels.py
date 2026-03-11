@@ -14,13 +14,14 @@ import aiofiles.os
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..auth import require_auth
 from ..csrf import require_csrf_token
+from ..services.dataset_service import DatasetService, get_dataset_service
 from ..validation import validate_path_containment, validated_dataset_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+DEFAULT_LABELS = ["SUCCESS", "FAILURE", "PARTIAL"]
 
 
 class EpisodeLabels(BaseModel):
@@ -34,7 +35,7 @@ class DatasetLabelsFile(BaseModel):
     """All episode labels and available options for a dataset."""
 
     dataset_id: str
-    available_labels: list[str] = Field(default_factory=lambda: ["SUCCESS", "FAILURE", "PARTIAL"])
+    available_labels: list[str] = Field(default_factory=lambda: DEFAULT_LABELS.copy())
     episodes: dict[str, list[str]] = Field(default_factory=dict)
 
 
@@ -48,6 +49,10 @@ class AddLabelOption(BaseModel):
     """Request body for adding a new available label option."""
 
     label: str = Field(min_length=1, max_length=100)
+
+
+def _normalize_label(label: str) -> str:
+    return label.strip().upper()
 
 
 def _get_base_path() -> str:
@@ -106,16 +111,45 @@ async def get_label_options(dataset_id: str = Depends(validated_dataset_id)) -> 
     return labels_file.available_labels
 
 
-@router.post("/{dataset_id}/labels/options", dependencies=[Depends(require_auth), Depends(require_csrf_token)])
+@router.post("/{dataset_id}/labels/options", dependencies=[Depends(require_csrf_token)])
 async def add_label_option(dataset_id: str = Depends(validated_dataset_id), body: AddLabelOption = ...) -> list[str]:
     """Add a new label option to the available set."""
     labels_file = await _load_labels(dataset_id)
-    normalized = body.label.strip().upper()
+    normalized = _normalize_label(body.label)
     if not normalized:
         raise HTTPException(status_code=400, detail="Label cannot be empty")
     if normalized not in labels_file.available_labels:
         labels_file.available_labels.append(normalized)
         await _save_labels(dataset_id, labels_file)
+    return labels_file.available_labels
+
+
+@router.delete(
+    "/{dataset_id}/labels/options/{label}",
+    dependencies=[Depends(require_csrf_token)],
+)
+async def delete_label_option(
+    dataset_id: str = Depends(validated_dataset_id),
+    label: str = ...,
+) -> list[str]:
+    """Delete a label option and remove it from all episode assignments."""
+    labels_file = await _load_labels(dataset_id)
+    normalized = _normalize_label(label)
+
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Label cannot be empty")
+
+    if normalized in DEFAULT_LABELS:
+        raise HTTPException(status_code=400, detail="Built-in labels cannot be deleted")
+
+    labels_file.available_labels = [existing for existing in labels_file.available_labels if existing != normalized]
+
+    labels_file.episodes = {
+        episode_idx: [existing for existing in labels if existing != normalized]
+        for episode_idx, labels in labels_file.episodes.items()
+    }
+
+    await _save_labels(dataset_id, labels_file)
     return labels_file.available_labels
 
 
@@ -132,12 +166,13 @@ async def get_episode_labels(dataset_id: str = Depends(validated_dataset_id), ep
 
 @router.put(
     "/{dataset_id}/episodes/{episode_idx}/labels",
-    dependencies=[Depends(require_auth), Depends(require_csrf_token)],
+    dependencies=[Depends(require_csrf_token)],
 )
 async def set_episode_labels(
     dataset_id: str = Depends(validated_dataset_id),
     episode_idx: int = ...,
     body: BulkLabelUpdate = ...,
+    dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> EpisodeLabels:
     """Set labels for a specific episode (replaces existing labels)."""
     labels_file = await _load_labels(dataset_id)
@@ -145,12 +180,13 @@ async def set_episode_labels(
 
     # Auto-add any new labels to available options
     for label in body.labels:
-        normalized = label.strip().upper()
+        normalized = _normalize_label(label)
         if normalized and normalized not in labels_file.available_labels:
             labels_file.available_labels.append(normalized)
 
-    labels_file.episodes[key] = [label.strip().upper() for label in body.labels if label.strip()]
+    labels_file.episodes[key] = [normalized for label in body.labels if (normalized := _normalize_label(label))]
     await _save_labels(dataset_id, labels_file)
+    dataset_service.invalidate_episode_cache(dataset_id, episode_idx)
 
     return EpisodeLabels(
         episode_index=episode_idx,
@@ -158,7 +194,7 @@ async def set_episode_labels(
     )
 
 
-@router.post("/{dataset_id}/labels/save", dependencies=[Depends(require_auth), Depends(require_csrf_token)])
+@router.post("/{dataset_id}/labels/save", dependencies=[Depends(require_csrf_token)])
 async def save_all_labels(dataset_id: str = Depends(validated_dataset_id)) -> DatasetLabelsFile:
     """Persist all labels to disk (already persisted on each write, but
     this endpoint lets the frontend trigger an explicit save/confirmation)."""

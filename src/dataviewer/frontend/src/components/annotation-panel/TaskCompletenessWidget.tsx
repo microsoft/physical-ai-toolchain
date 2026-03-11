@@ -6,11 +6,16 @@
  */
 
 import { useEffect } from 'react';
-import { useAnnotationStore } from '@/stores';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { useAnnotationStore } from '@/stores';
 import type { TaskCompletenessRating } from '@/types';
+
+import { FormSection } from './FormSection';
 
 /**
  * Widget for annotating task completeness with keyboard shortcuts.
@@ -136,10 +141,7 @@ export function TaskCompletenessWidget() {
         </div>
 
         {/* Confidence level */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium">
-            Confidence Level: {taskCompleteness?.confidence ?? 3}
-          </label>
+        <FormSection label={`Confidence Level: ${taskCompleteness?.confidence ?? 3}`}>
           <input
             type="range"
             min={1}
@@ -154,15 +156,12 @@ export function TaskCompletenessWidget() {
             <span>Low</span>
             <span>High</span>
           </div>
-        </div>
+        </FormSection>
 
         {/* Conditional: Partial - Completion percentage and subtask */}
         {taskCompleteness?.rating === 'partial' && (
           <>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                Completion: {taskCompleteness.completionPercentage ?? 50}%
-              </label>
+            <FormSection label={`Completion: ${taskCompleteness.completionPercentage ?? 50}%`}>
               <input
                 type="range"
                 min={0}
@@ -176,41 +175,41 @@ export function TaskCompletenessWidget() {
                 }
                 className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer"
               />
-            </div>
+            </FormSection>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Last Subtask Reached</label>
-              <select
+            <FormSection label="Last Subtask Reached" htmlFor="subtask-reached">
+              <Select
                 value={taskCompleteness.subtaskReached ?? ''}
-                onChange={(e) =>
-                  updateTaskCompleteness({ subtaskReached: e.target.value })
-                }
-                className="w-full p-2 text-sm border rounded-md bg-background"
+                onValueChange={(value) => updateTaskCompleteness({ subtaskReached: value })}
               >
-                <option value="">Select subtask...</option>
-                {subtaskOptions.map((subtask) => (
-                  <option key={subtask} value={subtask}>
-                    {subtask.charAt(0).toUpperCase() + subtask.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <SelectTrigger id="subtask-reached">
+                  <SelectValue placeholder="Select subtask..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {subtaskOptions.map((subtask) => (
+                    <SelectItem key={subtask} value={subtask}>
+                      {subtask.charAt(0).toUpperCase() + subtask.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormSection>
           </>
         )}
 
         {/* Conditional: Failure - Reason */}
         {taskCompleteness?.rating === 'failure' && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Failure Reason</label>
-            <textarea
+          <FormSection label="Failure Reason" htmlFor="failure-reason">
+            <Textarea
+              id="failure-reason"
               value={taskCompleteness.failureReason ?? ''}
               onChange={(e) =>
                 updateTaskCompleteness({ failureReason: e.target.value })
               }
               placeholder="Describe why the task failed..."
-              className="w-full p-2 text-sm border rounded-md bg-background min-h-[60px] resize-none"
+              className="min-h-[60px] resize-none"
             />
-          </div>
+          </FormSection>
         )}
       </CardContent>
     </Card>

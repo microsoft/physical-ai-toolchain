@@ -1,0 +1,47 @@
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Container Apps internal DNS; forces per-request resolution via variables
+    resolver ${NGINX_RESOLVER} valid=10s;
+
+    # Proxy API requests to the backend service.
+    # NGINX_BACKEND_HOST defaults to "backend:8000" for local docker-compose.
+    # In Azure Container Apps, set to the app name (same-environment routing).
+    # Using a variable forces nginx to resolve DNS per-request via the resolver.
+    location /api/ {
+        set $backend_upstream ${NGINX_BACKEND_SCHEME}://${NGINX_BACKEND_HOST};
+        proxy_pass $backend_upstream;
+        proxy_http_version 1.1;
+        proxy_ssl_verify off;
+        proxy_ssl_server_name on;
+        proxy_set_header Host ${NGINX_BACKEND_HOST};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Support large video file streaming
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        client_max_body_size 0;
+    }
+
+    # Health endpoint proxied from backend
+    location /health {
+        set $backend_health ${NGINX_BACKEND_SCHEME}://${NGINX_BACKEND_HOST}/health;
+        proxy_pass $backend_health;
+        proxy_http_version 1.1;
+        proxy_ssl_verify off;
+        proxy_ssl_server_name on;
+        proxy_set_header Host ${NGINX_BACKEND_HOST};
+    }
+
+    # SPA fallback: all other routes served by index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

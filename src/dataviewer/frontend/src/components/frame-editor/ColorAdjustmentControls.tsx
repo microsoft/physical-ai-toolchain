@@ -5,13 +5,14 @@
  * plus preset color filter buttons.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { Contrast, Droplets, Palette, RotateCcw, Sun, SunDim } from 'lucide-react';
+import { useCallback, useEffect,useState } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { useTransformState } from '@/stores';
 import { cn } from '@/lib/utils';
+import { useTransformState } from '@/stores';
 import type { ColorAdjustment, ColorFilterPreset } from '@/types/episode-edit';
-import { RotateCcw, Sun, Contrast, Droplets, Palette, SunDim } from 'lucide-react';
 
 interface ColorAdjustmentControlsProps {
   /** Camera name for per-camera transforms */
@@ -129,7 +130,7 @@ export function ColorAdjustmentControls({
   }));
   const [filter, setFilter] = useState<ColorFilterPreset>(currentFilter ?? 'none');
 
-  // Sync local state with store when store changes
+  // Sync local state with store when store changes externally
   useEffect(() => {
     if (currentAdjustment) {
       setAdjustment({ ...DEFAULT_ADJUSTMENT, ...currentAdjustment });
@@ -140,66 +141,66 @@ export function ColorAdjustmentControls({
     setFilter(currentFilter ?? 'none');
   }, [currentFilter]);
 
-  // Update a single adjustment value
-  const updateAdjustment = useCallback(
-    (key: keyof ColorAdjustment, value: number) => {
-      setAdjustment((prev) => ({ ...prev, [key]: value }));
+  // Push current local state to the store
+  const applyToStore = useCallback(
+    (adj: Required<ColorAdjustment>, flt: ColorFilterPreset) => {
+      const colorAdjustment: ColorAdjustment = {};
+      if (adj.brightness !== 0) colorAdjustment.brightness = adj.brightness;
+      if (adj.contrast !== 0) colorAdjustment.contrast = adj.contrast;
+      if (adj.saturation !== 0) colorAdjustment.saturation = adj.saturation;
+      if (adj.gamma !== 1) colorAdjustment.gamma = adj.gamma;
+      if (adj.hue !== 0) colorAdjustment.hue = adj.hue;
+
+      const hasColorAdj = Object.keys(colorAdjustment).length > 0;
+      const colorFilter = flt !== 'none' ? flt : undefined;
+
+      if (cameraName) {
+        const hasAny = hasColorAdj || colorFilter;
+        setCameraTransform(cameraName, hasAny ? { colorAdjustment: hasColorAdj ? colorAdjustment : undefined, colorFilter } : null);
+      } else {
+        // Preserve resize/crop if they exist, but clear color fields
+        const hasResize = !!globalTransform?.resize;
+        const hasCrop = !!globalTransform?.crop;
+        const hasAny = hasColorAdj || colorFilter || hasResize || hasCrop;
+
+        setGlobalTransform(hasAny ? {
+          ...(hasCrop ? { crop: globalTransform!.crop } : {}),
+          ...(hasResize ? { resize: globalTransform!.resize } : {}),
+          ...(hasColorAdj ? { colorAdjustment } : {}),
+          ...(colorFilter ? { colorFilter } : {}),
+        } : null);
+      }
     },
-    []
+    [cameraName, globalTransform, setGlobalTransform, setCameraTransform],
   );
 
-  // Apply adjustments to store
-  const handleApply = useCallback(() => {
-    // Only include non-default values
-    const colorAdjustment: ColorAdjustment = {};
-    if (adjustment.brightness !== 0) colorAdjustment.brightness = adjustment.brightness;
-    if (adjustment.contrast !== 0) colorAdjustment.contrast = adjustment.contrast;
-    if (adjustment.saturation !== 0) colorAdjustment.saturation = adjustment.saturation;
-    if (adjustment.gamma !== 1) colorAdjustment.gamma = adjustment.gamma;
-    if (adjustment.hue !== 0) colorAdjustment.hue = adjustment.hue;
-
-    const colorFilter = filter !== 'none' ? filter : undefined;
-
-    if (cameraName) {
-      setCameraTransform(cameraName, {
-        colorAdjustment: Object.keys(colorAdjustment).length > 0 ? colorAdjustment : undefined,
-        colorFilter,
+  // Update a single adjustment value and apply immediately
+  const updateAdjustment = useCallback(
+    (key: keyof ColorAdjustment, value: number) => {
+      setAdjustment((prev) => {
+        const next = { ...prev, [key]: value };
+        applyToStore(next, filter);
+        return next;
       });
-    } else {
-      setGlobalTransform({
-        ...globalTransform,
-        colorAdjustment: Object.keys(colorAdjustment).length > 0 ? colorAdjustment : undefined,
-        colorFilter,
-      });
-    }
-  }, [
-    adjustment,
-    filter,
-    cameraName,
-    globalTransform,
-    setGlobalTransform,
-    setCameraTransform,
-  ]);
+    },
+    [applyToStore, filter],
+  );
+
+  // Update filter and apply immediately
+  const handleFilterChange = useCallback(
+    (newFilter: ColorFilterPreset) => {
+      setFilter(newFilter);
+      applyToStore(adjustment, newFilter);
+    },
+    [applyToStore, adjustment],
+  );
 
   // Reset to defaults
   const handleReset = useCallback(() => {
     setAdjustment(DEFAULT_ADJUSTMENT);
     setFilter('none');
-
-    if (cameraName) {
-      setCameraTransform(cameraName, {
-        ...globalTransform,
-        colorAdjustment: undefined,
-        colorFilter: undefined,
-      });
-    } else {
-      setGlobalTransform({
-        ...globalTransform,
-        colorAdjustment: undefined,
-        colorFilter: undefined,
-      });
-    }
-  }, [cameraName, globalTransform, setGlobalTransform, setCameraTransform]);
+    applyToStore(DEFAULT_ADJUSTMENT, 'none');
+  }, [applyToStore]);
 
   // Check if any adjustments have been made
   const hasChanges =
@@ -284,7 +285,7 @@ export function ColorAdjustmentControls({
               variant={filter === preset.value ? 'default' : 'outline'}
               size="sm"
               className="h-7 text-xs px-2"
-              onClick={() => setFilter(preset.value)}
+              onClick={() => handleFilterChange(preset.value)}
             >
               {preset.label}
             </Button>
@@ -292,16 +293,14 @@ export function ColorAdjustmentControls({
         </div>
       </div>
 
-      {/* Action buttons */}
+      {/* Reset button */}
       <div className="flex gap-2">
-        <Button size="sm" onClick={handleApply} className="flex-1">
-          Apply Colors
-        </Button>
         <Button
           variant="outline"
           size="sm"
           onClick={handleReset}
           disabled={!hasChanges}
+          className="flex-1"
         >
           <RotateCcw className="h-4 w-4 mr-1" />
           Reset

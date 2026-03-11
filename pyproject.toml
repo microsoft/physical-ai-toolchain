@@ -1,7 +1,7 @@
 [project]
-name = "azure-nvidia-robotics-reference-architecture"
+name = "physical-ai-toolchain"
 version = "0.4.0"
-description = "Azure NVIDIA Robotics Reference Architecture for Isaac Lab training"
+description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
 requires-python = ">=3.11"
 
@@ -57,6 +57,7 @@ select = [
 "src/inference/scripts/act_inference_node.py" = ["E402"]
 "src/inference/scripts/play_policy.py" = ["E402"]
 "src/training/scripts/rsl_rl/*.py" = ["E402"]
+"src/dataviewer/backend/tests/*.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["training", "common", "inference"]

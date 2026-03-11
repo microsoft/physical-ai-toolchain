@@ -4,7 +4,8 @@
  * Performance: Wrapped in React.memo to prevent re-renders when sibling markers change.
  */
 
-import { useState, memo, useCallback } from 'react';
+import { memo, useCallback,useState } from 'react';
+
 import { cn } from '@/lib/utils';
 import type { Anomaly } from '@/types';
 

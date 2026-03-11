@@ -4,7 +4,7 @@
  * Provides local persistence of annotations and pending sync queue.
  */
 
-import { openDB, type IDBPDatabase, type DBSchema } from 'idb';
+import { type DBSchema,type IDBPDatabase, openDB } from 'idb';
 
 /** Schema for the annotation offline database */
 interface AnnotationDBSchema extends DBSchema {
@@ -271,6 +271,14 @@ export async function getMetadata<T = unknown>(
   const db = await getDB();
   const item = await db.get('metadata', key);
   return item?.value as T | undefined;
+}
+
+/**
+ * Delete metadata value.
+ */
+export async function deleteMetadata(key: string): Promise<void> {
+  const db = await getDB();
+  await db.delete('metadata', key);
 }
 
 /**

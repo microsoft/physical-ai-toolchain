@@ -1,8 +1,8 @@
 """
-Storage adapters for annotation persistence.
+Storage adapters for annotation persistence and dataset file access.
 
-This module provides storage backends for saving and retrieving
-episode annotations across different storage providers.
+Provides backends for saving/retrieving episode annotations and
+reading dataset files across local and Azure Blob Storage providers.
 """
 
 from .base import StorageAdapter, StorageError
@@ -21,6 +21,13 @@ def get_azure_adapter():
     from .azure import AzureBlobStorageAdapter
 
     return AzureBlobStorageAdapter
+
+
+def get_blob_dataset_provider():
+    """Get the BlobDatasetProvider for dataset file access (requires azure-storage-blob)."""
+    from .blob_dataset import BlobDatasetProvider
+
+    return BlobDatasetProvider
 
 
 def get_huggingface_adapter():

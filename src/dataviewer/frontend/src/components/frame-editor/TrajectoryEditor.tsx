@@ -5,7 +5,9 @@
  * that are stored non-destructively in the edit store.
  */
 
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { Check, RotateCcw, Trash2 } from 'lucide-react';
+import { useCallback, useEffect,useMemo, useState } from 'react';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,8 +17,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { useTrajectoryAdjustmentState, usePlaybackControls, useEpisodeStore } from '@/stores';
-import { RotateCcw, Check, Trash2 } from 'lucide-react';
+import { useEpisodeStore,usePlaybackControls, useTrajectoryAdjustmentState } from '@/stores';
 import type { TrajectoryPoint } from '@/types/api';
 
 interface TrajectoryEditorProps {
@@ -128,7 +129,7 @@ function ArmEditor({
   onReset,
 }: ArmEditorProps) {
   const positions = currentPoint.jointPositions;
-  const currentDelta = delta ?? [0, 0, 0];
+  const currentDelta = useMemo((): [number, number, number] => delta ?? [0, 0, 0], [delta]);
   const hasChanges = delta !== undefined || gripperOverride !== undefined;
   const currentGripperValue = gripperOverride ?? positions[gripperIndex] ?? 0;
 

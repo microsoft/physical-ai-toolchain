@@ -28,6 +28,7 @@ Deployment order:
 2. `./02-deploy-azureml-extension.sh` — AzureML K8s extension, compute attach
 3. `./03-deploy-osmo-control-plane.sh` — OSMO control plane
 4. `./04-deploy-osmo-backend.sh` — OSMO backend services
+5. `./05-deploy-dataviewer.sh` — Dataviewer container build and deploy
 
 ## 📖 Documentation
 

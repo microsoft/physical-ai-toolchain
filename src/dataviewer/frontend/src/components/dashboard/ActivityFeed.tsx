@@ -2,19 +2,24 @@
  * Recent activity feed showing latest annotation actions.
  */
 
-import { cn } from '@/lib/utils';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { formatDistanceToNow } from 'date-fns';
 import {
+  Activity,
   CheckCircle,
+  Clock,
   Edit,
   Eye,
-  Clock,
   FileText,
-  Activity,
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  getActivityTypeTone,
+  getSemanticToneClasses,
+} from '@/lib/semantic-state';
+import { cn } from '@/lib/utils';
 
 export interface ActivityItem {
   id: string;
@@ -39,20 +44,14 @@ export interface ActivityFeedProps {
 const TYPE_CONFIG = {
   annotation: {
     icon: CheckCircle,
-    color: 'text-green-500',
-    bg: 'bg-green-100',
     label: 'Annotated',
   },
   review: {
     icon: Eye,
-    color: 'text-blue-500',
-    bg: 'bg-blue-100',
     label: 'Reviewed',
   },
   edit: {
     icon: Edit,
-    color: 'text-orange-500',
-    bg: 'bg-orange-100',
     label: 'Edited',
   },
 };
@@ -98,6 +97,7 @@ export function ActivityFeed({
               {sortedActivities.map((activity) => {
                 const config = TYPE_CONFIG[activity.type];
                 const Icon = config.icon;
+                const tone = getActivityTypeTone(activity.type);
 
                 return (
                   <div
@@ -107,11 +107,11 @@ export function ActivityFeed({
                     {/* Icon */}
                     <div
                       className={cn(
-                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-full',
-                        config.bg
+                        'flex h-8 w-8 shrink-0 items-center justify-center rounded-full border',
+                        getSemanticToneClasses('surface', tone)
                       )}
                     >
-                      <Icon className={cn('h-4 w-4', config.color)} />
+                      <Icon className={cn('h-4 w-4', getSemanticToneClasses('icon', tone))} />
                     </div>
 
                     {/* Content */}
@@ -120,7 +120,7 @@ export function ActivityFeed({
                         <span className="font-medium truncate">
                           {activity.annotator_name}
                         </span>
-                        <Badge variant="outline" className="text-xs">
+                        <Badge variant="status" tone={tone} className="text-xs">
                           {config.label}
                         </Badge>
                       </div>

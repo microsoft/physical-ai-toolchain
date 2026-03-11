@@ -31,7 +31,7 @@ Visit <https://cla.opensource.microsoft.com> to sign the CLA electronically. Whe
 
 Before creating a bug report:
 
-* Search [existing issues](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues) for similar deployment errors or problems
+* Search [existing issues](https://github.com/microsoft/physical-ai-toolchain/issues) for similar deployment errors or problems
 * Verify you are using tested versions: Terraform >= 1.9.8, Azure CLI >= 2.65.0
 * Check Azure resource quotas and limits: `az vm list-usage --location <region>`
 * Confirm network mode (private/hybrid/public) matches documented requirements
@@ -39,7 +39,7 @@ Before creating a bug report:
 
 ### How to Submit a Bug Report
 
-Create a [new issue](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues/new) with:
+Create a [new issue](https://github.com/microsoft/physical-ai-toolchain/issues/new) with:
 
 | Field                | Details                                                                |
 |----------------------|------------------------------------------------------------------------|
@@ -122,14 +122,14 @@ After submission, expect initial acknowledgment within the timeframes documented
 Before suggesting an enhancement:
 
 * Determine if the enhancement is broadly applicable (blueprint improvement) or organization-specific (belongs in a fork)
-* Search [existing issues](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues) and [pull requests](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/pulls) for similar proposals
+* Search [existing issues](https://github.com/microsoft/physical-ai-toolchain/issues) and [pull requests](https://github.com/microsoft/physical-ai-toolchain/pulls) for similar proposals
 * Consider cost implications if adding new Azure services or increasing resource scale
 * Verify compatibility with all three network modes (private/hybrid/public) or document known limitations
 * Check if enhancement aligns with reference architecture goals (generalized deployment patterns vs. specific use cases)
 
 ### How to Submit an Enhancement
 
-Create a [new issue](https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues/new) with:
+Create a [new issue](https://github.com/microsoft/physical-ai-toolchain/issues/new) with:
 
 * Clear title describing the enhancement
 * Problem statement: What limitation or gap does this enhancement address?

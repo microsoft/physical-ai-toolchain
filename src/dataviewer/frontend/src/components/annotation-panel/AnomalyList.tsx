@@ -2,8 +2,14 @@
  * Anomaly list component displaying detected anomalies.
  */
 
-import { Trash2, CheckCircle, Zap, AlertTriangle } from 'lucide-react';
+import { AlertTriangle,CheckCircle, Trash2, Zap } from 'lucide-react';
+
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  getAnomalySeverityTone,
+  getSemanticToneClasses,
+} from '@/lib/semantic-state';
 import { cn } from '@/lib/utils';
 import type { Anomaly } from '@/types';
 
@@ -45,60 +51,41 @@ export function AnomalyList({
     );
   }
 
-  const severityColors = {
-    low: 'border-yellow-200 bg-yellow-50',
-    medium: 'border-orange-200 bg-orange-50',
-    high: 'border-red-200 bg-red-50',
-  };
-
-  const severityBadgeColors = {
-    low: 'bg-yellow-200 text-yellow-800',
-    medium: 'bg-orange-200 text-orange-800',
-    high: 'bg-red-200 text-red-800',
-  };
-
   return (
     <div className="space-y-2 max-h-48 overflow-y-auto">
-      {anomalies.map((anomaly) => (
+      {anomalies.map((anomaly) => {
+        const severityTone = getAnomalySeverityTone(anomaly.severity);
+
+        return (
         <div
           key={anomaly.id}
           className={cn(
-            'flex items-start gap-2 p-2 rounded-md border',
-            severityColors[anomaly.severity]
+            'flex items-start gap-2 rounded-md border p-2 text-foreground',
+            getSemanticToneClasses('surface', severityTone)
           )}
         >
           <AlertTriangle
-            className={cn(
-              'h-4 w-4 shrink-0 mt-0.5',
-              anomaly.severity === 'high' && 'text-red-500',
-              anomaly.severity === 'medium' && 'text-orange-500',
-              anomaly.severity === 'low' && 'text-yellow-500'
-            )}
+            className={cn('mt-0.5 h-4 w-4 shrink-0', getSemanticToneClasses('icon', severityTone))}
           />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-medium capitalize">
                 {anomaly.type.replace(/_/g, ' ')}
               </span>
-              <span
-                className={cn(
-                  'text-xs px-1.5 rounded',
-                  severityBadgeColors[anomaly.severity]
-                )}
-              >
+              <Badge variant="status" tone={severityTone} className="text-xs">
                 {anomaly.severity}
-              </span>
+              </Badge>
               {anomaly.autoDetected && (
-                <span className="text-xs px-1.5 rounded bg-blue-100 text-blue-700 flex items-center gap-0.5">
+                <Badge variant="status" tone="info" className="gap-0.5 text-xs">
                   <Zap className="h-3 w-3" />
                   auto
-                </span>
+                </Badge>
               )}
               {anomaly.verified && (
-                <span className="text-xs px-1.5 rounded bg-green-100 text-green-700 flex items-center gap-0.5">
+                <Badge variant="status" tone="success" className="gap-0.5 text-xs">
                   <CheckCircle className="h-3 w-3" />
                   verified
-                </span>
+                </Badge>
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5 truncate">
@@ -123,7 +110,9 @@ export function AnomalyList({
                 <CheckCircle
                   className={cn(
                     'h-3 w-3',
-                    anomaly.verified ? 'text-green-500' : 'text-muted-foreground'
+                    anomaly.verified
+                      ? getSemanticToneClasses('icon', 'success')
+                      : 'text-muted-foreground'
                   )}
                 />
               </Button>
@@ -138,7 +127,7 @@ export function AnomalyList({
             </Button>
           </div>
         </div>
-      ))}
+      )})}
     </div>
   );
 }

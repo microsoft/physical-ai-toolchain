@@ -33,9 +33,60 @@ export default {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
         },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
+        },
+        status: {
+          neutral: {
+            DEFAULT: "hsl(var(--status-neutral))",
+            foreground: "hsl(var(--status-neutral-foreground))",
+            subtle: "hsl(var(--status-neutral-subtle))",
+            border: "hsl(var(--status-neutral-border))",
+          },
+          info: {
+            DEFAULT: "hsl(var(--status-info))",
+            foreground: "hsl(var(--status-info-foreground))",
+            subtle: "hsl(var(--status-info-subtle))",
+            border: "hsl(var(--status-info-border))",
+          },
+          success: {
+            DEFAULT: "hsl(var(--status-success))",
+            foreground: "hsl(var(--status-success-foreground))",
+            subtle: "hsl(var(--status-success-subtle))",
+            border: "hsl(var(--status-success-border))",
+          },
+          warning: {
+            DEFAULT: "hsl(var(--status-warning))",
+            foreground: "hsl(var(--status-warning-foreground))",
+            subtle: "hsl(var(--status-warning-subtle))",
+            border: "hsl(var(--status-warning-border))",
+          },
+          danger: {
+            DEFAULT: "hsl(var(--status-danger))",
+            foreground: "hsl(var(--status-danger-foreground))",
+            subtle: "hsl(var(--status-danger-subtle))",
+            border: "hsl(var(--status-danger-border))",
+          },
+        },
+        severity: {
+          minor: "hsl(var(--status-warning))",
+          low: "hsl(var(--status-warning))",
+          major: "hsl(var(--status-warning))",
+          medium: "hsl(var(--status-warning))",
+          critical: "hsl(var(--status-danger))",
+          high: "hsl(var(--status-danger))",
+        },
+        chart: {
+          1: "hsl(var(--chart-1))",
+          2: "hsl(var(--chart-2))",
+          3: "hsl(var(--chart-3))",
+          4: "hsl(var(--chart-4))",
+          5: "hsl(var(--chart-5))",
         },
       },
       borderRadius: {

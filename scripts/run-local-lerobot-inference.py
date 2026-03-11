@@ -17,7 +17,7 @@ Usage:
     # Download from AzureML model registry
     python scripts/run-local-lerobot-inference.py \
         --model-name hex-pickup-act --model-version 3 \
-        --dataset-dir /path/to/hexagon_lerobot \
+        --dataset-dir /path/to/lerobot \
         --episodes 10
 
     # HuggingFace repo

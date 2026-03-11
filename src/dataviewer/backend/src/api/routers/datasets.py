@@ -7,8 +7,8 @@ and accessing episode information with HDF5 and LeRobot parquet support.
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
@@ -85,25 +85,6 @@ async def get_dataset_capabilities(
     has_hdf5 = service.dataset_has_hdf5(dataset_id)
     is_lerobot = service.dataset_is_lerobot(dataset_id)
 
-    if has_hdf5:
-        # Get episode count from HDF5 loader
-        hdf5_loader = service._get_hdf5_loader(dataset_id)
-        if hdf5_loader:
-            try:
-                episodes = hdf5_loader.list_episodes()
-                episode_count = max(episode_count, len(episodes))
-            except Exception:
-                pass  # Best-effort; loader may not support listing
-    elif is_lerobot:
-        # Get episode count from LeRobot loader
-        lerobot_loader = service._get_lerobot_loader(dataset_id)
-        if lerobot_loader:
-            try:
-                episodes = lerobot_loader.list_episodes()
-                episode_count = max(episode_count, len(episodes))
-            except Exception:
-                pass  # Best-effort; loader may not support listing
-
     return DatasetCapabilities(
         hdf5_support=service.has_hdf5_support(),
         has_hdf5_files=has_hdf5,
@@ -129,6 +110,9 @@ async def list_episodes(
     and annotation status. When HDF5 files are available, episode
     length and task index are loaded from the files.
     """
+    dataset = await service.get_dataset(dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
     return await service.list_episodes(
         dataset_id,
         offset=offset,
@@ -141,6 +125,7 @@ async def list_episodes(
 @router.get("/{dataset_id}/episodes/{episode_idx}", response_model=EpisodeData)
 async def get_episode(
     episode_idx: int,
+    response: Response,
     dataset_id: str = Depends(validated_dataset_id),
     service: DatasetService = Depends(get_dataset_service),
 ) -> EpisodeData:
@@ -151,12 +136,16 @@ async def get_episode(
     and trajectory data points. When HDF5 files are available,
     trajectory data is loaded directly from the HDF5 file.
     """
+    dataset = await service.get_dataset(dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
     episode = await service.get_episode(dataset_id, episode_idx)
     if episode is None:
         raise HTTPException(
             status_code=404,
             detail=f"Episode {episode_idx} not found in dataset '{dataset_id}'",
         )
+    response.headers["Cache-Control"] = "private, max-age=60"
     return episode
 
 
@@ -166,6 +155,7 @@ async def get_episode(
 )
 async def get_episode_trajectory(
     episode_idx: int,
+    response: Response,
     dataset_id: str = Depends(validated_dataset_id),
     service: DatasetService = Depends(get_dataset_service),
 ) -> list[TrajectoryPoint]:
@@ -181,6 +171,7 @@ async def get_episode_trajectory(
             status_code=404,
             detail=f"No trajectory data for episode {episode_idx} in dataset '{dataset_id}'",
         )
+    response.headers["Cache-Control"] = "private, max-age=60"
     return trajectory
 
 
@@ -204,7 +195,11 @@ async def get_episode_frame(
                 status_code=404,
                 detail=f"Frame {frame_idx} not found for camera '{camera}'",
             )
-        return Response(content=image_bytes, media_type="image/jpeg")
+        return Response(
+            content=image_bytes,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -227,48 +222,159 @@ async def get_episode_cameras(
     return cameras
 
 
-@router.get("/{dataset_id}/episodes/{episode_idx}/video/{camera}")
+@router.get(
+    "/{dataset_id}/episodes/{episode_idx}/video/{camera}",
+    response_model=None,
+)
+@router.head(
+    "/{dataset_id}/episodes/{episode_idx}/video/{camera}",
+    response_model=None,
+    include_in_schema=False,
+)
 async def get_episode_video(
+    request: Request,
     episode_idx: int,
     dataset_id: str = Depends(validated_dataset_id),
     camera: str = Depends(validated_camera_name),
     service: DatasetService = Depends(get_dataset_service),
-) -> FileResponse:
+) -> FileResponse | StreamingResponse | Response:
     """
     Get video file for an episode and camera.
 
-    Returns the video file for streaming. Supports LeRobot parquet datasets
-    with video files stored alongside the parquet data.
+    Returns the video file for streaming with HTTP Range support for
+    seeking. Supports LeRobot parquet datasets with video files stored
+    alongside the parquet data, as well as datasets stored in Azure
+    Blob Storage.
 
     Note: camera parameter can include dots (e.g., 'observation.images.color')
     """
     video_path = service.get_video_file_path(dataset_id, episode_idx, camera)
 
-    if video_path is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Video not found for episode {episode_idx}, camera '{camera}'",
+    if video_path is not None:
+        video_file = validate_path_containment(Path(video_path), Path(service.base_path))
+        if not video_file.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video file not found: {video_path}",
+            )
+        suffix = video_file.suffix.lower()
+        media_types = {
+            ".mp4": "video/mp4",
+            ".webm": "video/webm",
+            ".avi": "video/x-msvideo",
+            ".mov": "video/quicktime",
+        }
+        media_type = media_types.get(suffix, "video/mp4")
+        return FileResponse(
+            path=str(video_file),
+            media_type=media_type,
+            filename=f"{dataset_id}_ep{episode_idx}_{camera.replace('.', '_')}{suffix}",
+            headers={"Cache-Control": "public, max-age=86400, immutable"},
         )
 
-    video_file = validate_path_containment(Path(video_path), Path(service.base_path))
-    if not video_file.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Video file not found: {video_path}",
-        )
+    # Fall back to blob streaming when local file is unavailable
+    if service.has_blob_provider():
+        blob_path = await service.get_blob_video_path(dataset_id, episode_idx, camera)
+        if blob_path is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video not found in blob storage for episode {episode_idx}, camera '{camera}'",
+            )
 
-    # Determine media type based on file extension
-    suffix = video_file.suffix.lower()
-    media_types = {
-        ".mp4": "video/mp4",
-        ".webm": "video/webm",
-        ".avi": "video/x-msvideo",
-        ".mov": "video/quicktime",
-    }
-    media_type = media_types.get(suffix, "video/mp4")
+        offset, length = _parse_range_header(request.headers.get("range"))
+        stream_result = await service.get_blob_video_stream(blob_path, offset=offset, length=length)
+        if stream_result is not None:
+            headers, media_type, stream = stream_result
+            status_code = 206 if offset is not None else 200
 
-    return FileResponse(
-        path=str(video_file),
-        media_type=media_type,
-        filename=f"{dataset_id}_ep{episode_idx}_{camera.replace('.', '_')}{suffix}",
+            if request.method == "HEAD":
+                return Response(
+                    status_code=status_code,
+                    headers=headers,
+                    media_type=media_type,
+                )
+
+            return StreamingResponse(
+                stream,
+                status_code=status_code,
+                media_type=media_type,
+                headers=headers,
+            )
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Video not found for episode {episode_idx}, camera '{camera}'",
     )
+
+
+def _parse_range_header(range_header: str | None) -> tuple[int | None, int | None]:
+    """Parse an HTTP Range header into (offset, length). Supports 'bytes=START-END' and 'bytes=START-'."""
+    if not range_header or not range_header.startswith("bytes="):
+        return None, None
+
+    range_spec = range_header[6:]
+    parts = range_spec.split("-", 1)
+    if not parts[0]:
+        return None, None
+
+    start = int(parts[0])
+    if parts[1]:
+        end = int(parts[1])
+        return start, end - start + 1
+    return start, None
+
+
+class EpisodeCacheStats(BaseModel):
+    """Cache performance metrics."""
+
+    capacity: int
+    size: int
+    hits: int
+    misses: int
+    hit_rate: float
+    total_bytes: int
+    max_memory_bytes: int
+
+
+@router.get("/cache/stats", response_model=EpisodeCacheStats)
+async def get_cache_stats(
+    service: DatasetService = Depends(get_dataset_service),
+) -> EpisodeCacheStats:
+    """Return episode cache performance metrics."""
+    stats = service._episode_cache.stats()
+    return EpisodeCacheStats(
+        capacity=stats.capacity,
+        size=stats.size,
+        hits=stats.hits,
+        misses=stats.misses,
+        hit_rate=stats.hit_rate,
+        total_bytes=stats.total_bytes,
+        max_memory_bytes=stats.max_memory_bytes,
+    )
+
+
+@router.post("/{dataset_id}/cache/warm")
+async def warm_cache(
+    count: int = Query(5, ge=1, le=20, description="Number of episodes to preload"),
+    dataset_id: str = Depends(validated_dataset_id),
+    service: DatasetService = Depends(get_dataset_service),
+) -> dict:
+    """
+    Preload the first N episodes into the LRU cache.
+
+    Designed to be called on dataset selection so the initial episode
+    loads are instant. Runs synchronously to give the caller confidence
+    that warm-up is complete before navigating.
+    """
+    dataset = await service.get_dataset(dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+
+    loaded = 0
+    total = min(count, dataset.total_episodes)
+    for idx in range(total):
+        episode = await service.get_episode(dataset_id, idx)
+        if episode is not None:
+            loaded += 1
+
+    return {"dataset_id": dataset_id, "loaded": loaded, "requested": total}
