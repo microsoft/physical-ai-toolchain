@@ -9,7 +9,7 @@
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "lint:md:fix": "markdownlint-cli2 \"**/*.md\" --fix",
     "lint:ps": "pwsh -File scripts/linting/Invoke-PSScriptAnalyzer.ps1",
-    "lint:links": "pwsh -File scripts/linting/Invoke-LinkLanguageCheck.ps1",
+    "lint:links": "node scripts/linting/run-link-language-check.cjs",
     "lint:yaml": "pwsh -File scripts/linting/Invoke-YamlLint.ps1",
     "lint:all": "npm run lint:md && npm run lint:ps && npm run lint:links && npm run lint:yaml",
     "format:tables": "markdown-table-formatter \"**/*.md\"",
