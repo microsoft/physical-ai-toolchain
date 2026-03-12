@@ -7,11 +7,11 @@ const config = {
   tagline: 'End-to-end robotics simulation, training, and deployment on Azure',
   favicon: 'img/microsoft-logo.svg',
 
-  url: 'https://azure-samples.github.io',
-  baseUrl: '/azure-nvidia-robotics-reference-architecture/',
+  url: 'https://microsoft.github.io',
+  baseUrl: '/physical-ai-toolchain/',
 
-  organizationName: 'Azure-Samples',
-  projectName: 'azure-nvidia-robotics-reference-architecture',
+  organizationName: 'microsoft',
+  projectName: 'physical-ai-toolchain',
   trailingSlash: false,
 
   onBrokenLinks: 'warn',
@@ -36,7 +36,7 @@ const config = {
           routeBasePath: '/',
           sidebarPath: './sidebars.js',
           editUrl:
-            'https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/tree/main/docs/docusaurus/',
+            'https://github.com/microsoft/physical-ai-toolchain/tree/main/docs/docusaurus/',
           exclude: ['docusaurus/**', 'images/**'],
           showLastUpdateTime: true,
         },
@@ -75,7 +75,7 @@ const config = {
             label: 'Documentation',
           },
           {
-            href: 'https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture',
+            href: 'https://github.com/microsoft/physical-ai-toolchain',
             label: 'GitHub',
             position: 'right',
           },
@@ -110,7 +110,7 @@ const config = {
               },
               {
                 label: 'GitHub Issues',
-                href: 'https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture/issues',
+                href: 'https://github.com/microsoft/physical-ai-toolchain/issues',
               },
             ],
           },
@@ -119,11 +119,11 @@ const config = {
             items: [
               {
                 label: 'GitHub',
-                href: 'https://github.com/Azure-Samples/azure-nvidia-robotics-reference-architecture',
+                href: 'https://github.com/microsoft/physical-ai-toolchain',
               },
               {
-                label: 'Azure Samples',
-                href: 'https://github.com/Azure-Samples',
+                label: 'Microsoft',
+                href: 'https://github.com/microsoft',
               },
             ],
           },

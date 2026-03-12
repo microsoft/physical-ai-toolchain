@@ -3,8 +3,8 @@ export default function useDocusaurusContext() {
     siteConfig: {
       title: 'Azure NVIDIA Robotics Reference Architecture',
       tagline: 'End-to-end reference architecture for cloud-to-edge robotics.',
-      url: 'https://azure-samples.github.io',
-      baseUrl: '/azure-nvidia-robotics-reference-architecture/',
+      url: 'https://microsoft.github.io',
+      baseUrl: '/physical-ai-toolchain/',
     },
   };
 }

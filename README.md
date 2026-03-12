@@ -5,6 +5,7 @@
 [![CodeQL](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/codeql-analysis.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/microsoft/physical-ai-toolchain/badge)](https://scorecard.dev/viewer/?uri=github.com/microsoft/physical-ai-toolchain)
 [![License](https://img.shields.io/github/license/microsoft/physical-ai-toolchain)](./LICENSE)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://microsoft.github.io/physical-ai-toolchain/)
 <!-- markdownlint-enable MD013 -->
 
 Production-ready framework for orchestrating robotics and AI workloads on [Microsoft Azure](https://azure.microsoft.com/) using NVIDIA [Isaac Lab](https://developer.nvidia.com/isaac/lab), [Isaac Sim](https://developer.nvidia.com/isaac/sim), and [OSMO](https://developer.nvidia.com/osmo).
