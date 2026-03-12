@@ -24,7 +24,7 @@ jobs:
 
       - name: Install gitsign
         run: |
-          go install github.com/sigstore/gitsign@latest
+          go install github.com/sigstore/gitsign@v0.13.0
           GOPATH_BIN="$(go env GOPATH)/bin"
           echo "${GOPATH_BIN}" >> "${GITHUB_PATH}"
 

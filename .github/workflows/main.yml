@@ -213,7 +213,7 @@ jobs:
       - name: Install gitsign
         if: ${{ steps.release.outputs.release_created == 'true' }}
         run: |
-          go install github.com/sigstore/gitsign@latest
+          go install github.com/sigstore/gitsign@v0.13.0
           $goPath = (go env GOPATH).Trim()
           $goBin = Join-Path $goPath 'bin'
           $gitsign = Join-Path $goBin 'gitsign'
