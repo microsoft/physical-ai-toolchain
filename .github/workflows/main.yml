@@ -106,6 +106,20 @@ jobs:
       contents: read
       id-token: write
 
+  # Dataviewer frontend lint, type-check, and build
+  dataviewer-frontend-tests:
+    name: Dataviewer Frontend Tests
+    uses: ./.github/workflows/dataviewer-frontend-tests.yml
+    permissions:
+      contents: read
+
+  # Dataviewer backend pytest execution
+  dataviewer-backend-pytests:
+    name: Dataviewer Backend Pytest
+    uses: ./.github/workflows/dataviewer-backend-pytests.yml
+    permissions:
+      contents: read
+
   # Python linting using ruff
   python-lint:
     name: Python Lint
@@ -136,6 +150,8 @@ jobs:
       - dependency-pinning
       - pester-tests
       - pytest-tests
+      - dataviewer-frontend-tests
+      - dataviewer-backend-pytests
       - python-lint
       - codeql-analysis
     name: Release Please

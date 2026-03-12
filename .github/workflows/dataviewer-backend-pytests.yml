@@ -1,0 +1,67 @@
+name: Dataviewer Backend Pytest
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - src/dataviewer/backend/**
+      - .github/workflows/dataviewer-backend-pytests.yml
+  push:
+    branches:
+      - main
+    paths:
+      - src/dataviewer/backend/**
+      - .github/workflows/dataviewer-backend-pytests.yml
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest-dataviewer:
+    name: Pytest Dataviewer Backend
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11']
+    defaults:
+      run:
+        working-directory: src/dataviewer/backend
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc # v2
+        with:
+          egress-policy: audit
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a # v7.4.0
+
+      - name: Install dependencies
+        run: |
+          uv sync --extra dev
+          uv pip install pytest-cov
+
+      - name: Run pytest with coverage
+        run: uv run pytest -v --cov=src --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage.xml artifact
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4.4.3
+        with:
+          name: pytest-dataviewer-coverage-xml
+          path: src/dataviewer/backend/coverage.xml
+          retention-days: 30
