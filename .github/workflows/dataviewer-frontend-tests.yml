@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   frontend-checks:
-    name: Lint, Type-check, Test and Build
+    name: Lint, Type-check & Test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -36,6 +36,11 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
         with:
           persist-credentials: false
+
+      - name: Harden runner
+        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc  # v2
+        with:
+          egress-policy: audit
 
       - name: Harden runner
         uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc  # v2
@@ -57,6 +62,7 @@ jobs:
         run: npm ci
 
       - name: ESLint
+        run: npm run lint
         run: npm run lint
 
       - name: Type check
@@ -107,10 +113,10 @@ jobs:
         with:
           name: frontend-test-results
           path: |
-            data-management/viewer/frontend/lint-results.txt
-            data-management/viewer/frontend/typecheck-results.txt
-            data-management/viewer/frontend/format-results.txt
-            data-management/viewer/frontend/test-results.txt
+            src/dataviewer/frontend/lint-results.txt
+            src/dataviewer/frontend/typecheck-results.txt
+            src/dataviewer/frontend/format-results.txt
+            src/dataviewer/frontend/test-results.txt
           retention-days: 30
 
       - name: Fail job if errors found
