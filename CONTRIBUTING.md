@@ -2,7 +2,7 @@
 title: Contributing
 description: How to contribute to the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-11
+ms.date: 2026-03-11
 ms.topic: how-to
 keywords:
   - contributing
@@ -211,6 +211,43 @@ This project uses [release-please](https://github.com/googleapis/release-please)
 After merging to `main`, release-please automatically creates a release PR with updated `CHANGELOG.md` and version bumps. Merging that PR creates a GitHub Release and git tag.
 
 For commit message format details, see [commit-message.instructions.md](.github/instructions/commit-message.instructions.md).
+
+## Release Tag Signing
+
+All release tags are required to be signed. Unsigned release tags are non-compliant with project policy.
+
+This repository uses Sigstore `gitsign` with GitHub OIDC identity for keyless tag signing.
+
+### Configure Signing
+
+```bash
+# Install gitsign
+# https://docs.sigstore.dev/cosign/signing/gitsign/
+
+# Configure git for keyless x509 signing
+git config --global gpg.format x509
+git config --global gpg.x509.program gitsign
+git config --global tag.gpgSign true
+```
+
+### Create a Signed Release Tag
+
+```bash
+git tag -s v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+### Verify a Signed Tag
+
+```bash
+git fetch --tags
+git tag -v v1.0.0
+```
+
+GitHub Actions validates signatures for pushed version tags (`v*`).
+
+> [!IMPORTANT]
+> Maintainer GPG key distribution is not required for this repository because release tags are signed using keyless Sigstore identities.
 
 ## Deprecation Policy
 
