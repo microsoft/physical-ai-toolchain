@@ -107,7 +107,7 @@ The toolchain includes agent-driven automation that collapses multi-stage physic
 
 **How it works:**
 
-1. **Describe the objective.** Provide a natural-language instruction such as "collect 50 demonstrations of a palletizing task and train an IL policy."
+1. **Describe the objective.** Provide a natural-language instruction such as "collect 50 demonstrations of an inspection and sorting task and train an IL policy."
 2. **Agent plans and executes.** The agent decomposes the objective into pipeline stages — data collection, conversion, training configuration, compute provisioning, and training launch — then executes each stage using the toolchain's APIs and infrastructure.
 3. **Evaluate and iterate.** The agent runs evaluation (simulation replay, success-rate metrics) and presents results. If the policy does not meet acceptance criteria, the agent adjusts hyperparameters or collects additional data and re-trains.
 4. **Deploy.** Once a policy passes evaluation, the agent packages it (ONNX/TensorRT), builds a container image, and triggers GitOps deployment to target edge devices.
