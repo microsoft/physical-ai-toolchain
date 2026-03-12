@@ -7,8 +7,11 @@ for task completeness, trajectory quality, data quality, and anomaly annotations
 
 from datetime import datetime
 from enum import Enum, StrEnum
+from typing import ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from ..validation import SanitizedModel
 
 # ============================================================================
 # Task Completeness Types
@@ -34,7 +37,7 @@ class ConfidenceLevel(int, Enum):
     FIVE = 5
 
 
-class TaskCompletenessAnnotation(BaseModel):
+class TaskCompletenessAnnotation(SanitizedModel):
     """Task completeness annotation with rating and optional details."""
 
     rating: TaskCompletenessRating
@@ -43,7 +46,7 @@ class TaskCompletenessAnnotation(BaseModel):
     failure_reason: str | None = None
     subtask_reached: str | None = None
 
-    model_config = {"use_enum_values": True}
+    model_config: ClassVar = {"use_enum_values": True}
 
 
 # ============================================================================
@@ -73,7 +76,7 @@ class TrajectoryFlag(StrEnum):
     CORRECTION_HEAVY = "correction-heavy"
 
 
-class TrajectoryQualityMetrics(BaseModel):
+class TrajectoryQualityMetrics(SanitizedModel):
     """Individual trajectory quality metrics."""
 
     smoothness: QualityScore
@@ -81,17 +84,17 @@ class TrajectoryQualityMetrics(BaseModel):
     safety: QualityScore
     precision: QualityScore
 
-    model_config = {"use_enum_values": True}
+    model_config: ClassVar = {"use_enum_values": True}
 
 
-class TrajectoryQualityAnnotation(BaseModel):
+class TrajectoryQualityAnnotation(SanitizedModel):
     """Complete trajectory quality annotation."""
 
     overall_score: QualityScore
     metrics: TrajectoryQualityMetrics
     flags: list[TrajectoryFlag] = Field(default_factory=list)
 
-    model_config = {"use_enum_values": True}
+    model_config: ClassVar = {"use_enum_values": True}
 
 
 # ============================================================================
@@ -129,7 +132,7 @@ class IssueSeverity(StrEnum):
     CRITICAL = "critical"
 
 
-class DataQualityIssue(BaseModel):
+class DataQualityIssue(SanitizedModel):
     """Individual data quality issue."""
 
     type: DataQualityIssueType
@@ -138,16 +141,16 @@ class DataQualityIssue(BaseModel):
     affected_streams: list[str] | None = None
     notes: str | None = None
 
-    model_config = {"use_enum_values": True}
+    model_config: ClassVar = {"use_enum_values": True}
 
 
-class DataQualityAnnotation(BaseModel):
+class DataQualityAnnotation(SanitizedModel):
     """Complete data quality annotation."""
 
     overall_quality: DataQualityLevel
     issues: list[DataQualityIssue] = Field(default_factory=list)
 
-    model_config = {"use_enum_values": True}
+    model_config: ClassVar = {"use_enum_values": True}
 
 
 # ============================================================================
@@ -176,7 +179,7 @@ class AnomalyType(StrEnum):
     OTHER = "other"
 
 
-class Anomaly(BaseModel):
+class Anomaly(SanitizedModel):
     """Individual anomaly marker."""
 
     id: str
@@ -188,10 +191,10 @@ class Anomaly(BaseModel):
     auto_detected: bool = False
     verified: bool = False
 
-    model_config = {"use_enum_values": True}
+    model_config: ClassVar = {"use_enum_values": True}
 
 
-class AnomalyAnnotation(BaseModel):
+class AnomalyAnnotation(SanitizedModel):
     """Container for anomaly annotations."""
 
     anomalies: list[Anomaly] = Field(default_factory=list)
@@ -202,7 +205,7 @@ class AnomalyAnnotation(BaseModel):
 # ============================================================================
 
 
-class EpisodeAnnotation(BaseModel):
+class EpisodeAnnotation(SanitizedModel):
     """Complete annotation for a single episode by one annotator."""
 
     annotator_id: str
@@ -214,7 +217,7 @@ class EpisodeAnnotation(BaseModel):
     notes: str | None = None
 
 
-class EpisodeConsensus(BaseModel):
+class EpisodeConsensus(SanitizedModel):
     """Consensus annotation derived from multiple annotators."""
 
     task_completeness: TaskCompletenessRating
@@ -222,10 +225,10 @@ class EpisodeConsensus(BaseModel):
     data_quality: DataQualityLevel
     agreement_score: float = Field(ge=0.0, le=1.0)
 
-    model_config = {"use_enum_values": True}
+    model_config: ClassVar = {"use_enum_values": True}
 
 
-class EpisodeAnnotationFile(BaseModel):
+class EpisodeAnnotationFile(SanitizedModel):
     """Complete annotation file for an episode."""
 
     schema_version: str = "1.0.0"
@@ -240,7 +243,7 @@ class EpisodeAnnotationFile(BaseModel):
 # ============================================================================
 
 
-class ComputedQualityMetrics(BaseModel):
+class ComputedQualityMetrics(SanitizedModel):
     """Computed trajectory quality metrics from auto-analysis."""
 
     smoothness_score: float = Field(ge=0.0, le=1.0)
@@ -250,7 +253,7 @@ class ComputedQualityMetrics(BaseModel):
     correction_count: int = Field(ge=0)
 
 
-class AutoQualityAnalysis(BaseModel):
+class AutoQualityAnalysis(SanitizedModel):
     """Auto-analysis result for an episode."""
 
     episode_index: int = Field(ge=0)
@@ -259,7 +262,7 @@ class AutoQualityAnalysis(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     flags: list[TrajectoryFlag] = Field(default_factory=list)
 
-    model_config = {"use_enum_values": True}
+    model_config: ClassVar = {"use_enum_values": True}
 
 
 # ============================================================================
@@ -267,7 +270,7 @@ class AutoQualityAnalysis(BaseModel):
 # ============================================================================
 
 
-class AnnotationSummary(BaseModel):
+class AnnotationSummary(SanitizedModel):
     """Aggregated annotation metrics for a dataset."""
 
     dataset_id: str

@@ -3,7 +3,6 @@ import type { SyntheticEvent } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAnnotationWorkspaceMediaController } from '@/components/annotation-workspace/useAnnotationWorkspaceMediaController'
-import { clearPersistentFrameCache } from '@/components/annotation-workspace/useVideoFrameCache'
 
 const dataset = {
   id: 'dataset-1',
@@ -21,7 +20,6 @@ describe('useAnnotationWorkspaceMediaController', () => {
 
   afterEach(() => {
     vi.useRealTimers()
-    clearPersistentFrameCache()
   })
 
   it('derives the primary camera video and frame URLs for the current episode frame', () => {
