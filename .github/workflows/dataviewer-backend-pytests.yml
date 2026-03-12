@@ -51,10 +51,13 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a # v7.4.0
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Install dependencies
         run: |
           uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
-          uv pip install pytest-cov opencv-python-headless
+          uv pip install pytest-cov
 
       - name: Run pytest with coverage
         run: uv run pytest -v --cov=src --cov-report=xml --cov-report=term-missing
