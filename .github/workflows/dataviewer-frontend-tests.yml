@@ -1,21 +1,31 @@
 name: Dataviewer Frontend Tests
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - src/dataviewer/frontend/**
+      - .github/workflows/dataviewer-frontend-tests.yml
+  push:
+    branches:
+      - main
+    paths:
+      - src/dataviewer/frontend/**
+      - .github/workflows/dataviewer-frontend-tests.yml
+  workflow_dispatch:
   workflow_call:
-    inputs:
-      soft-fail:
-        description: 'Whether to continue on test or lint failures'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 jobs:
   frontend-checks:
-    name: Lint, Type-check & Test
+    name: Lint, Type-check and Build
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22]
     defaults:
       run:
         working-directory: data-management/viewer/frontend
@@ -26,6 +36,11 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
         with:
           persist-credentials: false
+
+      - name: Harden runner
+        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc  # v2
+        with:
+          egress-policy: audit
 
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
@@ -38,14 +53,10 @@ jobs:
         run: npm ci
 
       - name: ESLint
-        id: lint
-        continue-on-error: true
-        run: npm run lint 2>&1 | tee lint-results.txt
+        run: npm run lint
 
       - name: Type check
-        id: typecheck
-        continue-on-error: true
-        run: npm run type-check 2>&1 | tee typecheck-results.txt
+        run: npm run type-check
 
       - name: Format check
         id: format
@@ -79,3 +90,6 @@ jobs:
         run: |
           echo "::error::Frontend checks failed. Run 'npm run lint', 'npm run type-check', 'npm run format', and 'npm run test' locally to reproduce."
           exit 1
+
+      - name: Build
+        run: npm run build
