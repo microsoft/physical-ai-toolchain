@@ -1,0 +1,69 @@
+name: Verify Release Tag Signature
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-release-tag:
+    name: Verify pushed release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install gitsign
+        run: |
+          VERSION="v0.13.0"
+
+          case "${{ runner.arch }}" in
+            X64)
+              ASSET="gitsign_0.13.0_linux_amd64"
+              EXPECTED_SHA="011af11d57ad205b4ae4e3f41ecc8c64fbe0043c829190c0cb44fce6fce74bbb"
+              ;;
+            ARM64)
+              ASSET="gitsign_0.13.0_linux_arm64"
+              EXPECTED_SHA="f0ec4732696b88f133ab6ef9ac2fe8be843ab9540bd1cc51dc4143142a858372"
+              ;;
+            *)
+              echo "Unsupported runner architecture: ${{ runner.arch }}"
+              exit 1
+              ;;
+          esac
+
+          BASE_URL="https://github.com/sigstore/gitsign/releases/download/${VERSION}"
+          curl -fsSLo "${RUNNER_TEMP}/${ASSET}" "${BASE_URL}/${ASSET}"
+
+          echo "${EXPECTED_SHA}  ${RUNNER_TEMP}/${ASSET}" | sha256sum -c -
+
+          BIN_DIR="${RUNNER_TEMP}/bin"
+          mkdir -p "${BIN_DIR}"
+          install -m 0755 "${RUNNER_TEMP}/${ASSET}" "${BIN_DIR}/gitsign"
+          echo "${BIN_DIR}" >> "${GITHUB_PATH}"
+
+      - name: Configure git x509 verifier
+        run: |
+          git config --global gpg.format x509
+          git config --global gpg.x509.program gitsign
+
+      - name: Verify tag signature
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          tag_type="$(git cat-file -t "refs/tags/${TAG_NAME}")"
+          if [ "${tag_type}" != "tag" ]; then
+            echo "Expected annotated tag object for ${TAG_NAME}, found ${tag_type}"
+            exit 1
+          fi
+
+          git tag -v "${TAG_NAME}"
