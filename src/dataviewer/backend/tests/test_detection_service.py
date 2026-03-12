@@ -1,5 +1,7 @@
 """Unit tests for detection service episode processing behavior."""
 
+import types
+
 import pytest
 
 from src.api.models.detection import DetectionRequest, DetectionResult
@@ -44,3 +46,24 @@ class TestDetectionEpisodeProcessing:
         assert observed_indices == [1, 1, 3, 3]
         assert [result.frame for result in summary.detections_by_frame] == [1, 3]
         assert summary.processed_frames == 2
+
+    def test_get_model_logs_sanitized_model_name(self, monkeypatch):
+        service = DetectionService()
+        logged: list[tuple[object, ...]] = []
+
+        class FakeYOLO:
+            def __init__(self, model_path: str):
+                self.model_path = model_path
+
+            def __call__(self, *_args, **_kwargs):
+                return []
+
+        monkeypatch.setattr(
+            "src.api.services.detection_service.logger.info",
+            lambda message, *args: logged.append((message, *args)),
+        )
+        monkeypatch.setitem(__import__("sys").modules, "ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
+
+        service._get_model("yolo11n\r\n")
+
+        assert logged[0] == ("Loading YOLO model: %s", "yolo11n")

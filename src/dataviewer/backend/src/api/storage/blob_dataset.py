@@ -215,7 +215,11 @@ class BlobDatasetProvider:
             self._info_cache[dataset_id] = info
             return info
         except json.JSONDecodeError as e:
-            logger.warning("Invalid JSON in info.json for dataset '%s': %s", dataset_id, e)
+            logger.warning(
+                "Invalid JSON in info.json for dataset '%s': %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                e,
+            )
             return None
 
     # ------------------------------------------------------------------
@@ -461,13 +465,17 @@ class BlobDatasetProvider:
             logger.info(
                 "Synced %d blobs for dataset '%s' to '%s'",
                 synced_count,
-                dataset_id,
+                dataset_id.replace("\r", "").replace("\n", ""),
                 local_dir,
             )
             return True
 
         except Exception as e:
-            logger.warning("Failed to sync dataset '%s' to local: %s", dataset_id, e)
+            logger.warning(
+                "Failed to sync dataset '%s' to local: %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                e,
+            )
             return False
 
     async def sync_meta_only_to_local(self, dataset_id: str, local_dir: Path) -> bool:
@@ -510,13 +518,20 @@ class BlobDatasetProvider:
 
             info_path = local_dir / "meta" / "info.json"
             if not info_path.exists():
-                logger.warning("meta/info.json not found for dataset '%s'", dataset_id)
+                logger.warning(
+                    "meta/info.json not found for dataset '%s'",
+                    dataset_id.replace("\r", "").replace("\n", ""),
+                )
                 return False
 
             return True
 
         except Exception as e:
-            logger.warning("Failed to sync meta for dataset '%s': %s", dataset_id, e)
+            logger.warning(
+                "Failed to sync meta for dataset '%s': %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                e,
+            )
             return False
 
     # ------------------------------------------------------------------
@@ -569,7 +584,11 @@ class BlobDatasetProvider:
                     logger.info("Downloaded cached video: %s", relative)
             return found_hdf5
         except Exception as e:
-            logger.warning("Failed to sync HDF5 dataset '%s': %s", dataset_id, e)
+            logger.warning(
+                "Failed to sync HDF5 dataset '%s': %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                e,
+            )
             return False
 
     async def sync_hdf5_episode_to_local(self, dataset_id: str, local_dir: Path, episode_idx: int) -> bool:
@@ -644,7 +663,11 @@ class BlobDatasetProvider:
                     count += 1
             return count
         except Exception as e:
-            logger.warning("Failed to count HDF5 episodes for '%s': %s", dataset_id, e)
+            logger.warning(
+                "Failed to count HDF5 episodes for '%s': %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                e,
+            )
             return 0
 
     # ------------------------------------------------------------------

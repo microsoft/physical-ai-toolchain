@@ -631,3 +631,26 @@ class TestBlobTempDirCleanup:
         assert not dir2.exists()
         assert len(service._blob_synced) == 0
         assert len(service._blob_meta_synced) == 0
+
+
+class TestLoggingSanitization:
+    """Tests for inline logger argument sanitization required by CodeQL."""
+
+    def test_upload_video_logs_sanitized_dataset_id_and_integer_episode(self, tmp_path, monkeypatch):
+        service = DatasetService(base_path=str(tmp_path))
+        logged: list[tuple[object, ...]] = []
+
+        class FakeBlobProvider:
+            async def upload_video(self, dataset_id: str, camera: str, episode_idx: int, cache_path: Path) -> None:
+                raise RuntimeError("upload failed")
+
+        service._blob_provider = FakeBlobProvider()
+
+        monkeypatch.setattr(
+            "src.api.services.dataset_service.service.logger.warning",
+            lambda message, *args: logged.append((message, *args)),
+        )
+
+        service._upload_video_to_blob("dataset\r\nname", 7.0, "cam0", tmp_path / "video.mp4")
+
+        assert logged == [("Blob upload failed for %s ep %d: %s", "datasetname", 7, "upload failed")]

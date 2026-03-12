@@ -125,7 +125,7 @@ class DetectionService:
             try:
                 from ultralytics import YOLO
 
-                logger.info("Loading YOLO model: %s", model_name)
+                logger.info("Loading YOLO model: %s", model_name.replace("\r", "").replace("\n", ""))
                 self._model = YOLO(f"{model_name}.pt")
                 self._model_name = model_name
                 # Warmup with dummy inference

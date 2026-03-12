@@ -175,7 +175,11 @@ class HDF5FormatHandler:
                 info = loader.get_episode_info(episode_indices[0])
                 fps = info.get("fps", 30.0)
         except Exception as e:
-            logger.warning("HDF5 discover failed for %s: %s", dataset_id, type(e).__name__)
+            logger.warning(
+                "HDF5 discover failed for %s: %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                type(e).__name__,
+            )
             hdf5_files = list(dataset_path.glob("*.hdf5"))
             episode_count = len(hdf5_files)
 
@@ -208,7 +212,11 @@ class HDF5FormatHandler:
                     episode_info_map[idx] = {"length": 0, "task_index": 0}
             return episode_indices, episode_info_map
         except Exception as e:
-            logger.warning("HDF5 list_episodes failed for %s: %s", dataset_id, type(e).__name__)
+            logger.warning(
+                "HDF5 list_episodes failed for %s: %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                type(e).__name__,
+            )
             return [], {}
 
     def load_episode(

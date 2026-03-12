@@ -159,7 +159,10 @@ class DatasetService:
             return tmp_dir
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        logger.warning("Blob sync failed for dataset '%s', tmp dir removed", dataset_id)
+        logger.warning(
+            "Blob sync failed for dataset '%s', tmp dir removed",
+            dataset_id.replace("\r", "").replace("\n", ""),
+        )
         return None
 
     async def _ensure_blob_meta_synced(self, dataset_id: str) -> Path | None:
@@ -180,7 +183,10 @@ class DatasetService:
             return tmp_dir
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        logger.warning("Blob meta sync failed for dataset '%s'", dataset_id)
+        logger.warning(
+            "Blob meta sync failed for dataset '%s'",
+            dataset_id.replace("\r", "").replace("\n", ""),
+        )
         return None
 
     async def _ensure_blob_hdf5_synced(self, dataset_id: str) -> Path | None:
@@ -637,7 +643,11 @@ class DatasetService:
                 episode = handler.load_episode(dataset_id, idx, dataset_info=dataset)
                 if episode is not None:
                     self._episode_cache.put(dataset_id, idx, episode)
-                    logger.debug("Prefetched episode %s/%d", dataset_id, idx)
+                    logger.debug(
+                        "Prefetched episode %s/%d",
+                        dataset_id.replace("\r", "").replace("\n", ""),
+                        int(idx),
+                    )
 
         # Clean up completed tasks
         self._prefetch_tasks = {t for t in self._prefetch_tasks if not t.done()}
@@ -647,7 +657,7 @@ class DatasetService:
             self._prefetch_tasks.add(task)
             task.add_done_callback(self._prefetch_tasks.discard)
         except RuntimeError as error:
-            logger.debug("Skipping episode prefetch for episode %d: %s", episode_idx, error)
+            logger.debug("Skipping episode prefetch for episode %d: %s", int(episode_idx), error)
 
     def is_safe_video_path(self, video_path: str) -> bool:
         """Check whether a video path falls within the base path or a blob-synced temp dir."""
@@ -731,7 +741,10 @@ class DatasetService:
         """Get a single frame image from an episode."""
         result = self._try_handlers(dataset_id, "get_frame_image", episode_idx, frame_idx, camera)
         if result is None:
-            logger.warning("No loader found for dataset %s", dataset_id)
+            logger.warning(
+                "No loader found for dataset %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+            )
         return result
 
     async def get_episode_cameras(self, dataset_id: str, episode_idx: int) -> list[str]:
@@ -769,7 +782,12 @@ class DatasetService:
             loop.run_until_complete(self._blob_provider.upload_video(dataset_id, camera, episode_idx, cache_path))
             loop.close()
         except Exception as exc:
-            logger.warning("Blob upload failed for %s ep %d: %s", dataset_id, episode_idx, exc)
+            logger.warning(
+                "Blob upload failed for %s ep %d: %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                int(episode_idx),
+                exc,
+            )
 
 
 # Global service instance

@@ -45,6 +45,13 @@ All user-provided values entering through `@router.` endpoint parameters or `req
 * Numeric types, coerce with `int()`, `float()`, or `bool()` as appropriate (e.g., `int(episode_idx)`, `float(request.confidence)`).
 * Sanitize at the earliest point, inside the router endpoint function body before passing values to service methods, logs, or any downstream calls.
 
+CodeQL workaround for logging:
+
+* Keep shared validation and `Depends()`-based sanitization in place.
+* When a `logger.` call writes `dataset_id`, `episode_idx`, `frame_idx`, `confidence`, or `model_name`, sanitize or coerce that specific value inline at the log call as well.
+* Prefer inline forms such as `dataset_id.replace("\r", "").replace("\n", "")`, `int(episode_idx)`, `int(frame_idx)`, `float(confidence)`, and `model_name.replace("\r", "").replace("\n", "")` so CodeQL can see the transformation on the logged value itself.
+* Do not sanitize or wrap the exception as the logger will take care of it.
+
 This can be done with `Depends()` on parameters.
 
 ## RPI Agent High Priority Instructions

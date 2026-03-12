@@ -134,7 +134,10 @@ class BlobLabelStorage:
         try:
             return DatasetLabelsFile.model_validate(json.loads(data.decode("utf-8")))
         except (json.JSONDecodeError, Exception):
-            logger.warning("Invalid labels blob for %s, returning defaults", dataset_id)
+            logger.warning(
+                "Invalid labels blob for %s, returning defaults",
+                dataset_id.replace("\r", "").replace("\n", ""),
+            )
             return DatasetLabelsFile(dataset_id=dataset_id)
 
     async def save(self, dataset_id: str, labels_file: DatasetLabelsFile) -> None:
@@ -151,7 +154,11 @@ class BlobLabelStorage:
                 content_settings=ContentSettings(content_type="application/json"),
             )
         except Exception as e:
-            logger.error("Failed to save labels blob for %s: %s", dataset_id, e)
+            logger.error(
+                "Failed to save labels blob for %s: %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                e,
+            )
             raise HTTPException(status_code=500, detail="Failed to save labels") from e
 
 
