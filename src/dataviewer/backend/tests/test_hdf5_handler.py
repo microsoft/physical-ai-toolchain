@@ -436,3 +436,35 @@ class TestVideoGenerationQueue:
 
         queued = handler.schedule_bulk_video_generation("test")
         assert queued == 1
+
+    def test_on_generated_callback_fires_after_generation(self, tmp_path):
+        """on_generated callback fires after successful video generation."""
+        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
+
+        q = VideoGenerationQueue()
+        uploaded = []
+
+        path = tmp_path / "gen.mp4"
+
+        def gen() -> bool:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"fake video")
+            return True
+
+        event = q.submit("ds", 0, "cam", 0, path, gen, on_generated=lambda: uploaded.append(str(path)))
+        event.wait(timeout=5)
+
+        assert uploaded == [str(path)]
+
+    def test_on_generated_callback_not_called_on_failure(self, tmp_path):
+        """on_generated callback does not fire when generation returns False."""
+        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
+
+        q = VideoGenerationQueue()
+        uploaded = []
+
+        path = tmp_path / "fail.mp4"
+        event = q.submit("ds", 0, "cam", 0, path, lambda: False, on_generated=lambda: uploaded.append(1))
+        event.wait(timeout=5)
+
+        assert uploaded == []

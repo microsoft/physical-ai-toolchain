@@ -22,6 +22,10 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
+# Suppress verbose Azure SDK HTTP request logging
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+
 # Load .env before any config or service singletons are initialized so that
 # all env vars are available to get_app_config() on first access.
 env_path = Path(__file__).parent.parent.parent / ".env"

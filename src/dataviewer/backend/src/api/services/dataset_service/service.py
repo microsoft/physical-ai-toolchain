@@ -10,7 +10,7 @@ import logging
 import os
 import shutil
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -77,6 +77,7 @@ class DatasetService:
         self._blob_dataset_ids: set[str] = set()
         self._blob_provider: BlobDatasetProvider | None = blob_provider
         self._blob_synced: dict[str, Path] = {}
+        self._blob_hdf5_synced: dict[str, Path] = {}
         self._blob_meta_synced: dict[str, Path] = {}
 
         # Format handlers (ordered by priority — LeRobot checked first)
@@ -183,19 +184,19 @@ class DatasetService:
         return None
 
     async def _ensure_blob_hdf5_synced(self, dataset_id: str) -> Path | None:
-        """Download HDF5 blob dataset files to a local temp dir."""
+        """Download HDF5 blob dataset placeholder files to a local temp dir."""
         if self._blob_provider is None:
             return None
 
         dataset_id = _validate_dataset_id(dataset_id)
 
-        if dataset_id in self._blob_synced:
-            return self._blob_synced[dataset_id]
+        if dataset_id in self._blob_hdf5_synced:
+            return self._blob_hdf5_synced[dataset_id]
 
         tmp_dir = Path(tempfile.mkdtemp(prefix="dvwh_"))
         success = await self._blob_provider.sync_hdf5_dataset_to_local(dataset_id, tmp_dir)
         if success:
-            self._blob_synced[dataset_id] = tmp_dir
+            self._blob_hdf5_synced[dataset_id] = tmp_dir
             return tmp_dir
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -413,7 +414,7 @@ class DatasetService:
 
     async def get_dataset(self, dataset_id: str) -> DatasetInfo | None:
         """Get metadata for a specific dataset."""
-        if dataset_id in self._local_dataset_ids:
+        if dataset_id in self._local_dataset_ids and dataset_id not in self._blob_dataset_ids:
             try:
                 self._get_dataset_path(dataset_id)
             except ValueError:
@@ -424,11 +425,14 @@ class DatasetService:
         if dataset is not None:
             return dataset
 
-        # Try blob discovery first
+        # Try blob discovery (LeRobot, then HDF5)
         if self._blob_provider is not None:
             blob_result = await self._discover_blob_dataset(dataset_id)
             if blob_result is not None:
                 return blob_result
+            hdf5_result = await self._discover_blob_hdf5_dataset(dataset_id)
+            if hdf5_result is not None:
+                return hdf5_result
 
         return self._discover_dataset(dataset_id)
 
@@ -469,6 +473,12 @@ class DatasetService:
             handler = self._resolve_handler(dataset_id)
             if handler is not None:
                 episode_indices, episode_info_map = handler.list_episodes(dataset_id)
+
+        # Blob HDF5 datasets: sync placeholders and list via HDF5 handler
+        if not episode_indices and self._blob_provider is not None:
+            synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
+            if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
+                episode_indices, episode_info_map = self._hdf5_handler.list_episodes(dataset_id)
 
         # Fallback: generate indices from dataset metadata
         if not episode_indices and dataset is not None:
@@ -533,7 +543,15 @@ class DatasetService:
         if handler is None and self._blob_provider is not None:
             synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
             if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
+                await self._blob_provider.sync_hdf5_episode_to_local(dataset_id, synced_path, episode_idx)
                 handler = self._hdf5_handler
+
+        # HDF5 blob datasets: ensure episode file is downloaded even when
+        # the handler was already registered during list_episodes (placeholders).
+        if handler is self._hdf5_handler and self._blob_provider is not None:
+            synced_path = self._blob_hdf5_synced.get(dataset_id)
+            if synced_path is not None:
+                await self._blob_provider.sync_hdf5_episode_to_local(dataset_id, synced_path, episode_idx)
 
         # Try all handlers in priority order
         handlers_to_try = [handler] if handler else []
@@ -615,7 +633,15 @@ class DatasetService:
                 if handler is None and dataset_id in self._blob_dataset_ids:
                     synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
                     if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
+                        if self._blob_provider is not None:
+                            await self._blob_provider.sync_hdf5_episode_to_local(dataset_id, synced_path, idx)
                         handler = self._hdf5_handler
+
+                # HDF5 blob datasets: ensure episode file is downloaded
+                if handler is self._hdf5_handler and self._blob_provider is not None:
+                    synced_path = self._blob_hdf5_synced.get(dataset_id)
+                    if synced_path is not None:
+                        await self._blob_provider.sync_hdf5_episode_to_local(dataset_id, synced_path, idx)
 
                 if handler is None:
                     break
@@ -661,17 +687,59 @@ class DatasetService:
             VideoGenerationQueue.PRIORITY_PREFETCH,
             cache_path,
             generate,
+            on_generated=self._make_blob_upload_callback(dataset_id, next_idx, camera, cache_path),
         )
 
     def schedule_bulk_video_generation(self, dataset_id: str) -> int:
         """Enqueue video generation for all uncached HDF5 episodes."""
         if not self._hdf5_handler.has_loader(dataset_id):
             return 0
-        return self._hdf5_handler.schedule_bulk_video_generation(dataset_id)
+        return self._hdf5_handler.schedule_bulk_video_generation(
+            dataset_id,
+            on_generated_factory=self._make_blob_upload_callback,
+        )
+
+    def _make_blob_upload_callback(
+        self,
+        dataset_id: str,
+        episode_idx: int,
+        camera: str,
+        cache_path: Path,
+    ) -> Callable[[], None] | None:
+        """Build a callback that uploads a generated video to blob storage, or None if no provider."""
+        if self._blob_provider is None:
+            return None
+
+        provider = self._blob_provider
+
+        def upload() -> None:
+            import asyncio
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(provider.upload_video(dataset_id, camera, episode_idx, cache_path))
+            except Exception as exc:
+                logger.warning("Blob upload failed for %s ep %d: %s", dataset_id, episode_idx, exc)
+            finally:
+                loop.close()
+
+        return upload
 
     def cancel_video_generation(self, dataset_id: str) -> None:
         """Synchronously cancel and wait for any in-progress video generation."""
         self._hdf5_handler._generation_queue.cancel_dataset(dataset_id)
+
+    def is_safe_video_path(self, video_path: str) -> bool:
+        """Check whether a video path falls within the base path or a blob-synced temp dir."""
+        normalized = os.path.normpath(os.path.realpath(video_path))
+        safe_base = os.path.realpath(self.base_path)
+        if normalized.startswith(safe_base + os.sep) or normalized == safe_base:
+            return True
+        for synced_dir in self._blob_synced.values():
+            safe_synced = os.path.realpath(str(synced_dir))
+            if normalized.startswith(safe_synced + os.sep) or normalized == safe_synced:
+                return True
+        return False
 
     # ------------------------------------------------------------------
     # Capability queries
@@ -761,8 +829,37 @@ class DatasetService:
         dataset_id = dataset_id.replace("\n", "").replace("\r", "")
         episode_idx = int(episode_idx)
         handler = self._resolve_handler(dataset_id)
-        if handler is not None:
-            return handler.get_video_path(dataset_id, episode_idx, camera)
+        if handler is None and self._hdf5_handler.has_loader(dataset_id):
+            handler = self._hdf5_handler
+        if handler is None or handler is not self._hdf5_handler:
+            if handler is not None:
+                return handler.get_video_path(dataset_id, episode_idx, camera)
+            return None
+
+        cache_path = self._hdf5_handler._video_cache_path(dataset_id, episode_idx, camera)
+        if cache_path is None:
+            return None
+        if cache_path.exists():
+            return str(cache_path)
+
+        from .hdf5_handler import VideoGenerationQueue
+
+        def generate() -> bool:
+            return self._hdf5_handler._generate_episode_video(dataset_id, episode_idx, camera, cache_path)
+
+        event = self._hdf5_handler._generation_queue.submit(
+            dataset_id,
+            episode_idx,
+            camera,
+            VideoGenerationQueue.PRIORITY_USER,
+            cache_path,
+            generate,
+            on_generated=self._make_blob_upload_callback(dataset_id, episode_idx, camera, cache_path),
+        )
+        event.wait(timeout=120)
+
+        if cache_path.exists():
+            return str(cache_path)
         return None
 
 

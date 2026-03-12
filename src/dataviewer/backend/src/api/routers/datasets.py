@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from ..models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
 from ..services.dataset_service import DatasetService, get_dataset_service
-from ..validation import validate_path_containment, validated_camera_name, validated_dataset_id
+from ..validation import validated_camera_name, validated_dataset_id
 
 router = APIRouter()
 
@@ -252,7 +252,9 @@ async def get_episode_video(
     video_path = await asyncio.to_thread(service.get_video_file_path, dataset_id, episode_idx, camera)
 
     if video_path is not None:
-        video_file = validate_path_containment(Path(video_path), Path(service.base_path))
+        if not service.is_safe_video_path(video_path):
+            raise HTTPException(status_code=400, detail="Path traversal detected: resolved path escapes base directory")
+        video_file = Path(video_path)
         if not video_file.exists():
             raise HTTPException(
                 status_code=404,

@@ -260,8 +260,10 @@ class BlobDatasetProvider:
         """
         Resolve the blob path for a LeRobot v3 video file.
 
-        Reads chunks_size from meta/info.json to compute the correct
-        chunk and file indices for the given episode.
+        Uses the video_path template from meta/info.json when available,
+        falling back to one-episode-per-chunk layout and then
+        chunks_size-based calculation. Scans blob storage as a last
+        resort, matching only the target episode's file index.
 
         Args:
             dataset_id: Dataset identifier.
@@ -272,24 +274,23 @@ class BlobDatasetProvider:
             Blob path string if found, None otherwise.
         """
         info = await self.get_info_json(dataset_id)
-        chunks_size = int((info or {}).get("chunks_size", 1000))
-
-        chunk_index = episode_idx // chunks_size
-        file_index = episode_idx % chunks_size
         prefix = self.get_blob_prefix(dataset_id)
-        blob_path = f"{prefix}/videos/{camera}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
 
-        props = await self.get_blob_properties(blob_path)
-        if props is not None:
-            return blob_path
+        candidates = self._build_video_path_candidates(info, prefix, camera, episode_idx)
 
-        # Fallback: scan camera prefix for any matching mp4 (HDF5-style flat layout)
+        for blob_path in candidates:
+            props = await self.get_blob_properties(blob_path)
+            if props is not None:
+                return blob_path
+
+        # Fallback: scan for the episode-specific file in chunk directories
+        file_suffix = f"/file-{episode_idx:03d}.mp4"
         video_prefix = f"{prefix}/videos/{camera}/"
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
             async for blob in container.list_blobs(name_starts_with=video_prefix):
-                if blob.name.endswith(".mp4"):
+                if blob.name.endswith(file_suffix):
                     return blob.name
         except Exception as e:
             logger.warning(
@@ -300,6 +301,55 @@ class BlobDatasetProvider:
                 e,
             )
         return None
+
+    @staticmethod
+    def _build_video_path_candidates(
+        info: dict | None,
+        prefix: str,
+        camera: str,
+        episode_idx: int,
+    ) -> list[str]:
+        """Build an ordered list of candidate blob paths for an episode video."""
+        chunks_size = int((info or {}).get("chunks_size", 1000))
+        candidates: list[str] = []
+
+        # Use the video_path template from info.json when present
+        video_path_template = (info or {}).get("video_path")
+        if video_path_template:
+            # One-episode-per-chunk layout (chunk_index == episode_index, file_index == 0)
+            try:
+                templated = video_path_template.format(
+                    video_key=camera,
+                    chunk_index=episode_idx,
+                    file_index=0,
+                )
+                candidates.append(f"{prefix}/{templated}")
+            except (KeyError, IndexError):
+                pass
+
+            # chunks_size-based layout
+            chunk_index = episode_idx // chunks_size
+            file_index = episode_idx % chunks_size
+            try:
+                cs_templated = video_path_template.format(
+                    video_key=camera,
+                    chunk_index=chunk_index,
+                    file_index=file_index,
+                )
+                cs_path = f"{prefix}/{cs_templated}"
+                if cs_path not in candidates:
+                    candidates.append(cs_path)
+            except (KeyError, IndexError):
+                pass
+
+        # Hardcoded fallback paths when no template is available
+        if not candidates:
+            candidates.append(f"{prefix}/videos/{camera}/chunk-{episode_idx:03d}/file-{episode_idx:03d}.mp4")
+            chunk_index = episode_idx // chunks_size
+            file_index = episode_idx % chunks_size
+            candidates.append(f"{prefix}/videos/{camera}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4")
+
+        return candidates
 
     async def stream_video(
         self,
@@ -331,6 +381,36 @@ class BlobDatasetProvider:
         async for chunk in download.chunks():
             yield chunk
 
+    async def upload_video(self, dataset_id: str, camera: str, episode_idx: int, local_path: Path) -> bool:
+        """Upload a locally generated video to blob storage.
+
+        Creates a dedicated client to avoid event loop conflicts when called
+        from a worker thread via asyncio.new_event_loop().
+        """
+        prefix = self.get_blob_prefix(dataset_id)
+        blob_path = f"{prefix}/meta/videos/{camera}/episode_{episode_idx:06d}.mp4"
+
+        account_url = f"https://{self.account_name}.blob.core.windows.net"
+        try:
+            credential = AsyncDefaultAzureCredential() if not self.sas_token else None
+            effective_credential = self.sas_token or credential
+            client = BlobServiceClient(account_url=account_url, credential=effective_credential)
+
+            async with client:
+                container = client.get_container_client(self.container_name)
+                blob_client = container.get_blob_client(blob_path)
+                with open(local_path, "rb") as f:
+                    await blob_client.upload_blob(f, overwrite=True)
+
+            if credential:
+                await credential.close()
+
+            logger.info("Uploaded video to blob: %s", blob_path)
+            return True
+        except Exception as e:
+            logger.warning("Failed to upload video to blob '%s': %s", blob_path, e)
+            return False
+
     # ------------------------------------------------------------------
     # Parquet / metadata sync to local temp dir (enables existing loaders)
     # ------------------------------------------------------------------
@@ -361,6 +441,9 @@ class BlobDatasetProvider:
             async for blob in container.list_blobs(name_starts_with=prefix):
                 # Skip video files — they are streamed on demand
                 if "/videos/" in blob.name:
+                    continue
+                # Skip HDF5 files — they are downloaded on demand per episode
+                if blob.name.endswith(".hdf5"):
                     continue
 
                 relative = blob.name[len(prefix) :]
@@ -441,27 +524,77 @@ class BlobDatasetProvider:
     # ------------------------------------------------------------------
 
     async def sync_hdf5_dataset_to_local(self, dataset_id: str, local_dir: Path) -> bool:
-        """Download HDF5 episode files and config to a local directory."""
+        """Download HDF5 config and episode file listing to a local directory.
+
+        Downloads only JSON config files and creates empty placeholder
+        files for each .hdf5 blob so HDF5Loader.list_episodes() can
+        discover episode indices without downloading full episode data.
+        Actual episode data is fetched on-demand via sync_hdf5_episode_to_local.
+        """
         local_dir.mkdir(parents=True, exist_ok=True)
         prefix = self.get_blob_prefix(dataset_id)
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
-            synced = 0
+            found_hdf5 = False
             async for blob in container.list_blobs(name_starts_with=prefix + "/"):
-                if not (blob.name.endswith(".hdf5") or blob.name.endswith(".json")):
-                    continue
-                filename = blob.name.rsplit("/", 1)[-1]
-                local_path = local_dir / filename
-                if local_path.exists():
-                    continue
-                data = await self._read_blob_bytes(blob.name)
-                if data is not None:
-                    local_path.write_bytes(data)
-                    synced += 1
-            return synced > 0
+                if blob.name.endswith(".json"):
+                    filename = blob.name.rsplit("/", 1)[-1]
+                    local_path = local_dir / filename
+                    if local_path.exists():
+                        continue
+                    data = await self._read_blob_bytes(blob.name)
+                    if data is not None:
+                        local_path.write_bytes(data)
+                elif blob.name.endswith(".hdf5"):
+                    found_hdf5 = True
+                    filename = blob.name.rsplit("/", 1)[-1]
+                    local_path = local_dir / filename
+                    if not local_path.exists():
+                        local_path.touch()
+            return found_hdf5
         except Exception as e:
             logger.warning("Failed to sync HDF5 dataset '%s': %s", dataset_id, e)
+            return False
+
+    async def sync_hdf5_episode_to_local(self, dataset_id: str, local_dir: Path, episode_idx: int) -> bool:
+        """Download a single HDF5 episode file to the local directory.
+
+        Streams directly to disk to avoid loading the entire file into memory.
+        """
+        prefix = self.get_blob_prefix(dataset_id)
+        patterns = [
+            f"episode_{episode_idx:06d}.hdf5",
+            f"episode_{episode_idx}.hdf5",
+            f"ep_{episode_idx:06d}.hdf5",
+            f"ep_{episode_idx}.hdf5",
+        ]
+        try:
+            client = await self._get_client()
+            container = client.get_container_client(self.container_name)
+            async for blob in container.list_blobs(name_starts_with=prefix + "/"):
+                if not blob.name.endswith(".hdf5"):
+                    continue
+                filename = blob.name.rsplit("/", 1)[-1]
+                if filename not in patterns:
+                    continue
+                local_path = local_dir / filename
+                if local_path.exists() and local_path.stat().st_size > 0:
+                    return True
+                blob_client = container.get_blob_client(blob.name)
+                download = await blob_client.download_blob()
+                tmp_path = local_path.with_suffix(".hdf5.tmp")
+                written = 0
+                with open(tmp_path, "wb") as f:
+                    async for chunk in download.chunks():
+                        f.write(chunk)
+                        written += len(chunk)
+                tmp_path.rename(local_path)
+                logger.info("Downloaded HDF5 episode %d for '%s' (%d bytes)", episode_idx, dataset_id, written)
+                return True
+            return False
+        except Exception as e:
+            logger.warning("Failed to sync HDF5 episode %d for '%s': %s", episode_idx, dataset_id, e)
             return False
 
     async def get_hdf5_dataset_config(self, dataset_id: str) -> dict | None:

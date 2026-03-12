@@ -4,6 +4,10 @@ FROM python:3.11-slim AS base
 
 WORKDIR /app
 
+# Install system dependencies (ffmpeg for HDF5 video generation)
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install uv
 RUN pip install --no-cache-dir uv
 

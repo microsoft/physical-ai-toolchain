@@ -134,6 +134,7 @@ class VideoGenerationQueue:
         camera: str = field(compare=False)
         cache_path: Path = field(compare=False)
         generate_fn: Callable[[], bool] = field(compare=False)
+        on_generated: Callable[[], None] | None = field(default=None, compare=False)
 
     def __init__(self) -> None:
         self._queue: queue.PriorityQueue[VideoGenerationQueue._Request] = queue.PriorityQueue()
@@ -155,6 +156,7 @@ class VideoGenerationQueue:
         priority: int,
         cache_path: Path,
         generate_fn: Callable[[], bool],
+        on_generated: Callable[[], None] | None = None,
     ) -> threading.Event:
         """Enqueue a generation request or return existing Event if already pending."""
         key = f"{dataset_id}:{episode_idx}:{camera}"
@@ -181,6 +183,7 @@ class VideoGenerationQueue:
                     camera=camera,
                     cache_path=cache_path,
                     generate_fn=generate_fn,
+                    on_generated=on_generated,
                 )
             )
 
@@ -211,8 +214,11 @@ class VideoGenerationQueue:
 
             key = f"{req.dataset_id}:{req.episode_idx}:{req.camera}"
             try:
-                if not req.cache_path.exists():
-                    req.generate_fn()
+                if not req.cache_path.exists() and req.generate_fn() and req.on_generated is not None:
+                    try:
+                        req.on_generated()
+                    except Exception as exc:
+                        logger.warning("on_generated callback failed for %s: %s", key, exc)
             except Exception as exc:
                 logger.warning("Video generation failed for %s: %s", key, exc)
             finally:
@@ -499,7 +505,11 @@ class HDF5FormatHandler:
 
         return False
 
-    def schedule_bulk_video_generation(self, dataset_id: str) -> int:
+    def schedule_bulk_video_generation(
+        self,
+        dataset_id: str,
+        on_generated_factory: Callable[[str, int, str, Path], Callable[[], None] | None] | None = None,
+    ) -> int:
         """Enqueue video generation for all uncached episodes at bulk priority."""
         loader = self._get_loader(dataset_id)
         if loader is None:
@@ -513,7 +523,10 @@ class HDF5FormatHandler:
         if not episode_indices:
             return 0
 
-        first_info = loader.get_episode_info(episode_indices[0])
+        try:
+            first_info = loader.get_episode_info(episode_indices[0])
+        except Exception:
+            return 0
         cameras = first_info.get("cameras", [])
         if not cameras:
             return 0
@@ -528,6 +541,8 @@ class HDF5FormatHandler:
                 def make_gen(d: str, e: int, c: str, p: Path) -> Callable[[], bool]:
                     return lambda: self._generate_episode_video(d, e, c, p)
 
+                callback = on_generated_factory(dataset_id, idx, camera, cache_path) if on_generated_factory else None
+
                 self._generation_queue.submit(
                     dataset_id,
                     idx,
@@ -535,6 +550,7 @@ class HDF5FormatHandler:
                     VideoGenerationQueue.PRIORITY_BULK,
                     cache_path,
                     make_gen(dataset_id, idx, camera, cache_path),
+                    on_generated=callback,
                 )
                 queued += 1
 
