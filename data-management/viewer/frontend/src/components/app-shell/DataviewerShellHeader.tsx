@@ -96,10 +96,14 @@ function DatasetSelector({
           >
             <CommandEmpty>No datasets match the current filter.</CommandEmpty>
             {groupKeys.map((groupKey) => (
+<<<<<<< HEAD:data-management/viewer/frontend/src/components/app-shell/DataviewerShellHeader.tsx
               <CommandGroup
                 key={groupKey}
                 heading={groupKey ? groupKey.split('--').join('/') : undefined}
               >
+=======
+              <CommandGroup key={groupKey} heading={groupKey ? groupKey.split('--').join('/') : undefined}>
+>>>>>>> 70adef4 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180)):src/dataviewer/frontend/src/components/app-shell/DataviewerShellHeader.tsx
                 {groupedDatasets[groupKey].map((dataset) => {
                   const isSelected = dataset.id === datasetId
                   const displayId = dataset.group
