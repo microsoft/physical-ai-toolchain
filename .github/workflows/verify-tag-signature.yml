@@ -1,0 +1,46 @@
+name: Verify Release Tag Signature
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-release-tag:
+    name: Verify pushed release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install gitsign
+        run: |
+          go install github.com/sigstore/gitsign/cmd/gitsign@v0.13.0
+          GOPATH_BIN="$(go env GOPATH)/bin"
+          echo "${GOPATH_BIN}" >> "${GITHUB_PATH}"
+
+      - name: Configure git x509 verifier
+        run: |
+          git config --global gpg.format x509
+          git config --global gpg.x509.program gitsign
+
+      - name: Verify tag signature
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          tag_type="$(git cat-file -t "refs/tags/${TAG_NAME}")"
+          if [ "${tag_type}" != "tag" ]; then
+            echo "Expected annotated tag object for ${TAG_NAME}, found ${tag_type}"
+            exit 1
+          fi
+
+          git tag -v "${TAG_NAME}"
