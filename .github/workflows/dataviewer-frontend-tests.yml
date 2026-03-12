@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   frontend-checks:
-    name: Lint, Type-check and Build
+    name: Lint, Type-check, Test and Build
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -90,6 +90,9 @@ jobs:
         run: |
           echo "::error::Frontend checks failed. Run 'npm run lint', 'npm run type-check', 'npm run format', and 'npm run test' locally to reproduce."
           exit 1
+
+      - name: Unit tests
+        run: npm run test
 
       - name: Build
         run: npm run build
