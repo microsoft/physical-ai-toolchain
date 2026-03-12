@@ -268,7 +268,6 @@ async def get_episode_video(
             ".mov": "video/quicktime",
         }
         media_type = media_types.get(suffix, "video/mp4")
-        service.schedule_video_prefetch(dataset_id, episode_idx, camera)
         return FileResponse(
             path=str(video_file),
             media_type=media_type,
@@ -367,15 +366,8 @@ async def warm_cache(
     Preload the first N episodes into the LRU cache.
 
     Designed to be called on dataset selection so the initial episode
-    loads are instant. Cancels any in-progress video generation for
-    the previously warmed dataset before proceeding.
+    loads are instant.
     """
-    previous_dataset = getattr(service, "_warm_cached_dataset_id", None)
-    if previous_dataset and previous_dataset != dataset_id:
-        await asyncio.to_thread(service.cancel_video_generation, previous_dataset)
-
-    service._warm_cached_dataset_id = dataset_id  # type: ignore[attr-defined]
-
     dataset = await service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
@@ -387,6 +379,4 @@ async def warm_cache(
         if episode is not None:
             loaded += 1
 
-    queued = service.schedule_bulk_video_generation(dataset_id)
-
-    return {"dataset_id": dataset_id, "loaded": loaded, "requested": total, "videos_queued": queued}
+    return {"dataset_id": dataset_id, "loaded": loaded, "requested": total}

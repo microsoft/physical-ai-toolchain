@@ -5,9 +5,6 @@ Tests handler detection, capability checks, and subdirectory episode
 discovery for datasets with recording session subdirectories.
 """
 
-import threading
-from collections.abc import Callable
-
 import numpy as np
 import pytest
 
@@ -266,150 +263,11 @@ class TestEpisodeCameraMetadata:
         assert "il-camera" in episode.video_urls
 
 
-class TestVideoGenerationQueue:
-    """Tests for priority-based video generation queue."""
+class TestVideoGeneration:
+    """Tests for synchronous video generation."""
 
-    def test_processes_higher_priority_first(self, tmp_path):
-        """Priority 0 items are processed before priority 2 items."""
-        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
-
-        q = VideoGenerationQueue()
-        results: list[int] = []
-        barrier = threading.Event()
-
-        def blocking_gen() -> bool:
-            barrier.wait(timeout=5)
-            return True
-
-        def make_recorder(idx: int) -> Callable[[], bool]:
-            def gen() -> bool:
-                results.append(idx)
-                return True
-
-            return gen
-
-        block_path = tmp_path / "block.mp4"
-        q.submit("ds", 99, "cam", VideoGenerationQueue.PRIORITY_USER, block_path, blocking_gen)
-
-        p2_path = tmp_path / "bulk.mp4"
-        q.submit("ds", 0, "cam", VideoGenerationQueue.PRIORITY_BULK, p2_path, make_recorder(2))
-
-        p0_path = tmp_path / "user.mp4"
-        q.submit("ds", 1, "cam", VideoGenerationQueue.PRIORITY_USER, p0_path, make_recorder(0))
-
-        barrier.set()
-
-        import time
-
-        deadline = time.monotonic() + 5
-        while len(results) < 2 and time.monotonic() < deadline:
-            time.sleep(0.01)
-
-        assert results == [0, 2]
-
-    def test_duplicate_submissions_return_same_event(self, tmp_path):
-        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
-
-        q = VideoGenerationQueue()
-        path = tmp_path / "test.mp4"
-        gen = lambda: True
-
-        e1 = q.submit("ds", 0, "cam", 2, path, gen)
-        e2 = q.submit("ds", 0, "cam", 0, path, gen)
-        assert e1 is e2
-
-    def test_returns_set_event_for_existing_file(self, tmp_path):
-        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
-
-        q = VideoGenerationQueue()
-        path = tmp_path / "cached.mp4"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"fake mp4")
-
-        event = q.submit("ds", 0, "cam", 0, path, lambda: True)
-        assert event.is_set()
-
-    def test_cancel_dataset_skips_queued_items(self, tmp_path):
-        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
-
-        q = VideoGenerationQueue()
-        generated = []
-        barrier = threading.Event()
-        blocker_started = threading.Event()
-
-        def blocking_gen() -> bool:
-            blocker_started.set()
-            barrier.wait(5)
-            return True
-
-        block_path = tmp_path / "block.mp4"
-        q.submit("other", 0, "cam", 0, block_path, blocking_gen)
-
-        blocker_started.wait(timeout=5)
-
-        cancel_path = tmp_path / "cancel.mp4"
-        q.submit("cancel_me", 0, "cam", 2, cancel_path, lambda: generated.append(1) or True)
-
-        q.cancel_dataset("cancel_me")
-        barrier.set()
-
-        import time
-
-        time.sleep(0.2)
-
-        assert not cancel_path.exists()
-        assert generated == []
-
-    def test_cancel_dataset_blocks_on_in_progress(self, tmp_path):
-        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
-
-        q = VideoGenerationQueue()
-        gen_started = threading.Event()
-        gen_gate = threading.Event()
-
-        def slow_gen() -> bool:
-            gen_started.set()
-            gen_gate.wait(timeout=5)
-            return True
-
-        path = tmp_path / "slow.mp4"
-        q.submit("slow_ds", 0, "cam", 0, path, slow_gen)
-
-        gen_started.wait(timeout=5)
-        assert q._in_progress_dataset == "slow_ds"
-
-        cancel_done = threading.Event()
-
-        def do_cancel():
-            q.cancel_dataset("slow_ds")
-            cancel_done.set()
-
-        threading.Thread(target=do_cancel).start()
-
-        import time
-
-        time.sleep(0.1)
-        assert not cancel_done.is_set()
-
-        gen_gate.set()
-        cancel_done.wait(timeout=5)
-        assert cancel_done.is_set()
-
-    def test_cancel_returns_immediately_when_not_in_progress(self):
-        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
-
-        q = VideoGenerationQueue()
-
-        import time
-
-        start = time.monotonic()
-        q.cancel_dataset("nonexistent")
-        elapsed = time.monotonic() - start
-
-        assert elapsed < 0.1
-
-    def test_ensure_video_returns_cached_path(self, tmp_path):
-        """_ensure_video returns immediately for already-cached videos."""
+    def test_get_video_path_returns_cached(self, tmp_path):
+        """get_video_path returns immediately for already-cached videos."""
         _create_hdf5_with_images(tmp_path / "episode_0.hdf5", cameras=["il-camera"])
         handler = HDF5FormatHandler()
         handler._loaders["test"] = HDF5Loader(tmp_path)
@@ -419,52 +277,17 @@ class TestVideoGenerationQueue:
         cached_file = cache_dir / "episode_000000.mp4"
         cached_file.write_bytes(b"fake mp4")
 
-        result = handler._ensure_video("test", 0, "il-camera")
+        result = handler.get_video_path("test", 0, "il-camera")
         assert result == str(cached_file)
 
-    def test_schedule_bulk_skips_cached(self, tmp_path):
-        """schedule_bulk_video_generation only enqueues uncached episodes."""
-        _create_hdf5_with_images(tmp_path / "episode_0.hdf5", cameras=["il-camera"])
-        _create_hdf5_with_images(tmp_path / "episode_1.hdf5", cameras=["il-camera"])
+    def test_get_video_path_returns_none_no_loader(self):
+        handler = HDF5FormatHandler()
+        assert handler.get_video_path("unknown", 0, "cam") is None
 
+    def test_video_cache_path_structure(self, tmp_path):
+        _create_minimal_hdf5(tmp_path / "episode_0.hdf5")
         handler = HDF5FormatHandler()
         handler._loaders["test"] = HDF5Loader(tmp_path)
 
-        cache_dir = tmp_path / "meta" / "videos" / "il-camera"
-        cache_dir.mkdir(parents=True)
-        (cache_dir / "episode_000000.mp4").write_bytes(b"fake mp4")
-
-        queued = handler.schedule_bulk_video_generation("test")
-        assert queued == 1
-
-    def test_on_generated_callback_fires_after_generation(self, tmp_path):
-        """on_generated callback fires after successful video generation."""
-        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
-
-        q = VideoGenerationQueue()
-        uploaded = []
-
-        path = tmp_path / "gen.mp4"
-
-        def gen() -> bool:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"fake video")
-            return True
-
-        event = q.submit("ds", 0, "cam", 0, path, gen, on_generated=lambda: uploaded.append(str(path)))
-        event.wait(timeout=5)
-
-        assert uploaded == [str(path)]
-
-    def test_on_generated_callback_not_called_on_failure(self, tmp_path):
-        """on_generated callback does not fire when generation returns False."""
-        from src.api.services.dataset_service.hdf5_handler import VideoGenerationQueue
-
-        q = VideoGenerationQueue()
-        uploaded = []
-
-        path = tmp_path / "fail.mp4"
-        event = q.submit("ds", 0, "cam", 0, path, lambda: False, on_generated=lambda: uploaded.append(1))
-        event.wait(timeout=5)
-
-        assert uploaded == []
+        path = handler._video_cache_path("test", 0, "il-camera")
+        assert path == tmp_path / "meta" / "videos" / "il-camera" / "episode_000000.mp4"

@@ -10,7 +10,7 @@ import logging
 import os
 import shutil
 import tempfile
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -660,85 +660,17 @@ class DatasetService:
         except RuntimeError as error:
             logger.debug("Skipping episode prefetch for episode %d: %s", episode_idx, error)
 
-    def schedule_video_prefetch(self, dataset_id: str, episode_idx: int, camera: str) -> None:
-        """Pre-generate the next episode's video in the background."""
-        dataset = self._datasets.get(dataset_id)
-        total = dataset.total_episodes if dataset else 0
-        next_idx = episode_idx + 1
-        if next_idx >= total:
-            return
-
-        if not self._hdf5_handler.has_loader(dataset_id):
-            return
-
-        from .hdf5_handler import VideoGenerationQueue
-
-        cache_path = self._hdf5_handler._video_cache_path(dataset_id, next_idx, camera)
-        if cache_path is None or cache_path.exists():
-            return
-
-        def generate() -> bool:
-            return self._hdf5_handler._generate_episode_video(dataset_id, next_idx, camera, cache_path)
-
-        self._hdf5_handler._generation_queue.submit(
-            dataset_id,
-            next_idx,
-            camera,
-            VideoGenerationQueue.PRIORITY_PREFETCH,
-            cache_path,
-            generate,
-            on_generated=self._make_blob_upload_callback(dataset_id, next_idx, camera, cache_path),
-        )
-
-    def schedule_bulk_video_generation(self, dataset_id: str) -> int:
-        """Enqueue video generation for all uncached HDF5 episodes."""
-        if not self._hdf5_handler.has_loader(dataset_id):
-            return 0
-        return self._hdf5_handler.schedule_bulk_video_generation(
-            dataset_id,
-            on_generated_factory=self._make_blob_upload_callback,
-        )
-
-    def _make_blob_upload_callback(
-        self,
-        dataset_id: str,
-        episode_idx: int,
-        camera: str,
-        cache_path: Path,
-    ) -> Callable[[], None] | None:
-        """Build a callback that uploads a generated video to blob storage, or None if no provider."""
-        if self._blob_provider is None:
-            return None
-
-        provider = self._blob_provider
-
-        def upload() -> None:
-            import asyncio
-
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(provider.upload_video(dataset_id, camera, episode_idx, cache_path))
-            except Exception as exc:
-                logger.warning("Blob upload failed for %s ep %d: %s", dataset_id, episode_idx, exc)
-            finally:
-                loop.close()
-
-        return upload
-
-    def cancel_video_generation(self, dataset_id: str) -> None:
-        """Synchronously cancel and wait for any in-progress video generation."""
-        self._hdf5_handler._generation_queue.cancel_dataset(dataset_id)
-
     def is_safe_video_path(self, video_path: str) -> bool:
         """Check whether a video path falls within the base path or a blob-synced temp dir."""
         normalized = os.path.normpath(os.path.realpath(video_path))
         safe_base = os.path.realpath(self.base_path)
         if normalized.startswith(safe_base + os.sep) or normalized == safe_base:
             return True
-        for synced_dir in self._blob_synced.values():
-            safe_synced = os.path.realpath(str(synced_dir))
-            if normalized.startswith(safe_synced + os.sep) or normalized == safe_synced:
-                return True
+        for synced_dirs in (self._blob_synced, self._blob_hdf5_synced):
+            for synced_dir in synced_dirs.values():
+                safe_synced = os.path.realpath(str(synced_dir))
+                if normalized.startswith(safe_synced + os.sep) or normalized == safe_synced:
+                    return True
         return False
 
     # ------------------------------------------------------------------
@@ -825,42 +757,41 @@ class DatasetService:
         return self._try_handlers(dataset_id, "get_cameras", episode_idx) or []
 
     def get_video_file_path(self, dataset_id: str, episode_idx: int, camera: str) -> str | None:
-        """Get the filesystem path to a video file."""
+        """Get the filesystem path to a video file, generating on-demand for HDF5.
+
+        When a video is generated for an HDF5 dataset with blob storage,
+        uploads the result to blob for caching across container restarts.
+        """
         dataset_id = dataset_id.replace("\n", "").replace("\r", "")
         episode_idx = int(episode_idx)
         handler = self._resolve_handler(dataset_id)
         if handler is None and self._hdf5_handler.has_loader(dataset_id):
             handler = self._hdf5_handler
-        if handler is None or handler is not self._hdf5_handler:
-            if handler is not None:
-                return handler.get_video_path(dataset_id, episode_idx, camera)
+        if handler is None:
             return None
 
-        cache_path = self._hdf5_handler._video_cache_path(dataset_id, episode_idx, camera)
-        if cache_path is None:
-            return None
-        if cache_path.exists():
-            return str(cache_path)
+        if handler is self._hdf5_handler:
+            cache_path = self._hdf5_handler._video_cache_path(dataset_id, episode_idx, camera)
+            if cache_path is None:
+                return None
+            already_existed = cache_path.exists()
+            result = handler.get_video_path(dataset_id, episode_idx, camera)
+            if result and not already_existed and self._blob_provider is not None:
+                self._upload_video_to_blob(dataset_id, episode_idx, camera, cache_path)
+            return result
 
-        from .hdf5_handler import VideoGenerationQueue
+        return handler.get_video_path(dataset_id, episode_idx, camera)
 
-        def generate() -> bool:
-            return self._hdf5_handler._generate_episode_video(dataset_id, episode_idx, camera, cache_path)
+    def _upload_video_to_blob(self, dataset_id: str, episode_idx: int, camera: str, cache_path: Path) -> None:
+        """Upload a generated video to blob storage for caching."""
+        import asyncio
 
-        event = self._hdf5_handler._generation_queue.submit(
-            dataset_id,
-            episode_idx,
-            camera,
-            VideoGenerationQueue.PRIORITY_USER,
-            cache_path,
-            generate,
-            on_generated=self._make_blob_upload_callback(dataset_id, episode_idx, camera, cache_path),
-        )
-        event.wait(timeout=120)
-
-        if cache_path.exists():
-            return str(cache_path)
-        return None
+        try:
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(self._blob_provider.upload_video(dataset_id, camera, episode_idx, cache_path))
+            loop.close()
+        except Exception as exc:
+            logger.warning("Blob upload failed for %s ep %d: %s", dataset_id, episode_idx, exc)
 
 
 # Global service instance

@@ -524,12 +524,13 @@ class BlobDatasetProvider:
     # ------------------------------------------------------------------
 
     async def sync_hdf5_dataset_to_local(self, dataset_id: str, local_dir: Path) -> bool:
-        """Download HDF5 config and episode file listing to a local directory.
+        """Download HDF5 config, video cache, and episode listing to a local directory.
 
-        Downloads only JSON config files and creates empty placeholder
-        files for each .hdf5 blob so HDF5Loader.list_episodes() can
-        discover episode indices without downloading full episode data.
-        Actual episode data is fetched on-demand via sync_hdf5_episode_to_local.
+        Downloads JSON config files, cached MP4 videos from meta/videos/,
+        and creates empty placeholder files for each .hdf5 blob so
+        HDF5Loader.list_episodes() can discover episode indices without
+        downloading full episode data. Episode HDF5 files are fetched
+        on-demand via sync_hdf5_episode_to_local.
         """
         local_dir.mkdir(parents=True, exist_ok=True)
         prefix = self.get_blob_prefix(dataset_id)
@@ -552,6 +553,20 @@ class BlobDatasetProvider:
                     local_path = local_dir / filename
                     if not local_path.exists():
                         local_path.touch()
+                elif blob.name.endswith(".mp4") and "/meta/videos/" in blob.name:
+                    relative = blob.name[len(prefix + "/") :]
+                    local_path = local_dir / relative
+                    if local_path.exists():
+                        continue
+                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    blob_client = container.get_blob_client(blob.name)
+                    download = await blob_client.download_blob()
+                    tmp_path = local_path.with_suffix(".mp4.tmp")
+                    with open(tmp_path, "wb") as f:
+                        async for chunk in download.chunks():
+                            f.write(chunk)
+                    tmp_path.rename(local_path)
+                    logger.info("Downloaded cached video: %s", relative)
             return found_hdf5
         except Exception as e:
             logger.warning("Failed to sync HDF5 dataset '%s': %s", dataset_id, e)
