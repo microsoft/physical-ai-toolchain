@@ -226,3 +226,15 @@ class TestGetVideo:
         assert resp.status_code == 200
         assert resp.headers.get("accept-ranges") == "bytes"
         assert int(resp.headers.get("content-length", 0)) > 0
+
+
+class TestGetFrame:
+    """GET /api/datasets/{dataset_id}/episodes/{episode_idx}/frames/{frame_idx}"""
+
+    def test_camera_query_strips_crlf(self, client):
+        resp = client.get(
+            f"/api/datasets/{DATASET_ID}/episodes/0/frames/0",
+            params={"camera": "observation.images.il-camera\r\n"},
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("content-type") == "image/jpeg"

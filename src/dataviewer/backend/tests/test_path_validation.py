@@ -6,15 +6,20 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from src.api.models.detection import DetectionRequest
+from src.api.routers.export import ExportRequest
 from src.api.validation import (
+    SAFE_CAMERA_NAME_PATTERN,
+    SAFE_DATASET_ID_PATTERN,
+    path_string_param,
+    query_csv_ints_param,
+    range_header_param,
     validate_path_containment,
-    validated_camera_name,
-    validated_dataset_id,
 )
 
 
-class TestValidatedDatasetId:
-    """Tests for validated_dataset_id dependency."""
+class TestPathStringParam:
+    """Tests for the generic validated path-string dependency factory."""
 
     @pytest.mark.parametrize(
         "dataset_id",
@@ -25,7 +30,8 @@ class TestValidatedDatasetId:
         ],
     )
     def test_valid_dataset_ids_accepted(self, dataset_id):
-        result = validated_dataset_id(dataset_id)
+        dependency = path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")
+        result = dependency(dataset_id)
         assert result == dataset_id
 
     @pytest.mark.parametrize(
@@ -43,13 +49,10 @@ class TestValidatedDatasetId:
         ],
     )
     def test_traversal_dataset_ids_rejected(self, dataset_id):
+        dependency = path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")
         with pytest.raises(HTTPException) as exc_info:
-            validated_dataset_id(dataset_id)
+            dependency(dataset_id)
         assert exc_info.value.status_code == 400
-
-
-class TestValidatedCameraName:
-    """Tests for validated_camera_name dependency."""
 
     @pytest.mark.parametrize(
         "camera",
@@ -60,7 +63,8 @@ class TestValidatedCameraName:
         ],
     )
     def test_valid_camera_names_accepted(self, camera):
-        result = validated_camera_name(camera)
+        dependency = path_string_param("camera", pattern=SAFE_CAMERA_NAME_PATTERN, label="camera name")
+        result = dependency(camera)
         assert result == camera
 
     @pytest.mark.parametrize(
@@ -72,8 +76,9 @@ class TestValidatedCameraName:
         ],
     )
     def test_traversal_camera_names_rejected(self, camera):
+        dependency = path_string_param("camera", pattern=SAFE_CAMERA_NAME_PATTERN, label="camera name")
         with pytest.raises(HTTPException) as exc_info:
-            validated_camera_name(camera)
+            dependency(camera)
         assert exc_info.value.status_code == 400
 
 
@@ -106,6 +111,87 @@ class TestValidatePathContainment:
         """Path equal to base directory should be accepted."""
         result = validate_path_containment(tmp_path, tmp_path)
         assert result == tmp_path.resolve()
+
+
+class TestRequestModelSanitization:
+    """Tests for request-body sanitization that should happen before service logic."""
+
+    def test_detection_request_sanitizes_model_and_coerces_primitives(self):
+        request = DetectionRequest.model_validate(
+            {
+                "frames": ["1", "2"],
+                "confidence": "0.4",
+                "model": "yolo11n\r\n",
+            }
+        )
+        assert request.frames == [1, 2]
+        assert request.confidence == 0.4
+        assert request.model == "yolo11n"
+
+    def test_export_request_sanitizes_output_path_and_coerces_primitives(self, tmp_path):
+        request = ExportRequest.model_validate(
+            {
+                "episodeIndices": ["1", "2"],
+                "outputPath": f"{tmp_path / 'export-output'}\r\n",
+                "applyEdits": "true",
+            }
+        )
+        assert request.episodeIndices == [1, 2]
+        assert request.applyEdits is True
+        assert request.outputPath == str(tmp_path / "export-output")
+
+
+class TestQueryCsvIntsParam:
+    """Tests for the generic comma-separated integer query dependency factory."""
+
+    def test_required_param_returns_list(self):
+        dependency = query_csv_ints_param("episode_indices")
+        result = dependency("1, 2,3")
+        assert result == [1, 2, 3]
+
+    def test_optional_param_returns_empty_collection_when_missing(self):
+        dependency = query_csv_ints_param("removed_frames", required=False, as_set=True)
+        result = dependency(None)
+        assert result == set()
+
+    def test_optional_param_returns_set(self):
+        dependency = query_csv_ints_param("removed_frames", required=False, as_set=True)
+        result = dependency("2, 5,2\r\n")
+        assert result == {2, 5}
+
+    def test_invalid_param_raises_http_400(self):
+        dependency = query_csv_ints_param("episode_indices")
+        with pytest.raises(HTTPException) as exc_info:
+            dependency("1,two,3")
+        assert exc_info.value.status_code == 400
+
+
+class TestRangeHeaderParam:
+    """Tests for the generic HTTP Range header dependency factory."""
+
+    def test_missing_header_returns_empty_range(self):
+        dependency = range_header_param()
+        assert dependency(None) == (None, None)
+
+    def test_closed_range_parses_offset_and_length(self):
+        dependency = range_header_param()
+        assert dependency("bytes=0-1023") == (0, 1024)
+
+    def test_open_ended_range_parses_offset_only(self):
+        dependency = range_header_param()
+        assert dependency("bytes=100-\r\n") == (100, None)
+
+    def test_invalid_reversed_range_raises_http_400(self):
+        dependency = range_header_param()
+        with pytest.raises(HTTPException) as exc_info:
+            dependency("bytes=10-5")
+        assert exc_info.value.status_code == 400
+
+    def test_invalid_non_numeric_range_raises_http_400(self):
+        dependency = range_header_param()
+        with pytest.raises(HTTPException) as exc_info:
+            dependency("bytes=start-end")
+        assert exc_info.value.status_code == 400
 
 
 class TestEndpointTraversalRejection:

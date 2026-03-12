@@ -7,7 +7,7 @@
         "start": "bash start.sh",
         "start:backend": "bash start.sh --backend",
         "start:frontend": "bash start.sh --frontend",
-        "dev:backend": "cd backend && DATAVIEWER_AUTH_DISABLED=${DATAVIEWER_AUTH_DISABLED:-true} uv run uvicorn src.api.main:app --reload --port ${BACKEND_PORT:-8000}",
+        "dev:backend": "cd backend && HMI_DATA_PATH=${HMI_DATA_PATH:-../datasets} DATAVIEWER_AUTH_DISABLED=${DATAVIEWER_AUTH_DISABLED:-true} uv run uvicorn src.api.main:app --reload --port ${BACKEND_PORT:-8000}",
         "dev:frontend": "cd frontend && npm run dev",
         "build:backend": "cd backend && uv sync --frozen",
         "build:frontend": "cd frontend && npm ci && npm run build",

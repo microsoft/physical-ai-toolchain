@@ -12,10 +12,10 @@ from pathlib import Path
 import aiofiles
 import aiofiles.os
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from ..csrf import require_csrf_token
-from ..validation import validate_path_containment, validated_dataset_id
+from ..validation import SAFE_DATASET_ID_PATTERN, SanitizedModel, path_string_param, validate_path_containment
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ router = APIRouter()
 defaults_router = APIRouter()
 
 
-class JointGroupConfig(BaseModel):
+class JointGroupConfig(SanitizedModel):
     """A named group of joint indices."""
 
     id: str
@@ -31,7 +31,7 @@ class JointGroupConfig(BaseModel):
     indices: list[int] = Field(default_factory=list)
 
 
-class JointConfig(BaseModel):
+class JointConfig(SanitizedModel):
     """Joint labels and groupings for a dataset."""
 
     dataset_id: str
@@ -39,7 +39,7 @@ class JointConfig(BaseModel):
     groups: list[JointGroupConfig] = Field(default_factory=list)
 
 
-class JointConfigUpdate(BaseModel):
+class JointConfigUpdate(SanitizedModel):
     """Request body for updating joint configuration."""
 
     labels: dict[str, str] = Field(default_factory=dict)
@@ -155,7 +155,9 @@ async def _save_dataset_config(dataset_id: str, config: JointConfig) -> None:
 
 
 @router.get("/{dataset_id}/joint-config")
-async def get_joint_config(dataset_id: str = Depends(validated_dataset_id)) -> JointConfig:
+async def get_joint_config(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+) -> JointConfig:
     """Get joint configuration for a dataset. Auto-creates from defaults if missing."""
     return await _load_dataset_config(dataset_id)
 
@@ -165,7 +167,7 @@ async def get_joint_config(dataset_id: str = Depends(validated_dataset_id)) -> J
     dependencies=[Depends(require_csrf_token)],
 )
 async def update_joint_config(
-    dataset_id: str = Depends(validated_dataset_id),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     body: JointConfigUpdate = ...,
 ) -> JointConfig:
     """Update joint configuration for a dataset."""
