@@ -263,7 +263,7 @@ class DetectionService:
         class_counts: dict[str, list[float]] = {}
         skipped_frames = 0
 
-        for frame_idx in frames_to_process:
+        for frame_idx in [float(f) for f in frames_to_process]:
             try:
                 image_bytes = await get_frame_image(frame_idx)
                 if image_bytes is None:
