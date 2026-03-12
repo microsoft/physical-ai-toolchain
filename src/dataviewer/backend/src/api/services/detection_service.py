@@ -309,7 +309,7 @@ class DetectionService:
                 print(f"[DETECT] Frame {frame_idx}: ERROR {e}", file=sys.stderr, flush=True)
                 logger.warning(
                     "Failed to process frame %s: %s",
-                    str(frame_idx),
+                    frame_idx,
                     type(e).__name__,
                 )
                 continue
