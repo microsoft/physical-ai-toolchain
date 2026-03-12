@@ -37,7 +37,10 @@ def _validate_dataset_id(dataset_id: str) -> str:
     """Validate and return a safe dataset identifier. Raises ValueError on traversal attempts."""
     if "\\" in dataset_id or "/" in dataset_id:
         raise ValueError(f"Invalid dataset identifier: {dataset_id!r}")
-    for part in dataset_id.split("--"):
+    parts = dataset_id.split("--")
+    if len(parts) > 5:
+        raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id!r}")
+    for part in parts:
         safe = os.path.basename(part)
         if not safe or safe != part or part in {".", ".."}:
             raise ValueError(f"Invalid dataset identifier: {dataset_id!r}")
@@ -179,6 +182,51 @@ class DatasetService:
         logger.warning("Blob meta sync failed for dataset '%s'", dataset_id)
         return None
 
+    async def _ensure_blob_hdf5_synced(self, dataset_id: str) -> Path | None:
+        """Download HDF5 blob dataset files to a local temp dir."""
+        if self._blob_provider is None:
+            return None
+
+        dataset_id = _validate_dataset_id(dataset_id)
+
+        if dataset_id in self._blob_synced:
+            return self._blob_synced[dataset_id]
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="dvwh_"))
+        success = await self._blob_provider.sync_hdf5_dataset_to_local(dataset_id, tmp_dir)
+        if success:
+            self._blob_synced[dataset_id] = tmp_dir
+            return tmp_dir
+
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return None
+
+    async def _discover_blob_hdf5_dataset(self, dataset_id: str) -> DatasetInfo | None:
+        """Build DatasetInfo from an HDF5 blob dataset."""
+        if self._blob_provider is None:
+            return None
+
+        episode_count = await self._blob_provider.count_hdf5_episodes(dataset_id)
+        if episode_count == 0:
+            return None
+
+        parts = dataset_id.split("--")
+        name = parts[-1]
+        group = "--".join(parts[:-1]) if len(parts) > 1 else None
+
+        dataset_info = DatasetInfo(
+            id=dataset_id,
+            name=name,
+            group=group,
+            total_episodes=episode_count,
+            fps=30.0,
+            features={},
+            tasks=[],
+        )
+        self._datasets[dataset_id] = dataset_info
+        self._blob_dataset_ids.add(dataset_id)
+        return dataset_info
+
     async def _discover_blob_dataset(self, dataset_id: str) -> DatasetInfo | None:
         """Build DatasetInfo from a blob dataset's meta/info.json."""
         if self._blob_provider is None:
@@ -275,25 +323,37 @@ class DatasetService:
 
         dataset_info = handler.discover(dataset_id, dataset_path)
         if dataset_info is not None:
-            # Set group for nested datasets (e.g. "parent--child" → group="parent")
             if "--" in dataset_id:
-                dataset_info.group = dataset_id.split("--", 1)[0]
+                dataset_info.group = "--".join(dataset_id.split("--")[:-1])
             self._datasets[dataset_id] = dataset_info
             self._local_dataset_ids.add(dataset_id)
         return dataset_info
 
     def _evict_dataset(self, dataset_id: str) -> None:
-        """Remove cached dataset metadata and handler state for a dataset."""
+        """Remove cached dataset metadata, handler state, and temp dirs for a dataset."""
         self._datasets.pop(dataset_id, None)
         self._local_dataset_ids.discard(dataset_id)
         self._blob_dataset_ids.discard(dataset_id)
-        self._blob_synced.pop(dataset_id, None)
-        self._blob_meta_synced.pop(dataset_id, None)
+        synced_dir = self._blob_synced.pop(dataset_id, None)
+        if synced_dir is not None:
+            shutil.rmtree(synced_dir, ignore_errors=True)
+        meta_dir = self._blob_meta_synced.pop(dataset_id, None)
+        if meta_dir is not None:
+            shutil.rmtree(meta_dir, ignore_errors=True)
         self._episode_cache.invalidate(dataset_id)
         for handler in self._handlers:
             loaders = getattr(handler, "_loaders", None)
             if isinstance(loaders, dict):
                 loaders.pop(dataset_id, None)
+
+    def cleanup_temp_dirs(self) -> None:
+        """Remove all blob sync temp directories. Call on shutdown."""
+        for path in self._blob_synced.values():
+            shutil.rmtree(path, ignore_errors=True)
+        self._blob_synced.clear()
+        for path in self._blob_meta_synced.values():
+            shutil.rmtree(path, ignore_errors=True)
+        self._blob_meta_synced.clear()
 
     def _prune_missing_local_datasets(self, discovered_ids: set[str]) -> None:
         """Evict cached local datasets that no longer exist on disk."""
@@ -301,42 +361,45 @@ class DatasetService:
         for dataset_id in stale_ids:
             self._evict_dataset(dataset_id)
 
+    def _scan_directory(self, directory: Path, prefix_parts: list[str], discovered: set[str]) -> None:
+        """Recursively scan for datasets, building --separated IDs. Max 5 levels."""
+        if len(prefix_parts) >= 5:
+            return
+        for item in directory.iterdir():
+            if not item.is_dir():
+                continue
+            current_parts = [*prefix_parts, item.name]
+            handled = False
+            for handler in self._handlers:
+                if handler.can_handle(item):
+                    discovered.add("--".join(current_parts))
+                    handled = True
+                    break
+            if not handled:
+                self._scan_directory(item, current_parts, discovered)
+
     async def list_datasets(self) -> list[DatasetInfo]:
         """List all available datasets."""
-        # Scan blob container when provider is configured
+        # Single-pass blob container scan for both LeRobot and HDF5 datasets
         if self._blob_provider is not None:
             try:
-                blob_ids = await self._blob_provider.list_dataset_ids()
-                for dataset_id in blob_ids:
+                scan = await self._blob_provider.scan_all_dataset_ids()
+                for dataset_id in scan.get("lerobot", []):
                     if dataset_id not in self._datasets:
                         await self._discover_blob_dataset(dataset_id)
+                for dataset_id in scan.get("hdf5", []):
+                    if dataset_id not in self._datasets:
+                        await self._discover_blob_hdf5_dataset(dataset_id)
             except Exception as e:
-                logger.warning("Failed to list blob datasets: %s", e)
+                logger.warning("Failed to scan blob datasets: %s", e)
 
         base = Path(self.base_path)
         if not base.exists():
             return list(self._datasets.values())
 
-        # Scan local directory (two levels deep for nested datasets)
         discovered_ids: set[str] = set()
         try:
-            for item in base.iterdir():
-                if not item.is_dir():
-                    continue
-                handled = False
-                for handler in self._handlers:
-                    if handler.can_handle(item):
-                        discovered_ids.add(item.name)
-                        handled = True
-                        break
-                if not handled:
-                    # Check children for nested datasets (e.g. e2emanufacturing/session_a/)
-                    for child in item.iterdir():
-                        if child.is_dir():
-                            for handler in self._handlers:
-                                if handler.can_handle(child):
-                                    discovered_ids.add(f"{item.name}--{child.name}")
-                                    break
+            self._scan_directory(base, [], discovered_ids)
         except OSError:
             return list(self._datasets.values())
 
@@ -466,6 +529,12 @@ class DatasetService:
             if synced_path is not None and self._lerobot_handler.get_loader(dataset_id, synced_path):
                 handler = self._lerobot_handler
 
+        # Try blob-synced HDF5
+        if handler is None and self._blob_provider is not None:
+            synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
+            if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
+                handler = self._hdf5_handler
+
         # Try all handlers in priority order
         handlers_to_try = [handler] if handler else []
         handlers_to_try.extend(h for h in self._handlers if h is not handler)
@@ -543,6 +612,11 @@ class DatasetService:
                     if synced_path is not None and self._lerobot_handler.get_loader(dataset_id, synced_path):
                         handler = self._lerobot_handler
 
+                if handler is None and dataset_id in self._blob_dataset_ids:
+                    synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
+                    if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
+                        handler = self._hdf5_handler
+
                 if handler is None:
                     break
                 episode = handler.load_episode(dataset_id, idx, dataset_info=dataset)
@@ -602,8 +676,8 @@ class DatasetService:
                         the directory does not exist.
         """
         parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
-        if len(parts) > 2:
-            raise ValueError(f"Invalid dataset path: {dataset_id}")
+        if len(parts) > 5:
+            raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id}")
 
         for part in parts:
             safe = os.path.basename(part)

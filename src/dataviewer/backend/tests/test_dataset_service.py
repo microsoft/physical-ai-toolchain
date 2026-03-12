@@ -312,6 +312,165 @@ class TestNestedDatasetDiscovery:
         ds = next(d for d in datasets if d.id == "flat_ds")
         assert ds.group is None
 
+    @pytest.mark.asyncio
+    async def test_three_level_nested_datasets_discovered(self, tmp_path):
+        """Datasets 3 levels deep are discovered with correct --separated IDs."""
+        deep = tmp_path / "project" / "recordings" / "session_1"
+        deep.mkdir(parents=True)
+        _create_minimal_hdf5(deep / "episode_0.hdf5")
+
+        service = DatasetService(base_path=str(tmp_path))
+        datasets = await service.list_datasets()
+        ids = {d.id for d in datasets}
+        assert "project--recordings--session_1" in ids
+
+    @pytest.mark.asyncio
+    async def test_deep_nested_dataset_group_includes_all_parents(self, tmp_path):
+        """Group for 3-level dataset includes all parent segments."""
+        deep = tmp_path / "project" / "recordings" / "session_1"
+        deep.mkdir(parents=True)
+        _create_minimal_hdf5(deep / "episode_0.hdf5")
+
+        service = DatasetService(base_path=str(tmp_path))
+        datasets = await service.list_datasets()
+        ds = next(d for d in datasets if d.id == "project--recordings--session_1")
+        assert ds.group == "project--recordings"
+
+    @pytest.mark.asyncio
+    async def test_deep_nested_dataset_path_resolves(self, tmp_path):
+        """3-level nested dataset IDs resolve correctly to filesystem paths."""
+        deep = tmp_path / "project" / "recordings" / "session_1"
+        deep.mkdir(parents=True)
+        _create_minimal_hdf5(deep / "episode_0.hdf5", num_frames=20)
+
+        service = DatasetService(base_path=str(tmp_path))
+        await service.list_datasets()
+        ds = await service.get_dataset("project--recordings--session_1")
+        assert ds is not None
+        assert ds.total_episodes == 1
+
+    @pytest.mark.asyncio
+    async def test_six_level_nesting_rejected(self, tmp_path):
+        """Dataset IDs with more than 5 segments are rejected."""
+        from src.api.services.dataset_service.service import _validate_dataset_id
+
+        with pytest.raises(ValueError, match="too deep"):
+            _validate_dataset_id("a--b--c--d--e--f")
+
+    @pytest.mark.asyncio
+    async def test_five_level_nesting_accepted(self, tmp_path):
+        """Dataset IDs with exactly 5 segments are accepted."""
+        from src.api.services.dataset_service.service import _validate_dataset_id
+
+        result = _validate_dataset_id("a--b--c--d--e")
+        assert result == "a--b--c--d--e"
+
+
+class TestLocalAnnotationPathResolution:
+    """Test that local annotations resolve --separated IDs to nested paths."""
+
+    @pytest.mark.asyncio
+    async def test_nested_annotation_path_uses_nested_dirs(self, tmp_path):
+        """Annotations for nested datasets use nested filesystem directories."""
+        from src.api.storage.local import LocalStorageAdapter
+
+        adapter = LocalStorageAdapter(str(tmp_path))
+        ann_dir = adapter._get_annotations_dir("project--recordings--session_1")
+        expected = tmp_path / "project" / "recordings" / "session_1" / "annotations" / "episodes"
+        assert ann_dir == expected
+
+    @pytest.mark.asyncio
+    async def test_flat_annotation_path_unchanged(self, tmp_path):
+        """Annotations for flat datasets use a single directory level."""
+        from src.api.storage.local import LocalStorageAdapter
+
+        adapter = LocalStorageAdapter(str(tmp_path))
+        ann_dir = adapter._get_annotations_dir("flat_dataset")
+        expected = tmp_path / "flat_dataset" / "annotations" / "episodes"
+        assert ann_dir == expected
+
+
+class TestDatasetIdToBlobPrefix:
+    """Test dataset_id_to_blob_prefix helper converts -- to /."""
+
+    def test_nested_id_converts_to_slash(self):
+        from src.api.storage.paths import dataset_id_to_blob_prefix
+
+        assert dataset_id_to_blob_prefix("a--b--c") == "a/b/c"
+
+    def test_flat_id_unchanged(self):
+        from src.api.storage.paths import dataset_id_to_blob_prefix
+
+        assert dataset_id_to_blob_prefix("flat_dataset") == "flat_dataset"
+
+    def test_two_level_id(self):
+        from src.api.storage.paths import dataset_id_to_blob_prefix
+
+        assert dataset_id_to_blob_prefix("parent--child") == "parent/child"
+
+
+class TestLabelsPathResolution:
+    """Test that labels use nested filesystem paths for -- separated IDs."""
+
+    @pytest.mark.asyncio
+    async def test_nested_labels_path_resolves(self, tmp_path):
+        """Labels for nested datasets use nested filesystem directories."""
+        from src.api.routers.labels import _labels_path_for_base
+
+        path = _labels_path_for_base("project--recordings--session_1", str(tmp_path))
+        expected = tmp_path / "project" / "recordings" / "session_1" / "meta" / "episode_labels.json"
+        assert path == expected
+
+    @pytest.mark.asyncio
+    async def test_flat_labels_path_unchanged(self, tmp_path):
+        """Labels for flat datasets use single directory level."""
+        from src.api.routers.labels import _labels_path_for_base
+
+        path = _labels_path_for_base("flat_dataset", str(tmp_path))
+        expected = tmp_path / "flat_dataset" / "meta" / "episode_labels.json"
+        assert path == expected
+
+
+class TestBlobLabelStorage:
+    """Test blob-backed label storage for azure mode."""
+
+    @pytest.mark.asyncio
+    async def test_blob_label_load_returns_default_when_missing(self):
+        """Loading labels from blob returns defaults when blob doesn't exist."""
+        from src.api.routers.labels import _create_label_storage
+
+        storage = _create_label_storage(storage_backend="azure", blob_provider=None)
+        # Without a blob provider, should fall back to empty defaults
+        result = await storage.load("nonexistent")
+        assert result.dataset_id == "nonexistent"
+        assert result.available_labels == ["SUCCESS", "FAILURE", "PARTIAL"]
+
+
+class TestCombinedBlobScan:
+    """Test combined single-pass blob scanning."""
+
+    @pytest.mark.asyncio
+    async def test_scan_all_dataset_ids_returns_both_types(self):
+        """scan_all_dataset_ids discovers both LeRobot and HDF5 datasets."""
+        from src.api.storage.blob_dataset import BlobDatasetProvider
+
+        assert hasattr(BlobDatasetProvider, "scan_all_dataset_ids")
+
+
+class TestGetBlobPrefix:
+    """Test that BlobDatasetProvider resolves dataset IDs to blob prefixes."""
+
+    def test_get_blob_prefix_resolves_nested_ids(self):
+        from src.api.storage.blob_dataset import BlobDatasetProvider
+
+        assert hasattr(BlobDatasetProvider, "get_blob_prefix")
+        assert BlobDatasetProvider.get_blob_prefix("a--b--c") == "a/b/c"
+
+    def test_get_blob_prefix_flat_id_unchanged(self):
+        from src.api.storage.blob_dataset import BlobDatasetProvider
+
+        assert BlobDatasetProvider.get_blob_prefix("flat_dataset") == "flat_dataset"
+
 
 class TestBlobSyncTempPrefixes:
     """Test temp-directory prefixes used for blob dataset sync."""
@@ -355,3 +514,53 @@ class TestBlobSyncTempPrefixes:
         service = DatasetService(base_path=str(tmp_path), blob_provider=FakeBlobProvider())
         with pytest.raises(ValueError, match="Invalid dataset identifier"):
             await service._ensure_blob_meta_synced("..\\escape")
+
+
+class TestBlobTempDirCleanup:
+    """Test that blob sync temp directories are cleaned up properly."""
+
+    @pytest.mark.asyncio
+    async def test_evict_dataset_removes_synced_temp_dir(self, tmp_path):
+        """Evicting a dataset cleans up its blob sync temp directory."""
+        service = DatasetService(base_path=str(tmp_path))
+        fake_dir = tmp_path / "dvw_fake"
+        fake_dir.mkdir()
+        (fake_dir / "somefile.parquet").write_text("data")
+        service._blob_synced["test_ds"] = fake_dir
+
+        service._evict_dataset("test_ds")
+
+        assert not fake_dir.exists()
+        assert "test_ds" not in service._blob_synced
+
+    @pytest.mark.asyncio
+    async def test_evict_dataset_removes_meta_synced_temp_dir(self, tmp_path):
+        """Evicting a dataset cleans up its meta sync temp directory."""
+        service = DatasetService(base_path=str(tmp_path))
+        fake_dir = tmp_path / "dvwm_fake"
+        fake_dir.mkdir()
+        (fake_dir / "meta" / "info.json").parent.mkdir(parents=True)
+        (fake_dir / "meta" / "info.json").write_text("{}")
+        service._blob_meta_synced["test_ds"] = fake_dir
+
+        service._evict_dataset("test_ds")
+
+        assert not fake_dir.exists()
+        assert "test_ds" not in service._blob_meta_synced
+
+    def test_cleanup_all_temp_dirs(self, tmp_path):
+        """cleanup_temp_dirs removes all synced and meta-synced directories."""
+        service = DatasetService(base_path=str(tmp_path))
+        dir1 = tmp_path / "dvw_1"
+        dir2 = tmp_path / "dvwm_2"
+        dir1.mkdir()
+        dir2.mkdir()
+        service._blob_synced["ds1"] = dir1
+        service._blob_meta_synced["ds2"] = dir2
+
+        service.cleanup_temp_dirs()
+
+        assert not dir1.exists()
+        assert not dir2.exists()
+        assert len(service._blob_synced) == 0
+        assert len(service._blob_meta_synced) == 0

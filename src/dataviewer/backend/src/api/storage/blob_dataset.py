@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
+from .paths import dataset_id_to_blob_prefix
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -88,6 +90,11 @@ class BlobDatasetProvider:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def get_blob_prefix(dataset_id: str) -> str:
+        """Convert a --separated dataset ID to a /-separated blob prefix."""
+        return dataset_id_to_blob_prefix(dataset_id)
+
     async def _get_client(self) -> BlobServiceClient:
         """Return a lazily-initialized async BlobServiceClient."""
         if self._client is None:
@@ -124,28 +131,53 @@ class BlobDatasetProvider:
     # ------------------------------------------------------------------
 
     async def list_dataset_ids(self) -> list[str]:
-        """
-        List dataset IDs by scanning the container for meta/info.json markers.
+        """List LeRobot dataset IDs by scanning for meta/info.json markers."""
+        result = await self.scan_all_dataset_ids()
+        return result["lerobot"]
+
+    async def list_hdf5_dataset_ids(self) -> list[str]:
+        """List HDF5 dataset IDs by scanning for .hdf5 episode files."""
+        result = await self.scan_all_dataset_ids()
+        return result["hdf5"]
+
+    async def scan_all_dataset_ids(self) -> dict[str, list[str]]:
+        """Single-pass scan that discovers both LeRobot and HDF5 datasets.
+
+        Uses list_blob_names() for performance. Classifies each blob by
+        checking for meta/info.json (LeRobot) or .hdf5 (HDF5 episodes).
 
         Returns:
-            Sorted list of dataset ID strings.
+            Dict with 'lerobot' and 'hdf5' keys, each a sorted list of dataset IDs.
         """
+        lerobot_ids: set[str] = set()
+        hdf5_ids: set[str] = set()
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
-            seen: set[str] = set()
-            async for blob in container.list_blobs():
-                parts = blob.name.split("/")
-                if len(parts) >= 3 and parts[1] == "meta" and parts[2] == "info.json":
-                    seen.add(parts[0])
-            return sorted(seen)
+            async for name in container.list_blob_names():
+                parts = name.split("/")
+                if len(parts) >= 3 and parts[-2] == "meta" and parts[-1] == "info.json":
+                    lerobot_ids.add(parts[0])
+                elif name.endswith(".hdf5"):
+                    parent_parts = name.rsplit("/", 1)
+                    if len(parent_parts) == 2:
+                        segments = parent_parts[0].split("/")
+                        if len(segments) <= 5:
+                            hdf5_ids.add("--".join(segments))
         except Exception as e:
-            logger.warning("Failed to list datasets from blob container '%s': %s", self.container_name, e)
-            return []
+            logger.warning("Failed to scan blob container '%s': %s", self.container_name, e)
+
+        # Exclude datasets already discovered as LeRobot
+        hdf5_ids -= lerobot_ids
+
+        return {
+            "lerobot": sorted(lerobot_ids),
+            "hdf5": sorted(hdf5_ids),
+        }
 
     async def dataset_exists(self, dataset_id: str) -> bool:
         """Return True if the dataset has a meta/info.json blob."""
-        blob_path = f"{dataset_id}/meta/info.json"
+        blob_path = f"{self.get_blob_prefix(dataset_id)}/meta/info.json"
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
@@ -174,7 +206,7 @@ class BlobDatasetProvider:
         if dataset_id in self._info_cache:
             return self._info_cache[dataset_id]
 
-        data = await self._read_blob_bytes(f"{dataset_id}/meta/info.json")
+        data = await self._read_blob_bytes(f"{self.get_blob_prefix(dataset_id)}/meta/info.json")
         if data is None:
             return None
 
@@ -244,18 +276,19 @@ class BlobDatasetProvider:
 
         chunk_index = episode_idx // chunks_size
         file_index = episode_idx % chunks_size
-        blob_path = f"{dataset_id}/videos/{camera}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
+        prefix = self.get_blob_prefix(dataset_id)
+        blob_path = f"{prefix}/videos/{camera}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
 
         props = await self.get_blob_properties(blob_path)
         if props is not None:
             return blob_path
 
         # Fallback: scan camera prefix for any matching mp4 (HDF5-style flat layout)
-        prefix = f"{dataset_id}/videos/{camera}/"
+        video_prefix = f"{prefix}/videos/{camera}/"
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
-            async for blob in container.list_blobs(name_starts_with=prefix):
+            async for blob in container.list_blobs(name_starts_with=video_prefix):
                 if blob.name.endswith(".mp4"):
                     return blob.name
         except Exception as e:
@@ -322,7 +355,7 @@ class BlobDatasetProvider:
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
-            prefix = f"{dataset_id}/"
+            prefix = f"{self.get_blob_prefix(dataset_id)}/"
             synced_count = 0
 
             async for blob in container.list_blobs(name_starts_with=prefix):
@@ -374,10 +407,11 @@ class BlobDatasetProvider:
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
-            meta_prefix = f"{dataset_id}/meta/"
+            prefix = self.get_blob_prefix(dataset_id)
+            meta_prefix = f"{prefix}/meta/"
 
             async for blob in container.list_blobs(name_starts_with=meta_prefix):
-                relative = blob.name[len(f"{dataset_id}/") :]
+                relative = blob.name[len(f"{prefix}/") :]
                 if relative not in _SYNC_META_BLOBS and not relative.startswith("meta/episodes/"):
                     continue
 
@@ -401,6 +435,59 @@ class BlobDatasetProvider:
         except Exception as e:
             logger.warning("Failed to sync meta for dataset '%s': %s", dataset_id, e)
             return False
+
+    # ------------------------------------------------------------------
+    # HDF5 dataset sync and metadata
+    # ------------------------------------------------------------------
+
+    async def sync_hdf5_dataset_to_local(self, dataset_id: str, local_dir: Path) -> bool:
+        """Download HDF5 episode files and config to a local directory."""
+        local_dir.mkdir(parents=True, exist_ok=True)
+        prefix = self.get_blob_prefix(dataset_id)
+        try:
+            client = await self._get_client()
+            container = client.get_container_client(self.container_name)
+            synced = 0
+            async for blob in container.list_blobs(name_starts_with=prefix + "/"):
+                if not (blob.name.endswith(".hdf5") or blob.name.endswith(".json")):
+                    continue
+                filename = blob.name.rsplit("/", 1)[-1]
+                local_path = local_dir / filename
+                if local_path.exists():
+                    continue
+                data = await self._read_blob_bytes(blob.name)
+                if data is not None:
+                    local_path.write_bytes(data)
+                    synced += 1
+            return synced > 0
+        except Exception as e:
+            logger.warning("Failed to sync HDF5 dataset '%s': %s", dataset_id, e)
+            return False
+
+    async def get_hdf5_dataset_config(self, dataset_id: str) -> dict | None:
+        """Read dataset_config.json for a dataset."""
+        data = await self._read_blob_bytes(f"{self.get_blob_prefix(dataset_id)}/dataset_config.json")
+        if data is None:
+            return None
+        try:
+            return json.loads(data.decode("utf-8"))
+        except json.JSONDecodeError:
+            return None
+
+    async def count_hdf5_episodes(self, dataset_id: str) -> int:
+        """Count .hdf5 files for a dataset."""
+        prefix = self.get_blob_prefix(dataset_id)
+        try:
+            client = await self._get_client()
+            container = client.get_container_client(self.container_name)
+            count = 0
+            async for name in container.list_blob_names(name_starts_with=prefix + "/"):
+                if name.endswith(".hdf5"):
+                    count += 1
+            return count
+        except Exception as e:
+            logger.warning("Failed to count HDF5 episodes for '%s': %s", dataset_id, e)
+            return 0
 
     # ------------------------------------------------------------------
     # Lifecycle
