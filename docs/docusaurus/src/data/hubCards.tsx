@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// SPDX-License-Identifier: MIT
+
 import React from 'react';
 import { RocketIcon, BookIcon, CodeIcon, CloudIcon, CpuIcon, ShieldIcon } from '../components/Icons';
 import type { IconCardProps } from '../components/IconCard';
@@ -53,26 +56,26 @@ export const boxCards: BoxCardProps[] = [
     title: 'Architecture Guide',
     links: [
       { label: 'System architecture', href: '/contributing/architecture' },
-      { label: 'Network topology', href: '/deploy/network-architecture' },
-      { label: 'Lifecycle domains', href: '/contributing/architecture#lifecycle-domains' },
+      { label: 'Network topology', href: '/deploy/infrastructure-reference' },
+      { label: 'Lifecycle domains', href: '/contributing/architecture#domain-overview' },
     ],
     icon: '/img/icons/clipboard-task.svg',
   },
   {
     title: 'GPU Configuration',
     links: [
-      { label: 'H100 setup', href: '/reference/gpu-configuration#h100' },
-      { label: 'RTX PRO 6000 setup', href: '/reference/gpu-configuration#rtx-pro-6000' },
-      { label: 'GPU Operator', href: '/reference/gpu-configuration#nvidia-gpu-operator' },
+      { label: 'H100 setup', href: '/reference/gpu-configuration#h100-nodes' },
+      { label: 'RTX PRO 6000 setup', href: '/reference/gpu-configuration#rtx-pro-6000-nodes' },
+      { label: 'GPU Operator', href: '/reference/gpu-configuration#gpu-driver-management' },
     ],
     icon: '/img/icons/developer-board.svg',
   },
   {
     title: 'Security',
     links: [
-      { label: 'Security review checklist', href: '/security/security-review' },
-      { label: 'Private cluster access', href: '/deploy/vpn-setup' },
-      { label: 'Identity and credentials', href: '/deploy/identity' },
+      { label: 'Security review checklist', href: '/contributing/security-review' },
+      { label: 'Private cluster access', href: '/deploy/vpn' },
+      { label: 'Identity and credentials', href: '/deploy/infrastructure#osmo-workload-identity' },
     ],
     icon: '/img/icons/shield-lock.svg',
   },

@@ -150,7 +150,7 @@ osmo_config = {
 }
 ```
 
-See [variables.tf](../../deploy/001-iac/variables.tf) for all configuration options.
+See [variables.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/variables.tf) for all configuration options.
 
 ## 🔗 Related
 

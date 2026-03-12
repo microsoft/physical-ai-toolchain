@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// SPDX-License-Identifier: MIT
+
 import React from 'react';
 import type { ReactNode } from 'react';
 import Link from '@docusaurus/Link';

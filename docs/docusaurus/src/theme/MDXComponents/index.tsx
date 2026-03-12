@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// SPDX-License-Identifier: MIT
+
 import React from 'react';
 import MDXComponents from '@theme-original/MDXComponents';
 import BoxCard from '@site/src/components/BoxCard';

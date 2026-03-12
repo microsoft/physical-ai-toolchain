@@ -1,3 +1,6 @@
+/* Copyright (c) Microsoft Corporation.
+   SPDX-License-Identifier: MIT */
+
 .hero {
   background: var(--ms-learn-hero-gradient);
   position: relative;

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// SPDX-License-Identifier: MIT
+
 import React from 'react';
 
 export function RocketIcon(): React.ReactElement {

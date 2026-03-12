@@ -52,10 +52,10 @@ LeRobot behavioral cloning on OSMO:
 
 ## 📚 Related Documentation
 
-- [Deployment Guide](../../deploy/README.md) for infrastructure setup
+- [Deployment Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md) for infrastructure setup
 - [LeRobot Inference](../inference/lerobot-inference.md) for running trained policies
-- [AzureML Workflows](../../workflows/azureml/README.md) for job template reference
-- [OSMO Workflows](../../workflows/osmo/README.md) for workflow template reference
+- [AzureML Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/README.md) for job template reference
+- [OSMO Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/osmo/README.md) for workflow template reference
 - [Scripts Reference](../reference/scripts.md) for CLI usage
 
 <!-- markdownlint-disable MD036 -->

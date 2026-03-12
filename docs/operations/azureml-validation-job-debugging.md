@@ -221,7 +221,7 @@ az storage account update --name stosmorobotst001 --allow-shared-key-access true
 
 ### 1. Terraform Configuration Updates
 
-#### [deploy/001-iac/main.tf](../deploy/001-iac/main.tf)
+#### [deploy/001-iac/main.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/main.tf)
 
 Added missing fields to `azureml_config` to enable extension installation and workload identity federation:
 
@@ -241,7 +241,7 @@ azureml_config = {
 
 ### 2. AzureML Job YAML Schema Fixes
 
-#### [workflows/azureml/validate.yaml](../workflows/azureml/validate.yaml)
+#### [workflows/azureml/validate.yaml](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/validate.yaml)
 
 Fixed input schema to comply with AzureML command job requirements:
 

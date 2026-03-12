@@ -114,7 +114,7 @@ Deployment script creates VNet and subnet but appears to skip role assignment fo
 
 </details>
 
-After submission, expect initial acknowledgment within the timeframes documented in [SUPPORT.md](../../SUPPORT.md).
+After submission, expect initial acknowledgment within the timeframes documented in [SUPPORT.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SUPPORT.md).
 
 ## Suggesting Enhancements
 
@@ -200,7 +200,7 @@ Before submitting documentation changes:
 * Run `npm run lint:md` to check formatting and style
 * Verify internal links with `npm run lint:links`
 * Test code samples in deployment environment
-* Review against [docs-style-and-conventions.instructions.md](../../.github/instructions/docs-style-and-conventions.instructions.md)
+* Review against [docs-style-and-conventions.instructions.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/.github/instructions/docs-style-and-conventions.instructions.md)
 
 ## Related Documentation
 

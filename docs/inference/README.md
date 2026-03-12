@@ -55,7 +55,7 @@ osmo workflow submit \
 
 - [Training Guide](../training/README.md)
 - [MLflow Integration](../training/mlflow-integration.md)
-- [Workflow Templates](../../workflows/README.md)
+- [Workflow Templates](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/README.md)
 - [Scripts Reference](../reference/scripts.md)
 
 ---

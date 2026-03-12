@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// SPDX-License-Identifier: MIT
+
 import React from 'react';
 import Navbar from '@theme-original/Navbar';
 import type { WrapperProps } from '@docusaurus/types';

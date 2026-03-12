@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// SPDX-License-Identifier: MIT
+
 import React from 'react';
 import Footer from '@theme-original/Footer';
 import type { WrapperProps } from '@docusaurus/types';

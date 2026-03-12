@@ -101,9 +101,9 @@ Root Module (001-iac/)
 
 | Module                                             | Purpose                                                         |
 |----------------------------------------------------|-----------------------------------------------------------------|
-| [platform](../../deploy/001-iac/modules/platform/) | Networking, storage, Key Vault, ML workspace, PostgreSQL, Redis |
-| [sil](../../deploy/001-iac/modules/sil/)           | AKS cluster with GPU node pools                                 |
-| [vpn](../../deploy/001-iac/modules/vpn/)           | VPN Gateway module (used by vpn/ standalone deployment)         |
+| [platform](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy/001-iac/modules/platform) | Networking, storage, Key Vault, ML workspace, PostgreSQL, Redis |
+| [sil](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy/001-iac/modules/sil)           | AKS cluster with GPU node pools                                 |
+| [vpn](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy/001-iac/modules/vpn)           | VPN Gateway module (used by vpn/ standalone deployment)         |
 
 ## 📤 Outputs
 
@@ -156,7 +156,7 @@ terraform init
 terraform apply -var="osmo_loadbalancer_ip=10.0.x.x"
 ```
 
-See [dns/README.md](../../deploy/001-iac/dns/README.md) for details.
+See [dns/README.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/dns/README.md) for details.
 
 ### Automation Account
 
@@ -168,7 +168,7 @@ cp terraform.tfvars.example terraform.tfvars
 terraform init && terraform apply -var-file=terraform.tfvars
 ```
 
-See [automation/README.md](../../deploy/001-iac/automation/README.md) for schedule configuration.
+See [automation/README.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/automation/README.md) for schedule configuration.
 
 ## 🔍 Troubleshooting
 

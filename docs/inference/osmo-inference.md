@@ -162,7 +162,7 @@ osmo workflow status <workflow-id>
 - [Inference Hub](README.md)
 - [LeRobot Inference](lerobot-inference.md)
 - [Training Guide](../training/README.md)
-- [Workflow Templates](../../workflows/README.md)
+- [Workflow Templates](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/README.md)
 
 ---
 

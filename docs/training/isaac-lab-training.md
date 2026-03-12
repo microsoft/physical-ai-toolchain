@@ -21,7 +21,7 @@ Isaac Lab reinforcement learning training with SKRL and RSL-RL backends. Both Az
 
 | Component         | Requirement                                                                   |
 |-------------------|-------------------------------------------------------------------------------|
-| Infrastructure    | AKS cluster deployed via [Infrastructure Guide](../../deploy/README.md)       |
+| Infrastructure    | AKS cluster deployed via [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md)       |
 | Azure ML          | Extension installed via `02-deploy-azureml-extension.sh`                      |
 | OSMO              | Control plane and backend via `03-deploy-osmo-control-plane.sh`               |
 | Terraform outputs | Available in `deploy/001-iac/` (or provide values via CLI / environment vars) |
@@ -157,8 +157,8 @@ The script stages files to exclude `__pycache__` and build artifacts via `.amlig
 
 - [Experiment Tracking](experiment-tracking.md) for MLflow and WANDB setup
 - [MLflow Integration](mlflow-integration.md) for SKRL metric logging internals
-- [AzureML Workflows](../../workflows/azureml/README.md) for job template reference
-- [OSMO Workflows](../../workflows/osmo/README.md) for workflow template reference
+- [AzureML Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/README.md) for job template reference
+- [OSMO Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/osmo/README.md) for workflow template reference
 - [Scripts Reference](../reference/scripts.md) for full CLI parameter tables
 
 <!-- markdownlint-disable MD036 -->
