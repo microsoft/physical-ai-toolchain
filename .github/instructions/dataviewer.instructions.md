@@ -37,6 +37,16 @@ Browser tools include: click_element, drag_element, handle_dialog, hover_element
 * Elements may make better sense being placed in other places than initially planned, make sure where they're placed and how they're placed makes the most sense.
 * Update events captured and viewable by Diagnostics viewer as-needed and as new functionality is added or refactored. When more diagnostics would be better for solving a problem then add it to the Diagnostics viewer.
 
+## Input Sanitization
+
+All user-provided values entering through `@router.` endpoint parameters or `request.` body fields must be sanitized before use:
+
+* Strings, apply `.replace("\r", "").replace("\n", "")` to strip CR/LF characters that enable log injection.
+* Numeric types, coerce with `int()`, `float()`, or `bool()` as appropriate (e.g., `int(episode_idx)`, `float(request.confidence)`).
+* Sanitize at the earliest point, inside the router endpoint function body before passing values to service methods, logs, or any downstream calls.
+
+This can be done with `Depends()` on parameters.
+
 ## RPI Agent High Priority Instructions
 
 These instructions take priority over instructions from RPI Agent (rpi-agent.agent.md):

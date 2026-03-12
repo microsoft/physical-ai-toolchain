@@ -15,12 +15,18 @@ from typing import TYPE_CHECKING, Protocol
 import aiofiles
 import aiofiles.os
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from ..csrf import require_csrf_token
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..storage.paths import dataset_id_to_blob_prefix
-from ..validation import validate_path_containment, validated_dataset_id
+from ..validation import (
+    SAFE_DATASET_ID_PATTERN,
+    SanitizedModel,
+    path_int_param,
+    path_string_param,
+    validate_path_containment,
+)
 
 if TYPE_CHECKING:
     from ..storage.blob_dataset import BlobDatasetProvider
@@ -31,14 +37,14 @@ router = APIRouter()
 DEFAULT_LABELS = ["SUCCESS", "FAILURE", "PARTIAL"]
 
 
-class EpisodeLabels(BaseModel):
+class EpisodeLabels(SanitizedModel):
     """Labels assigned to a single episode."""
 
     episode_index: int
     labels: list[str] = Field(default_factory=list)
 
 
-class DatasetLabelsFile(BaseModel):
+class DatasetLabelsFile(SanitizedModel):
     """All episode labels and available options for a dataset."""
 
     dataset_id: str
@@ -46,13 +52,13 @@ class DatasetLabelsFile(BaseModel):
     episodes: dict[str, list[str]] = Field(default_factory=dict)
 
 
-class BulkLabelUpdate(BaseModel):
+class BulkLabelUpdate(SanitizedModel):
     """Request body for updating labels on a single episode."""
 
     labels: list[str]
 
 
-class AddLabelOption(BaseModel):
+class AddLabelOption(SanitizedModel):
     """Request body for adding a new available label option."""
 
     label: str = Field(min_length=1, max_length=100)
@@ -202,20 +208,27 @@ async def _save_labels(dataset_id: str, labels_file: DatasetLabelsFile) -> None:
 
 
 @router.get("/{dataset_id}/labels")
-async def get_dataset_labels(dataset_id: str = Depends(validated_dataset_id)) -> DatasetLabelsFile:
+async def get_dataset_labels(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+) -> DatasetLabelsFile:
     """Get all episode labels and available label options for a dataset."""
     return await _load_labels(dataset_id)
 
 
 @router.get("/{dataset_id}/labels/options")
-async def get_label_options(dataset_id: str = Depends(validated_dataset_id)) -> list[str]:
+async def get_label_options(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+) -> list[str]:
     """Get the list of available label options for a dataset."""
     labels_file = await _load_labels(dataset_id)
     return labels_file.available_labels
 
 
 @router.post("/{dataset_id}/labels/options", dependencies=[Depends(require_csrf_token)])
-async def add_label_option(dataset_id: str = Depends(validated_dataset_id), body: AddLabelOption = ...) -> list[str]:
+async def add_label_option(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    body: AddLabelOption = ...,
+) -> list[str]:
     """Add a new label option to the available set."""
     labels_file = await _load_labels(dataset_id)
     normalized = _normalize_label(body.label)
@@ -232,8 +245,8 @@ async def add_label_option(dataset_id: str = Depends(validated_dataset_id), body
     dependencies=[Depends(require_csrf_token)],
 )
 async def delete_label_option(
-    dataset_id: str = Depends(validated_dataset_id),
-    label: str = ...,
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    label: str = Depends(path_string_param("label", label="label")),
 ) -> list[str]:
     """Delete a label option and remove it from all episode assignments."""
     labels_file = await _load_labels(dataset_id)
@@ -257,7 +270,10 @@ async def delete_label_option(
 
 
 @router.get("/{dataset_id}/episodes/{episode_idx}/labels")
-async def get_episode_labels(dataset_id: str = Depends(validated_dataset_id), episode_idx: int = ...) -> EpisodeLabels:
+async def get_episode_labels(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+) -> EpisodeLabels:
     """Get labels for a specific episode."""
     labels_file = await _load_labels(dataset_id)
     key = str(episode_idx)
@@ -272,8 +288,8 @@ async def get_episode_labels(dataset_id: str = Depends(validated_dataset_id), ep
     dependencies=[Depends(require_csrf_token)],
 )
 async def set_episode_labels(
-    dataset_id: str = Depends(validated_dataset_id),
-    episode_idx: int = ...,
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     body: BulkLabelUpdate = ...,
     dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> EpisodeLabels:
@@ -298,7 +314,9 @@ async def set_episode_labels(
 
 
 @router.post("/{dataset_id}/labels/save", dependencies=[Depends(require_csrf_token)])
-async def save_all_labels(dataset_id: str = Depends(validated_dataset_id)) -> DatasetLabelsFile:
+async def save_all_labels(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+) -> DatasetLabelsFile:
     """Persist all labels to disk (already persisted on each write, but
     this endpoint lets the frontend trigger an explicit save/confirmation)."""
     labels_file = await _load_labels(dataset_id)

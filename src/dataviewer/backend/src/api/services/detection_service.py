@@ -254,8 +254,8 @@ class DetectionService:
         )
 
         # Determine frames to process
-        confidence = float(request.confidence)
-        model_name = request.model.replace("\r", "").replace("\n", "")
+        confidence = request.confidence
+        model_name = request.model
         frames_to_process = request.frames if request.frames else list(range(total_frames))
         print(f"[DETECT] Will process {len(frames_to_process)} frames", file=sys.stderr, flush=True)
 
@@ -265,7 +265,6 @@ class DetectionService:
 
         for frame_idx in frames_to_process:
             try:
-                frame_idx = int(frame_idx)
                 image_bytes = await get_frame_image(frame_idx)
                 if image_bytes is None:
                     skipped_frames += 1
