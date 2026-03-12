@@ -7,6 +7,7 @@ import { useEpisodeStore, useDatasetStore } from '@/stores';
 import { useLabelStore } from '@/stores/label-store';
 import { AnnotationWorkspace } from '@/components/annotation-workspace/AnnotationWorkspace';
 import { LabelFilter } from '@/components/annotation-panel';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { EpisodeMeta } from '@/types';
 
@@ -191,13 +192,13 @@ function AppContent() {
             Episode annotation system for robot demonstration datasets
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <label className="text-sm">Dataset:</label>
           {datasets && datasets.length > 1 ? (
             <select
               value={datasetId}
               onChange={(e) => { setDatasetId(e.target.value); setSelectedEpisode(0); }}
-              className="px-3 py-1 border rounded text-sm w-64"
+              className="px-3 py-1 border border-input rounded text-sm w-64 bg-background text-foreground"
             >
               {datasets.map((ds) => (
                 <option key={ds.id} value={ds.id}>{ds.name}</option>
@@ -208,10 +209,11 @@ function AppContent() {
               type="text"
               value={datasetId}
               onChange={(e) => setDatasetId(e.target.value)}
-              className="px-3 py-1 border rounded text-sm w-64"
+              className="px-3 py-1 border border-input rounded text-sm w-64 bg-background text-foreground"
               placeholder="Dataset ID"
             />
           )}
+          <ThemeToggle />
         </div>
       </header>
 

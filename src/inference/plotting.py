@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 matplotlib.use("Agg")
+plt.style.use("dark_background")
 
 JOINT_NAMES = [
     "shoulder_pan",
@@ -193,7 +194,10 @@ def plot_summary_panel(
 
     # Top-right: error distribution per joint
     ax = axes[0, 1]
-    ax.boxplot([error[:, j] for j in range(n_joints)], tick_labels=names, patch_artist=True)
+    bp = ax.boxplot([error[:, j] for j in range(n_joints)], tick_labels=names, patch_artist=True)
+    for patch, c in zip(bp["boxes"], colors[:n_joints]):
+        patch.set_facecolor(c)
+        patch.set_alpha(0.6)
     ax.set_ylabel("Absolute Error (rad)", fontsize=9)
     ax.set_title("Error Distribution per Joint", fontsize=10)
     ax.tick_params(axis="x", rotation=30, labelsize=8)
@@ -305,7 +309,7 @@ def plot_aggregate_summary(
 
     # Bottom-right: per-episode MSE
     ax = axes[1, 1]
-    bars = ax.bar(ep_labels, mses, color="#9C27B0", alpha=0.7)
+    bars = ax.bar(ep_labels, mses, color="#CE93D8", alpha=0.7)
     ax.axhline(y=np.mean(mses), color="#F44336", linestyle="--", alpha=0.7, label=f"Mean: {np.mean(mses):.7f}")
     ax.set_xlabel("Episode", fontsize=9)
     ax.set_ylabel("MSE (rad²)", fontsize=9)

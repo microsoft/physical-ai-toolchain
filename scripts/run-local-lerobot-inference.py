@@ -169,6 +169,8 @@ def run_evaluation(args: argparse.Namespace) -> None:
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+
+    plt.style.use("dark_background")
     from lerobot.policies.act.modeling_act import ACTPolicy
 
     device = resolve_device(args.device)
@@ -353,7 +355,10 @@ def run_evaluation(args: argparse.Namespace) -> None:
         ax.grid(True, alpha=0.3)
 
         ax = axes_panel[0, 1]
-        ax.boxplot([error[:, j] for j in range(n_dims)], tick_labels=dim_labels, patch_artist=True)
+        bp = ax.boxplot([error[:, j] for j in range(n_dims)], tick_labels=dim_labels, patch_artist=True)
+        for patch, c in zip(bp["boxes"], colors[:n_dims]):
+            patch.set_facecolor(c)
+            patch.set_alpha(0.6)
         ax.set_ylabel("Absolute Error")
         ax.set_title("Error Distribution per Dimension")
         ax.tick_params(axis="x", rotation=45, labelsize=6 if n_dims > 8 else 8)
