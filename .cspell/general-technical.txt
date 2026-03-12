@@ -8,6 +8,7 @@ acunetix
 adobe
 adrm
 adrs
+agentic
 agentless
 agile
 anom
@@ -160,6 +161,7 @@ chatbot
 chatbots
 chatmode
 chatmodes
+chatlog
 cheatham
 checkbox
 checkboxes
@@ -1551,7 +1553,9 @@ auditable
 auditability
 auditifnotexists
 gdpr
+gitsign
 hipaa
+keyless
 oidc
 OSSF
 passwordless
@@ -1559,6 +1563,7 @@ siem
 sox
 Sarbanes
 Oxley
+x509
 
 # Cloud Platforms & Services (not covered by public dicts)
 amazonaws

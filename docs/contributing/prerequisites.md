@@ -189,6 +189,8 @@ The workspace `.vscode/settings.json` also configures Copilot Chat to load instr
 
 These paths resolve when hve-core is installed as a peer directory or via the VS Code Extension. Without hve-core, Copilot still functions but shared conventions, prompts, and chat modes are unavailable.
 
+For a complete list of available agents, prompts, and skills, see [Copilot Artifacts](../reference/copilot-artifacts.md).
+
 ## Related Documentation
 
 * [Contributing Guide](README.md) - Main contributing guide with all sections

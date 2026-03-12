@@ -145,6 +145,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
+      id-token: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -183,7 +184,7 @@ jobs:
 
       - name: Setup uv
         if: ${{ steps.release.outputs.prs_created == 'true' }}
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        uses: astral-sh/setup-uv@6ee6290f1cbc4156c0bdd66691b2c144ef8df19a  # v7.4.0
 
       - name: Regenerate uv.lock
         if: ${{ steps.release.outputs.prs_created == 'true' }}
@@ -202,32 +203,90 @@ jobs:
           git commit -m "chore: regenerate uv.lock"
           git push
 
+      - name: Checkout default branch for tag signing
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Install gitsign
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        run: |
+          $version = 'v0.13.0'
+          $arch = '${{ runner.arch }}'
+
+          switch ($arch) {
+            'X64' {
+              $asset = 'gitsign_0.13.0_linux_amd64'
+              $expectedSha = '011af11d57ad205b4ae4e3f41ecc8c64fbe0043c829190c0cb44fce6fce74bbb'
+            }
+            'ARM64' {
+              $asset = 'gitsign_0.13.0_linux_arm64'
+              $expectedSha = 'f0ec4732696b88f133ab6ef9ac2fe8be843ab9540bd1cc51dc4143142a858372'
+            }
+            default {
+              throw "Unsupported runner architecture: $arch"
+            }
+          }
+
+          $assetUrl = "https://github.com/sigstore/gitsign/releases/download/$version/$asset"
+          $assetPath = Join-Path $env:RUNNER_TEMP $asset
+          Invoke-WebRequest -Uri $assetUrl -OutFile $assetPath
+
+          $actualSha = (Get-FileHash -Path $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha -ne $expectedSha) {
+            throw "Checksum verification failed for $asset. Expected $expectedSha but got $actualSha"
+          }
+
+          $binDir = Join-Path $env:RUNNER_TEMP 'bin'
+          New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+          $gitsign = Join-Path $binDir 'gitsign'
+          Move-Item -Path $assetPath -Destination $gitsign -Force
+          chmod +x $gitsign
+          Add-Content -Path $env:GITHUB_PATH -Value $binDir
+          & $gitsign version
+
       # Workaround: release-please with "draft": true uses lazy tag
       # creation. The git tag is not materialized until the release is
       # published. Without the tag, release-please cannot find the draft
       # on subsequent runs, breaking version anchoring and causing bogus
       # changelog entries. The skip-github-pull-request conditional above
       # prevents PR creation on release commits (zero unreleased changes),
-      # and this step creates the tag so subsequent runs find the release.
+      # and this step creates a signed tag so subsequent runs find the release.
       # Replace both workarounds with "force-tag-creation": true in
       # release-please-config.json once release-please-action ships a
       # version that includes googleapis/release-please#2627.
-      - name: Create git tag for draft release
+      - name: Create signed git tag for draft release
         if: ${{ steps.release.outputs.release_created == 'true' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          git config --global gpg.format x509
+          git config --global gpg.x509.program gitsign
+          git config --global tag.gpgSign true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --tags --force
+
           $tag = '${{ steps.release.outputs.tag_name }}'
-          $repo = '${{ github.repository }}'
-          $null = gh api "/repos/$repo/git/refs/tags/$tag" --silent 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            gh api "/repos/$repo/git/refs" `
-              -f "ref=refs/tags/$tag" `
-              -f "sha=${{ github.sha }}"
-            Write-Output "Created git tag $tag -> ${{ github.sha }}"
-          } else {
+          $existingTag = git tag --list $tag
+          if ($existingTag) {
             Write-Output "Git tag $tag already exists"
+            exit 0
           }
+
+          git remote set-url origin "https://x-access-token:${env:GH_TOKEN}@github.com/${env:GITHUB_REPOSITORY}.git"
+          git tag -s $tag $env:GITHUB_SHA -m "Release $tag"
+          git push origin "refs/tags/$tag"
+          Write-Output "Created signed git tag $tag -> $env:GITHUB_SHA"
+
+      - name: Verify signed git tag
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        run: |
+          $tag = '${{ steps.release.outputs.tag_name }}'
+          git tag -v $tag
 
   # Sign release artifacts and generate SBOM attestation
   attest-release:

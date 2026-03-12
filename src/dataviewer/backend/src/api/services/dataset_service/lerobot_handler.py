@@ -9,29 +9,22 @@ import io
 import logging
 from pathlib import Path
 
-from ...models.datasources import (
-    DatasetInfo,
-    EpisodeData,
-    EpisodeMeta,
-    FeatureSchema,
-    TrajectoryPoint,
-)
+from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TrajectoryPoint
 from .base import build_trajectory
 
 logger = logging.getLogger(__name__)
 
 # LeRobot parquet support is optional
 try:
-    from ..lerobot_loader import (
-        LeRobotLoader,
-        is_lerobot_dataset,
-    )
+    from ..lerobot_loader import LeRobotLoader, is_lerobot_dataset
 
     LEROBOT_AVAILABLE = True
 except ImportError:
     LEROBOT_AVAILABLE = False
     LeRobotLoader = None
-    is_lerobot_dataset = lambda x: False  # noqa: E731
+
+    def is_lerobot_dataset(x):
+        return False
 
 
 class LeRobotFormatHandler:
