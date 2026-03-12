@@ -38,9 +38,9 @@ Standardized folder structure for robotics data stored in Azure Blob Storage, in
 
 ### File Naming
 
-**ROS Bags:** `{episode-or-sequence-id}.mcap`  
-**Datasets:** Follow LeRobot v0.3.x conventions (`episode_{NNNNNN}.parquet`, `chunk-{NNN}/`)  
-**Reports:** `{metric-type}_results.json` or `ep{NNN}_predictions.npz`  
+**ROS Bags:** `{episode-or-sequence-id}.mcap`
+**Datasets:** Follow LeRobot v0.3.x conventions (`episode_{NNNNNN}.parquet`, `chunk-{NNN}/`)
+**Reports:** `{metric-type}_results.json` or `ep{NNN}_predictions.npz`
 **Checkpoints:** `{timestamp}_step_{N}.pt` or `{timestamp}.{onnx|jit}`
 
 ## Path Patterns
@@ -139,7 +139,7 @@ reports_cool_tier_days                           = 30
 reports_archive_tier_days                        = 180
 ```
 
-**Disable a policy:** Set `should_enable_*_lifecycle_policy = false`  
+**Disable a policy:** Set `should_enable_*_lifecycle_policy = false`
 **Disable an action:** Set days to `-1` (e.g., `raw_bags_retention_days = -1`)
 
 ### Policy Activation
@@ -194,10 +194,10 @@ def validate_blob_path(blob_name: str, data_type: str) -> bool:
         "reports": r"^reports/[a-z0-9-]+/\d{4}-\d{2}-\d{2}/[a-z0-9-_]+\.(json|npz|mp4)$",
         "checkpoints": r"^checkpoints/[a-z0-9-]+/\d{8}_\d{6}(_step_\d+)?\.(pt|onnx|jit)$",
     }
-    
+
     if data_type not in patterns:
         raise ValueError(f"Unknown data type: {data_type}")
-    
+
     return bool(re.match(patterns[data_type], blob_name))
 
 # Example usage
@@ -209,14 +209,14 @@ assert not validate_blob_path("raw/Robot-01/2026-03-05/Episode 001.mcap", "raw")
 
 ### Current Checkpoint Pattern
 
-**Existing:** `checkpoints/{model-name}/{timestamp}_step_{N}.pt`  
+**Existing:** `checkpoints/{model-name}/{timestamp}_step_{N}.pt`
 **Status:** ✅ Already compliant with naming conventions
 
 No migration needed.
 
 ### Current Inference Outputs
 
-**Existing:** `inference_outputs/{task}/{timestamp}/{models,videos}/`  
+**Existing:** `inference_outputs/{task}/{timestamp}/{models,videos}/`
 **Proposed:** `reports/{dataset-id}/{YYYY-MM-DD}/{filename}`
 
 **Migration Strategy:**
@@ -227,7 +227,7 @@ No migration needed.
 
 ### Current LeRobot Datasets
 
-**Existing:** Ad-hoc blob prefixes specified at download time  
+**Existing:** Ad-hoc blob prefixes specified at download time
 **Proposed:** `converted/{dataset-id}/meta/info.json`
 
 **Migration Strategy:**
@@ -292,5 +292,5 @@ az storage account management-policy show \
 
 - [Azure Blob Storage Lifecycle Management](https://learn.microsoft.com/azure/storage/blobs/lifecycle-management-overview)
 - [Terraform azurerm_storage_management_policy](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_management_policy)
-- [LeRobot Dataset Format v0.3.x](https://github.com/huggingface/lerobot/tree/main/lerobot/common/datasets)
+- [LeRobot Dataset Format v0.3.x](https://github.com/huggingface/lerobot/tree/main/src/lerobot/common/datasets)
 - [ROS 2 MCAP Format](https://mcap.dev/)

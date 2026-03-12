@@ -15,7 +15,7 @@ Validation enforces folder structure and naming patterns for:
 """
 
 import re
-from typing import Literal, Optional
+from typing import Literal
 
 DataType = Literal["raw", "converted", "reports", "checkpoints"]
 
@@ -42,14 +42,12 @@ def validate_blob_path(blob_name: str, data_type: DataType) -> bool:
         ValueError: If data_type is not recognized
     """
     if data_type not in PATTERNS:
-        raise ValueError(
-            f"Unknown data type: {data_type}. Must be one of {list(PATTERNS.keys())}"
-        )
+        raise ValueError(f"Unknown data type: {data_type}. Must be one of {list(PATTERNS.keys())}")
 
     return bool(re.match(PATTERNS[data_type], blob_name))
 
 
-def get_validation_error(blob_name: str, data_type: DataType) -> Optional[str]:
+def get_validation_error(blob_name: str, data_type: DataType) -> str | None:
     """Get validation error message if path is invalid.
 
     Args:
@@ -70,6 +68,5 @@ def get_validation_error(blob_name: str, data_type: DataType) -> Optional[str]:
 
     error_detail = ", ".join(errors) if errors else "does not match expected pattern"
     return (
-        f"Invalid blob path '{blob_name}': {error_detail}. "
-        "See docs/cloud/blob-storage-structure.md for path patterns."
+        f"Invalid blob path '{blob_name}': {error_detail}. See docs/cloud/blob-storage-structure.md for path patterns."
     )
