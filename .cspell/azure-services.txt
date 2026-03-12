@@ -40,12 +40,14 @@ azuremonitor
 azureml
 containerapp
 cosmosdb
+Dependabot
 deviceregistry
 eastus
 Entra
 entra
 Eventhouse
 keyvault
+MLflow
 onedrive
 onenote
 powerbi
