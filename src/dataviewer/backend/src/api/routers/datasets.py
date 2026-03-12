@@ -5,6 +5,7 @@ Provides endpoints for listing datasets, retrieving metadata,
 and accessing episode information with HDF5 and LeRobot parquet support.
 """
 
+import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -248,7 +249,7 @@ async def get_episode_video(
 
     Note: camera parameter can include dots (e.g., 'observation.images.color')
     """
-    video_path = service.get_video_file_path(dataset_id, episode_idx, camera)
+    video_path = await asyncio.to_thread(service.get_video_file_path, dataset_id, episode_idx, camera)
 
     if video_path is not None:
         video_file = validate_path_containment(Path(video_path), Path(service.base_path))
@@ -265,6 +266,7 @@ async def get_episode_video(
             ".mov": "video/quicktime",
         }
         media_type = media_types.get(suffix, "video/mp4")
+        service.schedule_video_prefetch(dataset_id, episode_idx, camera)
         return FileResponse(
             path=str(video_file),
             media_type=media_type,
@@ -363,9 +365,15 @@ async def warm_cache(
     Preload the first N episodes into the LRU cache.
 
     Designed to be called on dataset selection so the initial episode
-    loads are instant. Runs synchronously to give the caller confidence
-    that warm-up is complete before navigating.
+    loads are instant. Cancels any in-progress video generation for
+    the previously warmed dataset before proceeding.
     """
+    previous_dataset = getattr(service, "_warm_cached_dataset_id", None)
+    if previous_dataset and previous_dataset != dataset_id:
+        await asyncio.to_thread(service.cancel_video_generation, previous_dataset)
+
+    service._warm_cached_dataset_id = dataset_id  # type: ignore[attr-defined]
+
     dataset = await service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
@@ -377,4 +385,6 @@ async def warm_cache(
         if episode is not None:
             loaded += 1
 
-    return {"dataset_id": dataset_id, "loaded": loaded, "requested": total}
+    queued = service.schedule_bulk_video_generation(dataset_id)
+
+    return {"dataset_id": dataset_id, "loaded": loaded, "requested": total, "videos_queued": queued}

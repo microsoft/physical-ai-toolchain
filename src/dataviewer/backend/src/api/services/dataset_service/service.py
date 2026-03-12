@@ -634,6 +634,45 @@ class DatasetService:
         except RuntimeError as error:
             logger.debug("Skipping episode prefetch for episode %d: %s", episode_idx, error)
 
+    def schedule_video_prefetch(self, dataset_id: str, episode_idx: int, camera: str) -> None:
+        """Pre-generate the next episode's video in the background."""
+        dataset = self._datasets.get(dataset_id)
+        total = dataset.total_episodes if dataset else 0
+        next_idx = episode_idx + 1
+        if next_idx >= total:
+            return
+
+        if not self._hdf5_handler.has_loader(dataset_id):
+            return
+
+        from .hdf5_handler import VideoGenerationQueue
+
+        cache_path = self._hdf5_handler._video_cache_path(dataset_id, next_idx, camera)
+        if cache_path is None or cache_path.exists():
+            return
+
+        def generate() -> bool:
+            return self._hdf5_handler._generate_episode_video(dataset_id, next_idx, camera, cache_path)
+
+        self._hdf5_handler._generation_queue.submit(
+            dataset_id,
+            next_idx,
+            camera,
+            VideoGenerationQueue.PRIORITY_PREFETCH,
+            cache_path,
+            generate,
+        )
+
+    def schedule_bulk_video_generation(self, dataset_id: str) -> int:
+        """Enqueue video generation for all uncached HDF5 episodes."""
+        if not self._hdf5_handler.has_loader(dataset_id):
+            return 0
+        return self._hdf5_handler.schedule_bulk_video_generation(dataset_id)
+
+    def cancel_video_generation(self, dataset_id: str) -> None:
+        """Synchronously cancel and wait for any in-progress video generation."""
+        self._hdf5_handler._generation_queue.cancel_dataset(dataset_id)
+
     # ------------------------------------------------------------------
     # Capability queries
     # ------------------------------------------------------------------

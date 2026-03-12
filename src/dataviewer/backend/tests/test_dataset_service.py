@@ -516,6 +516,73 @@ class TestBlobSyncTempPrefixes:
             await service._ensure_blob_meta_synced("..\\escape")
 
 
+def _create_hdf5_with_images(path, num_frames=10, num_joints=6, width=64, height=48):
+    """Create an HDF5 episode file with trajectory data and camera images."""
+    with h5py.File(path, "w") as f:
+        data = f.create_group("data")
+        data.create_dataset("qpos", data=np.zeros((num_frames, num_joints)))
+        data.create_dataset("action", data=np.zeros((num_frames, num_joints)))
+        obs = f.create_group("observations")
+        img_group = obs.create_group("images")
+        img_group.create_dataset(
+            "cam0",
+            data=np.random.randint(0, 255, (num_frames, height, width, 3), dtype=np.uint8),
+        )
+        f.attrs["fps"] = 30.0
+        f.attrs["task_index"] = 0
+
+
+class TestHDF5VideoGeneration:
+    """Test on-demand mp4 video generation from HDF5 image data."""
+
+    @pytest.mark.asyncio
+    async def test_hdf5_episode_provides_video_url(self, tmp_path):
+        """HDF5 episodes with cameras should populate video_urls."""
+        ds_dir = tmp_path / "cam_dataset"
+        ds_dir.mkdir()
+        _create_hdf5_with_images(ds_dir / "episode_0.hdf5", num_frames=5)
+
+        service = DatasetService(base_path=str(tmp_path))
+        await service.list_datasets()
+        episode = await service.get_episode("cam_dataset", 0)
+
+        assert episode is not None
+        assert len(episode.video_urls) > 0
+
+    @pytest.mark.asyncio
+    async def test_hdf5_video_file_created_on_access(self, tmp_path):
+        """Accessing video path generates and caches an mp4 file."""
+        from src.api.services.dataset_service.hdf5_handler import HDF5FormatHandler
+
+        ds_dir = tmp_path / "vid_dataset"
+        ds_dir.mkdir()
+        _create_hdf5_with_images(ds_dir / "episode_0.hdf5", num_frames=5)
+
+        handler = HDF5FormatHandler()
+        handler.get_loader("vid_dataset", ds_dir)
+
+        video_path = handler.get_video_path("vid_dataset", 0, "cam0")
+        assert video_path is not None
+        assert Path(video_path).exists()
+        assert Path(video_path).suffix == ".mp4"
+
+    @pytest.mark.asyncio
+    async def test_hdf5_single_frame_uses_slice(self, tmp_path):
+        """get_frame_image should load only the requested frame, not the full array."""
+        from src.api.services.dataset_service.hdf5_handler import HDF5FormatHandler
+
+        ds_dir = tmp_path / "slice_dataset"
+        ds_dir.mkdir()
+        _create_hdf5_with_images(ds_dir / "episode_0.hdf5", num_frames=5, width=32, height=24)
+
+        handler = HDF5FormatHandler()
+        handler.get_loader("slice_dataset", ds_dir)
+
+        frame_bytes = handler.get_frame_image("slice_dataset", 0, 2, "cam0")
+        assert frame_bytes is not None
+        assert len(frame_bytes) > 0
+
+
 class TestBlobTempDirCleanup:
     """Test that blob sync temp directories are cleaned up properly."""
 
