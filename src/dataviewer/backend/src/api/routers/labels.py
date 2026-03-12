@@ -70,8 +70,11 @@ def _normalize_label(label: str) -> str:
 class LabelStorage(Protocol):
     """Protocol for label persistence backends."""
 
-    async def load(self, dataset_id: str) -> DatasetLabelsFile: ...
-    async def save(self, dataset_id: str, labels_file: DatasetLabelsFile) -> None: ...
+    async def load(self, dataset_id: str) -> DatasetLabelsFile:
+        """Load labels for a dataset."""
+
+    async def save(self, dataset_id: str, labels_file: DatasetLabelsFile) -> None:
+        """Persist labels for a dataset."""
 
 
 class LocalLabelStorage:

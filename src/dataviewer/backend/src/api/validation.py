@@ -17,7 +17,8 @@ _CAMERA_NAME_RE = re.compile(SAFE_CAMERA_NAME_PATTERN)
 def validated_dataset_id(
     dataset_id: str = PathParam(..., pattern=SAFE_DATASET_ID_PATTERN),
 ) -> str:
-    """FastAPI dependency that validates dataset_id path parameters."""
+    """FastAPI dependency that validates and sanitizes dataset_id path parameters."""
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
     if "\x00" in dataset_id or dataset_id in (".", "..") or "/" in dataset_id or "\\" in dataset_id:
         raise HTTPException(status_code=400, detail=f"Invalid dataset_id: '{dataset_id}'")
     if not _DATASET_ID_RE.match(dataset_id):
@@ -28,7 +29,8 @@ def validated_dataset_id(
 def validated_camera_name(
     camera: str = PathParam(..., pattern=SAFE_CAMERA_NAME_PATTERN),
 ) -> str:
-    """FastAPI dependency that validates camera name path parameters."""
+    """FastAPI dependency that validates and sanitizes camera name path parameters."""
+    camera = camera.replace("\r", "").replace("\n", "")
     if "\x00" in camera or camera in (".", "..") or "/" in camera or "\\" in camera:
         raise HTTPException(status_code=400, detail=f"Invalid camera name: '{camera}'")
     if not _CAMERA_NAME_RE.match(camera):

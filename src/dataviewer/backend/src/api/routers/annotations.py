@@ -42,6 +42,8 @@ async def get_annotations(
     contributions and consensus if available.
     """
     # Verify dataset exists
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
+    episode_idx = int(episode_idx)
     dataset = await dataset_service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
@@ -75,6 +77,8 @@ async def save_annotations(
     from the same user already exists, it will be replaced.
     """
     # Verify dataset exists
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
+    episode_idx = int(episode_idx)
     dataset = await dataset_service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
@@ -110,6 +114,8 @@ async def delete_annotations(
     Otherwise, all annotations for the episode are deleted.
     """
     # Verify dataset exists
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
+    episode_idx = int(episode_idx)
     dataset = await dataset_service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
@@ -143,6 +149,8 @@ async def trigger_auto_analysis(
     Returns suggested ratings based on computed metrics.
     """
     # Verify dataset exists
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
+    episode_idx = int(episode_idx)
     dataset = await dataset_service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
@@ -179,6 +187,7 @@ async def get_annotation_summary(
     quality score distribution, and anomaly type counts.
     """
     # Verify dataset exists
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
     dataset = await dataset_service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")

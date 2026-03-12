@@ -125,6 +125,7 @@ async def export_episodes(
     This is a synchronous endpoint. For progress updates, use the
     /export/stream endpoint with SSE.
     """
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
     # Validate dataset exists
     dataset = await service.get_dataset(dataset_id)
     if dataset is None:
@@ -242,6 +243,7 @@ async def export_episodes_stream(
     - percentage: float (0-100)
     - status: str
     """
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
     # Validate dataset exists
     dataset = await service.get_dataset(dataset_id)
     if dataset is None:
@@ -420,6 +422,7 @@ async def preview_export(
 
     Useful for confirming export settings before running.
     """
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
     # Validate dataset exists
     dataset = await service.get_dataset(dataset_id)
     if dataset is None:

@@ -51,7 +51,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         service.cleanup_temp_dirs()
         logger.info("Cleaned up blob sync temp directories")
     except Exception:
-        pass
+        pass  # Best-effort cleanup; failure here must not block shutdown
 
 
 app = FastAPI(

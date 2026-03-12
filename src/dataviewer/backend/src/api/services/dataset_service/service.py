@@ -258,8 +258,6 @@ class DatasetService:
 
     async def get_blob_video_path(self, dataset_id: str, episode_idx: int, camera: str) -> str | None:
         """Resolve the blob path for an episode video."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
         if self._blob_provider is None:
             return None
         return await self._blob_provider.resolve_video_blob_path(dataset_id, episode_idx, camera)
@@ -453,7 +451,6 @@ class DatasetService:
         task_index: int | None = None,
     ) -> list[EpisodeMeta]:
         """List episodes for a dataset with filtering."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
         dataset = self._datasets.get(dataset_id)
         annotated_indices = set(await self._storage.list_annotated_episodes(dataset_id))
 
@@ -517,9 +514,6 @@ class DatasetService:
 
     async def get_episode(self, dataset_id: str, episode_idx: int) -> EpisodeData | None:
         """Get complete data for a specific episode."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
-
         # Check cache first
         cached = self._episode_cache.get(dataset_id, episode_idx)
         if cached is not None:
@@ -581,9 +575,6 @@ class DatasetService:
 
     async def get_episode_trajectory(self, dataset_id: str, episode_idx: int) -> list[TrajectoryPoint]:
         """Get only the trajectory data for an episode."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
-
         cached = self._episode_cache.get(dataset_id, episode_idx)
         if cached is not None:
             return cached.trajectory_data
@@ -596,8 +587,6 @@ class DatasetService:
 
     def _schedule_prefetch(self, dataset_id: str, episode_idx: int) -> None:
         """Schedule background loading of adjacent episodes into the cache."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
         if not self._episode_cache.enabled:
             return
 
@@ -740,11 +729,6 @@ class DatasetService:
 
     async def get_frame_image(self, dataset_id: str, episode_idx: int, frame_idx: int, camera: str) -> bytes | None:
         """Get a single frame image from an episode."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
-        frame_idx = int(frame_idx)
-        camera = camera.replace("\n", "").replace("\r", "")
-
         result = self._try_handlers(dataset_id, "get_frame_image", episode_idx, frame_idx, camera)
         if result is None:
             logger.warning("No loader found for dataset %s", dataset_id)
@@ -752,8 +736,6 @@ class DatasetService:
 
     async def get_episode_cameras(self, dataset_id: str, episode_idx: int) -> list[str]:
         """Get list of available cameras for an episode."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
         return self._try_handlers(dataset_id, "get_cameras", episode_idx) or []
 
     def get_video_file_path(self, dataset_id: str, episode_idx: int, camera: str) -> str | None:
@@ -762,8 +744,6 @@ class DatasetService:
         When a video is generated for an HDF5 dataset with blob storage,
         uploads the result to blob for caching across container restarts.
         """
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
         handler = self._resolve_handler(dataset_id)
         if handler is None and self._hdf5_handler.has_loader(dataset_id):
             handler = self._hdf5_handler
@@ -784,8 +764,6 @@ class DatasetService:
 
     def _upload_video_to_blob(self, dataset_id: str, episode_idx: int, camera: str, cache_path: Path) -> None:
         """Upload a generated video to blob storage for caching."""
-        import asyncio
-
         try:
             loop = asyncio.new_event_loop()
             loop.run_until_complete(self._blob_provider.upload_video(dataset_id, camera, episode_idx, cache_path))

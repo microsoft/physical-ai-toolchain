@@ -137,6 +137,7 @@ async def get_episode(
     and trajectory data points. When HDF5 files are available,
     trajectory data is loaded directly from the HDF5 file.
     """
+    episode_idx = int(episode_idx)
     dataset = await service.get_dataset(dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
@@ -166,6 +167,7 @@ async def get_episode_trajectory(
     Optimized endpoint for loading trajectory data without full episode
     metadata. Useful for analysis operations.
     """
+    episode_idx = int(episode_idx)
     trajectory = await service.get_episode_trajectory(dataset_id, episode_idx)
     if not trajectory:
         raise HTTPException(
@@ -189,6 +191,8 @@ async def get_episode_frame(
 
     Returns the image as JPEG for the specified frame and camera.
     """
+    episode_idx = int(episode_idx)
+    frame_idx = int(frame_idx)
     try:
         image_bytes = await service.get_frame_image(dataset_id, episode_idx, frame_idx, camera)
         if image_bytes is None:
@@ -219,6 +223,7 @@ async def get_episode_cameras(
     """
     Get list of available cameras for an episode.
     """
+    episode_idx = int(episode_idx)
     cameras = await service.get_episode_cameras(dataset_id, episode_idx)
     return cameras
 
@@ -249,6 +254,7 @@ async def get_episode_video(
 
     Note: camera parameter can include dots (e.g., 'observation.images.color')
     """
+    episode_idx = int(episode_idx)
     video_path = await asyncio.to_thread(service.get_video_file_path, dataset_id, episode_idx, camera)
 
     if video_path is not None:

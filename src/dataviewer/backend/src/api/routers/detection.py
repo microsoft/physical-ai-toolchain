@@ -40,6 +40,8 @@ async def run_detection(
     Results are cached for subsequent retrieval.
     """
     print(f"\n{'=' * 60}", file=sys.stderr, flush=True)
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
+    episode_idx = int(episode_idx)
     print(
         f"[API] POST /detect called: dataset={dataset_id}, episode={episode_idx}",
         file=sys.stderr,
@@ -104,6 +106,7 @@ async def get_detections(
 
     Returns None if no detection has been run yet.
     """
+    episode_idx = int(episode_idx)
     return detection_service.get_cached(dataset_id, episode_idx)
 
 
@@ -118,5 +121,6 @@ async def clear_detections(
 
     Use this after frame edits to force re-detection.
     """
+    episode_idx = int(episode_idx)
     cleared = detection_service.clear_cache(dataset_id, episode_idx)
     return {"cleared": cleared}

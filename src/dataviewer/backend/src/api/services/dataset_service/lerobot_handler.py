@@ -42,7 +42,6 @@ class LeRobotFormatHandler:
 
     def get_loader(self, dataset_id: str, dataset_path: Path) -> bool:
         """Get or create a LeRobot loader. Returns True if successful."""
-        dataset_id = dataset_id.replace("\r\n", "").replace("\n", "")
         if not LEROBOT_AVAILABLE:
             return False
 
@@ -58,8 +57,8 @@ class LeRobotFormatHandler:
         except Exception as e:
             logger.warning(
                 "Failed to create LeRobot loader for %s: %s",
-                dataset_id.replace("\r\n", "").replace("\n", ""),
-                str(e).replace("\r\n", "").replace("\n", ""),
+                dataset_id,
+                str(e),
             )
             return False
 
@@ -80,13 +79,12 @@ class LeRobotFormatHandler:
         except Exception as e:
             logger.warning(
                 "LeRobot list_episodes_from_path failed for %s: %s",
-                str(path).replace("\r\n", "").replace("\n", ""),
+                str(path),
                 type(e).__name__,
             )
             return [], {}
 
     def discover(self, dataset_id: str, dataset_path: Path) -> DatasetInfo | None:
-        dataset_id = dataset_id.replace("\r\n", "").replace("\n", "")
         if not self.get_loader(dataset_id, dataset_path):
             return None
 
@@ -115,8 +113,8 @@ class LeRobotFormatHandler:
         except Exception as e:
             logger.warning(
                 "Failed to discover LeRobot dataset %s: %s",
-                dataset_id.replace("\r\n", "").replace("\n", ""),
-                str(e).replace("\r\n", "").replace("\n", ""),
+                dataset_id,
+                str(e),
             )
             return None
 
@@ -131,8 +129,8 @@ class LeRobotFormatHandler:
         except Exception as e:
             logger.warning(
                 "LeRobot list_episodes failed for %s: %s",
-                dataset_id.replace("\r\n", "").replace("\n", ""),
-                str(e).replace("\r\n", "").replace("\n", ""),
+                dataset_id,
+                str(e),
             )
             return [], {}
 
@@ -182,8 +180,8 @@ class LeRobotFormatHandler:
         except Exception as e:
             logger.warning(
                 "LeRobot load_episode failed for episode %s: %s",
-                str(episode_idx).replace("\r\n", "").replace("\n", ""),
-                type(e).__name__.replace("\r\n", "").replace("\n", ""),
+                episode_idx,
+                type(e).__name__,
             )
             return None
 
@@ -206,8 +204,8 @@ class LeRobotFormatHandler:
         except Exception as e:
             logger.warning(
                 "LeRobot trajectory load failed for episode %s: %s",
-                str(episode_idx).replace("\r\n", "").replace("\n", ""),
-                type(e).__name__.replace("\r\n", "").replace("\n", ""),
+                episode_idx,
+                type(e).__name__,
             )
             return []
 
@@ -218,7 +216,6 @@ class LeRobotFormatHandler:
         frame_idx: int,
         camera: str,
     ) -> bytes | None:
-        camera = camera.replace("\r\n", "").replace("\n", "")
         loader = self._get_loader(dataset_id)
         if loader is None:
             return None
@@ -230,7 +227,7 @@ class LeRobotFormatHandler:
         if video_path is None:
             logger.warning(
                 "No video for episode %s",
-                str(episode_idx).replace("\r\n", "").replace("\n", ""),
+                episode_idx,
             )
             return None
 
@@ -241,7 +238,7 @@ class LeRobotFormatHandler:
             if not ret or frame is None:
                 logger.warning(
                     "Failed to read frame %s",
-                    str(frame_idx).replace("\r\n", "").replace("\n", ""),
+                    frame_idx,
                 )
                 return None
 
@@ -272,6 +269,6 @@ class LeRobotFormatHandler:
             if video_path is not None:
                 return str(video_path)
         except Exception as e:
-            logger.warning("Failed to get video path: %s", str(e).replace("\r\n", "").replace("\n", ""))
+            logger.warning("Failed to get video path: %s", str(e))
 
         return None

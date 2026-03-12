@@ -325,7 +325,7 @@ class BlobDatasetProvider:
                 )
                 candidates.append(f"{prefix}/{templated}")
             except (KeyError, IndexError):
-                pass
+                pass  # Template may lack required placeholders; skip to next strategy
 
             # chunks_size-based layout
             chunk_index = episode_idx // chunks_size
@@ -340,7 +340,7 @@ class BlobDatasetProvider:
                 if cs_path not in candidates:
                     candidates.append(cs_path)
             except (KeyError, IndexError):
-                pass
+                pass  # Template may lack required placeholders; skip to fallback paths
 
         # Hardcoded fallback paths when no template is available
         if not candidates:
@@ -605,11 +605,21 @@ class BlobDatasetProvider:
                         f.write(chunk)
                         written += len(chunk)
                 tmp_path.rename(local_path)
-                logger.info("Downloaded HDF5 episode %d for '%s' (%d bytes)", episode_idx, dataset_id, written)
+                logger.info(
+                    "Downloaded HDF5 episode %d for '%s' (%d bytes)",
+                    episode_idx,
+                    dataset_id,
+                    written,
+                )
                 return True
             return False
         except Exception as e:
-            logger.warning("Failed to sync HDF5 episode %d for '%s': %s", episode_idx, dataset_id, e)
+            logger.warning(
+                "Failed to sync HDF5 episode %d for '%s': %s",
+                episode_idx,
+                dataset_id,
+                e,
+            )
             return False
 
     async def get_hdf5_dataset_config(self, dataset_id: str) -> dict | None:

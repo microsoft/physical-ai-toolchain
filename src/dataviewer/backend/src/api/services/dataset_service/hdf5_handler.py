@@ -252,7 +252,12 @@ class HDF5FormatHandler:
                 trajectory_data=trajectory_data,
             )
         except Exception as e:
-            logger.warning("HDF5 load_episode failed for %s ep %d: %s", dataset_id, episode_idx, e)
+            logger.warning(
+                "HDF5 load_episode failed for %s ep %d: %s",
+                dataset_id,
+                episode_idx,
+                e,
+            )
             return None
 
     def get_trajectory(self, dataset_id: str, episode_idx: int) -> list[TrajectoryPoint]:
@@ -273,7 +278,12 @@ class HDF5FormatHandler:
                 clamp_gripper=True,
             )
         except Exception as e:
-            logger.warning("HDF5 get_trajectory failed for %s ep %d: %s", dataset_id, episode_idx, type(e).__name__)
+            logger.warning(
+                "HDF5 get_trajectory failed for %s ep %d: %s",
+                dataset_id,
+                episode_idx,
+                type(e).__name__,
+            )
             return []
 
     def get_frame_image(
@@ -284,7 +294,6 @@ class HDF5FormatHandler:
         camera: str,
     ) -> bytes | None:
         """Load a single frame using h5py slice indexing."""
-        camera = camera.replace("\r\n", "").replace("\n", "")
         loader = self._get_loader(dataset_id)
         if loader is None:
             return None
@@ -314,7 +323,12 @@ class HDF5FormatHandler:
             info = loader.get_episode_info(episode_idx)
             return info.get("cameras", [])
         except Exception as e:
-            logger.warning("HDF5 get_cameras failed for %s ep %d: %s", dataset_id, episode_idx, type(e).__name__)
+            logger.warning(
+                "HDF5 get_cameras failed for %s ep %d: %s",
+                dataset_id,
+                episode_idx,
+                type(e).__name__,
+            )
             return []
 
     def get_video_path(self, dataset_id: str, episode_idx: int, camera: str) -> str | None:
@@ -362,6 +376,11 @@ class HDF5FormatHandler:
                 )
                 return True
         except Exception as e:
-            logger.warning("Video generation failed for %s ep %d: %s", dataset_id, episode_idx, type(e).__name__)
+            logger.warning(
+                "Video generation failed for %s ep %d: %s",
+                dataset_id,
+                episode_idx,
+                type(e).__name__,
+            )
 
         return False

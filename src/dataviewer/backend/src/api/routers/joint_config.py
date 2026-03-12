@@ -157,6 +157,7 @@ async def _save_dataset_config(dataset_id: str, config: JointConfig) -> None:
 @router.get("/{dataset_id}/joint-config")
 async def get_joint_config(dataset_id: str = Depends(validated_dataset_id)) -> JointConfig:
     """Get joint configuration for a dataset. Auto-creates from defaults if missing."""
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
     return await _load_dataset_config(dataset_id)
 
 
@@ -169,6 +170,7 @@ async def update_joint_config(
     body: JointConfigUpdate = ...,
 ) -> JointConfig:
     """Update joint configuration for a dataset."""
+    dataset_id = dataset_id.replace("\r", "").replace("\n", "")
     config = JointConfig(
         dataset_id=dataset_id,
         labels=body.labels,
