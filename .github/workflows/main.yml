@@ -144,7 +144,7 @@ jobs:
       group: release-please-${{ github.ref }}
       cancel-in-progress: false
     permissions:
-      contents: write
+      contents: read
       id-token: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -213,7 +213,7 @@ jobs:
       - name: Install gitsign
         if: ${{ steps.release.outputs.release_created == 'true' }}
         run: |
-          go install github.com/sigstore/gitsign@v0.13.0
+          go install github.com/sigstore/gitsign@latest
           $goPath = (go env GOPATH).Trim()
           $goBin = Join-Path $goPath 'bin'
           $gitsign = Join-Path $goBin 'gitsign'
@@ -250,7 +250,7 @@ jobs:
             exit 0
           }
 
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${env:GITHUB_REPOSITORY}.git"
+          git remote set-url origin "https://x-access-token:${env:GH_TOKEN}@github.com/${env:GITHUB_REPOSITORY}.git"
           git tag -s $tag $env:GITHUB_SHA -m "Release $tag"
           git push origin "refs/tags/$tag"
           Write-Output "Created signed git tag $tag -> $env:GITHUB_SHA"
