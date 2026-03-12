@@ -292,5 +292,5 @@ az storage account management-policy show \
 
 - [Azure Blob Storage Lifecycle Management](https://learn.microsoft.com/azure/storage/blobs/lifecycle-management-overview)
 - [Terraform azurerm_storage_management_policy](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_management_policy)
-- [LeRobot Dataset Format v0.3.x](https://github.com/huggingface/lerobot/tree/main/src/lerobot/common/datasets)
+- [LeRobot Dataset Format v0.3.x](https://github.com/huggingface/lerobot/tree/main/src/lerobot/datasets)
 - [ROS 2 MCAP Format](https://mcap.dev/)
