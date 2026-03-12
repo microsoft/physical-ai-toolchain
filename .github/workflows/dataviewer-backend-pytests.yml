@@ -31,6 +31,7 @@ jobs:
         working-directory: src/dataviewer/backend
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.2.2
@@ -52,7 +53,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --extra dev
+          uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
           uv pip install pytest-cov
 
       - name: Run pytest with coverage
@@ -65,3 +66,14 @@ jobs:
           name: pytest-dataviewer-coverage-xml
           path: src/dataviewer/backend/coverage.xml
           retention-days: 30
+
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        with:
+          files: coverage.xml
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: pytest-dataviewer
+          name: pytest-dataviewer-coverage
