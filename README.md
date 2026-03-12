@@ -65,6 +65,17 @@ Contributions are welcome. Whether fixing documentation or adding new training t
 2. Review [open issues](https://github.com/microsoft/physical-ai-toolchain/issues)
 3. See the [prerequisites](docs/contributing/prerequisites.md) for required tools
 
+## Verifying Git Tags
+
+All release tags are signed. Verify a release tag before using it in production workflows:
+
+```bash
+git fetch --tags
+git tag -v v1.0.0
+```
+
+This repository uses Sigstore `gitsign` keyless signing for release tags. For tag signing policy and maintainer guidance, see [CONTRIBUTING.md](CONTRIBUTING.md#release-tag-signing).
+
 ## Roadmap
 
 See the [project roadmap](docs/contributing/ROADMAP.md) for priorities, timelines, and success metrics.
