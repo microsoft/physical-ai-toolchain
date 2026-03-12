@@ -32,6 +32,8 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 > [!NOTE]
 > **Who it's not for (yet):** This toolchain targets production and pre-production workloads. It is not currently designed for hobbyist projects, ROS beginners learning the basics, or single-robot desktop demos. We welcome contributions that broaden accessibility over time.
 
+<!-- separate blockquotes -->
+
 > [!TIP]
 > **Get started in under 2 hours.** By the end of the [Quickstart Guide](docs/getting-started/quickstart.md), you will have:
 >
