@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -24,12 +24,17 @@ from ..services.hdf5_exporter import (
     HDF5ExportError,
     parse_edit_operations,
 )
-from ..validation import validated_dataset_id
+from ..validation import (
+    SAFE_DATASET_ID_PATTERN,
+    SanitizedModel,
+    path_string_param,
+    query_csv_ints_param,
+)
 
 router = APIRouter()
 
 
-class ImageTransformRequest(BaseModel):
+class ImageTransformRequest(SanitizedModel):
     """Image transform request model."""
 
     crop: dict[str, int] | None = Field(
@@ -44,7 +49,7 @@ class ImageTransformRequest(BaseModel):
     )
 
 
-class SubtaskRequest(BaseModel):
+class SubtaskRequest(SanitizedModel):
     """Subtask segment request model."""
 
     id: str = Field(..., description="Unique segment ID")
@@ -60,7 +65,7 @@ class SubtaskRequest(BaseModel):
     description: str | None = None
 
 
-class FrameInsertionRequest(BaseModel):
+class FrameInsertionRequest(SanitizedModel):
     """Frame insertion request model."""
 
     afterFrameIndex: int = Field(..., ge=0, description="Insert after this frame index")
@@ -72,7 +77,7 @@ class FrameInsertionRequest(BaseModel):
     )
 
 
-class EpisodeEditRequest(BaseModel):
+class EpisodeEditRequest(SanitizedModel):
     """Edit operations for a single episode."""
 
     episodeIndex: int = Field(..., description="Episode index")
@@ -85,7 +90,7 @@ class EpisodeEditRequest(BaseModel):
     subtasks: list[SubtaskRequest] | None = Field(None, description="Sub-task segments")
 
 
-class ExportRequest(BaseModel):
+class ExportRequest(SanitizedModel):
     """Export request model."""
 
     episodeIndices: list[int] = Field(..., description="Episode indices to export", min_length=1)
@@ -109,7 +114,7 @@ class ExportResultResponse(BaseModel):
     dependencies=[Depends(require_csrf_token)],
 )
 async def export_episodes(
-    dataset_id: str = Depends(validated_dataset_id),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     request: ExportRequest = ...,
     service: DatasetService = Depends(get_dataset_service),
 ) -> ExportResultResponse:
@@ -131,7 +136,6 @@ async def export_episodes(
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
 
     # Get dataset path
-    dataset_id = os.path.basename(dataset_id)
     try:
         dataset_path = service._get_dataset_path(dataset_id)
     except ValueError:
@@ -178,9 +182,7 @@ async def export_episodes(
         if request.applyEdits and request.edits:
             edits_map = {}
             for episode_idx, edit_req in request.edits.items():
-                # Convert string key to int (JSON keys are always strings)
-                idx = int(episode_idx) if isinstance(episode_idx, str) else episode_idx
-                edits_map[idx] = parse_edit_operations(
+                edits_map[episode_idx] = parse_edit_operations(
                     {
                         "datasetId": dataset_id,
                         "episodeIndex": edit_req.episodeIndex,
@@ -222,7 +224,7 @@ async def export_episodes(
 
 @router.post("/{dataset_id}/export/stream", dependencies=[Depends(require_csrf_token)])
 async def export_episodes_stream(
-    dataset_id: str = Depends(validated_dataset_id),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     request: ExportRequest = ...,
     service: DatasetService = Depends(get_dataset_service),
 ) -> StreamingResponse:
@@ -248,7 +250,6 @@ async def export_episodes_stream(
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
 
     # Get dataset path
-    dataset_id = os.path.basename(dataset_id)
     try:
         dataset_path = service._get_dataset_path(dataset_id)
     except ValueError:
@@ -296,9 +297,7 @@ async def export_episodes_stream(
             if request.applyEdits and request.edits:
                 edits_map = {}
                 for episode_idx, edit_req in request.edits.items():
-                    # Convert string key to int (JSON keys are always strings)
-                    idx = int(episode_idx) if isinstance(episode_idx, str) else episode_idx
-                    edits_map[idx] = parse_edit_operations(
+                    edits_map[episode_idx] = parse_edit_operations(
                         {
                             "datasetId": dataset_id,
                             "episodeIndex": edit_req.episodeIndex,
@@ -405,9 +404,18 @@ async def export_episodes_stream(
 
 @router.get("/{dataset_id}/export/preview")
 async def preview_export(
-    dataset_id: str = Depends(validated_dataset_id),
-    episode_indices: str = Query(..., description="Comma-separated episode indices"),
-    removed_frames: str | None = Query(None, description="Comma-separated frame indices to remove"),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_indices: list[int] = Depends(
+        query_csv_ints_param("episode_indices", description="Comma-separated episode indices")
+    ),
+    removed_frames: set[int] = Depends(
+        query_csv_ints_param(
+            "removed_frames",
+            description="Comma-separated frame indices to remove",
+            required=False,
+            as_set=True,
+        )
+    ),
     service: DatasetService = Depends(get_dataset_service),
 ) -> dict[str, Any]:
     """
@@ -425,40 +433,20 @@ async def preview_export(
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
 
-    # Parse episode indices
-    try:
-        indices = [int(i.strip()) for i in episode_indices.split(",")]
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid episode_indices format. Use comma-separated integers.",
-        )
-
-    # Parse removed frames
-    removed: set[int] = set()
-    if removed_frames:
-        try:
-            removed = {int(i.strip()) for i in removed_frames.split(",")}
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid removed_frames format. Use comma-separated integers.",
-            )
-
     # Calculate preview stats
     total_original_frames = 0
     total_output_frames = 0
 
-    for episode_idx in indices:
+    for episode_idx in episode_indices:
         episode = await service.get_episode(dataset_id, episode_idx)
         if episode:
             original = episode.meta.length
-            output = original - len([f for f in removed if f < original])
+            output = original - len([frame for frame in removed_frames if frame < original])
             total_original_frames += original
             total_output_frames += output
 
     return {
-        "episodeCount": len(indices),
+        "episodeCount": len(episode_indices),
         "originalFrames": total_original_frames,
         "removedFrames": total_original_frames - total_output_frames,
         "outputFrames": total_output_frames,

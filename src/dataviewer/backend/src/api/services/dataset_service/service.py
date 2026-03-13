@@ -37,7 +37,10 @@ def _validate_dataset_id(dataset_id: str) -> str:
     """Validate and return a safe dataset identifier. Raises ValueError on traversal attempts."""
     if "\\" in dataset_id or "/" in dataset_id:
         raise ValueError(f"Invalid dataset identifier: {dataset_id!r}")
-    for part in dataset_id.split("--"):
+    parts = dataset_id.split("--")
+    if len(parts) > 5:
+        raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id!r}")
+    for part in parts:
         safe = os.path.basename(part)
         if not safe or safe != part or part in {".", ".."}:
             raise ValueError(f"Invalid dataset identifier: {dataset_id!r}")
@@ -74,6 +77,7 @@ class DatasetService:
         self._blob_dataset_ids: set[str] = set()
         self._blob_provider: BlobDatasetProvider | None = blob_provider
         self._blob_synced: dict[str, Path] = {}
+        self._blob_hdf5_synced: dict[str, Path] = {}
         self._blob_meta_synced: dict[str, Path] = {}
 
         # Format handlers (ordered by priority — LeRobot checked first)
@@ -155,7 +159,10 @@ class DatasetService:
             return tmp_dir
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        logger.warning("Blob sync failed for dataset '%s', tmp dir removed", dataset_id)
+        logger.warning(
+            "Blob sync failed for dataset '%s', tmp dir removed",
+            dataset_id.replace("\r", "").replace("\n", ""),
+        )
         return None
 
     async def _ensure_blob_meta_synced(self, dataset_id: str) -> Path | None:
@@ -176,8 +183,56 @@ class DatasetService:
             return tmp_dir
 
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        logger.warning("Blob meta sync failed for dataset '%s'", dataset_id)
+        logger.warning(
+            "Blob meta sync failed for dataset '%s'",
+            dataset_id.replace("\r", "").replace("\n", ""),
+        )
         return None
+
+    async def _ensure_blob_hdf5_synced(self, dataset_id: str) -> Path | None:
+        """Download HDF5 blob dataset placeholder files to a local temp dir."""
+        if self._blob_provider is None:
+            return None
+
+        dataset_id = _validate_dataset_id(dataset_id)
+
+        if dataset_id in self._blob_hdf5_synced:
+            return self._blob_hdf5_synced[dataset_id]
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="dvwh_"))
+        success = await self._blob_provider.sync_hdf5_dataset_to_local(dataset_id, tmp_dir)
+        if success:
+            self._blob_hdf5_synced[dataset_id] = tmp_dir
+            return tmp_dir
+
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return None
+
+    async def _discover_blob_hdf5_dataset(self, dataset_id: str) -> DatasetInfo | None:
+        """Build DatasetInfo from an HDF5 blob dataset."""
+        if self._blob_provider is None:
+            return None
+
+        episode_count = await self._blob_provider.count_hdf5_episodes(dataset_id)
+        if episode_count == 0:
+            return None
+
+        parts = dataset_id.split("--")
+        name = parts[-1]
+        group = "--".join(parts[:-1]) if len(parts) > 1 else None
+
+        dataset_info = DatasetInfo(
+            id=dataset_id,
+            name=name,
+            group=group,
+            total_episodes=episode_count,
+            fps=30.0,
+            features={},
+            tasks=[],
+        )
+        self._datasets[dataset_id] = dataset_info
+        self._blob_dataset_ids.add(dataset_id)
+        return dataset_info
 
     async def _discover_blob_dataset(self, dataset_id: str) -> DatasetInfo | None:
         """Build DatasetInfo from a blob dataset's meta/info.json."""
@@ -209,8 +264,6 @@ class DatasetService:
 
     async def get_blob_video_path(self, dataset_id: str, episode_idx: int, camera: str) -> str | None:
         """Resolve the blob path for an episode video."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
         if self._blob_provider is None:
             return None
         return await self._blob_provider.resolve_video_blob_path(dataset_id, episode_idx, camera)
@@ -275,25 +328,37 @@ class DatasetService:
 
         dataset_info = handler.discover(dataset_id, dataset_path)
         if dataset_info is not None:
-            # Set group for nested datasets (e.g. "parent--child" → group="parent")
             if "--" in dataset_id:
-                dataset_info.group = dataset_id.split("--", 1)[0]
+                dataset_info.group = "--".join(dataset_id.split("--")[:-1])
             self._datasets[dataset_id] = dataset_info
             self._local_dataset_ids.add(dataset_id)
         return dataset_info
 
     def _evict_dataset(self, dataset_id: str) -> None:
-        """Remove cached dataset metadata and handler state for a dataset."""
+        """Remove cached dataset metadata, handler state, and temp dirs for a dataset."""
         self._datasets.pop(dataset_id, None)
         self._local_dataset_ids.discard(dataset_id)
         self._blob_dataset_ids.discard(dataset_id)
-        self._blob_synced.pop(dataset_id, None)
-        self._blob_meta_synced.pop(dataset_id, None)
+        synced_dir = self._blob_synced.pop(dataset_id, None)
+        if synced_dir is not None:
+            shutil.rmtree(synced_dir, ignore_errors=True)
+        meta_dir = self._blob_meta_synced.pop(dataset_id, None)
+        if meta_dir is not None:
+            shutil.rmtree(meta_dir, ignore_errors=True)
         self._episode_cache.invalidate(dataset_id)
         for handler in self._handlers:
             loaders = getattr(handler, "_loaders", None)
             if isinstance(loaders, dict):
                 loaders.pop(dataset_id, None)
+
+    def cleanup_temp_dirs(self) -> None:
+        """Remove all blob sync temp directories. Call on shutdown."""
+        for path in self._blob_synced.values():
+            shutil.rmtree(path, ignore_errors=True)
+        self._blob_synced.clear()
+        for path in self._blob_meta_synced.values():
+            shutil.rmtree(path, ignore_errors=True)
+        self._blob_meta_synced.clear()
 
     def _prune_missing_local_datasets(self, discovered_ids: set[str]) -> None:
         """Evict cached local datasets that no longer exist on disk."""
@@ -301,42 +366,45 @@ class DatasetService:
         for dataset_id in stale_ids:
             self._evict_dataset(dataset_id)
 
+    def _scan_directory(self, directory: Path, prefix_parts: list[str], discovered: set[str]) -> None:
+        """Recursively scan for datasets, building --separated IDs. Max 5 levels."""
+        if len(prefix_parts) >= 5:
+            return
+        for item in directory.iterdir():
+            if not item.is_dir():
+                continue
+            current_parts = [*prefix_parts, item.name]
+            handled = False
+            for handler in self._handlers:
+                if handler.can_handle(item):
+                    discovered.add("--".join(current_parts))
+                    handled = True
+                    break
+            if not handled:
+                self._scan_directory(item, current_parts, discovered)
+
     async def list_datasets(self) -> list[DatasetInfo]:
         """List all available datasets."""
-        # Scan blob container when provider is configured
+        # Single-pass blob container scan for both LeRobot and HDF5 datasets
         if self._blob_provider is not None:
             try:
-                blob_ids = await self._blob_provider.list_dataset_ids()
-                for dataset_id in blob_ids:
+                scan = await self._blob_provider.scan_all_dataset_ids()
+                for dataset_id in scan.get("lerobot", []):
                     if dataset_id not in self._datasets:
                         await self._discover_blob_dataset(dataset_id)
+                for dataset_id in scan.get("hdf5", []):
+                    if dataset_id not in self._datasets:
+                        await self._discover_blob_hdf5_dataset(dataset_id)
             except Exception as e:
-                logger.warning("Failed to list blob datasets: %s", e)
+                logger.warning("Failed to scan blob datasets: %s", e)
 
         base = Path(self.base_path)
         if not base.exists():
             return list(self._datasets.values())
 
-        # Scan local directory (two levels deep for nested datasets)
         discovered_ids: set[str] = set()
         try:
-            for item in base.iterdir():
-                if not item.is_dir():
-                    continue
-                handled = False
-                for handler in self._handlers:
-                    if handler.can_handle(item):
-                        discovered_ids.add(item.name)
-                        handled = True
-                        break
-                if not handled:
-                    # Check children for nested datasets (e.g. e2emanufacturing/session_a/)
-                    for child in item.iterdir():
-                        if child.is_dir():
-                            for handler in self._handlers:
-                                if handler.can_handle(child):
-                                    discovered_ids.add(f"{item.name}--{child.name}")
-                                    break
+            self._scan_directory(base, [], discovered_ids)
         except OSError:
             return list(self._datasets.values())
 
@@ -350,7 +418,7 @@ class DatasetService:
 
     async def get_dataset(self, dataset_id: str) -> DatasetInfo | None:
         """Get metadata for a specific dataset."""
-        if dataset_id in self._local_dataset_ids:
+        if dataset_id in self._local_dataset_ids and dataset_id not in self._blob_dataset_ids:
             try:
                 self._get_dataset_path(dataset_id)
             except ValueError:
@@ -361,11 +429,14 @@ class DatasetService:
         if dataset is not None:
             return dataset
 
-        # Try blob discovery first
+        # Try blob discovery (LeRobot, then HDF5)
         if self._blob_provider is not None:
             blob_result = await self._discover_blob_dataset(dataset_id)
             if blob_result is not None:
                 return blob_result
+            hdf5_result = await self._discover_blob_hdf5_dataset(dataset_id)
+            if hdf5_result is not None:
+                return hdf5_result
 
         return self._discover_dataset(dataset_id)
 
@@ -386,7 +457,6 @@ class DatasetService:
         task_index: int | None = None,
     ) -> list[EpisodeMeta]:
         """List episodes for a dataset with filtering."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
         dataset = self._datasets.get(dataset_id)
         annotated_indices = set(await self._storage.list_annotated_episodes(dataset_id))
 
@@ -406,6 +476,12 @@ class DatasetService:
             handler = self._resolve_handler(dataset_id)
             if handler is not None:
                 episode_indices, episode_info_map = handler.list_episodes(dataset_id)
+
+        # Blob HDF5 datasets: sync placeholders and list via HDF5 handler
+        if not episode_indices and self._blob_provider is not None:
+            synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
+            if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
+                episode_indices, episode_info_map = self._hdf5_handler.list_episodes(dataset_id)
 
         # Fallback: generate indices from dataset metadata
         if not episode_indices and dataset is not None:
@@ -444,9 +520,6 @@ class DatasetService:
 
     async def get_episode(self, dataset_id: str, episode_idx: int) -> EpisodeData | None:
         """Get complete data for a specific episode."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
-
         # Check cache first
         cached = self._episode_cache.get(dataset_id, episode_idx)
         if cached is not None:
@@ -465,6 +538,20 @@ class DatasetService:
             synced_path = await self._ensure_blob_synced(dataset_id)
             if synced_path is not None and self._lerobot_handler.get_loader(dataset_id, synced_path):
                 handler = self._lerobot_handler
+
+        # Try blob-synced HDF5
+        if handler is None and self._blob_provider is not None:
+            synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
+            if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
+                await self._blob_provider.sync_hdf5_episode_to_local(dataset_id, synced_path, episode_idx)
+                handler = self._hdf5_handler
+
+        # HDF5 blob datasets: ensure episode file is downloaded even when
+        # the handler was already registered during list_episodes (placeholders).
+        if handler is self._hdf5_handler and self._blob_provider is not None:
+            synced_path = self._blob_hdf5_synced.get(dataset_id)
+            if synced_path is not None:
+                await self._blob_provider.sync_hdf5_episode_to_local(dataset_id, synced_path, episode_idx)
 
         # Try all handlers in priority order
         handlers_to_try = [handler] if handler else []
@@ -494,9 +581,6 @@ class DatasetService:
 
     async def get_episode_trajectory(self, dataset_id: str, episode_idx: int) -> list[TrajectoryPoint]:
         """Get only the trajectory data for an episode."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
-
         cached = self._episode_cache.get(dataset_id, episode_idx)
         if cached is not None:
             return cached.trajectory_data
@@ -509,8 +593,6 @@ class DatasetService:
 
     def _schedule_prefetch(self, dataset_id: str, episode_idx: int) -> None:
         """Schedule background loading of adjacent episodes into the cache."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
         if not self._episode_cache.enabled:
             return
 
@@ -543,12 +625,29 @@ class DatasetService:
                     if synced_path is not None and self._lerobot_handler.get_loader(dataset_id, synced_path):
                         handler = self._lerobot_handler
 
+                if handler is None and dataset_id in self._blob_dataset_ids:
+                    synced_path = await self._ensure_blob_hdf5_synced(dataset_id)
+                    if synced_path is not None and self._hdf5_handler.get_loader(dataset_id, synced_path):
+                        if self._blob_provider is not None:
+                            await self._blob_provider.sync_hdf5_episode_to_local(dataset_id, synced_path, idx)
+                        handler = self._hdf5_handler
+
+                # HDF5 blob datasets: ensure episode file is downloaded
+                if handler is self._hdf5_handler and self._blob_provider is not None:
+                    synced_path = self._blob_hdf5_synced.get(dataset_id)
+                    if synced_path is not None:
+                        await self._blob_provider.sync_hdf5_episode_to_local(dataset_id, synced_path, idx)
+
                 if handler is None:
                     break
                 episode = handler.load_episode(dataset_id, idx, dataset_info=dataset)
                 if episode is not None:
                     self._episode_cache.put(dataset_id, idx, episode)
-                    logger.debug("Prefetched episode %s/%d", dataset_id, idx)
+                    logger.debug(
+                        "Prefetched episode %s/%d",
+                        dataset_id.replace("\r", "").replace("\n", ""),
+                        int(idx),
+                    )
 
         # Clean up completed tasks
         self._prefetch_tasks = {t for t in self._prefetch_tasks if not t.done()}
@@ -558,7 +657,20 @@ class DatasetService:
             self._prefetch_tasks.add(task)
             task.add_done_callback(self._prefetch_tasks.discard)
         except RuntimeError as error:
-            logger.debug("Skipping episode prefetch for episode %d: %s", episode_idx, error)
+            logger.debug("Skipping episode prefetch for episode %d: %s", int(episode_idx), error)
+
+    def is_safe_video_path(self, video_path: str) -> bool:
+        """Check whether a video path falls within the base path or a blob-synced temp dir."""
+        normalized = os.path.normpath(os.path.realpath(video_path))
+        safe_base = os.path.realpath(self.base_path)
+        if normalized.startswith(safe_base + os.sep) or normalized == safe_base:
+            return True
+        for synced_dirs in (self._blob_synced, self._blob_hdf5_synced):
+            for synced_dir in synced_dirs.values():
+                safe_synced = os.path.realpath(str(synced_dir))
+                if normalized.startswith(safe_synced + os.sep) or normalized == safe_synced:
+                    return True
+        return False
 
     # ------------------------------------------------------------------
     # Capability queries
@@ -602,8 +714,8 @@ class DatasetService:
                         the directory does not exist.
         """
         parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
-        if len(parts) > 2:
-            raise ValueError(f"Invalid dataset path: {dataset_id}")
+        if len(parts) > 5:
+            raise ValueError(f"Dataset nesting too deep (max 5 levels): {dataset_id}")
 
         for part in parts:
             safe = os.path.basename(part)
@@ -627,30 +739,55 @@ class DatasetService:
 
     async def get_frame_image(self, dataset_id: str, episode_idx: int, frame_idx: int, camera: str) -> bytes | None:
         """Get a single frame image from an episode."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
-        frame_idx = int(frame_idx)
-        camera = camera.replace("\n", "").replace("\r", "")
-
         result = self._try_handlers(dataset_id, "get_frame_image", episode_idx, frame_idx, camera)
         if result is None:
-            logger.warning("No loader found for dataset %s", dataset_id)
+            logger.warning(
+                "No loader found for dataset %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+            )
         return result
 
     async def get_episode_cameras(self, dataset_id: str, episode_idx: int) -> list[str]:
         """Get list of available cameras for an episode."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
         return self._try_handlers(dataset_id, "get_cameras", episode_idx) or []
 
     def get_video_file_path(self, dataset_id: str, episode_idx: int, camera: str) -> str | None:
-        """Get the filesystem path to a video file."""
-        dataset_id = dataset_id.replace("\n", "").replace("\r", "")
-        episode_idx = int(episode_idx)
+        """Get the filesystem path to a video file, generating on-demand for HDF5.
+
+        When a video is generated for an HDF5 dataset with blob storage,
+        uploads the result to blob for caching across container restarts.
+        """
         handler = self._resolve_handler(dataset_id)
-        if handler is not None:
-            return handler.get_video_path(dataset_id, episode_idx, camera)
-        return None
+        if handler is None and self._hdf5_handler.has_loader(dataset_id):
+            handler = self._hdf5_handler
+        if handler is None:
+            return None
+
+        if handler is self._hdf5_handler:
+            cache_path = self._hdf5_handler._video_cache_path(dataset_id, episode_idx, camera)
+            if cache_path is None:
+                return None
+            already_existed = cache_path.exists()
+            result = handler.get_video_path(dataset_id, episode_idx, camera)
+            if result and not already_existed and self._blob_provider is not None:
+                self._upload_video_to_blob(dataset_id, episode_idx, camera, cache_path)
+            return result
+
+        return handler.get_video_path(dataset_id, episode_idx, camera)
+
+    def _upload_video_to_blob(self, dataset_id: str, episode_idx: int, camera: str, cache_path: Path) -> None:
+        """Upload a generated video to blob storage for caching."""
+        try:
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(self._blob_provider.upload_video(dataset_id, camera, episode_idx, cache_path))
+            loop.close()
+        except Exception as exc:
+            logger.warning(
+                "Blob upload failed for %s ep %d: %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                int(episode_idx),
+                exc,
+            )
 
 
 # Global service instance

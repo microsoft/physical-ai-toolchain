@@ -5,10 +5,12 @@ These models define the request/response schemas for object detection
 endpoints and match the frontend TypeScript type definitions.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import Field, field_validator
+
+from ..validation import SanitizedModel
 
 
-class DetectionRequest(BaseModel):
+class DetectionRequest(SanitizedModel):
     """Request parameters for running object detection."""
 
     frames: list[int] | None = Field(
@@ -26,8 +28,17 @@ class DetectionRequest(BaseModel):
         description="YOLO model variant: yolo11n, yolo11s, yolo11m, yolo11l, yolo11x",
     )
 
+    @field_validator("frames")
+    @classmethod
+    def validate_frames(cls, frames: list[int] | None) -> list[int] | None:
+        if frames is None:
+            return None
+        if any(frame < 0 for frame in frames):
+            raise ValueError("Frame indices must be non-negative")
+        return frames
 
-class Detection(BaseModel):
+
+class Detection(SanitizedModel):
     """Single object detection result."""
 
     class_id: int = Field(ge=0, description="COCO class ID")
@@ -36,7 +47,7 @@ class Detection(BaseModel):
     bbox: tuple[float, float, float, float] = Field(description="Bounding box as (x1, y1, x2, y2) in pixels")
 
 
-class DetectionResult(BaseModel):
+class DetectionResult(SanitizedModel):
     """Detection results for a single frame."""
 
     frame: int = Field(ge=0, description="Frame index")
@@ -44,14 +55,14 @@ class DetectionResult(BaseModel):
     processing_time_ms: float = Field(ge=0.0, description="Inference time in milliseconds")
 
 
-class ClassSummary(BaseModel):
+class ClassSummary(SanitizedModel):
     """Summary statistics for a detection class."""
 
     count: int = Field(ge=0, description="Total detections of this class")
     avg_confidence: float = Field(ge=0.0, le=1.0, description="Average confidence")
 
 
-class EpisodeDetectionSummary(BaseModel):
+class EpisodeDetectionSummary(SanitizedModel):
     """Complete detection results for an episode."""
 
     total_frames: int = Field(ge=0, description="Total frames in episode")

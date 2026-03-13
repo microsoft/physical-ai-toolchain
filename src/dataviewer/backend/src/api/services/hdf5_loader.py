@@ -417,3 +417,30 @@ def get_hdf5_loader(base_path: str | Path) -> HDF5Loader:
         Configured HDF5Loader instance.
     """
     return HDF5Loader(base_path)
+
+
+def load_single_frame(file_path: Path, camera: str, frame_idx: int) -> NDArray[np.uint8] | None:
+    """Load a single frame from an HDF5 file using h5py slice indexing."""
+    try:
+        with h5py.File(file_path, "r") as f:
+            for group_path in ["observations/images", "observation/images", "images", "data/images"]:
+                if group_path in f and isinstance(f[group_path], h5py.Group) and camera in f[group_path]:
+                    ds = f[group_path][camera]
+                    if frame_idx < 0 or frame_idx >= ds.shape[0]:
+                        return None
+                    return np.asarray(ds[frame_idx], dtype=np.uint8)
+    except Exception:
+        return None
+    return None
+
+
+def load_all_frames(file_path: Path, camera: str) -> NDArray[np.uint8] | None:
+    """Load all frames for a camera from an HDF5 file."""
+    try:
+        with h5py.File(file_path, "r") as f:
+            for group_path in ["observations/images", "observation/images", "images", "data/images"]:
+                if group_path in f and isinstance(f[group_path], h5py.Group) and camera in f[group_path]:
+                    return np.asarray(f[group_path][camera][:], dtype=np.uint8)
+    except Exception:
+        return None
+    return None
