@@ -24,6 +24,7 @@ Install these tools before contributing:
 | Tool        | Minimum Version | Installation                                                          |
 |-------------|-----------------|-----------------------------------------------------------------------|
 | Terraform   | 1.9.8           | <https://developer.hashicorp.com/terraform/install>                   |
+| TFLint      | 0.61.0          | <https://github.com/terraform-linters/tflint>                         |
 | Azure CLI   | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>             |
 | kubectl     | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
 | Helm        | 3.16            | <https://helm.sh/docs/intro/install/>                                 |
@@ -34,6 +35,7 @@ Install these tools before contributing:
 | Docker      | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit) |
 | OSMO CLI    | latest          | <https://developer.nvidia.com/osmo>                                   |
 | hve-core    | latest          | <https://github.com/microsoft/hve-core>                               |
+
 
 ## Azure Access Requirements
 
@@ -151,6 +153,14 @@ cd deploy/001-iac/
 terraform init
 terraform validate
 ```
+### TFLint Installation
+
+TFLint validates Terraform configurations and is required for infrastructure linting.
+
+macOS (brew)
+
+```bash
+brew install tflint
 
 **Shell Scripts:**
 
