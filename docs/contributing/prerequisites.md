@@ -25,6 +25,7 @@ Install these tools before contributing:
 | Tool        | Minimum Version | Installation                                                          |
 |-------------|-----------------|-----------------------------------------------------------------------|
 | Terraform   | 1.9.8           | <https://developer.hashicorp.com/terraform/install>                   |
+| TFLint      | 0.61.0          | <https://github.com/terraform-linters/tflint>                         |
 | Azure CLI   | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>             |
 | kubectl     | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
 | Helm        | 3.16            | <https://helm.sh/docs/intro/install/>                                 |
@@ -105,6 +106,9 @@ Verify tool versions before validating:
 # Terraform
 terraform version  # >= 1.9.8
 
+# TFLint (Terraform linter)
+tflint --version  # >= 0.61.0
+
 # Azure CLI
 az version  # >= 2.65.0
 
@@ -151,6 +155,9 @@ terraform fmt -check -recursive deploy/
 cd deploy/001-iac/
 terraform init
 terraform validate
+
+# Lint Terraform configurations (required for infrastructure changes)
+tflint --recursive deploy/001-iac/
 ```
 
 **Shell Scripts:**
