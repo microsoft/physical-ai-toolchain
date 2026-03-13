@@ -93,6 +93,15 @@ module "platform" {
   should_add_current_user_storage_blob    = var.should_add_current_user_storage_blob
   should_enable_purge_protection          = var.should_enable_purge_protection
 
+  // Storage lifecycle management
+  should_enable_raw_bags_lifecycle_policy           = var.should_enable_raw_bags_lifecycle_policy
+  raw_bags_retention_days                           = var.raw_bags_retention_days
+  should_enable_converted_datasets_lifecycle_policy = var.should_enable_converted_datasets_lifecycle_policy
+  converted_datasets_cool_tier_days                 = var.converted_datasets_cool_tier_days
+  should_enable_reports_lifecycle_policy            = var.should_enable_reports_lifecycle_policy
+  reports_cool_tier_days                            = var.reports_cool_tier_days
+  reports_archive_tier_days                         = var.reports_archive_tier_days
+
   // OSMO services
   should_deploy_postgresql = var.should_deploy_postgresql
   should_deploy_redis      = var.should_deploy_redis
