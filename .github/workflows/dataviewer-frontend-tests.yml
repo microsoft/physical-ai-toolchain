@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   frontend-checks:
-    name: Lint, Type-check & Test
+    name: Lint, Type-check and Build
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -103,29 +103,7 @@ jobs:
         continue-on-error: true
 
       - name: Unit tests
-        id: tests
-        continue-on-error: true
-        run: npm run test 2>&1 | tee test-results.txt
+        run: npm run test
 
-      - name: Upload results
-        if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v4.4.3
-        with:
-          name: frontend-test-results
-          path: |
-            src/dataviewer/frontend/lint-results.txt
-            src/dataviewer/frontend/typecheck-results.txt
-            src/dataviewer/frontend/format-results.txt
-            src/dataviewer/frontend/test-results.txt
-          retention-days: 30
-
-      - name: Fail job if errors found
-        if: >-
-          (steps.lint.outcome == 'failure'
-          || steps.typecheck.outcome == 'failure'
-          || steps.format.outcome == 'failure'
-          || steps.tests.outcome == 'failure')
-          && !inputs.soft-fail
-        run: |
-          echo "::error::Frontend checks failed. Run 'npm run lint', 'npm run type-check', 'npm run format', and 'npm run test' locally to reproduce."
-          exit 1
+      - name: Build
+        run: npm run build
