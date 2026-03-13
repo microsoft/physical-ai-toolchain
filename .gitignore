@@ -465,4 +465,4 @@ AGENTS.md
 # Terraform Environments
 envs/
 
-src/dataviewer/datasets/
+datasets/

@@ -96,7 +96,7 @@ function DatasetSelector({
           >
             <CommandEmpty>No datasets match the current filter.</CommandEmpty>
             {groupKeys.map((groupKey) => (
-              <CommandGroup key={groupKey} heading={groupKey || undefined}>
+              <CommandGroup key={groupKey} heading={groupKey ? groupKey.split('--').join('/') : undefined}>
                 {groupedDatasets[groupKey].map((dataset) => {
                   const isSelected = dataset.id === datasetId;
                   const displayId = dataset.group

@@ -14,7 +14,7 @@ from ..csrf import require_csrf_token
 from ..models.detection import DetectionRequest, EpisodeDetectionSummary
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.detection_service import DetectionService, get_detection_service
-from ..validation import validated_dataset_id
+from ..validation import SAFE_DATASET_ID_PATTERN, path_int_param, path_string_param
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
     dependencies=[Depends(require_csrf_token)],
 )
 async def run_detection(
-    episode_idx: int,
-    dataset_id: str = Depends(validated_dataset_id),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     request: DetectionRequest = DetectionRequest(),
     detection_service: DetectionService = Depends(get_detection_service),
     dataset_service: DatasetService = Depends(get_dataset_service),
@@ -95,8 +95,8 @@ async def run_detection(
     response_model=EpisodeDetectionSummary | None,
 )
 async def get_detections(
-    episode_idx: int,
-    dataset_id: str = Depends(validated_dataset_id),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     detection_service: DetectionService = Depends(get_detection_service),
 ) -> EpisodeDetectionSummary | None:
     """
@@ -109,8 +109,8 @@ async def get_detections(
 
 @router.delete("/{dataset_id}/episodes/{episode_idx}/detections")
 async def clear_detections(
-    episode_idx: int,
-    dataset_id: str = Depends(validated_dataset_id),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     detection_service: DetectionService = Depends(get_detection_service),
 ) -> dict[str, bool]:
     """

@@ -1950,10 +1950,17 @@ allclose
 cmdk
 cooldown
 desync
+dvwh
 dvwm
 emanufacturing
+faststart
+fourcc
 midtone
+movflags
 nameidentifier
 persistable
+rawvideo
 rvfc
 srcs
+tobytes
+ultrafast

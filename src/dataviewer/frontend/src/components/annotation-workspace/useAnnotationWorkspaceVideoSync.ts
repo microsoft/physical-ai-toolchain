@@ -14,35 +14,6 @@ import type { FrameInsertion } from '@/types/episode-edit'
 
 const PLAYBACK_RECOVERY_COOLDOWN_MS = 300
 
-function drawVideoToCanvas(video: HTMLVideoElement, canvas: HTMLCanvasElement): boolean {
-  if (!video.videoWidth || !video.videoHeight) return false
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return false
-  if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-  }
-  ctx.drawImage(video, 0, 0)
-  return true
-}
-
-function drawBitmapToCanvas(bitmap: ImageBitmap, canvas: HTMLCanvasElement): boolean {
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return false
-  if (bitmap.width === 0 || bitmap.height === 0) return false
-  if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-    canvas.width = bitmap.width
-    canvas.height = bitmap.height
-  }
-  try {
-    ctx.drawImage(bitmap, 0, 0)
-  } catch {
-    // Bitmap was closed between cache swap and draw — safe to skip
-    return false
-  }
-  return true
-}
-
 interface UseAnnotationWorkspaceVideoSyncOptions {
   currentFrame: number
   totalFrames: number
@@ -59,8 +30,6 @@ interface UseAnnotationWorkspaceVideoSyncOptions {
   insertedFrames: Map<number, FrameInsertion>
   removedFrames: Set<number>
   videoSrc: string | null
-  frameCache?: Map<number, ImageBitmap>
-  frameCacheReady?: boolean
   onSetCurrentFrame: (frame: number) => void
   onTogglePlayback: () => void
   onSetFrameWithinPlaybackRange: (frame: number) => void
@@ -83,15 +52,12 @@ export function useAnnotationWorkspaceVideoSync({
   insertedFrames,
   removedFrames,
   videoSrc,
-  frameCache,
-  frameCacheReady = false,
   onSetCurrentFrame,
   onTogglePlayback,
   onSetFrameWithinPlaybackRange,
   onRecordEvent,
 }: UseAnnotationWorkspaceVideoSyncOptions) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const displayCanvasRef = useRef<HTMLCanvasElement>(null)
   const currentFrameRef = useRef(0)
   const originalFrameIndexRef = useRef<number | null>(null)
   const playbackSpeedRef = useRef(playbackSpeed)
@@ -99,9 +65,6 @@ export function useAnnotationWorkspaceVideoSync({
   const skipNextPlaybackSyncRef = useRef(false)
   const playbackRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastPlaybackRecoveryAtRef = useRef(0)
-  const rvfcActiveRef = useRef(false)
-  const frameCacheRef = useRef<Map<number, ImageBitmap> | undefined>(undefined)
-  const frameCacheReadyRef = useRef(false)
   const [videoDuration, setVideoDuration] = useState(0)
 
   useEffect(() => {
@@ -115,8 +78,6 @@ export function useAnnotationWorkspaceVideoSync({
   currentFrameRef.current = currentFrame
   originalFrameIndexRef.current = originalFrameIndex
   playbackSpeedRef.current = playbackSpeed
-  frameCacheRef.current = frameCache
-  frameCacheReadyRef.current = frameCacheReady
 
   const fps = computeEffectiveFps(totalFrames, videoDuration, datasetFps)
 
@@ -292,44 +253,8 @@ export function useAnnotationWorkspaceVideoSync({
       if (disposed) return
 
       const video = videoRef.current
-      const cache = frameCacheRef.current
-      const cacheReady = frameCacheReadyRef.current && cache && cache.size > 0
 
-      if (cacheReady) {
-        // Cache-driven playback: virtual time clock + cached frame draw
-        if (video && !video.paused) video.pause()
-
-        if (lastTimestamp !== null) {
-          const expectedFrame = Math.floor(virtualTime * fps)
-          if (Math.abs(currentFrameRef.current - expectedFrame) > 1) {
-            virtualTime = currentFrameRef.current / fps
-          }
-
-          virtualTime += ((timestamp - lastTimestamp) / 1000) * playbackSpeedRef.current
-          const nextFrame = Math.floor(virtualTime * fps)
-          const resolved = resolvePlaybackTick(nextFrame, totalFrames, activePlaybackRange, shouldLoopPlaybackRange)
-
-          if (resolved.shouldStop) {
-            onSetCurrentFrame(resolved.frame)
-            onTogglePlayback()
-            return
-          }
-
-          if (resolved.frame !== lastFrame) {
-            lastFrame = resolved.frame
-            onSetCurrentFrame(resolved.frame)
-            const canvas = displayCanvasRef.current
-            const bitmap = cache.get(resolved.frame)
-            if (canvas && bitmap) drawBitmapToCanvas(bitmap, canvas)
-          }
-
-          if (resolved.frame < nextFrame) {
-            virtualTime = resolved.frame / fps
-          }
-        }
-
-        lastTimestamp = timestamp
-      } else if (video) {
+      if (video) {
         const nextFrame = Math.floor(video.currentTime * fps)
         const resolved = resolvePlaybackTick(nextFrame, totalFrames, activePlaybackRange, shouldLoopPlaybackRange)
         const now = Date.now()
@@ -403,12 +328,8 @@ export function useAnnotationWorkspaceVideoSync({
 
           video.currentTime = resolved.frame / fps
         }
-
-        if (!rvfcActiveRef.current) {
-          const canvas = displayCanvasRef.current
-          if (canvas) drawVideoToCanvas(video, canvas)
-        }
       } else if (!videoSrc) {
+        // Frame-only playback using a virtual time clock
         if (lastTimestamp !== null) {
           const expectedFrame = Math.floor(virtualTime * fps)
           if (Math.abs(currentFrameRef.current - expectedFrame) > 1) {
@@ -459,8 +380,8 @@ export function useAnnotationWorkspaceVideoSync({
     }
   }, [isPlaying, playbackSpeed])
 
+  // Seek video when paused and frame changes
   useEffect(() => {
-    if (frameCacheReady) return
     const video = videoRef.current
     if (!video || isPlaying) {
       return
@@ -470,7 +391,7 @@ export function useAnnotationWorkspaceVideoSync({
     if (Math.abs(video.currentTime - targetTime) > 0.5 / fps) {
       video.currentTime = targetTime
     }
-  }, [currentFrame, fps, frameCacheReady, isPlaying, originalFrameIndex])
+  }, [currentFrame, fps, isPlaying, originalFrameIndex])
 
   const handleVideoEnded = useCallback(() => {
     onRecordEvent('playback', 'video-ended', {
@@ -498,81 +419,7 @@ export function useAnnotationWorkspaceVideoSync({
     onSetFrameWithinPlaybackRange(playbackRangeEnd)
   }, [autoLoop, ensureVideoPlaybackAtTime, fps, isPlaying, onRecordEvent, onSetFrameWithinPlaybackRange, onTogglePlayback, playbackRangeEnd, playbackRangeStart, shouldLoopPlaybackRange])
 
-  // RVFC-based forward-only canvas rendering during playback (disabled when cache is ready)
-  useEffect(() => {
-    if (frameCacheReady) {
-      rvfcActiveRef.current = false
-      return
-    }
-
-    const video = videoRef.current
-    const canvas = displayCanvasRef.current
-    if (!video || !canvas || !videoSrc || !isPlaying) {
-      rvfcActiveRef.current = false
-      return
-    }
-
-    if (!('requestVideoFrameCallback' in video)) {
-      rvfcActiveRef.current = false
-      return
-    }
-
-    rvfcActiveRef.current = true
-    let lastForwardTime = -1
-    let disposed = false
-
-    const handleSeeking = () => { lastForwardTime = -1 }
-    video.addEventListener('seeking', handleSeeking)
-
-    const onVideoFrame = (_now: number, metadata: { mediaTime: number }) => {
-      if (disposed) return
-      const c = displayCanvasRef.current
-      if (c && metadata.mediaTime > lastForwardTime) {
-        drawVideoToCanvas(video, c)
-        lastForwardTime = metadata.mediaTime
-      }
-      ;(video as HTMLVideoElement & { requestVideoFrameCallback: (cb: typeof onVideoFrame) => number }).requestVideoFrameCallback(onVideoFrame)
-    }
-
-    ;(video as HTMLVideoElement & { requestVideoFrameCallback: (cb: typeof onVideoFrame) => number }).requestVideoFrameCallback(onVideoFrame)
-
-    return () => {
-      disposed = true
-      rvfcActiveRef.current = false
-      video.removeEventListener('seeking', handleSeeking)
-    }
-  }, [frameCacheReady, isPlaying, videoSrc])
-
-  // Draw cached frame when paused and frame changes
-  useEffect(() => {
-    if (!frameCacheReady || !frameCache || isPlaying) return
-    const canvas = displayCanvasRef.current
-    if (!canvas) return
-    const bitmap = frameCache.get(currentFrame)
-    if (bitmap) drawBitmapToCanvas(bitmap, canvas)
-  }, [currentFrame, frameCache, frameCacheReady, isPlaying])
-
-  // Draw to canvas when paused (seeked/loadeddata events) — fallback when cache not ready
-  useEffect(() => {
-    if (frameCacheReady) return
-    const video = videoRef.current
-    const canvas = displayCanvasRef.current
-    if (!video || !canvas || !videoSrc || isPlaying) return
-
-    const draw = () => drawVideoToCanvas(video, canvas)
-
-    video.addEventListener('seeked', draw)
-    video.addEventListener('loadeddata', draw)
-    if (video.readyState >= 2) draw()
-
-    return () => {
-      video.removeEventListener('seeked', draw)
-      video.removeEventListener('loadeddata', draw)
-    }
-  }, [frameCacheReady, isPlaying, videoSrc])
-
   return {
-    displayCanvasRef,
     handleLoadedMetadata,
     handleResumePlayback,
     handleVideoEnded,

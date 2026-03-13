@@ -37,8 +37,9 @@ class LocalStorageAdapter(StorageAdapter):
         self.base_path = Path(base_path)
 
     def _get_annotations_dir(self, dataset_id: str) -> Path:
-        """Get the annotations directory for a dataset."""
-        resolved = (self.base_path / dataset_id / "annotations" / "episodes").resolve()
+        """Get the annotations directory for a dataset. Resolves -- to nested dirs."""
+        parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
+        resolved = self.base_path.joinpath(*parts, "annotations", "episodes").resolve()
         if not resolved.is_relative_to(self.base_path.resolve()):
             raise StorageError(f"Invalid dataset_id: path traversal detected in '{dataset_id}'")
         return resolved
