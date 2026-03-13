@@ -1,4 +1,5 @@
 ---
+sidebar_position: 1
 title: Deployment Guide
 description: Infrastructure deployment and cluster configuration for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team

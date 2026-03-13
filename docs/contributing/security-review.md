@@ -1,4 +1,5 @@
 ---
+sidebar_position: 10
 title: Security Review Process
 description: Security checklist, credential handling, and vulnerability reporting for contributions
 author: Microsoft Robotics-AI Team
@@ -62,7 +63,7 @@ Contributions touching these areas require security review:
 > [!WARNING]
 > **DO NOT** report security vulnerabilities through public GitHub issues.
 
-Report security vulnerabilities to the Microsoft Security Response Center (MSRC). See [SECURITY.md](../../SECURITY.md) for complete instructions.
+Report security vulnerabilities to the Microsoft Security Response Center (MSRC). See [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md) for complete instructions.
 
 For non-security bugs that have security implications (e.g., excessive permissions), use the standard bug reporting process but add the `security` label.
 
@@ -102,6 +103,6 @@ Security patch PRs are encouraged and receive expedited review:
 ## Related Documentation
 
 * [Contributing Guide](README.md) - Prerequisites, workflow, commit messages
-* [SECURITY.md](../../SECURITY.md) - Security vulnerability reporting
+* [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md) - Security vulnerability reporting
 * [Deployment Validation](deployment-validation.md) - Validation levels and testing
 * [Infrastructure Style](infrastructure-style.md) - Secure coding patterns

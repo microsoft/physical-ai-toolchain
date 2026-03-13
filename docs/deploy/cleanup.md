@@ -1,4 +1,5 @@
 ---
+sidebar_position: 10
 title: Cleanup and Destroy
 description: Remove cluster components, destroy Azure infrastructure, and clean up development environment
 author: Microsoft Robotics-AI Team
@@ -205,7 +206,7 @@ az lock delete --name <lock-name> --resource-group <resource-group>
 
 * [Infrastructure Deployment](infrastructure.md)
 * [Cluster Setup](cluster-setup.md)
-* [Contributing Guide](../../CONTRIBUTING.md)
+* [Contributing Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/CONTRIBUTING.md)
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

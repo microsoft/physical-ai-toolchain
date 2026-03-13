@@ -1,4 +1,5 @@
 ---
+sidebar_position: 2
 title: Azure ML Training Workflows
 description: Submit Isaac Lab and LeRobot training jobs to Azure Machine Learning
 author: Microsoft Robotics-AI Team

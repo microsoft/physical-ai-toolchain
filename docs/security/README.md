@@ -1,4 +1,5 @@
 ---
+sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
@@ -23,7 +24,7 @@ Security documentation for the Physical AI Toolchain covering threat analysis, d
 | [Threat Model](threat-model.md)                              | STRIDE-based threat analysis and remediation roadmap             |
 | [Deployment Security Guide](../operations/security-guide.md) | Security configuration inventory and deployment responsibilities |
 | [Release Verification](release-verification.md)              | Verify release artifact provenance and SBOM attestations         |
-| [SECURITY.md](../../SECURITY.md)                             | Vulnerability disclosure and reporting process                   |
+| [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md) | Vulnerability disclosure and reporting process                   |
 
 ## 🔒 Security Posture
 

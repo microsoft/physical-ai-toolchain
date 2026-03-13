@@ -1,4 +1,5 @@
 ---
+sidebar_position: 6
 title: Cluster Operations and Troubleshooting
 description: Accessing OSMO, troubleshooting common issues, and optional deployment scripts
 author: Microsoft Robotics-AI Team

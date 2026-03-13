@@ -1,4 +1,5 @@
 ---
+sidebar_position: 7
 title: Infrastructure as Code Style Guide
 description: Terraform conventions, shell script standards, and copyright headers for contributions
 author: Microsoft Robotics-AI Team
@@ -7,7 +8,7 @@ ms.topic: reference
 ---
 
 > [!NOTE]
-> This guide expands on the [Infrastructure as Code Style](README.md#-infrastructure-as-code-style) section of the main contributing guide.
+> This guide expands on the [Infrastructure as Code Style](README.md#infrastructure-as-code-style) section of the main contributing guide.
 
 Infrastructure code follows strict conventions for consistency, security, and maintainability.
 
@@ -159,7 +160,7 @@ OSMO_VERSION="${OSMO_VERSION:-6.0.0}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 ```
 
-For complete shell script guidance, see [shell-scripts.instructions.md](../../.github/instructions/shell-scripts.instructions.md).
+For complete shell script guidance, see [shell-scripts.instructions.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/.github/instructions/shell-scripts.instructions.md).
 
 ## Copyright Headers
 
@@ -227,4 +228,4 @@ kind: ConfigMap
 * [Contributing Guide](README.md) - Prerequisites, workflow, commit messages
 * [Deployment Validation](deployment-validation.md) - Validation levels and testing
 * [Security Review](security-review.md) - Security checklist and patterns
-* [Shell Scripts Instructions](../../.github/instructions/shell-scripts.instructions.md) - Detailed shell script guidance
+* [Shell Scripts Instructions](https://github.com/microsoft/physical-ai-toolchain/blob/main/.github/instructions/shell-scripts.instructions.md) - Detailed shell script guidance

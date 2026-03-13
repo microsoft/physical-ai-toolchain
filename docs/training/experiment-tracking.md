@@ -1,4 +1,5 @@
 ---
+sidebar_position: 3
 title: Experiment Tracking
 description: MLflow and WANDB experiment tracking configuration for training workflows on Azure ML and OSMO
 author: Microsoft Robotics-AI Team

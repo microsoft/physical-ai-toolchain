@@ -1,4 +1,5 @@
 ---
+sidebar_position: 3
 title: Deployment Security Guide
 description: Security configuration inventory, deployment responsibilities, and considerations for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
@@ -18,7 +19,7 @@ Security configurations included in this reference architecture and responsibili
 > This document provides security guidance for informational purposes only. It does
 > not constitute professional security advice and is not a substitute for your own
 > security assessment. This reference architecture is licensed under the
-> [MIT License](../../LICENSE), provided "AS IS" without warranty of any kind. You are
+> [MIT License](https://github.com/microsoft/physical-ai-toolchain/blob/main/LICENSE), provided "AS IS" without warranty of any kind. You are
 > solely responsible for the security of your deployment, including configuration,
 > operational practices, and compliance with applicable regulations. The project
 > maintainers accept no liability for security incidents arising from the use of

@@ -2,6 +2,9 @@
   "name": "physical-ai-toolchain",
   "version": "0.4.0",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "description": "Physical AI Toolchain",
   "scripts": {
     "spell-check": "cspell \"**/*.{md,ts,js,json,yaml,yml,py,sh}\"",
@@ -14,7 +17,11 @@
     "lint:all": "npm run lint:md && npm run lint:ps && npm run lint:links && npm run lint:yaml",
     "format:tables": "markdown-table-formatter \"**/*.md\"",
     "test:ps": "pwsh -File ./scripts/tests/Invoke-PesterTests.ps1",
-    "prepare": "husky"
+    "prepare": "husky",
+    "docs:build": "cd docs/docusaurus && npm run build",
+    "docs:start": "cd docs/docusaurus && npm start",
+    "docs:test": "cd docs/docusaurus && npm test",
+    "docs:serve": "cd docs/docusaurus && npm run serve"
   },
   "devDependencies": {
     "cspell": "9.4.0",

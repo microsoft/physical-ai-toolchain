@@ -1,4 +1,5 @@
 ---
+sidebar_position: 3
 title: OSMO Inference Workflows
 description: Execute trained robotics policy inference using NVIDIA OSMO with Isaac Lab and LeRobot frameworks
 author: Microsoft Robotics-AI Team
@@ -161,7 +162,7 @@ osmo workflow status <workflow-id>
 - [Inference Hub](README.md)
 - [LeRobot Inference](lerobot-inference.md)
 - [Training Guide](../training/README.md)
-- [Workflow Templates](../../workflows/README.md)
+- [Workflow Templates](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/README.md)
 
 ---
 
