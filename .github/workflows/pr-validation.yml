@@ -131,6 +131,14 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
+  # Dataviewer backend pytest execution
+  dataviewer-backend-pytests:
+    name: Dataviewer Backend Pytest
+    uses: ./.github/workflows/dataviewer-backend-pytests.yml
+    permissions:
+      contents: read
+
   # Python linting using ruff
   python-lint:
     name: Python Lint
