@@ -1,7 +1,7 @@
 /** TFLint configuration for deploy/001-iac and child modules */
 
 tflint {
-  required_version = ">= 0.61"
+  required_version = ">= 0.61.0"
 }
 
 config {
