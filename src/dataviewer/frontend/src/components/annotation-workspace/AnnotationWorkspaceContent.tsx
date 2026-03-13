@@ -27,7 +27,6 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
     <AnnotationWorkspacePlaybackCard
       compact
       canvasRef={shell.canvasRef}
-      displayCanvasRef={shell.displayCanvasRef}
       videoRef={shell.videoRef}
       videoSrc={shell.videoSrc}
       onVideoEnded={shell.handleVideoEnded}
@@ -53,8 +52,6 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
       onSetFrameWithinPlaybackRange={shell.playback.setFrameWithinPlaybackRange}
       playbackRangeHighlight={shell.playback.playbackRangeHighlight}
       playbackRangeLabel={shell.playback.playbackRangeLabel}
-      frameCacheProgress={shell.frameCacheProgress}
-      frameCacheReady={shell.frameCacheReady}
     />
   )
 

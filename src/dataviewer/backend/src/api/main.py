@@ -2,6 +2,8 @@
 
 import logging
 import os
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -20,6 +22,10 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
+# Suppress verbose Azure SDK HTTP request logging
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+
 # Load .env before any config or service singletons are initialized so that
 # all env vars are available to get_app_config() on first access.
 env_path = Path(__file__).parent.parent.parent / ".env"
@@ -31,10 +37,28 @@ from .config import load_config  # noqa: E402
 
 _config = load_config()
 
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+    """Clean up blob sync temp directories on shutdown."""
+    yield
+    from .services.dataset_service import get_dataset_service
+
+    try:
+        service = get_dataset_service()
+        service.cleanup_temp_dirs()
+        logger.info("Cleaned up blob sync temp directories")
+    except Exception:
+        pass  # Best-effort cleanup; failure here must not block shutdown
+
+
 app = FastAPI(
     title="LeRobot Annotation API",
     description="API for episode annotation in robot demonstration datasets",
     version="0.1.0",
+    lifespan=lifespan,
     openapi_tags=[
         {"name": "auth", "description": "Authentication utilities"},
     ],

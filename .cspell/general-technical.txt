@@ -161,6 +161,7 @@ chatbot
 chatbots
 chatmode
 chatmodes
+chatlog
 cheatham
 checkbox
 checkboxes
@@ -1552,7 +1553,9 @@ auditable
 auditability
 auditifnotexists
 gdpr
+gitsign
 hipaa
+keyless
 oidc
 OSSF
 passwordless
@@ -1560,6 +1563,7 @@ siem
 sox
 Sarbanes
 Oxley
+x509
 
 # Cloud Platforms & Services (not covered by public dicts)
 amazonaws
@@ -1946,10 +1950,17 @@ allclose
 cmdk
 cooldown
 desync
+dvwh
 dvwm
 emanufacturing
+faststart
+fourcc
 midtone
+movflags
 nameidentifier
 persistable
+rawvideo
 rvfc
 srcs
+tobytes
+ultrafast

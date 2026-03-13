@@ -5,15 +5,25 @@ Provides endpoints for listing datasets, retrieving metadata,
 and accessing episode information with HDF5 and LeRobot parquet support.
 """
 
+import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
 from ..services.dataset_service import DatasetService, get_dataset_service
-from ..validation import validate_path_containment, validated_camera_name, validated_dataset_id
+from ..validation import (
+    SAFE_CAMERA_NAME_PATTERN,
+    SAFE_DATASET_ID_PATTERN,
+    path_int_param,
+    path_string_param,
+    query_bool_param,
+    query_int_param,
+    query_string_param,
+    range_header_param,
+)
 
 router = APIRouter()
 
@@ -52,7 +62,7 @@ async def list_datasets(
 
 @router.get("/{dataset_id}", response_model=DatasetInfo)
 async def get_dataset(
-    dataset_id: str = Depends(validated_dataset_id),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: DatasetService = Depends(get_dataset_service),
 ) -> DatasetInfo:
     """
@@ -69,7 +79,7 @@ async def get_dataset(
 
 @router.get("/{dataset_id}/capabilities", response_model=DatasetCapabilities)
 async def get_dataset_capabilities(
-    dataset_id: str = Depends(validated_dataset_id),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: DatasetService = Depends(get_dataset_service),
 ) -> DatasetCapabilities:
     """
@@ -96,11 +106,17 @@ async def get_dataset_capabilities(
 
 @router.get("/{dataset_id}/episodes", response_model=list[EpisodeMeta])
 async def list_episodes(
-    dataset_id: str = Depends(validated_dataset_id),
-    offset: int = Query(0, ge=0, description="Number of episodes to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum episodes to return"),
-    has_annotations: bool | None = Query(None, description="Filter by annotation status"),
-    task_index: int | None = Query(None, ge=0, description="Filter by task index"),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    offset: int = Depends(query_int_param("offset", default=0, ge=0, description="Number of episodes to skip")),
+    limit: int = Depends(
+        query_int_param("limit", default=100, ge=1, le=1000, description="Maximum episodes to return")
+    ),
+    has_annotations: bool | None = Depends(
+        query_bool_param("has_annotations", default=None, description="Filter by annotation status")
+    ),
+    task_index: int | None = Depends(
+        query_int_param("task_index", default=None, ge=0, description="Filter by task index")
+    ),
     service: DatasetService = Depends(get_dataset_service),
 ) -> list[EpisodeMeta]:
     """
@@ -124,9 +140,9 @@ async def list_episodes(
 
 @router.get("/{dataset_id}/episodes/{episode_idx}", response_model=EpisodeData)
 async def get_episode(
-    episode_idx: int,
     response: Response,
-    dataset_id: str = Depends(validated_dataset_id),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: DatasetService = Depends(get_dataset_service),
 ) -> EpisodeData:
     """
@@ -154,9 +170,9 @@ async def get_episode(
     response_model=list[TrajectoryPoint],
 )
 async def get_episode_trajectory(
-    episode_idx: int,
     response: Response,
-    dataset_id: str = Depends(validated_dataset_id),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: DatasetService = Depends(get_dataset_service),
 ) -> list[TrajectoryPoint]:
     """
@@ -177,10 +193,18 @@ async def get_episode_trajectory(
 
 @router.get("/{dataset_id}/episodes/{episode_idx}/frames/{frame_idx}")
 async def get_episode_frame(
-    episode_idx: int,
-    frame_idx: int,
-    dataset_id: str = Depends(validated_dataset_id),
-    camera: str = Query("il-camera", description="Camera name"),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    frame_idx: int = Depends(path_int_param("frame_idx", ge=0, description="Frame index")),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    camera: str | None = Depends(
+        query_string_param(
+            "camera",
+            default="il-camera",
+            pattern=SAFE_CAMERA_NAME_PATTERN,
+            label="camera name",
+            description="Camera name",
+        )
+    ),
     service: DatasetService = Depends(get_dataset_service),
 ) -> Response:
     """
@@ -211,8 +235,8 @@ async def get_episode_frame(
 
 @router.get("/{dataset_id}/episodes/{episode_idx}/cameras")
 async def get_episode_cameras(
-    episode_idx: int,
-    dataset_id: str = Depends(validated_dataset_id),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: DatasetService = Depends(get_dataset_service),
 ) -> list[str]:
     """
@@ -233,9 +257,10 @@ async def get_episode_cameras(
 )
 async def get_episode_video(
     request: Request,
-    episode_idx: int,
-    dataset_id: str = Depends(validated_dataset_id),
-    camera: str = Depends(validated_camera_name),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    camera: str = Depends(path_string_param("camera", pattern=SAFE_CAMERA_NAME_PATTERN, label="camera name")),
+    range_values: tuple[int | None, int | None] = Depends(range_header_param()),
     service: DatasetService = Depends(get_dataset_service),
 ) -> FileResponse | StreamingResponse | Response:
     """
@@ -248,10 +273,12 @@ async def get_episode_video(
 
     Note: camera parameter can include dots (e.g., 'observation.images.color')
     """
-    video_path = service.get_video_file_path(dataset_id, episode_idx, camera)
+    video_path = await asyncio.to_thread(service.get_video_file_path, dataset_id, episode_idx, camera)
 
     if video_path is not None:
-        video_file = validate_path_containment(Path(video_path), Path(service.base_path))
+        if not service.is_safe_video_path(video_path):
+            raise HTTPException(status_code=400, detail="Path traversal detected: resolved path escapes base directory")
+        video_file = Path(video_path)
         if not video_file.exists():
             raise HTTPException(
                 status_code=404,
@@ -281,11 +308,14 @@ async def get_episode_video(
                 detail=f"Video not found in blob storage for episode {episode_idx}, camera '{camera}'",
             )
 
-        offset, length = _parse_range_header(request.headers.get("range"))
-        stream_result = await service.get_blob_video_stream(blob_path, offset=offset, length=length)
+        stream_result = await service.get_blob_video_stream(
+            blob_path,
+            offset=range_values[0],
+            length=range_values[1],
+        )
         if stream_result is not None:
             headers, media_type, stream = stream_result
-            status_code = 206 if offset is not None else 200
+            status_code = 206 if range_values[0] is not None else 200
 
             if request.method == "HEAD":
                 return Response(
@@ -305,23 +335,6 @@ async def get_episode_video(
         status_code=404,
         detail=f"Video not found for episode {episode_idx}, camera '{camera}'",
     )
-
-
-def _parse_range_header(range_header: str | None) -> tuple[int | None, int | None]:
-    """Parse an HTTP Range header into (offset, length). Supports 'bytes=START-END' and 'bytes=START-'."""
-    if not range_header or not range_header.startswith("bytes="):
-        return None, None
-
-    range_spec = range_header[6:]
-    parts = range_spec.split("-", 1)
-    if not parts[0]:
-        return None, None
-
-    start = int(parts[0])
-    if parts[1]:
-        end = int(parts[1])
-        return start, end - start + 1
-    return start, None
 
 
 class EpisodeCacheStats(BaseModel):
@@ -355,16 +368,15 @@ async def get_cache_stats(
 
 @router.post("/{dataset_id}/cache/warm")
 async def warm_cache(
-    count: int = Query(5, ge=1, le=20, description="Number of episodes to preload"),
-    dataset_id: str = Depends(validated_dataset_id),
+    count: int = Depends(query_int_param("count", default=5, ge=1, le=20, description="Number of episodes to preload")),
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: DatasetService = Depends(get_dataset_service),
 ) -> dict:
     """
     Preload the first N episodes into the LRU cache.
 
     Designed to be called on dataset selection so the initial episode
-    loads are instant. Runs synchronously to give the caller confidence
-    that warm-up is complete before navigating.
+    loads are instant.
     """
     dataset = await service.get_dataset(dataset_id)
     if dataset is None:

@@ -16,6 +16,7 @@ from ..models.annotations import (
 )
 from ..services.annotation_service import AnnotationService, get_annotation_service
 from ..services.dataset_service import DatasetService, get_dataset_service
+from ..validation import SAFE_DATASET_ID_PATTERN, path_int_param, path_string_param, query_string_param
 
 router = APIRouter()
 
@@ -30,8 +31,8 @@ router = APIRouter()
     response_model=EpisodeAnnotationFile,
 )
 async def get_annotations(
-    dataset_id: str,
-    episode_idx: int,
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     service: AnnotationService = Depends(get_annotation_service),
     dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> EpisodeAnnotationFile:
@@ -62,9 +63,9 @@ async def get_annotations(
     dependencies=[Depends(require_csrf_token)],
 )
 async def save_annotations(
-    dataset_id: str,
-    episode_idx: int,
-    annotation: EpisodeAnnotation,
+    annotation: EpisodeAnnotation = ...,
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     service: AnnotationService = Depends(get_annotation_service),
     dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> EpisodeAnnotationFile:
@@ -97,9 +98,11 @@ async def save_annotations(
     dependencies=[Depends(require_csrf_token)],
 )
 async def delete_annotations(
-    dataset_id: str,
-    episode_idx: int,
-    annotator_id: str | None = None,
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    annotator_id: str | None = Depends(
+        query_string_param("annotator_id", default=None, description="Annotator ID", label="annotator ID")
+    ),
     service: AnnotationService = Depends(get_annotation_service),
     dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> dict:
@@ -130,9 +133,9 @@ async def delete_annotations(
     dependencies=[Depends(require_csrf_token)],
 )
 async def trigger_auto_analysis(
-    dataset_id: str,
-    episode_idx: int,
     background_tasks: BackgroundTasks,
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     service: AnnotationService = Depends(get_annotation_service),
     dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> AutoQualityAnalysis:
@@ -168,7 +171,7 @@ async def trigger_auto_analysis(
     response_model=AnnotationSummary,
 )
 async def get_annotation_summary(
-    dataset_id: str,
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     service: AnnotationService = Depends(get_annotation_service),
     dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> AnnotationSummary:
