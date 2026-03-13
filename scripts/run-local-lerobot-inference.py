@@ -164,6 +164,33 @@ def _load_normalizer_stats(policy: torch.nn.Module, model_dir: Path) -> None:
         print(f"  Loaded {loaded} normalizer stats from preprocessor files")
 
 
+def _load_processor_stats(model_dir: Path) -> dict[str, dict[str, np.ndarray]]:
+    """Load normalization stats from processor safetensors files.
+
+    Returns dict keyed by feature name (e.g. 'observation.state', 'action') with
+    sub-dicts of 'mean', 'std', 'min', 'max' as numpy arrays.
+    """
+    import glob
+
+    import safetensors.torch as st
+
+    raw: dict[str, torch.Tensor] = {}
+    for sf in sorted(glob.glob(str(model_dir / "*processor*.safetensors"))):
+        raw.update(st.load_file(sf))
+
+    stats: dict[str, dict[str, np.ndarray]] = {}
+    for key, tensor in raw.items():
+        parts = key.rsplit(".", 1)
+        if len(parts) != 2:
+            continue
+        feature, stat_type = parts
+        if stat_type not in ("mean", "std", "min", "max"):
+            continue
+        stats.setdefault(feature, {})[stat_type] = tensor.numpy()
+
+    return stats
+
+
 def run_evaluation(args: argparse.Namespace) -> None:
     import matplotlib
 
@@ -202,6 +229,26 @@ def run_evaluation(args: argparse.Namespace) -> None:
 
     # Load normalization stats from preprocessor files if normalizer buffers are missing
     _load_normalizer_stats(policy, Path(policy_path))
+    proc_stats = _load_processor_stats(Path(policy_path))
+
+    # Build normalize/unnormalize functions from processor stats
+    def normalize(value: np.ndarray, feature: str) -> np.ndarray:
+        if feature not in proc_stats:
+            return value
+        s = proc_stats[feature]
+        return (value - s["mean"]) / np.clip(s["std"], 1e-8, None)
+
+    def unnormalize(value: np.ndarray, feature: str) -> np.ndarray:
+        if feature not in proc_stats:
+            return value
+        s = proc_stats[feature]
+        return value * np.clip(s["std"], 1e-8, None) + s["mean"]
+
+    has_proc = bool(proc_stats)
+    if has_proc:
+        print(f"  Processor stats loaded for: {list(proc_stats.keys())}")
+    else:
+        print("  WARNING: No processor stats found; inputs/outputs may be unnormalized")
 
     policy.to(device)
     print(f"  Loaded in {time.time() - t0:.1f}s ({sum(p.numel() for p in policy.parameters()) / 1e6:.1f}M params)")
@@ -221,13 +268,16 @@ def run_evaluation(args: argparse.Namespace) -> None:
     print(f"  state_dim={state_dim}, action_dim={action_dim}, image_key={image_key}, fps={fps}")
 
     # Determine episodes
-    episodes_meta = os.path.join(args.dataset_dir, "meta", "episodes.jsonl")
-    if os.path.exists(episodes_meta):
-        with open(episodes_meta) as f:
-            total_episodes = sum(1 for _ in f)
+    if args.episode_indices:
+        episode_list = [int(x) for x in args.episode_indices.split(",")]
     else:
-        total_episodes = info.get("total_episodes", args.episodes)
-    num_episodes = min(args.episodes, total_episodes)
+        episodes_meta = os.path.join(args.dataset_dir, "meta", "episodes.jsonl")
+        if os.path.exists(episodes_meta):
+            with open(episodes_meta) as f:
+                total_episodes = sum(1 for _ in f)
+        else:
+            total_episodes = info.get("total_episodes", args.episodes)
+        episode_list = list(range(min(args.episodes, total_episodes)))
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -236,7 +286,7 @@ def run_evaluation(args: argparse.Namespace) -> None:
 
     all_metrics = []
 
-    for ep in range(num_episodes):
+    for ep in episode_list:
         print(f"\n{'=' * 60}")
         print(f"Episode {ep}")
         print(f"{'=' * 60}")
@@ -268,9 +318,18 @@ def run_evaluation(args: argparse.Namespace) -> None:
             gt_action = np.array(data["action"][step], dtype=np.float32)
             image = frames[step]
 
+            # Normalize inputs to match training distribution
+            norm_state = normalize(state, "observation.state")
+            img_t = torch.from_numpy(image).float().permute(2, 0, 1) / 255.0
+            if "observation.images.il-camera" in proc_stats:
+                img_stats = proc_stats["observation.images.il-camera"]
+                img_mean = torch.from_numpy(img_stats["mean"]).float()
+                img_std = torch.from_numpy(np.clip(img_stats["std"], 1e-8, None)).float()
+                img_t = (img_t - img_mean) / img_std
+
             obs = {
-                "observation.state": torch.from_numpy(state).float().unsqueeze(0).to(device),
-                image_key: (torch.from_numpy(image).float().permute(2, 0, 1) / 255.0).unsqueeze(0).to(device),
+                "observation.state": torch.from_numpy(norm_state).float().unsqueeze(0).to(device),
+                image_key: img_t.unsqueeze(0).to(device),
             }
 
             t_start = time.time()
@@ -279,7 +338,9 @@ def run_evaluation(args: argparse.Namespace) -> None:
             t_inf = time.time() - t_start
             inference_times.append(t_inf)
 
+            # Unnormalize predicted action back to raw space
             action_np = action.squeeze(0).cpu().numpy()
+            action_np = unnormalize(action_np, "action")
             actions_predicted.append(action_np)
             actions_ground_truth.append(gt_action)
 
@@ -437,6 +498,7 @@ def main() -> None:
 
     parser.add_argument("--dataset-dir", required=True, help="Path to LeRobot dataset root")
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to evaluate (default: 5)")
+    parser.add_argument("--episode-indices", help="Comma-separated episode indices to evaluate (overrides --episodes)")
     parser.add_argument(
         "--output-dir", default="outputs/local-eval", help="Output directory (default: outputs/local-eval)"
     )

@@ -14,6 +14,7 @@ class MLflowConfig:
 
     tracking_uri: str
     experiment_name: str
+    credential: object | None = None
 
 
 def bootstrap_mlflow(
@@ -38,7 +39,7 @@ def bootstrap_mlflow(
     try:
         import mlflow
         from azure.ai.ml import MLClient
-        from azure.identity import DefaultAzureCredential
+        from azure.identity import AzureCliCredential, DefaultAzureCredential
     except ImportError as exc:
         print(f"[ERROR] Missing required package: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -57,10 +58,17 @@ def bootstrap_mlflow(
     print("[INFO] Initializing Azure ML connection...")
 
     try:
-        credential = DefaultAzureCredential(
-            managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID"),
-            authority=os.environ.get("AZURE_AUTHORITY_HOST"),
-        )
+        # Use AzureCliCredential for local runs; DefaultAzureCredential for cloud
+        # (managed identity). AZURE_CLIENT_ID presence indicates cloud environment.
+        if os.environ.get("AZURE_CLIENT_ID"):
+            credential = DefaultAzureCredential(
+                managed_identity_client_id=os.environ["AZURE_CLIENT_ID"],
+                authority=os.environ.get("AZURE_AUTHORITY_HOST"),
+            )
+            use_cli_credential = False
+        else:
+            credential = AzureCliCredential()
+            use_cli_credential = True
 
         client = MLClient(
             credential=credential,
@@ -76,6 +84,13 @@ def bootstrap_mlflow(
             print("[ERROR] Azure ML workspace does not expose MLflow tracking URI", file=sys.stderr)
             sys.exit(1)
 
+        # Local runs: use HTTPS URI with explicit Bearer token to avoid
+        # azureml-mlflow plugin picking up VM managed identity credentials.
+        if use_cli_credential and tracking_uri.startswith("azureml://"):
+            tracking_uri = tracking_uri.replace("azureml://", "https://")
+            token = credential.get_token("https://ml.azure.com/.default")
+            os.environ["MLFLOW_TRACKING_TOKEN"] = token.token
+
         mlflow.set_tracking_uri(tracking_uri)
 
         resolved_name = experiment_name or f"lerobot-{policy_type}-{job_name}"
@@ -89,7 +104,11 @@ def bootstrap_mlflow(
         config_path = Path("/tmp/mlflow_config.env")
         config_path.write_text(f"MLFLOW_TRACKING_URI={tracking_uri}\nMLFLOW_EXPERIMENT_NAME={resolved_name}\n")
 
-        return MLflowConfig(tracking_uri=tracking_uri, experiment_name=resolved_name)
+        return MLflowConfig(
+            tracking_uri=tracking_uri,
+            experiment_name=resolved_name,
+            credential=credential if use_cli_credential else None,
+        )
 
     except Exception as exc:
         print(f"[ERROR] Failed to configure Azure ML: {exc}", file=sys.stderr)

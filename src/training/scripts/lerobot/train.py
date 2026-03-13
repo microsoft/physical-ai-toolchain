@@ -51,6 +51,7 @@ _VAL_PATTERN = re.compile(r"val[_/]loss[:\s]+([\d.]+)")
 
 CHECKPOINT_CHECK_INTERVAL = 60
 SYSTEM_METRICS_INTERVAL = 30
+TOKEN_REFRESH_INTERVAL = 2700  # 45 minutes; Azure CLI tokens expire after ~1 hour
 
 
 def _parse_k_value(val: str) -> float:
@@ -148,6 +149,24 @@ def _build_train_params() -> dict[str, str]:
     }
 
 
+def _refresh_mlflow_token() -> None:
+    """Refresh the MLFLOW_TRACKING_TOKEN using AzureCliCredential.
+
+    No-op when AZURE_CLIENT_ID is set (cloud environment uses managed identity)
+    or when MLFLOW_TRACKING_TOKEN is not in use.
+    """
+    if os.environ.get("AZURE_CLIENT_ID") or not os.environ.get("MLFLOW_TRACKING_TOKEN"):
+        return
+    try:
+        from azure.identity import AzureCliCredential
+
+        token = AzureCliCredential().get_token("https://ml.azure.com/.default")
+        os.environ["MLFLOW_TRACKING_TOKEN"] = token.token
+        print("[MLflow] Refreshed tracking token")
+    except Exception as exc:
+        print(f"[MLflow] Token refresh failed: {exc}")
+
+
 def run_training(cmd: list[str], source: str = "osmo-lerobot-training") -> int:
     """Execute lerobot-train and log metrics to MLflow.
 
@@ -167,6 +186,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training") -> int:
     uploaded_checkpoints: set[str] = set()
     last_checkpoint_check = 0.0
     last_system_check = 0.0
+    last_token_refresh = time.time()
 
     with mlflow.start_run(run_name=os.environ.get("JOB_NAME", "lerobot-training")) as run:
         print(f"[MLflow] Run ID: {run.info.run_id}")
@@ -218,6 +238,11 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training") -> int:
                     last_system_check = current_time
                     with contextlib.suppress(Exception):
                         metrics.update(system_collector.collect_metrics())
+
+                # Refresh Azure CLI token before expiry
+                if current_time - last_token_refresh > TOKEN_REFRESH_INTERVAL:
+                    last_token_refresh = current_time
+                    _refresh_mlflow_token()
 
                 mlflow.log_metrics(metrics, step=step)
 
