@@ -1,4 +1,5 @@
 ---
+sidebar_position: 6
 title: Prerequisites and Build Validation
 description: Required tools, Azure access, NGC credentials, and build validation commands for contributing
 author: Microsoft Robotics-AI Team
@@ -35,7 +36,6 @@ Install these tools before contributing:
 | Docker      | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit) |
 | OSMO CLI    | latest          | <https://developer.nvidia.com/osmo>                                   |
 | hve-core    | latest          | <https://github.com/microsoft/hve-core>                               |
-
 
 ## Azure Access Requirements
 
@@ -106,6 +106,9 @@ Verify tool versions before validating:
 # Terraform
 terraform version  # >= 1.9.8
 
+# TFLint (Terraform linter)
+tflint --version  # >= 0.61.0
+
 # Azure CLI
 az version  # >= 2.65.0
 
@@ -152,15 +155,10 @@ terraform fmt -check -recursive deploy/
 cd deploy/001-iac/
 terraform init
 terraform validate
+
+# Lint Terraform configurations (required for infrastructure changes)
+tflint --recursive deploy/001-iac/
 ```
-### TFLint Installation
-
-TFLint validates Terraform configurations and is required for infrastructure linting.
-
-macOS (brew)
-
-```bash
-brew install tflint
 
 **Shell Scripts:**
 
