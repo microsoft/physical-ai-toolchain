@@ -199,6 +199,7 @@ This toolchain builds upon:
 - [NVIDIA Isaac Sim](https://developer.nvidia.com/isaac-sim) — Physics simulation
 - [NVIDIA OSMO](https://developer.nvidia.com/osmo) — Workflow orchestration
 - [LeRobot](https://github.com/huggingface/lerobot) — Imitation learning dataset format
+- Built with [HVE Core](https://github.com/microsoft/hve-core)
 
 ## 🤖 Responsible AI
 
