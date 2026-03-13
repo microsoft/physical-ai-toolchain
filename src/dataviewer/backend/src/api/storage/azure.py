@@ -10,6 +10,7 @@ import json
 
 from ..models.annotations import EpisodeAnnotationFile
 from .base import StorageAdapter, StorageError
+from .paths import dataset_id_to_blob_prefix
 from .serializers import DateTimeEncoder
 
 # Azure SDK imports are optional - only required when using this adapter
@@ -92,8 +93,9 @@ class AzureBlobStorageAdapter(StorageAdapter):
         return self._client
 
     def _get_blob_path(self, dataset_id: str, episode_index: int) -> str:
-        """Get the blob path for an episode's annotations."""
-        return f"{dataset_id}/annotations/episodes/episode_{episode_index:06d}.json"
+        """Get the blob path for an episode's annotations. Resolves -- to /."""
+        blob_prefix = dataset_id_to_blob_prefix(dataset_id)
+        return f"{blob_prefix}/annotations/episodes/episode_{episode_index:06d}.json"
 
     async def get_annotation(self, dataset_id: str, episode_index: int) -> EpisodeAnnotationFile | None:
         """
@@ -181,7 +183,7 @@ class AzureBlobStorageAdapter(StorageAdapter):
         Returns:
             Sorted list of episode indices that have annotations.
         """
-        prefix = f"{dataset_id}/annotations/episodes/episode_"
+        prefix = f"{dataset_id_to_blob_prefix(dataset_id)}/annotations/episodes/episode_"
 
         try:
             client = await self._get_client()

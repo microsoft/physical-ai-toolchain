@@ -1,5 +1,5 @@
 import { Loader2, Pause, Play, Repeat, RotateCcw, SkipBack, SkipForward } from 'lucide-react'
-import { type RefObject, type SyntheticEvent, useEffect, useMemo, useState } from 'react'
+import { type RefObject, type SyntheticEvent, useCallback, useEffect, useMemo, useState } from 'react'
 
 import { PlaybackControlStrip } from '@/components/playback/PlaybackControlStrip'
 import { SpeedControl } from '@/components/playback/SpeedControl'
@@ -10,7 +10,6 @@ import { ViewerDisplayControls } from '@/components/viewer-display'
 interface AnnotationWorkspacePlaybackCardProps {
   compact?: boolean
   canvasRef: RefObject<HTMLCanvasElement>
-  displayCanvasRef: RefObject<HTMLCanvasElement>
   videoRef: RefObject<HTMLVideoElement>
   videoSrc: string | null
   onVideoEnded: () => void
@@ -36,14 +35,11 @@ interface AnnotationWorkspacePlaybackCardProps {
   onSetFrameWithinPlaybackRange: (frame: number) => number
   playbackRangeHighlight: { left: string; width: string } | null
   playbackRangeLabel: string | null
-  frameCacheProgress?: number
-  frameCacheReady?: boolean
 }
 
 export function AnnotationWorkspacePlaybackCard({
   compact = false,
   canvasRef,
-  displayCanvasRef,
   videoRef,
   videoSrc,
   onVideoEnded,
@@ -69,8 +65,6 @@ export function AnnotationWorkspacePlaybackCard({
   onSetFrameWithinPlaybackRange,
   playbackRangeHighlight,
   playbackRangeLabel,
-  frameCacheProgress = 0,
-  frameCacheReady = true,
 }: AnnotationWorkspacePlaybackCardProps) {
   // Extract episode base path from frameImageUrl to detect episode switches
   const episodeBase = useMemo(() => {
@@ -80,6 +74,30 @@ export function AnnotationWorkspacePlaybackCard({
   }, [frameImageUrl])
 
   const [imageLoaded, setImageLoaded] = useState(false)
+  const [videoLoaded, setVideoLoaded] = useState(false)
+  const [showVideoLoading, setShowVideoLoading] = useState(false)
+
+  useEffect(() => {
+    if (!videoSrc) {
+      setVideoLoaded(false)
+      setShowVideoLoading(false)
+      return
+    }
+
+    setVideoLoaded(false)
+    setShowVideoLoading(false)
+    const timer = setTimeout(() => {
+      setShowVideoLoading(true)
+    }, 200)
+
+    return () => clearTimeout(timer)
+  }, [videoSrc])
+
+  const handleVideoLoadedMetadata = useCallback((event: SyntheticEvent<HTMLVideoElement>) => {
+    setVideoLoaded(true)
+    setShowVideoLoading(false)
+    onLoadedMetadata(event)
+  }, [onLoadedMetadata])
 
   useEffect(() => {
     if (!videoSrc && frameImageUrl) {
@@ -99,23 +117,17 @@ export function AnnotationWorkspacePlaybackCard({
           <canvas ref={canvasRef} className="hidden" />
 
           {videoSrc ? (
-            <>
-              <video
-                ref={videoRef}
-                src={videoSrc}
-                onEnded={onVideoEnded}
-                onLoadedMetadata={onLoadedMetadata}
-                muted
-                playsInline
-                preload="auto"
-                className="absolute opacity-0 pointer-events-none"
-              />
-              <canvas
-                ref={displayCanvasRef}
-                className="max-h-full max-w-full object-contain"
-                style={displayFilter ? { filter: displayFilter } : undefined}
-              />
-            </>
+            <video
+              ref={videoRef}
+              src={videoSrc}
+              onEnded={onVideoEnded}
+              onLoadedMetadata={handleVideoLoadedMetadata}
+              muted
+              playsInline
+              preload="auto"
+              className="max-h-full max-w-full object-contain"
+              style={displayFilter ? { filter: displayFilter } : undefined}
+            />
           ) : isInsertedFrame && interpolatedImageUrl ? (
             <img
               src={interpolatedImageUrl}
@@ -147,16 +159,10 @@ export function AnnotationWorkspacePlaybackCard({
             </div>
           )}
 
-          {videoSrc && !frameCacheReady && (
+          {videoSrc && !videoLoaded && showVideoLoading && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/30">
               <Loader2 className="h-8 w-8 animate-spin text-white" />
-              <p className="mt-2 text-sm text-white">Preparing frames…</p>
-              <div className="mt-3 h-1.5 w-48 overflow-hidden rounded-full bg-white/20">
-                <div
-                  className="h-full rounded-full bg-blue-400 transition-[width] duration-200"
-                  style={{ width: `${Math.round(frameCacheProgress * 100)}%` }}
-                />
-              </div>
+              <p className="mt-2 text-sm text-white">Loading video…</p>
             </div>
           )}
 

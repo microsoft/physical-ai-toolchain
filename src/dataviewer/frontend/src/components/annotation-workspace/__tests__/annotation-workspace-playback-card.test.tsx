@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { createRef } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AnnotationWorkspacePlaybackCard } from '@/components/annotation-workspace/AnnotationWorkspacePlaybackCard'
 
@@ -8,7 +8,6 @@ function renderPlaybackCard(overrides: Record<string, unknown> = {}) {
   const defaultProps = {
     compact: false,
     canvasRef: createRef<HTMLCanvasElement>(),
-    displayCanvasRef: createRef<HTMLCanvasElement>(),
     videoRef: createRef<HTMLVideoElement>(),
     videoSrc: null,
     onVideoEnded: vi.fn(),
@@ -39,6 +38,14 @@ function renderPlaybackCard(overrides: Record<string, unknown> = {}) {
 }
 
 describe('AnnotationWorkspacePlaybackCard', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('shows loading overlay for HDF5 episodes before first image loads', () => {
     renderPlaybackCard({
       videoSrc: null,
@@ -74,7 +81,6 @@ describe('AnnotationWorkspacePlaybackCard', () => {
       <AnnotationWorkspacePlaybackCard
         compact={false}
         canvasRef={createRef<HTMLCanvasElement>()}
-        displayCanvasRef={createRef<HTMLCanvasElement>()}
         videoRef={createRef<HTMLVideoElement>()}
         videoSrc={null}
         onVideoEnded={vi.fn()}
@@ -112,7 +118,6 @@ describe('AnnotationWorkspacePlaybackCard', () => {
       <AnnotationWorkspacePlaybackCard
         compact={false}
         canvasRef={createRef<HTMLCanvasElement>()}
-        displayCanvasRef={createRef<HTMLCanvasElement>()}
         videoRef={createRef<HTMLVideoElement>()}
         videoSrc={null}
         onVideoEnded={vi.fn()}
@@ -141,5 +146,61 @@ describe('AnnotationWorkspacePlaybackCard', () => {
     )
 
     expect(screen.getByText('Loading episode…')).toBeInTheDocument()
+  })
+
+  it('does not show video loading overlay before 200ms delay', () => {
+    renderPlaybackCard({
+      videoSrc: '/api/datasets/test/episodes/0/video/wrist',
+      frameImageUrl: null,
+    })
+
+    expect(screen.queryByText('Loading video…')).not.toBeInTheDocument()
+  })
+
+  it('shows video loading overlay after 200ms when video has not loaded', () => {
+    renderPlaybackCard({
+      videoSrc: '/api/datasets/test/episodes/0/video/wrist',
+      frameImageUrl: null,
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(200)
+    })
+
+    expect(screen.getByText('Loading video…')).toBeInTheDocument()
+  })
+
+  it('hides video loading overlay after loadedmetadata fires', () => {
+    renderPlaybackCard({
+      videoSrc: '/api/datasets/test/episodes/0/video/wrist',
+      frameImageUrl: null,
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(200)
+    })
+
+    expect(screen.getByText('Loading video…')).toBeInTheDocument()
+
+    const video = document.querySelector('video')!
+    fireEvent.loadedMetadata(video)
+
+    expect(screen.queryByText('Loading video…')).not.toBeInTheDocument()
+  })
+
+  it('does not show video loading overlay when video loads within 200ms', () => {
+    renderPlaybackCard({
+      videoSrc: '/api/datasets/test/episodes/0/video/wrist',
+      frameImageUrl: null,
+    })
+
+    const video = document.querySelector('video')!
+    fireEvent.loadedMetadata(video)
+
+    act(() => {
+      vi.advanceTimersByTime(200)
+    })
+
+    expect(screen.queryByText('Loading video…')).not.toBeInTheDocument()
   })
 })
