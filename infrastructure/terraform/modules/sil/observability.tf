@@ -15,7 +15,7 @@
 
 // DCR for AKS Container Insights Logs (requires DCE)
 resource "azurerm_monitor_data_collection_rule" "logs" {
-  count = var.data_collection_endpoint != null ? 1 : 0
+  count = var.should_deploy_dce ? 1 : 0
 
   name                        = "dcr-logs-${local.resource_name_suffix}"
   location                    = var.resource_group.location
@@ -54,7 +54,7 @@ resource "azurerm_monitor_data_collection_rule" "logs" {
 
 // DCR for AKS Prometheus Metrics (requires DCE and Monitor Workspace)
 resource "azurerm_monitor_data_collection_rule" "metrics" {
-  count = var.data_collection_endpoint != null && var.monitor_workspace != null ? 1 : 0
+  count = var.should_deploy_dce && var.should_deploy_monitor_workspace ? 1 : 0
 
   name                        = "dcr-metrics-${local.resource_name_suffix}"
   location                    = var.resource_group.location
@@ -88,7 +88,7 @@ resource "azurerm_monitor_data_collection_rule" "metrics" {
 
 // Associate Container Insights logs DCR with AKS
 resource "azurerm_monitor_data_collection_rule_association" "logs" {
-  count = var.data_collection_endpoint != null ? 1 : 0
+  count = var.should_deploy_dce ? 1 : 0
 
   name                    = "dcra-logs-${local.resource_name_suffix}"
   target_resource_id      = azurerm_kubernetes_cluster.main.id
@@ -97,7 +97,7 @@ resource "azurerm_monitor_data_collection_rule_association" "logs" {
 
 // Associate Prometheus metrics DCR with AKS
 resource "azurerm_monitor_data_collection_rule_association" "metrics" {
-  count = var.data_collection_endpoint != null && var.monitor_workspace != null ? 1 : 0
+  count = var.should_deploy_dce && var.should_deploy_monitor_workspace ? 1 : 0
 
   name                    = "dcra-metrics-${local.resource_name_suffix}"
   target_resource_id      = azurerm_kubernetes_cluster.main.id
@@ -110,7 +110,7 @@ resource "azurerm_monitor_data_collection_rule_association" "metrics" {
 
 // Required for Container Insights MSI authentication mode
 resource "azurerm_monitor_data_collection_rule_association" "dce" {
-  count = var.data_collection_endpoint != null ? 1 : 0
+  count = var.should_deploy_dce ? 1 : 0
 
   target_resource_id          = azurerm_kubernetes_cluster.main.id
   data_collection_endpoint_id = var.data_collection_endpoint.id
