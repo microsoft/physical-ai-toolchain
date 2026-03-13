@@ -3,8 +3,8 @@ const { themes: prismThemes } = require('prism-react-renderer');
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
-  title: 'Azure NVIDIA Robotics Reference Architecture',
-  tagline: 'End-to-end robotics simulation, training, and deployment on Azure',
+  title: 'Physical AI Toolchain',
+  tagline: 'Production-ready framework for training, deploying, and operating physical AI solutions on Azure with NVIDIA Isaac',
   favicon: 'img/microsoft-logo.svg',
 
   url: 'https://microsoft.github.io',
@@ -64,7 +64,7 @@ const config = {
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
       navbar: {
-        title: 'Azure NVIDIA Robotics',
+        title: 'Physical AI Toolchain',
         logo: {
           alt: 'Microsoft',
           src: 'img/microsoft-logo.svg',
