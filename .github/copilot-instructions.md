@@ -184,7 +184,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 ### Linting
 
-* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` in sequence
+* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` in sequence
 * `npm run spell-check` and `npm run format:tables` are NOT included in `lint:all` — run them separately
 * `npm run lint:md:fix` and `npm run format:tables` auto-fix markdown issues
 * `.copilot-tracking/` is excluded from markdown linting via `.markdownlint-cli2.jsonc`
