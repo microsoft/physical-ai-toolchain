@@ -18,7 +18,7 @@ dev = [
     "pytest",
     "pytest-mock",
     "pytest-cov",
-    "pydantic",
+    "pydantic==2.12.5",
     "ipykernel",
     "ipywidgets",
     "tqdm",
