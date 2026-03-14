@@ -73,7 +73,6 @@ AZURE CONTEXT:
         --resource-group NAME     Azure resource group
         --workspace-name NAME     Azure ML workspace
         --compute TARGET          Compute target override
-        --instance-type NAME      Instance type (default: gpuspot)
         --display-name NAME       Display name override
         --stream                  Stream logs after submission
 
@@ -179,7 +178,6 @@ mlflow_retries="${MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES:-5}"
 mlflow_timeout="${MLFLOW_HTTP_REQUEST_TIMEOUT:-600}"
 
 compute="${AZUREML_COMPUTE:-$(get_compute_target)}"
-instance_type="gpuspot"
 display_name=""
 stream_logs=false
 config_preview=false
@@ -222,7 +220,6 @@ while [[ $# -gt 0 ]]; do
     --mlflow-token-retries)       mlflow_retries="$2"; shift 2 ;;
     --mlflow-http-timeout)        mlflow_timeout="$2"; shift 2 ;;
     --compute)                    compute="$2"; shift 2 ;;
-    --instance-type)              instance_type="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
     --stream)                     stream_logs=true; shift ;;
     --config-preview)             config_preview=true; shift ;;
