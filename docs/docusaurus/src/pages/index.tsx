@@ -13,8 +13,8 @@ export default function Home(): React.ReactElement {
   return (
     <Layout>
       <HeroSection
-        title="Azure NVIDIA Robotics Reference Architecture"
-        subtitle="End-to-end reference architecture for training, deploying, and operating autonomous robots with Azure and NVIDIA Isaac."
+        title="Physical AI Toolchain"
+        subtitle="Production-ready framework for training, deploying, and operating physical AI solutions on Azure with NVIDIA Isaac."
       />
       <main>
         <section style={{ padding: '2rem 1.5rem' }}>
