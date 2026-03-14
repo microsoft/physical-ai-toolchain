@@ -49,7 +49,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath 'Modules/LintingHelpers.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot "../lib/Modules/CIHelpers.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/Modules/CIHelpers.psm1") -Force
 
 function Get-MarkdownTarget {
     <#
@@ -91,8 +91,8 @@ function Get-MarkdownTarget {
             foreach ($resolvedPath in $resolved) {
                 if (Test-Path -LiteralPath $resolvedPath -PathType Container) {
                     $targets += Get-ChildItem -LiteralPath $resolvedPath -Recurse -Include *.md |
-                                Where-Object { -not $_.PSIsContainer } |
-                                Select-Object -ExpandProperty FullName
+                    Where-Object { -not $_.PSIsContainer } |
+                    Select-Object -ExpandProperty FullName
                 }
                 else {
                     $targets += $resolvedPath.ProviderPath
@@ -229,8 +229,8 @@ function Invoke-MarkdownLinkCheckCore {
 
                             if ($status -eq 'dead') {
                                 $brokenLinks += @{
-                                    File = $relative
-                                    Link = $url
+                                    File   = $relative
+                                    Link   = $url
                                     Status = "$statusCode"
                                 }
                                 Write-CIAnnotation -Level Error -Message "Broken link: $url (Status: $statusCode)" -File $relative
@@ -266,13 +266,13 @@ function Invoke-MarkdownLinkCheckCore {
     }
 
     $results = @{
-        timestamp = (Get-Date).ToUniversalTime().ToString('o')
-        script = 'markdown-link-check'
-        summary = @{
-            total_files = $totalFiles
+        timestamp    = (Get-Date).ToUniversalTime().ToString('o')
+        script       = 'markdown-link-check'
+        summary      = @{
+            total_files             = $totalFiles
             files_with_broken_links = $failedFiles.Count
-            total_links_checked = $totalLinks
-            total_broken_links = $brokenLinks.Count
+            total_links_checked     = $totalLinks
+            total_broken_links      = $brokenLinks.Count
         }
         broken_links = $brokenLinks
     }

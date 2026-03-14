@@ -15,7 +15,7 @@
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot '../../linting/Invoke-PSScriptAnalyzer.ps1'
     $script:ModulePath = Join-Path $PSScriptRoot '../../linting/Modules/LintingHelpers.psm1'
-    $script:CIHelpersPath = Join-Path $PSScriptRoot '../../lib/Modules/CIHelpers.psm1'
+    $script:CIHelpersPath = Join-Path $PSScriptRoot '../../../../scripts/lib/Modules/CIHelpers.psm1'
 
     # Mock module info object returned by Get-Module PSScriptAnalyzer
     $script:MockPSModuleInfo = [PSCustomObject]@{ Name = 'PSScriptAnalyzer'; Version = [version]'1.22.0' }

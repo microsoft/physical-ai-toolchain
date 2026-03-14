@@ -27,7 +27,7 @@ Describe 'Default configuration values' -Tag 'Unit' {
             Remove-Item "env:$name" -ErrorAction SilentlyContinue
         }
 
-        . $PSScriptRoot/../../../deploy/002-setup/defaults.ps1
+        . $PSScriptRoot/../../../../deploy/002-setup/defaults.ps1
     }
 
     AfterAll {
@@ -119,7 +119,7 @@ Describe 'Environment variable overrides' -Tag 'Unit' {
         $env:TIMEOUT_DEPLOY = '999s'
         $env:GPU_INSTANCE_TYPE = 'Standard_Custom_VM'
 
-        . $PSScriptRoot/../../../deploy/002-setup/defaults.ps1
+        . $PSScriptRoot/../../../../deploy/002-setup/defaults.ps1
     }
 
     AfterAll {

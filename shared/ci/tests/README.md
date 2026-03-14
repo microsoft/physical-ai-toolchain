@@ -8,7 +8,7 @@ PowerShell tests use [Pester 5.7.1](https://pester.dev/) with a split configurat
 ## 🏗️ Directory Structure
 
 ```text
-scripts/tests/
+shared/ci/tests/
 ├── Invoke-PesterTests.ps1              # Runner wrapper for local and CI execution
 ├── pester.config.ps1                   # Pester 5.x configuration generator
 ├── Fixtures/                           # Static test data organized by domain
@@ -27,19 +27,19 @@ scripts/tests/
 ### Local Execution
 
 ```powershell
-./scripts/tests/Invoke-PesterTests.ps1
+./shared/ci/tests/Invoke-PesterTests.ps1
 ```
 
 Run with code coverage:
 
 ```powershell
-./scripts/tests/Invoke-PesterTests.ps1 -CodeCoverage
+./shared/ci/tests/Invoke-PesterTests.ps1 -CodeCoverage
 ```
 
 Run tests in a specific subdirectory:
 
 ```powershell
-./scripts/tests/Invoke-PesterTests.ps1 -TestPath ./scripts/tests/security
+./shared/ci/tests/Invoke-PesterTests.ps1 -TestPath ./shared/ci/tests/security
 ```
 
 ### npm Script
@@ -53,7 +53,7 @@ npm run test:ps
 CI mode enables NUnit XML output, non-zero exit on failure, and GitHub Actions annotations:
 
 ```powershell
-./scripts/tests/Invoke-PesterTests.ps1 -CI -CodeCoverage
+./shared/ci/tests/Invoke-PesterTests.ps1 -CI -CodeCoverage
 ```
 
 ## ⚙️ Conventions
@@ -62,12 +62,12 @@ CI mode enables NUnit XML output, non-zero exit on failure, and GitHub Actions a
 
 Test files use `.Tests.ps1` extension and mirror source layout:
 
-| Source Path                                   | Test Path                                                 |
-|-----------------------------------------------|-----------------------------------------------------------|
-| `scripts/security/Test-DependencyPinning.ps1` | `scripts/tests/security/Test-DependencyPinning.Tests.ps1` |
-| `scripts/linting/Check-Something.ps1`         | `scripts/tests/linting/Check-Something.Tests.ps1`         |
+| Source Path                                     | Test Path                                                   |
+|-------------------------------------------------|-------------------------------------------------------------|
+| `shared/ci/security/Test-DependencyPinning.ps1` | `shared/ci/tests/security/Test-DependencyPinning.Tests.ps1` |
+| `shared/ci/linting/Check-Something.ps1`         | `shared/ci/tests/linting/Check-Something.Tests.ps1`         |
 
-Test subdirectories mirror the `scripts/` source layout. Create matching directories under `scripts/tests/` as you add tests for new source areas.
+Test subdirectories mirror the `shared/ci/` source layout. Create matching directories under `shared/ci/tests/` as you add tests for new source areas.
 
 ### Tags
 

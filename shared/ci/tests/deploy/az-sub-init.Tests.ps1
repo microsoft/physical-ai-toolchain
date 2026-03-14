@@ -21,7 +21,7 @@ BeforeAll {
     Mock Get-Command { [PSCustomObject]@{ Name = 'az' } } -ParameterFilter { $Name -eq 'az' }
     Mock Write-Host {}
 
-    . $PSScriptRoot/../../../deploy/000-prerequisites/az-sub-init.ps1
+    . $PSScriptRoot/../../../../deploy/000-prerequisites/az-sub-init.ps1
 }
 
 AfterAll {

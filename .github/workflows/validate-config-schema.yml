@@ -4,12 +4,15 @@ on:
   pull_request:
     paths:
       - 'src/common/config_models.py'
+      - 'data-pipeline/capture/models/config_models.py'
       - 'config/recording_config.schema.json'
       - 'config/generate_config_schema.py'
+      - 'data-pipeline/capture/config/**'
   push:
     branches: [main]
     paths:
       - 'src/common/config_models.py'
+      - 'data-pipeline/capture/models/config_models.py'
       - 'config/recording_config.schema.json'
 
 permissions:

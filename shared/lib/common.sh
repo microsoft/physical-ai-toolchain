@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Shared functions for 002-setup deployment scripts
+# Shared functions for deployment and submission scripts
 # Follows k3s/Docker/Homebrew conventions for user-facing scripts
 
 # Source repo-root .env.local for local environment overrides (not committed to git)
 _common_sh_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_env_local="$(cd "$_common_sh_dir/../../.." 2>/dev/null && pwd)/.env.local"
+_env_local="$(cd "$_common_sh_dir/../.." 2>/dev/null && pwd)/.env.local"
 if [[ -f "$_env_local" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -37,9 +37,9 @@ require_tools() {
 # Override the osmo command with the local osmo-dev.sh Bazel wrapper.
 # Requires OSMO_SOURCE_DIR in .env.local or environment (see optional/osmo-dev.sh --help).
 activate_local_osmo() {
-  local lib_dir
-  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  OSMO_DEV_CLI="${lib_dir}/../optional/osmo-dev.sh"
+  local repo_root
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  OSMO_DEV_CLI="${repo_root}/deploy/002-setup/optional/osmo-dev.sh"
 
   if [[ ! -x "$OSMO_DEV_CLI" ]]; then
     fatal "osmo-dev.sh not found at $OSMO_DEV_CLI"
@@ -47,6 +47,7 @@ activate_local_osmo() {
 
   info "Using local OSMO CLI: $OSMO_DEV_CLI"
 
+  # shellcheck disable=SC2329  # exported via export -f for child shells
   osmo() { "$OSMO_DEV_CLI" "$@"; }
   export OSMO_DEV_CLI
   export -f osmo
@@ -83,7 +84,8 @@ tf_get() {
 
 # Require a terraform output value (fatal if missing)
 tf_require() {
-  local json="${1:?json required}" key="${2:?key required}" description="${3:-$key}"
+  local json="${1:?json required}" key="${2:?key required}"
+  local description="${3:-$key}"
   local val
   val=$(tf_get "$json" "$key")
   [[ -n "$val" ]] || fatal "$description not found in terraform outputs"
@@ -252,7 +254,7 @@ apply_secret_provider_class() {
   local tenant_id="${4:?tenant_id required}"
 
   local manifest_dir
-  manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/manifests"
+  manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/deploy/002-setup/manifests"
 
   export NAMESPACE="$namespace"
   export KEY_VAULT_NAME="$keyvault"

@@ -42,21 +42,26 @@ $configuration.Output.CILogLevel = 'Error'
 # Test result configuration (NUnit XML for CI artifact upload)
 $configuration.TestResult.Enabled = $CI.IsPresent
 $configuration.TestResult.OutputFormat = 'NUnitXml'
-$configuration.TestResult.OutputPath = Join-Path $PSScriptRoot '../../logs/pester-results.xml'
+$configuration.TestResult.OutputPath = Join-Path $PSScriptRoot '../../../logs/pester-results.xml'
 $configuration.TestResult.TestSuiteName = 'Robotics-RefArch-PowerShell-Tests'
 
 # Code coverage configuration
 if ($CodeCoverage.IsPresent) {
     $configuration.CodeCoverage.Enabled = $true
     $configuration.CodeCoverage.OutputFormat = 'JaCoCo'
-    $configuration.CodeCoverage.OutputPath = Join-Path $PSScriptRoot '../../logs/coverage.xml'
+    $configuration.CodeCoverage.OutputPath = Join-Path $PSScriptRoot '../../../logs/coverage.xml'
 
     # Resolve coverage paths explicitly - Join-Path with wildcards returns literal paths without file system expansion in Pester configuration
-    $scriptRoot = Split-Path $PSScriptRoot -Parent
-    $coverageDirs = @('linting', 'security', 'lib')
+    $ciRoot = Split-Path $PSScriptRoot -Parent
+    $repoRoot = Split-Path (Split-Path $ciRoot -Parent) -Parent
+    $coverageSources = @(
+        (Join-Path $ciRoot 'linting'),
+        (Join-Path $ciRoot 'security'),
+        (Join-Path $repoRoot 'scripts' 'lib')
+    )
 
-    $coveragePaths = $coverageDirs | ForEach-Object {
-        Get-ChildItem -Path (Join-Path $scriptRoot $_) -Include '*.ps1', '*.psm1' -Recurse -File -ErrorAction SilentlyContinue
+    $coveragePaths = $coverageSources | ForEach-Object {
+        Get-ChildItem -Path $_ -Include '*.ps1', '*.psm1' -Recurse -File -ErrorAction SilentlyContinue
     } | Where-Object {
         $_.FullName -notmatch '\.Tests\.ps1$'
     } | Select-Object -ExpandProperty FullName

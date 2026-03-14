@@ -222,7 +222,7 @@ function Initialize-GitMocks {
 
         [string]$MergeBase = 'abc123def456789',
 
-        [string[]]$ChangedFiles = @('scripts/linting/Test-Script.ps1', 'docs/README.md'),
+        [string[]]$ChangedFiles = @('shared/ci/linting/Test-Script.ps1', 'docs/README.md'),
 
         [int]$MergeBaseExitCode = 0,
 
@@ -397,27 +397,27 @@ function Get-MockGitDiffScenario {
             return @()
         }
         'SingleFile' {
-            return @('scripts/linting/Test.ps1')
+            return @('shared/ci/linting/Test.ps1')
         }
         'MultipleFiles' {
             return @(
-                'scripts/linting/Script1.ps1',
-                'scripts/linting/Script2.ps1',
-                'scripts/linting/Script3.ps1'
+                'shared/ci/linting/Script1.ps1',
+                'shared/ci/linting/Script2.ps1',
+                'shared/ci/linting/Script3.ps1'
             )
         }
         'MixedExtensions' {
             return @(
-                'scripts/linting/Script.ps1',
+                'shared/ci/linting/Script.ps1',
                 'docs/README.md',
                 'config/settings.json',
-                'scripts/security/Check.ps1'
+                'shared/ci/security/Check.ps1'
             )
         }
         'DeepPaths' {
             return @(
-                'scripts/linting/Modules/Helpers/Utils.psm1',
-                'scripts/linting/Modules/Helpers/Tests/Utils.Tests.ps1',
+                'shared/ci/linting/Modules/Helpers/Utils.psm1',
+                'shared/ci/linting/Modules/Helpers/Tests/Utils.Tests.ps1',
                 'docs/api/v1/endpoints/users.md'
             )
         }

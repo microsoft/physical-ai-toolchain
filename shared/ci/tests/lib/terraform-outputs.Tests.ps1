@@ -11,7 +11,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0' }
 
 BeforeAll {
-    . $PSScriptRoot/../../lib/terraform-outputs.ps1
+    . $PSScriptRoot/../../../../scripts/lib/terraform-outputs.ps1
 }
 
 Describe 'Read-TerraformOutputs' -Tag 'Unit' {

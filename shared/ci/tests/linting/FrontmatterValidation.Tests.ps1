@@ -1,10 +1,10 @@
 ﻿#Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0' }
 
-using module ..\..\..\scripts\linting\Modules\FrontmatterValidation.psm1
+using module ..\..\linting\Modules\FrontmatterValidation.psm1
 
 BeforeAll {
-    $modulePath = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'linting' 'Modules' 'FrontmatterValidation.psm1'
+    $modulePath = Join-Path $PSScriptRoot '..' '..' 'linting' 'Modules' 'FrontmatterValidation.psm1'
     Import-Module $modulePath -Force
     $script:FVModule = Get-Module FrontmatterValidation
     $script:FixtureDir = Join-Path $PSScriptRoot '..' 'Fixtures' 'Frontmatter'
@@ -476,7 +476,7 @@ Describe 'Get-FileTypeInfo' -Tag 'Unit' {
     }
 
     It 'does not require frontmatter for non-matching files' {
-        $info = Get-FileTypeInfo -RelativePath 'scripts/linting/README.md'
+        $info = Get-FileTypeInfo -RelativePath 'shared/ci/linting/README.md'
         $info.IsDocumentation | Should -BeFalse
         $info.IsInstruction | Should -BeFalse
         $info.IsPrompt | Should -BeFalse
@@ -982,7 +982,7 @@ Describe 'Test-SingleFileFrontmatter' -Tag 'Unit' {
 
     It 'returns valid for non-matching file types' {
         $filePath = Join-Path $script:FixtureDir 'valid-docs.md'
-        $result = Test-SingleFileFrontmatter -FilePath $filePath -RelativePath 'scripts/linting/README.md'
+        $result = Test-SingleFileFrontmatter -FilePath $filePath -RelativePath 'shared/ci/linting/README.md'
         $result.IsValid | Should -BeTrue
         $result.Issues.Count | Should -Be 0
     }
@@ -1366,7 +1366,7 @@ Describe 'Test-SingleFileFrontmatter footer integration' -Tag 'Unit' {
             $content = "# Test`nSome content"
             $tempFile = Join-Path $TestDrive 'helper.md'
             Set-Content -Path $tempFile -Value $content
-            $result = Test-SingleFileFrontmatter -FilePath $tempFile -RelativePath 'scripts/linting/README.md'
+            $result = Test-SingleFileFrontmatter -FilePath $tempFile -RelativePath 'shared/ci/linting/README.md'
             $footerIssues = $result.Issues | Where-Object { $_.Field -eq 'footer' }
             $footerIssues | Should -HaveCount 0
         }

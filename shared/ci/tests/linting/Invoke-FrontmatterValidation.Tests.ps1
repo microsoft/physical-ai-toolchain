@@ -1,13 +1,13 @@
 ﻿#Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0' }
 
-using module ..\..\..\scripts\linting\Modules\FrontmatterValidation.psm1
+using module ..\..\linting\Modules\FrontmatterValidation.psm1
 
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '')]
 param()
 
 BeforeDiscovery {
-    $lintingDir = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'linting'
+    $lintingDir = Join-Path $PSScriptRoot '..' '..' 'linting'
     $schemaDir = Join-Path $lintingDir 'schemas' 'frontmatter'
     $mappingPath = Join-Path $schemaDir 'schema-mapping.json'
     $script:SchemaAvailable = Test-Path $mappingPath
@@ -15,9 +15,9 @@ BeforeDiscovery {
 
 BeforeAll {
     # Import modules
-    $lintingDir = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'linting'
+    $lintingDir = Join-Path $PSScriptRoot '..' '..' 'linting'
     $modulePath = Join-Path $lintingDir 'Modules' 'FrontmatterValidation.psm1'
-    $ciHelpersPath = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'lib' 'Modules' 'CIHelpers.psm1'
+    $ciHelpersPath = Join-Path $PSScriptRoot '..' '..' '..' '..' 'scripts' 'lib' 'Modules' 'CIHelpers.psm1'
     $lintingHelpersPath = Join-Path $lintingDir 'Modules' 'LintingHelpers.psm1'
     $gitMocksPath = Join-Path $PSScriptRoot '..' 'Mocks' 'GitMocks.psm1'
 
@@ -120,7 +120,7 @@ Describe 'Get-SchemaForFile' -Tag 'Unit' {
         }
 
         It 'falls back to default schema for unmatched paths' -Skip:(-not $script:SchemaAvailable) {
-            $result = Get-SchemaForFile -FilePath 'scripts/linting/README.md' -SchemaContext $script:TestSchemaContext
+            $result = Get-SchemaForFile -FilePath 'shared/ci/linting/README.md' -SchemaContext $script:TestSchemaContext
             $result | Should -Not -BeNullOrEmpty
             $result.SchemaName | Should -Be 'base-frontmatter.schema.json'
         }

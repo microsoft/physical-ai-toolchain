@@ -167,7 +167,7 @@ Describe 'Markdown-Link-Check Integration' -Tag 'Integration' {
 
 Describe 'Invoke-MarkdownLinkCheckCore' -Tag 'Unit' {
     BeforeAll {
-        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../../..')).Path
         $script:FixtureConfig = Join-Path $PSScriptRoot '../Fixtures/Linting/link-check-config.json'
     }
 

@@ -1,0 +1,45 @@
+{
+  "ScanPath": "/private/tmp/6368703d-faae-47aa-b28a-8fe648367915/test-workflows",
+  "Timestamp": "2026-03-14T16:27:35.989375-07:00",
+  "TotalFiles": 0,
+  "ScannedFiles": 1,
+  "TotalDependencies": 1,
+  "PinnedDependencies": 0,
+  "UnpinnedDependencies": 1,
+  "ComplianceScore": 0.0,
+  "Violations": [
+    {
+      "File": ".github/workflows/test.yml",
+      "Line": 1,
+      "Type": "github-actions",
+      "Name": "actions/checkout",
+      "Version": "invalid!!!",
+      "CurrentRef": "uses: actions/checkout@invalid!!!",
+      "Severity": "High",
+      "ViolationType": null,
+      "Description": "Unpinned dependency: GitHub Actions uses statements",
+      "Remediation": "Enable -Remediate flag for specific SHA suggestions",
+      "Metadata": {
+        "PatternDescription": "GitHub Actions uses statements",
+        "LineContent": "u"
+      }
+    }
+  ],
+  "Summary": {
+    "github-actions": {
+      "High": 1,
+      "Medium": 0,
+      "Low": 0,
+      "Total": 1
+    }
+  },
+  "Metadata": {
+    "ExcludedPaths": "",
+    "IncludedTypes": "github-actions,npm,pip,shell-downloads",
+    "RemediationEnabled": false,
+    "ComplianceThreshold": 95,
+    "PowerShellVersion": "7.5.4",
+    "Platform": "Unix",
+    "ScanTimestamp": "2026-03-14T16:27:35.989Z"
+  }
+}

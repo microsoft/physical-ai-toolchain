@@ -8,7 +8,7 @@
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot '../../linting/Invoke-LinkLanguageCheck.ps1'
     $script:ModulePath = Join-Path $PSScriptRoot '../../linting/Modules/LintingHelpers.psm1'
-    $script:CIHelpersPath = Join-Path $PSScriptRoot '../../lib/Modules/CIHelpers.psm1'
+    $script:CIHelpersPath = Join-Path $PSScriptRoot '../../../../scripts/lib/Modules/CIHelpers.psm1'
 
     Import-Module $script:ModulePath -Force
     Import-Module $script:CIHelpersPath -Force

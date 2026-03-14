@@ -45,7 +45,7 @@ jobs:
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $scriptArgs['ChangedFilesOnly'] = $true
           }
-          & scripts/linting/Invoke-PSScriptAnalyzer.ps1 @scriptArgs
+          & shared/ci/linting/Invoke-PSScriptAnalyzer.ps1 @scriptArgs
 
       - name: Upload PSScriptAnalyzer results
         if: always()

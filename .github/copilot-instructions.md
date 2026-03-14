@@ -38,6 +38,7 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 | `src/training/` | Python training package (built as wheel via hatchling) |
 | `scripts/` | AzureML and OSMO job submission scripts |
 | `workflows/` | Job definition templates (AzureML YAML, OSMO workflow YAML) |
+| `shared/lib/` | Cross-domain shared shell libraries (canonical location) |
 | `external/IsaacLab/` | NVIDIA IsaacLab (cloned for IntelliSense only, not built locally) |
 | `docs/contributing/` | Architecture, roadmap, style guides, contribution workflow |
 
@@ -63,8 +64,8 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 Detailed template and structure in `.github/instructions/shell-scripts.instructions.md`.
 
 * Two Terraform output libraries exist (do NOT mix them):
-  * `deploy/002-setup/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy scripts
-  * `scripts/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts
+  * `shared/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy scripts (symlinked at `deploy/002-setup/lib/common.sh`)
+  * `shared/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts (symlinked at `scripts/lib/terraform-outputs.sh`)
 * `.env.local` load order: `common.sh` loads `.env.local` BEFORE `defaults.conf`; override defaults via `${VAR:-default}` pattern
 * Idempotent K8s operations: `kubectl create --dry-run=client -o yaml | kubectl apply -f -`
 * Every script supports `--config-preview` (print configuration and exit without changes)
@@ -209,7 +210,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 
 ### Pester Tests
 
-* `npm run test:ps` — runs Pester tests in `scripts/tests/` covering linting helpers and security checks
+* `npm run test:ps` — runs Pester tests in `shared/ci/tests/` covering linting helpers and security checks
 
 ## Contributing References
 

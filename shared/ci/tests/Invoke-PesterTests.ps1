@@ -23,7 +23,7 @@
 .PARAMETER CodeCoverage
     Enables JaCoCo code coverage collection.
 .PARAMETER TestPath
-    Paths to search for test files. Defaults to the scripts/tests directory.
+    Paths to search for test files. Defaults to the shared/ci/tests directory.
 .EXAMPLE
     ./Invoke-PesterTests.ps1
 .EXAMPLE
@@ -50,7 +50,7 @@ $result = Invoke-Pester -Configuration $config
 
 # Write step summary in CI environments when CIHelpers is available
 if ($CI.IsPresent) {
-    $ciHelpersPath = Join-Path $PSScriptRoot '../lib/Modules/CIHelpers.psm1'
+    $ciHelpersPath = Join-Path $PSScriptRoot '../../../scripts/lib/Modules/CIHelpers.psm1'
     if (Test-Path $ciHelpersPath) {
         Import-Module $ciHelpersPath -Force
         if (Get-Command -Name Write-CIStepSummary -ErrorAction SilentlyContinue) {

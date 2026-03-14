@@ -19,7 +19,7 @@
     The base branch to compare against when using ChangedFilesOnly. Defaults to 'origin/main'.
 
 .PARAMETER ConfigPath
-    Path to the PSScriptAnalyzer settings file. Defaults to 'scripts/linting/PSScriptAnalyzer.psd1'.
+    Path to the PSScriptAnalyzer settings file. Defaults to 'shared/ci/linting/PSScriptAnalyzer.psd1'.
 
 .PARAMETER OutputPath
     Path for JSON results output. When specified, results are exported to this file.
@@ -44,7 +44,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot "Modules/LintingHelpers.psm1") -Force
-Import-Module (Join-Path $PSScriptRoot "../lib/Modules/CIHelpers.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/Modules/CIHelpers.psm1") -Force
 
 function Invoke-PSScriptAnalyzerCore {
     [CmdletBinding()]
