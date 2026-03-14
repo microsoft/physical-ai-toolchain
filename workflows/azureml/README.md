@@ -2,7 +2,7 @@
 title: AzureML Workflows
 description: Azure Machine Learning job templates for robotics training and validation
 author: Edge AI Team
-ms.date: 2025-12-04
+ms.date: 2026-03-14
 ms.topic: reference
 ---
 
