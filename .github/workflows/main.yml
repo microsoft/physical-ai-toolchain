@@ -198,6 +198,7 @@ jobs:
 
       - name: Regenerate uv.lock
         if: ${{ steps.release.outputs.prs_created == 'true' }}
+        shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
