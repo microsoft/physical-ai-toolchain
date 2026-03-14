@@ -2,7 +2,7 @@
 title: OSMO Workflows
 description: NVIDIA OSMO workflow templates for distributed robotics training
 author: Edge AI Team
-ms.date: 2025-12-04
+ms.date: 2026-03-14
 ms.topic: reference
 ---
 
