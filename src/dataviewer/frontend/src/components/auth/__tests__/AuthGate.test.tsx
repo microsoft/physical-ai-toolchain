@@ -63,9 +63,9 @@ describe('AuthGate', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('authenticated')).toBeInTheDocument()
-    })
-    expect(mockLoginRedirect).toHaveBeenCalledWith({
-      scopes: ['api://test-client-id/access_as_user'],
+      expect(mockLoginRedirect).toHaveBeenCalledWith({
+        scopes: ['api://test-client-id/access_as_user'],
+      })
     })
   })
 
@@ -80,7 +80,7 @@ describe('AuthGate', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('authenticated')).toBeInTheDocument()
+      expect(mockLoginRedirect).toHaveBeenCalled()
     })
-    expect(mockLoginRedirect).toHaveBeenCalled()
   })
 })
