@@ -236,5 +236,5 @@ The CI/CD pipeline validates that the schema is up-to-date with the pydantic mod
 
 ## 🔗 Related Documentation
 
-* [LeRobot Integration](../docs/lerobot-inference.md) - Dataset structure and feature mapping
-* [AzureML Validation Job Debugging](../docs/azureml-validation-job-debugging.md) - Training pipeline integration
+* [LeRobot Integration](../docs/inference/lerobot-inference.md) - Dataset structure and feature mapping
+* [AzureML Validation Job Debugging](../docs/operations/azureml-validation-job-debugging.md) - Training pipeline integration
