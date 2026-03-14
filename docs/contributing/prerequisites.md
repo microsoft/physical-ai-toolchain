@@ -37,6 +37,57 @@ Install these tools before contributing:
 | OSMO CLI    | latest          | <https://developer.nvidia.com/osmo>                                   |
 | hve-core    | latest          | <https://github.com/microsoft/hve-core>                               |
 
+## TFLint Setup
+
+Install TFLint locally to match CI linting for Terraform changes.
+
+### Install Commands
+
+**macOS (Homebrew):**
+
+```bash
+brew install tflint
+```
+
+**Windows (Chocolatey):**
+
+```powershell
+choco install tflint
+```
+
+**Windows (Scoop):**
+
+```powershell
+scoop install tflint
+```
+
+**Linux (official install script):**
+
+```bash
+curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+```
+
+### First-Time Initialization
+
+Run plugin initialization before your first lint run:
+
+```bash
+# From repository root
+tflint --init --chdir=deploy/001-iac/
+
+# Or from the Terraform directory directly
+cd deploy/001-iac/
+tflint --init
+```
+
+### Optional VS Code Extension
+
+For inline Terraform lint diagnostics, install the `TFLint` VS Code extension:
+
+```bash
+code --install-extension terraform-linters.tflint
+```
+
 ## Azure Access Requirements
 
 Deploying this architecture requires Azure subscription access with specific permissions and quotas:

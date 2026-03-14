@@ -174,7 +174,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | File Type | Validation Commands |
 | --- | --- |
 | `*.md` | `npm run lint:md`, `npm run spell-check`, `npm run format:tables` |
-| `*.tf`, `*.tfvars` | `terraform fmt -check`, `terraform validate`, `terraform plan` |
+| `*.tf`, `*.tfvars` | `terraform fmt -check`, `terraform validate`, `tflint --recursive deploy/001-iac/`, `terraform plan` |
 | `*.sh` | `shellcheck <file>` |
 | `*.ps1` | `npm run lint:ps` |
 | `*.yml` (GitHub Actions) | `npm run lint:yaml` |
