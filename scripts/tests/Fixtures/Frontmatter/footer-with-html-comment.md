@@ -2,7 +2,7 @@
 title: HTML Comment Footer Test
 description: A document with HTML comment wrapping around the footer
 author: test-author
-ms.date: 2025-01-15
+ms.date: 2026-03-14
 ---
 
 Content with HTML comments interspersed near the footer.
