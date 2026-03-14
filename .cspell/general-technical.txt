@@ -1958,18 +1958,24 @@ desync
 dvwh
 dvwm
 emanufacturing
+fastapi
 faststart
 fourcc
 midtone
 movflags
 nameidentifier
 persistable
+pydantic
+radix
 rawvideo
 rvfc
+shadcn
 srcs
+tanstack
 tobytes
 ultrafast
 
 kolmogorov
 mqtt
 smirnov
+zustand
