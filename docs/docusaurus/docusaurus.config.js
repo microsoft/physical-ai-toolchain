@@ -12,7 +12,6 @@ const config = {
 
   organizationName: 'microsoft',
   projectName: 'physical-ai-toolchain',
-  trailingSlash: false,
 
   onBrokenLinks: 'warn',
 
