@@ -51,6 +51,10 @@ The project maintainers commit to remediating confirmed vulnerabilities based on
 
 Remediation timelines begin when the vulnerability is confirmed and may involve a code fix, configuration change, dependency update, or documented mitigation. Tracking is done through GitHub Security Advisories or GitHub issues. If a fix requires more time, the maintainers will publish a mitigation or workaround within the target window and document the extended timeline.
 
+## Security Assurance
+
+This project maintains a [threat model and assurance case](docs/security/threat-model.md) covering STRIDE analysis, trust boundaries, and risk acceptances for the reference architecture.
+
 ## Security Considerations for Deployers
 
 > [!IMPORTANT]
