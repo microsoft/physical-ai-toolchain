@@ -15,6 +15,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.5.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.4.0...v0.5.0) (2026-03-14)
+
+
+### ✨ Features
+
+* add dataviewer web application for dataset analysis and annotation ([#375](https://github.com/microsoft/physical-ai-toolchain/issues/375)) ([c44d7bb](https://github.com/microsoft/physical-ai-toolchain/commit/c44d7bbe7765e456e75c2ccba969eef1d116f912))
+* add return type annotations to cli_args functions ([#476](https://github.com/microsoft/physical-ai-toolchain/issues/476)) ([35523ee](https://github.com/microsoft/physical-ai-toolchain/commit/35523ee5fb16a1eb6916aa154524c5798ad1477b))
+* add YAML config schema with pydantic validation for ROS 2 recording ([#376](https://github.com/microsoft/physical-ai-toolchain/issues/376)) ([1fa5243](https://github.com/microsoft/physical-ai-toolchain/commit/1fa52430274c04813f207306810b8e0df0fe9994))
+* **agents:** Copilot agents and skills for dataviewer and OSMO training workflows. ([#444](https://github.com/microsoft/physical-ai-toolchain/issues/444)) ([8b72daf](https://github.com/microsoft/physical-ai-toolchain/commit/8b72dafd3a9b23be4bed7c4d97703fc289d713b2))
+* **build:** add automated ms.date freshness checking ([#448](https://github.com/microsoft/physical-ai-toolchain/issues/448)) ([f92ddbc](https://github.com/microsoft/physical-ai-toolchain/commit/f92ddbcb27027ed6cc4b183d2361d6b8b39e42f7))
+* **build:** add coverage.py configuration to pyproject.toml ([#428](https://github.com/microsoft/physical-ai-toolchain/issues/428)) ([eac7426](https://github.com/microsoft/physical-ai-toolchain/commit/eac74261d10a887bf834963bf593b92ff5aeb427))
+* **build:** add OpenSSF Scorecard workflow and badge ([#431](https://github.com/microsoft/physical-ai-toolchain/issues/431)) ([98a62e7](https://github.com/microsoft/physical-ai-toolchain/commit/98a62e7b089008d1401661498ac96057e0983584))
+* **build:** add release artifact signing and SBOM attestation ([#480](https://github.com/microsoft/physical-ai-toolchain/issues/480)) ([b226e96](https://github.com/microsoft/physical-ai-toolchain/commit/b226e964e56fa7d27fd308d2a9ca8157e0e9ad35))
+* **dataviewer:** add authentication middleware and CSRF protection for mutation endpoints ([#432](https://github.com/microsoft/physical-ai-toolchain/issues/432)) ([77c8a01](https://github.com/microsoft/physical-ai-toolchain/commit/77c8a016a6462e8649273967f6a3abaa63bcf5fc))
+* **docs:** create training documentation hub with guides and migration ([#380](https://github.com/microsoft/physical-ai-toolchain/issues/380)) ([0fdccc5](https://github.com/microsoft/physical-ai-toolchain/commit/0fdccc51b31e3d9e1b9b1390d3775ee3a329b601))
+* **docs:** port Docusaurus documentation site with full build validation ([#182](https://github.com/microsoft/physical-ai-toolchain/issues/182)) ([29dd640](https://github.com/microsoft/physical-ai-toolchain/commit/29dd6405c6d41ccfc66ec1f85a111ad511c498ce))
+* fix and deploy dataviewer ([#498](https://github.com/microsoft/physical-ai-toolchain/issues/498)) ([c922d49](https://github.com/microsoft/physical-ai-toolchain/commit/c922d49108c5a7603fb7d4b10eab45d1bf7b562e))
+* **inference:** add AzureML and local LeRobot inference workflows ([#438](https://github.com/microsoft/physical-ai-toolchain/issues/438)) ([f7d786a](https://github.com/microsoft/physical-ai-toolchain/commit/f7d786a9559cddcea449a47cf4c7512372b070ca))
+* **inference:** add MLflow trajectory plots and multi-source support to OSMO inference workflow ([#421](https://github.com/microsoft/physical-ai-toolchain/issues/421)) ([8637458](https://github.com/microsoft/physical-ai-toolchain/commit/8637458cf495a54dd44e95dea1fd392abb83efd1))
+* **infrastructure:** add optional observability and compute feature flags ([#437](https://github.com/microsoft/physical-ai-toolchain/issues/437)) ([9eba0da](https://github.com/microsoft/physical-ai-toolchain/commit/9eba0dac14784ddbbe7ab0bb8777655e87e7ef1f))
+* **scripts:** add --config-preview and deployment summary to submission scripts ([#499](https://github.com/microsoft/physical-ai-toolchain/issues/499)) ([4069806](https://github.com/microsoft/physical-ai-toolchain/commit/4069806c8a97993163aa6411fe036ee74666702a))
+* **scripts:** add Copilot attribution footer validation to frontmatter linting ([#378](https://github.com/microsoft/physical-ai-toolchain/issues/378)) ([4d595f2](https://github.com/microsoft/physical-ai-toolchain/commit/4d595f258331c213539e90bf288e9c739788a68e))
+* **src:** add dataviewer web application with storage adapter layer ([#404](https://github.com/microsoft/physical-ai-toolchain/issues/404)) ([8a9fb70](https://github.com/microsoft/physical-ai-toolchain/commit/8a9fb7009d16e6f7a579ab75662aabdf0e0810ca))
+
+
+### 🐛 Bug Fixes
+
+* **build:** expand CODEOWNERS coverage to critical paths ([#505](https://github.com/microsoft/physical-ai-toolchain/issues/505)) ([bafade1](https://github.com/microsoft/physical-ai-toolchain/commit/bafade1012ccde9b3d4a9613884d39e98ef0e2d6))
+* **build:** pin Docker base image and pip dependencies with Dependabot coverage ([#497](https://github.com/microsoft/physical-ai-toolchain/issues/497)) ([d3d7ea4](https://github.com/microsoft/physical-ai-toolchain/commit/d3d7ea4a507fd0f747c6eccdb1a1f1db4c4f4e45))
+* **build:** pin pydantic version and use uv in config schema validation workflow ([#493](https://github.com/microsoft/physical-ai-toolchain/issues/493)) ([28d823f](https://github.com/microsoft/physical-ai-toolchain/commit/28d823ff2a8f56d29b9800bcfea7cb497eb2523a))
+* **build:** pin uv installer to versioned URL ([#495](https://github.com/microsoft/physical-ai-toolchain/issues/495)) ([8d8541b](https://github.com/microsoft/physical-ai-toolchain/commit/8d8541ba736d0478eb0e13637fbbaa0e0e24f06a))
+* **build:** remove README frontmatter, add FrontmatterExcludePaths, enforce Pester 5 ([#443](https://github.com/microsoft/physical-ai-toolchain/issues/443)) ([641d0f3](https://github.com/microsoft/physical-ai-toolchain/commit/641d0f37cb12a7aeee9d3d1bf9bd8cd9ee5e1188))
+* **build:** resolve CI failures for release 0.5.0 PR ([#174](https://github.com/microsoft/physical-ai-toolchain/issues/174)) ([62c9900](https://github.com/microsoft/physical-ai-toolchain/commit/62c9900a99aa8e3dae9c310152bdce6557d9ba52))
+* **build:** resolve codecov PR comment suppression ([#523](https://github.com/microsoft/physical-ai-toolchain/issues/523)) ([5603bd7](https://github.com/microsoft/physical-ai-toolchain/commit/5603bd73f8c572ffac7d5c078798dfb9ad5cb36a))
+* **build:** use npm ci for deterministic frontend dependency install ([#491](https://github.com/microsoft/physical-ai-toolchain/issues/491)) ([ee8b5d3](https://github.com/microsoft/physical-ai-toolchain/commit/ee8b5d3219d35f1fddb357e4ddad7a1489bfe37a)), closes [#490](https://github.com/microsoft/physical-ai-toolchain/issues/490)
+* **ci:** add `wait_for_ci` to Codecov configuration ([#183](https://github.com/microsoft/physical-ai-toolchain/issues/183)) ([370cf44](https://github.com/microsoft/physical-ai-toolchain/commit/370cf442a21f0463d0db484db5c253a2695f847a))
+* **dataviewer:** add HTTP Range support for blob video streaming ([#165](https://github.com/microsoft/physical-ai-toolchain/issues/165)) ([8adde50](https://github.com/microsoft/physical-ai-toolchain/commit/8adde501f6440f8c0ddfdc0bba2cfb82312b8713))
+* **dataviewer:** remediate CodeQL alerts and align ruff config ([#419](https://github.com/microsoft/physical-ai-toolchain/issues/419)) ([eb6fac9](https://github.com/microsoft/physical-ai-toolchain/commit/eb6fac9a1ddae1288cfc5ea3fdf612fbe0f846bd))
+* **dataviewer:** remediate path traversal and input validation vulnerabilities ([#413](https://github.com/microsoft/physical-ai-toolchain/issues/413)) ([0a1d2ca](https://github.com/microsoft/physical-ai-toolchain/commit/0a1d2caef9a322721f0a4ea5dd8a30457231397b))
+* **docs:** remove trailingSlash: false for GitHub Pages compatibility ([#228](https://github.com/microsoft/physical-ai-toolchain/issues/228)) ([a78cb97](https://github.com/microsoft/physical-ai-toolchain/commit/a78cb97510ff4edb6669d05db09bfd215db96045))
+* **gpu:** add GPU Operator validation dependencies to GRID driver installer ([#441](https://github.com/microsoft/physical-ai-toolchain/issues/441)) ([eec42da](https://github.com/microsoft/physical-ai-toolchain/commit/eec42da514aaecab8ef25ba3cf46ea7cd31ecc29))
+* **scripts:** pin uv version in OSMO workflow templates ([#500](https://github.com/microsoft/physical-ai-toolchain/issues/500)) ([7edf13a](https://github.com/microsoft/physical-ai-toolchain/commit/7edf13a7785f590fb9332f8ed0acc24445a70360))
+* **scripts:** replace lambda with def in lerobot_handler to satisfy R… ([#176](https://github.com/microsoft/physical-ai-toolchain/issues/176)) ([baf9e58](https://github.com/microsoft/physical-ai-toolchain/commit/baf9e58961044fb5acdcb987be681e2bfd195977))
+* **settings:** update devcontainer name to match project context ([#177](https://github.com/microsoft/physical-ai-toolchain/issues/177)) ([745321e](https://github.com/microsoft/physical-ai-toolchain/commit/745321e7e62df0f0dde6b904311af279637fcd80))
+* **training:** correct learning rate mapping and pin LeRobot version ([#439](https://github.com/microsoft/physical-ai-toolchain/issues/439)) ([5cf9943](https://github.com/microsoft/physical-ai-toolchain/commit/5cf9943390b62a1edc6ae923e6f820bc6c40529b))
+* **workflows:** enable SARIF upload for dependency-pinning scans ([#502](https://github.com/microsoft/physical-ai-toolchain/issues/502)) ([124cad6](https://github.com/microsoft/physical-ai-toolchain/commit/124cad65806838398b4fcfc72bedf9c376153061)), closes [#501](https://github.com/microsoft/physical-ai-toolchain/issues/501)
+* **workflows:** remove redundant top-level permissions from codeql-analysis ([#489](https://github.com/microsoft/physical-ai-toolchain/issues/489)) ([1490fda](https://github.com/microsoft/physical-ai-toolchain/commit/1490fda6c522eacdba74bde6904fb2b7627a87ce))
+* **workflows:** use bash shell for uv.lock regeneration and add SARIF to dictionary ([#225](https://github.com/microsoft/physical-ai-toolchain/issues/225)) ([e6fa6ea](https://github.com/microsoft/physical-ai-toolchain/commit/e6fa6ea2f0d883492942011b770e03ce65c5416d))
+
+
+### 📚 Documentation
+
+* add chunking and compression configuration guide for Jetson edge recording ([#408](https://github.com/microsoft/physical-ai-toolchain/issues/408)) ([787a322](https://github.com/microsoft/physical-ai-toolchain/commit/787a322b4776b0d4159212ed22e25ecd326653e4))
+* **contributing:** remove version-specific planning language from ownership tip ([#407](https://github.com/microsoft/physical-ai-toolchain/issues/407)) ([3191f9b](https://github.com/microsoft/physical-ai-toolchain/commit/3191f9be34a0b2e4b81209aa6daa3de0a10d6d27))
+* **deploy:** replace deploy/ READMEs with pointer files ([#379](https://github.com/microsoft/physical-ai-toolchain/issues/379)) ([b3c3abb](https://github.com/microsoft/physical-ai-toolchain/commit/b3c3abb2ea3a6def816f7227ad9e7fef40e891f0))
+* **docs:** add bug report response timeline for OSSF report_responses criterion ([#485](https://github.com/microsoft/physical-ai-toolchain/issues/485)) ([9b26212](https://github.com/microsoft/physical-ai-toolchain/commit/9b2621273616114d52bbffcda8a49b07500805f4))
+* **docs:** add component update process for OpenSSF Silver badge ([#446](https://github.com/microsoft/physical-ai-toolchain/issues/446)) ([6adc8a2](https://github.com/microsoft/physical-ai-toolchain/commit/6adc8a27ba2a1cbb430a70deeb579201e1b12969))
+* **docs:** add deprecation policy for external interfaces ([#445](https://github.com/microsoft/physical-ai-toolchain/issues/445)) ([229d5db](https://github.com/microsoft/physical-ai-toolchain/commit/229d5db57f3f64e40b470d523ec2c81e3aa9b206))
+* **docs:** add YAML frontmatter to SUPPORT.md ([#478](https://github.com/microsoft/physical-ai-toolchain/issues/478)) ([d94c15d](https://github.com/microsoft/physical-ai-toolchain/commit/d94c15df31afe4ef998c19f646d8e4f8f73ad720)), closes [#347](https://github.com/microsoft/physical-ai-toolchain/issues/347)
+* **docs:** create inference and training docs hubs ([#402](https://github.com/microsoft/physical-ai-toolchain/issues/402)) ([7a20a2e](https://github.com/microsoft/physical-ai-toolchain/commit/7a20a2ec570bc257ec8fbe86e857f675894aa8b5))
+* **docs:** create reference hub and migrate script documentation ([#503](https://github.com/microsoft/physical-ai-toolchain/issues/503)) ([03a31c6](https://github.com/microsoft/physical-ai-toolchain/commit/03a31c622c588c8b1b41ed2b0b6e9014645ab90f))
+* **docs:** create training and inference documentation hubs ([#403](https://github.com/microsoft/physical-ai-toolchain/issues/403)) ([7be003b](https://github.com/microsoft/physical-ai-toolchain/commit/7be003bccd97b0d88d70f8f3462e9d34c1e48234))
+* **operations:** create operations hub and troubleshooting guide ([#525](https://github.com/microsoft/physical-ai-toolchain/issues/525)) ([31c7aaa](https://github.com/microsoft/physical-ai-toolchain/commit/31c7aaae4004b7b9a357fc4460e19b2b97a1347b))
+* **reference:** add copilot artifacts documentation hub ([#170](https://github.com/microsoft/physical-ai-toolchain/issues/170)) ([9a45ca4](https://github.com/microsoft/physical-ai-toolchain/commit/9a45ca49c1f11eace5445e489144c6b24d039955))
+* simplify root README and update prerequisites ([#440](https://github.com/microsoft/physical-ai-toolchain/issues/440)) ([c0c7710](https://github.com/microsoft/physical-ai-toolchain/commit/c0c77107d67167e7ba3a7767722d0409dfc6ea3f))
+
+
+### ♻️ Code Refactoring
+
+* **build:** align Python dependency workflows with uv ([#447](https://github.com/microsoft/physical-ai-toolchain/issues/447)) ([3102e03](https://github.com/microsoft/physical-ai-toolchain/commit/3102e03d6e6c844f1130c278b9c53dddf0119e75))
+* **docs:** rename Docusaurus site to Physical AI Toolchain ([#224](https://github.com/microsoft/physical-ai-toolchain/issues/224)) ([cfdf47a](https://github.com/microsoft/physical-ai-toolchain/commit/cfdf47a52be6b8367acb2dd025ca38e4355ee338))
+* **python:** move runtime deps to workflow pyproject manifests ([#405](https://github.com/microsoft/physical-ai-toolchain/issues/405)) ([6c5fbeb](https://github.com/microsoft/physical-ai-toolchain/commit/6c5fbeb80ba7d30f1d106d5a731835d355d9515d))
+
+
+### 📦 Build System
+
+* **build:** add Codecov upload to pytest workflow ([#434](https://github.com/microsoft/physical-ai-toolchain/issues/434)) ([0110c17](https://github.com/microsoft/physical-ai-toolchain/commit/0110c17a161eb2201ac615a74b671894b4b62b87))
+* **workflows:** enable coverage parameters and fix Pester test infrastructure ([#435](https://github.com/microsoft/physical-ai-toolchain/issues/435)) ([528bbde](https://github.com/microsoft/physical-ai-toolchain/commit/528bbde3cd3530934d0bdb026093e78a05e4eb29))
+
+
+### 🔧 Miscellaneous
+
+* **build:** add codecov.yml for unified coverage reporting ([#430](https://github.com/microsoft/physical-ai-toolchain/issues/430)) ([b0faf70](https://github.com/microsoft/physical-ai-toolchain/commit/b0faf700704b92a2993b443e6f394a8e01641977))
+* **deps:** bump cryptography from 45.0.7 to 46.0.5 in /src/training ([#506](https://github.com/microsoft/physical-ai-toolchain/issues/506)) ([a06434e](https://github.com/microsoft/physical-ai-toolchain/commit/a06434e4493f96d10c64628a0c2ef11f21a66605))
+* **deps:** bump minimatch in /src/dataviewer/frontend ([#416](https://github.com/microsoft/physical-ai-toolchain/issues/416)) ([38a7607](https://github.com/microsoft/physical-ai-toolchain/commit/38a76072243cbf12496b5c6ac196f7a78a602c01))
+* **deps:** bump rollup in /src/dataviewer/frontend ([#417](https://github.com/microsoft/physical-ai-toolchain/issues/417)) ([6302ce4](https://github.com/microsoft/physical-ai-toolchain/commit/6302ce4ccd81800a7a25a75a2422ab75d0478869))
+* **deps:** bump the common-dependencies group in /src/common with 3 updates ([#507](https://github.com/microsoft/physical-ai-toolchain/issues/507)) ([db05074](https://github.com/microsoft/physical-ai-toolchain/commit/db050745e523540577a576e3e9d08eaa68929ff5))
+* **deps:** bump the github-actions group across 1 directory with 6 updates ([#433](https://github.com/microsoft/physical-ai-toolchain/issues/433)) ([2d9dd4f](https://github.com/microsoft/physical-ai-toolchain/commit/2d9dd4f2985775a78e8d5c1f9bdddc69233308bd))
+* **deps:** bump the github-actions group across 1 directory with 6 updates ([#510](https://github.com/microsoft/physical-ai-toolchain/issues/510)) ([c334a64](https://github.com/microsoft/physical-ai-toolchain/commit/c334a64a4f775314a766bc8b0b3334c2a7395ccc))
+* **deps:** bump the github-actions group with 2 updates ([#163](https://github.com/microsoft/physical-ai-toolchain/issues/163)) ([f25713e](https://github.com/microsoft/physical-ai-toolchain/commit/f25713eeefec1c7b9a9ebf169ca99b7af36ed167))
+* **deps:** bump the inference-dependencies group in /src/inference with 5 updates ([#508](https://github.com/microsoft/physical-ai-toolchain/issues/508)) ([2852ffb](https://github.com/microsoft/physical-ai-toolchain/commit/2852ffb2edb0e9f8a207656eaf41b6e2d15b47c0))
+* **deps:** bump the lerobot-inference-dependencies group in /workflows/azureml with 4 updates ([#511](https://github.com/microsoft/physical-ai-toolchain/issues/511)) ([b7c5773](https://github.com/microsoft/physical-ai-toolchain/commit/b7c5773dd4f570c42b911e07b7da87355a86649a))
+* **deps:** bump the npm_and_yarn group across 2 directories with 1 update ([#223](https://github.com/microsoft/physical-ai-toolchain/issues/223)) ([6a261ab](https://github.com/microsoft/physical-ai-toolchain/commit/6a261ab863e67c4141b59f6dde97a85baacafd9d))
+* **deps:** bump the training-dependencies group ([#429](https://github.com/microsoft/physical-ai-toolchain/issues/429)) ([66e43f4](https://github.com/microsoft/physical-ai-toolchain/commit/66e43f484634d357af686cdae4b2127ab6ee52ac))
+* **deps:** bump tornado from 6.5.4 to 6.5.5 in the uv group across 1 directory ([#172](https://github.com/microsoft/physical-ai-toolchain/issues/172)) ([d6caf29](https://github.com/microsoft/physical-ai-toolchain/commit/d6caf29536e59c617b8ec0487fef7ed97b6a6db1))
+* migrate references from Azure-Samples to microsoft/physical-ai-toolchain ([f58f0ef](https://github.com/microsoft/physical-ai-toolchain/commit/f58f0effcc40dfb311d6e899d385264916d6686b))
+
 ## [0.4.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.3.0...v0.4.0) (2026-02-27)
 
 
