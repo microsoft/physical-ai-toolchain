@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children, ...props }: { children: React.ReactNode } & Record<string, unknown>) => (
@@ -36,14 +36,6 @@ vi.mock('@/hooks/use-joint-config', () => ({
   useSaveJointConfig: () => ({ save: vi.fn() }),
   useSaveJointConfigDefaults: () => ({ mutate: vi.fn(), isPending: false }),
 }))
-
-beforeAll(() => {
-  globalThis.ResizeObserver = class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver
-})
 
 afterEach(cleanup)
 
