@@ -40,6 +40,10 @@ Microsoft follows the principle of [Coordinated Vulnerability Disclosure](https:
 
 <!-- END MICROSOFT SECURITY.MD BLOCK -->
 
+## Security Assurance
+
+This project maintains a [threat model and assurance case](docs/security/threat-model.md) covering STRIDE analysis, trust boundaries, and risk acceptances for the reference architecture.
+
 ## Security Considerations for Deployers
 
 > [!IMPORTANT]
