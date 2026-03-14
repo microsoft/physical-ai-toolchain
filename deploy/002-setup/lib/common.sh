@@ -83,7 +83,10 @@ tf_get() {
 
 # Require a terraform output value (fatal if missing)
 tf_require() {
-  local json="${1:?json required}" key="${2:?key required}" description="${3:-$key}"
+  local json key description
+  json="${1:?json required}"
+  key="${2:?key required}"
+  description="${3:-$key}"
   local val
   val=$(tf_get "$json" "$key")
   [[ -n "$val" ]] || fatal "$description not found in terraform outputs"
