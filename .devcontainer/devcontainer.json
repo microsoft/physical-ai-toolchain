@@ -74,7 +74,8 @@
 				"redhat.vscode-yaml",
 				"ms-toolsai.vscode-ai",
 				"GitHub.copilot@prerelease",
-				"GitHub.copilot-chat@prerelease"
+				"GitHub.copilot-chat@prerelease",
+				"ise-hve-essentials.hve-core-all"
 			]
 		}
 	},
