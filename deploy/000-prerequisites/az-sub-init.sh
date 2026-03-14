@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 tenant=""
 help="Usage: az-sub-init.sh [--tenant your-tenant.onmicrosoft.com] [--help]
