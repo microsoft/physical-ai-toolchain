@@ -39,6 +39,8 @@ anydb
 anymal
 aobo
 apis
+aks
+aksconfig
 app
 apple
 appletalk
@@ -124,6 +126,7 @@ bombay
 bootdiagnostics
 bootstorm
 borderless
+bool
 bots
 bpel
 bpms
@@ -1184,6 +1187,7 @@ sios
 sitelogs
 sklearn
 skrl
+sku
 skus
 slas
 sles
@@ -1246,7 +1250,9 @@ subcomponents
 subfolders
 submillisecond
 submittext
+subnet
 subnetting
+subnets
 subnetworks
 subresource
 subresources
