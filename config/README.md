@@ -215,7 +215,7 @@ Regenerate the schema whenever you modify:
 
 ```bash
 # Run the schema generation script
-pip install pydantic && PYTHONPATH=. python config/generate_config_schema.py
+pip install 'pydantic==2.12.5' && PYTHONPATH=. python config/generate_config_schema.py
 
 # Verify the updated schema
 git diff config/recording_config.schema.json
