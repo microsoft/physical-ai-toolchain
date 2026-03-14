@@ -439,6 +439,7 @@ filesystem
 Finalizer
 firewalls
 flatdict
+flatmap
 flexbox
 Flink
 fluentbit

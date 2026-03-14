@@ -14,6 +14,8 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.100.0",
+    "numpy>=1.26.0,<3.0.0",
     "ruff",
     "pytest",
     "pytest-mock",
@@ -39,6 +41,10 @@ addopts = [
     "--cov-report=xml",
 ]
 markers = []
+
+[tool.hypothesis]
+max_examples = 50
+deadline = 500
 
 [tool.ruff]
 target-version = "py311"
