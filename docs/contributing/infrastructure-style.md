@@ -44,6 +44,45 @@ modules/
     README.md        # Module documentation
 ```
 
+### Terraform-docs Workflow
+
+Terraform module documentation is generated with `terraform-docs` using the
+repository-level `.terraform-docs.yml` configuration.
+
+#### Inject Mode and Markers
+
+This repository uses `mode: inject`, which preserves hand-written README
+content and updates only the generated section between these markers:
+
+```md
+<!-- BEGIN_TF_DOCS -->
+<!-- END_TF_DOCS -->
+```
+
+Place markers after introductory content and before footer blocks. Keep
+hand-written usage notes outside the marker block.
+
+#### CI Validation Model
+
+CI validates generated documentation by running terraform-docs and checking for
+diffs. Pull requests should include regenerated README changes when Terraform
+inputs/outputs/resources are modified.
+
+#### Variable Documentation Best Practices
+
+* Add concise, factual `description` values for all variables
+* Keep variable types explicit and accurate
+* Declare defaults where optional behavior is intended
+* Use repository naming conventions (for example `should_*` for booleans)
+
+#### Local Regeneration Command
+
+Regenerate module documentation locally before submitting a PR:
+
+```bash
+./scripts/update-terraform-docs.sh
+```
+
 ### Resource Tagging
 
 All Azure resources must include standard tags:
