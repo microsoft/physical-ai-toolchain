@@ -42,10 +42,6 @@ flags:
       - src/
     carryforward: true
 
-parsers:
-  jacoco:
-    partials_as_hits: true
-
 comment:
   layout: "header, diff, flags, files"
   behavior: default
