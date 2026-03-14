@@ -1,0 +1,40 @@
+name: Dependabot Security Prefix
+
+on:
+  pull_request:
+    types:
+      - opened
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  retitle-security-pr:
+    name: Retitle Security PRs
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Retitle PR with security prefix
+        if: steps.metadata.outputs.ghsa-id != '' || steps.metadata.outputs.cvss != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          new_title="${PR_TITLE/chore(deps)/security(deps)}"
+          new_title="${new_title/chore(deps-dev)/security(deps-dev)}"
+          if [[ "${new_title}" != "${PR_TITLE}" ]]; then
+            gh pr edit "${PR_NUMBER}" --repo "${GITHUB_REPOSITORY}" --title "${new_title}"
+            echo "Retitled PR #${PR_NUMBER}: ${new_title}"
+          fi
