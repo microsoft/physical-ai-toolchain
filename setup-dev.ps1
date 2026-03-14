@@ -94,6 +94,71 @@ Write-Section 'Tool Verification'
 Assert-Tools az, terraform, kubectl, helm, jq
 Write-Info 'All required tools found'
 
+Write-Section 'Terraform-docs Setup'
+
+$TerraformDocsVersion = 'v0.21.0'
+$TerraformDocsArchive = "terraform-docs-$TerraformDocsVersion-linux-amd64.tar.gz"
+$TerraformDocsUrl = "https://github.com/terraform-docs/terraform-docs/releases/download/$TerraformDocsVersion/$TerraformDocsArchive"
+$TerraformDocsChecksumUrl = "https://github.com/terraform-docs/terraform-docs/releases/download/$TerraformDocsVersion/terraform-docs-$TerraformDocsVersion.sha256sum"
+$TerraformDocsInstallDir = Join-Path $HOME '.local/bin'
+
+$currentTerraformDocsVersion = $null
+if (Get-Command terraform-docs -ErrorAction SilentlyContinue) {
+    $versionOutput = terraform-docs --version 2>$null
+    $versionMatch = [regex]::Match($versionOutput, 'v\d+\.\d+\.\d+')
+    if ($versionMatch.Success) {
+        $currentTerraformDocsVersion = $versionMatch.Value
+    }
+}
+
+if ($currentTerraformDocsVersion -eq $TerraformDocsVersion) {
+    Write-Info "terraform-docs $TerraformDocsVersion already installed"
+}
+else {
+    Write-Info "Installing terraform-docs $TerraformDocsVersion with checksum verification..."
+    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("terraform-docs-" + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+    try {
+        $archivePath = Join-Path $tempDir $TerraformDocsArchive
+        $checksumPath = Join-Path $tempDir "terraform-docs-$TerraformDocsVersion.sha256sum"
+
+        Invoke-WebRequest -Uri $TerraformDocsUrl -OutFile $archivePath -UseBasicParsing
+        Invoke-WebRequest -Uri $TerraformDocsChecksumUrl -OutFile $checksumPath -UseBasicParsing
+
+        $checksumLine = Get-Content $checksumPath | Where-Object { $_ -match [regex]::Escape($TerraformDocsArchive) } | Select-Object -First 1
+        if (-not $checksumLine) {
+            Write-Error "Unable to locate checksum for $TerraformDocsArchive"
+        }
+
+        $expectedHash = ($checksumLine -split '\s+')[0].ToLowerInvariant()
+        $actualHash = (Get-FileHash -Path $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($expectedHash -ne $actualHash) {
+            Write-Error 'Checksum verification failed for terraform-docs archive'
+        }
+
+        New-Item -ItemType Directory -Path $TerraformDocsInstallDir -Force | Out-Null
+        tar -xzf $archivePath -C $tempDir terraform-docs
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "tar extraction failed (exit code $LASTEXITCODE)"
+        }
+
+        Copy-Item -Path (Join-Path $tempDir 'terraform-docs') -Destination (Join-Path $TerraformDocsInstallDir 'terraform-docs') -Force
+        if (-not $IsWindows) {
+            chmod +x (Join-Path $TerraformDocsInstallDir 'terraform-docs')
+        }
+
+        if ($env:PATH -notlike "*$TerraformDocsInstallDir*") {
+            $env:PATH = "$TerraformDocsInstallDir:$env:PATH"
+        }
+
+        Write-Info "Installed terraform-docs: $((& terraform-docs --version | Select-Object -First 1))"
+    }
+    finally {
+        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Section 'UV Package Manager Setup'
 
 $UvVersion = '0.7.12'

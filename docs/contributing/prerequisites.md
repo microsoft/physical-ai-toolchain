@@ -25,6 +25,7 @@ Install these tools before contributing:
 | Tool        | Minimum Version | Installation                                                          |
 |-------------|-----------------|-----------------------------------------------------------------------|
 | Terraform   | 1.9.8           | <https://developer.hashicorp.com/terraform/install>                   |
+| terraform-docs | 0.21.0       | <https://github.com/terraform-docs/terraform-docs/releases/tag/v0.21.0> |
 | TFLint      | 0.61.0          | <https://github.com/terraform-linters/tflint>                         |
 | Azure CLI   | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>             |
 | kubectl     | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
@@ -106,6 +107,9 @@ Verify tool versions before validating:
 # Terraform
 terraform version  # >= 1.9.8
 
+# terraform-docs
+terraform-docs --version  # = v0.21.0
+
 # TFLint (Terraform linter)
 tflint --version  # >= 0.61.0
 
@@ -170,6 +174,9 @@ shellcheck deploy/**/*.sh scripts/**/*.sh
 **Documentation:**
 
 ```bash
+# Regenerate Terraform module documentation (required for IaC README updates)
+./scripts/update-terraform-docs.sh
+
 # Install dependencies (first time only)
 npm install
 

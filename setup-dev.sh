@@ -42,6 +42,46 @@ section "Tool Verification"
 require_tools az terraform kubectl helm jq
 info "All required tools found"
 
+section "Terraform-docs Setup"
+
+TERRAFORM_DOCS_VERSION="v0.21.0"
+TERRAFORM_DOCS_ARCHIVE="terraform-docs-${TERRAFORM_DOCS_VERSION}-linux-amd64.tar.gz"
+TERRAFORM_DOCS_URL="https://github.com/terraform-docs/terraform-docs/releases/download/${TERRAFORM_DOCS_VERSION}/${TERRAFORM_DOCS_ARCHIVE}"
+TERRAFORM_DOCS_SHA_URL="https://github.com/terraform-docs/terraform-docs/releases/download/${TERRAFORM_DOCS_VERSION}/terraform-docs-${TERRAFORM_DOCS_VERSION}.sha256sum"
+TERRAFORM_DOCS_INSTALL_DIR="${HOME}/.local/bin"
+
+current_terraform_docs_version=""
+if command -v terraform-docs &>/dev/null; then
+  current_terraform_docs_version="$(terraform-docs --version 2>/dev/null | sed -n 's/.*version \\(v[0-9.]*\\).*/\\1/p' | head -n 1)"
+fi
+
+if [[ "${current_terraform_docs_version}" == "${TERRAFORM_DOCS_VERSION}" ]]; then
+  info "terraform-docs ${TERRAFORM_DOCS_VERSION} already installed"
+else
+  info "Installing terraform-docs ${TERRAFORM_DOCS_VERSION} with checksum verification..."
+  tmp_dir="$(mktemp -d)"
+  trap 'rm -rf "${tmp_dir}"' EXIT
+
+  archive_path="${tmp_dir}/${TERRAFORM_DOCS_ARCHIVE}"
+  sha_path="${tmp_dir}/terraform-docs-${TERRAFORM_DOCS_VERSION}.sha256sum"
+
+  curl -fsSL "${TERRAFORM_DOCS_URL}" -o "${archive_path}"
+  curl -fsSL "${TERRAFORM_DOCS_SHA_URL}" -o "${sha_path}"
+
+  expected_sha="$(awk -v target="${TERRAFORM_DOCS_ARCHIVE}" '$2 == target {print $1}' "${sha_path}" | head -n 1)"
+  [[ -n "${expected_sha}" ]] || fatal "Unable to locate checksum for ${TERRAFORM_DOCS_ARCHIVE}"
+
+  actual_sha="$(sha256sum "${archive_path}" | awk '{print $1}')"
+  [[ "${actual_sha}" == "${expected_sha}" ]] || fatal "Checksum verification failed for terraform-docs archive"
+
+  mkdir -p "${TERRAFORM_DOCS_INSTALL_DIR}"
+  tar -xzf "${archive_path}" -C "${tmp_dir}" terraform-docs
+  install -m 0755 "${tmp_dir}/terraform-docs" "${TERRAFORM_DOCS_INSTALL_DIR}/terraform-docs"
+
+  export PATH="${TERRAFORM_DOCS_INSTALL_DIR}:$PATH"
+  info "Installed terraform-docs: $(terraform-docs --version | head -n 1)"
+fi
+
 section "UV Package Manager Setup"
 
 if ! command -v uv &>/dev/null; then
