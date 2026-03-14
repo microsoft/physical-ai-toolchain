@@ -15,6 +15,19 @@ Contributions are welcome across infrastructure code, deployment automation, doc
 
 If you are new to the project, start with issues labeled `good first issue` or documentation updates before making larger changes.
 
+## Contributor License Agreement (CLA)
+
+Most contributions require you to agree to a Contributor License Agreement (CLA)
+declaring that you have the right to grant us the rights to use your
+contribution.
+
+When you submit a pull request, a CLA bot automatically determines whether you
+need to provide a CLA and decorates the PR (for example, status check, comment).
+Follow the bot instructions. You only need to complete this process once across
+all repositories using this CLA.
+
+For details, visit <https://cla.opensource.microsoft.com>.
+
 ## Getting Started
 
 1. Read the [Contributing Guide](docs/contributing/README.md) for prerequisites, workflow, and conventions
