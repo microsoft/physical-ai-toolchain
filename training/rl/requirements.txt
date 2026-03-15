@@ -1,6 +1,6 @@
 # Generated file. Do not edit by hand.
-# Source: src/training/pyproject.toml
-# Regenerate: uv pip compile src/training/pyproject.toml -o src/training/requirements.txt
+# Source: training/rl/pyproject.toml
+# Regenerate: uv pip compile training/rl/pyproject.toml -o training/rl/requirements.txt
 absl-py==2.4.0
     # via tensorboard
 alembic==1.18.4
@@ -27,14 +27,14 @@ attrs==25.4.0
 authlib==1.6.9
     # via fastmcp
 azure-ai-ml==1.31.0
-    # via robotics-training (src/training/pyproject.toml)
+    # via robotics-training (training/rl/pyproject.toml)
 azure-common==1.1.28
     # via
     #   azure-ai-ml
     #   azureml-mlflow
 azure-core==1.38.1
     # via
-    #   robotics-training (src/training/pyproject.toml)
+    #   robotics-training (training/rl/pyproject.toml)
     #   azure-ai-ml
     #   azure-core-tracing-opentelemetry
     #   azure-identity
@@ -50,7 +50,7 @@ azure-core-tracing-opentelemetry==1.0.0b12
     # via azure-monitor-opentelemetry
 azure-identity==1.25.2
     # via
-    #   robotics-training (src/training/pyproject.toml)
+    #   robotics-training (training/rl/pyproject.toml)
     #   azure-monitor-opentelemetry-exporter
     #   azureml-mlflow
 azure-mgmt-core==1.6.0
@@ -63,7 +63,7 @@ azure-monitor-opentelemetry-exporter==1.0.0b48
     # via azure-monitor-opentelemetry
 azure-storage-blob==12.19.0
     # via
-    #   robotics-training (src/training/pyproject.toml)
+    #   robotics-training (training/rl/pyproject.toml)
     #   azure-ai-ml
     #   azure-storage-file-datalake
     #   azureml-mlflow
@@ -72,7 +72,7 @@ azure-storage-file-datalake==12.14.0
 azure-storage-file-share==12.24.0
     # via azure-ai-ml
 azureml-mlflow==1.61.0.post1
-    # via robotics-training (src/training/pyproject.toml)
+    # via robotics-training (training/rl/pyproject.toml)
 backports-tarfile==1.2.0
     # via jaraco-context
 beartype==0.22.9
@@ -273,7 +273,7 @@ markupsafe==3.0.3
     #   werkzeug
 marshmallow==3.26.2
     # via
-    #   robotics-training (src/training/pyproject.toml)
+    #   robotics-training (training/rl/pyproject.toml)
     #   azure-ai-ml
 matplotlib==3.10.8
     # via mlflow
@@ -287,7 +287,7 @@ ml-dtypes==0.5.4
     #   onnx-ir
     #   onnxscript
 mlflow==3.5.0
-    # via robotics-training (src/training/pyproject.toml)
+    # via robotics-training (training/rl/pyproject.toml)
 mlflow-skinny==3.5.0
     # via
     #   azureml-mlflow
@@ -314,7 +314,7 @@ networkx==3.6.1
     # via torch
 numpy==1.26.4
     # via
-    #   robotics-training (src/training/pyproject.toml)
+    #   robotics-training (training/rl/pyproject.toml)
     #   contourpy
     #   gymnasium
     #   matplotlib
@@ -439,7 +439,7 @@ orjson==3.11.7
     # via tensordict
 packaging==25.0
     # via
-    #   robotics-training (src/training/pyproject.toml)
+    #   robotics-training (training/rl/pyproject.toml)
     #   fastmcp
     #   gunicorn
     #   marshmallow
@@ -477,7 +477,7 @@ protobuf==6.33.5
     #   tensorboard
 psutil==7.2.2
     # via
-    #   robotics-training (src/training/pyproject.toml)
+    #   robotics-training (training/rl/pyproject.toml)
     #   azure-monitor-opentelemetry-exporter
 py-key-value-aio==0.3.0
     # via
@@ -520,12 +520,12 @@ pyjwt==2.11.0
     #   mcp
     #   msal
 pynvml==13.0.1
-    # via robotics-training (src/training/pyproject.toml)
+    # via robotics-training (training/rl/pyproject.toml)
 pyparsing==3.3.2
     # via matplotlib
 pyperclip==1.11.0
     # via
-    #   robotics-training (src/training/pyproject.toml)
+    #   robotics-training (training/rl/pyproject.toml)
     #   fastmcp
 python-dateutil==2.9.0.post0
     # via
@@ -593,7 +593,7 @@ rpds-py==0.30.0
 rsa==4.9.1
     # via google-auth
 rsl-rl-lib==4.0.1
-    # via robotics-training (src/training/pyproject.toml)
+    # via robotics-training (training/rl/pyproject.toml)
 scikit-learn==1.8.0
     # via mlflow
 scipy==1.17.1
@@ -609,7 +609,7 @@ shellingham==1.5.4
 six==1.17.0
     # via python-dateutil
 skrl==1.4.3
-    # via robotics-training (src/training/pyproject.toml)
+    # via robotics-training (training/rl/pyproject.toml)
 smmap==5.0.2
     # via gitdb
 sortedcontainers==2.4.0
@@ -639,7 +639,7 @@ tensorboard-data-server==0.7.2
     # via tensorboard
 tensordict==0.11.0
     # via
-    #   robotics-training (src/training/pyproject.toml)
+    #   robotics-training (training/rl/pyproject.toml)
     #   rsl-rl-lib
 threadpoolctl==3.6.0
     # via scikit-learn

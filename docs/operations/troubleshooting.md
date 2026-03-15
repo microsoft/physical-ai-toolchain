@@ -124,7 +124,7 @@ Set `NVIDIA_DRIVER_CAPABILITIES=all` in the job environment variables. This is r
 
 **Resolution:**
 
-Run `source deploy/000-prerequisites/az-sub-init.sh` to register all required providers. The script reads from `deploy/000-prerequisites/robotics-azure-resource-providers.txt`.
+Run `source infrastructure/terraform/prerequisites/az-sub-init.sh` to register all required providers. The script reads from `infrastructure/terraform/prerequisites/robotics-azure-resource-providers.txt`.
 
 ### Terraform plan fails with "subscription not configured"
 
@@ -132,7 +132,7 @@ Run `source deploy/000-prerequisites/az-sub-init.sh` to register all required pr
 
 **Resolution:**
 
-Run `source deploy/000-prerequisites/az-sub-init.sh` before any `terraform` commands. This script exports `ARM_SUBSCRIPTION_ID` and validates Azure CLI authentication.
+Run `source infrastructure/terraform/prerequisites/az-sub-init.sh` before any `terraform` commands. This script exports `ARM_SUBSCRIPTION_ID` and validates Azure CLI authentication.
 
 ### Helm chart installation fails with connection refused
 
@@ -140,7 +140,7 @@ Run `source deploy/000-prerequisites/az-sub-init.sh` before any `terraform` comm
 
 **Resolution:**
 
-1. Complete VPN deployment: `deploy/001-iac/vpn/`.
+1. Complete VPN deployment: `infrastructure/terraform/vpn/`.
 2. Connect the VPN client.
 3. Re-run deploy scripts in order: `01-deploy-robotics-charts.sh` through `04-deploy-osmo-backend.sh`.
 
@@ -160,7 +160,7 @@ Run `source deploy/000-prerequisites/az-sub-init.sh` before any `terraform` comm
 
 **Resolution:**
 
-Set `oauth2Proxy.enabled: false` in the OSMO Helm values when no OIDC provider is available. See `deploy/002-setup/04-deploy-osmo-backend.sh` for the configuration.
+Set `oauth2Proxy.enabled: false` in the OSMO Helm values when no OIDC provider is available. See `infrastructure/setup/04-deploy-osmo-backend.sh` for the configuration.
 
 ### Resource group creation fails with quota errors
 

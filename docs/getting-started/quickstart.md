@@ -48,8 +48,8 @@ Use the devcontainer (recommended) or run local setup:
 Authenticate with Azure and register required resource providers.
 
 ```bash
-source deploy/000-prerequisites/az-sub-init.sh
-bash deploy/000-prerequisites/register-azure-providers.sh
+source infrastructure/terraform/prerequisites/az-sub-init.sh
+bash infrastructure/terraform/prerequisites/register-azure-providers.sh
 ```
 
 Verify your subscription:
@@ -63,7 +63,7 @@ az account show --query "{name:name, id:id}" -o table
 Create a Terraform variables file for the full-public deployment path. From the repository root:
 
 ```bash
-cd deploy/001-iac
+cd infrastructure/terraform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
@@ -82,7 +82,7 @@ enable_private_dns = false
 ```
 
 > [!TIP]
-> For private networking, set `enable_vpn_gateway = true` and `enable_private_dns = true`. See the [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/README.md) for details.
+> For private networking, set `enable_vpn_gateway = true` and `enable_private_dns = true`. See the [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/terraform/README.md) for details.
 
 ## Step 4: Deploy Infrastructure
 
@@ -113,7 +113,7 @@ az aks get-credentials \
 Deploy GPU Operator, KAI Scheduler, and the AzureML extension. From the repository root:
 
 ```bash
-cd deploy/002-setup
+cd infrastructure/setup
 bash 01-deploy-robotics-charts.sh
 bash 02-deploy-azureml-extension.sh
 ```
@@ -169,7 +169,7 @@ kubectl logs -n osmo-control-plane -l app=osmo-training --tail=50
 Destroy all infrastructure when finished to stop incurring costs. From the repository root:
 
 ```bash
-cd deploy/001-iac
+cd infrastructure/terraform
 terraform destroy
 ```
 

@@ -295,7 +295,7 @@ The inference workflow produces:
 | Requirement                   | Setup                    |
 |-------------------------------|--------------------------|
 | Infrastructure deployed       | `infrastructure/terraform/` |
-| Setup scripts completed       | `deploy/002-setup/`      |
+| Setup scripts completed       | `infrastructure/setup/`      |
 | Azure CLI authenticated       | `az login`               |
 | OSMO CLI (for OSMO workflows) | Installed and configured |
 

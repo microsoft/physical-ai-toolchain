@@ -18,7 +18,7 @@ Azure Automation Account for scheduled cluster operations. Manages start/stop sc
 ## 🚀 Quick Start
 
 ```bash
-cd deploy/001-iac/automation
+cd infrastructure/terraform/automation
 cp terraform.tfvars.example terraform.tfvars
 terraform init && terraform apply
 ```
@@ -31,7 +31,7 @@ terraform init && terraform apply
 
 ## ➡️ Next Step
 
-Proceed to [Cluster Setup](../../002-setup/).
+Proceed to [Cluster Setup](../../setup/).
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

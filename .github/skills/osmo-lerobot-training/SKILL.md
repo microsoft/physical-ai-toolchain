@@ -316,7 +316,7 @@ pkill -f poll-and-eval-checkpoints
 | Poller exits immediately | Training workflow already terminal | Check `osmo workflow query <id>`; rerun poller or submit inference manually |
 | Poller stalls at max-concurrent | Inference jobs not finishing | Check inference workflow status; increase `--max-concurrent` or cancel stuck jobs |
 | Many pending inference jobs after stopping poller | Poller submitted jobs faster than cluster could drain | `osmo workflow list` only returns the last 12 — iterate over expected ID range to cancel all: `for id in $(seq <first> <last>); do osmo workflow cancel lerobot-inference-$id; done` |
-| `info: command not found` in poller | `common.sh` not sourced | Verify `deploy/002-setup/lib/common.sh` exists and is readable |
+| `info: command not found` in poller | `common.sh` not sourced | Verify `shared/lib/common.sh` exists and is readable |
 
 See [references/REFERENCE.md](references/REFERENCE.md) for detailed debugging commands.
 

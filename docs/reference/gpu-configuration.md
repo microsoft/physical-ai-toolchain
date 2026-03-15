@@ -34,7 +34,7 @@ The GPU Operator manages the full driver lifecycle for H100 nodes using its buil
 
 RTX PRO 6000 BSE nodes use Azure SR-IOV vGPU passthrough, which requires the Microsoft GRID driver instead of the NVIDIA datacenter driver. AKS does not support `gpu_driver = "Install"` for this VM SKU.
 
-The `gpu-grid-driver-installer` DaemonSet ([manifests/gpu-grid-driver-installer.yaml](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/002-setup/manifests/gpu-grid-driver-installer.yaml)) installs the GRID driver on each RTX node. Terraform labels these nodes with `nvidia.com/gpu.deploy.driver=false`, causing the GPU Operator to skip its driver DaemonSet on those nodes while still managing toolkit, device-plugin, and validator components.
+The `gpu-grid-driver-installer` DaemonSet ([manifests/gpu-grid-driver-installer.yaml](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/setup/manifests/gpu-grid-driver-installer.yaml)) installs the GRID driver on each RTX node. Terraform labels these nodes with `nvidia.com/gpu.deploy.driver=false`, causing the GPU Operator to skip its driver DaemonSet on those nodes while still managing toolkit, device-plugin, and validator components.
 
 The GRID driver is installed via an init container that uses `nsenter` into the host namespace to download and compile the driver. New nodes added by the autoscaler receive the driver automatically through the DaemonSet.
 
@@ -172,5 +172,5 @@ After `env.close()`, training scripts call `os._exit(0)` instead of `simulation_
 
 * [NVIDIA GPU Operator with Azure AKS](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/microsoft-aks.html)
 * [NVIDIA GPU Operator vGPU support](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/install-gpu-operator-vgpu.html)
-* [GPU Operator Helm values](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/002-setup/values/nvidia-gpu-operator.yaml)
-* [GRID driver installer DaemonSet](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/002-setup/manifests/gpu-grid-driver-installer.yaml)
+* [GPU Operator Helm values](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/setup/values/nvidia-gpu-operator.yaml)
+* [GRID driver installer DaemonSet](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/setup/manifests/gpu-grid-driver-installer.yaml)

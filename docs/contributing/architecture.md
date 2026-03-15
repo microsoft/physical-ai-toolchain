@@ -41,7 +41,7 @@ The root `pyproject.toml` serves local development dependency management:
 |-------------------|-----------------------------------------------------------------|
 | Local development | Providing module availability for intellisense and verification |
 
-This setup is not intended for building publishable Python packages. The `pyproject.toml` build target only packages `src/training` into a wheel for in-container use.
+This setup is not intended for building publishable Python packages. The `pyproject.toml` build target only packages `training/rl` into a wheel for in-container use.
 
 ## Future and Ongoing Architecture
 

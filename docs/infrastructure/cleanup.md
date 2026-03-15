@@ -41,10 +41,10 @@ Cleanup scripts remove Kubernetes resources from the AKS cluster without affecti
 | `cleanup/uninstall-azureml-extension.sh`  | ML extension, compute target, FICs    |
 | `cleanup/uninstall-robotics-charts.sh`    | GPU Operator, KAI Scheduler           |
 
-Run scripts from the `deploy/002-setup/cleanup/` directory:
+Run scripts from the `infrastructure/setup/cleanup/` directory:
 
 ```bash
-cd deploy/002-setup/cleanup
+cd infrastructure/setup/cleanup
 
 ./uninstall-osmo-backend.sh
 ./uninstall-osmo-control-plane.sh
@@ -68,7 +68,7 @@ Uninstall scripts preserve data by default. Use flags for complete removal.
 Full cleanup including all data:
 
 ```bash
-cd deploy/002-setup/cleanup
+cd infrastructure/setup/cleanup
 
 ./uninstall-osmo-backend.sh --delete-container
 ./uninstall-osmo-control-plane.sh --purge-postgres --purge-redis --delete-mek
@@ -96,7 +96,7 @@ After removing cluster components, destroy Azure infrastructure using one of two
 Recommended approach. Preserves state files and allows clean redeployment.
 
 ```bash
-cd deploy/001-iac
+cd infrastructure/terraform
 
 # Destroy VPN first (if deployed)
 cd vpn && terraform destroy -var-file=terraform.tfvars && cd ..
@@ -176,7 +176,7 @@ Resources manually deleted or created outside Terraform cause state mismatches.
 Refresh state for resources deleted outside Terraform:
 
 ```bash
-cd deploy/001-iac
+cd infrastructure/terraform
 terraform refresh -var-file=terraform.tfvars
 terraform plan -var-file=terraform.tfvars
 ```

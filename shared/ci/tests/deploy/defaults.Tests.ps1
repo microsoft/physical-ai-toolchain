@@ -27,14 +27,15 @@ Describe 'Default configuration values' -Tag 'Unit' {
             Remove-Item "env:$name" -ErrorAction SilentlyContinue
         }
 
-        . $PSScriptRoot/../../../../deploy/002-setup/defaults.ps1
+        . $PSScriptRoot/../../../../infrastructure/setup/defaults.ps1
     }
 
     AfterAll {
         foreach ($entry in $script:SavedVars.GetEnumerator()) {
             if ($null -ne $entry.Value) {
                 Set-Item "env:$($entry.Key)" $entry.Value
-            } else {
+            }
+            else {
                 Remove-Item "env:$($entry.Key)" -ErrorAction SilentlyContinue
             }
         }
@@ -119,14 +120,15 @@ Describe 'Environment variable overrides' -Tag 'Unit' {
         $env:TIMEOUT_DEPLOY = '999s'
         $env:GPU_INSTANCE_TYPE = 'Standard_Custom_VM'
 
-        . $PSScriptRoot/../../../../deploy/002-setup/defaults.ps1
+        . $PSScriptRoot/../../../../infrastructure/setup/defaults.ps1
     }
 
     AfterAll {
         foreach ($entry in $script:OverrideVars.GetEnumerator()) {
             if ($null -ne $entry.Value) {
                 Set-Item "env:$($entry.Key)" $entry.Value
-            } else {
+            }
+            else {
                 Remove-Item "env:$($entry.Key)" -ErrorAction SilentlyContinue
             }
         }

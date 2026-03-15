@@ -19,13 +19,13 @@ Azure Automation account for scheduled infrastructure operations. Runs PowerShel
 
 ## 📋 Prerequisites
 
-* Platform infrastructure deployed (`cd deploy/001-iac && terraform apply`)
+* Platform infrastructure deployed (`cd infrastructure/terraform && terraform apply`)
 * Core variables matching parent deployment (`environment`, `resource_prefix`, `location`)
 
 ## 🚀 Usage
 
 ```bash
-cd deploy/001-iac/automation
+cd infrastructure/terraform/automation
 
 # Configure schedule and resources
 # Edit terraform.tfvars with your schedule

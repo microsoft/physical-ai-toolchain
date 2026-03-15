@@ -80,7 +80,7 @@ Submits Isaac Lab training using OSMO dataset folder injection instead of base64
 |----------------------|-----------------|-------------------------------------------------|
 | `dataset_bucket`     | `training`      | OSMO bucket for training code                   |
 | `dataset_name`       | `training-code` | Dataset name in bucket                          |
-| `training_localpath` | (required)      | Local path to src/training relative to workflow |
+| `training_localpath` | (required)      | Local path to training/ relative to workflow |
 
 ### Dataset Usage
 

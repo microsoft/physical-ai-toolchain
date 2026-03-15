@@ -18,8 +18,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# shellcheck source=deploy/002-setup/lib/common.sh
-source "${SCRIPT_DIR}/deploy/002-setup/lib/common.sh"
+# shellcheck source=shared/lib/common.sh
+source "${SCRIPT_DIR}/shared/lib/common.sh"
 
 # Preamble: Recommend devcontainer for easier setup
 echo

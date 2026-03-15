@@ -18,7 +18,7 @@ Point-to-site VPN for secure remote access to the private AKS cluster and Azure 
 ## 🚀 Quick Start
 
 ```bash
-cd deploy/001-iac/vpn
+cd infrastructure/terraform/vpn
 cp terraform.tfvars.example terraform.tfvars
 terraform init && terraform apply
 ```
@@ -31,7 +31,7 @@ terraform init && terraform apply
 
 ## ➡️ Next Step
 
-Proceed to [Cluster Setup](../../002-setup/).
+Proceed to [Cluster Setup](../../setup/).
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

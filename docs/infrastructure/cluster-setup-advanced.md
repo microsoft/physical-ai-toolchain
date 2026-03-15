@@ -96,7 +96,7 @@ This indicates the AKS cluster has a private endpoint and your machine cannot re
 
 **Resolution:**
 
-1. Deploy the VPN Gateway: `cd deploy/001-iac/vpn && terraform apply`
+1. Deploy the VPN Gateway: `cd infrastructure/terraform/vpn && terraform apply`
 2. Download and import VPN client configuration (see [VPN Gateway](vpn.md))
 3. Connect to VPN using Azure VPN Client
 4. Verify connectivity: `kubectl cluster-info`

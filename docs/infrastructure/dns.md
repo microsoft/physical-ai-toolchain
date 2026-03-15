@@ -19,7 +19,7 @@ Internal DNS resolution for the OSMO UI service running on an internal LoadBalan
 
 ## 📋 Prerequisites
 
-* Platform infrastructure deployed (`cd deploy/001-iac && terraform apply`)
+* Platform infrastructure deployed (`cd infrastructure/terraform && terraform apply`)
 * VPN Gateway deployed ([VPN Gateway](vpn.md))
 * OSMO UI service running with internal LoadBalancer IP
 
@@ -34,7 +34,7 @@ kubectl get svc -n osmo-control-plane osmo-ui -o jsonpath='{.status.loadBalancer
 Deploy the DNS zone:
 
 ```bash
-cd deploy/001-iac/dns
+cd infrastructure/terraform/dns
 terraform init
 terraform apply -var="osmo_loadbalancer_ip=10.0.x.x"
 ```

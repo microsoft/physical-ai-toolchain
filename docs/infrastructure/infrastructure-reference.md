@@ -101,9 +101,9 @@ Root Module (001-iac/)
 
 | Module                                             | Purpose                                                         |
 |----------------------------------------------------|-----------------------------------------------------------------|
-| [platform](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy/001-iac/modules/platform) | Networking, storage, Key Vault, ML workspace, PostgreSQL, Redis |
-| [sil](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy/001-iac/modules/sil)           | AKS cluster with GPU node pools                                 |
-| [vpn](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy/001-iac/modules/vpn)           | VPN Gateway module (used by vpn/ standalone deployment)         |
+| [platform](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/platform) | Networking, storage, Key Vault, ML workspace, PostgreSQL, Redis |
+| [sil](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/sil)           | AKS cluster with GPU node pools                                 |
+| [vpn](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/vpn)           | VPN Gateway module (used by vpn/ standalone deployment)         |
 
 ## 📤 Outputs
 
@@ -148,7 +148,7 @@ See [VPN Gateway](vpn.md) for configuration options and VPN client setup.
 
 ### Private DNS for OSMO UI
 
-Configure DNS resolution for the OSMO UI LoadBalancer after setup from `deploy/002-setup/03-deploy-osmo-control-plane.sh` (requires VPN):
+Configure DNS resolution for the OSMO UI LoadBalancer after setup from `infrastructure/setup/03-deploy-osmo-control-plane.sh` (requires VPN):
 
 ```bash
 cd dns
@@ -156,7 +156,7 @@ terraform init
 terraform apply -var="osmo_loadbalancer_ip=10.0.x.x"
 ```
 
-See [dns/README.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/dns/README.md) for details.
+See [dns/README.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/terraform/dns/README.md) for details.
 
 ### Automation Account
 
@@ -168,7 +168,7 @@ cp terraform.tfvars.example terraform.tfvars
 terraform init && terraform apply -var-file=terraform.tfvars
 ```
 
-See [automation/README.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/automation/README.md) for schedule configuration.
+See [automation/README.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/terraform/automation/README.md) for schedule configuration.
 
 ## 🔍 Troubleshooting
 

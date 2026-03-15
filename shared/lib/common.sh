@@ -39,7 +39,7 @@ require_tools() {
 activate_local_osmo() {
   local repo_root
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-  OSMO_DEV_CLI="${repo_root}/deploy/002-setup/optional/osmo-dev.sh"
+  OSMO_DEV_CLI="${repo_root}/infrastructure/setup/optional/osmo-dev.sh"
 
   if [[ ! -x "$OSMO_DEV_CLI" ]]; then
     fatal "osmo-dev.sh not found at $OSMO_DEV_CLI"
@@ -254,7 +254,7 @@ apply_secret_provider_class() {
   local tenant_id="${4:?tenant_id required}"
 
   local manifest_dir
-  manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/deploy/002-setup/manifests"
+  manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/infrastructure/setup/manifests"
 
   export NAMESPACE="$namespace"
   export KEY_VAULT_NAME="$keyvault"

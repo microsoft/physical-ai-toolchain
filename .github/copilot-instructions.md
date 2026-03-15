@@ -66,7 +66,7 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 Detailed template and structure in `.github/instructions/shell-scripts.instructions.md`.
 
 * Two Terraform output libraries exist (do NOT mix them):
-  * `shared/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy scripts (symlinked at `deploy/002-setup/lib/common.sh`)
+  * `shared/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy and submission scripts
   * `shared/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts (symlinked at `scripts/lib/terraform-outputs.sh`)
 * `.env.local` load order: `common.sh` loads `.env.local` BEFORE `defaults.conf`; override defaults via `${VAR:-default}` pattern
 * Idempotent K8s operations: `kubectl create --dry-run=client -o yaml | kubectl apply -f -`
@@ -134,7 +134,7 @@ AzureML runs on Arc-connected AKS clusters via the AzureML Kubernetes extension.
 * Job YAML schema: `$schema: .../commandJob.schema.json`
   * No empty strings in YAML values — use sentinel values (`auto`, `none`, `placeholder`)
   * Submit with runtime overrides: `az ml job create --file <yaml> --set "display_name=..." --set "environment_variables.KEY=value"`
-* Code snapshot: `src/` directory uploaded to AzureML; exclusions controlled by `src/.amlignore`
+* Code snapshot: each domain's workflow directory uploaded to AzureML via `code: .` relative path
 * Identity chain: Terraform-created managed identity → federated credentials → K8s service accounts (`azureml:default`, `azureml:training`)
 * Model validation mode: `mode: download` (NOT `ro_mount`) — workaround for workload identity auth failures in `data-capability` sidecar
 * Multi-node: Volcano scheduler installed by AzureML extension when `installVolcano: true`

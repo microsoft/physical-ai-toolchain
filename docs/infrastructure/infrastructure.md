@@ -42,8 +42,8 @@ Terraform creates role assignments for managed identities, requiring `Microsoft.
 ## 🚀 Quick Start
 
 ```bash
-cd deploy/001-iac
-source ../000-prerequisites/az-sub-init.sh
+cd infrastructure/terraform
+source prerequisites/az-sub-init.sh
 cp terraform.tfvars.example terraform.tfvars
 terraform init && terraform apply -var-file=terraform.tfvars
 ```
@@ -150,7 +150,7 @@ osmo_config = {
 }
 ```
 
-See [variables.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/variables.tf) for all configuration options.
+See [variables.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/terraform/variables.tf) for all configuration options.
 
 ## 🔗 Related
 

@@ -96,7 +96,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | High                                                                                    |
 | Risk Rating      | High                                                                                    |
 | Current Controls | Cluster-internal networking only; namespace isolation                                   |
-| Evidence         | `deploy/002-setup/values/osmo-control-plane-values.yaml` sets `auth.enabled: false`     |
+| Evidence         | `infrastructure/setup/values/osmo-control-plane-values.yaml` sets `auth.enabled: false`     |
 | Status           | Open                                                                                    |
 | Remediation      | Enable OSMO auth when vendor provides production-ready auth configuration               |
 
@@ -111,7 +111,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | Medium                                                                         |
 | Risk Rating      | Medium                                                                         |
 | Current Controls | VNet integration; private endpoint; Key Vault–stored credentials               |
-| Evidence         | `deploy/001-iac/modules/sil/postgresql.tf` configures single admin login       |
+| Evidence         | `infrastructure/terraform/modules/sil/postgresql.tf` configures single admin login       |
 | Status           | Accepted                                                                       |
 | Rationale        | Single-purpose database serving only OSMO; network isolation limits exposure   |
 
@@ -143,7 +143,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | High                                                                                            |
 | Risk Rating      | Critical                                                                                        |
 | Current Controls | `.gitignore` excludes `*.tfstate`; VPN-only access to workstation                               |
-| Evidence         | `deploy/001-iac/versions.tf` has no remote backend configuration                                |
+| Evidence         | `infrastructure/terraform/versions.tf` has no remote backend configuration                                |
 | Status           | Open                                                                                            |
 | Remediation      | Configure Azure Storage remote backend with state encryption and locking                        |
 
@@ -269,7 +269,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | High                                                                                   |
 | Risk Rating      | High                                                                                   |
 | Current Controls | Azure CNI network plugin supports NetworkPolicy; namespaces provide logical separation |
-| Evidence         | No `NetworkPolicy` resources in `deploy/002-setup/manifests/`                          |
+| Evidence         | No `NetworkPolicy` resources in `infrastructure/setup/manifests/`                          |
 | Status           | Open                                                                                   |
 | Remediation      | Define deny-all default policies per namespace; allow-list required traffic flows      |
 
@@ -284,7 +284,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | Medium                                                                                       |
 | Risk Rating      | Low                                                                                          |
 | Current Controls | Private endpoints eliminate public attack surface; VPN-only ingress                          |
-| Evidence         | `deploy/001-iac/modules/platform/networking.tf` defines NSG with no custom rules             |
+| Evidence         | `infrastructure/terraform/modules/platform/networking.tf` defines NSG with no custom rules             |
 | Status           | Accepted                                                                                     |
 | Rationale        | Private endpoints and VPN remove public exposure; custom rules add value after traffic audit |
 
@@ -331,7 +331,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | Medium                                                                   |
 | Risk Rating      | Low                                                                      |
 | Current Controls | Automation runs scheduled maintenance tasks only; no external triggers   |
-| Evidence         | `deploy/001-iac/modules/platform/automation.tf` assigns Contributor role |
+| Evidence         | `infrastructure/terraform/modules/platform/automation.tf` assigns Contributor role |
 | Status           | Open                                                                     |
 | Remediation      | Define custom RBAC role scoped to specific maintenance operations        |
 
@@ -361,7 +361,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | High                                                                                    |
 | Risk Rating      | High                                                                                    |
 | Current Controls | Script requires manual execution by a privileged operator                               |
-| Evidence         | `deploy/002-setup/optional/add-user-to-platform.sh` assigns broad role set              |
+| Evidence         | `infrastructure/setup/optional/add-user-to-platform.sh` assigns broad role set              |
 | Status           | Open                                                                                    |
 | Remediation      | Define tiered role profiles (reader, contributor, admin); assign minimum required roles |
 

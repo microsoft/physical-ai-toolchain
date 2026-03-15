@@ -20,11 +20,11 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 | Component                 | Source    | Version Location                                               | Current Version | Update Method    |
 |---------------------------|-----------|----------------------------------------------------------------|-----------------|------------------|
-| NVIDIA GPU Operator       | Helm      | `deploy/002-setup/defaults.conf` → `GPU_OPERATOR_VERSION`      | v25.3.4         | Manual           |
-| KAI Scheduler             | Helm      | `deploy/002-setup/defaults.conf` → `KAI_SCHEDULER_VERSION`     | v0.5.5          | Manual           |
-| OSMO Chart                | Helm      | `deploy/002-setup/defaults.conf` → `OSMO_CHART_VERSION`        | 1.0.1           | Manual           |
-| OSMO Image                | Container | `deploy/002-setup/defaults.conf` → `OSMO_IMAGE_VERSION`        | 6.0.0           | Manual           |
-| AzureML K8s Extension     | Azure CLI | `deploy/002-setup/defaults.conf` → `AZUREML_EXTENSION_VERSION` | 1.3.1           | Manual           |
+| NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION`      | v25.3.4         | Manual           |
+| KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION`     | v0.5.5          | Manual           |
+| OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`        | 1.0.1           | Manual           |
+| OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`        | 6.0.0           | Manual           |
+| AzureML K8s Extension     | Azure CLI | `infrastructure/setup/defaults.conf` → `AZUREML_EXTENSION_VERSION` | 1.3.1           | Manual           |
 | Isaac Lab                 | Container | Hardcoded in 7+ files                                          | 2.3.2           | Manual grep      |
 | Azure Terraform Providers | Terraform | `versions.tf` across 8 directories                             | Floor-pinned    | Dependabot (2/4) |
 | Python Packages           | pip/uv    | `pyproject.toml`, `requirements.txt`                           | Mixed           | Dependabot       |
@@ -38,7 +38,7 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 | Ecosystem        | Tool or Method                                                | Command or Location                         |
 |------------------|---------------------------------------------------------------|---------------------------------------------|
 | Python           | Dependabot PRs, `uv pip compile --upgrade`                    | `.github/dependabot.yml`, `pyproject.toml`  |
-| Terraform        | Dependabot PRs, `terraform init -upgrade`                     | `.github/dependabot.yml`, `deploy/001-iac/` |
+| Terraform        | Dependabot PRs, `terraform init -upgrade`                     | `.github/dependabot.yml`, `infrastructure/terraform/` |
 | Helm Charts      | `helm repo update && helm search repo <chart> --versions`     | NVIDIA NGC Helm repositories                |
 | Container Images | NVIDIA NGC catalog, GitHub release pages                      | `nvcr.io/nvidia/` namespace                 |
 | GitHub Actions   | Dependabot PRs, `gh api repos/{owner}/{repo}/releases/latest` | `.github/dependabot.yml`                    |
@@ -50,9 +50,9 @@ Dependabot opens PRs weekly on Monday for covered ecosystems. Configuration live
 | Ecosystem      | Directory             | Grouping                | Schedule       |
 |----------------|-----------------------|-------------------------|----------------|
 | pip            | `/`                   | `python-dependencies`   | Weekly, Monday |
-| pip            | `/src/training`       | `training-dependencies` | Weekly, Monday |
-| terraform      | `/deploy/001-iac`     | None                    | Weekly, Monday |
-| terraform      | `/deploy/001-iac/dns` | None                    | Weekly, Monday |
+| pip            | `/training/`          | `training-dependencies` | Weekly, Monday |
+| terraform      | `/infrastructure/terraform`     | None                    | Weekly, Monday |
+| terraform      | `/infrastructure/terraform/dns` | None                    | Weekly, Monday |
 | github-actions | `/`                   | `github-actions`        | Weekly, Monday |
 
 PR flow: Dependabot opens PR → CI runs (dependency-review, pinning-scan, CodeQL, linters) → maintainer reviews changelog and test results → merge.
@@ -64,7 +64,7 @@ PR flow: Dependabot opens PR → CI runs (dependency-review, pinning-scan, CodeQ
 
 ### Helm Charts
 
-Helm chart versions are centralized in `deploy/002-setup/defaults.conf`.
+Helm chart versions are centralized in `infrastructure/setup/defaults.conf`.
 
 1. Check for a new chart version:
 
@@ -73,7 +73,7 @@ Helm chart versions are centralized in `deploy/002-setup/defaults.conf`.
    helm search repo <chart-name> --versions
    ```
 
-2. Update the version variable in `deploy/002-setup/defaults.conf`
+2. Update the version variable in `infrastructure/setup/defaults.conf`
 3. Run `--config-preview` on affected deploy scripts to verify configuration
 4. Deploy to a test cluster and validate
 5. Submit PR with changelog summary from the upstream release

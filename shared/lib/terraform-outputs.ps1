@@ -1,20 +1,20 @@
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
 
-# Shared library for reading Terraform outputs from deploy/001-iac
+# Shared library for reading Terraform outputs from infrastructure/terraform
 # Dot-source this file and call Read-TerraformOutputs to populate $Script:TfOutput
 
 #Requires -Version 7.0
 
 $Script:TfOutput = $null
-$Script:DefaultTerraformDir = Join-Path $PSScriptRoot '..' '..' 'deploy' '001-iac'
+$Script:DefaultTerraformDir = Join-Path $PSScriptRoot '..' '..' 'infrastructure' 'terraform'
 
 <#
 .SYNOPSIS
 Reads Terraform outputs from the specified directory.
 
 .PARAMETER TerraformDir
-Path to the Terraform directory. Defaults to deploy/001-iac relative to this script.
+Path to the Terraform directory. Defaults to infrastructure/terraform relative to this script.
 
 .OUTPUTS
 System.Boolean

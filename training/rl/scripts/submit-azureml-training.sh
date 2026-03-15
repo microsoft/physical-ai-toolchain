@@ -6,7 +6,7 @@ set -o errexit -o nounset
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || dirname "$SCRIPT_DIR")"
 
-source "$REPO_ROOT/deploy/002-setup/lib/common.sh"
+source "$REPO_ROOT/shared/lib/common.sh"
 source "$SCRIPT_DIR/lib/terraform-outputs.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 

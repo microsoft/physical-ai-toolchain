@@ -1,4 +1,4 @@
-/** TFLint configuration for deploy/001-iac and child modules */
+/** TFLint configuration for infrastructure/terraform and child modules */
 
 tflint {
   required_version = ">= 0.61.0"

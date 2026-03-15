@@ -26,14 +26,14 @@ Point-to-Site and Site-to-Site VPN connectivity for secure remote access to the 
 
 ## 📋 Prerequisites
 
-* Platform infrastructure deployed (`cd deploy/001-iac && terraform apply`)
+* Platform infrastructure deployed (`cd infrastructure/terraform && terraform apply`)
 * Terraform 1.5+ installed
 * Core variables matching parent deployment (`environment`, `resource_prefix`, `location`)
 
 ## 🚀 Quick Start
 
 ```bash
-cd deploy/001-iac/vpn
+cd infrastructure/terraform/vpn
 
 # Configure
 cp terraform.tfvars.example terraform.tfvars

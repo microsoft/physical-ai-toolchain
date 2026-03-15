@@ -221,7 +221,7 @@ az storage account update --name stosmorobotst001 --allow-shared-key-access true
 
 ### 1. Terraform Configuration Updates
 
-#### [deploy/001-iac/main.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/main.tf)
+#### [infrastructure/terraform/main.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/terraform/main.tf)
 
 Added missing fields to `azureml_config` to enable extension installation and workload identity federation:
 
@@ -354,7 +354,7 @@ should_enable_storage_shared_access_key = true
 Then run:
 
 ```bash
-cd deploy/001-iac
+cd infrastructure/terraform
 terraform apply -var-file=terraform.tfvars
 ```
 
@@ -402,7 +402,7 @@ Submit jobs to AzureML managed compute (e.g., `gpu-cluster`) instead of the atta
 
 | File                              | Change Type                                                     |
 |-----------------------------------|-----------------------------------------------------------------|
-| `deploy/001-iac/main.tf`          | Added `should_install_extension`, `should_federate_ml_identity` |
+| `infrastructure/terraform/main.tf`          | Added `should_install_extension`, `should_federate_ml_identity` |
 | `workflows/azureml/validate.yaml` | Fixed input schema, changed mount to download                   |
 
 ## Related Resources

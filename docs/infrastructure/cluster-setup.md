@@ -19,7 +19,7 @@ AKS cluster configuration for robotics workloads with AzureML and NVIDIA OSMO.
 
 ## 📋 Prerequisites
 
-- Terraform infrastructure deployed (`cd deploy/001-iac && terraform apply`)
+- Terraform infrastructure deployed (`cd infrastructure/terraform && terraform apply`)
 - VPN connected (if using default private AKS cluster)
 - Azure CLI authenticated (`az login`)
 - kubectl, Helm 3.x, jq installed
@@ -207,7 +207,7 @@ See [OSMO Keycloak configuration](https://nvidia.github.io/OSMO/main/deployment_
 
 ## ⚙️ Configuration
 
-Scripts read from Terraform outputs in `deploy/001-iac/`. Override with environment variables:
+Scripts read from Terraform outputs in `infrastructure/terraform/`. Override with environment variables:
 
 | Variable                | Description        |
 |-------------------------|--------------------|

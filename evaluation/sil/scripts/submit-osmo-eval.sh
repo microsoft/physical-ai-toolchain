@@ -22,8 +22,8 @@ fi
 source "${SCRIPT_DIR}/lib/terraform-outputs.sh"
 read_terraform_outputs "${REPO_ROOT}/infrastructure/terraform" 2>/dev/null || true
 
-# shellcheck source=../deploy/002-setup/lib/common.sh
-source "${REPO_ROOT}/deploy/002-setup/lib/common.sh"
+# shellcheck source=../../../shared/lib/common.sh
+source "${REPO_ROOT}/shared/lib/common.sh"
 
 usage() {
   cat <<'EOF'

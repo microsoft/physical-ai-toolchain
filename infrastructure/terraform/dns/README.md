@@ -22,7 +22,7 @@ Private DNS zone for OSMO UI hostname resolution. Maps the OSMO UI hostname to t
 kubectl get svc -n osmo osmo-ui -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 
 # Deploy DNS zone with the LoadBalancer IP
-cd deploy/001-iac/dns
+cd infrastructure/terraform/dns
 terraform init && terraform apply -var="osmo_loadbalancer_ip=<IP_FROM_ABOVE>"
 ```
 
@@ -34,7 +34,7 @@ terraform init && terraform apply -var="osmo_loadbalancer_ip=<IP_FROM_ABOVE>"
 
 ## ➡️ Next Step
 
-Proceed to [Cluster Setup](../../002-setup/).
+Proceed to [Cluster Setup](../../setup/).
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
