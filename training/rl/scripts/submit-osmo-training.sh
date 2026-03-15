@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit OSMO training workflow with src/training/ packaged as base64 payload
+# Submit OSMO training workflow with training/rl/ packaged as base64 payload
 # Excludes __pycache__ and build artifacts to reduce payload size
 set -o errexit -o nounset
 
@@ -18,10 +18,10 @@ show_help() {
   cat << 'EOF'
 Usage: submit-osmo-training.sh [OPTIONS] [-- osmo-submit-flags]
 
-Package src/training/, encode as base64, and submit an OSMO workflow.
+Package training/rl/, encode as base64, and submit an OSMO workflow.
 
 WORKFLOW OPTIONS:
-    -w, --workflow PATH           Workflow template (default: workflows/osmo/train.yaml)
+    -w, --workflow PATH           Workflow template (default: training/rl/workflows/osmo/train.yaml)
     -t, --task NAME               IsaacLab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
     -n, --num-envs COUNT          Number of environments (default: 2048)
     -m, --max-iterations N        Maximum iterations (empty to unset)
@@ -85,7 +85,7 @@ TMP_DIR="$SCRIPT_DIR/.tmp"
 ARCHIVE_PATH="$TMP_DIR/osmo-training.zip"
 B64_PATH="$TMP_DIR/osmo-training.b64"
 
-workflow="$REPO_ROOT/workflows/osmo/train.yaml"
+workflow="$REPO_ROOT/training/rl/workflows/osmo/train.yaml"
 task="${TASK:-Isaac-Velocity-Rough-Anymal-C-v0}"
 num_envs="${NUM_ENVS:-2048}"
 max_iterations="${MAX_ITERATIONS:-}"
@@ -156,7 +156,7 @@ done
 require_tools osmo zip base64
 
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
-[[ -d "$REPO_ROOT/src/training" ]] || fatal "Directory src/training not found"
+[[ -d "$REPO_ROOT/training/rl" ]] || fatal "Directory training/rl not found"
 
 checkpoint_mode="$(normalize_checkpoint_mode "$checkpoint_mode")"
 
@@ -197,7 +197,7 @@ mkdir -p "$TMP_DIR"
 rm -f "$ARCHIVE_PATH" "$B64_PATH"
 
 # Exclude __pycache__, .pyc, and build artifacts to reduce payload size
-(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" src/training src/common \
+(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/rl training/__init__.py training/stream.py training/utils src/common \
   -x "**/__pycache__/*" \
   -x "*.pyc" \
   -x "*.pyo" \

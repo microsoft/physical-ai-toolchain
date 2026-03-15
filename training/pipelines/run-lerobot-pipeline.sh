@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || dirname "$SCRIPT_DIR")"
 
 source "$REPO_ROOT/deploy/002-setup/lib/common.sh"
-source "$SCRIPT_DIR/lib/terraform-outputs.sh"
+source "$REPO_ROOT/scripts/lib/terraform-outputs.sh"
 read_terraform_outputs "$REPO_ROOT/deploy/001-iac" 2>/dev/null || true
 
 # Source .env file if present
@@ -235,7 +235,7 @@ section "Stage 1: Training"
 info "Submitting LeRobot training workflow..."
 
 train_args=(
-  "$SCRIPT_DIR/submit-osmo-lerobot-training.sh"
+  "$REPO_ROOT/training/il/scripts/submit-osmo-lerobot-training.sh"
   --dataset-repo-id "$dataset_repo_id"
   --policy-type "$policy_type"
   --job-name "$train_job_name"
@@ -345,7 +345,7 @@ else
   info "Submitting LeRobot inference workflow..."
 
   eval_args=(
-    "$SCRIPT_DIR/submit-osmo-lerobot-inference.sh"
+    "$REPO_ROOT/scripts/submit-osmo-lerobot-inference.sh"
     --policy-repo-id "$policy_repo_id"
     --policy-type "$policy_type"
     --job-name "$eval_job_name"

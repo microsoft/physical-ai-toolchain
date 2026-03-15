@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TRAINING_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-SRC_DIR="$(cd "${TRAINING_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${TRAINING_DIR}/../.." && pwd)"
 
 ENV_FILE="${TRAINING_DIR}/.env"
 if [[ -f "${ENV_FILE}" ]]; then
@@ -63,9 +63,9 @@ configure_uv
 
 prebundle_path="/isaac-sim/exts/omni.pip.compute/pip_prebundle"
 if [[ -d "${prebundle_path}" ]]; then
-  export PYTHONPATH="${prebundle_path}:${SRC_DIR}:${PYTHONPATH:-}"
+  export PYTHONPATH="${prebundle_path}:${REPO_ROOT}:${PYTHONPATH:-}"
 else
-  export PYTHONPATH="${SRC_DIR}:${PYTHONPATH:-}"
+  export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 fi
 
 if command -v uv &>/dev/null && [[ -n "${UV_PYTHON:-}" ]]; then
@@ -104,9 +104,9 @@ backend_lc=$(printf '%s' "$backend" | tr '[:upper:]' '[:lower:]')
 
 case "${backend_lc}" in
   rsl-rl|rsl_rl|rslrl)
-    exec "${python_cmd[@]}" -m training.scripts.launch_rsl_rl "$@"
+    exec "${python_cmd[@]}" -m training.rl.scripts.launch_rsl_rl "$@"
     ;;
   *)
-    exec "${python_cmd[@]}" -m training.scripts.launch "$@"
+    exec "${python_cmd[@]}" -m training.rl.scripts.launch "$@"
     ;;
 esac

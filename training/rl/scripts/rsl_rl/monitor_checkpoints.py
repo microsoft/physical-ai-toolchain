@@ -9,7 +9,7 @@ from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
-from common import cli_args  # isort: skip
+from training.rl import cli_args  # isort: skip
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Monitor checkpoints and evaluate new policies with RSL-RL.")

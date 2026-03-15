@@ -27,7 +27,7 @@ AZUREML ASSET OPTIONS:
     --assets-only                 Register environment without submitting job
 
 TRAINING OPTIONS:
-    -w, --job-file PATH           Job YAML template (default: workflows/azureml/train.yaml)
+    -w, --job-file PATH           Job YAML template (default: training/rl/workflows/azureml/train.yaml)
     -t, --task NAME               IsaacLab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
     -n, --num-envs COUNT          Number of environments (default: 2048)
     -m, --max-iterations N        Maximum iterations (empty to unset)
@@ -133,7 +133,7 @@ environment_version="2.3.2"
 image="nvcr.io/nvidia/isaac-lab:2.3.2"
 assets_only=false
 
-job_file="$REPO_ROOT/workflows/azureml/train.yaml"
+job_file="$REPO_ROOT/training/rl/workflows/azureml/train.yaml"
 mode="train"
 task="${TASK:-Isaac-Velocity-Rough-Anymal-C-v0}"
 num_envs="${NUM_ENVS:-2048}"

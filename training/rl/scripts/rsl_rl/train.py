@@ -20,7 +20,7 @@ from typing import Any
 
 from isaaclab.app import AppLauncher
 
-from common import cli_args
+from training.rl import cli_args
 from training.simulation_shutdown import prepare_for_shutdown
 from training.stream import install_ansi_stripping
 

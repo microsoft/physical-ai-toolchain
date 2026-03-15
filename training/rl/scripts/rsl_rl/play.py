@@ -8,7 +8,7 @@ import sys
 
 from isaaclab.app import AppLauncher
 
-from common import cli_args  # isort: skip
+from training.rl import cli_args  # isort: skip
 from training.simulation_shutdown import prepare_for_shutdown
 
 # add argparse arguments

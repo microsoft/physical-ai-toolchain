@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Submit OSMO training workflow using dataset folder injection
-# Uploads src/training/ via OSMO localpath and registers as versioned dataset
+# Uploads training code via OSMO localpath and registers as versioned dataset
 # Excludes __pycache__ and build artifacts via staging directory
 set -o errexit -o nounset
 
@@ -22,10 +22,10 @@ show_help() {
 Usage: submit-osmo-dataset-training.sh [OPTIONS] [-- osmo-submit-flags]
 
 Submit an OSMO training workflow using dataset folder injection.
-The src/training folder is uploaded as a versioned OSMO dataset via localpath.
+The training folder is uploaded as a versioned OSMO dataset via localpath.
 
 WORKFLOW OPTIONS:
-    -w, --workflow PATH           Workflow template (default: workflows/osmo/train-dataset.yaml)
+    -w, --workflow PATH           Workflow template (default: training/rl/workflows/osmo/train-dataset.yaml)
     -t, --task NAME               IsaacLab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
     -n, --num-envs COUNT          Number of environments (default: 2048)
     -m, --max-iterations N        Maximum iterations (empty to unset)
@@ -41,7 +41,7 @@ RESOURCE OPTIONS:
 DATASET OPTIONS:
         --dataset-bucket NAME     OSMO bucket name (default: training)
         --dataset-name NAME       Dataset name (default: training-code)
-        --training-path PATH      Local path to upload (default: src/training)
+        --training-path PATH      Local path to upload (default: training/rl)
 
 CHECKPOINT OPTIONS:
     -c, --checkpoint-uri URI      MLflow checkpoint artifact URI
@@ -103,7 +103,7 @@ build_rsync_excludes() {
 # Defaults
 #------------------------------------------------------------------------------
 
-workflow="$REPO_ROOT/workflows/osmo/train-dataset.yaml"
+workflow="$REPO_ROOT/training/rl/workflows/osmo/train-dataset.yaml"
 task="${TASK:-Isaac-Velocity-Rough-Anymal-C-v0}"
 num_envs="${NUM_ENVS:-2048}"
 max_iterations="${MAX_ITERATIONS:-}"
@@ -118,7 +118,7 @@ storage="${OSMO_STORAGE:-200Gi}"
 # Dataset configuration
 dataset_bucket="${OSMO_DATASET_BUCKET:-training}"
 dataset_name="${OSMO_DATASET_NAME:-training-code}"
-training_path="${TRAINING_PATH:-$REPO_ROOT/src/training}"
+training_path="${TRAINING_PATH:-$REPO_ROOT/training/rl}"
 
 checkpoint_uri="${CHECKPOINT_URI:-}"
 checkpoint_mode="${CHECKPOINT_MODE:-from-scratch}"
@@ -222,7 +222,7 @@ rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 
 # Build exclude args from .amlignore (uses gitignore syntax)
-amlignore_file="$REPO_ROOT/src/.amlignore"
+amlignore_file="$REPO_ROOT/training/.amlignore"
 rsync_excludes=()
 if [[ -f "$amlignore_file" ]]; then
   while IFS= read -r exclude; do

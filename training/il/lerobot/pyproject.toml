@@ -1,5 +1,5 @@
 [project]
-name = "robotics-lerobot"
+name = "robotics-training-il"
 version = "0.1.0"
 description = "LeRobot workflow runtime dependencies"
 requires-python = ">=3.10,<3.13"

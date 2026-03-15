@@ -41,7 +41,7 @@ AZUREML ASSET OPTIONS:
     --assets-only                 Register environment without submitting job
 
 TRAINING OPTIONS:
-    -w, --job-file PATH           Job YAML template (default: workflows/azureml/lerobot-train.yaml)
+    -w, --job-file PATH           Job YAML template (default: training/il/workflows/azureml/lerobot-train.yaml)
     -p, --policy-type TYPE        Policy architecture: act, diffusion (default: act)
     -j, --job-name NAME           Job identifier (default: lerobot-act-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
@@ -150,7 +150,7 @@ environment_version="1.0.0"
 image="${IMAGE:-pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime}"
 assets_only=false
 
-job_file="$REPO_ROOT/workflows/azureml/lerobot-train.yaml"
+job_file="$REPO_ROOT/training/il/workflows/azureml/lerobot-train.yaml"
 dataset_repo_id="${DATASET_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 job_name="${JOB_NAME:-lerobot-act-training}"

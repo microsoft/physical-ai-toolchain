@@ -40,7 +40,7 @@ DATA SOURCE:
         --blob-prefix PREFIX      Blob path prefix for dataset
 
 TRAINING OPTIONS:
-    -w, --workflow PATH           Workflow template (default: workflows/osmo/lerobot-train.yaml)
+    -w, --workflow PATH           Workflow template (default: training/il/workflows/osmo/lerobot-train.yaml)
     -p, --policy-type TYPE        Policy architecture: act, diffusion (default: act)
     -j, --job-name NAME           Job identifier (default: lerobot-act-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
@@ -113,7 +113,7 @@ EOF
 # Defaults
 #------------------------------------------------------------------------------
 
-workflow="$REPO_ROOT/workflows/osmo/lerobot-train.yaml"
+workflow="$REPO_ROOT/training/il/workflows/osmo/lerobot-train.yaml"
 dataset_repo_id="${DATASET_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 job_name="${JOB_NAME:-lerobot-act-training}"
@@ -203,7 +203,7 @@ done
 require_tools osmo zip base64
 
 [[ -z "$dataset_repo_id" ]] && fatal "--dataset-repo-id is required"
-[[ -d "$REPO_ROOT/src/training" ]] || fatal "Directory src/training not found"
+[[ -d "$REPO_ROOT/training/il" ]] || fatal "Directory training/il not found"
 
 # Validate blob parameters when --from-blob is specified
 if [[ "$from_blob" == "true" ]]; then
@@ -254,7 +254,7 @@ info "Packaging training payload..."
 mkdir -p "$TMP_DIR"
 rm -f "$ARCHIVE_PATH" "$B64_PATH"
 
-(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" src/training src/common \
+(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/il training/__init__.py training/stream.py training/utils src/common \
   -x "**/__pycache__/*" \
   -x "*.pyc" \
   -x "*.pyo" \

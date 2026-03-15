@@ -9,6 +9,9 @@ requires-python = ">=3.11"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["training/rl"]
+
 [dependency-groups]
 dev = [
     "ruff",
@@ -25,8 +28,8 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
+testpaths = ["tests", "training/tests"]
+pythonpath = ["src", "."]
 addopts = [
     "-ra",
     "--strict-markers",
@@ -56,7 +59,7 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 "src/inference/scripts/act_inference_node.py" = ["E402"]
 "src/inference/scripts/play_policy.py" = ["E402"]
-"src/training/scripts/rsl_rl/*.py" = ["E402"]
+"training/rl/scripts/rsl_rl/*.py" = ["E402"]
 "data-management/viewer/backend/tests/*.py" = ["E402"]
 
 [tool.ruff.lint.isort]
