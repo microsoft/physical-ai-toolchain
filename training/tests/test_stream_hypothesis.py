@@ -44,7 +44,7 @@ def _make_stream() -> tuple[AnsiStrippingStream, CaptureStream]:
 # ---------------------------------------------------------------------------
 
 _CSI_PARAMS = st.text(alphabet="0123456789;", min_size=0, max_size=8)
-_CSI_FINAL = st.sampled_from(list("ABCDEFGHJKSTfmnsulh"))
+_CSI_FINAL = st.sampled_from(list("ABCDEFGHJKSTfmnsulh"))  # cspell:disable-line
 
 ansi_codes = st.builds(lambda p, f: f"\x1b[{p}{f}", _CSI_PARAMS, _CSI_FINAL)
 printable_text = st.text(
@@ -85,7 +85,7 @@ def test_ansi_interleaved_with_text(code, text):
 
 @given(text=printable_text)
 def test_cr_lf_preserved(text):
-    """\\r\\n pairs are normalised to \\n, not doubled."""
+    """\\r\\n pairs are normalized to \\n, not doubled."""
     stream, inner = _make_stream()
     stream.write(text + "\r\n")
     assert inner.value == text + "\n"
