@@ -1,12 +1,12 @@
 ---
 sidebar_position: 1
-title: Inference Guide
-description: Run trained robotics policies in simulation and on physical hardware using Azure ML and NVIDIA OSMO
+title: Evaluation Guide
+description: Evaluate trained robotics policies in simulation and on physical hardware using Azure ML and NVIDIA OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-24
+ms.date: 2026-03-14
 ms.topic: overview
 keywords:
-  - inference
+  - evaluation
   - robotics
   - Isaac Lab
   - LeRobot
@@ -14,16 +14,16 @@ keywords:
   - Azure ML
 ---
 
-Deploy trained robotics policies using local environments, Azure ML compute, or NVIDIA OSMO workflows. This guide covers LeRobot ACT policy inference and OSMO-managed inference for Isaac Lab and LeRobot workloads.
+Evaluate trained robotics policies using local environments, Azure ML compute, or NVIDIA OSMO workflows. This guide covers LeRobot ACT policy evaluation and OSMO-managed evaluation for Isaac Lab and LeRobot workloads.
 
-## 📖 Inference Guides
+## 📖 Evaluation Guides
 
-| Guide                                                | Description                                             |
-|------------------------------------------------------|---------------------------------------------------------|
-| [LeRobot ACT Policy Inference](lerobot-inference.md) | Run LeRobot ACT policies locally with ROS2 deployment   |
-| [OSMO Inference Workflows](osmo-inference.md)        | Execute Isaac Lab and LeRobot inference via NVIDIA OSMO |
+| Guide                                                    | Description                                               |
+|----------------------------------------------------------|-----------------------------------------------------------|
+| [LeRobot ACT Policy Evaluation](lerobot-evaluation.md)   | Run LeRobot ACT policies locally with ROS2 deployment     |
+| [OSMO Evaluation Workflows](osmo-evaluation.md)          | Execute Isaac Lab and LeRobot evaluation via NVIDIA OSMO  |
 
-## ⚖️ Inference Comparison
+## ⚖️ Evaluation Comparison
 
 | Feature              | Local / Azure ML        | OSMO                        |
 |----------------------|-------------------------|-----------------------------|
@@ -35,7 +35,7 @@ Deploy trained robotics policies using local environments, Azure ML compute, or 
 
 ## 🚀 Quick Start
 
-LeRobot local inference:
+LeRobot local evaluation:
 
 ```bash
 python lerobot/scripts/eval.py \
@@ -43,11 +43,11 @@ python lerobot/scripts/eval.py \
   -p lerobot/configs/policy/act.yaml
 ```
 
-OSMO inference submission:
+OSMO evaluation submission:
 
 ```bash
 osmo workflow submit \
-  --file workflows/osmo/infer.yaml \
+  --file evaluation/sil/workflows/osmo/eval.yaml \
   --set checkpoint_uri=<checkpoint-uri>
 ```
 

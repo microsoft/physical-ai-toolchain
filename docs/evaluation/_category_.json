@@ -1,8 +1,8 @@
 {
-  "label": "Inference",
+  "label": "Evaluation",
   "position": 4,
   "link": {
     "type": "generated-index",
-    "description": "Run inference with trained models."
+    "description": "Evaluate trained models in simulation and on hardware."
   }
 }

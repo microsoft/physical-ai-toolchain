@@ -1,7 +1,7 @@
 [project]
-name = "robotics-inference"
+name = "physical-ai-evaluation"
 version = "0.1.0"
-description = "Inference workflow runtime dependencies"
+description = "Evaluation workflow runtime dependencies"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "numpy>=1.26.0,<3.0.0",
