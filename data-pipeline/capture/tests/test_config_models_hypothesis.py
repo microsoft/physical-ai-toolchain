@@ -160,3 +160,69 @@ def test_recording_config_rejects_extra_fields(field_name):
     base[field_name] = "unexpected"
     with pytest.raises(ValidationError, match="Extra inputs"):
         RecordingConfig(**base)
+
+
+# === Edge-case and boundary property tests ===
+
+
+@given(
+    name=st.from_regex(r"/[a-z][a-z0-9_/]*", fullmatch=True),
+    frequency_hz=st.floats(min_value=0.01, max_value=1000.0, allow_nan=False, allow_infinity=False),
+    pin=st.integers(0, 27),
+)
+def test_recording_config_full_roundtrip(name, frequency_hz, pin):
+    """Valid RecordingConfig survives model_dump → model_validate roundtrip."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original = RecordingConfig(
+            topics=[TopicConfig(name=name, frequency_hz=frequency_hz)],
+            trigger=GpioTriggerConfig(pin=pin),
+            output_dir=tmpdir,
+        )
+        rebuilt = RecordingConfig.model_validate(original.model_dump())
+        assert rebuilt.topics == original.topics
+        assert rebuilt.trigger == original.trigger
+
+
+@given(
+    count=st.integers(min_value=2, max_value=5),
+    base_name=st.from_regex(r"/[a-z][a-z0-9_]*", fullmatch=True),
+)
+def test_recording_config_accepts_unique_topics(count, base_name):
+    """Multiple topics with unique names are accepted."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        topics = [TopicConfig(name=f"{base_name}_{i}", frequency_hz=100.0) for i in range(count)]
+        config = RecordingConfig(
+            topics=topics,
+            trigger=GpioTriggerConfig(pin=17),
+            output_dir=tmpdir,
+        )
+        assert len(config.topics) == count
+
+
+@given(frequency_hz=st.floats(min_value=1e-6, max_value=0.01, allow_nan=False, allow_infinity=False))
+def test_topic_config_near_zero_frequency(frequency_hz):
+    """Very small positive frequency values are accepted."""
+    config = TopicConfig(name="/test", frequency_hz=frequency_hz)
+    assert config.frequency_hz == frequency_hz
+
+
+@given(frequency_hz=st.floats(min_value=999.0, max_value=1000.0, allow_nan=False, allow_infinity=False))
+def test_topic_config_near_max_frequency(frequency_hz):
+    """Frequency values near the 1000 Hz limit are accepted."""
+    config = TopicConfig(name="/test", frequency_hz=frequency_hz)
+    assert config.frequency_hz == frequency_hz
+
+
+@given(threshold_ms=st.floats(min_value=1e-10, max_value=0.01, allow_nan=False, allow_infinity=False))
+def test_gap_detection_near_zero_threshold(threshold_ms):
+    """Very small positive threshold values are accepted."""
+    config = GapDetectionConfig(threshold_ms=threshold_ms)
+    assert config.threshold_ms == threshold_ms
+
+
+@given(warning=st.integers(min_value=0, max_value=98))
+def test_disk_thresholds_adjacent_values(warning):
+    """Warning exactly one less than critical is valid."""
+    thresholds = DiskThresholds(warning_percent=warning, critical_percent=warning + 1)
+    assert thresholds.warning_percent == warning
+    assert thresholds.critical_percent == warning + 1
