@@ -13,7 +13,7 @@ keywords:
 Azure subscription initialization and resource provider registration. Configures subscription context and registers required Azure resource providers for the robotics reference architecture.
 
 > [!NOTE]
-> Complete prerequisites including tooling requirements, version constraints, and Azure quota checks are in the [Prerequisites](../../docs/deploy/prerequisites.md) guide.
+> Complete prerequisites including tooling requirements, version constraints, and Azure quota checks are in the [Prerequisites](../../docs/infrastructure/prerequisites.md) guide.
 
 ## 🚀 Quick Start
 
@@ -25,7 +25,7 @@ source az-sub-init.sh
 
 | Guide                                               | Description                                          |
 |-----------------------------------------------------|------------------------------------------------------|
-| [Prerequisites](../../docs/deploy/prerequisites.md) | Full prerequisites, tooling, and Azure configuration |
+| [Prerequisites](../../docs/infrastructure/prerequisites.md) | Full prerequisites, tooling, and Azure configuration |
 
 ## ➡️ Next Step
 

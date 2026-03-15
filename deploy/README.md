@@ -13,7 +13,7 @@ keywords:
 Orchestrator for the end-to-end deployment pipeline. Covers Azure subscription setup, Terraform infrastructure provisioning, and AKS cluster configuration with GPU operator and AzureML.
 
 > [!NOTE]
-> Complete deployment walkthrough, architecture overview, and troubleshooting are in the [Deployment Guide](../docs/deploy/README.md).
+> Complete deployment walkthrough, architecture overview, and troubleshooting are in the [Deployment Guide](../docs/infrastructure/README.md).
 
 ## 🚀 Quick Start
 
@@ -36,7 +36,7 @@ az aks get-credentials --resource-group <rg> --name <aks>
 
 | Guide                                        | Description                                         |
 |----------------------------------------------|-----------------------------------------------------|
-| [Deployment Guide](../docs/deploy/README.md) | End-to-end deployment hub and architecture overview |
+| [Deployment Guide](../docs/infrastructure/README.md) | End-to-end deployment hub and architecture overview |
 | [Prerequisites](000-prerequisites/)          | Azure subscription initialization                   |
 | [Infrastructure](001-iac/)                   | Terraform configuration and provisioning            |
 | [Cluster Setup](002-setup/)                  | AKS cluster configuration and extensions            |

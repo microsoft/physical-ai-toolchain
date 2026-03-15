@@ -41,8 +41,8 @@ $Script:HELM_REPO_GPU_OPERATOR = $env:HELM_REPO_GPU_OPERATOR ?? 'https://helm.ng
 $Script:HELM_REPO_KAI = $env:HELM_REPO_KAI ?? 'https://nvidia.github.io/k8s-device-scheduler/'
 $Script:HELM_REPO_OSMO = $env:HELM_REPO_OSMO ?? 'https://helm.ngc.nvidia.com/nvidia/osmo'
 
-# Default Terraform Directory (relative to 002-setup)
-$Script:DEFAULT_TF_DIR = $env:DEFAULT_TF_DIR ?? '../001-iac'
+# Default Terraform Directory (relative to setup)
+$Script:DEFAULT_TF_DIR = $env:DEFAULT_TF_DIR ?? '../terraform'
 
 # AzureML Extension Configuration
 $Script:AZUREML_EXTENSION_NAME = $env:AZUREML_EXTENSION_NAME ?? 'aml-extension'

@@ -13,7 +13,7 @@ keywords:
 Point-to-site VPN for secure remote access to the private AKS cluster and Azure services. Required for kubectl access, OSMO UI, and other cluster-internal endpoints.
 
 > [!NOTE]
-> Complete VPN configuration including authentication options, client setup, and site-to-site configuration is in the [VPN Gateway Configuration](../../../docs/deploy/vpn.md) guide.
+> Complete VPN configuration including authentication options, client setup, and site-to-site configuration is in the [VPN Gateway Configuration](../../../docs/infrastructure/vpn.md) guide.
 
 ## 🚀 Quick Start
 
@@ -27,7 +27,7 @@ terraform init && terraform apply
 
 | Guide                                                    | Description                                               |
 |----------------------------------------------------------|-----------------------------------------------------------|
-| [VPN Gateway Configuration](../../../docs/deploy/vpn.md) | Authentication options, client setup, and troubleshooting |
+| [VPN Gateway Configuration](../../../docs/infrastructure/vpn.md) | Authentication options, client setup, and troubleshooting |
 
 ## ➡️ Next Step
 

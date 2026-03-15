@@ -13,7 +13,7 @@ keywords:
 AKS cluster configuration for robotics workloads. Deploys NVIDIA GPU operator, KAI Scheduler, AzureML extension, and OSMO components onto the AKS cluster provisioned in the infrastructure phase.
 
 > [!NOTE]
-> Complete setup walkthrough, deployment scenarios, and troubleshooting are in the [Cluster Setup](../../docs/deploy/cluster-setup.md) guide.
+> Complete setup walkthrough, deployment scenarios, and troubleshooting are in the [Cluster Setup](../../docs/infrastructure/cluster-setup.md) guide.
 
 ## 🚀 Quick Start
 
@@ -34,12 +34,12 @@ Deployment order:
 
 | Guide                                                             | Description                                       |
 |-------------------------------------------------------------------|---------------------------------------------------|
-| [Cluster Setup](../../docs/deploy/cluster-setup.md)               | Full setup walkthrough and deployment scenarios   |
-| [Cluster Operations](../../docs/deploy/cluster-setup-advanced.md) | Advanced operations, scaling, and troubleshooting |
+| [Cluster Setup](../../docs/infrastructure/cluster-setup.md)               | Full setup walkthrough and deployment scenarios   |
+| [Cluster Operations](../../docs/infrastructure/cluster-setup-advanced.md) | Advanced operations, scaling, and troubleshooting |
 
 ## ➡️ Next Step
 
-See [Deployment Scenarios](../../docs/deploy/cluster-setup.md#-deployment-scenarios) for advanced configurations.
+See [Deployment Scenarios](../../docs/infrastructure/cluster-setup.md#-deployment-scenarios) for advanced configurations.
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

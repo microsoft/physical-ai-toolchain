@@ -27,7 +27,7 @@ system_node_pool_node_count = 1
 // node_labels: Kubernetes labels applied to nodes at provisioning time.
 //   Set nvidia.com/gpu.deploy.driver=false on vGPU nodes (RTX PRO 6000) to
 //   skip GPU Operator driver management. The GRID driver DaemonSet in
-//   deploy/002-setup/manifests/gpu-grid-driver-installer.yaml handles these nodes.
+//   infrastructure/setup/manifests/gpu-grid-driver-installer.yaml handles these nodes.
 
 // Single GPU pool (Spot A10 — simplest configuration)
 node_pools = {
@@ -122,25 +122,3 @@ should_enable_microsoft_defender        = true
 
 // DNS Zones
 // should_include_aks_dns_zone = true
-
-// Dataviewer Application (disabled by default)
-// Deploy the dataset analysis tool on Azure Container Apps.
-// Container images must be pushed to ACR before enabling.
-// should_deploy_dataviewer = false
-// dataviewer_config = {
-//   backend_image  = "acrosmorbt4dev001.azurecr.io/dataviewer-backend:latest"
-//   frontend_image = "acrosmorbt4dev001.azurecr.io/dataviewer-frontend:latest"
-// }
-
-// Public deployment with Entra ID authentication:
-// should_deploy_dataviewer = true
-// dataviewer_config = {
-//   backend_image          = "acrosmorbt4dev001.azurecr.io/dataviewer-backend:latest"
-//   frontend_image         = "acrosmorbt4dev001.azurecr.io/dataviewer-frontend:latest"
-//   should_enable_internal = false
-//   should_deploy_auth     = true
-//   redirect_uris          = [
-//     "http://localhost:5173/",
-//     "https://ca-frontend-nvidia-dev-001.westus2.azurecontainerapps.io/",
-//   ]
-// }

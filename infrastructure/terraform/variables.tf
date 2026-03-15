@@ -418,37 +418,3 @@ variable "should_include_aks_dns_zone" {
   description = "Whether to include the AKS private DNS zone in core DNS zones"
   default     = true
 }
-
-/*
- * Dataviewer Configuration - Optional
- */
-
-variable "should_deploy_dataviewer" {
-  type        = bool
-  description = "Whether to deploy the dataviewer application on Azure Container Apps"
-  default     = false
-}
-
-variable "dataviewer_config" {
-  type = object({
-    subnet_address_prefix        = optional(string, "10.0.16.0/21")
-    should_enable_internal       = optional(bool, true)
-    backend_image                = optional(string, "")
-    frontend_image               = optional(string, "")
-    storage_dataset_container    = optional(string, "datasets")
-    storage_annotation_container = optional(string, "annotations")
-    should_deploy_auth           = optional(bool, false)
-    redirect_uris                = optional(list(string), ["http://localhost:5173/", "http://localhost:5174/"])
-  })
-  description = "Dataviewer Container Apps configuration including subnet, access mode, container images, and auth. Leave image fields empty to provision with a placeholder for initial IaC deployment"
-  default = {
-    subnet_address_prefix        = "10.0.16.0/21"
-    should_enable_internal       = true
-    backend_image                = ""
-    frontend_image               = ""
-    storage_dataset_container    = "datasets"
-    storage_annotation_container = "annotations"
-    should_deploy_auth           = false
-    redirect_uris                = ["http://localhost:5173/", "http://localhost:5174/"]
-  }
-}

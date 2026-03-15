@@ -13,7 +13,7 @@ keywords:
 Azure Automation Account for scheduled cluster operations. Manages start/stop schedules and maintenance runbooks for the AKS cluster.
 
 > [!NOTE]
-> Complete automation configuration including schedule setup and runbook details is in the [Cluster Automation](../../../docs/deploy/automation.md) guide.
+> Complete automation configuration including schedule setup and runbook details is in the [Cluster Automation](../../../docs/infrastructure/automation.md) guide.
 
 ## 🚀 Quick Start
 
@@ -27,7 +27,7 @@ terraform init && terraform apply
 
 | Guide                                                    | Description                                             |
 |----------------------------------------------------------|---------------------------------------------------------|
-| [Cluster Automation](../../../docs/deploy/automation.md) | Schedule configuration, runbooks, and managed resources |
+| [Cluster Automation](../../../docs/infrastructure/automation.md) | Schedule configuration, runbooks, and managed resources |
 
 ## ➡️ Next Step
 

@@ -13,7 +13,7 @@ keywords:
 Terraform configuration for the robotics reference architecture. Deploys Azure resources including AKS with GPU node pools, Azure ML workspace, storage, and OSMO backend services.
 
 > [!NOTE]
-> Complete configuration reference, architecture diagrams, and troubleshooting are in the [Infrastructure Deployment](../../docs/deploy/infrastructure.md) guide.
+> Complete configuration reference, architecture diagrams, and troubleshooting are in the [Infrastructure Deployment](../../docs/infrastructure/infrastructure.md) guide.
 
 <!-- markdownlint-disable MD028 -->
 
@@ -25,22 +25,22 @@ Terraform configuration for the robotics reference architecture. Deploys Azure r
 ## 🚀 Quick Start
 
 ```bash
-cd deploy/001-iac
-source ../000-prerequisites/az-sub-init.sh
+cd infrastructure/terraform
+source prerequisites/az-sub-init.sh
 cp terraform.tfvars.example terraform.tfvars
 terraform init && terraform apply
 ```
 
 ## 📖 Documentation
 
-| Guide                                                                     | Description                                          |
-|---------------------------------------------------------------------------|------------------------------------------------------|
-| [Infrastructure Deployment](../../docs/deploy/infrastructure.md)          | Configuration, variables, and deployment walkthrough |
-| [Infrastructure Reference](../../docs/deploy/infrastructure-reference.md) | Architecture, module structure, and troubleshooting  |
+| Guide                                                                                | Description                                          |
+|--------------------------------------------------------------------------------------|------------------------------------------------------|
+| [Infrastructure Deployment](../../docs/infrastructure/infrastructure.md)              | Configuration, variables, and deployment walkthrough |
+| [Infrastructure Reference](../../docs/infrastructure/infrastructure-reference.md)     | Architecture, module structure, and troubleshooting  |
 
 ## ➡️ Next Step
 
-Deploy [VPN Gateway](vpn/) or proceed to [Cluster Setup](../002-setup/).
+Deploy [VPN Gateway](vpn/) or proceed to [Cluster Setup](../setup/).
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

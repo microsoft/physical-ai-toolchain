@@ -13,7 +13,7 @@ keywords:
 Private DNS zone for OSMO UI hostname resolution. Maps the OSMO UI hostname to the internal LoadBalancer IP for access through VPN.
 
 > [!NOTE]
-> Complete DNS configuration and resolution flow details are in the [Private DNS Configuration](../../../docs/deploy/dns.md) guide.
+> Complete DNS configuration and resolution flow details are in the [Private DNS Configuration](../../../docs/infrastructure/dns.md) guide.
 
 ## 🚀 Quick Start
 
@@ -30,7 +30,7 @@ terraform init && terraform apply -var="osmo_loadbalancer_ip=<IP_FROM_ABOVE>"
 
 | Guide                                                    | Description                                     |
 |----------------------------------------------------------|-------------------------------------------------|
-| [Private DNS Configuration](../../../docs/deploy/dns.md) | DNS zone setup, resolution flow, and validation |
+| [Private DNS Configuration](../../../docs/infrastructure/dns.md) | DNS zone setup, resolution flow, and validation |
 
 ## ➡️ Next Step
 
