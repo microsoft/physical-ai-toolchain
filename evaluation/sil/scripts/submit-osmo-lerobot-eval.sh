@@ -8,7 +8,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || dirname "$SCRIPT_DIR")
 
 source "$REPO_ROOT/deploy/002-setup/lib/common.sh"
 source "$SCRIPT_DIR/lib/terraform-outputs.sh"
-read_terraform_outputs "$REPO_ROOT/deploy/001-iac" 2>/dev/null || true
+read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
 # Source .env file if present (for credentials and Azure context)
 ENV_FILE="${SCRIPT_DIR}/.env"
@@ -180,7 +180,7 @@ else
 fi
 
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
-[[ -d "$REPO_ROOT/src/training" ]] || fatal "Directory src/training not found"
+[[ -d "$REPO_ROOT/training/il" ]] || fatal "Directory training/il not found"
 
 case "$policy_type" in
   act|diffusion) ;;
@@ -227,7 +227,7 @@ info "Packaging LeRobot runtime payload..."
 mkdir -p "$TMP_DIR"
 rm -f "$ARCHIVE_PATH" "$B64_PATH"
 
-(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" src/training src/common \
+(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/il evaluation/sil \
   -x "**/__pycache__/*" \
   -x "*.pyc" \
   -x "*.pyo" \

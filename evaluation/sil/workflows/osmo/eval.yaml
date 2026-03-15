@@ -51,7 +51,7 @@ workflow:
 
             ARCHIVE_PATH="${TEMP_ARCHIVE:-/tmp/isaac_payload.zip}"
             PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/isaac_payload}"
-            INFERENCE_ROOT="${INFERENCE_ROOT:-${PAYLOAD_ROOT}/src/inference}"
+            INFERENCE_ROOT="${INFERENCE_ROOT:-${PAYLOAD_ROOT}/evaluation/sil}"
 
             mkdir -p "${PAYLOAD_ROOT}"
             printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"

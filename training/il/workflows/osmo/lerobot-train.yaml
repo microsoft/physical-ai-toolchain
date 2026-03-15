@@ -97,7 +97,7 @@ workflow:
             echo "Training scripts unpacked to ${PAYLOAD_ROOT}/src"
 
             # Install runtime dependencies from workflow manifest
-            LEROBOT_MANIFEST="${PAYLOAD_ROOT}/src/training/lerobot/pyproject.toml"
+            LEROBOT_MANIFEST="${PAYLOAD_ROOT}/training/il/lerobot/pyproject.toml"
             LEROBOT_REQUIREMENTS="/tmp/lerobot-runtime-requirements.txt"
             if [[ ! -f "${LEROBOT_MANIFEST}" ]]; then
               echo "ERROR: LeRobot workflow manifest not found at ${LEROBOT_MANIFEST}" >&2

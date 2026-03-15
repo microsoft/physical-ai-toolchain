@@ -76,7 +76,7 @@ workflows/
 
 ## 💾 OSMO Dataset Workflow
 
-The `train-dataset.yaml` template uploads `src/training/` as a versioned OSMO dataset instead of base64-encoding it inline.
+The `train-dataset.yaml` template uploads `training/rl/` as a versioned OSMO dataset instead of base64-encoding it inline.
 
 | Aspect         | train.yaml             | train-dataset.yaml    |
 |----------------|------------------------|-----------------------|
@@ -104,7 +104,7 @@ The `train-dataset.yaml` template uploads `src/training/` as a versioned OSMO da
 |--------------------|-----------------|-------------------------------|
 | `--dataset-bucket` | `training`      | OSMO bucket for training code |
 | `--dataset-name`   | `training-code` | Dataset name (auto-versioned) |
-| `--training-path`  | `src/training`  | Local folder to upload        |
+| `--training-path`  | `training/rl`   | Local folder to upload        |
 
 The training folder mounts at `/data/<dataset_name>/training` inside the container.
 
@@ -294,7 +294,7 @@ The inference workflow produces:
 
 | Requirement                   | Setup                    |
 |-------------------------------|--------------------------|
-| Infrastructure deployed       | `deploy/001-iac/`        |
+| Infrastructure deployed       | `infrastructure/terraform/` |
 | Setup scripts completed       | `deploy/002-setup/`      |
 | Azure CLI authenticated       | `az login`               |
 | OSMO CLI (for OSMO workflows) | Installed and configured |
@@ -307,6 +307,6 @@ Scripts resolve values in order:
 |-------------|-----------------------|----------------------------------|
 | 1 (highest) | CLI arguments         | `--resource-group rg-custom`     |
 | 2           | Environment variables | `AZURE_RESOURCE_GROUP=rg-custom` |
-| 3 (default) | Terraform outputs     | `deploy/001-iac/`                |
+| 3 (default) | Terraform outputs     | `infrastructure/terraform/`       |
 
 See individual workflow READMEs for detailed configuration options.

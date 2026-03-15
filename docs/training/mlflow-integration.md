@@ -158,16 +158,16 @@ Use CLI arguments to control logging frequency:
 
 ```bash
 # Log after every training step
-python src/training/scripts/skrl_training.py --mlflow_log_interval step
+python training/rl/scripts/skrl_training.py --mlflow_log_interval step
 
 # Log every 10 steps (default)
-python src/training/scripts/skrl_training.py --mlflow_log_interval balanced
+python training/rl/scripts/skrl_training.py --mlflow_log_interval balanced
 
 # Log once per rollout
-python src/training/scripts/skrl_training.py --mlflow_log_interval rollout
+python training/rl/scripts/skrl_training.py --mlflow_log_interval rollout
 
 # Log every 100 steps
-python src/training/scripts/skrl_training.py --mlflow_log_interval 100
+python training/rl/scripts/skrl_training.py --mlflow_log_interval 100
 ```
 
 ### Filtering Metrics for Production
@@ -194,7 +194,7 @@ runner.agent._update = wrapper_func
 The MLflow integration is automatically applied in `skrl_training.py` when training with Isaac Lab tasks:
 
 ```bash
-python src/training/scripts/skrl_training.py \
+python training/rl/scripts/skrl_training.py \
     --task Isaac-Cartpole-v0 \
     --num_envs 512 \
     --headless

@@ -175,7 +175,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | Medium                                                                                   |
 | Risk Rating      | Medium                                                                                   |
 | Current Controls | Debug logging disabled by default; Log Analytics RBAC                                    |
-| Evidence         | `src/training/utils/` modules include debug-level credential logging                     |
+| Evidence         | `training/rl/utils/` modules include debug-level credential logging                     |
 | Status           | Open                                                                                     |
 | Remediation      | Sanitize or redact `AZURE_*` values before logging; enforce structured logging           |
 
@@ -207,7 +207,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | Medium                                                                         |
 | Risk Rating      | Medium                                                                         |
 | Current Controls | `.gitignore` excludes state files; workstation access controls                 |
-| Evidence         | `deploy/001-iac/vpn/` stores VPN shared key as Terraform-managed resource      |
+| Evidence         | `infrastructure/terraform/vpn/` stores VPN shared key as Terraform-managed resource      |
 | Status           | Open                                                                           |
 | Remediation      | Resolved by T-2 remediation (remote backend with state encryption)             |
 
@@ -252,7 +252,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | Medium                                                                                         |
 | Risk Rating      | Medium                                                                                         |
 | Current Controls | Debug logging off by default; RBAC on Log Analytics                                            |
-| Evidence         | `src/training/utils/env.py` logs `AZURE_*` values at debug verbosity                           |
+| Evidence         | `training/rl/utils/env.py` logs `AZURE_*` values at debug verbosity                           |
 | Status           | Open                                                                                           |
 | Remediation      | Same as R-1; sanitize credential values before logging                                         |
 

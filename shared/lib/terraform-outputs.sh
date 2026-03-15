@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Shared library for reading Terraform outputs from deploy/001-iac
+# Shared library for reading Terraform outputs from infrastructure/terraform
 # Sources this file and call read_terraform_outputs() to populate TF_OUTPUT
 
-TERRAFORM_DIR="${TERRAFORM_DIR:-$(dirname "${BASH_SOURCE[0]}")/../../deploy/001-iac}"
+TERRAFORM_DIR="${TERRAFORM_DIR:-$(dirname "${BASH_SOURCE[0]}")/../../infrastructure/terraform}"
 
 # Read Terraform outputs from the specified directory into TF_OUTPUT
 # Returns 1 if Terraform state cannot be read (non-fatal for scripts)

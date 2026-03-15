@@ -166,11 +166,11 @@ Numeric metrics are on the **Metrics** tab: per-episode values (`ep0_mse`, `ep0_
 
 ## 🤖 ROS2 Deployment
 
-For real robot control, use the ROS2 inference node in `src/inference/scripts/act_inference_node.py`.
+For real robot control, use the ROS2 inference node in `fleet-deployment/inference/act_inference_node.py`.
 
 ### Data Classes
 
-`src/inference/robot_types.py` defines the interface between the robot and the policy:
+`evaluation/sil/robot_types.py` defines the interface between the robot and the policy:
 
 | Type                               | Maps to                    | Shape                 |
 |------------------------------------|----------------------------|-----------------------|

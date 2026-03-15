@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# OSMO Inference Workflow Submission Script
+# OSMO Evaluation Workflow Submission Script
 #
-# Packages src/training/ and deploy/, encodes the archive, and submits an OSMO
-# inference workflow using workflows/osmo/infer.yaml as a template.
+# Packages training and evaluation code, encodes the archive, and submits an OSMO
+# evaluation workflow using evaluation/sil/workflows/osmo/eval.yaml as a template.
 #
 set -euo pipefail
 
@@ -20,7 +20,7 @@ if [[ -f "${ENV_FILE}" ]]; then
 fi
 
 source "${SCRIPT_DIR}/lib/terraform-outputs.sh"
-read_terraform_outputs "${REPO_ROOT}/deploy/001-iac" 2>/dev/null || true
+read_terraform_outputs "${REPO_ROOT}/infrastructure/terraform" 2>/dev/null || true
 
 # shellcheck source=../deploy/002-setup/lib/common.sh
 source "${REPO_ROOT}/deploy/002-setup/lib/common.sh"
@@ -29,7 +29,7 @@ usage() {
   cat <<'EOF'
 Usage: submit-osmo-inference.sh [options] [-- osmo-submit-flags]
 
-Packages src/training/ and deploy/, encodes the archive, and submits the inference workflow.
+Packages training and evaluation code, encodes the archive, and submits the evaluation workflow.
 
 Required:
   -c, --checkpoint-uri URI  Checkpoint URI (required). Supported formats:
@@ -191,13 +191,13 @@ if [[ ! -f "$WORKFLOW_TEMPLATE" ]]; then
   exit 1
 fi
 
-if [[ ! -d "$REPO_ROOT/src/training" ]]; then
-  echo "Directory src/training not found under $REPO_ROOT" >&2
+if [[ ! -d "$REPO_ROOT/training/rl" ]]; then
+  echo "Directory training/rl not found under $REPO_ROOT" >&2
   exit 1
 fi
 
-if [[ ! -f "$REPO_ROOT/src/inference/scripts/export_policy.py" ]]; then
-  echo "Export script src/inference/scripts/export_policy.py not found under $REPO_ROOT" >&2
+if [[ ! -f "$REPO_ROOT/training/packaging/scripts/export_policy.py" ]]; then
+  echo "Export script training/packaging/scripts/export_policy.py not found under $REPO_ROOT" >&2
   exit 1
 fi
 
@@ -223,8 +223,8 @@ mkdir -p "$TMP_DIR"
 rm -f "$ARCHIVE_PATH" "$B64_PATH"
 
 pushd "$REPO_ROOT" >/dev/null
-if ! zip -qr "$ARCHIVE_PATH" src/training src/inference src/common; then
-  echo "Failed to create inference archive" >&2
+if ! zip -qr "$ARCHIVE_PATH" training/rl evaluation/sil; then
+  echo "Failed to create evaluation archive" >&2
   popd >/dev/null
   exit 1
 fi

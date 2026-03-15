@@ -88,7 +88,7 @@ workflow:
             unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
             export PYTHONPATH="${PAYLOAD_ROOT}/src:${PYTHONPATH:-}"
 
-            LEROBOT_MANIFEST="${PAYLOAD_ROOT}/src/training/lerobot/pyproject.toml"
+            LEROBOT_MANIFEST="${PAYLOAD_ROOT}/training/il/lerobot/pyproject.toml"
             LEROBOT_REQUIREMENTS="/tmp/lerobot-runtime-requirements.txt"
             if [[ ! -f "${LEROBOT_MANIFEST}" ]]; then
               echo "ERROR: LeRobot workflow manifest not found at ${LEROBOT_MANIFEST}" >&2
@@ -321,7 +321,7 @@ workflow:
             JOINT_NAMES = None
 
             # ----------------------------------------------------------------
-            # Plotting (inline copy of src/inference/plotting.py functions)
+            # Plotting (inline copy of evaluation/metrics/plotting.py functions)
             # ----------------------------------------------------------------
 
             def _setup_matplotlib():

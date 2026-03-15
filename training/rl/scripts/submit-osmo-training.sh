@@ -8,7 +8,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || dirname "$SCRIPT_DIR")
 
 source "$REPO_ROOT/deploy/002-setup/lib/common.sh"
 source "$SCRIPT_DIR/lib/terraform-outputs.sh"
-read_terraform_outputs "$REPO_ROOT/deploy/001-iac" 2>/dev/null || true
+read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
 #------------------------------------------------------------------------------
 # Help

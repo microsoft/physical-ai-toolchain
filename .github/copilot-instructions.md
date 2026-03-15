@@ -31,19 +31,21 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 
 | Directory | Purpose |
 | --- | --- |
-| `deploy/000-prerequisites/` | Azure subscription setup, provider registration |
-| `deploy/001-iac/` | Terraform infrastructure (AKS, networking, storage, identity) |
-| `deploy/001-iac/vpn/` | Point-to-site VPN for private cluster access |
-| `deploy/002-setup/` | Post-deploy shell scripts (Helm charts, AzureML, OSMO) |
-| `src/training/` | Python training package (built as wheel via hatchling) |
-| `scripts/` | AzureML and OSMO job submission scripts |
-| `workflows/` | Job definition templates (AzureML YAML, OSMO workflow YAML) |
+| `infrastructure/terraform/prerequisites/` | Azure subscription setup, provider registration |
+| `infrastructure/terraform/` | Terraform infrastructure (AKS, networking, storage, identity) |
+| `infrastructure/terraform/vpn/` | Point-to-site VPN for private cluster access |
+| `infrastructure/setup/` | Post-deploy shell scripts (Helm charts, AzureML, OSMO) |
+| `training/rl/` | RL training package (SKRL, RSL-RL, Isaac Lab) |
+| `training/il/` | IL training package (LeRobot ACT/Diffusion) |
+| `evaluation/sil/` | Software-in-the-loop evaluation scripts and workflows |
+| `data-management/viewer/` | Dataset analysis tool (FastAPI backend + React frontend) |
+| `data-pipeline/capture/` | Recording configuration and data capture |
 | `shared/lib/` | Cross-domain shared shell libraries (canonical location) |
 | `external/IsaacLab/` | NVIDIA IsaacLab (cloned for IntelliSense only, not built locally) |
 | `docs/contributing/` | Architecture, roadmap, style guides, contribution workflow |
 
 * Version: managed by release-please across `pyproject.toml` and `package.json`
-* Python: >=3.11, managed by `uv` (not pip); `hatchling` builds `src/training` into wheel
+* Python: >=3.11, managed by `uv` (not pip); `hatchling` builds `training/rl` into wheel
 * Linting: `npm run lint:md` (markdownlint-cli2), `npm run spell-check` (cspell), `npm run lint:yaml` (yaml-lint)
 
 ## Terraform Conventions
@@ -89,17 +91,17 @@ Four ordered deployment steps:
 
 | Step | Directory | Description |
 | --- | --- | --- |
-| 1 | `deploy/000-prerequisites/` | Azure subscription init, provider registration |
-| 2 | `deploy/001-iac/` | Terraform infrastructure (AKS, networking, storage, identity) |
-| 3 | `deploy/001-iac/vpn/` | Point-to-site VPN (required for private clusters before any kubectl) |
-| 4 | `deploy/002-setup/` | Helm charts, AzureML extension, OSMO control plane and backend |
+| 1 | `infrastructure/terraform/prerequisites/` | Azure subscription init, provider registration |
+| 2 | `infrastructure/terraform/` | Terraform infrastructure (AKS, networking, storage, identity) |
+| 3 | `infrastructure/terraform/vpn/` | Point-to-site VPN (required for private clusters before any kubectl) |
+| 4 | `infrastructure/setup/` | Helm charts, AzureML extension, OSMO control plane and backend |
 
 * Default is private AKS — VPN step (3) is REQUIRED before any kubectl or Helm commands unless `should_enable_public_access = true`
 * Three network modes: Full Private (default), Hybrid, Full Public
-* Always run `source deploy/000-prerequisites/az-sub-init.sh` before any `terraform` or deploy script commands
+* Always run `source infrastructure/terraform/prerequisites/az-sub-init.sh` before any `terraform` or deploy script commands
   * Exports `ARM_SUBSCRIPTION_ID` and validates Azure CLI authentication
   * If the user has not done `az login`, the script requires interactive input
-* Deploy scripts (`002-setup/`) must run in numeric order (01 → 02 → 03 → 04)
+* Deploy scripts (`infrastructure/setup/`) must run in numeric order (01 → 02 → 03 → 04)
 * Each deploy script is idempotent and safe to re-run
 
 ## OSMO Platform
@@ -194,19 +196,18 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 Terraform validation is per-directory — each deployment directory has its own provider configuration and state:
 
-* `terraform fmt -check -recursive deploy/` — formatting compliance (recursive across all directories)
+* `terraform fmt -check -recursive infrastructure/terraform/` — formatting compliance (recursive across all directories)
 * `terraform validate` — run inside each deployment directory individually:
-  * `deploy/001-iac/`
-  * `deploy/001-iac/vpn/`
-  * `deploy/001-iac/dns/`
-  * `deploy/001-iac/automation/`
-* `terraform plan -var-file=terraform.tfvars` — validates configuration against provider APIs (requires `source deploy/000-prerequisites/az-sub-init.sh` first)
+  * `infrastructure/terraform/`
+  * `infrastructure/terraform/vpn/`
+  * `infrastructure/terraform/dns/`
+  * `infrastructure/terraform/automation/`
+* `terraform plan -var-file=terraform.tfvars` — validates configuration against provider APIs (requires `source infrastructure/terraform/prerequisites/az-sub-init.sh` first)
 
 ### Shell Scripts
 
-* `shellcheck deploy/**/*.sh scripts/**/*.sh` — static analysis for deploy and submission scripts
-* Requires zsh or bash with `shopt -s globstar`; alternatively use `find deploy scripts -name '*.sh' -exec shellcheck {} +`
-* Deploy scripts (`deploy/002-setup/`) support `--config-preview` — prints configuration and exits without making changes; use for dry-run validation after modifying any deploy script
+* `shellcheck infrastructure/setup/*.sh training/**/*.sh evaluation/**/*.sh` — static analysis for deploy and submission scripts
+* Deploy scripts (`infrastructure/setup/`) support `--config-preview` — prints configuration and exits without making changes; use for dry-run validation after modifying any deploy script
 
 ### Pester Tests
 

@@ -142,7 +142,7 @@ OSMO supports two payload delivery modes for training code:
 | Base64 payload    | `submit-osmo-training.sh`         | ~1 MB      | None       |
 | Dataset injection | `submit-osmo-dataset-training.sh` | Unlimited  | Automatic  |
 
-Dataset injection uploads `src/training/` as a versioned OSMO dataset, mounted at `/data/<dataset_name>/training` in the container:
+Dataset injection uploads `training/rl/` as a versioned OSMO dataset, mounted at `/data/<dataset_name>/training` in the container:
 
 ```bash
 ./scripts/submit-osmo-dataset-training.sh \

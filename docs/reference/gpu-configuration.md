@@ -158,7 +158,7 @@ def _app_control_on_stop_handle_fn(self, event):
 
 This callback enters an infinite render loop because the timeline was just stopped (not playing) and nothing restarts it. The loop runs in C++ and never yields to the Python interpreter, preventing signal-based timeouts from functioning.
 
-All training scripts call `prepare_for_shutdown()` from [`simulation_shutdown.py`](https://github.com/microsoft/physical-ai-toolchain/blob/main/src/training/simulation_shutdown.py) before `env.close()`. This function neutralizes the callback:
+All training scripts call `prepare_for_shutdown()` from [`simulation_shutdown.py`](https://github.com/microsoft/physical-ai-toolchain/blob/main/training/rl/simulation_shutdown.py) before `env.close()`. This function neutralizes the callback:
 
 1. Sets [`_disable_app_control_on_stop_handle`](https://github.com/isaac-sim/IsaacLab/blob/main/source/isaaclab/isaaclab/sim/simulation_context.py#L257) to `True` as a first layer of defense.
 2. Unsubscribes the `_app_control_on_stop_handle` callback entirely, removing it from the timeline event stream so it cannot fire during Kit shutdown.

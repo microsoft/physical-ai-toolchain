@@ -105,7 +105,7 @@ verify_cluster_connectivity() {
   info "Verifying cluster connectivity..."
   if ! kubectl cluster-info &>/dev/null; then
     error "Cannot connect to Kubernetes cluster"
-    error "For private clusters, connect via VPN first. See: deploy/001-iac/vpn/README.md"
+    error "For private clusters, connect via VPN first. See: infrastructure/terraform/vpn/README.md"
     fatal "Cluster connectivity check failed"
   fi
   info "Cluster connectivity verified"

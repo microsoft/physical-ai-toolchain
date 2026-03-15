@@ -49,7 +49,7 @@ workflow:
 
             ARCHIVE_PATH="${TEMP_ARCHIVE:-/tmp/isaac_payload.zip}"
             PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/isaac_payload}"
-            TRAINING_ROOT="${TRAINING_ROOT:-${PAYLOAD_ROOT}/src/training}"
+            TRAINING_ROOT="${TRAINING_ROOT:-${PAYLOAD_ROOT}/training/rl}"
 
             mkdir -p "${PAYLOAD_ROOT}"
             printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"

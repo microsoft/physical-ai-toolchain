@@ -20,7 +20,7 @@ updates:
 
   # Python dependencies for training
   - package-ecosystem: "pip"
-    directory: "/src/training"
+    directory: "/training/rl"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -55,9 +55,9 @@ updates:
       prefix: "chore"
       include: "scope"
 
-  # Python dependencies for inference
+  # Python dependencies for evaluation
   - package-ecosystem: "pip"
-    directory: "/src/inference"
+    directory: "/evaluation"
     schedule:
       interval: "weekly"
       day: "monday"
