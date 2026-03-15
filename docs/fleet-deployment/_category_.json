@@ -1,0 +1,8 @@
+{
+    "label": "Fleet Deployment",
+    "position": 7,
+    "link": {
+        "type": "generated-index",
+        "description": "Deploy trained models to robot fleets via FluxCD GitOps pipelines."
+    }
+}

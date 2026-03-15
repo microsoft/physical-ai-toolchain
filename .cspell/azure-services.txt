@@ -67,3 +67,5 @@ sharepoint
 southeastasia
 wasbs
 westus
+
+eventhub
