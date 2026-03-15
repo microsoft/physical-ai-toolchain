@@ -251,7 +251,7 @@ class TestEpisodeCameraMetadata:
         assert sorted(ep.metadata.get("cameras", [])) == ["il-camera", "wrist-camera"]
 
     def test_cameras_populated_for_hdf5(self, tmp_path):
-        """HDF5FormatHandler.load_episode should return cameras, not video_urls."""
+        """HDF5FormatHandler.load_episode should return cameras and video_urls."""
         _create_hdf5_with_images(tmp_path / "episode_0.hdf5", cameras=["il-camera"])
 
         handler = HDF5FormatHandler()
@@ -260,4 +260,34 @@ class TestEpisodeCameraMetadata:
         episode = handler.load_episode("test", 0)
         assert episode is not None
         assert "il-camera" in episode.cameras
-        assert episode.video_urls == {}
+        assert "il-camera" in episode.video_urls
+
+
+class TestVideoGeneration:
+    """Tests for synchronous video generation."""
+
+    def test_get_video_path_returns_cached(self, tmp_path):
+        """get_video_path returns immediately for already-cached videos."""
+        _create_hdf5_with_images(tmp_path / "episode_0.hdf5", cameras=["il-camera"])
+        handler = HDF5FormatHandler()
+        handler._loaders["test"] = HDF5Loader(tmp_path)
+
+        cache_dir = tmp_path / "meta" / "videos" / "il-camera"
+        cache_dir.mkdir(parents=True)
+        cached_file = cache_dir / "episode_000000.mp4"
+        cached_file.write_bytes(b"fake mp4")
+
+        result = handler.get_video_path("test", 0, "il-camera")
+        assert result == str(cached_file)
+
+    def test_get_video_path_returns_none_no_loader(self):
+        handler = HDF5FormatHandler()
+        assert handler.get_video_path("unknown", 0, "cam") is None
+
+    def test_video_cache_path_structure(self, tmp_path):
+        _create_minimal_hdf5(tmp_path / "episode_0.hdf5")
+        handler = HDF5FormatHandler()
+        handler._loaders["test"] = HDF5Loader(tmp_path)
+
+        path = handler._video_cache_path("test", 0, "il-camera")
+        assert path == tmp_path / "meta" / "videos" / "il-camera" / "episode_000000.mp4"

@@ -1,4 +1,5 @@
 ---
+sidebar_position: 1
 title: Inference Guide
 description: Run trained robotics policies in simulation and on physical hardware using Azure ML and NVIDIA OSMO
 author: Microsoft Robotics-AI Team
@@ -54,7 +55,7 @@ osmo workflow submit \
 
 - [Training Guide](../training/README.md)
 - [MLflow Integration](../training/mlflow-integration.md)
-- [Workflow Templates](../../workflows/README.md)
+- [Workflow Templates](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/README.md)
 - [Scripts Reference](../reference/scripts.md)
 
 ---

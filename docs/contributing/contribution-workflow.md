@@ -1,4 +1,5 @@
 ---
+sidebar_position: 4
 title: Contribution Workflow
 description: How to contribute including legal requirements, bug reports, enhancement suggestions, and documentation improvements
 author: Microsoft Robotics-AI Team
@@ -113,7 +114,7 @@ Deployment script creates VNet and subnet but appears to skip role assignment fo
 
 </details>
 
-After submission, expect initial acknowledgment within the timeframes documented in [SUPPORT.md](../../SUPPORT.md).
+After submission, expect initial acknowledgment within the timeframes documented in [SUPPORT.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SUPPORT.md).
 
 ## Suggesting Enhancements
 
@@ -185,7 +186,7 @@ Documentation contributions improve the architecture for the entire robotics and
 
 ### High-Value Documentation Contributions
 
-* Deployment troubleshooting guides: Expand [azureml-validation-job-debugging.md](../azureml-validation-job-debugging.md) with new scenarios
+* Deployment troubleshooting guides: Expand [azureml-validation-job-debugging.md](../operations/azureml-validation-job-debugging.md) with new scenarios
 * Region/SKU compatibility matrices: Document tested combinations and known limitations
 * Cost optimization strategies: Real-world cost profiles and reduction techniques
 * Network architecture decisions: Guidance on when to use private vs. hybrid vs. public modes
@@ -199,7 +200,7 @@ Before submitting documentation changes:
 * Run `npm run lint:md` to check formatting and style
 * Verify internal links with `npm run lint:links`
 * Test code samples in deployment environment
-* Review against [docs-style-and-conventions.instructions.md](../../.github/instructions/docs-style-and-conventions.instructions.md)
+* Review against [docs-style-and-conventions.instructions.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/.github/instructions/docs-style-and-conventions.instructions.md)
 
 ## Related Documentation
 

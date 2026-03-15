@@ -1,4 +1,5 @@
 ---
+sidebar_position: 2
 title: Prerequisites
 description: Azure subscription initialization and resource provider registration for robotics deployment
 author: Microsoft Robotics-AI Team

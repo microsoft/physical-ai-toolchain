@@ -1,6 +1,8 @@
 ---
-title: GPU Configuration Guide
-description: GPU driver architecture, MIG strategy, and runtime behavior for mixed GPU node pools in Azure AKS
+title: GPU Configuration
+sidebar_label: GPU Configuration
+sidebar_position: 1
+description: GPU driver and operator configuration for H100 and RTX PRO 6000 nodes.
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-23
 ms.topic: concept
@@ -32,7 +34,7 @@ The GPU Operator manages the full driver lifecycle for H100 nodes using its buil
 
 RTX PRO 6000 BSE nodes use Azure SR-IOV vGPU passthrough, which requires the Microsoft GRID driver instead of the NVIDIA datacenter driver. AKS does not support `gpu_driver = "Install"` for this VM SKU.
 
-The `gpu-grid-driver-installer` DaemonSet ([manifests/gpu-grid-driver-installer.yaml](../deploy/002-setup/manifests/gpu-grid-driver-installer.yaml)) installs the GRID driver on each RTX node. Terraform labels these nodes with `nvidia.com/gpu.deploy.driver=false`, causing the GPU Operator to skip its driver DaemonSet on those nodes while still managing toolkit, device-plugin, and validator components.
+The `gpu-grid-driver-installer` DaemonSet ([manifests/gpu-grid-driver-installer.yaml](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/002-setup/manifests/gpu-grid-driver-installer.yaml)) installs the GRID driver on each RTX node. Terraform labels these nodes with `nvidia.com/gpu.deploy.driver=false`, causing the GPU Operator to skip its driver DaemonSet on those nodes while still managing toolkit, device-plugin, and validator components.
 
 The GRID driver is installed via an init container that uses `nsenter` into the host namespace to download and compile the driver. New nodes added by the autoscaler receive the driver automatically through the DaemonSet.
 
@@ -156,7 +158,7 @@ def _app_control_on_stop_handle_fn(self, event):
 
 This callback enters an infinite render loop because the timeline was just stopped (not playing) and nothing restarts it. The loop runs in C++ and never yields to the Python interpreter, preventing signal-based timeouts from functioning.
 
-All training scripts call `prepare_for_shutdown()` from [`simulation_shutdown.py`](../src/training/simulation_shutdown.py) before `env.close()`. This function neutralizes the callback:
+All training scripts call `prepare_for_shutdown()` from [`simulation_shutdown.py`](https://github.com/microsoft/physical-ai-toolchain/blob/main/src/training/simulation_shutdown.py) before `env.close()`. This function neutralizes the callback:
 
 1. Sets [`_disable_app_control_on_stop_handle`](https://github.com/isaac-sim/IsaacLab/blob/main/source/isaaclab/isaaclab/sim/simulation_context.py#L257) to `True` as a first layer of defense.
 2. Unsubscribes the `_app_control_on_stop_handle` callback entirely, removing it from the timeline event stream so it cannot fire during Kit shutdown.
@@ -170,5 +172,5 @@ After `env.close()`, training scripts call `os._exit(0)` instead of `simulation_
 
 * [NVIDIA GPU Operator with Azure AKS](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/microsoft-aks.html)
 * [NVIDIA GPU Operator vGPU support](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/install-gpu-operator-vgpu.html)
-* [GPU Operator Helm values](../deploy/002-setup/values/nvidia-gpu-operator.yaml)
-* [GRID driver installer DaemonSet](../deploy/002-setup/manifests/gpu-grid-driver-installer.yaml)
+* [GPU Operator Helm values](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/002-setup/values/nvidia-gpu-operator.yaml)
+* [GRID driver installer DaemonSet](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/002-setup/manifests/gpu-grid-driver-installer.yaml)

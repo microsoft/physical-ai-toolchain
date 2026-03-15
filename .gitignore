@@ -410,6 +410,9 @@ FodyWeavers.xsd
 # Ignore .terraform lock
 .terraform.lock.hcl
 
+# TFLint plugin cache
+.tflint.d/
+
 # Crash log files
 crash.log
 
@@ -465,4 +468,4 @@ AGENTS.md
 # Terraform Environments
 envs/
 
-src/dataviewer/datasets/
+datasets/

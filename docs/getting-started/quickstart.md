@@ -1,4 +1,5 @@
 ---
+sidebar_position: 2
 title: "Quickstart: Clone to First Training Job"
 description: Deploy infrastructure and submit your first robotics training job in 8 steps
 author: Microsoft Robotics-AI Team
@@ -81,7 +82,7 @@ enable_private_dns = false
 ```
 
 > [!TIP]
-> For private networking, set `enable_vpn_gateway = true` and `enable_private_dns = true`. See the [Infrastructure Guide](../../deploy/001-iac/README.md) for details.
+> For private networking, set `enable_vpn_gateway = true` and `enable_private_dns = true`. See the [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/README.md) for details.
 
 ## Step 4: Deploy Infrastructure
 
@@ -180,5 +181,5 @@ See [Cost Considerations](../contributing/cost-considerations.md) for detailed p
 |---------------------------------------------------------|-------------------------------------------|
 | [LeRobot Inference](../inference/lerobot-inference.md)  | Run inference with trained LeRobot models |
 | [MLflow Integration](../training/mlflow-integration.md) | Track experiments with MLflow             |
-| [Deployment Guide](../../deploy/README.md)              | Full deployment reference and options     |
+| [Deployment Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md)              | Full deployment reference and options     |
 | [Contributing Guide](../contributing/README.md)         | Development workflow and code standards   |
