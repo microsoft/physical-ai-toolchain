@@ -166,7 +166,7 @@ fi
 # Build Container Images
 #------------------------------------------------------------------------------
 
-SRC_DIR="$SCRIPT_DIR/../../src/dataviewer"
+SRC_DIR="$SCRIPT_DIR/../viewer"
 
 if [[ "$skip_build" == "false" ]]; then
 

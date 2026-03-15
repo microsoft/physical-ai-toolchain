@@ -92,7 +92,7 @@ pattern appear in the chat context.
 | Name                       | Applies To          | Purpose                                                 |
 |----------------------------|---------------------|---------------------------------------------------------|
 | Commit Messages            | `**`                | Conventional Commits format, scopes, line-length limits |
-| Dataviewer                 | `src/dataviewer/**` | SOLID principles, test-first, validation commands       |
+| Dataviewer                 | `data-management/viewer/**` | SOLID principles, test-first, validation commands       |
 | Docs Style and Conventions | `**/*.md`           | Document hierarchy, tables, voice/tone, frontmatter     |
 | Shell Scripts              | `**/*.sh`           | Script template, library functions, deployment patterns |
 

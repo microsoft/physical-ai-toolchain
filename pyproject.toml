@@ -57,7 +57,7 @@ select = [
 "src/inference/scripts/act_inference_node.py" = ["E402"]
 "src/inference/scripts/play_policy.py" = ["E402"]
 "src/training/scripts/rsl_rl/*.py" = ["E402"]
-"src/dataviewer/backend/tests/*.py" = ["E402"]
+"data-management/viewer/backend/tests/*.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["training", "common", "inference"]

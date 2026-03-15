@@ -179,8 +179,8 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | `*.sh` | `shellcheck <file>` |
 | `*.ps1` | `npm run lint:ps` |
 | `*.yml` (GitHub Actions) | `npm run lint:yaml` |
-| `src/dataviewer/frontend/**` | `cd src/dataviewer/frontend && npm run validate` (type-check + lint + test) |
-| `src/dataviewer/backend/**` | `cd src/dataviewer/backend && pytest` and `ruff check src/` |
+| `data-management/viewer/frontend/**` | `cd data-management/viewer/frontend && npm run validate` (type-check + lint + test) |
+| `data-management/viewer/backend/**` | `cd data-management/viewer/backend && pytest` and `ruff check src/` |
 | Any file | `npm run spell-check` |
 
 ### Linting

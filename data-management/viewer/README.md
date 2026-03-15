@@ -257,7 +257,7 @@ ruff check src/ --fix
 
 ### Frontend Development
 
-All frontend validation runs through npm scripts in `src/dataviewer/frontend/`.
+All frontend validation runs through npm scripts in `data-management/viewer/frontend/`.
 
 ```bash
 cd frontend

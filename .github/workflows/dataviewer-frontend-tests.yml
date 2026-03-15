@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: src/dataviewer/frontend
+        working-directory: data-management/viewer/frontend
     permissions:
       contents: read
     steps:
@@ -30,9 +30,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
-          node-version-file: src/dataviewer/frontend/.nvmrc
+          node-version-file: data-management/viewer/frontend/.nvmrc
           cache: npm
-          cache-dependency-path: src/dataviewer/frontend/package-lock.json
+          cache-dependency-path: data-management/viewer/frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -63,10 +63,10 @@ jobs:
         with:
           name: frontend-test-results
           path: |
-            src/dataviewer/frontend/lint-results.txt
-            src/dataviewer/frontend/typecheck-results.txt
-            src/dataviewer/frontend/format-results.txt
-            src/dataviewer/frontend/test-results.txt
+            data-management/viewer/frontend/lint-results.txt
+            data-management/viewer/frontend/typecheck-results.txt
+            data-management/viewer/frontend/format-results.txt
+            data-management/viewer/frontend/test-results.txt
           retention-days: 30
 
       - name: Fail job if errors found
