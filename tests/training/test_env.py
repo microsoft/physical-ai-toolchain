@@ -1,17 +1,9 @@
 """Tests for training environment utility helpers."""
 
-import importlib.util
-from pathlib import Path
-
 import pytest
+from conftest import load_training_module
 
-_ENV_MODULE_PATH = Path(__file__).resolve().parents[2] / "src" / "training" / "utils" / "env.py"
-_ENV_SPEC = importlib.util.spec_from_file_location("training_utils_env", _ENV_MODULE_PATH)
-if _ENV_SPEC is None or _ENV_SPEC.loader is None:
-    raise RuntimeError(f"Unable to load env module from {_ENV_MODULE_PATH}")
-_ENV_MODULE = importlib.util.module_from_spec(_ENV_SPEC)
-_ENV_SPEC.loader.exec_module(_ENV_MODULE)
-
+_ENV_MODULE = load_training_module("training_utils_env", "training/utils/env.py")
 require_env = _ENV_MODULE.require_env
 set_env_defaults = _ENV_MODULE.set_env_defaults
 
