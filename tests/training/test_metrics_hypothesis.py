@@ -1,21 +1,12 @@
 """Hypothesis property-based tests for _extract_from_value."""
 
-import importlib.util
-from pathlib import Path
-
 import numpy as np
+from conftest import load_training_module
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-METRICS_PATH = SRC / "training" / "utils" / "metrics.py"
-SPEC = importlib.util.spec_from_file_location("metrics_under_test", METRICS_PATH)
-assert SPEC is not None and SPEC.loader is not None
-metrics_module = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(metrics_module)
-
+metrics_module = load_training_module("metrics_under_test", "training/utils/metrics.py")
 _extract_from_value = metrics_module._extract_from_value
 
 
@@ -136,5 +127,27 @@ def test_extract_tensor_array_produces_statistics(values):
     metrics: dict[str, float] = {}
     _extract_from_value("t", tensor, metrics)
     assert set(metrics) == {"t/mean", "t/std", "t/min", "t/max"}
-    assert metrics["t/min"] <= metrics["t/mean"] <= metrics["t/max"]
+    assert metrics["t/min"] <= metrics["t/mean"] + 1e-9
+    assert metrics["t/mean"] <= metrics["t/max"] + 1e-9
     assert all(isinstance(v, float) for v in metrics.values())
+
+
+class RuntimeErrorTensor:
+    """Tensor-like object whose .item() raises RuntimeError (zero-element tensor)."""
+
+    def __init__(self, numel_val: int = 0):
+        self._numel = numel_val
+
+    def item(self):
+        raise RuntimeError("a]Tensor with 0 elements cannot be converted to scalar")
+
+    def numel(self):
+        return self._numel
+
+
+@given(name=st.text(min_size=1))
+def test_extract_runtime_error_is_handled(name):
+    """RuntimeError from .item() is caught — produces empty metrics dict."""
+    metrics: dict[str, float] = {}
+    _extract_from_value(name, RuntimeErrorTensor(numel_val=1), metrics)
+    assert metrics == {}

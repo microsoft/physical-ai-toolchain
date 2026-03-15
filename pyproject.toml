@@ -21,6 +21,7 @@ dev = [
     "ipykernel",
     "ipywidgets",
     "tqdm",
+    "matplotlib>=3.10.8",
 ]
 
 [tool.uv]

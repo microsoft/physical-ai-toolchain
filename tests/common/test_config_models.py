@@ -450,21 +450,19 @@ class TestOutputDirValidation:
                 output_dir=file_path,
             )
 
-    def test_output_dir_must_be_writable(self, tmp_path):
+    def test_output_dir_must_be_writable(self, tmp_path, monkeypatch):
         """Non-writable directory is rejected."""
         read_only_dir = tmp_path / "read_only"
         read_only_dir.mkdir()
-        read_only_dir.chmod(0o444)
 
-        try:
-            with pytest.raises(ValidationError, match="not writable"):
-                RecordingConfig(
-                    topics=[TopicConfig(name="/joint_states", frequency_hz=100.0)],
-                    trigger={"type": "gpio", "pin": 17},
-                    output_dir=read_only_dir,
-                )
-        finally:
-            read_only_dir.chmod(0o755)
+        monkeypatch.setattr("os.access", lambda path, mode: False)
+
+        with pytest.raises(ValidationError, match="not writable"):
+            RecordingConfig(
+                topics=[TopicConfig(name="/joint_states", frequency_hz=100.0)],
+                trigger={"type": "gpio", "pin": 17},
+                output_dir=read_only_dir,
+            )
 
     def test_output_dir_valid(self, tmp_path):
         """Valid writable directory is accepted."""
