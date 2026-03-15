@@ -245,5 +245,5 @@
   "title": "RecordingConfig",
   "type": "object",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/microsoft/physical-ai-toolchain/main/config/recording_config.schema.json"
+  "$id": "https://raw.githubusercontent.com/microsoft/physical-ai-toolchain/main/data-pipeline/capture/config/recording_config.schema.json"
 }
