@@ -71,12 +71,12 @@ def episode_metrics_list(draw):
                 "episode": ep,
                 "mse": float(draw(_unit)),
                 "mae": float(draw(_unit)),
-                "throughput_hz": float(draw(
-                    st.floats(min_value=1.0, max_value=200.0, allow_nan=False, allow_infinity=False)
-                )),
-                "avg_inference_ms": float(draw(
-                    st.floats(min_value=0.1, max_value=100.0, allow_nan=False, allow_infinity=False)
-                )),
+                "throughput_hz": float(
+                    draw(st.floats(min_value=1.0, max_value=200.0, allow_nan=False, allow_infinity=False))
+                ),
+                "avg_inference_ms": float(
+                    draw(st.floats(min_value=0.1, max_value=100.0, allow_nan=False, allow_infinity=False))
+                ),
                 "per_joint_mae": per_joint.tolist(),
             }
         )

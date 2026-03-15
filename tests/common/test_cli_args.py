@@ -38,13 +38,20 @@ class TestAddRslRlArgs:
         """String arguments are parsed from command-line tokens."""
         parser = argparse.ArgumentParser()
         add_rsl_rl_args(parser)
-        args = parser.parse_args([
-            "--experiment_name", "my-exp",
-            "--run_name", "run-42",
-            "--load_run", "2026-03-14_12-00-00",
-            "--checkpoint", "model_5000.pt",
-            "--log_project_name", "my-project",
-        ])
+        args = parser.parse_args(
+            [
+                "--experiment_name",
+                "my-exp",
+                "--run_name",
+                "run-42",
+                "--load_run",
+                "2026-03-14_12-00-00",
+                "--checkpoint",
+                "model_5000.pt",
+                "--log_project_name",
+                "my-project",
+            ]
+        )
         assert args.experiment_name == "my-exp"
         assert args.run_name == "run-42"
         assert args.load_run == "2026-03-14_12-00-00"
