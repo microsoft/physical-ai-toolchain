@@ -93,8 +93,8 @@ workflow:
             fi
             printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"
             unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
-            export PYTHONPATH="${PAYLOAD_ROOT}/src:${PYTHONPATH:-}"
-            echo "Training scripts unpacked to ${PAYLOAD_ROOT}/src"
+            export PYTHONPATH="${PAYLOAD_ROOT}:${PYTHONPATH:-}"
+            echo "Training scripts unpacked to ${PAYLOAD_ROOT}"
 
             # Install runtime dependencies from workflow manifest
             LEROBOT_MANIFEST="${PAYLOAD_ROOT}/training/il/lerobot/pyproject.toml"
@@ -112,7 +112,7 @@ workflow:
             # Download dataset from Azure Blob Storage when configured
             if [[ -n "${STORAGE_ACCOUNT:-}" ]]; then
               echo "Downloading dataset from Azure Blob Storage..."
-              python3 -m training.scripts.lerobot.download_dataset
+              python3 -m training.il.scripts.lerobot.download_dataset
 
               FULL_DATASET_PATH="${DATASET_ROOT}/${DATASET_REPO_ID}"
               echo "Dataset downloaded to: ${FULL_DATASET_PATH}"
@@ -125,7 +125,7 @@ workflow:
 
             # Run training via Python orchestrator
             echo "Starting LeRobot training..."
-            python3 -m training.scripts.lerobot.train "${TRAIN_ARGS[@]}"
+            python3 -m training.il.scripts.lerobot.train "${TRAIN_ARGS[@]}"
 
             echo "=== Training Complete ==="
             ls -la "${OUTPUT_DIR}/" 2>/dev/null || true
@@ -133,7 +133,7 @@ workflow:
             # Upload checkpoints to Azure ML model registry
             if [[ -n "${REGISTER_CHECKPOINT:-}" && -n "${AZURE_SUBSCRIPTION_ID:-}" && -n "${AZURE_RESOURCE_GROUP:-}" && -n "${AZUREML_WORKSPACE_NAME:-}" ]]; then
               echo "=== Uploading Checkpoints to Azure ML ==="
-              python3 -c "from training.scripts.lerobot.checkpoints import upload_checkpoints_to_azure_ml; upload_checkpoints_to_azure_ml()"
+              python3 -c "from training.il.scripts.lerobot.checkpoints import upload_checkpoints_to_azure_ml; upload_checkpoints_to_azure_ml()"
               echo "=== Checkpoint Upload Complete ==="
             fi
 

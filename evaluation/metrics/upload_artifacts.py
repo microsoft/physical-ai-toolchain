@@ -194,11 +194,12 @@ def upload_to_blob_fallback(
     timestamp: str,
 ) -> bool:
     """Upload artifacts directly to Azure Blob Storage as fallback."""
-    if not blob_account and checkpoint_uri.startswith("https://") and ".blob.core.windows.net" in checkpoint_uri:
+    if not blob_account and checkpoint_uri.startswith("https://"):
         parsed = urlparse(checkpoint_uri)
-        blob_account = parsed.netloc.split(".")[0]
-        path_parts = parsed.path.lstrip("/").split("/", 1)
-        blob_container = path_parts[0] if path_parts else "inference-outputs"
+        if parsed.netloc.endswith(".blob.core.windows.net"):
+            blob_account = parsed.netloc.split(".")[0]
+            path_parts = parsed.path.lstrip("/").split("/", 1)
+            blob_container = path_parts[0] if path_parts else "inference-outputs"
 
     if not blob_account:
         blob_account = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME", "")

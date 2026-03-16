@@ -91,7 +91,7 @@ The MLflow logging interval is controlled via the `--mlflow_log_interval` CLI ar
 To customize which metrics are logged, modify the `create_mlflow_logging_wrapper` call in `skrl_training.py`:
 
 ```python
-from training.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
+from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
 
 basic_metrics = {
     "episode_reward_mean",
@@ -134,7 +134,7 @@ The monkey-patching approach is applied after creating the SKRL Runner:
 ```python
 import mlflow
 from skrl.utils.runner.torch import Runner
-from training.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
+from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
 
 mlflow.set_tracking_uri("azureml://...")
 mlflow.set_experiment("isaaclab-training")

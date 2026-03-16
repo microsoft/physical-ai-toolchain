@@ -165,9 +165,9 @@ if [[ -z "$model_name" ]]; then
   info "Auto-derived model name: $model_name"
 fi
 
-code_path="$REPO_ROOT/src"
+code_path="$REPO_ROOT"
 [[ -d "$code_path/training" ]] || fatal "Training source not found: $code_path/training"
-[[ -f "$code_path/.amlignore" ]] || warn "No .amlignore found; __pycache__ may be included in snapshot"
+[[ -f "$code_path/training/.amlignore" ]] || warn "No .amlignore found; __pycache__ may be included in snapshot"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"

@@ -9,7 +9,7 @@ import sys
 from isaaclab.app import AppLauncher
 
 from training.rl import cli_args  # isort: skip
-from training.simulation_shutdown import prepare_for_shutdown
+from training.rl.simulation_shutdown import prepare_for_shutdown
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Run inference from a trained RSL-RL checkpoint.")

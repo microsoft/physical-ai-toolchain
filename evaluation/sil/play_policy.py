@@ -15,8 +15,8 @@ from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
-from common import cli_args  # isort: skip
-from training.simulation_shutdown import prepare_for_shutdown
+from training.rl import cli_args  # isort: skip
+from training.rl.simulation_shutdown import prepare_for_shutdown
 
 parser = argparse.ArgumentParser(description="Run inference using an exported ONNX or TorchScript policy.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during inference.")

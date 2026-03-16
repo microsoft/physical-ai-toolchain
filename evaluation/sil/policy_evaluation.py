@@ -9,7 +9,7 @@ This approach follows Azure ML best practices where model metadata is stored in
 model tags/properties rather than separate files.
 
 Usage:
-    python -m training.scripts.policy_evaluation \
+    python -m evaluation.sil.policy_evaluation \
         --model-path /mnt/azureml/model \
         --task Isaac-Velocity-Rough-Anymal-C-v0 \
         --framework skrl \
@@ -35,7 +35,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from training.simulation_shutdown import prepare_for_shutdown
+from training.rl.simulation_shutdown import prepare_for_shutdown
 
 _LOGGER = logging.getLogger("isaaclab.eval")
 

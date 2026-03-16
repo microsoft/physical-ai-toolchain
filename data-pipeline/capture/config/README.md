@@ -200,7 +200,7 @@ except ValidationError as exc:
 
 ## � Schema Maintenance
 
-The JSON Schema (`recording_config.schema.json`) is a **derived artifact** generated from pydantic models in `src/common/config_models.py`.
+The JSON Schema (`recording_config.schema.json`) is a **derived artifact** generated from pydantic models in `data-pipeline/capture/models/config_models.py`.
 
 ### When to Regenerate Schema
 

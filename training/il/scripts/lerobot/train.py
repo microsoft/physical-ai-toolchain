@@ -5,7 +5,7 @@ metrics and log them to MLflow. Collects system metrics (CPU, GPU, memory, disk)
 and uploads checkpoints periodically.
 
 Usage:
-    python -m training.scripts.lerobot.train [lerobot-train args...]
+    python -m training.il.scripts.lerobot.train [lerobot-train args...]
 
 Environment variables:
     DATASET_REPO_ID: HuggingFace dataset repository.
@@ -160,7 +160,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training") -> int:
     """
     import mlflow
 
-    from training.scripts.lerobot.checkpoints import upload_new_checkpoints
+    from training.il.scripts.lerobot.checkpoints import upload_new_checkpoints
 
     system_collector = _init_system_collector()
     output_dir = Path(os.environ.get("OUTPUT_DIR", "/workspace/outputs/train"))
@@ -253,8 +253,8 @@ def main() -> int:
     Bootstraps Azure ML, builds lerobot-train command from environment
     variables and CLI arguments, runs training, and registers checkpoints.
     """
-    from training.scripts.lerobot.bootstrap import authenticate_huggingface, bootstrap_mlflow
-    from training.scripts.lerobot.checkpoints import register_final_checkpoint
+    from training.il.scripts.lerobot.bootstrap import authenticate_huggingface, bootstrap_mlflow
+    from training.il.scripts.lerobot.checkpoints import register_final_checkpoint
 
     # Bootstrap
     hf_user = authenticate_huggingface()

@@ -57,7 +57,7 @@ Use the metric_filter parameter to control which metrics are logged:
 Usage Example
 -------------
 ```python
-from training.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
+from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
 import mlflow
 
 # After creating SKRL runner with agent

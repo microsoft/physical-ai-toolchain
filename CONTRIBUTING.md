@@ -329,7 +329,7 @@ Tests mirror the source directory structure under `tests/`:
 |---------------------------------|-------------------------------|
 | `training/rl/utils/env.py`      | `training/tests/test_env.py`  |
 | `training/rl/utils/metrics.py`  | `training/tests/test_metrics.py` |
-| `src/common/cli_args.py`        | `tests/unit/test_cli_args.py` |
+| `training/rl/cli_args.py`       | `tests/unit/test_cli_args.py` |
 
 ### Test Categories
 

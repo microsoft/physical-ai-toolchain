@@ -86,7 +86,7 @@ workflow:
             fi
             printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"
             unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
-            export PYTHONPATH="${PAYLOAD_ROOT}/src:${PYTHONPATH:-}"
+            export PYTHONPATH="${PAYLOAD_ROOT}:${PYTHONPATH:-}"
 
             LEROBOT_MANIFEST="${PAYLOAD_ROOT}/training/il/lerobot/pyproject.toml"
             LEROBOT_REQUIREMENTS="/tmp/lerobot-runtime-requirements.txt"

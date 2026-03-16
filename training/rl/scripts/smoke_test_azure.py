@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from training.scripts import launch as launch_entrypoint
+from training.rl.scripts import launch as launch_entrypoint
 from training.utils import AzureConfigError, AzureMLContext, bootstrap_azure_ml
 from training.utils.context import AzureStorageContext
 

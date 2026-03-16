@@ -116,10 +116,10 @@ run_smoke_test() {
   command -v "$python_bin" &>/dev/null || python_bin="python"
 
   info "Running Azure connectivity smoke test..."
-  local pythonpath="$REPO_ROOT/src"
+  local pythonpath="$REPO_ROOT"
   [[ -n "${PYTHONPATH:-}" ]] && pythonpath="${pythonpath}:${PYTHONPATH}"
 
-  PYTHONPATH="$pythonpath" "$python_bin" -m training.scripts.smoke_test_azure ||
+  PYTHONPATH="$pythonpath" "$python_bin" -m training.rl.scripts.smoke_test_azure ||
     fatal "Smoke test failed; aborting submission"
   info "Smoke test passed"
 }
@@ -219,7 +219,7 @@ if [[ "$skip_register" == "false" && -z "$register_checkpoint" ]]; then
   info "Auto-derived model name: $register_checkpoint"
 fi
 
-code_path="$REPO_ROOT/src"
+code_path="$REPO_ROOT"
 [[ -d "$code_path/training" ]] || fatal "Training source not found: $code_path/training"
 [[ -f "$code_path/training/.amlignore" ]] || warn "No .amlignore found; __pycache__ may be included in snapshot"
 

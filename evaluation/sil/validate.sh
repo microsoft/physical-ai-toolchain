@@ -41,4 +41,4 @@ else
   exit 1
 fi
 
-exec "${python_cmd[@]}" -m training.scripts.policy_evaluation "$@"
+exec "${python_cmd[@]}" -m evaluation.sil.policy_evaluation "$@"

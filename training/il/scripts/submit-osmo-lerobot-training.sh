@@ -254,7 +254,7 @@ info "Packaging training payload..."
 mkdir -p "$TMP_DIR"
 rm -f "$ARCHIVE_PATH" "$B64_PATH"
 
-(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/il training/__init__.py training/stream.py training/utils src/common \
+(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/il training/__init__.py training/stream.py training/utils \
   -x "**/__pycache__/*" \
   -x "*.pyc" \
   -x "*.pyo" \

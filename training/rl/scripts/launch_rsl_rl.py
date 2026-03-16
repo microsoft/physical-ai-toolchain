@@ -127,7 +127,7 @@ def _run_training(
     args: argparse.Namespace,
     hydra_args: Sequence[str],
 ) -> None:
-    cmd = [sys.executable, "-m", "training.scripts.rsl_rl.train"]
+    cmd = [sys.executable, "-m", "training.rl.scripts.rsl_rl.train"]
 
     if args.task:
         cmd.extend(["--task", args.task])
@@ -150,7 +150,7 @@ def _run_training(
 
 def _run_smoke_test() -> None:
     _LOGGER.info("Running Azure connectivity smoke test")
-    from training.scripts import smoke_test_azure
+    from training.rl.scripts import smoke_test_azure
 
     smoke_test_azure.main([])
 

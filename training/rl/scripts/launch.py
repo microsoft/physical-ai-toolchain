@@ -149,10 +149,10 @@ def _run_training(
     context: AzureMLContext | None,
 ) -> None:
     try:
-        from training.scripts import skrl_training
+        from training.rl.scripts import skrl_training
     except ImportError as exc:
         raise SystemExit(
-            "training.scripts.skrl_training module is unavailable. Ensure training payload includes SKRL training code."
+            "training.rl.scripts.skrl_training module is unavailable. Ensure training payload includes SKRL training code."
         ) from exc
 
     skrl_training.run_training(args=args, hydra_args=hydra_args, context=context)
@@ -160,7 +160,7 @@ def _run_training(
 
 def _run_smoke_test() -> None:
     _LOGGER.info("Running Azure connectivity smoke test")
-    from training.scripts import smoke_test_azure
+    from training.rl.scripts import smoke_test_azure
 
     smoke_test_azure.main([])
 

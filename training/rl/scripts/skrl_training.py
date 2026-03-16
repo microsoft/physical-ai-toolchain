@@ -25,8 +25,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from training.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
-from training.simulation_shutdown import prepare_for_shutdown
+from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
+from training.rl.simulation_shutdown import prepare_for_shutdown
 from training.stream import install_ansi_stripping
 from training.utils import AzureMLContext, set_env_defaults
 
