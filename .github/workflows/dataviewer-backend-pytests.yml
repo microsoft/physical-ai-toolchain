@@ -55,7 +55,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+        run: |
+          uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+          uv pip install pytest-cov opencv-python-headless
 
       - name: Run pytest with coverage
         run: uv run pytest -v --cov=src --cov-report=xml --cov-report=term-missing
