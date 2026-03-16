@@ -32,8 +32,8 @@ Deployment order:
 
 ## 📖 Documentation
 
-| Guide                                                             | Description                                       |
-|-------------------------------------------------------------------|---------------------------------------------------|
+| Guide                                                                     | Description                                       |
+|---------------------------------------------------------------------------|---------------------------------------------------|
 | [Cluster Setup](../../docs/infrastructure/cluster-setup.md)               | Full setup walkthrough and deployment scenarios   |
 | [Cluster Operations](../../docs/infrastructure/cluster-setup-advanced.md) | Advanced operations, scaling, and troubleshooting |
 

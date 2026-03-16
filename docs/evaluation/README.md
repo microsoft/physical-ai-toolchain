@@ -18,10 +18,10 @@ Evaluate trained robotics policies using local environments, Azure ML compute, o
 
 ## 📖 Evaluation Guides
 
-| Guide                                                    | Description                                               |
-|----------------------------------------------------------|-----------------------------------------------------------|
-| [LeRobot ACT Policy Evaluation](lerobot-evaluation.md)   | Run LeRobot ACT policies locally with ROS2 deployment     |
-| [OSMO Evaluation Workflows](osmo-evaluation.md)          | Execute Isaac Lab and LeRobot evaluation via NVIDIA OSMO  |
+| Guide                                                  | Description                                              |
+|--------------------------------------------------------|----------------------------------------------------------|
+| [LeRobot ACT Policy Evaluation](lerobot-evaluation.md) | Run LeRobot ACT policies locally with ROS2 deployment    |
+| [OSMO Evaluation Workflows](osmo-evaluation.md)        | Execute Isaac Lab and LeRobot evaluation via NVIDIA OSMO |
 
 ## ⚖️ Evaluation Comparison
 

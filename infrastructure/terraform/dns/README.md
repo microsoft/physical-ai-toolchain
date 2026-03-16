@@ -28,8 +28,8 @@ terraform init && terraform apply -var="osmo_loadbalancer_ip=<IP_FROM_ABOVE>"
 
 ## 📖 Documentation
 
-| Guide                                                    | Description                                     |
-|----------------------------------------------------------|-------------------------------------------------|
+| Guide                                                            | Description                                     |
+|------------------------------------------------------------------|-------------------------------------------------|
 | [Private DNS Configuration](../../../docs/infrastructure/dns.md) | DNS zone setup, resolution flow, and validation |
 
 ## ➡️ Next Step

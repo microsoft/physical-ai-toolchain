@@ -99,8 +99,8 @@ Root Module (001-iac/)
 
 ## 📦 Modules
 
-| Module                                             | Purpose                                                         |
-|----------------------------------------------------|-----------------------------------------------------------------|
+| Module                                                                                                             | Purpose                                                         |
+|--------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|
 | [platform](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/platform) | Networking, storage, Key Vault, ML workspace, PostgreSQL, Redis |
 | [sil](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/sil)           | AKS cluster with GPU node pools                                 |
 | [vpn](https://github.com/microsoft/physical-ai-toolchain/tree/main/infrastructure/terraform/modules/vpn)           | VPN Gateway module (used by vpn/ standalone deployment)         |

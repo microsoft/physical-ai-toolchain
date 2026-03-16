@@ -10,12 +10,12 @@ NVIDIA OSMO workflow templates for distributed Isaac Lab training on Azure Kuber
 
 ## 📜 Available Templates
 
-| Template                                 | Purpose                               | Submission Script                          |
-|------------------------------------------|---------------------------------------|--------------------------------------------|
-| [train.yaml](train.yaml)                 | Distributed training (base64 inline)  | `scripts/submit-osmo-training.sh`          |
-| [train-dataset.yaml](train-dataset.yaml) | Distributed training (dataset upload) | `scripts/submit-osmo-dataset-training.sh`  |
-| [lerobot-train.yaml](lerobot-train.yaml) | LeRobot behavioral cloning            | `scripts/submit-osmo-lerobot-training.sh`  |
-| [lerobot-infer.yaml](lerobot-infer.yaml) | LeRobot inference/evaluation          | `scripts/submit-osmo-lerobot-inference.sh` |
+| Template                                                                   | Purpose                               | Submission Script                                     |
+|----------------------------------------------------------------------------|---------------------------------------|-------------------------------------------------------|
+| [train.yaml](../../training/rl/workflows/osmo/train.yaml)                  | Distributed training (base64 inline)  | `training/rl/scripts/submit-osmo-training.sh`         |
+| [train-dataset.yaml](../../training/il/workflows/osmo/train-dataset.yaml)  | Distributed training (dataset upload) | `training/il/scripts/submit-osmo-dataset-training.sh` |
+| [lerobot-train.yaml](../../training/il/workflows/osmo/lerobot-train.yaml)  | LeRobot behavioral cloning            | `training/il/scripts/submit-osmo-lerobot-training.sh` |
+| [lerobot-eval.yaml](../../evaluation/sil/workflows/osmo/lerobot-eval.yaml) | LeRobot inference/evaluation          | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`  |
 
 ## ⚖️ Workflow Comparison
 
@@ -76,10 +76,10 @@ Submits Isaac Lab training using OSMO dataset folder injection instead of base64
 
 ### Dataset Parameters
 
-| Parameter            | Default         | Description                                     |
-|----------------------|-----------------|-------------------------------------------------|
-| `dataset_bucket`     | `training`      | OSMO bucket for training code                   |
-| `dataset_name`       | `training-code` | Dataset name in bucket                          |
+| Parameter            | Default         | Description                                  |
+|----------------------|-----------------|----------------------------------------------|
+| `dataset_bucket`     | `training`      | OSMO bucket for training code                |
+| `dataset_name`       | `training-code` | Dataset name in bucket                       |
 | `training_localpath` | (required)      | Local path to training/ relative to workflow |
 
 ### Dataset Usage

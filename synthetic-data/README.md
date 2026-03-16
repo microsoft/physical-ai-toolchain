@@ -4,16 +4,16 @@ Synthetic data generation (SDG) pipelines leveraging NVIDIA Cosmos world foundat
 
 ## 📂 Directory Structure
 
-| Directory          | Purpose                                               |
-|--------------------|-------------------------------------------------------|
-| `workflows/osmo/`  | OSMO workflow definitions for Cosmos SDG jobs         |
-| `workflows/azureml/` | AzureML job definitions for Cosmos SDG jobs         |
-| `cosmos/transfer/` | Cosmos Transfer 2.5 sim-to-real image transformation  |
-| `cosmos/predict/`  | Cosmos Predict 2.5 future frame prediction            |
-| `cosmos/reason/`   | Cosmos Reason 2 data curation and quality assessment  |
-| `cosmos/configs/`  | Model-specific configuration templates                |
-| `examples/`        | SDG pipeline examples and reference configurations    |
-| `specifications/`  | Domain specifications for agent skills                |
+| Directory            | Purpose                                              |
+|----------------------|------------------------------------------------------|
+| `workflows/osmo/`    | OSMO workflow definitions for Cosmos SDG jobs        |
+| `workflows/azureml/` | AzureML job definitions for Cosmos SDG jobs          |
+| `cosmos/transfer/`   | Cosmos Transfer 2.5 sim-to-real image transformation |
+| `cosmos/predict/`    | Cosmos Predict 2.5 future frame prediction           |
+| `cosmos/reason/`     | Cosmos Reason 2 data curation and quality assessment |
+| `cosmos/configs/`    | Model-specific configuration templates               |
+| `examples/`          | SDG pipeline examples and reference configurations   |
+| `specifications/`    | Domain specifications for agent skills               |
 
 ## Quick Start
 
@@ -27,9 +27,9 @@ The SDG pipeline chains three NVIDIA Cosmos capabilities:
 
 ## External References
 
-| Resource | URL |
-|----------|-----|
-| NVIDIA Cosmos Platform | <https://developer.nvidia.com/cosmos> |
-| Cosmos Transfer 2.5 | <https://github.com/NVIDIA/Cosmos-Transfer2.5> |
-| Cosmos Predict 2.5 | <https://github.com/NVIDIA/Cosmos-Predict2.5> |
-| Cosmos Cookbook | <https://github.com/NVIDIA/Cosmos-Cookbook> |
+| Resource               | URL                                            |
+|------------------------|------------------------------------------------|
+| NVIDIA Cosmos Platform | <https://developer.nvidia.com/cosmos>          |
+| Cosmos Transfer 2.5    | <https://github.com/NVIDIA/Cosmos-Transfer2.5> |
+| Cosmos Predict 2.5     | <https://github.com/NVIDIA/Cosmos-Predict2.5>  |
+| Cosmos Cookbook        | <https://github.com/NVIDIA/Cosmos-Cookbook>    |

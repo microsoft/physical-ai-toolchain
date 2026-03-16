@@ -4,8 +4,8 @@ Deployment gating service that validates trained models before they are rolled o
 
 ## Planned Components
 
-| Component       | Purpose                                                |
-|-----------------|--------------------------------------------------------|
-| Gate evaluator  | Run pre-deployment safety and performance checks       |
-| Approval API    | Programmatic approval/rejection of deployment gates    |
-| Webhook handler | Receive FluxCD notifications and trigger gate checks   |
+| Component       | Purpose                                              |
+|-----------------|------------------------------------------------------|
+| Gate evaluator  | Run pre-deployment safety and performance checks     |
+| Approval API    | Programmatic approval/rejection of deployment gates  |
+| Webhook handler | Receive FluxCD notifications and trigger gate checks |

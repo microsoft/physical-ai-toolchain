@@ -18,8 +18,8 @@ Robot-to-cloud data capture pipeline for recording, compressing, and uploading r
 
 ## 📖 Guides
 
-| Guide | Description |
-|-------|-------------|
+| Guide                                                                    | Description                                                                                       |
+|--------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
 | [Chunking and Compression Configuration](chunking-compression-config.md) | Configure bag chunking thresholds and zstd compression for ROS 2 edge recording on Jetson devices |
 
 ## 🏗️ Architecture

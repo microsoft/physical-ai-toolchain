@@ -18,14 +18,14 @@ This policy defines how external interfaces are deprecated, maintained during a 
 
 This policy applies to all external interfaces that users or downstream automation depend on:
 
-| Interface Type         | Examples                                    | Location                              |
-|------------------------|---------------------------------------------|---------------------------------------|
-| Shell script arguments | `--config-dir`, `--tf-dir`, `--dry-run`     | `infrastructure/setup/`, `scripts/`       |
-| Environment variables  | `GPU_OPERATOR_VERSION`, `NS_GPU_OPERATOR`   | `infrastructure/setup/defaults.conf`      |
-| Terraform variables    | `environment`, `should_deploy_postgresql`   | `infrastructure/terraform/variables.tf`         |
-| Terraform outputs      | `aks_cluster`, `postgresql_connection_info` | `infrastructure/terraform/outputs.tf`           |
-| Configuration schemas  | Recording config properties                 | `config/recording_config.schema.json` |
-| Workflow templates     | AzureML and OSMO YAML fields                | `workflows/`                          |
+| Interface Type         | Examples                                    | Location                                |
+|------------------------|---------------------------------------------|-----------------------------------------|
+| Shell script arguments | `--config-dir`, `--tf-dir`, `--dry-run`     | `infrastructure/setup/`, `scripts/`     |
+| Environment variables  | `GPU_OPERATOR_VERSION`, `NS_GPU_OPERATOR`   | `infrastructure/setup/defaults.conf`    |
+| Terraform variables    | `environment`, `should_deploy_postgresql`   | `infrastructure/terraform/variables.tf` |
+| Terraform outputs      | `aks_cluster`, `postgresql_connection_info` | `infrastructure/terraform/outputs.tf`   |
+| Configuration schemas  | Recording config properties                 | `config/recording_config.schema.json`   |
+| Workflow templates     | AzureML and OSMO YAML fields                | `workflows/`                            |
 
 Internal implementation details, private functions, and module-internal resources are excluded. Changes to these do not require a deprecation notice.
 

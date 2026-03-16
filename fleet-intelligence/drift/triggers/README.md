@@ -4,11 +4,11 @@ Automated retraining pipeline triggers based on drift detection signals and flee
 
 ## 📂 Components
 
-| Component | Description |
-|-----------|-------------|
+| Component         | Description                                         |
+|-------------------|-----------------------------------------------------|
 | Trigger evaluator | Evaluates drift signals against retraining criteria |
-| Pipeline launcher | Initiates training jobs via AzureML or OSMO |
-| Rollback guard | Validates retrained model before fleet deployment |
+| Pipeline launcher | Initiates training jobs via AzureML or OSMO         |
+| Rollback guard    | Validates retrained model before fleet deployment   |
 
 ## 🏗️ Flow
 

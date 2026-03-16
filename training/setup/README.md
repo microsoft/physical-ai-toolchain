@@ -4,8 +4,8 @@ Training environment setup scripts for container preparation, dependency install
 
 ## 📋 Scope
 
-| Area | Description |
-|------|-------------|
-| Container preparation | Isaac Lab container customization and dependency pinning |
-| Dependency installation | Runtime package installation (LeRobot, SKRL, numpy ABI pins) |
-| Environment configuration | PYTHONPATH, EULA acceptance, Vulkan driver capabilities |
+| Area                      | Description                                                  |
+|---------------------------|--------------------------------------------------------------|
+| Container preparation     | Isaac Lab container customization and dependency pinning     |
+| Dependency installation   | Runtime package installation (LeRobot, SKRL, numpy ABI pins) |
+| Environment configuration | PYTHONPATH, EULA acceptance, Vulkan driver capabilities      |

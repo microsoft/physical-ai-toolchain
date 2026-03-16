@@ -4,19 +4,19 @@ Data curation and quality assessment using NVIDIA Cosmos Reason 2. Evaluates syn
 
 ## Capabilities
 
-| Capability | Description |
-|------------|-------------|
-| Quality assessment | Score synthetic frames for training suitability |
-| Data filtering | Remove low-quality or unrealistic samples |
-| Reasoning annotations | Attach quality metadata to curated datasets |
+| Capability            | Description                                     |
+|-----------------------|-------------------------------------------------|
+| Quality assessment    | Score synthetic frames for training suitability |
+| Data filtering        | Remove low-quality or unrealistic samples       |
+| Reasoning annotations | Attach quality metadata to curated datasets     |
 
 ## Integration Points
 
-| Component | Description |
-|-----------|-------------|
+| Component              | Description                                      |
+|------------------------|--------------------------------------------------|
 | Cosmos Transfer output | Assess quality of sim-to-real transformed frames |
-| Cosmos Predict output | Validate predicted frame plausibility |
-| Training pipeline | Curated dataset consumed by RL/IL training |
+| Cosmos Predict output  | Validate predicted frame plausibility            |
+| Training pipeline      | Curated dataset consumed by RL/IL training       |
 
 ## References
 

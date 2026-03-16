@@ -21,11 +21,11 @@ Generate photorealistic training data from simulation using NVIDIA Cosmos world 
 
 The synthetic data generation pipeline chains three Cosmos capabilities:
 
-| Stage | Model | Description |
-|-------|-------|-------------|
+| Stage    | Model               | Description                                         |
+|----------|---------------------|-----------------------------------------------------|
 | Transfer | Cosmos Transfer 2.5 | Convert simulation renders to photorealistic images |
-| Predict | Cosmos Predict 2.5 | Generate plausible future frame sequences |
-| Reason | Cosmos Reason 2 | Assess and curate data for training quality |
+| Predict  | Cosmos Predict 2.5  | Generate plausible future frame sequences           |
+| Reason   | Cosmos Reason 2     | Assess and curate data for training quality         |
 
 ## 🏗️ Architecture
 

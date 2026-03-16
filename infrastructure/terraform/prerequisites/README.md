@@ -23,8 +23,8 @@ source az-sub-init.sh
 
 ## 📖 Documentation
 
-| Guide                                               | Description                                          |
-|-----------------------------------------------------|------------------------------------------------------|
+| Guide                                                       | Description                                          |
+|-------------------------------------------------------------|------------------------------------------------------|
 | [Prerequisites](../../docs/infrastructure/prerequisites.md) | Full prerequisites, tooling, and Azure configuration |
 
 ## ➡️ Next Step

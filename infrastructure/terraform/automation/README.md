@@ -25,8 +25,8 @@ terraform init && terraform apply
 
 ## 📖 Documentation
 
-| Guide                                                    | Description                                             |
-|----------------------------------------------------------|---------------------------------------------------------|
+| Guide                                                            | Description                                             |
+|------------------------------------------------------------------|---------------------------------------------------------|
 | [Cluster Automation](../../../docs/infrastructure/automation.md) | Schedule configuration, runbooks, and managed resources |
 
 ## ➡️ Next Step

@@ -19,12 +19,12 @@ Configure bag file chunking thresholds and per-topic compression for ROS 2 edge 
 
 ## Prerequisites
 
-| Requirement             | Details                                         |
-|-------------------------|-------------------------------------------------|
-| NVIDIA Jetson device    | Orin Nano (60 GB SSD) or AGX Orin (500 GB NVMe) |
-| ROS 2 Humble or later   | With `rosbag2` and MCAP storage plugin          |
+| Requirement             | Details                                                              |
+|-------------------------|----------------------------------------------------------------------|
+| NVIDIA Jetson device    | Orin Nano (60 GB SSD) or AGX Orin (500 GB NVMe)                      |
+| ROS 2 Humble or later   | With `rosbag2` and MCAP storage plugin                               |
 | Recording config schema | `data-pipeline/capture/config/recording_config.yaml` from issue #197 |
-| Python 3.10+            | For pydantic config validation                  |
+| Python 3.10+            | For pydantic config validation                                       |
 
 ## Quick Start
 

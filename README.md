@@ -46,16 +46,16 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 
 ![Physical AI Toolchain Architecture Diagram](docs/images/physical-ai-toolchain-architecture-diagram.png "Physical AI Toolchain Architecture Diagram")
 
-| Capability | Description |
-|---|---|
-| **Simulation & Synthetic Data** | Isaac Sim and Isaac Lab environments for RL task training and synthetic data generation |
-| **Edge Data Capture** | ROS 2 demonstration recording on Jetson with chunking, compression, and cloud upload |
-| **Cloud Data Pipeline** | Automated ROS-to-LeRobot conversion, quality validation, and event-driven orchestration |
-| **Training Infrastructure** | OSMO + Azure ML integration for scalable RL and IL training with experiment tracking |
-| **Model Evaluation** | Offline replay evaluation, Isaac Sim validation, and evaluation dashboards |
-| **Model Deployment** | ONNX/TensorRT conversion, container packaging, and GitOps-based edge deployment |
-| **Agentic Workflows** | Instruction-driven agents that orchestrate data collection, training, evaluation, and deployment end-to-end |
-| **Hybrid Architecture** | Azure Arc, air-gapped training support, and MQTT telemetry for connected and disconnected sites |
+| Capability                      | Description                                                                                                 |
+|---------------------------------|-------------------------------------------------------------------------------------------------------------|
+| **Simulation & Synthetic Data** | Isaac Sim and Isaac Lab environments for RL task training and synthetic data generation                     |
+| **Edge Data Capture**           | ROS 2 demonstration recording on Jetson with chunking, compression, and cloud upload                        |
+| **Cloud Data Pipeline**         | Automated ROS-to-LeRobot conversion, quality validation, and event-driven orchestration                     |
+| **Training Infrastructure**     | OSMO + Azure ML integration for scalable RL and IL training with experiment tracking                        |
+| **Model Evaluation**            | Offline replay evaluation, Isaac Sim validation, and evaluation dashboards                                  |
+| **Model Deployment**            | ONNX/TensorRT conversion, container packaging, and GitOps-based edge deployment                             |
+| **Agentic Workflows**           | Instruction-driven agents that orchestrate data collection, training, evaluation, and deployment end-to-end |
+| **Hybrid Architecture**         | Azure Arc, air-gapped training support, and MQTT telemetry for connected and disconnected sites             |
 
 ## Key Features
 
@@ -81,13 +81,13 @@ The setup script installs Python 3.11 via [uv](https://docs.astral.sh/uv/), crea
 
 Full documentation is available in the [docs/](docs/README.md) directory.
 
-| Guide | Description |
-|---|---|
-| [Getting Started](docs/getting-started/README.md) | Prerequisites, quickstart, and first training job |
-| [Deployment](docs/infrastructure/README.md) | Infrastructure provisioning and setup |
-| [Training](docs/training/README.md) | RL and IL training workflows, MLflow, and checkpointing |
-| [Security](docs/security/README.md) | Threat model, security guide, deployment responsibilities |
-| [Contributing](docs/contributing/README.md) | Architecture, style guides, contribution workflow |
+| Guide                                             | Description                                               |
+|---------------------------------------------------|-----------------------------------------------------------|
+| [Getting Started](docs/getting-started/README.md) | Prerequisites, quickstart, and first training job         |
+| [Deployment](docs/infrastructure/README.md)       | Infrastructure provisioning and setup                     |
+| [Training](docs/training/README.md)               | RL and IL training workflows, MLflow, and checkpointing   |
+| [Security](docs/security/README.md)               | Threat model, security guide, deployment responsibilities |
+| [Contributing](docs/contributing/README.md)       | Architecture, style guides, contribution workflow         |
 
 ## Architecture
 
@@ -117,38 +117,38 @@ The toolchain includes agent-driven automation that collapses multi-stage physic
 
 **What agents can do today:**
 
-| Capability | Description |
-|---|---|
-| Sample data collection | Configure Isaac Sim scenes and collect synthetic demonstration datasets |
-| RL pipeline execution | Set up Isaac Lab tasks, launch OSMO training jobs, and track experiments in MLflow |
-| IL pipeline execution | Convert demonstration data to LeRobot format, run imitation learning training |
-| Policy evaluation | Execute offline replay and simulation-based validation against success criteria |
-| Deployment promotion | Convert checkpoints, package containers, and push to edge via GitOps |
+| Capability             | Description                                                                        |
+|------------------------|------------------------------------------------------------------------------------|
+| Sample data collection | Configure Isaac Sim scenes and collect synthetic demonstration datasets            |
+| RL pipeline execution  | Set up Isaac Lab tasks, launch OSMO training jobs, and track experiments in MLflow |
+| IL pipeline execution  | Convert demonstration data to LeRobot format, run imitation learning training      |
+| Policy evaluation      | Execute offline replay and simulation-based validation against success criteria    |
+| Deployment promotion   | Convert checkpoints, package containers, and push to edge via GitOps               |
 
 Agents operate within the same security boundaries, managed identities, and RBAC controls as manual workflows. All agent actions are logged and auditable.
 
 ### Guardrails and Control
 
-| Question | Answer |
-|---|---|
-| Are agents required? | No. Every pipeline stage has a manual CLI and API path. Agents are opt-in. |
-| Can I use agents for some stages but not others? | Yes. Agents are composable — use them for data collection but run training manually, or vice versa. |
-| Are agents opinionated or customizable? | Customizable. Agent behavior is driven by configuration files you control: which stages to automate, compute budgets, approval gates, and evaluation thresholds. |
-| What happens if an agent makes a mistake? | Agents request human approval before destructive actions (deploying to production, deleting data). All intermediate artifacts are versioned and recoverable. |
-| How are agent actions audited? | Every agent action is logged with the initiating instruction, parameters, and outcome. Logs integrate with Azure Monitor and MLflow. |
+| Question                                         | Answer                                                                                                                                                           |
+|--------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Are agents required?                             | No. Every pipeline stage has a manual CLI and API path. Agents are opt-in.                                                                                       |
+| Can I use agents for some stages but not others? | Yes. Agents are composable — use them for data collection but run training manually, or vice versa.                                                              |
+| Are agents opinionated or customizable?          | Customizable. Agent behavior is driven by configuration files you control: which stages to automate, compute budgets, approval gates, and evaluation thresholds. |
+| What happens if an agent makes a mistake?        | Agents request human approval before destructive actions (deploying to production, deleting data). All intermediate artifacts are versioned and recoverable.     |
+| How are agent actions audited?                   | Every agent action is logged with the initiating instruction, parameters, and outcome. Logs integrate with Azure Monitor and MLflow.                             |
 
 ## For Developers
 
 ### Repository Structure
 
-| Directory | Purpose |
-|---|---|
-| `src/` | Core Python modules — conversion, validation, training utilities |
-| `infra/` | Terraform and Bicep templates for Azure resource provisioning |
-| `config/` | YAML configuration schemas for recording, training, and deployment |
-| `scripts/` | Setup, benchmarking, and operational helper scripts |
-| `tests/` | Unit, integration, and end-to-end test suites |
-| `docs/` | All project documentation |
+| Directory  | Purpose                                                            |
+|------------|--------------------------------------------------------------------|
+| `src/`     | Core Python modules — conversion, validation, training utilities   |
+| `infra/`   | Terraform and Bicep templates for Azure resource provisioning      |
+| `config/`  | YAML configuration schemas for recording, training, and deployment |
+| `scripts/` | Setup, benchmarking, and operational helper scripts                |
+| `tests/`   | Unit, integration, and end-to-end test suites                      |
+| `docs/`    | All project documentation                                          |
 
 ### Development Environment
 

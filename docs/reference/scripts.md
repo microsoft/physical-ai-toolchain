@@ -204,7 +204,7 @@ Example:
 | `--backend` / `-b`             | `skrl`                              | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
 | `--dataset-bucket`             | `training`                          | OSMO bucket name                                 | `OSMO_DATASET_BUCKET`         |
 | `--dataset-name`               | `training-code`                     | Dataset name (auto-versioned)                    | `OSMO_DATASET_NAME`           |
-| `--training-path`              | `training/`                        | Local path to upload                             | `TRAINING_PATH`               |
+| `--training-path`              | `training/`                         | Local path to upload                             | `TRAINING_PATH`               |
 | `--checkpoint-uri` / `-c`      | unset                               | MLflow checkpoint artifact URI                   | `CHECKPOINT_URI`              |
 | `--checkpoint-mode` / `-M`     | `from-scratch`                      | `from-scratch`, `warm-start`, `resume`, `fresh`  | `CHECKPOINT_MODE`             |
 | `--register-checkpoint` / `-r` | derived from task                   | Model name for checkpoint registration           | `REGISTER_CHECKPOINT`         |

@@ -23,19 +23,19 @@ data-pipeline/
 
 ## 📋 Specifications
 
-| Document | Description |
-|----------|-------------|
-| [Data Pipeline](specifications/data-pipeline.specification.md) | Robot-to-cloud capture architecture and edge requirements |
-| [Recording Configuration](specifications/recording-config.specification.md) | Configuration schema, validation, and file locations |
+| Document                                                                    | Description                                               |
+|-----------------------------------------------------------------------------|-----------------------------------------------------------|
+| [Data Pipeline](specifications/data-pipeline.specification.md)              | Robot-to-cloud capture architecture and edge requirements |
+| [Recording Configuration](specifications/recording-config.specification.md) | Configuration schema, validation, and file locations      |
 
 ## 🏗️ Architecture
 
-| Stage | Location | Description |
-|-------|----------|-------------|
-| Capture | Edge device | ROS 2 topics recorded to local disk via recording service |
-| Validation | Edge device | Gap detection, compression verification |
-| Upload | Edge → Cloud | Episode transfer to Azure Blob Storage |
-| Registration | Cloud | Dataset catalog entry for training consumption |
+| Stage        | Location     | Description                                               |
+|--------------|--------------|-----------------------------------------------------------|
+| Capture      | Edge device  | ROS 2 topics recorded to local disk via recording service |
+| Validation   | Edge device  | Gap detection, compression verification                   |
+| Upload       | Edge → Cloud | Episode transfer to Azure Blob Storage                    |
+| Registration | Cloud        | Dataset catalog entry for training consumption            |
 
 ## ⚙️ Configuration
 

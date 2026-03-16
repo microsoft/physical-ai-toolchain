@@ -292,12 +292,12 @@ The inference workflow produces:
 
 ## 📋 Prerequisites
 
-| Requirement                   | Setup                    |
-|-------------------------------|--------------------------|
+| Requirement                   | Setup                       |
+|-------------------------------|-----------------------------|
 | Infrastructure deployed       | `infrastructure/terraform/` |
-| Setup scripts completed       | `infrastructure/setup/`      |
-| Azure CLI authenticated       | `az login`               |
-| OSMO CLI (for OSMO workflows) | Installed and configured |
+| Setup scripts completed       | `infrastructure/setup/`     |
+| Azure CLI authenticated       | `az login`                  |
+| OSMO CLI (for OSMO workflows) | Installed and configured    |
 
 ## ⚙️ Configuration
 
@@ -307,6 +307,6 @@ Scripts resolve values in order:
 |-------------|-----------------------|----------------------------------|
 | 1 (highest) | CLI arguments         | `--resource-group rg-custom`     |
 | 2           | Environment variables | `AZURE_RESOURCE_GROUP=rg-custom` |
-| 3 (default) | Terraform outputs     | `infrastructure/terraform/`       |
+| 3 (default) | Terraform outputs     | `infrastructure/terraform/`      |
 
 See individual workflow READMEs for detailed configuration options.

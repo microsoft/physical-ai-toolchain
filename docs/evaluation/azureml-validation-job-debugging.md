@@ -400,10 +400,10 @@ Submit jobs to AzureML managed compute (e.g., `gpu-cluster`) instead of the atta
 
 ## Files Changed Summary
 
-| File                              | Change Type                                                     |
-|-----------------------------------|-----------------------------------------------------------------|
-| `infrastructure/terraform/main.tf`          | Added `should_install_extension`, `should_federate_ml_identity` |
-| `workflows/azureml/validate.yaml` | Fixed input schema, changed mount to download                   |
+| File                               | Change Type                                                     |
+|------------------------------------|-----------------------------------------------------------------|
+| `infrastructure/terraform/main.tf` | Added `should_install_extension`, `should_federate_ml_identity` |
+| `workflows/azureml/validate.yaml`  | Fixed input schema, changed mount to download                   |
 
 ## Related Resources
 

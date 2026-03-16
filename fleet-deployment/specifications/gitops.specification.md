@@ -8,14 +8,14 @@ Planned — placeholder for future implementation.
 
 ## Components
 
-| Component              | Description                                          |
-|------------------------|------------------------------------------------------|
-| GitRepository source   | Git-based manifest source for FluxCD                 |
-| OCIRepository source   | OCI artifact source for container images             |
-| Kustomization          | Reconciliation target for raw manifests              |
-| HelmRelease            | Reconciliation target for Helm charts                |
-| ImagePolicy            | Version selection rules for automated updates        |
-| ImageUpdateAutomation  | Commit automation for manifest image tag updates     |
+| Component             | Description                                      |
+|-----------------------|--------------------------------------------------|
+| GitRepository source  | Git-based manifest source for FluxCD             |
+| OCIRepository source  | OCI artifact source for container images         |
+| Kustomization         | Reconciliation target for raw manifests          |
+| HelmRelease           | Reconciliation target for Helm charts            |
+| ImagePolicy           | Version selection rules for automated updates    |
+| ImageUpdateAutomation | Commit automation for manifest image tag updates |
 
 ## Reconciliation Flow
 

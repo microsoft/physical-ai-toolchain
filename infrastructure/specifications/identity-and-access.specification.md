@@ -4,15 +4,15 @@ Managed identities, RBAC assignments, and workload identity federation for secur
 
 ## Components
 
-| Component | Purpose |
-|-----------|---------|
-| AKS Managed Identity | Cluster identity for Azure resource access |
-| AzureML Managed Identity | Training job identity for storage and model registry |
-| OSMO Managed Identity | Workflow orchestration identity |
+| Component                    | Purpose                                               |
+|------------------------------|-------------------------------------------------------|
+| AKS Managed Identity         | Cluster identity for Azure resource access            |
+| AzureML Managed Identity     | Training job identity for storage and model registry  |
+| OSMO Managed Identity        | Workflow orchestration identity                       |
 | Workload Identity Federation | Kubernetes service account to Azure AD token exchange |
-| Key Vault RBAC | Secrets and certificate access control |
-| Storage RBAC | Blob data access for training data and checkpoints |
-| Entra ID Application | VPN authentication and service principal |
+| Key Vault RBAC               | Secrets and certificate access control                |
+| Storage RBAC                 | Blob data access for training data and checkpoints    |
+| Entra ID Application         | VPN authentication and service principal              |
 
 ## Configuration
 
@@ -20,28 +20,28 @@ Managed identities, RBAC assignments, and workload identity federation for secur
 
 Terraform creates managed identities and federated credentials linking Kubernetes service accounts to Azure AD:
 
-| Identity | Kubernetes Namespace | Service Accounts |
-|----------|---------------------|------------------|
-| AzureML | `azureml` | `default`, `training` |
-| OSMO Control Plane | `osmo-control-plane` | OSMO service accounts |
-| OSMO Operator | `osmo-operator` | Backend operator account |
-| OSMO Workflows | `osmo-workflows` | Job execution accounts |
+| Identity           | Kubernetes Namespace | Service Accounts         |
+|--------------------|----------------------|--------------------------|
+| AzureML            | `azureml`            | `default`, `training`    |
+| OSMO Control Plane | `osmo-control-plane` | OSMO service accounts    |
+| OSMO Operator      | `osmo-operator`      | Backend operator account |
+| OSMO Workflows     | `osmo-workflows`     | Job execution accounts   |
 
 ### RBAC Assignments
 
-| Role | Scope | Purpose |
-|------|-------|---------|
-| Key Vault Secrets Officer | Key Vault | Current user secret management |
-| Storage Blob Data Contributor | Storage Account | Training data read/write |
-| AcrPull | Container Registry | Image pull from AKS |
-| Contributor | Resource Group | AzureML workspace operations |
+| Role                          | Scope              | Purpose                        |
+|-------------------------------|--------------------|--------------------------------|
+| Key Vault Secrets Officer     | Key Vault          | Current user secret management |
+| Storage Blob Data Contributor | Storage Account    | Training data read/write       |
+| AcrPull                       | Container Registry | Image pull from AKS            |
+| Contributor                   | Resource Group     | AzureML workspace operations   |
 
 ### Key Vault Access
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `should_add_current_user_key_vault_admin` | Grant current user Key Vault Secrets Officer | `true` |
-| `should_add_current_user_storage_blob` | Grant current user Storage Blob Data Contributor | `true` |
+| Parameter                                 | Description                                      | Default |
+|-------------------------------------------|--------------------------------------------------|---------|
+| `should_add_current_user_key_vault_admin` | Grant current user Key Vault Secrets Officer     | `true`  |
+| `should_add_current_user_storage_blob`    | Grant current user Storage Blob Data Contributor | `true`  |
 
 ### AzureML Identity Chain
 

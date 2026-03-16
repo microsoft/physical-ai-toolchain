@@ -8,11 +8,11 @@ Active — supports ONNX and TensorRT export paths.
 
 ## Components
 
-| Component | Description |
-|-----------|-------------|
-| `export_policy.py` | Converts trained policy checkpoints to deployment-ready formats |
-| ONNX export | Framework-agnostic model serialization |
-| TensorRT optimization | NVIDIA GPU-optimized inference acceleration |
+| Component             | Description                                                     |
+|-----------------------|-----------------------------------------------------------------|
+| `export_policy.py`    | Converts trained policy checkpoints to deployment-ready formats |
+| ONNX export           | Framework-agnostic model serialization                          |
+| TensorRT optimization | NVIDIA GPU-optimized inference acceleration                     |
 
 ## Export Flow
 

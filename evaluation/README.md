@@ -4,15 +4,15 @@ Software-in-the-loop (SiL) and hardware-in-the-loop (HiL) validation for trained
 
 ## 📂 Directory Structure
 
-| Directory         | Purpose                                          |
-|-------------------|--------------------------------------------------|
+| Directory         | Purpose                                             |
+|-------------------|-----------------------------------------------------|
 | `sil/`            | SiL evaluation scripts, workflows, Docker artifacts |
-| `metrics/`        | Plotting, artifact upload, MLflow bootstrapping   |
-| `tests/`          | Evaluation tests                                  |
-| `hil/`            | Hardware-in-the-loop validation (placeholder)     |
-| `setup/`          | Evaluation setup scripts (placeholder)            |
-| `specifications/` | Domain specifications                             |
-| `examples/`       | Example configurations                            |
+| `metrics/`        | Plotting, artifact upload, MLflow bootstrapping     |
+| `tests/`          | Evaluation tests                                    |
+| `hil/`            | Hardware-in-the-loop validation (placeholder)       |
+| `setup/`          | Evaluation setup scripts (placeholder)              |
+| `specifications/` | Domain specifications                               |
+| `examples/`       | Example configurations                              |
 
 ## 🚀 Quick Start
 

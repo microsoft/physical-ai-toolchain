@@ -4,11 +4,11 @@ Algorithms and pipelines for detecting policy performance degradation in deploye
 
 ## 📂 Approaches
 
-| Method | Description |
-|--------|-------------|
-| Distribution shift | Statistical tests on observation/action distributions vs. training baseline |
-| Performance regression | Success rate and task completion metric tracking over time |
-| Latency anomaly | Inference timing deviation from established baseline |
+| Method                 | Description                                                                 |
+|------------------------|-----------------------------------------------------------------------------|
+| Distribution shift     | Statistical tests on observation/action distributions vs. training baseline |
+| Performance regression | Success rate and task completion metric tracking over time                  |
+| Latency anomaly        | Inference timing deviation from established baseline                        |
 
 ## 🏗️ Architecture
 

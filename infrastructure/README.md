@@ -83,18 +83,18 @@ Each script supports `--config-preview` to print configuration without making ch
 
 ## 🌐 Network Modes
 
-| Mode | Private Endpoints | Private AKS | VPN Required | Use Case |
-|------|-------------------|-------------|--------------|----------|
-| Full Private | `true` | `true` | Yes | Production deployments |
-| Hybrid | `true` | `false` | No | Development with private data services |
-| Full Public | `false` | `false` | No | Evaluation only |
+| Mode         | Private Endpoints | Private AKS | VPN Required | Use Case                               |
+|--------------|-------------------|-------------|--------------|----------------------------------------|
+| Full Private | `true`            | `true`      | Yes          | Production deployments                 |
+| Hybrid       | `true`            | `false`     | No           | Development with private data services |
+| Full Public  | `false`           | `false`     | No           | Evaluation only                        |
 
 ## 📖 Documentation
 
-| Guide | Description |
-|-------|-------------|
-| [Infrastructure Deployment](../docs/infrastructure/infrastructure.md) | Configuration, variables, and deployment walkthrough |
-| [Infrastructure Reference](../docs/infrastructure/infrastructure-reference.md) | Architecture, module structure, and troubleshooting |
-| [Cluster Setup](../docs/infrastructure/cluster-setup.md) | AKS setup walkthrough and deployment scenarios |
-| [VPN Configuration](../docs/infrastructure/vpn.md) | Point-to-site VPN for private cluster access |
-| [Prerequisites](../docs/infrastructure/prerequisites.md) | Required tools and versions |
+| Guide                                                                          | Description                                          |
+|--------------------------------------------------------------------------------|------------------------------------------------------|
+| [Infrastructure Deployment](../docs/infrastructure/infrastructure.md)          | Configuration, variables, and deployment walkthrough |
+| [Infrastructure Reference](../docs/infrastructure/infrastructure-reference.md) | Architecture, module structure, and troubleshooting  |
+| [Cluster Setup](../docs/infrastructure/cluster-setup.md)                       | AKS setup walkthrough and deployment scenarios       |
+| [VPN Configuration](../docs/infrastructure/vpn.md)                             | Point-to-site VPN for private cluster access         |
+| [Prerequisites](../docs/infrastructure/prerequisites.md)                       | Required tools and versions                          |

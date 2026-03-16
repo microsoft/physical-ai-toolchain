@@ -4,7 +4,7 @@ FluxCD source definitions for fleet deployment: `GitRepository` and `OCIReposito
 
 ## Planned Resources
 
-| Resource Type   | Purpose                                      |
-|-----------------|----------------------------------------------|
-| GitRepository   | Reference to this repository for manifests   |
-| OCIRepository   | Container registry sources for model images  |
+| Resource Type | Purpose                                     |
+|---------------|---------------------------------------------|
+| GitRepository | Reference to this repository for manifests  |
+| OCIRepository | Container registry sources for model images |

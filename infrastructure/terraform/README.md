@@ -33,10 +33,10 @@ terraform init && terraform apply
 
 ## 📖 Documentation
 
-| Guide                                                                                | Description                                          |
-|--------------------------------------------------------------------------------------|------------------------------------------------------|
-| [Infrastructure Deployment](../../docs/infrastructure/infrastructure.md)              | Configuration, variables, and deployment walkthrough |
-| [Infrastructure Reference](../../docs/infrastructure/infrastructure-reference.md)     | Architecture, module structure, and troubleshooting  |
+| Guide                                                                             | Description                                          |
+|-----------------------------------------------------------------------------------|------------------------------------------------------|
+| [Infrastructure Deployment](../../docs/infrastructure/infrastructure.md)          | Configuration, variables, and deployment walkthrough |
+| [Infrastructure Reference](../../docs/infrastructure/infrastructure-reference.md) | Architecture, module structure, and troubleshooting  |
 
 ## ➡️ Next Step
 

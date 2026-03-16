@@ -35,7 +35,7 @@ Find the symptom you are experiencing, then follow the resolution steps. Start w
 **Resolution:**
 
 1. Verify VPN connection status in the Azure portal under the VPN Gateway resource.
-2. Reconnect using the VPN client profile downloaded during [VPN setup](../deploy/vpn.md).
+2. Reconnect using the VPN client profile downloaded during [VPN setup](../infrastructure/vpn.md).
 3. Confirm connectivity with `kubectl get nodes`.
 
 ### DNS resolution fails for private endpoints
@@ -65,7 +65,7 @@ Find the symptom you are experiencing, then follow the resolution steps. Start w
 
 1. Check the ingress service IP: `kubectl get svc -n osmo-control-plane`.
 2. Verify DNS records in the private DNS zone match the load balancer IP.
-3. See [Private DNS](../deploy/dns.md) for DNS zone deployment.
+3. See [Private DNS](../infrastructure/dns.md) for DNS zone deployment.
 
 ## GPU and CUDA Errors
 

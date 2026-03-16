@@ -4,11 +4,11 @@ On-robot telemetry agent for collecting and forwarding policy execution and heal
 
 ## 📂 Components
 
-| Component | Description |
-|-----------|-------------|
-| Collector | Gathers policy execution metrics and hardware health data |
+| Component | Description                                                   |
+|-----------|---------------------------------------------------------------|
+| Collector | Gathers policy execution metrics and hardware health data     |
 | Formatter | Transforms raw metrics into schema-compliant telemetry events |
-| Forwarder | Publishes events to the IoT Operations MQTT broker |
+| Forwarder | Publishes events to the IoT Operations MQTT broker            |
 
 ## ⚙️ Configuration
 

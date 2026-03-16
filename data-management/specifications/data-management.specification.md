@@ -4,19 +4,19 @@ Domain contracts for dataset storage, formats, versioning, and access patterns i
 
 ## Dataset Formats
 
-| Format | Extension | Use Case |
-|--------|-----------|----------|
-| HDF5 | `.hdf5` | Dense episode storage with frame data, actions, and observations |
-| LeRobot | directory | Hugging Face LeRobot-compatible dataset structure |
-| Raw | directory | Unprocessed sensor recordings with metadata sidecar files |
+| Format  | Extension | Use Case                                                         |
+|---------|-----------|------------------------------------------------------------------|
+| HDF5    | `.hdf5`   | Dense episode storage with frame data, actions, and observations |
+| LeRobot | directory | Hugging Face LeRobot-compatible dataset structure                |
+| Raw     | directory | Unprocessed sensor recordings with metadata sidecar files        |
 
 ## Storage Backends
 
-| Backend | Protocol | Configuration |
-|---------|----------|---------------|
-| Local filesystem | File path | `DATASETS_PATH` environment variable |
+| Backend            | Protocol   | Configuration                                              |
+|--------------------|------------|------------------------------------------------------------|
+| Local filesystem   | File path  | `DATASETS_PATH` environment variable                       |
 | Azure Blob Storage | `wasbs://` | Storage account, container, and credential via environment |
-| Hugging Face Hub | HTTPS | Repository ID and optional token |
+| Hugging Face Hub   | HTTPS      | Repository ID and optional token                           |
 
 ## Directory Layout
 

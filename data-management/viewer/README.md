@@ -73,18 +73,18 @@ Expected blob structure:
 
 ### Full Environment Variable Reference
 
-| Variable | Default | Description |
-|---|---|---|
-| `HMI_STORAGE_BACKEND` | `local` | Storage backend: `local` or `azure` |
-| `HMI_DATA_PATH` | `./data` | Local dataset directory (local mode) |
-| `AZURE_STORAGE_ACCOUNT_NAME` | — | Azure Storage account name (azure mode) |
-| `AZURE_STORAGE_DATASET_CONTAINER` | — | Blob container for dataset files |
-| `AZURE_STORAGE_ANNOTATION_CONTAINER` | — | Blob container for annotations (defaults to dataset container) |
-| `AZURE_STORAGE_SAS_TOKEN` | — | SAS token (omit to use DefaultAzureCredential / MSI) |
-| `BACKEND_HOST` | `127.0.0.1` | Bind address (`0.0.0.0` for containers) |
-| `BACKEND_PORT` | `8000` | API server port |
-| `FRONTEND_PORT` | `5173` | Dev server port |
-| `CORS_ORIGINS` | localhost ports | Comma-separated allowed CORS origins |
+| Variable                             | Default         | Description                                                    |
+|--------------------------------------|-----------------|----------------------------------------------------------------|
+| `HMI_STORAGE_BACKEND`                | `local`         | Storage backend: `local` or `azure`                            |
+| `HMI_DATA_PATH`                      | `./data`        | Local dataset directory (local mode)                           |
+| `AZURE_STORAGE_ACCOUNT_NAME`         | —               | Azure Storage account name (azure mode)                        |
+| `AZURE_STORAGE_DATASET_CONTAINER`    | —               | Blob container for dataset files                               |
+| `AZURE_STORAGE_ANNOTATION_CONTAINER` | —               | Blob container for annotations (defaults to dataset container) |
+| `AZURE_STORAGE_SAS_TOKEN`            | —               | SAS token (omit to use DefaultAzureCredential / MSI)           |
+| `BACKEND_HOST`                       | `127.0.0.1`     | Bind address (`0.0.0.0` for containers)                        |
+| `BACKEND_PORT`                       | `8000`          | API server port                                                |
+| `FRONTEND_PORT`                      | `5173`          | Dev server port                                                |
+| `CORS_ORIGINS`                       | localhost ports | Comma-separated allowed CORS origins                           |
 
 ## 🔒 Authentication with Entra ID
 
@@ -137,15 +137,15 @@ The frontend Dockerfile passes `VITE_AZURE_CLIENT_ID` and `VITE_AZURE_TENANT_ID`
 
 ### Auth Environment Variable Reference
 
-| Variable | Location | Description |
-|---|---|---|
-| `DATAVIEWER_AUTH_DISABLED` | Backend | Set to `false` to enable auth (`true` disables all checks) |
-| `DATAVIEWER_AUTH_PROVIDER` | Backend | Auth provider: `apikey`, `azure_ad`, or `auth0` |
-| `DATAVIEWER_AZURE_TENANT_ID` | Backend | Entra ID tenant ID (GUID) |
-| `DATAVIEWER_AZURE_CLIENT_ID` | Backend | App registration client ID (GUID) |
-| `DATAVIEWER_SECURE_COOKIES` | Backend | Set to `true` for HTTPS deployments |
-| `VITE_AZURE_CLIENT_ID` | Frontend (build-time) | Same client ID — enables MSAL.js when set |
-| `VITE_AZURE_TENANT_ID` | Frontend (build-time) | Same tenant ID — used for authority URL |
+| Variable                     | Location              | Description                                                |
+|------------------------------|-----------------------|------------------------------------------------------------|
+| `DATAVIEWER_AUTH_DISABLED`   | Backend               | Set to `false` to enable auth (`true` disables all checks) |
+| `DATAVIEWER_AUTH_PROVIDER`   | Backend               | Auth provider: `apikey`, `azure_ad`, or `auth0`            |
+| `DATAVIEWER_AZURE_TENANT_ID` | Backend               | Entra ID tenant ID (GUID)                                  |
+| `DATAVIEWER_AZURE_CLIENT_ID` | Backend               | App registration client ID (GUID)                          |
+| `DATAVIEWER_SECURE_COOKIES`  | Backend               | Set to `true` for HTTPS deployments                        |
+| `VITE_AZURE_CLIENT_ID`       | Frontend (build-time) | Same client ID — enables MSAL.js when set                  |
+| `VITE_AZURE_TENANT_ID`       | Frontend (build-time) | Same tenant ID — used for authority URL                    |
 
 ### Token Flow
 

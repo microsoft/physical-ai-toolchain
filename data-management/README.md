@@ -34,21 +34,21 @@ docker compose up
 
 ## 📦 Components
 
-| Component | Location | Description |
-|-----------|----------|-------------|
-| Viewer Backend | `viewer/backend/` | FastAPI REST API for dataset browsing, annotation, export |
-| Viewer Frontend | `viewer/frontend/` | React/Vite/TypeScript UI for episode visualization |
-| Deploy Script | `setup/` | Kubernetes deployment for hosted viewer |
-| CLI Tools | `tools/` | Dataset filtering, splitting, merging, conversion, validation |
-| Specifications | `specifications/` | Domain contracts and interface definitions |
+| Component       | Location           | Description                                                   |
+|-----------------|--------------------|---------------------------------------------------------------|
+| Viewer Backend  | `viewer/backend/`  | FastAPI REST API for dataset browsing, annotation, export     |
+| Viewer Frontend | `viewer/frontend/` | React/Vite/TypeScript UI for episode visualization            |
+| Deploy Script   | `setup/`           | Kubernetes deployment for hosted viewer                       |
+| CLI Tools       | `tools/`           | Dataset filtering, splitting, merging, conversion, validation |
+| Specifications  | `specifications/`  | Domain contracts and interface definitions                    |
 
 ## 📖 Documentation
 
-| Guide | Description |
-|-------|-------------|
-| [Viewer README](viewer/README.md) | Architecture, API reference, auth configuration |
-| [Dataset Curation Spec](specifications/dataset-curation.specification.md) | Filtering, splitting, merging, conversion, validation |
-| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md) | Kubernetes deployment architecture |
+| Guide                                                                       | Description                                           |
+|-----------------------------------------------------------------------------|-------------------------------------------------------|
+| [Viewer README](viewer/README.md)                                           | Architecture, API reference, auth configuration       |
+| [Dataset Curation Spec](specifications/dataset-curation.specification.md)   | Filtering, splitting, merging, conversion, validation |
+| [Viewer Deployment Spec](specifications/viewer-deployment.specification.md) | Kubernetes deployment architecture                    |
 
 ## 🗂️ Dataset Storage
 

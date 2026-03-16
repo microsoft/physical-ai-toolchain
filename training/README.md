@@ -31,20 +31,20 @@ training/
 
 ## 🏋️ Training Approaches
 
-| Approach | Directory | Framework | Status |
-|----------|-----------|-----------|--------|
-| Reinforcement Learning | `rl/` | SKRL (primary), RSL-RL (alternative) | Active |
-| Imitation Learning | `il/` | LeRobot (ACT, Diffusion policies) | Active |
-| Vision-Language-Action | `vla/` | Multi-modal transformer policies | Planned |
+| Approach               | Directory | Framework                            | Status  |
+|------------------------|-----------|--------------------------------------|---------|
+| Reinforcement Learning | `rl/`     | SKRL (primary), RSL-RL (alternative) | Active  |
+| Imitation Learning     | `il/`     | LeRobot (ACT, Diffusion policies)    | Active  |
+| Vision-Language-Action | `vla/`    | Multi-modal transformer policies     | Planned |
 
 ## 🚀 Submission
 
 Training jobs submit via AzureML or OSMO. Each approach has dedicated submission scripts and workflow definitions.
 
-| Approach | AzureML Script | OSMO Script |
-|----------|---------------|-------------|
-| RL | `rl/scripts/submit-azureml-training.sh` | `rl/scripts/submit-osmo-training.sh` |
-| IL | `il/scripts/submit-azureml-lerobot-training.sh` | `il/scripts/submit-osmo-lerobot-training.sh` |
+| Approach | AzureML Script                                  | OSMO Script                                  |
+|----------|-------------------------------------------------|----------------------------------------------|
+| RL       | `rl/scripts/submit-azureml-training.sh`         | `rl/scripts/submit-osmo-training.sh`         |
+| IL       | `il/scripts/submit-azureml-lerobot-training.sh` | `il/scripts/submit-osmo-lerobot-training.sh` |
 
 ## 📦 Packaging
 
@@ -52,12 +52,12 @@ Trained policies export to ONNX and TensorRT formats via `packaging/scripts/expo
 
 ## 📋 Specifications
 
-| Document | Description |
-|----------|-------------|
-| [RL Training](specifications/rl-training.specification.md) | SKRL, RSL-RL, Isaac Lab runtime configuration |
-| [IL Training](specifications/il-training.specification.md) | LeRobot ACT/Diffusion policies, dataset injection |
-| [VLA Training](specifications/vla-training.specification.md) | Multi-modal transformer training (planned) |
-| [Packaging](specifications/packaging.specification.md) | ONNX/TensorRT model export |
+| Document                                                     | Description                                       |
+|--------------------------------------------------------------|---------------------------------------------------|
+| [RL Training](specifications/rl-training.specification.md)   | SKRL, RSL-RL, Isaac Lab runtime configuration     |
+| [IL Training](specifications/il-training.specification.md)   | LeRobot ACT/Diffusion policies, dataset injection |
+| [VLA Training](specifications/vla-training.specification.md) | Multi-modal transformer training (planned)        |
+| [Packaging](specifications/packaging.specification.md)       | ONNX/TensorRT model export                        |
 
 > [!NOTE]
 > Evaluation capabilities are managed separately and will be extracted to a dedicated evaluation domain.

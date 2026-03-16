@@ -18,42 +18,42 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 ## Component Inventory
 
-| Component                 | Source    | Version Location                                               | Current Version | Update Method    |
-|---------------------------|-----------|----------------------------------------------------------------|-----------------|------------------|
+| Component                 | Source    | Version Location                                                   | Current Version | Update Method    |
+|---------------------------|-----------|--------------------------------------------------------------------|-----------------|------------------|
 | NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION`      | v25.3.4         | Manual           |
 | KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION`     | v0.5.5          | Manual           |
 | OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`        | 1.0.1           | Manual           |
 | OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`        | 6.0.0           | Manual           |
 | AzureML K8s Extension     | Azure CLI | `infrastructure/setup/defaults.conf` → `AZUREML_EXTENSION_VERSION` | 1.3.1           | Manual           |
-| Isaac Lab                 | Container | Hardcoded in 7+ files                                          | 2.3.2           | Manual grep      |
-| Azure Terraform Providers | Terraform | `versions.tf` across 8 directories                             | Floor-pinned    | Dependabot (2/4) |
-| Python Packages           | pip/uv    | `pyproject.toml`, `requirements.txt`                           | Mixed           | Dependabot       |
-| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                       | SHA-pinned      | Dependabot       |
+| Isaac Lab                 | Container | Hardcoded in 7+ files                                              | 2.3.2           | Manual grep      |
+| Azure Terraform Providers | Terraform | `versions.tf` across 8 directories                                 | Floor-pinned    | Dependabot (2/4) |
+| Python Packages           | pip/uv    | `pyproject.toml`, `requirements.txt`                               | Mixed           | Dependabot       |
+| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                           | SHA-pinned      | Dependabot       |
 
 > [!IMPORTANT]
 > Isaac Lab version `2.3.2` is hardcoded across workflow YAMLs, deploy scripts, and `pyproject.toml` files. No centralized variable exists. Use `grep -r "2.3.2" --include="*.yaml" --include="*.yml" --include="*.toml" --include="*.sh"` to locate all references before updating.
 
 ## Identifying Available Updates
 
-| Ecosystem        | Tool or Method                                                | Command or Location                         |
-|------------------|---------------------------------------------------------------|---------------------------------------------|
-| Python           | Dependabot PRs, `uv pip compile --upgrade`                    | `.github/dependabot.yml`, `pyproject.toml`  |
+| Ecosystem        | Tool or Method                                                | Command or Location                                   |
+|------------------|---------------------------------------------------------------|-------------------------------------------------------|
+| Python           | Dependabot PRs, `uv pip compile --upgrade`                    | `.github/dependabot.yml`, `pyproject.toml`            |
 | Terraform        | Dependabot PRs, `terraform init -upgrade`                     | `.github/dependabot.yml`, `infrastructure/terraform/` |
-| Helm Charts      | `helm repo update && helm search repo <chart> --versions`     | NVIDIA NGC Helm repositories                |
-| Container Images | NVIDIA NGC catalog, GitHub release pages                      | `nvcr.io/nvidia/` namespace                 |
-| GitHub Actions   | Dependabot PRs, `gh api repos/{owner}/{repo}/releases/latest` | `.github/dependabot.yml`                    |
+| Helm Charts      | `helm repo update && helm search repo <chart> --versions`     | NVIDIA NGC Helm repositories                          |
+| Container Images | NVIDIA NGC catalog, GitHub release pages                      | `nvcr.io/nvidia/` namespace                           |
+| GitHub Actions   | Dependabot PRs, `gh api repos/{owner}/{repo}/releases/latest` | `.github/dependabot.yml`                              |
 
 ## Automated Updates (Dependabot)
 
 Dependabot opens PRs weekly on Monday for covered ecosystems. Configuration lives in `.github/dependabot.yml`.
 
-| Ecosystem      | Directory             | Grouping                | Schedule       |
-|----------------|-----------------------|-------------------------|----------------|
-| pip            | `/`                   | `python-dependencies`   | Weekly, Monday |
-| pip            | `/training/`          | `training-dependencies` | Weekly, Monday |
+| Ecosystem      | Directory                       | Grouping                | Schedule       |
+|----------------|---------------------------------|-------------------------|----------------|
+| pip            | `/`                             | `python-dependencies`   | Weekly, Monday |
+| pip            | `/training/`                    | `training-dependencies` | Weekly, Monday |
 | terraform      | `/infrastructure/terraform`     | None                    | Weekly, Monday |
 | terraform      | `/infrastructure/terraform/dns` | None                    | Weekly, Monday |
-| github-actions | `/`                   | `github-actions`        | Weekly, Monday |
+| github-actions | `/`                             | `github-actions`        | Weekly, Monday |
 
 PR flow: Dependabot opens PR → CI runs (dependency-review, pinning-scan, CodeQL, linters) → maintainer reviews changelog and test results → merge.
 

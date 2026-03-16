@@ -12,8 +12,8 @@ VLA models accept visual observations and natural language task descriptions as 
 
 ## Planned Components
 
-| Component | Description |
-|-----------|-------------|
-| Multi-modal backbone | Vision-language encoder for joint perception and language understanding |
-| Action decoder | Transformer-based action generation conditioned on language goals |
-| Dataset pipeline | Multi-modal dataset preparation combining demonstrations with language annotations |
+| Component            | Description                                                                        |
+|----------------------|------------------------------------------------------------------------------------|
+| Multi-modal backbone | Vision-language encoder for joint perception and language understanding            |
+| Action decoder       | Transformer-based action generation conditioned on language goals                  |
+| Dataset pipeline     | Multi-modal dataset preparation combining demonstrations with language annotations |

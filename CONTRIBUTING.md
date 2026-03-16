@@ -325,11 +325,11 @@ coverage report -m
 
 Tests mirror the source directory structure under `tests/`:
 
-| Source Path                     | Test Path                     |
-|---------------------------------|-------------------------------|
-| `training/rl/utils/env.py`      | `training/tests/test_env.py`  |
-| `training/rl/utils/metrics.py`  | `training/tests/test_metrics.py` |
-| `training/rl/cli_args.py`       | `tests/unit/test_cli_args.py` |
+| Source Path                    | Test Path                        |
+|--------------------------------|----------------------------------|
+| `training/rl/utils/env.py`     | `training/tests/test_env.py`     |
+| `training/rl/utils/metrics.py` | `training/tests/test_metrics.py` |
+| `training/rl/cli_args.py`      | `tests/unit/test_cli_args.py`    |
 
 ### Test Categories
 

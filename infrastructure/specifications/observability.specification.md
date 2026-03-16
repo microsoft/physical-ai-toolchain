@@ -4,23 +4,23 @@ Monitoring, logging, and diagnostics for Azure infrastructure and Kubernetes wor
 
 ## Components
 
-| Component | Purpose |
-|-----------|---------|
-| Azure Monitor Workspace | Prometheus metrics collection and storage |
-| Azure Managed Grafana | Dashboard visualization for cluster and GPU metrics |
-| Log Analytics Workspace | Centralized log aggregation and KQL queries |
-| Azure Monitor Private Link Scope (AMPLS) | Private connectivity for monitoring data |
-| Data Collection Endpoints (DCE) | Ingestion endpoints for metrics and logs |
-| Data Collection Rules (DCR) | Routing rules for monitoring data streams |
+| Component                                | Purpose                                             |
+|------------------------------------------|-----------------------------------------------------|
+| Azure Monitor Workspace                  | Prometheus metrics collection and storage           |
+| Azure Managed Grafana                    | Dashboard visualization for cluster and GPU metrics |
+| Log Analytics Workspace                  | Centralized log aggregation and KQL queries         |
+| Azure Monitor Private Link Scope (AMPLS) | Private connectivity for monitoring data            |
+| Data Collection Endpoints (DCE)          | Ingestion endpoints for metrics and logs            |
+| Data Collection Rules (DCR)              | Routing rules for monitoring data streams           |
 
 ## Configuration
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `should_deploy_grafana` | Deploy Azure Managed Grafana | `true` |
-| `should_deploy_monitor_workspace` | Deploy Azure Monitor workspace | `true` |
-| `should_deploy_ampls` | Deploy Azure Monitor Private Link Scope | `true` |
-| `should_deploy_dce` | Deploy Data Collection Endpoints | `true` |
+| Parameter                         | Description                             | Default |
+|-----------------------------------|-----------------------------------------|---------|
+| `should_deploy_grafana`           | Deploy Azure Managed Grafana            | `true`  |
+| `should_deploy_monitor_workspace` | Deploy Azure Monitor workspace          | `true`  |
+| `should_deploy_ampls`             | Deploy Azure Monitor Private Link Scope | `true`  |
+| `should_deploy_dce`               | Deploy Data Collection Endpoints        | `true`  |
 
 All observability components deploy by default. Disable individually to reduce cost in development environments.
 
