@@ -33,12 +33,6 @@ import numpy as np
 import rclpy
 from builtin_interfaces.msg import Duration
 from cv_bridge import CvBridge
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Image, JointState
-from std_msgs.msg import String
-from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-
 from inference.policy_runner import PolicyRunner
 from inference.robot_types import (
     CONTROL_HZ,
@@ -50,6 +44,11 @@ from inference.robot_types import (
     RobotObservation,
     RobotState,
 )
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import Image, JointState
+from std_msgs.msg import String
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 
 class ACTInferenceNode(Node):

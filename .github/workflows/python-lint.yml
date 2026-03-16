@@ -35,7 +35,7 @@ jobs:
         id: ruff-check
         continue-on-error: true
         run: |
-          uvx ruff check src/ tests/ --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
+          uvx ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_CHECK_FAILED=true' >> $env:GITHUB_ENV
@@ -46,7 +46,7 @@ jobs:
         id: ruff-format
         continue-on-error: true
         run: |
-          uvx ruff format --check --diff src/ tests/ 2>&1 | Tee-Object -FilePath ruff-format-results.txt
+          uvx ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_FORMAT_FAILED=true' >> $env:GITHUB_ENV
@@ -66,5 +66,5 @@ jobs:
       - name: Fail job if errors found
         if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true') && !inputs.soft-fail
         run: |
-          Write-Output "::error::Ruff violations detected. Run 'uvx ruff check --fix src/ tests/' and 'uvx ruff format src/ tests/' locally."
+          Write-Output "::error::Ruff violations detected. Run 'uvx ruff check --fix .' and 'uvx ruff format .' locally."
           exit 1

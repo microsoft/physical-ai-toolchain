@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-_ENV_MODULE_PATH = Path(__file__).resolve().parents[2] / "src" / "training" / "utils" / "env.py"
+_ENV_MODULE_PATH = Path(__file__).resolve().parents[2] / "training" / "utils" / "env.py"
 _ENV_SPEC = importlib.util.spec_from_file_location("training_utils_env", _ENV_MODULE_PATH)
 if _ENV_SPEC is None or _ENV_SPEC.loader is None:
     raise RuntimeError(f"Unable to load env module from {_ENV_MODULE_PATH}")

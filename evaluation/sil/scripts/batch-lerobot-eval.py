@@ -24,7 +24,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-
 from inference.plotting import (
     plot_action_deltas,
     plot_aggregate_summary,

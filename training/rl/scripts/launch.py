@@ -152,7 +152,8 @@ def _run_training(
         from training.rl.scripts import skrl_training
     except ImportError as exc:
         raise SystemExit(
-            "training.rl.scripts.skrl_training module is unavailable. Ensure training payload includes SKRL training code."
+            "training.rl.scripts.skrl_training module is unavailable."
+            " Ensure training payload includes SKRL training code."
         ) from exc
 
     skrl_training.run_training(args=args, hydra_args=hydra_args, context=context)

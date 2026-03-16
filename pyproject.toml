@@ -29,12 +29,12 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "training/tests"]
-pythonpath = ["src", "."]
+pythonpath = ["."]
 addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    "--cov=src",
+    "--cov=training",
     "--cov-report=term-missing",
     "--cov-report=xml",
 ]
@@ -58,9 +58,12 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "fleet-deployment/inference/act_inference_node.py" = ["E402"]
+"evaluation/sil/play.py" = ["E402"]
 "evaluation/sil/play_policy.py" = ["E402"]
+"evaluation/sil/monitor_checkpoints.py" = ["E402"]
 "training/rl/scripts/rsl_rl/*.py" = ["E402"]
 "data-management/viewer/backend/tests/*.py" = ["E402"]
+"data-pipeline/capture/tests/test_config_models.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["training"]

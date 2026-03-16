@@ -9,8 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-METRICS_PATH = SRC / "training" / "utils" / "metrics.py"
+METRICS_PATH = ROOT / "training" / "utils" / "metrics.py"
 SPEC = importlib.util.spec_from_file_location("metrics_under_test", METRICS_PATH)
 assert SPEC is not None and SPEC.loader is not None
 metrics_module = importlib.util.module_from_spec(SPEC)
