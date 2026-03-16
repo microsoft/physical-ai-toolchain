@@ -5,7 +5,7 @@ import Home from '../src/pages/index';
 describe('Homepage', () => {
   it('renders the hero section', () => {
     render(<Home />);
-    expect(screen.getByText('Azure NVIDIA Robotics Reference Architecture')).toBeDefined();
+    expect(screen.getByText('Physical AI Toolchain')).toBeDefined();
   });
 
   it('renders the Explore the platform section', () => {
