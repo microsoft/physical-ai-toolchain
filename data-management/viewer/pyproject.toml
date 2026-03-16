@@ -67,3 +67,8 @@ known-first-party = ["datasetanalysistool"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["backend/tests"]
+
+[tool.uv]
+constraint-dependencies = [
+    "pyjwt>=2.12.0",
+]
