@@ -1,12 +1,4 @@
 import { Loader2, Pause, Play, Repeat, RotateCcw, SkipBack, SkipForward } from 'lucide-react'
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD:data-management/viewer/frontend/src/components/annotation-workspace/AnnotationWorkspacePlaybackCard.tsx
-=======
->>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))
-=======
-<<<<<<< HEAD:data-management/viewer/frontend/src/components/annotation-workspace/AnnotationWorkspacePlaybackCard.tsx
->>>>>>> 6a7b015 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180))
 import {
   type RefObject,
   type SyntheticEvent,
@@ -15,18 +7,6 @@ import {
   useMemo,
   useState,
 } from 'react'
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-import { type RefObject, type SyntheticEvent, useCallback, useEffect, useMemo, useState } from 'react'
->>>>>>> 70adef4 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180)):src/dataviewer/frontend/src/components/annotation-workspace/AnnotationWorkspacePlaybackCard.tsx
-=======
->>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))
-=======
-=======
-import { type RefObject, type SyntheticEvent, useCallback, useEffect, useMemo, useState } from 'react'
->>>>>>> 70adef4 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180)):src/dataviewer/frontend/src/components/annotation-workspace/AnnotationWorkspacePlaybackCard.tsx
->>>>>>> 6a7b015 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180))
 
 import { PlaybackControlStrip } from '@/components/playback/PlaybackControlStrip'
 import { SpeedControl } from '@/components/playback/SpeedControl'
@@ -120,14 +100,6 @@ export function AnnotationWorkspacePlaybackCard({
     return () => clearTimeout(timer)
   }, [videoSrc])
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD:data-management/viewer/frontend/src/components/annotation-workspace/AnnotationWorkspacePlaybackCard.tsx
-=======
->>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))
-=======
-<<<<<<< HEAD:data-management/viewer/frontend/src/components/annotation-workspace/AnnotationWorkspacePlaybackCard.tsx
->>>>>>> 6a7b015 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180))
   const handleVideoLoadedMetadata = useCallback(
     (event: SyntheticEvent<HTMLVideoElement>) => {
       setVideoLoaded(true)
@@ -136,22 +108,6 @@ export function AnnotationWorkspacePlaybackCard({
     },
     [onLoadedMetadata],
   )
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 6a7b015 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180))
-=======
-  const handleVideoLoadedMetadata = useCallback((event: SyntheticEvent<HTMLVideoElement>) => {
-    setVideoLoaded(true)
-    setShowVideoLoading(false)
-    onLoadedMetadata(event)
-  }, [onLoadedMetadata])
->>>>>>> 70adef4 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180)):src/dataviewer/frontend/src/components/annotation-workspace/AnnotationWorkspacePlaybackCard.tsx
-<<<<<<< HEAD
-=======
->>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))
-=======
->>>>>>> 6a7b015 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180))
 
   useEffect(() => {
     if (!videoSrc && frameImageUrl) {

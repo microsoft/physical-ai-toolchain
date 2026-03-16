@@ -52,14 +52,12 @@ azurestack
 azurevpnconfig
 containerapp
 cosmosdb
-Dependabot
 deviceregistry
 eastu
 eastus
 entra
 functionalization
 keyvault
-MLflow
 onedrive
 onenote
 powerbi
