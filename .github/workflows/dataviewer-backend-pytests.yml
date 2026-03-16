@@ -5,13 +5,13 @@ on:
     branches:
       - main
     paths:
-      - src/dataviewer/backend/**
+      - data-management/viewer/backend/**
       - .github/workflows/dataviewer-backend-pytests.yml
   push:
     branches:
       - main
     paths:
-      - src/dataviewer/backend/**
+      - data-management/viewer/backend/**
       - .github/workflows/dataviewer-backend-pytests.yml
   workflow_dispatch:
   workflow_call:
@@ -28,7 +28,7 @@ jobs:
         python-version: ['3.11']
     defaults:
       run:
-        working-directory: src/dataviewer/backend
+        working-directory: data-management/viewer/backend
     permissions:
       contents: read
       id-token: write
@@ -55,9 +55,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install dependencies
-        run: |
-          uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
-          uv pip install pytest-cov opencv-python-headless
+        run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Run pytest with coverage
         run: uv run pytest -v --cov=src --cov-report=xml --cov-report=term-missing
@@ -67,19 +65,8 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4.4.3
         with:
           name: pytest-dataviewer-coverage-xml
-          path: src/dataviewer/backend/coverage.xml
+          path: data-management/viewer/backend/coverage.xml
           retention-days: 30
-
-      - name: Upload coverage to Codecov
-        if: always()
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
-        with:
-          files: coverage.xml
-          use_oidc: true
-          fail_ci_if_error: false
-          verbose: true
-          flags: pytest-dataviewer
-          name: pytest-dataviewer-coverage
 
       - name: Upload coverage to Codecov
         if: always()
