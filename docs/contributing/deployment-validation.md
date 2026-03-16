@@ -1,4 +1,5 @@
 ---
+sidebar_position: 8
 title: Deployment Validation Guide
 description: Validation levels, testing templates, and cost optimization for contribution testing
 author: Microsoft Robotics-AI Team

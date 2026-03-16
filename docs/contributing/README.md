@@ -1,4 +1,5 @@
 ---
+sidebar_position: 1
 title: Contributing to Physical AI Toolchain
 description: Guide for contributing including prerequisites, deployment validation, and style conventions
 author: Microsoft Robotics-AI Team
@@ -81,8 +82,8 @@ Search existing resources before asking questions:
 
 * Search [GitHub Issues](https://github.com/microsoft/physical-ai-toolchain/issues) for similar questions or problems
 * Check [GitHub Discussions](https://github.com/microsoft/physical-ai-toolchain/discussions) for community Q&A
-* Review [docs/](../) for troubleshooting guides
-* See [azureml-validation-job-debugging.md](../azureml-validation-job-debugging.md) for common deployment and workflow issues
+* Review [docs/](https://github.com/microsoft/physical-ai-toolchain/tree/main/docs) for troubleshooting guides
+* See [azureml-validation-job-debugging.md](../operations/azureml-validation-job-debugging.md) for common deployment and workflow issues
 
 If you cannot find an answer:
 
@@ -116,7 +117,7 @@ Scopes: `terraform`, `k8s`, `azureml`, `osmo`, `scripts`, `docs`, `deploy`
 
 Use present tense, keep subject under 100 characters, capitalize subject line. Provide detailed body for non-trivial changes.
 
-For complete commit message guidance with examples, see [commit-message.instructions.md](../../.github/instructions/commit-message.instructions.md).
+For complete commit message guidance with examples, see [commit-message.instructions.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/.github/instructions/commit-message.instructions.md).
 
 ## 📝 Markdown Style
 
@@ -134,9 +135,9 @@ ms.topic: concept | how-to | reference | tutorial
 
 Use ATX-style headers, tables for structured data, GitHub alert syntax for callouts, and language-specified code blocks. Validate with `npm run lint:md`.
 
-For complete Markdown guidance, see [docs-style-and-conventions.instructions.md](../../.github/instructions/docs-style-and-conventions.instructions.md).
+For complete Markdown guidance, see [docs-style-and-conventions.instructions.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/.github/instructions/docs-style-and-conventions.instructions.md).
 
-## 🏗️ Infrastructure as Code Style
+## 🏗️ Infrastructure as Code Style {#infrastructure-as-code-style}
 
 Infrastructure code follows strict conventions for consistency, security, and maintainability.
 
@@ -248,7 +249,7 @@ Security-sensitive contributions require additional review to ensure Azure best 
 
 ### Reporting Security Issues
 
-**DO NOT** report vulnerabilities through public GitHub issues. Report to Microsoft Security Response Center (MSRC). See [SECURITY.md](../../SECURITY.md).
+**DO NOT** report vulnerabilities through public GitHub issues. Report to Microsoft Security Response Center (MSRC). See [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md).
 
 For the complete security checklist, dependency update process, and scanning requirements, see [Security Review Guide](security-review.md).
 

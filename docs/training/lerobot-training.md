@@ -1,4 +1,5 @@
 ---
+sidebar_position: 5
 title: LeRobot Training
 description: Behavioral cloning training with ACT and Diffusion policies on Azure ML and OSMO platforms
 author: Microsoft Robotics-AI Team
@@ -20,7 +21,7 @@ LeRobot behavioral cloning training for ACT and Diffusion policy architectures. 
 
 | Component         | Requirement                                                             |
 |-------------------|-------------------------------------------------------------------------|
-| Infrastructure    | AKS cluster deployed via [Infrastructure Guide](../../deploy/README.md) |
+| Infrastructure    | AKS cluster deployed via [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md) |
 | Azure ML or OSMO  | At least one platform configured (see Platform Selection section)       |
 | HuggingFace token | Required for private datasets (`hf_token` credential)                   |
 | WANDB API key     | Required when `--wandb-enable` is set (default on OSMO)                 |
@@ -209,8 +210,8 @@ The `run-lerobot-pipeline.sh` script orchestrates the full lifecycle on OSMO:
 
 - [LeRobot Inference](../inference/lerobot-inference.md) for evaluating trained policies
 - [Experiment Tracking](experiment-tracking.md) for MLflow and WANDB configuration
-- [AzureML Workflows](../../workflows/azureml/README.md) for job template reference
-- [OSMO Workflows](../../workflows/osmo/README.md) for workflow template reference
+- [AzureML Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/README.md) for job template reference
+- [OSMO Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/osmo/README.md) for workflow template reference
 - [Scripts Reference](../reference/scripts.md) for full CLI parameter tables
 
 <!-- markdownlint-disable MD036 -->

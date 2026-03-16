@@ -1,4 +1,6 @@
 ---
+sidebar_position: 1
+slug: /documentation
 title: Documentation
 description: Index of all documentation for the Physical AI Toolchain
 author: Edge AI Team
@@ -19,7 +21,7 @@ Documentation spans the full lifecycle — from provisioning Azure infrastructur
 
 | Role                   | Start here                                                                            |
 |------------------------|---------------------------------------------------------------------------------------|
-| First-time deployer    | Getting Started (coming soon), then [Deploy](../deploy/)                              |
+| First-time deployer    | Getting Started (coming soon), then [Deploy](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy)                              |
 | ML / Robotics engineer | Training (coming soon) and Inference (coming soon)                                    |
 | Platform operator      | [Operations](operations/README.md) and [Security Guide](operations/security-guide.md) |
 | Contributor            | [Contributing](contributing/README.md)                                                |
@@ -29,7 +31,7 @@ Documentation spans the full lifecycle — from provisioning Azure infrastructur
 | Section                                | Description                                                                         | Status      |
 |----------------------------------------|-------------------------------------------------------------------------------------|-------------|
 | Getting Started                        | Environment setup, prerequisites, and first deployment walkthrough                  | Coming soon |
-| [Deploy](../deploy/)                   | Infrastructure provisioning with Terraform, AKS cluster setup, and networking       | Available   |
+| [Deploy](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy)                   | Infrastructure provisioning with Terraform, AKS cluster setup, and networking       | Available   |
 | Training                               | Model training pipelines with Isaac Lab, AzureML jobs, and OSMO orchestration       | Coming soon |
 | Inference                              | Serving trained policies for real-time control on edge and cloud                    | Coming soon |
 | Workflows                              | AzureML and OSMO job templates, pipeline configuration, and submission scripts      | Coming soon |
@@ -44,14 +46,14 @@ Standalone guides available now. These cover common tasks and will move into the
 
 | Guide                                                                   | Description                                                                                                         |
 |-------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| [AzureML Validation Job Debugging](azureml-validation-job-debugging.md) | Diagnosing and resolving AzureML validation job failures on AKS, including pod scheduling and resource quota issues |
+| [AzureML Validation Job Debugging](operations/azureml-validation-job-debugging.md) | Diagnosing and resolving AzureML validation job failures on AKS, including pod scheduling and resource quota issues |
 | [LeRobot Inference](inference/lerobot-inference.md)                     | Running LeRobot inference workloads with pre-trained policies on Azure infrastructure                               |
 | [MLflow Integration](training/mlflow-integration.md)                    | Configuring MLflow experiment tracking for SKRL training agents with automatic metric logging to Azure ML           |
 | [Security Guide](operations/security-guide.md)                          | Security configuration inventory, deployment responsibilities, and hardening checklist for robotics workloads       |
 
 ## 🚀 Next Steps
 
-* Review the [deployment guide](../deploy/README.md) for infrastructure provisioning and cluster setup
+* Review the [deployment guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md) for infrastructure provisioning and cluster setup
 * Explore [MLflow Integration](training/mlflow-integration.md) to set up experiment tracking for training runs
 * Read the [Contributing](contributing/README.md) guide to get involved with the project
 

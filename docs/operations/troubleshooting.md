@@ -1,4 +1,5 @@
 ---
+sidebar_position: 4
 title: Troubleshooting Guide
 description: Symptom-based resolution guide for common errors in the robotics reference architecture
 author: Microsoft Robotics-AI Team
@@ -74,7 +75,7 @@ Find the symptom you are experiencing, then follow the resolution steps. Start w
 
 **Resolution:**
 
-Set `mig.strategy: single` in the GPU Operator Helm values for RTX PRO 6000 node pools. See [GPU Configuration](../gpu-configuration.md) for node-specific settings.
+Set `mig.strategy: single` in the GPU Operator Helm values for RTX PRO 6000 node pools. See [GPU Configuration](../reference/gpu-configuration.md) for node-specific settings.
 
 > [!WARNING]
 > RTX PRO 6000 nodes require `mig.strategy: single`. Using `none` causes all GPU workloads on these nodes to fail with `CUDA_ERROR_NO_DEVICE`.
@@ -273,8 +274,8 @@ Convert all template expressions to Jinja syntax. For variable substitution, use
 
 ## Additional Resources
 
-- [GPU Configuration](../gpu-configuration.md)
-- [AzureML Validation Job Debugging](../azureml-validation-job-debugging.md)
+- [GPU Configuration](../reference/gpu-configuration.md)
+- [AzureML Validation Job Debugging](./azureml-validation-job-debugging.md)
 - [Security Guide](security-guide.md)
 - [Deployment Validation](../contributing/deployment-validation.md)
 - [NVIDIA CUDA Compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/)

@@ -1,4 +1,5 @@
 ---
+sidebar_position: 3
 title: Threat Model — Physical AI Toolchain
 description: STRIDE-based threat model covering infrastructure-as-code components, trust boundaries, and remediation roadmap
 author: Microsoft Robotics-AI Team
@@ -418,7 +419,7 @@ Goal Structuring Notation (GSN) elements supporting the security posture claim.
 
 ## References
 
-* [SECURITY.md](../../SECURITY.md) — Microsoft security policy and deployer additions
+* [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md) — Microsoft security policy and deployer additions
 * [Security Guide](../operations/security-guide.md) — security configuration inventory and hardening checklist
 * [STRIDE Threat Modeling](https://learn.microsoft.com/azure/security/develop/threat-modeling-tool-threats) — Microsoft STRIDE reference
 * [OpenSSF Best Practices](https://www.bestpractices.dev/en/criteria) — badge criteria

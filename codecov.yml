@@ -1,12 +1,12 @@
 # codecov.yml — Codecov configuration for unified coverage reporting
-# Issue #424 — Part of unified coverage initiative (Issue #422)
 #
 # Flags:
 #   pester — PowerShell tests covering scripts/
 #   pytest — Python tests covering src/
 
 codecov:
-  require_ci_to_pass: false
+  notify:
+    wait_for_ci: true
 
 coverage:
   precision: 2

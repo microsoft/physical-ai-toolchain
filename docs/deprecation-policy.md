@@ -1,4 +1,5 @@
 ---
+sidebar_position: 99
 title: Deprecation Policy
 description: Policy for handling deprecated external interfaces including announcement, maintenance duration, migration guidance, and breaking-change communication
 author: Microsoft Robotics-AI Team
@@ -84,7 +85,8 @@ Use this template for deprecation notices in documentation:
 
 ## Breaking Change Communication
 
-Breaking changes follow the decision tier defined in [GOVERNANCE.md](../GOVERNANCE.md), which requires two maintainer approvals with explicit breaking-change acknowledgment and a documented migration path. The communication plan in [Pull Request Process](contributing/pull-request-process.md) specifies that breaking changes include a `[BREAKING]` prefix in the GitHub Release, migration guidance in release notes, updated deployment documentation, and an announcement in repository discussions.
+Breaking changes follow the decision tier defined in [GOVERNANCE.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/GOVERNANCE.md), which requires two maintainer approvals with explicit breaking-change acknowledgment and a documented migration path.
+The communication plan in [Pull Request Process](contributing/pull-request-process.md) specifies that breaking changes include a `[BREAKING]` prefix in the GitHub Release, migration guidance in release notes, updated deployment documentation, and an announcement in repository discussions.
 
 No external interface will be removed without a deprecation notice in a prior release.
 
@@ -127,7 +129,7 @@ No interfaces are currently deprecated. When deprecations occur, they are listed
 
 ## Related Documentation
 
-* [GOVERNANCE.md](../GOVERNANCE.md) — Decision tiers for breaking changes
+* [GOVERNANCE.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/GOVERNANCE.md) — Decision tiers for breaking changes
 * [Documentation Maintenance](contributing/documentation-maintenance.md) — Deprecation notice formatting rules
 * [Pull Request Process](contributing/pull-request-process.md) — Breaking change communication channels
 * [Contribution Workflow](contributing/contribution-workflow.md) — Enhancement submission requirements

@@ -1,4 +1,14 @@
-# AzureML Validation Job Debugging Summary
+---
+title: AzureML Validation Job Debugging
+sidebar_label: Validation Job Debugging
+sidebar_position: 2
+description: Troubleshooting guide for AzureML validation job failures and common issues.
+author: Microsoft Robotics-AI Team
+ms.date: 2026-03-12
+ms.topic: troubleshooting
+---
+
+## AzureML Validation Job Debugging Summary
 
 **Date**: December 3, 2025
 **Branch**: `feat/azureml-job-support`
@@ -211,7 +221,7 @@ az storage account update --name stosmorobotst001 --allow-shared-key-access true
 
 ### 1. Terraform Configuration Updates
 
-#### [deploy/001-iac/main.tf](../deploy/001-iac/main.tf)
+#### [deploy/001-iac/main.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/main.tf)
 
 Added missing fields to `azureml_config` to enable extension installation and workload identity federation:
 
@@ -231,7 +241,7 @@ azureml_config = {
 
 ### 2. AzureML Job YAML Schema Fixes
 
-#### [workflows/azureml/validate.yaml](../workflows/azureml/validate.yaml)
+#### [workflows/azureml/validate.yaml](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/validate.yaml)
 
 Fixed input schema to comply with AzureML command job requirements:
 

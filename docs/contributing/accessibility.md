@@ -1,4 +1,5 @@
 ---
+sidebar_position: 13
 title: Accessibility Best Practices
 description: Standards for accessible documentation and CLI output in this project
 author: Microsoft Robotics-AI Team

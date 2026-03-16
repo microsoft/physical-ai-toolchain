@@ -1,4 +1,5 @@
 ---
+sidebar_position: 6
 title: MLflow Integration for SKRL Training
 description: Metric logging integration for SKRL agent training during Isaac Lab runs using monkey-patching
 author: Microsoft Robotics-AI Team
@@ -282,7 +283,7 @@ Log messages like `"Failed to extract or log metrics at step X"` indicate transi
 
 * [Training Guide](README.md)
 * [Inference Guide](../inference/README.md)
-* [Workflow Templates](../../workflows/README.md)
+* [Workflow Templates](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/README.md)
 
 ---
 

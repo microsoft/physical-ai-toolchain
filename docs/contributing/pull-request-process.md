@@ -1,4 +1,5 @@
 ---
+sidebar_position: 5
 title: Pull Request Process
 description: PR workflow, reviewer assignment, review cycles, approval criteria, and update process
 author: Microsoft Robotics-AI Team
@@ -134,7 +135,7 @@ git merge upstream/main
 
 Pull requests that remain inactive accumulate merge conflicts and delay feedback loops. This section defines closure timelines for inactive PRs. Automation that enforces this policy is a separate effort that references these thresholds.
 
-For issue and discussion inactivity policy, see [Inactivity Closure Policy](../../GOVERNANCE.md#inactivity-closure-policy) in GOVERNANCE.md.
+For issue and discussion inactivity policy, see [Inactivity Closure Policy](https://github.com/microsoft/physical-ai-toolchain/blob/main/GOVERNANCE.md#inactivity-closure-policy) in GOVERNANCE.md.
 
 ### Active Pull Requests
 

@@ -1,4 +1,5 @@
 ---
+sidebar_position: 2
 title: LeRobot ACT Policy Inference
 description: Run a trained ACT policy locally, on OSMO with MLflow plots, or on a UR10E robot via ROS2
 author: Microsoft Robotics-AI Team
@@ -226,7 +227,7 @@ ros2 run lerobot_inference act_inference_node \
 
 - [MLflow Integration](../training/mlflow-integration.md) for experiment tracking during training
 - [LeRobot Training Guide](../training/lerobot-training.md) for training workflow configuration
-- [Workflows README](../../workflows/README.md) for training workflow definitions
+- [Workflows README](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/README.md) for training workflow definitions
 - [Scripts Reference](../reference/scripts.md) for submission script usage
 
 ---

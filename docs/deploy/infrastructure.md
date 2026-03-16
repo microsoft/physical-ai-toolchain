@@ -1,4 +1,5 @@
 ---
+sidebar_position: 3
 title: Infrastructure Deployment
 description: Terraform configuration and deployment for AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
@@ -149,7 +150,7 @@ osmo_config = {
 }
 ```
 
-See [variables.tf](../../deploy/001-iac/variables.tf) for all configuration options.
+See [variables.tf](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/001-iac/variables.tf) for all configuration options.
 
 ## 🔗 Related
 

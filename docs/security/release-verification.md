@@ -1,4 +1,5 @@
 ---
+sidebar_position: 2
 title: Release Verification
 description: Verify release artifact provenance and SBOM attestations for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
@@ -60,5 +61,5 @@ The SBOM follows the SPDX 2.3 specification and lists all package dependencies i
 
 - [Deployment Security Guide](../operations/security-guide.md): Security configuration inventory and deployment responsibilities
 - [Threat Model](threat-model.md): STRIDE-based threat analysis and remediation roadmap
-- [SECURITY.md](../../SECURITY.md): Vulnerability disclosure and reporting process
+- [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md): Vulnerability disclosure and reporting process
 - [GitHub attestation verification](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds): GitHub documentation on artifact attestations
