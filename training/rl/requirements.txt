@@ -514,11 +514,12 @@ pydocket==0.18.0
     # via fastmcp
 pygments==2.19.2
     # via rich
-pyjwt==2.11.0
+pyjwt==2.12.1
     # via
     #   azure-ai-ml
     #   mcp
     #   msal
+    #   robotics-training-rl (training/rl/pyproject.toml)
 pynvml==13.0.1
     # via robotics-training (training/rl/pyproject.toml)
 pyparsing==3.3.2
