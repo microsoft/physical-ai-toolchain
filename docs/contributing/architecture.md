@@ -41,7 +41,7 @@ The root `pyproject.toml` serves local development dependency management:
 |-------------------|-----------------------------------------------------------------|
 | Local development | Providing module availability for intellisense and verification |
 
-This setup is not intended for building publishable Python packages. The `pyproject.toml` build target only packages `src/training` into a wheel for in-container use.
+This setup is not intended for building publishable Python packages. The `pyproject.toml` build target only packages `training/rl` into a wheel for in-container use.
 
 ## Future and Ongoing Architecture
 
@@ -186,12 +186,12 @@ This project uses [GitHub Copilot](https://code.visualstudio.com/docs/copilot/ov
 
 The [hve-core-all](https://marketplace.visualstudio.com/items?itemName=ise-hve-essentials.hve-core-all) VS Code extension provides shared agentic tooling:
 
-| Artifact Type | Count | Examples |
-|---------------|-------|----------|
-| Agents | 33 | RPI workflow, backlog management, PR creation |
-| Instructions | 24 | Coding standards (Bash, C#, Python, Terraform, Bicep), commit messages, markdown |
-| Prompts | 27 | ADO work items, GitHub issues, security planning, PR descriptions |
-| Skills | 2 | PR reference generation, video-to-GIF conversion |
+| Artifact Type | Count | Examples                                                                         |
+|---------------|-------|----------------------------------------------------------------------------------|
+| Agents        | 33    | RPI workflow, backlog management, PR creation                                    |
+| Instructions  | 24    | Coding standards (Bash, C#, Python, Terraform, Bicep), commit messages, markdown |
+| Prompts       | 27    | ADO work items, GitHub issues, security planning, PR descriptions                |
+| Skills        | 2     | PR reference generation, video-to-GIF conversion                                 |
 
 HVE-Core artifacts are registered via the extension's `package.json` `contributes` section and loaded when the extension activates.
 
@@ -199,12 +199,12 @@ HVE-Core artifacts are registered via the extension's `package.json` `contribute
 
 This repository defines project-specific artifacts in `.github/` that extend HVE-Core with domain knowledge:
 
-| Artifact Type | Count | Purpose |
-|---------------|-------|----------|
-| Agents | 2 | OSMO training manager, dataviewer developer |
-| Instructions | 4 | Copilot instructions, dataviewer conventions, documentation style, shell scripts |
-| Prompts | 4 | OSMO training submission, LeRobot pipeline, dataviewer workflows |
-| Skills | 2 | Dataviewer interaction, OSMO LeRobot training |
+| Artifact Type | Count | Purpose                                                                          |
+|---------------|-------|----------------------------------------------------------------------------------|
+| Agents        | 2     | OSMO training manager, dataviewer developer                                      |
+| Instructions  | 4     | Copilot instructions, dataviewer conventions, documentation style, shell scripts |
+| Prompts       | 4     | OSMO training submission, LeRobot pipeline, dataviewer workflows                 |
+| Skills        | 2     | Dataviewer interaction, OSMO LeRobot training                                    |
 
 Project artifacts are auto-discovered by VS Code from the `.github/` directory without explicit registration.
 
@@ -217,12 +217,12 @@ Two workflow chains compose these artifacts:
 
 Each artifact type uses YAML frontmatter to declare behavior:
 
-| Artifact | File Pattern | Key Frontmatter | Loading |
-|----------|-------------|-----------------|----------|
-| Agents | `*.agent.md` | `mode`, `tools`, `description` | Auto-discovered from `.github/agents/` |
-| Instructions | `*.instructions.md` | `applyTo`, `description` | Auto-discovered from `.github/instructions/` |
-| Prompts | `*.prompt.md` | `mode`, `description`, `tools` | Auto-discovered from `.github/prompts/` |
-| Skills | `SKILL.md` | N/A (referenced by agents) | Referenced via `copilot-skill:` URI |
+| Artifact     | File Pattern        | Key Frontmatter                | Loading                                      |
+|--------------|---------------------|--------------------------------|----------------------------------------------|
+| Agents       | `*.agent.md`        | `mode`, `tools`, `description` | Auto-discovered from `.github/agents/`       |
+| Instructions | `*.instructions.md` | `applyTo`, `description`       | Auto-discovered from `.github/instructions/` |
+| Prompts      | `*.prompt.md`       | `mode`, `description`, `tools` | Auto-discovered from `.github/prompts/`      |
+| Skills       | `SKILL.md`          | N/A (referenced by agents)     | Referenced via `copilot-skill:` URI          |
 
 HVE-Core artifacts follow the same patterns but load through extension contribution points rather than workspace auto-discovery.
 

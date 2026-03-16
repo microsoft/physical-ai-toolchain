@@ -14,8 +14,8 @@ argument-hint: "[datasetPath=...] [backendPort=8000] [frontendPort=5173]"
 
 ## Requirements
 
-1. If datasetPath is provided, update `HMI_DATA_PATH` in `src/dataviewer/backend/.env` to the absolute path.
-2. Start the dataviewer app using `src/dataviewer/start.sh` with configured ports.
+1. If datasetPath is provided, update `HMI_DATA_PATH` in `data-management/viewer/backend/.env` to the absolute path.
+2. Start the dataviewer app using `data-management/viewer/start.sh` with configured ports.
 3. Wait for the backend health check to pass.
 4. Open `http://localhost:${frontendPort}` using `open_browser_page`. If Playwright MCP tools are available, take a snapshot instead.
 5. Report the loaded datasets and episode counts.

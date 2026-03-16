@@ -18,8 +18,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# shellcheck source=deploy/002-setup/lib/common.sh
-source "${SCRIPT_DIR}/deploy/002-setup/lib/common.sh"
+# shellcheck source=shared/lib/common.sh
+source "${SCRIPT_DIR}/shared/lib/common.sh"
 
 # Preamble: Recommend devcontainer for easier setup
 echo
@@ -110,11 +110,11 @@ if [[ "${DISABLE_VENV}" == "false" ]]; then
   echo
 fi
 echo "Next steps:"
-echo "  1. Run: source deploy/000-prerequisites/az-sub-init.sh"
-echo "  2. Configure: deploy/001-iac/terraform.tfvars"
-echo "  3. Deploy: cd deploy/001-iac && terraform init && terraform apply"
+echo "  1. Run: source infrastructure/terraform/prerequisites/az-sub-init.sh"
+echo "  2. Configure: infrastructure/terraform/terraform.tfvars"
+echo "  3. Deploy: cd infrastructure/terraform && terraform init && terraform apply"
 echo
 echo "Documentation:"
 echo "  - README.md           - Quick start guide"
-echo "  - deploy/README.md    - Deployment overview"
+echo "  - docs/infrastructure/README.md - Deployment overview"
 echo

@@ -5,7 +5,7 @@
       "label": "Dataviewer: Backend",
       "type": "npm",
       "script": "dev:backend",
-      "path": "src/dataviewer",
+      "path": "data-management/viewer",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": {
@@ -18,7 +18,7 @@
       "label": "Dataviewer: Frontend",
       "type": "npm",
       "script": "dev:frontend",
-      "path": "src/dataviewer",
+      "path": "data-management/viewer",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": {

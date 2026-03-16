@@ -1,0 +1,8 @@
+{
+    "label": "Synthetic Data",
+    "position": 10,
+    "link": {
+        "type": "generated-index",
+        "description": "NVIDIA Cosmos world foundation models for synthetic data generation."
+    }
+}

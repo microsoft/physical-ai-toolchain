@@ -9,6 +9,9 @@ requires-python = ">=3.11"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["training/rl"]
+
 [dependency-groups]
 dev = [
     "ruff",
@@ -25,13 +28,13 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
+testpaths = ["tests", "training/tests"]
+pythonpath = ["."]
 addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    "--cov=src",
+    "--cov=training",
     "--cov-report=term-missing",
     "--cov-report=xml",
 ]
@@ -54,23 +57,26 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"src/inference/scripts/act_inference_node.py" = ["E402"]
-"src/inference/scripts/play_policy.py" = ["E402"]
-"src/training/scripts/rsl_rl/*.py" = ["E402"]
-"src/dataviewer/backend/tests/*.py" = ["E402"]
+"fleet-deployment/inference/act_inference_node.py" = ["E402"]
+"evaluation/sil/play.py" = ["E402"]
+"evaluation/sil/play_policy.py" = ["E402"]
+"evaluation/sil/monitor_checkpoints.py" = ["E402"]
+"training/rl/scripts/rsl_rl/*.py" = ["E402"]
+"data-management/viewer/backend/tests/*.py" = ["E402"]
+"data-pipeline/capture/tests/test_config_models.py" = ["E402"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["training", "common", "inference"]
+known-first-party = ["training"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.coverage.run]
-source = ["src"]
+source = ["training"]
 branch = true
 omit = [
-    "src/**/conftest.py",
-    "src/**/__init__.py",
+    "training/**/conftest.py",
+    "training/**/__init__.py",
 ]
 
 [tool.coverage.report]

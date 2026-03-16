@@ -3,14 +3,13 @@ name: Validate Config Schema
 on:
   pull_request:
     paths:
-      - 'src/common/config_models.py'
-      - 'config/recording_config.schema.json'
-      - 'config/generate_config_schema.py'
+      - 'data-pipeline/capture/models/config_models.py'
+      - 'data-pipeline/capture/config/**'
   push:
     branches: [main]
     paths:
-      - 'src/common/config_models.py'
-      - 'config/recording_config.schema.json'
+      - 'data-pipeline/capture/models/config_models.py'
+      - 'data-pipeline/capture/config/**'
 
 permissions:
   contents: read
@@ -39,18 +38,18 @@ jobs:
         run: uv pip install --system "pydantic>=2.10.0,<3.0.0"
 
       - name: Regenerate schema
-        run: PYTHONPATH=. python config/generate_config_schema.py
+        run: python data-pipeline/capture/config/generate_config_schema.py
 
       - name: Check for schema drift
         run: |
-          if ! git diff --exit-code config/recording_config.schema.json; then
+          if ! git diff --exit-code data-pipeline/capture/config/recording_config.schema.json; then
             echo ""
             echo "❌ Error: Schema is out of sync with pydantic models"
             echo ""
             echo "The JSON Schema file does not match the current pydantic models."
             echo "If the models have changed intentionally, regenerate the schema by running the following command locally:"
             echo ""
-            echo "  uv pip install pydantic && PYTHONPATH=. python config/generate_config_schema.py"
+            echo "  uv pip install pydantic && python data-pipeline/capture/config/generate_config_schema.py"
             echo ""
             echo "Then commit the updated schema file."
             echo ""

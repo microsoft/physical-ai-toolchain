@@ -443,6 +443,7 @@ flexbox
 Flink
 fluentbit
 fluentd
+fluxcd
 flyout
 flyouts
 fontcolor
@@ -508,6 +509,7 @@ heredoc
 heredocs
 hexadecimal
 hids
+hil
 highlevel
 hipaa
 hive
@@ -647,6 +649,7 @@ kingsway
 kingswaysoft
 koalaman
 kpis
+kql
 kreps
 kube
 kubeconfig
@@ -1150,6 +1153,7 @@ scom
 scoped
 scrum
 scsp
+sdg
 sdk
 sdks
 sdlc
@@ -1176,6 +1180,7 @@ sigalrm
 signalr
 signingkey
 sigstore
+sil
 signup
 Silverlight
 Simbolic
@@ -1964,3 +1969,7 @@ rvfc
 srcs
 tobytes
 ultrafast
+
+kolmogorov
+mqtt
+smirnov

@@ -19,11 +19,11 @@ Closes #
 ## Component(s) Affected
 <!-- Mark all that apply -->
 
-- [ ] `deploy/000-prerequisites` - Azure subscription setup
-- [ ] `deploy/001-iac` - Terraform infrastructure
-- [ ] `deploy/002-setup` - OSMO control plane / Helm
-- [ ] `deploy/004-workflow` - Training workflows
-- [ ] `src/training` - Python training scripts
+- [ ] `infrastructure/terraform/prerequisites/` - Azure subscription setup
+- [ ] `infrastructure/terraform/` - Terraform infrastructure
+- [ ] `infrastructure/setup/` - OSMO control plane / Helm
+- [ ] `workflows/` - Training and evaluation workflows
+- [ ] `training/` - Training pipelines and scripts
 - [ ] `docs/` - Documentation
 
 ## Testing Performed

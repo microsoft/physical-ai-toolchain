@@ -45,7 +45,7 @@ Provide details about your issue:
 
 <!--
 Include any relevant information:
-- Related files or components (e.g., deploy/001-iac, src/training)
+- Related files or components (e.g., infrastructure/terraform/, training/)
 - Links to documentation you've consulted
 - Screenshots or diagrams if helpful
 -->

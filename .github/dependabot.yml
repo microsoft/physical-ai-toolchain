@@ -20,7 +20,7 @@ updates:
 
   # Python dependencies for training
   - package-ecosystem: "pip"
-    directory: "/src/training"
+    directory: "/training/rl"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -37,27 +37,9 @@ updates:
       prefix: "chore"
       include: "scope"
 
-  # Python dependencies for common
+  # Python dependencies for evaluation
   - package-ecosystem: "pip"
-    directory: "/src/common"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-    groups:
-      common-dependencies:
-        patterns:
-          - "*"
-    labels:
-      - "dependencies"
-      - "python"
-    commit-message:
-      prefix: "chore"
-      include: "scope"
-
-  # Python dependencies for inference
-  - package-ecosystem: "pip"
-    directory: "/src/inference"
+    directory: "/evaluation"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -75,7 +57,7 @@ updates:
 
   # Terraform modules
   - package-ecosystem: "terraform"
-    directory: "/deploy/001-iac"
+    directory: "/infrastructure/terraform"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -89,7 +71,35 @@ updates:
 
   # Terraform DNS module
   - package-ecosystem: "terraform"
-    directory: "/deploy/001-iac/dns"
+    directory: "/infrastructure/terraform/dns"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "terraform"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Terraform VPN module
+  - package-ecosystem: "terraform"
+    directory: "/infrastructure/terraform/vpn"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "terraform"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Terraform automation module
+  - package-ecosystem: "terraform"
+    directory: "/infrastructure/terraform/automation"
     schedule:
       interval: "weekly"
       day: "monday"
