@@ -42,11 +42,6 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Harden runner
-        uses: step-security/harden-runner@58077d3c7e43986b6b15fba718e8ea69e387dfcc  # v2
-        with:
-          egress-policy: audit
-
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
