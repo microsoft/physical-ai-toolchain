@@ -96,14 +96,20 @@ function DatasetSelector({
           >
             <CommandEmpty>No datasets match the current filter.</CommandEmpty>
             {groupKeys.map((groupKey) => (
+<<<<<<< HEAD
 <<<<<<< HEAD:data-management/viewer/frontend/src/components/app-shell/DataviewerShellHeader.tsx
+=======
+>>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))
               <CommandGroup
                 key={groupKey}
                 heading={groupKey ? groupKey.split('--').join('/') : undefined}
               >
+<<<<<<< HEAD
 =======
               <CommandGroup key={groupKey} heading={groupKey ? groupKey.split('--').join('/') : undefined}>
 >>>>>>> 70adef4 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180)):src/dataviewer/frontend/src/components/app-shell/DataviewerShellHeader.tsx
+=======
+>>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))
                 {groupedDatasets[groupKey].map((dataset) => {
                   const isSelected = dataset.id === datasetId
                   const displayId = dataset.group

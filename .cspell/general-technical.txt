@@ -1970,9 +1970,15 @@ srcs
 tobytes
 ultrafast
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))
 
 kolmogorov
 mqtt
 smirnov
+<<<<<<< HEAD
 =======
 >>>>>>> 70adef4 (feat(dataviewer): enhance HDF5 video handling and nested dataset support (#180))
+=======
+>>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))

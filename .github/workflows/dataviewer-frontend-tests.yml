@@ -45,7 +45,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
+<<<<<<< HEAD
           node-version-file: data-management/viewer/frontend/.nvmrc
+=======
+          node-version-file: src/dataviewer/frontend/.nvmrc
+>>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))
           cache: npm
           cache-dependency-path: data-management/viewer/frontend/package-lock.json
 
@@ -93,7 +97,29 @@ jobs:
         continue-on-error: true
 
       - name: Unit tests
-        run: npm run test
+        id: tests
+        continue-on-error: true
+        run: npm run test 2>&1 | tee test-results.txt
 
-      - name: Build
-        run: npm run build
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v4.4.3
+        with:
+          name: frontend-test-results
+          path: |
+            data-management/viewer/frontend/lint-results.txt
+            data-management/viewer/frontend/typecheck-results.txt
+            data-management/viewer/frontend/format-results.txt
+            data-management/viewer/frontend/test-results.txt
+          retention-days: 30
+
+      - name: Fail job if errors found
+        if: >-
+          (steps.lint.outcome == 'failure'
+          || steps.typecheck.outcome == 'failure'
+          || steps.format.outcome == 'failure'
+          || steps.tests.outcome == 'failure')
+          && !inputs.soft-fail
+        run: |
+          echo "::error::Frontend checks failed. Run 'npm run lint', 'npm run type-check', 'npm run format', and 'npm run test' locally to reproduce."
+          exit 1
