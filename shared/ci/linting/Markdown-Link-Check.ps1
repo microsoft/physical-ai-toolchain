@@ -156,8 +156,7 @@ function Invoke-MarkdownLinkCheckCore {
         [switch]$Quiet
     )
 
-    $scriptRootParent = Split-Path -Path $PSScriptRoot -Parent
-    $repoRootPath = Split-Path -Path $scriptRootParent -Parent
+    $repoRootPath = git rev-parse --show-toplevel 2>$null
     $repoRoot = Resolve-Path -LiteralPath $repoRootPath
     $config = Resolve-Path -LiteralPath $ConfigPath -ErrorAction Stop
     $filesToCheck = @(Get-MarkdownTarget -InputPath $Path)

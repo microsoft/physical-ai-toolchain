@@ -1,6 +1,6 @@
 {
-  "ScanPath": "/private/tmp/6368703d-faae-47aa-b28a-8fe648367915/test-workflows",
-  "Timestamp": "2026-03-14T16:27:35.989375-07:00",
+  "ScanPath": "/tmp/0a12b56c-8a6a-4ceb-afa3-7d01dd87cbaf/test-workflows",
+  "Timestamp": "2026-03-16T17:01:11.8488517+00:00",
   "TotalFiles": 0,
   "ScannedFiles": 1,
   "TotalDependencies": 1,
@@ -28,18 +28,18 @@
   "Summary": {
     "github-actions": {
       "High": 1,
-      "Medium": 0,
+      "Total": 1,
       "Low": 0,
-      "Total": 1
+      "Medium": 0
     }
   },
   "Metadata": {
     "ExcludedPaths": "",
-    "IncludedTypes": "github-actions,npm,pip,shell-downloads",
+    "ScanTimestamp": "2026-03-16T17:01:11.848Z",
     "RemediationEnabled": false,
-    "ComplianceThreshold": 95,
-    "PowerShellVersion": "7.5.4",
+    "IncludedTypes": "github-actions,npm,pip,shell-downloads",
     "Platform": "Unix",
-    "ScanTimestamp": "2026-03-14T16:27:35.989Z"
+    "ComplianceThreshold": 95,
+    "PowerShellVersion": "7.5.4"
   }
 }

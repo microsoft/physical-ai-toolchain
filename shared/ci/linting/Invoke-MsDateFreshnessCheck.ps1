@@ -85,24 +85,24 @@ function Get-MarkdownFiles {
         $files = @(Get-ChildItem -Path $path -Recurse -Include '*.md' -File -ErrorAction SilentlyContinue)
 
         $allFiles += @($files | Where-Object {
-            $file = $_
+                $file = $_
 
-            if ($isExplicitPath) {
-                return $true
-            }
-
-            $excluded = $false
-            foreach ($pattern in $excludePatterns) {
-                if ($file.FullName -like "*$([System.IO.Path]::DirectorySeparatorChar)$pattern$([System.IO.Path]::DirectorySeparatorChar)*" -or
-                    $file.FullName -like "*$([System.IO.Path]::DirectorySeparatorChar)$pattern" -or
-                    $file.Name -eq $pattern) {
-                    $excluded = $true
-                    break
+                if ($isExplicitPath) {
+                    return $true
                 }
-            }
 
-            -not $excluded
-        })
+                $excluded = $false
+                foreach ($pattern in $excludePatterns) {
+                    if ($file.FullName -like "*$([System.IO.Path]::DirectorySeparatorChar)$pattern$([System.IO.Path]::DirectorySeparatorChar)*" -or
+                        $file.FullName -like "*$([System.IO.Path]::DirectorySeparatorChar)$pattern" -or
+                        $file.Name -eq $pattern) {
+                        $excluded = $true
+                        break
+                    }
+                }
+
+                -not $excluded
+            })
     }
 
     Write-Verbose "Found $(@($allFiles).Count) markdown files"

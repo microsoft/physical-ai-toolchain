@@ -58,7 +58,7 @@ function Invoke-PSScriptAnalyzerCore {
     # Determine repository root
     $repoRoot = git rev-parse --show-toplevel 2>$null
     if (-not $repoRoot) {
-        $repoRoot = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+        $repoRoot = (Get-Item $PSScriptRoot).Parent.Parent.Parent.FullName
     }
 
     # Set default config path if not specified
@@ -80,7 +80,8 @@ function Invoke-PSScriptAnalyzerCore {
     if ($ChangedFilesOnly) {
         Write-Host "Analyzing changed files only (base: $BaseBranch)"
         $filesToAnalyze = @(Get-ChangedFilesFromGit -BaseBranch $BaseBranch -FileExtensions @('*.ps1', '*.psm1', '*.psd1'))
-    } else {
+    }
+    else {
         Write-Host 'Analyzing all PowerShell files in repository'
         $filesToAnalyze = @(Get-ChildItem -Path $repoRoot -Include '*.ps1', '*.psm1', '*.psd1' -Recurse -File |
             Where-Object { $_.FullName -notmatch '[\\/](\.git|node_modules|vendor)[\\/]' } |
@@ -105,7 +106,7 @@ function Invoke-PSScriptAnalyzerCore {
             }
 
             $analyzerParams = @{
-                Path = $file
+                Path    = $file
                 Recurse = $false
             }
 
@@ -145,18 +146,18 @@ function Invoke-PSScriptAnalyzerCore {
         }
 
         $exportData = @{
-            timestamp = (Get-Date).ToString('o')
-            totalFiles = @($filesToAnalyze).Count
-            errorCount = $errorCount
+            timestamp    = (Get-Date).ToString('o')
+            totalFiles   = @($filesToAnalyze).Count
+            errorCount   = $errorCount
             warningCount = $warningCount
-            results = $allResults | ForEach-Object {
+            results      = $allResults | ForEach-Object {
                 @{
-                    file = $_.ScriptPath
-                    line = $_.Line
-                    column = $_.Column
+                    file     = $_.ScriptPath
+                    line     = $_.Line
+                    column   = $_.Column
                     severity = $_.Severity.ToString()
-                    rule = $_.RuleName
-                    message = $_.Message
+                    rule     = $_.RuleName
+                    message  = $_.Message
                 }
             }
         }

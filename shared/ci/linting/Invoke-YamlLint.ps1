@@ -47,7 +47,7 @@ function Invoke-YamlLintCore {
     # Determine repository root
     $repoRoot = git rev-parse --show-toplevel 2>$null
     if (-not $repoRoot) {
-        $repoRoot = (Get-Item $PSScriptRoot).Parent.Parent.FullName
+        $repoRoot = (Get-Item $PSScriptRoot).Parent.Parent.Parent.FullName
     }
 
     # Set default output path
@@ -68,7 +68,8 @@ function Invoke-YamlLintCore {
         Write-Host "Linting changed workflow files only (base: $BaseBranch)"
         $allChanged = @(Get-ChangedFilesFromGit -BaseBranch $BaseBranch -FileExtensions @('*.yml', '*.yaml'))
         $filesToLint = @($allChanged | Where-Object { $_ -match '\.github[\\/]workflows[\\/]' })
-    } else {
+    }
+    else {
         Write-Host 'Linting all GitHub Actions workflow files'
         $workflowDir = Join-Path $repoRoot '.github/workflows'
         if (Test-Path $workflowDir) {
@@ -98,7 +99,8 @@ No workflow files to lint.
     $jsonOutput = $null
     try {
         $jsonOutput = & actionlint -format '{{json .}}' @filesToLint 2>&1
-    } catch {
+    }
+    catch {
         Write-Verbose "actionlint returned non-zero exit code: $_"
     }
 
@@ -110,7 +112,8 @@ No workflow files to lint.
             try {
                 $parsed = $jsonString | ConvertFrom-Json
                 $issues = @($parsed)
-            } catch {
+            }
+            catch {
                 Write-Warning "Failed to parse actionlint JSON output: $($_.Exception.Message)"
             }
         }
@@ -142,16 +145,16 @@ No workflow files to lint.
     }
 
     $exportData = @{
-        timestamp = (Get-Date).ToString('o')
-        totalFiles = @($filesToLint).Count
-        errorCount = $errorCount
+        timestamp    = (Get-Date).ToString('o')
+        totalFiles   = @($filesToLint).Count
+        errorCount   = $errorCount
         warningCount = $warningCount
-        issues = $issues | ForEach-Object {
+        issues       = $issues | ForEach-Object {
             @{
-                file = $_.filepath
-                line = $_.line
-                column = $_.column
-                kind = $_.kind
+                file    = $_.filepath
+                line    = $_.line
+                column  = $_.column
+                kind    = $_.kind
                 message = $_.message
             }
         }

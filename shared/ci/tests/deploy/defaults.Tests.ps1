@@ -82,7 +82,7 @@ Describe 'Default configuration values' -Tag 'Unit' {
     }
 
     It 'Sets DEFAULT_TF_DIR default' {
-        $Script:DEFAULT_TF_DIR | Should -Be '../001-iac'
+        $Script:DEFAULT_TF_DIR | Should -Be '../terraform'
     }
 
     It 'Sets AZUREML_EXTENSION_NAME default' {
