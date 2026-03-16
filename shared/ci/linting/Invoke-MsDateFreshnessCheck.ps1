@@ -69,7 +69,7 @@ function Get-MarkdownFiles {
         return @($files | Where-Object { Test-Path $_ -PathType Leaf })
     }
 
-    $excludePatterns = @('node_modules', '.git', 'logs', '.copilot-tracking', 'CHANGELOG.md')
+    $excludePatterns = @('node_modules', '.git', 'logs', '.copilot-tracking', 'CHANGELOG.md', 'shared/ci/tests')
     $allFiles = @()
 
     # Explicit paths bypass exclusion filtering (e.g., 'logs/specific.md')

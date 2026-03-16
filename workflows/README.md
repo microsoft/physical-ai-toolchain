@@ -2,7 +2,7 @@
 title: Workflows
 description: AzureML and OSMO workflow templates for robotics training and validation jobs
 author: Edge AI Team
-ms.date: 2025-12-14
+ms.date: 2026-03-16
 ms.topic: reference
 ---
 
