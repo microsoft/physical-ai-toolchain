@@ -50,11 +50,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
-<<<<<<< HEAD
           node-version-file: data-management/viewer/frontend/.nvmrc
-=======
-          node-version-file: src/dataviewer/frontend/.nvmrc
->>>>>>> 574be63 (feat(repo): migrate to domain-driven architecture (#270))
           cache: npm
           cache-dependency-path: data-management/viewer/frontend/package-lock.json
 
@@ -62,7 +58,6 @@ jobs:
         run: npm ci
 
       - name: ESLint
-        run: npm run lint
         run: npm run lint
 
       - name: Type check
