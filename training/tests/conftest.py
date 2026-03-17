@@ -9,7 +9,7 @@ _THIS_DIR = str(Path(__file__).parent)
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
 
-_SRC = Path(__file__).resolve().parents[2] / "src"
+_SRC = Path(__file__).resolve().parents[2]
 
 
 def load_training_module(name: str, relative_path: str) -> ModuleType:

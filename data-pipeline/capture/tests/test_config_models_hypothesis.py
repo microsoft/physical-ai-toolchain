@@ -3,10 +3,6 @@
 import tempfile
 
 import pytest
-from hypothesis import assume, given
-from hypothesis import strategies as st
-from pydantic import ValidationError
-
 from common.config_models import (
     DiskThresholds,
     GapDetectionConfig,
@@ -16,6 +12,9 @@ from common.config_models import (
     TopicConfig,
     VrTriggerConfig,
 )
+from hypothesis import assume, given
+from hypothesis import strategies as st
+from pydantic import ValidationError
 
 
 @given(

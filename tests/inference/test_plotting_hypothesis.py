@@ -7,7 +7,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
-from inference.plotting import (
+from evaluation.metrics.plotting import (
     plot_action_deltas,
     plot_aggregate_summary,
     plot_cumulative_positions,

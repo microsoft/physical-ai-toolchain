@@ -6,7 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import array_shapes, arrays
 
-from inference.robot_types import JointPositionCommand, RobotObservation
+from evaluation.sil.robot_types import JointPositionCommand, RobotObservation
 
 joint_array = arrays(
     dtype=np.float64,

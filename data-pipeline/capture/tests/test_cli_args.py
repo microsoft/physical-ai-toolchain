@@ -6,7 +6,6 @@ import argparse
 from types import SimpleNamespace
 
 import pytest
-
 from common.cli_args import add_rsl_rl_args, update_rsl_rl_cfg
 
 
