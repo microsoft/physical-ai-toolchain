@@ -4,6 +4,7 @@
 [![CI Status](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/main.yml/badge.svg)](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/main.yml)
 [![CodeQL](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/microsoft/physical-ai-toolchain/actions/workflows/codeql-analysis.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/microsoft/physical-ai-toolchain/badge)](https://scorecard.dev/viewer/?uri=github.com/microsoft/physical-ai-toolchain)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12195/badge)](https://www.bestpractices.dev/projects/12195)
 [![License](https://img.shields.io/github/license/microsoft/physical-ai-toolchain)](./LICENSE)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://microsoft.github.io/physical-ai-toolchain/)
 <!-- markdownlint-enable MD013 -->
