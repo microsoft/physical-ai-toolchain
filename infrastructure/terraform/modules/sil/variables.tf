@@ -59,24 +59,24 @@ variable "aks_subnet_config" {
 
 variable "aks_config" {
   type = object({
-    system_node_pool_vm_size             = string
-    system_node_pool_node_count          = number
-    system_node_pool_enable_auto_scaling = bool
-    system_node_pool_min_count           = optional(number)
-    system_node_pool_max_count           = optional(number)
-    is_private_cluster                   = bool
-    system_node_pool_zones               = optional(list(string))
-    should_enable_microsoft_defender     = optional(bool, false)
+    system_node_pool_vm_size                    = string
+    system_node_pool_node_count                 = number
+    should_enable_system_node_pool_auto_scaling = bool
+    system_node_pool_min_count                  = optional(number)
+    system_node_pool_max_count                  = optional(number)
+    is_private_cluster                          = bool
+    system_node_pool_zones                      = optional(list(string))
+    should_enable_microsoft_defender            = optional(bool, false)
   })
   description = "AKS cluster configuration for the system node pool"
   default = {
-    system_node_pool_vm_size             = "Standard_D8ds_v5"
-    system_node_pool_node_count          = 2
-    system_node_pool_enable_auto_scaling = false
-    system_node_pool_min_count           = null
-    system_node_pool_max_count           = null
-    is_private_cluster                   = true
-    system_node_pool_zones               = null
+    system_node_pool_vm_size                    = "Standard_D8ds_v5"
+    system_node_pool_node_count                 = 2
+    should_enable_system_node_pool_auto_scaling = false
+    system_node_pool_min_count                  = null
+    system_node_pool_max_count                  = null
+    is_private_cluster                          = true
+    system_node_pool_zones                      = null
   }
 }
 
