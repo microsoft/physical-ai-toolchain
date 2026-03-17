@@ -215,7 +215,7 @@ Regenerate the schema whenever you modify:
 
 ```bash
 # Run the schema generation script
-pip install pydantic && PYTHONPATH=. python config/generate_config_schema.py
+pip install 'pydantic==2.12.5' && PYTHONPATH=. python config/generate_config_schema.py
 
 # Verify the updated schema
 git diff config/recording_config.schema.json
@@ -236,5 +236,5 @@ The CI/CD pipeline validates that the schema is up-to-date with the pydantic mod
 
 ## 🔗 Related Documentation
 
-* [LeRobot Integration](../docs/lerobot-inference.md) - Dataset structure and feature mapping
-* [AzureML Validation Job Debugging](../docs/azureml-validation-job-debugging.md) - Training pipeline integration
+* [LeRobot Integration](../docs/inference/lerobot-inference.md) - Dataset structure and feature mapping
+* [AzureML Validation Job Debugging](../docs/operations/azureml-validation-job-debugging.md) - Training pipeline integration

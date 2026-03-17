@@ -146,6 +146,15 @@ jobs:
     permissions:
       contents: read
 
+  # Terraform linting using TFLint
+  terraform-lint:
+    name: Terraform Lint
+    uses: ./.github/workflows/terraform-lint.yml
+    with:
+      soft-fail: true
+    permissions:
+      contents: read
+
   # CodeQL security analysis
   codeql-analysis:
     name: CodeQL Analysis

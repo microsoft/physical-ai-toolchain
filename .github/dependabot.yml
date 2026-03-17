@@ -143,6 +143,44 @@ updates:
       prefix: "chore"
       include: "scope"
 
+  # Python dependencies for dataviewer backend
+  - package-ecosystem: "pip"
+    directory: "/src/dataviewer/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      dataviewer-backend-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "python"
+      - "dataviewer"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # npm dependencies for dataviewer frontend
+  - package-ecosystem: "npm"
+    directory: "/src/dataviewer/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      dataviewer-frontend-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "npm"
+      - "dataviewer"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
   # Python dependencies for LeRobot inference
   - package-ecosystem: "pip"
     directory: "/workflows/azureml"

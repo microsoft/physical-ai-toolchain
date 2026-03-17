@@ -439,6 +439,7 @@ filesystem
 Finalizer
 firewalls
 flatdict
+flatmap
 flexbox
 Flink
 fluentbit
@@ -945,6 +946,7 @@ playment
 playsinline
 Plotly
 pluggable
+pluginid
 pluralsight
 pmks
 pngs
@@ -1109,6 +1111,7 @@ rfcs
 rgba
 rhn
 risc
+riskcode
 rlhf
 rmem
 roadmap
@@ -1510,6 +1513,7 @@ yymmddhhmmss
 yymmddhhmss
 zabbix
 Zachman
+zaproxy
 Zeebe
 Zeek
 zerega
@@ -1958,18 +1962,24 @@ desync
 dvwh
 dvwm
 emanufacturing
+fastapi
 faststart
 fourcc
 midtone
 movflags
 nameidentifier
 persistable
+pydantic
+radix
 rawvideo
 rvfc
+shadcn
 srcs
+tanstack
 tobytes
 ultrafast
 
 kolmogorov
 mqtt
 smirnov
+zustand
