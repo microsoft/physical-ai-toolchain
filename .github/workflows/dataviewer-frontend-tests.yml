@@ -2,19 +2,13 @@ name: Dataviewer Frontend Tests
 
 on:
   workflow_call:
-    inputs:
-      soft-fail:
-        description: 'Whether to continue on test or lint failures'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 jobs:
   frontend-checks:
-    name: Lint, Type-check & Test
+    name: Lint, Type-check, Test and Build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -23,7 +17,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
 
@@ -38,44 +32,16 @@ jobs:
         run: npm ci
 
       - name: ESLint
-        id: lint
-        continue-on-error: true
-        run: npm run lint 2>&1 | tee lint-results.txt
+        run: npm run lint
 
       - name: Type check
-        id: typecheck
-        continue-on-error: true
-        run: npm run type-check 2>&1 | tee typecheck-results.txt
+        run: npm run type-check
 
       - name: Format check
-        id: format
-        continue-on-error: true
-        run: npm run format 2>&1 | tee format-results.txt
+        run: npm run format
 
       - name: Unit tests
-        id: tests
-        continue-on-error: true
-        run: npm run test 2>&1 | tee test-results.txt
+        run: npm run test
 
-      - name: Upload results
-        if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v4.4.3
-        with:
-          name: frontend-test-results
-          path: |
-            data-management/viewer/frontend/lint-results.txt
-            data-management/viewer/frontend/typecheck-results.txt
-            data-management/viewer/frontend/format-results.txt
-            data-management/viewer/frontend/test-results.txt
-          retention-days: 30
-
-      - name: Fail job if errors found
-        if: >-
-          (steps.lint.outcome == 'failure'
-          || steps.typecheck.outcome == 'failure'
-          || steps.format.outcome == 'failure'
-          || steps.tests.outcome == 'failure')
-          && !inputs.soft-fail
-        run: |
-          echo "::error::Frontend checks failed. Run 'npm run lint', 'npm run type-check', 'npm run format', and 'npm run test' locally to reproduce."
-          exit 1
+      - name: Build
+        run: npm run build
