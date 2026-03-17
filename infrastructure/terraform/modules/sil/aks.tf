@@ -22,7 +22,7 @@
 
 resource "azurerm_user_assigned_identity" "aks" {
   name                = "id-aks-${local.resource_name_suffix}"
-  location            = var.resource_group.location
+  location            = var.location
   resource_group_name = var.resource_group.name
 }
 
@@ -38,8 +38,8 @@ resource "azurerm_kubernetes_cluster" "main" {
   kubernetes_version                = null // Use latest stable version
   automatic_upgrade_channel         = "patch"
   sku_tier                          = "Standard"
-  private_cluster_enabled           = var.aks_config.is_private_cluster
-  private_dns_zone_id               = var.aks_config.is_private_cluster && local.pe_enabled ? var.private_dns_zones["aks"].id : null
+  private_cluster_enabled           = var.aks_config.should_enable_private_cluster
+  private_dns_zone_id               = var.aks_config.should_enable_private_cluster && local.pe_enabled ? var.private_dns_zones["aks"].id : null
   local_account_disabled            = true
   azure_policy_enabled              = true
   oidc_issuer_enabled               = true
@@ -129,9 +129,9 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu" {
   vm_size               = each.value.vm_size
   vnet_subnet_id        = azurerm_subnet.gpu_node_pool[each.key].id
   node_taints           = each.value.node_taints
-  auto_scaling_enabled  = each.value.enable_auto_scaling
-  min_count             = each.value.enable_auto_scaling ? each.value.min_count : null
-  max_count             = each.value.enable_auto_scaling ? each.value.max_count : null
+  auto_scaling_enabled  = each.value.should_enable_auto_scaling
+  min_count             = each.value.should_enable_auto_scaling ? each.value.min_count : null
+  max_count             = each.value.should_enable_auto_scaling ? each.value.max_count : null
   priority              = each.value.priority
   zones                 = each.value.zones
   eviction_policy       = each.value.priority == "Spot" ? each.value.eviction_policy : null
@@ -160,7 +160,7 @@ resource "azurerm_kubernetes_cluster_node_pool" "gpu" {
 resource "azurerm_private_endpoint" "aks" {
   // Use known boolean values for count to avoid plan-time dependency issues
   // pe_enabled ensures the PE subnet exists when this resource is created
-  count = var.aks_config.is_private_cluster && local.pe_enabled ? 1 : 0
+  count = var.aks_config.should_enable_private_cluster && local.pe_enabled ? 1 : 0
 
   name                = "pe-aks-${local.resource_name_suffix}"
   location            = var.resource_group.location

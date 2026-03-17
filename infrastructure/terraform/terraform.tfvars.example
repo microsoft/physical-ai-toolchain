@@ -39,9 +39,9 @@ node_pools = {
     node_labels = {
       "kubernetes.azure.com/scalesetpriority" = "spot"
     }
-    priority                = "Spot"
-    enable_auto_scaling     = true
-    min_count               = 1
+    priority                   = "Spot"
+    should_enable_auto_scaling = true
+    min_count                  = 1
     max_count               = 1
     zones                   = []
     eviction_policy         = "Delete"
@@ -59,9 +59,9 @@ node_pools = {
 //     node_labels = {
 //       "nvidia.com/gpu.deploy.driver" = "false"
 //     }
-//     priority            = "Regular"
-//     enable_auto_scaling = true
-//     min_count           = 1
+//     priority                   = "Regular"
+//     should_enable_auto_scaling = true
+//     min_count                  = 1
 //     max_count           = 1
 //     zones               = []
 //   }
@@ -77,9 +77,9 @@ node_pools = {
 //       "kubernetes.azure.com/scalesetpriority" = "spot"
 //     }
 //     priority            = "Spot"
-//     eviction_policy     = "Delete"
-//     enable_auto_scaling = true
-//     min_count           = 1
+//     eviction_policy            = "Delete"
+//     should_enable_auto_scaling = true
+//     min_count                  = 1
 //     max_count           = 1
 //     zones               = []
 //   }

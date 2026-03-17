@@ -1,7 +1,7 @@
 /**
  * # Core Variables
  *
- * Core variables shared across all modules: environment, resource_prefix, instance, resource_group.
+ * Core variables shared across all modules: environment, resource_prefix, location, instance.
  */
 
 /*
@@ -18,6 +18,11 @@ variable "instance" {
   type        = string
   description = "Instance identifier for naming resources: 001, 002, etc"
   default     = "001"
+}
+
+variable "location" {
+  type        = string
+  description = "Location for all resources in this module"
 }
 
 variable "resource_group" {

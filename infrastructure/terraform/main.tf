@@ -97,19 +97,19 @@ module "platform" {
   should_deploy_postgresql = var.should_deploy_postgresql
   should_deploy_redis      = var.should_deploy_redis
   postgresql_config = {
-    location                  = coalesce(var.postgresql_location, var.location)
-    sku_name                  = var.postgresql_sku_name
-    storage_mb                = var.postgresql_storage_mb
-    version                   = var.postgresql_version
-    databases                 = var.postgresql_databases
-    zone                      = var.postgresql_zone
-    high_availability_enabled = var.postgresql_high_availability.enabled
-    standby_availability_zone = var.postgresql_high_availability.standby_availability_zone
+    location                        = coalesce(var.postgresql_location, var.location)
+    sku_name                        = var.postgresql_sku_name
+    storage_mb                      = var.postgresql_storage_mb
+    version                         = var.postgresql_version
+    databases                       = var.postgresql_databases
+    zone                            = var.postgresql_zone
+    should_enable_high_availability = var.postgresql_high_availability.should_enable
+    standby_availability_zone       = var.postgresql_high_availability.standby_availability_zone
   }
   redis_config = {
-    sku_name                  = var.redis_sku_name
-    clustering_policy         = var.redis_clustering_policy
-    high_availability_enabled = var.should_enable_redis_high_availability
+    sku_name                        = var.redis_sku_name
+    clustering_policy               = var.redis_clustering_policy
+    should_enable_high_availability = var.should_enable_redis_high_availability
   }
 
   // OSMO workload identity
@@ -142,6 +142,7 @@ module "sil" {
   environment     = var.environment
   resource_prefix = var.resource_prefix
   instance        = var.instance
+  location        = var.location
   resource_group  = local.resource_group
 
   // Current user OID for cluster admin role assignments (from Microsoft Graph)
@@ -172,7 +173,7 @@ module "sil" {
     should_enable_system_node_pool_auto_scaling = var.should_enable_system_node_pool_auto_scaling
     system_node_pool_min_count                  = var.system_node_pool_min_count
     system_node_pool_max_count                  = var.system_node_pool_max_count
-    is_private_cluster                          = var.should_enable_private_aks_cluster
+    should_enable_private_cluster               = var.should_enable_private_aks_cluster
     system_node_pool_zones                      = var.system_node_pool_zones
     should_enable_microsoft_defender            = var.should_enable_microsoft_defender
   }
