@@ -311,12 +311,12 @@ pkill -f poll-and-eval-checkpoints
 | `codebase_version` warning | Dataset still marked v3.0 | Verify `patch_info_paths()` sets `codebase_version = "v2.1"` |
 | `CUDA_ERROR_NO_DEVICE` | MIG strategy misconfigured | Set `mig.strategy: single` for vGPU nodes |
 | VM eviction mid-training | Spot GPU preempted | Checkpoints already registered to AML survive eviction |
-| `ImportError: patch_info_paths` | Payload missing training fixes | Ensure `src/training/` includes `download_dataset.py` with `patch_info_paths` |
+| `ImportError: patch_info_paths` | Payload missing training fixes | Ensure `training/il/` includes `download_dataset.py` with `patch_info_paths` |
 | OOM during training | Batch size too large | Reduce `--batch-size` (32 for 24GB, 64 for 48GB) |
 | Poller exits immediately | Training workflow already terminal | Check `osmo workflow query <id>`; rerun poller or submit inference manually |
 | Poller stalls at max-concurrent | Inference jobs not finishing | Check inference workflow status; increase `--max-concurrent` or cancel stuck jobs |
 | Many pending inference jobs after stopping poller | Poller submitted jobs faster than cluster could drain | `osmo workflow list` only returns the last 12 — iterate over expected ID range to cancel all: `for id in $(seq <first> <last>); do osmo workflow cancel lerobot-inference-$id; done` |
-| `info: command not found` in poller | `common.sh` not sourced | Verify `deploy/002-setup/lib/common.sh` exists and is readable |
+| `info: command not found` in poller | `common.sh` not sourced | Verify `shared/lib/common.sh` exists and is readable |
 
 See [references/REFERENCE.md](references/REFERENCE.md) for detailed debugging commands.
 

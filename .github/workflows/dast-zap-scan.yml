@@ -1,0 +1,105 @@
+name: DAST ZAP Baseline Scan
+
+on:
+  schedule:
+    # Weekly scan: Sundays at 05:00 UTC (after Scorecard 03:00, Gitleaks 04:00)
+    - cron: "0 5 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: ZAP Baseline Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      issues: write
+    concurrency:
+      group: dast-zap-scan
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Build and start dataviewer
+        shell: bash
+        working-directory: src/dataviewer
+        env:
+          HMI_LOCAL_DATA_PATH: ./data/test-dataset
+        run: docker compose up -d --build --wait
+
+      - name: Verify containers are healthy
+        run: |
+          $response = Invoke-WebRequest -Uri "http://localhost:8000/health" -UseBasicParsing
+          if ($response.StatusCode -ne 200) { throw "Backend health check failed" }
+          $response = Invoke-WebRequest -Uri "http://localhost:5173/" -UseBasicParsing
+          if ($response.StatusCode -ne 200) { throw "Frontend health check failed" }
+
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
+        with:
+          target: "http://localhost:5173/"
+          rules_file_name: ".zap/rules.tsv"
+          allow_issue_writing: true
+          issue_title: "DAST ZAP Baseline Scan Report"
+          fail_action: ""
+          artifact_name: "zap-baseline-report"
+
+      - name: Convert ZAP report to SARIF
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          python3 scripts/security/zap-to-sarif.py report_json.json results/zap-results.sarif
+
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@b1bff81932f5cdfc8695c7752dcee935dcd061c8 # v4.33.0
+        continue-on-error: true
+        with:
+          sarif_file: results/zap-results.sarif
+          category: dast-zap-baseline
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: dast-zap-results
+          path: |
+            report_json.json
+            report_md.md
+            report_html.html
+            results/zap-results.sarif
+          retention-days: 90
+
+      - name: Stop dataviewer containers
+        if: always()
+        shell: bash
+        working-directory: src/dataviewer
+        run: docker compose down
+
+      - name: Add job summary
+        if: always()
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## DAST ZAP Baseline Scan Results
+
+          | Metric | Value |
+          |--------|-------|
+          | Target | \`http://localhost:5173/\` |
+          | Status | Completed |
+          | Security Tab | [View alerts](/${{ github.repository }}/security/code-scanning?query=tool%3Azap) |
+          | Artifacts | [View run artifacts](/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+          EOF

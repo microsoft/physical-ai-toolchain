@@ -182,9 +182,9 @@ This reference architecture validates through deployment rather than automated t
 Static validation is required for all PRs:
 
 ```bash
-terraform fmt -check -recursive deploy/
-terraform validate deploy/001-iac/
-shellcheck deploy/**/*.sh scripts/**/*.sh
+terraform fmt -check -recursive infrastructure/terraform/
+terraform validate infrastructure/terraform/
+shellcheck infrastructure/**/*.sh scripts/**/*.sh
 npm run lint:md
 ```
 
@@ -267,7 +267,7 @@ Documentation standards:
 CLI output standards:
 
 * Support the [NO_COLOR](https://no-color.org) standard in shell scripts
-* Shared color functions in `deploy/002-setup/lib/common.sh` check `NO_COLOR` before emitting ANSI escape sequences
+* Shared color functions in `shared/lib/common.sh` check `NO_COLOR` before emitting ANSI escape sequences
 
 See [Accessibility](accessibility.md) for full guidelines.
 

@@ -1,0 +1,9 @@
+# Cosmos Predict — OSMO Workflow
+# Generates plausible future frames from current observations using Cosmos Predict 2.5.
+#
+# Status: Planned — awaiting Cosmos container integration
+#
+# Container: TBD (NVIDIA Cosmos Predict from nvcr.io)
+# GPU: Required (minimum 1x A100/H100)
+# Input: Observation sequences (dataset injection)
+# Output: Predicted future frames for training augmentation

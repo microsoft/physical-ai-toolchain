@@ -18,10 +18,10 @@ Infrastructure code follows strict conventions for consistency, security, and ma
 
 ```bash
 # Format all Terraform files before committing
-terraform fmt -recursive deploy/
+terraform fmt -recursive infrastructure/terraform/
 
 # Validate syntax
-terraform validate deploy/001-iac/
+terraform validate infrastructure/terraform/
 ```
 
 ### Variable Naming
@@ -140,7 +140,7 @@ Include header documentation:
 shellcheck deploy/**/*.sh scripts/**/*.sh
 
 # Check specific script
-shellcheck -x deploy/002-setup/01-deploy-robotics-charts.sh
+shellcheck -x infrastructure/setup/01-deploy-robotics-charts.sh
 ```
 
 ### Configuration Management

@@ -1,0 +1,53 @@
+// =============================================================================
+// Hybrid Network Mode
+// =============================================================================
+// Private endpoints for data services but public AKS API server.
+// kubectl works without VPN while storage and databases remain private.
+// Recommended for development teams that need private data with easy access.
+// =============================================================================
+
+// Core Configuration
+environment     = "dev"
+location        = "westus3"
+resource_prefix = "roboticshyb"
+instance        = "001"
+
+// Resource Group
+should_create_resource_group = true
+
+// AKS System Node Pool
+system_node_pool_vm_size    = "Standard_D8ds_v5"
+system_node_pool_node_count = 1
+
+// Single GPU pool
+node_pools = {
+  gpu = {
+    vm_size                 = "Standard_NV36ads_A10_v5"
+    subnet_address_prefixes = ["10.0.7.0/24"]
+    node_taints             = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
+    gpu_driver              = "Install"
+    node_labels = {
+      "kubernetes.azure.com/scalesetpriority" = "spot"
+    }
+    priority            = "Spot"
+    eviction_policy     = "Delete"
+    enable_auto_scaling = true
+    min_count           = 1
+    max_count           = 2
+    zones               = []
+  }
+}
+
+// OSMO Backend Services
+should_deploy_postgresql = true
+should_deploy_redis      = true
+
+// Network Security — Hybrid mode
+// Private endpoints protect storage, Key Vault, PostgreSQL, and Redis.
+// AKS API server remains public for kubectl access without VPN.
+should_enable_private_endpoint    = true
+should_enable_private_aks_cluster = false
+
+should_enable_public_network_access     = true
+should_add_current_user_key_vault_admin = true
+should_enable_microsoft_defender        = true
