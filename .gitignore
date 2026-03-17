@@ -457,6 +457,7 @@ terraform.rc
 
 .venv/
 venv/
+.hypothesis/
 **/out/*
 .copilot-tracking/*
 
