@@ -18,7 +18,7 @@ resource "azurerm_managed_redis" "main" {
   resource_group_name = var.resource_group.name
   sku_name            = var.redis_config.sku_name
 
-  high_availability_enabled = var.redis_config.high_availability_enabled
+  high_availability_enabled = var.redis_config.should_enable_high_availability
 
   default_database {
     clustering_policy                  = var.redis_config.clustering_policy

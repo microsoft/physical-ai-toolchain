@@ -15,7 +15,7 @@ locals {
 
   // Determine authentication types based on configuration
   has_certificate_auth = var.root_certificate_public_data != null
-  has_aad_auth         = var.aad_auth_config.enabled
+  has_aad_auth         = var.aad_auth_config.should_enable
 
   // Build vpn_auth_types list based on enabled authentication methods
   vpn_auth_types = compact([

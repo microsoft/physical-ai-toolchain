@@ -39,7 +39,7 @@ resource "azurerm_role_assignment" "aks_rbac_cluster_admin" {
 // Grant AKS identity Private DNS Zone Contributor role for custom DNS zone management
 // This must be created BEFORE the AKS cluster so the identity can manage DNS records
 resource "azurerm_role_assignment" "aks_dns_zone_contributor" {
-  count = var.aks_config.is_private_cluster && local.pe_enabled ? 1 : 0
+  count = var.aks_config.should_enable_private_cluster && local.pe_enabled ? 1 : 0
 
   scope                            = var.private_dns_zones["aks"].id
   role_definition_name             = "Private DNS Zone Contributor"
