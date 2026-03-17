@@ -40,6 +40,17 @@ Microsoft follows the principle of [Coordinated Vulnerability Disclosure](https:
 
 <!-- END MICROSOFT SECURITY.MD BLOCK -->
 
+## Vulnerability Remediation
+
+The project maintainers commit to remediating confirmed vulnerabilities based on severity:
+
+| Severity          | Remediation Target |
+|-------------------|--------------------|
+| Critical and High | 60 days            |
+| Medium            | 90 days            |
+
+Remediation timelines begin when the vulnerability is confirmed and may involve a code fix, configuration change, dependency update, or documented mitigation. Tracking is done through GitHub Security Advisories or GitHub issues. If a fix requires more time, the maintainers will publish a mitigation or workaround within the target window and document the extended timeline.
+
 ## Security Considerations for Deployers
 
 > [!IMPORTANT]
