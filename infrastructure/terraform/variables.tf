@@ -161,7 +161,7 @@ variable "redis_clustering_policy" {
   }
 }
 
-variable "redis_high_availability_enabled" {
+variable "should_enable_redis_high_availability" {
   type        = bool
   description = "Enable high availability for Redis. Increases cost but provides zone redundancy"
   default     = false
@@ -257,7 +257,7 @@ variable "system_node_pool_node_count" {
   default     = 1
 }
 
-variable "system_node_pool_enable_auto_scaling" {
+variable "should_enable_system_node_pool_auto_scaling" {
   type        = bool
   description = "Enable auto-scaling for the AKS system node pool"
   default     = false
