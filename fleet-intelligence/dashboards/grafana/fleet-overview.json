@@ -1,0 +1,14 @@
+{
+    "title": "Fleet Overview",
+    "description": "Fleet-wide operational dashboard showing robot health, policy execution metrics, and drift indicators.",
+    "status": "Planned — awaiting Grafana integration",
+    "panels": [],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "refresh": "30s"
+}

@@ -1,0 +1,9 @@
+# Cosmos Transfer — OSMO Workflow
+# Converts simulation-rendered frames to photorealistic images using Cosmos Transfer 2.5.
+#
+# Status: Planned — awaiting Cosmos container integration
+#
+# Container: TBD (NVIDIA Cosmos Transfer from nvcr.io)
+# GPU: Required (minimum 1x A100/H100)
+# Input: Isaac Sim rendered frames (dataset injection)
+# Output: Photorealistic frames for downstream training

@@ -149,15 +149,15 @@ Run these commands before committing:
 
 ```bash
 # Format check (required)
-terraform fmt -check -recursive deploy/
+terraform fmt -check -recursive infrastructure/terraform/
 
 # Initialize and validate (required for infrastructure changes)
-cd deploy/001-iac/
+cd infrastructure/terraform/
 terraform init
 terraform validate
 
 # Lint Terraform configurations (required for infrastructure changes)
-tflint --recursive deploy/001-iac/
+tflint --recursive infrastructure/terraform/
 ```
 
 **Shell Scripts:**

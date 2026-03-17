@@ -1,0 +1,249 @@
+{
+  "$defs": {
+    "DiskThresholds": {
+      "description": "Disk usage alert thresholds.\n\nAttributes:\n    warning_percent: Warning threshold percentage (0-100).\n    critical_percent: Critical threshold percentage (0-100).",
+      "properties": {
+        "warning_percent": {
+          "default": 80,
+          "description": "Warning threshold percentage",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Warning Percent",
+          "type": "integer"
+        },
+        "critical_percent": {
+          "default": 95,
+          "description": "Critical threshold percentage",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Critical Percent",
+          "type": "integer"
+        }
+      },
+      "title": "DiskThresholds",
+      "type": "object"
+    },
+    "GapDetectionConfig": {
+      "description": "Message gap detection configuration.\n\nAttributes:\n    threshold_ms: Gap detection threshold in milliseconds.\n    severity: Severity level for gap detection events.",
+      "properties": {
+        "threshold_ms": {
+          "default": 100.0,
+          "description": "Gap detection threshold in milliseconds",
+          "exclusiveMinimum": 0,
+          "title": "Threshold Ms",
+          "type": "number"
+        },
+        "severity": {
+          "default": "warning",
+          "description": "Severity level for gap detection events",
+          "enum": [
+            "warning",
+            "error",
+            "critical"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "title": "GapDetectionConfig",
+      "type": "object"
+    },
+    "GpioTriggerConfig": {
+      "description": "GPIO pin trigger configuration.\n\nAttributes:\n    type: Discriminator field, always \"gpio\".\n    pin: GPIO pin number using BCM numbering, constrained to [0, 27].\n    active_high: True if trigger on HIGH signal, False if LOW.",
+      "properties": {
+        "type": {
+          "const": "gpio",
+          "default": "gpio",
+          "title": "Type",
+          "type": "string"
+        },
+        "pin": {
+          "description": "GPIO pin number (BCM numbering)",
+          "maximum": 27,
+          "minimum": 0,
+          "title": "Pin",
+          "type": "integer"
+        },
+        "active_high": {
+          "default": true,
+          "description": "True if trigger on HIGH, False if LOW",
+          "title": "Active High",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "pin"
+      ],
+      "title": "GpioTriggerConfig",
+      "type": "object"
+    },
+    "PositionTriggerConfig": {
+      "description": "Position-based trigger configuration.\n\nAttributes:\n    type: Discriminator field, always \"position\".\n    joint_indices: Joint indices to monitor for position-based triggering.\n    tolerances: Position tolerance per joint (radians or meters).",
+      "properties": {
+        "type": {
+          "const": "position",
+          "default": "position",
+          "title": "Type",
+          "type": "string"
+        },
+        "joint_indices": {
+          "description": "Joint indices to monitor",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Joint Indices",
+          "type": "array"
+        },
+        "tolerances": {
+          "description": "Position tolerance per joint (radians or meters)",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 1,
+          "title": "Tolerances",
+          "type": "array"
+        }
+      },
+      "required": [
+        "joint_indices",
+        "tolerances"
+      ],
+      "title": "PositionTriggerConfig",
+      "type": "object"
+    },
+    "TopicConfig": {
+      "description": "ROS 2 topic recording configuration.\n\nAttributes:\n    name: ROS 2 topic name (must start with /).\n    frequency_hz: Target recording frequency in Hz, constrained to (0, 1000] range.\n    compression: Compression algorithm to apply to recorded data.",
+      "properties": {
+        "name": {
+          "description": "ROS 2 topic name (must start with /)",
+          "examples": [
+            "/joint_states",
+            "/camera/image_raw"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "frequency_hz": {
+          "description": "Target recording frequency in Hz",
+          "exclusiveMinimum": 0,
+          "maximum": 1000,
+          "title": "Frequency Hz",
+          "type": "number"
+        },
+        "compression": {
+          "default": "none",
+          "description": "Compression algorithm",
+          "enum": [
+            "none",
+            "lz4",
+            "zstd"
+          ],
+          "title": "Compression",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "frequency_hz"
+      ],
+      "title": "TopicConfig",
+      "type": "object"
+    },
+    "VrTriggerConfig": {
+      "description": "VR controller trigger configuration.\n\nAttributes:\n    type: Discriminator field, always \"vr\".\n    controller: VR controller side (left or right).\n    button: Button name to monitor for trigger events.",
+      "properties": {
+        "type": {
+          "const": "vr",
+          "default": "vr",
+          "title": "Type",
+          "type": "string"
+        },
+        "controller": {
+          "description": "VR controller side",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "title": "Controller",
+          "type": "string"
+        },
+        "button": {
+          "description": "Button name to monitor",
+          "enum": [
+            "trigger",
+            "grip",
+            "primary",
+            "secondary"
+          ],
+          "title": "Button",
+          "type": "string"
+        }
+      },
+      "required": [
+        "controller",
+        "button"
+      ],
+      "title": "VrTriggerConfig",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Root configuration for ROS 2 edge recording system.\n\nAttributes:\n    topics: List of ROS 2 topics to record.\n    trigger: Episode trigger configuration.\n    disk_thresholds: Disk usage alert configuration.\n    gap_detection: Data gap detection parameters.\n    output_dir: Root directory for recorded episodes.",
+  "properties": {
+    "topics": {
+      "description": "List of ROS 2 topics to record",
+      "items": {
+        "$ref": "#/$defs/TopicConfig"
+      },
+      "title": "Topics",
+      "type": "array"
+    },
+    "trigger": {
+      "description": "Episode trigger configuration",
+      "discriminator": {
+        "mapping": {
+          "gpio": "#/$defs/GpioTriggerConfig",
+          "position": "#/$defs/PositionTriggerConfig",
+          "vr": "#/$defs/VrTriggerConfig"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/GpioTriggerConfig"
+        },
+        {
+          "$ref": "#/$defs/PositionTriggerConfig"
+        },
+        {
+          "$ref": "#/$defs/VrTriggerConfig"
+        }
+      ],
+      "title": "Trigger"
+    },
+    "disk_thresholds": {
+      "$ref": "#/$defs/DiskThresholds",
+      "description": "Disk usage alert configuration"
+    },
+    "gap_detection": {
+      "$ref": "#/$defs/GapDetectionConfig",
+      "description": "Data gap detection parameters"
+    },
+    "output_dir": {
+      "default": "/data/recordings",
+      "description": "Root directory for recorded episodes",
+      "format": "path",
+      "title": "Output Dir",
+      "type": "string"
+    }
+  },
+  "required": [
+    "topics",
+    "trigger"
+  ],
+  "title": "RecordingConfig",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/microsoft/physical-ai-toolchain/main/data-pipeline/capture/config/recording_config.schema.json"
+}

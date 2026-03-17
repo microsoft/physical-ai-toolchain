@@ -96,24 +96,24 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | High                                                                                    |
 | Risk Rating      | High                                                                                    |
 | Current Controls | Cluster-internal networking only; namespace isolation                                   |
-| Evidence         | `deploy/002-setup/values/osmo-control-plane-values.yaml` sets `auth.enabled: false`     |
+| Evidence         | `infrastructure/setup/values/osmo-control-plane-values.yaml` sets `auth.enabled: false` |
 | Status           | Open                                                                                    |
 | Remediation      | Enable OSMO auth when vendor provides production-ready auth configuration               |
 
 #### S-2: PostgreSQL Shared Admin Identity
 
-| Field            | Value                                                                          |
-|------------------|--------------------------------------------------------------------------------|
-| Threat           | PostgreSQL uses a single `psqladmin` identity for all OSMO database operations |
-| Affected Assets  | Azure Database for PostgreSQL, OSMO metadata                                   |
-| Trust Boundary   | TB-3                                                                           |
-| Likelihood       | Medium                                                                         |
-| Impact           | Medium                                                                         |
-| Risk Rating      | Medium                                                                         |
-| Current Controls | VNet integration; private endpoint; Key Vault–stored credentials               |
-| Evidence         | `deploy/001-iac/modules/sil/postgresql.tf` configures single admin login       |
-| Status           | Accepted                                                                       |
-| Rationale        | Single-purpose database serving only OSMO; network isolation limits exposure   |
+| Field            | Value                                                                              |
+|------------------|------------------------------------------------------------------------------------|
+| Threat           | PostgreSQL uses a single `psqladmin` identity for all OSMO database operations     |
+| Affected Assets  | Azure Database for PostgreSQL, OSMO metadata                                       |
+| Trust Boundary   | TB-3                                                                               |
+| Likelihood       | Medium                                                                             |
+| Impact           | Medium                                                                             |
+| Risk Rating      | Medium                                                                             |
+| Current Controls | VNet integration; private endpoint; Key Vault–stored credentials                   |
+| Evidence         | `infrastructure/terraform/modules/sil/postgresql.tf` configures single admin login |
+| Status           | Accepted                                                                           |
+| Rationale        | Single-purpose database serving only OSMO; network isolation limits exposure       |
 
 ### Tampering
 
@@ -143,7 +143,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | High                                                                                            |
 | Risk Rating      | Critical                                                                                        |
 | Current Controls | `.gitignore` excludes `*.tfstate`; VPN-only access to workstation                               |
-| Evidence         | `deploy/001-iac/versions.tf` has no remote backend configuration                                |
+| Evidence         | `infrastructure/terraform/versions.tf` has no remote backend configuration                      |
 | Status           | Open                                                                                            |
 | Remediation      | Configure Azure Storage remote backend with state encryption and locking                        |
 
@@ -175,7 +175,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | Medium                                                                                   |
 | Risk Rating      | Medium                                                                                   |
 | Current Controls | Debug logging disabled by default; Log Analytics RBAC                                    |
-| Evidence         | `src/training/utils/` modules include debug-level credential logging                     |
+| Evidence         | `training/rl/utils/` modules include debug-level credential logging                      |
 | Status           | Open                                                                                     |
 | Remediation      | Sanitize or redact `AZURE_*` values before logging; enforce structured logging           |
 
@@ -198,18 +198,18 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 
 #### I-2: VPN Shared Keys in Local Terraform State
 
-| Field            | Value                                                                          |
-|------------------|--------------------------------------------------------------------------------|
-| Threat           | VPN gateway shared secret stored in plaintext within local `terraform.tfstate` |
-| Affected Assets  | VPN gateway, operator VPN credentials                                          |
-| Trust Boundary   | TB-5                                                                           |
-| Likelihood       | Medium                                                                         |
-| Impact           | Medium                                                                         |
-| Risk Rating      | Medium                                                                         |
-| Current Controls | `.gitignore` excludes state files; workstation access controls                 |
-| Evidence         | `deploy/001-iac/vpn/` stores VPN shared key as Terraform-managed resource      |
-| Status           | Open                                                                           |
-| Remediation      | Resolved by T-2 remediation (remote backend with state encryption)             |
+| Field            | Value                                                                               |
+|------------------|-------------------------------------------------------------------------------------|
+| Threat           | VPN gateway shared secret stored in plaintext within local `terraform.tfstate`      |
+| Affected Assets  | VPN gateway, operator VPN credentials                                               |
+| Trust Boundary   | TB-5                                                                                |
+| Likelihood       | Medium                                                                              |
+| Impact           | Medium                                                                              |
+| Risk Rating      | Medium                                                                              |
+| Current Controls | `.gitignore` excludes state files; workstation access controls                      |
+| Evidence         | `infrastructure/terraform/vpn/` stores VPN shared key as Terraform-managed resource |
+| Status           | Open                                                                                |
+| Remediation      | Resolved by T-2 remediation (remote backend with state encryption)                  |
 
 #### I-3: Redis Access Keys Alongside Private Endpoint
 
@@ -252,7 +252,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | Medium                                                                                         |
 | Risk Rating      | Medium                                                                                         |
 | Current Controls | Debug logging off by default; RBAC on Log Analytics                                            |
-| Evidence         | `src/training/utils/env.py` logs `AZURE_*` values at debug verbosity                           |
+| Evidence         | `training/rl/utils/env.py` logs `AZURE_*` values at debug verbosity                            |
 | Status           | Open                                                                                           |
 | Remediation      | Same as R-1; sanitize credential values before logging                                         |
 
@@ -269,7 +269,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | High                                                                                   |
 | Risk Rating      | High                                                                                   |
 | Current Controls | Azure CNI network plugin supports NetworkPolicy; namespaces provide logical separation |
-| Evidence         | No `NetworkPolicy` resources in `deploy/002-setup/manifests/`                          |
+| Evidence         | No `NetworkPolicy` resources in `infrastructure/setup/manifests/`                      |
 | Status           | Open                                                                                   |
 | Remediation      | Define deny-all default policies per namespace; allow-list required traffic flows      |
 
@@ -284,7 +284,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | Medium                                                                                       |
 | Risk Rating      | Low                                                                                          |
 | Current Controls | Private endpoints eliminate public attack surface; VPN-only ingress                          |
-| Evidence         | `deploy/001-iac/modules/platform/networking.tf` defines NSG with no custom rules             |
+| Evidence         | `infrastructure/terraform/modules/platform/networking.tf` defines NSG with no custom rules   |
 | Status           | Accepted                                                                                     |
 | Rationale        | Private endpoints and VPN remove public exposure; custom rules add value after traffic audit |
 
@@ -322,18 +322,18 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 
 #### E-1: Automation Account Contributor Role
 
-| Field            | Value                                                                    |
-|------------------|--------------------------------------------------------------------------|
-| Threat           | Automation Account assigned `Contributor` role at resource group scope   |
-| Affected Assets  | Azure Automation Account, resource group resources                       |
-| Trust Boundary   | TB-1                                                                     |
-| Likelihood       | Low                                                                      |
-| Impact           | Medium                                                                   |
-| Risk Rating      | Low                                                                      |
-| Current Controls | Automation runs scheduled maintenance tasks only; no external triggers   |
-| Evidence         | `deploy/001-iac/modules/platform/automation.tf` assigns Contributor role |
-| Status           | Open                                                                     |
-| Remediation      | Define custom RBAC role scoped to specific maintenance operations        |
+| Field            | Value                                                                              |
+|------------------|------------------------------------------------------------------------------------|
+| Threat           | Automation Account assigned `Contributor` role at resource group scope             |
+| Affected Assets  | Azure Automation Account, resource group resources                                 |
+| Trust Boundary   | TB-1                                                                               |
+| Likelihood       | Low                                                                                |
+| Impact           | Medium                                                                             |
+| Risk Rating      | Low                                                                                |
+| Current Controls | Automation runs scheduled maintenance tasks only; no external triggers             |
+| Evidence         | `infrastructure/terraform/modules/platform/automation.tf` assigns Contributor role |
+| Status           | Open                                                                               |
+| Remediation      | Define custom RBAC role scoped to specific maintenance operations                  |
 
 #### E-2: OSMO Service Token One-Year Expiry Without Rotation
 
@@ -361,7 +361,7 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 | Impact           | High                                                                                    |
 | Risk Rating      | High                                                                                    |
 | Current Controls | Script requires manual execution by a privileged operator                               |
-| Evidence         | `deploy/002-setup/optional/add-user-to-platform.sh` assigns broad role set              |
+| Evidence         | `infrastructure/setup/optional/add-user-to-platform.sh` assigns broad role set          |
 | Status           | Open                                                                                    |
 | Remediation      | Define tiered role profiles (reader, contributor, admin); assign minimum required roles |
 

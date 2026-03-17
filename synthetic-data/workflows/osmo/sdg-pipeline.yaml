@@ -1,0 +1,13 @@
+# SDG Pipeline — OSMO Workflow
+# End-to-end synthetic data generation pipeline chaining Cosmos Transfer, Predict, and Reason.
+#
+# Status: Planned — awaiting individual Cosmos workflow implementations
+#
+# Pipeline stages:
+#   1. Isaac Sim renders simulation frames
+#   2. Cosmos Transfer converts to photorealistic images
+#   3. Cosmos Predict generates future frame sequences
+#   4. Cosmos Reason curates output for training quality
+#
+# Input: Isaac Sim scene configuration (dataset injection)
+# Output: Curated photorealistic training dataset

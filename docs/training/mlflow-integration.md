@@ -91,7 +91,7 @@ The MLflow logging interval is controlled via the `--mlflow_log_interval` CLI ar
 To customize which metrics are logged, modify the `create_mlflow_logging_wrapper` call in `skrl_training.py`:
 
 ```python
-from training.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
+from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
 
 basic_metrics = {
     "episode_reward_mean",
@@ -134,7 +134,7 @@ The monkey-patching approach is applied after creating the SKRL Runner:
 ```python
 import mlflow
 from skrl.utils.runner.torch import Runner
-from training.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
+from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
 
 mlflow.set_tracking_uri("azureml://...")
 mlflow.set_experiment("isaaclab-training")
@@ -158,16 +158,16 @@ Use CLI arguments to control logging frequency:
 
 ```bash
 # Log after every training step
-python src/training/scripts/skrl_training.py --mlflow_log_interval step
+python training/rl/scripts/skrl_training.py --mlflow_log_interval step
 
 # Log every 10 steps (default)
-python src/training/scripts/skrl_training.py --mlflow_log_interval balanced
+python training/rl/scripts/skrl_training.py --mlflow_log_interval balanced
 
 # Log once per rollout
-python src/training/scripts/skrl_training.py --mlflow_log_interval rollout
+python training/rl/scripts/skrl_training.py --mlflow_log_interval rollout
 
 # Log every 100 steps
-python src/training/scripts/skrl_training.py --mlflow_log_interval 100
+python training/rl/scripts/skrl_training.py --mlflow_log_interval 100
 ```
 
 ### Filtering Metrics for Production
@@ -194,7 +194,7 @@ runner.agent._update = wrapper_func
 The MLflow integration is automatically applied in `skrl_training.py` when training with Isaac Lab tasks:
 
 ```bash
-python src/training/scripts/skrl_training.py \
+python training/rl/scripts/skrl_training.py \
     --task Isaac-Cartpole-v0 \
     --num_envs 512 \
     --headless

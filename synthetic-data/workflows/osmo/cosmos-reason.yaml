@@ -1,0 +1,9 @@
+# Cosmos Reason — OSMO Workflow
+# Curates and assesses synthetic data quality using Cosmos Reason 2.
+#
+# Status: Planned — awaiting Cosmos container integration
+#
+# Container: TBD (NVIDIA Cosmos Reason from nvcr.io)
+# GPU: Required
+# Input: Generated synthetic frames (dataset injection)
+# Output: Quality-filtered dataset with reasoning annotations

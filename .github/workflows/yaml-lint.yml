@@ -60,7 +60,7 @@ jobs:
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $lintArgs['ChangedFilesOnly'] = $true
           }
-          & scripts/linting/Invoke-YamlLint.ps1 @lintArgs
+          & shared/ci/linting/Invoke-YamlLint.ps1 @lintArgs
 
       - name: Upload YAML lint results
         if: always()

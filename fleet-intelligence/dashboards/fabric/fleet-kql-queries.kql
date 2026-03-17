@@ -1,0 +1,26 @@
+// Fleet KQL queries for Microsoft Fabric Real-Time Intelligence
+// Status: Planned — awaiting Fabric workspace integration
+
+// Policy execution latency percentiles over last hour
+// PolicyExecution
+// | where Timestamp > ago(1h)
+// | summarize p50=percentile(InferenceLatencyMs, 50),
+//            p95=percentile(InferenceLatencyMs, 95),
+//            p99=percentile(InferenceLatencyMs, 99)
+//   by bin(Timestamp, 5m), RobotId
+
+// Robot fleet health summary
+// RobotHealth
+// | where Timestamp > ago(30m)
+// | summarize LastSeen=max(Timestamp),
+//            AvgGpuUtil=avg(GpuUtilizationPct),
+//            AvgCpuUtil=avg(CpuUtilizationPct)
+//   by RobotId
+// | extend IsOnline=LastSeen > ago(10m)
+
+// Drift detection signal aggregation
+// PolicyExecution
+// | where Timestamp > ago(24h)
+// | summarize AvgActionNorm=avg(ActionNorm),
+//            StdActionNorm=stdev(ActionNorm)
+//   by bin(Timestamp, 1h), PolicyName, PolicyVersion

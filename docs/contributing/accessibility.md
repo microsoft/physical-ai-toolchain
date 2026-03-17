@@ -50,12 +50,12 @@ Shell scripts support the [NO_COLOR](https://no-color.org) standard. When the `N
 Run any deployment script without color:
 
 ```bash
-NO_COLOR=1 ./deploy/002-setup/01-deploy-robotics-charts.sh
+NO_COLOR=1 ./infrastructure/setup/01-deploy-robotics-charts.sh
 ```
 
 ### Implementation Pattern
 
-Shared color functions in `deploy/002-setup/lib/common.sh` check `NO_COLOR` before emitting escape sequences:
+Shared color functions in `shared/lib/common.sh` check `NO_COLOR` before emitting escape sequences:
 
 ```bash
 if [[ -z "${NO_COLOR+x}" ]]; then
