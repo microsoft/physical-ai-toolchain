@@ -147,6 +147,15 @@ jobs:
     permissions:
       contents: read
 
+  # Terraform Format and Validate
+  terraform-validation:
+    name: Terraform Validation
+    uses: ./.github/workflows/terraform-validation.yml
+    with:
+      soft-fail: false
+    permissions:
+      contents: read
+
   # CodeQL security analysis
   codeql-analysis:
     name: CodeQL Analysis

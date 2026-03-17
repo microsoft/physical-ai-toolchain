@@ -1,0 +1,78 @@
+name: Terraform Validation
+
+on:
+  workflow_call:
+    inputs:
+        soft-fail:
+            description: "Whether to continue on Terraform validation errors"
+            required: false
+            type: boolean
+            default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  tf-format:
+    name: Terraform Format
+    runs-on: ubuntu-latest
+    strategy:
+        matrix:
+          path:
+            - infrastructure/terraform/
+            - infrastructure/terraform/vpn/
+            - infrastructure/terraform/dns/
+            - infrastructure/terraform/automation/
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 #v4.0.0
+
+      - name: Terraform Format
+        working-directory: ${{ matrix.path }}
+        run: |
+          terraform fmt -check -recursive
+        continue-on-error: ${{ inputs.soft-fail }}
+
+  tf-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+        matrix:
+          path:
+            - infrastructure/terraform/
+            - infrastructure/terraform/vpn/
+            - infrastructure/terraform/dns/
+            - infrastructure/terraform/automation/
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
+
+      - name: Terraform Initialize
+        working-directory: ${{ matrix.path }}
+        run: |
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        working-directory: ${{ matrix.path }}
+        run: |
+          terraform validate
+        continue-on-error: ${{ inputs.soft-fail }}
