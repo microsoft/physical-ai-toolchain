@@ -1,0 +1,8 @@
+{
+    "label": "Data Pipeline",
+    "position": 4,
+    "link": {
+        "type": "generated-index",
+        "description": "Robot-to-cloud data capture, recording configuration, and Arc agent setup."
+    }
+}

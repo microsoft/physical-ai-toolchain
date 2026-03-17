@@ -34,8 +34,8 @@ When a code PR introduces any of these changes, the author must update affected 
 
 Documentation ownership maps areas to responsible teams. The `.github/CODEOWNERS` file configures automatic review requests for code owners.
 
-| Area                                           | Owner                                                      |
-|------------------------------------------------|------------------------------------------------------------|
+| Area                                           | Owner                                                  |
+|------------------------------------------------|--------------------------------------------------------|
 | `/docs/**/*.md`                                | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
 | `/deploy/**/README.md`                         | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
 | `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md` | Repository maintainers (`@microsoft/edge-ai-core-dev`) |

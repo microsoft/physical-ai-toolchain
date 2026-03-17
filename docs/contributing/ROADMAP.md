@@ -174,9 +174,9 @@ Phase 1 migrates existing `deploy/` and `src/` content into the Infrastructure a
 
 **Will Do:**
 
-* Migrate existing Terraform IaC from `deploy/001-iac/` into `infrastructure/terraform/`
-* Migrate existing setup scripts from `deploy/002-setup/` into `infrastructure/setup/`
-* Reorganize `src/training/` and `src/inference/` into `training/rl/`, `training/il/`, and `training/vla/`
+* ~~Migrate existing Terraform IaC from `deploy/001-iac/` into `infrastructure/terraform/`~~ (complete)
+* ~~Migrate existing setup scripts from `deploy/002-setup/` into `infrastructure/setup/`~~ (complete)
+* ~~Reorganize `src/training/` and `src/inference/` into `training/rl/`, `training/il/`, and `training/vla/`~~ (complete)
 * Establish `evaluation/sil/` and `evaluation/hil/` with Isaac Sim-based validation pipelines
 * Create `data-pipeline/` with Azure Arc edge agent setup and ROS 2 episodic capture
 * Create `data-management/` with LeRobot-based episodic data viewer and curation tooling

@@ -1,0 +1,42 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Policy Execution Telemetry",
+    "description": "Schema for robot policy execution telemetry events including action outputs, observation summaries, and inference timing.",
+    "type": "object",
+    "properties": {
+        "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 event timestamp"
+        },
+        "robot_id": {
+            "type": "string",
+            "description": "Unique identifier for the reporting robot"
+        },
+        "policy_name": {
+            "type": "string",
+            "description": "Name of the deployed policy"
+        },
+        "policy_version": {
+            "type": "string",
+            "description": "Semantic version of the deployed policy checkpoint"
+        },
+        "inference_latency_ms": {
+            "type": "number",
+            "description": "Policy inference duration in milliseconds"
+        },
+        "action_norm": {
+            "type": "number",
+            "description": "L2 norm of the action output vector"
+        },
+        "observation_summary": {
+            "type": "object",
+            "description": "Summary statistics of observation inputs"
+        }
+    },
+    "required": [
+        "timestamp",
+        "robot_id",
+        "policy_name"
+    ]
+}

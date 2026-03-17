@@ -7,7 +7,7 @@ on:
         description: 'Whether to continue on broken links'
         required: false
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -33,9 +33,9 @@ jobs:
         id: changed-files
         run: |
           if ('${{ github.event_name }}' -eq 'pull_request') {
-            $changedFiles = (git diff --name-only --diff-filter=ACMRT '${{ github.event.pull_request.base.sha }}' '${{ github.sha }}' -- '*.md' ':!scripts/tests/') -join ' '
+            $changedFiles = (git diff --name-only --diff-filter=ACMRT '${{ github.event.pull_request.base.sha }}' '${{ github.sha }}' -- '*.md' ':!shared/ci/tests/') -join ' '
           } else {
-            $changedFiles = (git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD -- '*.md' ':!scripts/tests/') -join ' '
+            $changedFiles = (git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD -- '*.md' ':!shared/ci/tests/') -join ' '
           }
           "files=$changedFiles" >> $env:GITHUB_OUTPUT
           if ([string]::IsNullOrWhiteSpace($changedFiles)) {
@@ -59,7 +59,7 @@ jobs:
         if: steps.changed-files.outputs.has_changes == 'true'
         run: |
           $changedFiles = "${{ steps.changed-files.outputs.files }}" -split '\s+' | Where-Object { $_ }
-          & scripts/linting/Markdown-Link-Check.ps1 -Path $changedFiles
+          & shared/ci/linting/Markdown-Link-Check.ps1 -Path $changedFiles
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Skip notification

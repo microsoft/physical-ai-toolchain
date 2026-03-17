@@ -1,0 +1,84 @@
+// =============================================================================
+// Production Environment
+// =============================================================================
+// Full private networking with multiple GPU pools, HA-enabled backend
+// services, and comprehensive observability. VPN required for all access.
+// =============================================================================
+
+// Core Configuration
+environment     = "prod"
+location        = "westus3"
+resource_prefix = "roboticsprod"
+instance        = "001"
+
+// Resource Group
+should_create_resource_group = true
+
+// AKS System Node Pool
+system_node_pool_vm_size    = "Standard_D8ds_v5"
+system_node_pool_node_count = 3
+
+// Multiple GPU pools with dedicated subnets
+node_pools = {
+  rtxprogpu = {
+    vm_size                 = "Standard_NC128ds_xl_RTXPRO6000BSE_v6"
+    subnet_address_prefixes = ["10.0.7.0/24"]
+    node_taints             = ["nvidia.com/gpu:NoSchedule"]
+    gpu_driver              = "None"
+    node_labels = {
+      "nvidia.com/gpu.deploy.driver" = "false"
+    }
+    priority            = "Regular"
+    enable_auto_scaling = true
+    min_count           = 1
+    max_count           = 4
+    zones               = []
+  }
+  h100gpu = {
+    vm_size                 = "Standard_NC40ads_H100_v5"
+    subnet_address_prefixes = ["10.0.8.0/24"]
+    node_taints = [
+      "nvidia.com/gpu:NoSchedule",
+      "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"
+    ]
+    gpu_driver = "None"
+    node_labels = {
+      "kubernetes.azure.com/scalesetpriority" = "spot"
+    }
+    priority            = "Spot"
+    eviction_policy     = "Delete"
+    enable_auto_scaling = true
+    min_count           = 0
+    max_count           = 4
+    zones               = []
+  }
+}
+
+// OSMO Backend Services with HA
+should_deploy_postgresql = true
+should_deploy_redis      = true
+
+// PostgreSQL HA
+postgresql_sku_name = "GP_Standard_D4s_v3"
+postgresql_high_availability = {
+  enabled                   = true
+  standby_availability_zone = "2"
+}
+
+// Redis HA
+redis_high_availability_enabled = true
+
+// Network Security — Full Private
+should_enable_private_endpoint    = true
+should_enable_private_aks_cluster = true
+
+should_enable_public_network_access     = false
+should_add_current_user_key_vault_admin = true
+should_enable_microsoft_defender        = true
+should_enable_purge_protection          = true
+
+// Observability — All components enabled
+// should_deploy_grafana            = true
+// should_deploy_monitor_workspace  = true
+// should_deploy_ampls              = true
+// should_deploy_dce                = true

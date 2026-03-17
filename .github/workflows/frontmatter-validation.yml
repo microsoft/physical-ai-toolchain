@@ -67,7 +67,7 @@ jobs:
           if ('${{ inputs.soft-fail }}' -eq 'true') {
             $args += '-SoftFail'
           }
-          & scripts/linting/Invoke-FrontmatterValidation.ps1 @args
+          & shared/ci/linting/Invoke-FrontmatterValidation.ps1 @args
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Upload frontmatter validation results

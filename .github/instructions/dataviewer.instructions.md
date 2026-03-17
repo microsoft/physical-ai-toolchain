@@ -1,6 +1,6 @@
 ---
-description: 'Instructions to always read and follow whenever working in src/dataviewer'
-applyTo: 'src/dataviewer/**'
+description: 'Instructions to always read and follow whenever working in data-management/viewer'
+applyTo: 'data-management/viewer/**'
 ---
 
 # Data Viewer Instructions
@@ -19,7 +19,7 @@ Tests are fluid. Tests always test behaviors. Tests never only test against mock
 * Make one or more failing tests before making changes (or update one ore more passing test to be failing tests).
 * Run tests during and after implementation work.
 
-Validate changes using npm scripts from `src/dataviewer/`:
+Validate changes using npm scripts from `data-management/viewer/`:
 
 * `npm run validate` — full validation for both backend and frontend
 * `npm run validate:fix` — auto-fix lint/format then validate
