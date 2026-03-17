@@ -20,14 +20,14 @@ Infrastructure code follows strict conventions for consistency, security, and ma
 # Format all Terraform files before committing
 terraform fmt -recursive infrastructure/terraform/
 
-# Validate syntax
-terraform validate infrastructure/terraform/
+# Validate formatting and syntax across all deployment directories
+npm run lint:tf:validate
 ```
 
 ### Variable Naming
 
 * Use descriptive snake_case: `gpu_node_pool_vm_size` not `vm_sku`
-* Prefix booleans with `enable_` or `is_`: `enable_private_endpoints`, `is_production`
+* Prefix booleans with `should_`: `should_enable_private_endpoints`, `should_deploy_vpn`
 * Group related variables with prefixes: `aks_cluster_name`, `aks_node_count`, `aks_version`
 
 ### Module Structure

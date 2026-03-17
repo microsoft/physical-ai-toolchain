@@ -65,7 +65,7 @@ function Invoke-TerraformValidationCore {
 
     # Determine which directories to validate
     $dirsToValidate = if ($ChangedFilesOnly) {
-        $changedFiles = Get-ChangedFilesFromGit -FileExtensions @('*.tf', '*.tfvars')
+        $changedFiles = @(Get-ChangedFilesFromGit -FileExtensions @('*.tf', '*.tfvars'))
         if ($changedFiles.Count -eq 0) {
             Write-Host 'No Terraform files changed — skipping validation'
             @()
@@ -171,27 +171,27 @@ function Invoke-TerraformValidationCore {
     }
 
     # Build results object
-    $directoriesChecked = ($validationResults | Where-Object { -not $_.skipped }).Count
-    $directoriesPassed = ($validationResults | Where-Object { -not $_.skipped -and $_.passed }).Count
-    $directoriesSkipped = ($validationResults | Where-Object { $_.skipped }).Count
+    $directoriesChecked = @($validationResults | Where-Object { -not $_.skipped }).Count
+    $directoriesPassed = @($validationResults | Where-Object { -not $_.skipped -and $_.passed }).Count
+    $directoriesSkipped = @($validationResults | Where-Object { $_.skipped }).Count
     $overallPassed = $fmtPassed -and ($directoriesChecked -eq $directoriesPassed)
 
     $results = @{
         timestamp         = (Get-Date -Format 'o')
         terraform_version = $versionString
         format_check      = @{
-            passed           = $fmtPassed
+            passed            = $fmtPassed
             unformatted_files = $unformattedFiles
         }
         validation        = @($validationResults | ForEach-Object {
-            @{
-                directory = $_.directory
-                passed    = $_.passed
-                skipped   = if ($_.skipped) { $true } else { $false }
-                errors    = $_.errors
-                warnings  = $_.warnings
-            }
-        })
+                @{
+                    directory = $_.directory
+                    passed    = $_.passed
+                    skipped   = if ($_.skipped) { $true } else { $false }
+                    errors    = $_.errors
+                    warnings  = $_.warnings
+                }
+            })
         summary           = @{
             directories_checked = $directoriesChecked
             directories_passed  = $directoriesPassed
