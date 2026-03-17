@@ -34,7 +34,7 @@ Inventory of submission scripts for training, validation, and inference workflow
 
 ## Quick Start
 
-Scripts auto-detect Azure context from Terraform outputs in `deploy/001-iac/`:
+Scripts auto-detect Azure context from Terraform outputs in `infrastructure/terraform/`:
 
 ```bash
 # Azure ML training
@@ -70,7 +70,7 @@ Scripts auto-detect Azure context from Terraform outputs in `deploy/001-iac/`:
 Common requirements:
 
 - Bash 4+
-- Terraform outputs available in `deploy/001-iac/` (or provide the same values via CLI / environment variables)
+- Terraform outputs available in `infrastructure/terraform/` (or provide the same values via CLI / environment variables)
 
 Script-specific tools:
 
@@ -204,7 +204,7 @@ Example:
 | `--backend` / `-b`             | `skrl`                              | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
 | `--dataset-bucket`             | `training`                          | OSMO bucket name                                 | `OSMO_DATASET_BUCKET`         |
 | `--dataset-name`               | `training-code`                     | Dataset name (auto-versioned)                    | `OSMO_DATASET_NAME`           |
-| `--training-path`              | `src/training`                      | Local path to upload                             | `TRAINING_PATH`               |
+| `--training-path`              | `training/`                         | Local path to upload                             | `TRAINING_PATH`               |
 | `--checkpoint-uri` / `-c`      | unset                               | MLflow checkpoint artifact URI                   | `CHECKPOINT_URI`              |
 | `--checkpoint-mode` / `-M`     | `from-scratch`                      | `from-scratch`, `warm-start`, `resume`, `fresh`  | `CHECKPOINT_MODE`             |
 | `--register-checkpoint` / `-r` | derived from task                   | Model name for checkpoint registration           | `REGISTER_CHECKPOINT`         |
@@ -249,7 +249,7 @@ Source the library to use helper functions:
 
 ```bash
 source lib/terraform-outputs.sh
-read_terraform_outputs ../deploy/001-iac
+read_terraform_outputs ../infrastructure/terraform
 get_aks_cluster_name   # Returns AKS cluster name
 get_azureml_workspace  # Returns ML workspace name
 ```

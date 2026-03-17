@@ -1,0 +1,8 @@
+# Cosmos Transfer — AzureML Job Definition
+# Converts simulation-rendered frames to photorealistic images using Cosmos Transfer 2.5.
+#
+# Status: Planned — awaiting Cosmos container integration
+#
+# Schema: $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+# Compute: GPU instance type (gpu or gpuspot)
+# Container: TBD (NVIDIA Cosmos Transfer from nvcr.io)

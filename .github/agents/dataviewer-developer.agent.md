@@ -30,7 +30,7 @@ Start the dataviewer app, optionally configuring the dataset path.
 
 If the user provides a dataset path:
 
-1. Read `src/dataviewer/backend/.env`.
+1. Read `data-management/viewer/backend/.env`.
 2. Replace the `HMI_DATA_PATH=` line with the absolute path to the user's dataset directory.
 3. Confirm the update.
 
@@ -41,7 +41,7 @@ If no path is provided, use the existing `HMI_DATA_PATH` value.
 1. Run `start.sh` in the background terminal with configured ports:
 
     ```bash
-    cd src/dataviewer && BACKEND_PORT=${backendPort} FRONTEND_PORT=${frontendPort} ./start.sh
+    cd data-management/viewer && BACKEND_PORT=${backendPort} FRONTEND_PORT=${frontendPort} ./start.sh
     ```
 
     Use default ports (8000/5173) when no overrides are specified.
@@ -198,7 +198,7 @@ Follow these codebase conventions:
 
 **Backend (Python/FastAPI):**
 
-- Source code in `src/dataviewer/backend/src/api/`
+- Source code in `data-management/viewer/backend/src/api/`
 - New endpoints go in `routers/` (REST) or `routes/` (specialized)
 - Models in `models/`, services in `services/`
 - Register new routers in `main.py`
@@ -206,7 +206,7 @@ Follow these codebase conventions:
 
 **Frontend (React/TypeScript):**
 
-- Source code in `src/dataviewer/frontend/src/`
+- Source code in `data-management/viewer/frontend/src/`
 - Components organized by feature in `components/`
 - API calls in `api/`, hooks in `hooks/`, stores in `stores/`
 - Types in `types/`

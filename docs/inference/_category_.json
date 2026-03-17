@@ -1,8 +1,0 @@
-{
-  "label": "Inference",
-  "position": 4,
-  "link": {
-    "type": "generated-index",
-    "description": "Run inference with trained models."
-  }
-}

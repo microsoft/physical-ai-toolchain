@@ -24,13 +24,13 @@ Follow these steps in order every time the dataviewer is started.
 Launch `start.sh` as a background terminal process. The script prints `[OK] Both services are running` and the URLs when both services are healthy.
 
 ```bash
-cd src/dataviewer && ./start.sh
+cd data-management/viewer && ./start.sh
 ```
 
 With a custom dataset path:
 
 ```bash
-cd src/dataviewer && HMI_DATA_PATH=/path/to/datasets ./start.sh
+cd data-management/viewer && HMI_DATA_PATH=/path/to/datasets ./start.sh
 ```
 
 ### Step 2 — Open SimpleBrowser
@@ -93,13 +93,13 @@ Always call `browser_snapshot` first to inspect the current DOM before issuing c
 Start the dataviewer with the default dataset path:
 
 ```bash
-cd src/dataviewer && ./start.sh
+cd data-management/viewer && ./start.sh
 ```
 
 Start with a custom dataset path:
 
 ```bash
-cd src/dataviewer && HMI_DATA_PATH=/path/to/datasets ./start.sh
+cd data-management/viewer && HMI_DATA_PATH=/path/to/datasets ./start.sh
 ```
 
 ## Parameters Reference
@@ -133,7 +133,7 @@ The `HMI_DATA_PATH` environment variable controls which datasets are visible in 
 
     ```bash
     export HMI_DATA_PATH=/path/to/datasets
-    cd src/dataviewer && ./start.sh
+    cd data-management/viewer && ./start.sh
     ```
 
 When a dataset path is provided, update `backend/.env` so the value persists:
@@ -145,7 +145,7 @@ When a dataset path is provided, update `backend/.env` so the value persists:
 ## Architecture
 
 ```text
-src/dataviewer/
+data-management/viewer/
 ├── start.sh              # Orchestrator: launches backend + frontend
 ├── backend/
 │   ├── .env              # HMI_DATA_PATH and test config

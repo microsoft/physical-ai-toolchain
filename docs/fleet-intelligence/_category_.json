@@ -1,0 +1,8 @@
+{
+    "label": "Fleet Intelligence",
+    "position": 9,
+    "link": {
+        "type": "generated-index",
+        "description": "IoT Operations telemetry, fleet dashboards, and drift detection."
+    }
+}

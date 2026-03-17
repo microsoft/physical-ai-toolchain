@@ -19,14 +19,14 @@ Isaac Lab reinforcement learning training with SKRL and RSL-RL backends. Both Az
 
 ## 📋 Prerequisites
 
-| Component         | Requirement                                                                   |
-|-------------------|-------------------------------------------------------------------------------|
-| Infrastructure    | AKS cluster deployed via [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md)       |
-| Azure ML          | Extension installed via `02-deploy-azureml-extension.sh`                      |
-| OSMO              | Control plane and backend via `03-deploy-osmo-control-plane.sh`               |
-| Terraform outputs | Available in `deploy/001-iac/` (or provide values via CLI / environment vars) |
-| Azure CLI         | `az` with `ml` extension for Azure ML submissions                             |
-| OSMO CLI          | `osmo` CLI installed and authenticated for OSMO submissions                   |
+| Component         | Requirement                                                                                                                            |
+|-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| Infrastructure    | AKS cluster deployed via [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/README.md) |
+| Azure ML          | Extension installed via `02-deploy-azureml-extension.sh`                                                                               |
+| OSMO              | Control plane and backend via `03-deploy-osmo-control-plane.sh`                                                                        |
+| Terraform outputs | Available in `infrastructure/terraform/` (or provide values via CLI / environment vars)                                                |
+| Azure CLI         | `az` with `ml` extension for Azure ML submissions                                                                                      |
+| OSMO CLI          | `osmo` CLI installed and authenticated for OSMO submissions                                                                            |
 
 ## 🚀 Quick Start
 
@@ -142,7 +142,7 @@ OSMO supports two payload delivery modes for training code:
 | Base64 payload    | `submit-osmo-training.sh`         | ~1 MB      | None       |
 | Dataset injection | `submit-osmo-dataset-training.sh` | Unlimited  | Automatic  |
 
-Dataset injection uploads `src/training/` as a versioned OSMO dataset, mounted at `/data/<dataset_name>/training` in the container:
+Dataset injection uploads `training/rl/` as a versioned OSMO dataset, mounted at `/data/<dataset_name>/training` in the container:
 
 ```bash
 ./scripts/submit-osmo-dataset-training.sh \

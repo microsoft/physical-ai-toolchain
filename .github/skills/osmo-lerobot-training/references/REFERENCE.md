@@ -408,7 +408,7 @@ Older checkpoints may have incompatible `config.json` fields or missing normaliz
 | `ImportError: PolicyProcessorPipeline` | Using old inference API                             | Remove preprocessor/postprocessor, use `select_action()` directly  |
 | `DecodingError: use_peft not valid`    | Old checkpoint config.json                          | Strip `use_peft`, `pretrained_path` from config.json               |
 | `AssertionError: mean is infinity`     | Normalizer buffers missing                          | Load stats from preprocessor safetensors files                     |
-| `ImportError: patch_info_paths`        | Payload missing training fixes                      | Ensure `src/training/` is on a branch with dataset conversion code |
+| `ImportError: patch_info_paths`        | Payload missing training fixes                      | Ensure `training/il/` is on a branch with dataset conversion code |
 | VM eviction during training            | Spot GPU preempted                                  | Checkpoints already registered survive; resubmit job               |
 | MLflow connection timeout              | Token refresh failure                               | Check `MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES`                      |
 | OOM during training                    | Batch size too large for GPU                        | 32 for 24GB (A10), 64 for 48GB (RTX PRO 6000)                      |

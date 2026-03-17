@@ -6,7 +6,7 @@
     ".venv/**",
     "**/.venv/**",
     "external/**",
-    "scripts/tests/Fixtures/**",
+    "shared/ci/tests/Fixtures/**",
     "logs/**"
   ],
   "config": {
