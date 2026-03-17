@@ -1,7 +1,6 @@
 """Unit tests for blob path validator."""
 
 import pytest
-
 from src.common.blob_path_validator import (
     get_validation_error,
     validate_blob_path,
