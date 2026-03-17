@@ -136,8 +136,11 @@ jobs:
   dataviewer-backend-pytests:
     name: Dataviewer Backend Pytest
     uses: ./.github/workflows/dataviewer-backend-pytests.yml
+    with:
+      code-coverage: true
     permissions:
       contents: read
+      id-token: write
 
   # Python linting using ruff
   python-lint:

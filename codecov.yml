@@ -48,7 +48,7 @@ flags:
     carryforward: true
   pytest-dataviewer:
     paths:
-      - src/dataviewer/backend/
+      - data-management/viewer/backend/src/
     carryforward: true
 
 parsers:
