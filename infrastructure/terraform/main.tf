@@ -109,7 +109,7 @@ module "platform" {
   redis_config = {
     sku_name                  = var.redis_sku_name
     clustering_policy         = var.redis_clustering_policy
-    high_availability_enabled = var.redis_high_availability_enabled
+    high_availability_enabled = var.should_enable_redis_high_availability
   }
 
   // OSMO workload identity
@@ -167,14 +167,14 @@ module "sil" {
 
   // AKS system node pool configuration
   aks_config = {
-    system_node_pool_vm_size             = var.system_node_pool_vm_size
-    system_node_pool_node_count          = var.system_node_pool_node_count
-    system_node_pool_enable_auto_scaling = var.system_node_pool_enable_auto_scaling
-    system_node_pool_min_count           = var.system_node_pool_min_count
-    system_node_pool_max_count           = var.system_node_pool_max_count
-    is_private_cluster                   = var.should_enable_private_aks_cluster
-    system_node_pool_zones               = var.system_node_pool_zones
-    should_enable_microsoft_defender     = var.should_enable_microsoft_defender
+    system_node_pool_vm_size                    = var.system_node_pool_vm_size
+    system_node_pool_node_count                 = var.system_node_pool_node_count
+    should_enable_system_node_pool_auto_scaling = var.should_enable_system_node_pool_auto_scaling
+    system_node_pool_min_count                  = var.system_node_pool_min_count
+    system_node_pool_max_count                  = var.system_node_pool_max_count
+    is_private_cluster                          = var.should_enable_private_aks_cluster
+    system_node_pool_zones                      = var.system_node_pool_zones
+    should_enable_microsoft_defender            = var.should_enable_microsoft_defender
   }
 
   node_pools = var.node_pools
