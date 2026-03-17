@@ -6,13 +6,7 @@ import { JOINT_COLORS } from '@/components/episode-viewer/joint-constants'
 import { JointConfigDefaultsEditor } from '@/components/episode-viewer/JointConfigDefaultsEditor'
 
 beforeAll(() => {
-  globalThis.ResizeObserver = class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver
-
-  Element.prototype.scrollIntoView = vi.fn()
+  vi.spyOn(Element.prototype, 'scrollIntoView')
 })
 
 afterEach(cleanup)
