@@ -10,10 +10,10 @@ from pathlib import Path
 SARIF_SCHEMA = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 
 LEVEL_MAP = {
-    "0": "none",       # Informational
-    "1": "note",       # Low
-    "2": "warning",    # Medium
-    "3": "error",      # High
+    "0": "none",  # Informational
+    "1": "note",  # Low
+    "2": "warning",  # Medium
+    "3": "error",  # High
 }
 
 
@@ -27,40 +27,48 @@ def convert(zap_json: dict) -> dict:
             rule_id = f"ZAP-{alert['pluginid']}"
             if rule_id not in rule_ids_seen:
                 rule_ids_seen.add(rule_id)
-                rules.append({
-                    "id": rule_id,
-                    "name": alert.get("name", ""),
-                    "shortDescription": {"text": alert.get("name", "")},
-                    "fullDescription": {"text": alert.get("desc", "").strip()},
-                    "helpUri": alert.get("reference", ""),
-                    "properties": {"tags": ["security", "DAST"]},
-                })
+                rules.append(
+                    {
+                        "id": rule_id,
+                        "name": alert.get("name", ""),
+                        "shortDescription": {"text": alert.get("name", "")},
+                        "fullDescription": {"text": alert.get("desc", "").strip()},
+                        "helpUri": alert.get("reference", ""),
+                        "properties": {"tags": ["security", "DAST"]},
+                    }
+                )
 
             for instance in alert.get("instances", []):
-                results.append({
-                    "ruleId": rule_id,
-                    "level": LEVEL_MAP.get(str(alert.get("riskcode", "0")), "warning"),
-                    "message": {"text": alert.get("solution", alert.get("name", ""))},
-                    "locations": [{
-                        "physicalLocation": {
-                            "artifactLocation": {"uri": instance.get("uri", "")},
-                        }
-                    }],
-                })
+                results.append(
+                    {
+                        "ruleId": rule_id,
+                        "level": LEVEL_MAP.get(str(alert.get("riskcode", "0")), "warning"),
+                        "message": {"text": alert.get("solution", alert.get("name", ""))},
+                        "locations": [
+                            {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": instance.get("uri", "")},
+                                }
+                            }
+                        ],
+                    }
+                )
 
     return {
         "$schema": SARIF_SCHEMA,
         "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "OWASP ZAP",
-                    "informationUri": "https://www.zaproxy.org/",
-                    "rules": rules,
-                }
-            },
-            "results": results,
-        }],
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "OWASP ZAP",
+                        "informationUri": "https://www.zaproxy.org/",
+                        "rules": rules,
+                    }
+                },
+                "results": results,
+            }
+        ],
     }
 
 
