@@ -19,6 +19,8 @@ anyio==4.12.1
     #   starlette
 asgiref==3.11.1
     # via opentelemetry-instrumentation-asgi
+async-timeout==5.0.1
+    # via redis
 attrs==25.4.0
     # via
     #   cyclopts
@@ -29,10 +31,8 @@ authlib==1.6.9
 azure-ai-ml==1.31.0
     # via robotics-training (training/rl/pyproject.toml)
 azure-common==1.1.28
-    # via
-    #   azure-ai-ml
-    #   azureml-mlflow
-azure-core==1.38.1
+    # via azure-ai-ml
+azure-core==1.38.2
     # via
     #   robotics-training (training/rl/pyproject.toml)
     #   azure-ai-ml
@@ -61,7 +61,7 @@ azure-monitor-opentelemetry==1.8.6
     # via azure-ai-ml
 azure-monitor-opentelemetry-exporter==1.0.0b48
     # via azure-monitor-opentelemetry
-azure-storage-blob==12.19.0
+azure-storage-blob==12.28.0
     # via
     #   robotics-training (training/rl/pyproject.toml)
     #   azure-ai-ml
@@ -71,7 +71,7 @@ azure-storage-file-datalake==12.14.0
     # via azure-ai-ml
 azure-storage-file-share==12.24.0
     # via azure-ai-ml
-azureml-mlflow==1.61.0.post1
+azureml-mlflow==1.62.0
     # via robotics-training (training/rl/pyproject.toml)
 backports-tarfile==1.2.0
     # via jaraco-context
@@ -109,7 +109,10 @@ cloudpickle==3.1.2
     #   pydocket
     #   tensordict
 colorama==0.4.6
-    # via azure-ai-ml
+    # via
+    #   azure-ai-ml
+    #   click
+    #   tqdm
 contourpy==1.3.3
     # via matplotlib
 croniter==6.0.0
@@ -125,7 +128,6 @@ cryptography==46.0.5
     #   mlflow
     #   msal
     #   pyjwt
-    #   secretstorage
 cycler==0.12.1
     # via matplotlib
 cyclopts==4.6.0
@@ -188,8 +190,6 @@ greenlet==3.3.2
     # via sqlalchemy
 grpcio==1.78.0
     # via tensorboard
-gunicorn==23.0.0
-    # via mlflow
 gymnasium==1.2.3
     # via skrl
 h11==0.16.0
@@ -231,10 +231,6 @@ jaraco-context==6.1.0
     # via keyring
 jaraco-functools==4.4.0
     # via keyring
-jeepney==0.9.0
-    # via
-    #   keyring
-    #   secretstorage
 jinja2==3.1.6
     # via
     #   flask
@@ -441,7 +437,6 @@ packaging==25.0
     # via
     #   robotics-training (training/rl/pyproject.toml)
     #   fastmcp
-    #   gunicorn
     #   marshmallow
     #   matplotlib
     #   mlflow-skinny
@@ -552,6 +547,12 @@ pytz==2025.2
     #   pandas
 pyvers==0.2.2
     # via tensordict
+pywin32==311
+    # via
+    #   docker
+    #   mcp
+pywin32-ctypes==0.2.3
+    # via keyring
 pyyaml==6.0.3
     # via
     #   azure-ai-ml
@@ -593,7 +594,7 @@ rpds-py==0.30.0
     #   referencing
 rsa==4.9.1
     # via google-auth
-rsl-rl-lib==4.0.1
+rsl-rl-lib==5.0.0
     # via robotics-training (training/rl/pyproject.toml)
 scikit-learn==1.8.0
     # via mlflow
@@ -601,8 +602,6 @@ scipy==1.17.1
     # via
     #   mlflow
     #   scikit-learn
-secretstorage==3.5.0
-    # via keyring
 setuptools==82.0.0
     # via tensorboard
 shellingham==1.5.4
@@ -697,7 +696,9 @@ typing-inspection==0.4.2
     #   pydantic
     #   pydantic-settings
 tzdata==2025.3
-    # via pandas
+    # via
+    #   pandas
+    #   pydocket
 uncalled-for==0.2.0
     # via pydocket
 urllib3==2.6.3
@@ -709,6 +710,8 @@ uvicorn==0.41.0
     #   fastmcp
     #   mcp
     #   mlflow-skinny
+waitress==3.0.2
+    # via mlflow
 websockets==16.0
     # via fastmcp
 werkzeug==3.1.6
