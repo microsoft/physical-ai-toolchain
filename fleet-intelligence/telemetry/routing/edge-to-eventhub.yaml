@@ -1,0 +1,18 @@
+# Edge-to-EventHub routing configuration
+# Status: Planned — awaiting IoT Operations integration
+#
+# Defines data flow routes from edge MQTT broker to Azure Event Hubs
+# for fleet telemetry ingestion.
+
+routes:
+  policy-execution:
+    source: "mqtt://edge-broker/telemetry/policy-execution"
+    destination: "eventhub://fleet-telemetry/policy-execution"
+    format: json
+    schema: "../schemas/policy-execution.schema.json"
+
+  robot-health:
+    source: "mqtt://edge-broker/telemetry/robot-health"
+    destination: "eventhub://fleet-telemetry/robot-health"
+    format: json
+    schema: "../schemas/robot-health.schema.json"

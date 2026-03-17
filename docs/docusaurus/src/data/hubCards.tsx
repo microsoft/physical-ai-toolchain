@@ -31,16 +31,16 @@ export const iconCards: IconCardProps[] = [
   {
     icon: <CodeIcon />,
     supertitle: 'Models',
-    title: 'Inference',
-    href: '/inference/',
-    description: 'Deploy trained models for real-time robot control and evaluation.',
+    title: 'Evaluation',
+    href: '/evaluation/',
+    description: 'Validate trained models in simulation and on hardware.',
   },
   {
     icon: <BookIcon />,
     supertitle: 'Devices',
-    title: 'Edge Deployment',
-    href: '/edge/',
-    description: 'Push models to edge devices for on-premises robot operation.',
+    title: 'Fleet Deployment',
+    href: '/fleet-deployment/',
+    description: 'Deploy trained models to robot fleets via FluxCD GitOps pipelines.',
   },
   {
     icon: <ShieldIcon />,

@@ -50,7 +50,7 @@ jobs:
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $args['ChangedFilesOnly'] = $true
           }
-          & scripts/linting/Invoke-MsDateFreshnessCheck.ps1 @args
+          & shared/ci/linting/Invoke-MsDateFreshnessCheck.ps1 @args
 
       - name: Upload freshness check results
         if: always()

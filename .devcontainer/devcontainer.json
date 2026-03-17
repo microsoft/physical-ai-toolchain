@@ -93,7 +93,7 @@
 		"setup-dev": "./setup-dev.sh --disable-venv",
 		"npm-install": "npm install",
 		"apt": "sudo apt update && sudo apt install -y shellcheck jq unzip",
-		"tflint": "curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash",
+		"tflint": "TFLINT_VERSION=v0.61.0 && curl -sSfL \"https://raw.githubusercontent.com/terraform-linters/tflint/${TFLINT_VERSION}/install_linux.sh\" | bash && tflint --init",
 		"actionlint": "ACTIONLINT_VERSION=1.7.10 && ACTIONLINT_SHA256=f4c76b71db5755a713e6055cbb0857ed07e103e028bda117817660ebadb4386f && curl -sSfL \"https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\" -o /tmp/actionlint.tar.gz && echo \"${ACTIONLINT_SHA256} /tmp/actionlint.tar.gz\" | sha256sum -c --quiet - && sudo tar -xzf /tmp/actionlint.tar.gz -C /usr/local/bin actionlint && rm /tmp/actionlint.tar.gz",
 		"update-bashrc": "echo 'export PATH=\"${containerWorkspaceFolder}/scripts:${containerWorkspaceFolder}/node_modules/.bin:$PATH\"' | sudo tee -a  ~/.bashrc",
 		"osmo-cli": "curl -fsSL https://raw.githubusercontent.com/NVIDIA/OSMO/refs/heads/main/install.sh | bash || true",

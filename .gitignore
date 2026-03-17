@@ -162,6 +162,7 @@ _TeamCity*
 coverage*.json
 coverage*.xml
 coverage*.info
+coverage/
 
 # Visual Studio code coverage results
 *.coverage
@@ -344,6 +345,9 @@ paket-files/
 **/__pycache__/
 *.pyc
 
+# Hypothesis testing framework cache
+.hypothesis/
+
 # Cake - Uncomment if you are using it
 #tools/**
 #!tools/packages.config
@@ -456,8 +460,10 @@ terraform.rc
 
 .venv/
 venv/
+.hypothesis/
 **/out/*
 .copilot-tracking/*
+dependency-pinning-artifacts/
 
 .DS_Store
 .beads/

@@ -22,7 +22,7 @@ Detailed submission examples for training, inference, and pipeline workflows on 
 
 ## OSMO Dataset Training
 
-The `submit-osmo-dataset-training.sh` script uploads `src/training/` as a versioned OSMO dataset. This approach removes the ~1MB size limit of base64-encoded archives and enables dataset reuse across runs.
+The `submit-osmo-dataset-training.sh` script uploads `training/rl/` as a versioned OSMO dataset. This approach removes the ~1MB size limit of base64-encoded archives and enables dataset reuse across runs.
 
 ### Dataset Submission Example
 
@@ -49,13 +49,13 @@ The `submit-osmo-dataset-training.sh` script uploads `src/training/` as a versio
 |--------------------|-----------------|-------------------------------|
 | `--dataset-bucket` | `training`      | OSMO bucket for training code |
 | `--dataset-name`   | `training-code` | Dataset name (auto-versioned) |
-| `--training-path`  | `src/training`  | Local folder to upload        |
+| `--training-path`  | `training/rl`   | Local folder to upload        |
 
 The script stages files to exclude `__pycache__` and build artifacts via `.amlignore` patterns before upload.
 
 ## LeRobot Behavioral Cloning
 
-The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows supporting ACT and Diffusion policy architectures. Uses HuggingFace Hub datasets and installs runtime dependencies from `src/training/lerobot/pyproject.toml`.
+The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows supporting ACT and Diffusion policy architectures. Uses HuggingFace Hub datasets and installs runtime dependencies from `training/il/lerobot/pyproject.toml`.
 
 ### LeRobot Submission Examples
 
@@ -125,7 +125,7 @@ The `submit-osmo-lerobot-inference.sh` script evaluates trained LeRobot policies
 
 ## AzureML LeRobot Training
 
-The `submit-azureml-lerobot-training.sh` script submits LeRobot training directly to Azure ML instead of OSMO. It registers an environment, compiles runtime dependencies from `src/training/lerobot/pyproject.toml`, and submits via `az ml job create`.
+The `submit-azureml-lerobot-training.sh` script submits LeRobot training directly to Azure ML instead of OSMO. It registers an environment, compiles runtime dependencies from `training/il/lerobot/pyproject.toml`, and submits via `az ml job create`.
 
 ### AzureML LeRobot Examples
 

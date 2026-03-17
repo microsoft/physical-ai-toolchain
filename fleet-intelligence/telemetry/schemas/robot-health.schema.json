@@ -1,0 +1,49 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Robot Health Telemetry",
+    "description": "Schema for robot health telemetry events including hardware status, resource utilization, and connectivity metrics.",
+    "type": "object",
+    "properties": {
+        "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 event timestamp"
+        },
+        "robot_id": {
+            "type": "string",
+            "description": "Unique identifier for the reporting robot"
+        },
+        "gpu_utilization_pct": {
+            "type": "number",
+            "description": "GPU utilization percentage (0-100)"
+        },
+        "gpu_memory_used_mb": {
+            "type": "number",
+            "description": "GPU memory usage in megabytes"
+        },
+        "cpu_utilization_pct": {
+            "type": "number",
+            "description": "CPU utilization percentage (0-100)"
+        },
+        "memory_used_mb": {
+            "type": "number",
+            "description": "System memory usage in megabytes"
+        },
+        "disk_free_mb": {
+            "type": "number",
+            "description": "Available disk space in megabytes"
+        },
+        "network_latency_ms": {
+            "type": "number",
+            "description": "Network round-trip latency to cloud endpoint"
+        },
+        "uptime_seconds": {
+            "type": "integer",
+            "description": "Seconds since last robot service restart"
+        }
+    },
+    "required": [
+        "timestamp",
+        "robot_id"
+    ]
+}

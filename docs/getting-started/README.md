@@ -47,8 +47,8 @@ Azure subscription with Contributor + User Access Administrator roles, GPU quota
 
 ## 📚 Related Documentation
 
-| Resource                                                      | Description                             |
-|---------------------------------------------------------------|-----------------------------------------|
-| [Contributing Guide](../contributing/README.md)               | Development workflow and code standards |
-| [Deployment Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md)                    | Detailed deployment reference           |
-| [Cost Considerations](../contributing/cost-considerations.md) | Pricing breakdown and optimization      |
+| Resource                                                                                          | Description                             |
+|---------------------------------------------------------------------------------------------------|-----------------------------------------|
+| [Contributing Guide](../contributing/README.md)                                                   | Development workflow and code standards |
+| [Deployment Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md) | Detailed deployment reference           |
+| [Cost Considerations](../contributing/cost-considerations.md)                                     | Pricing breakdown and optimization      |

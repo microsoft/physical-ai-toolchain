@@ -31,18 +31,21 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 
 | Directory | Purpose |
 | --- | --- |
-| `deploy/000-prerequisites/` | Azure subscription setup, provider registration |
-| `deploy/001-iac/` | Terraform infrastructure (AKS, networking, storage, identity) |
-| `deploy/001-iac/vpn/` | Point-to-site VPN for private cluster access |
-| `deploy/002-setup/` | Post-deploy shell scripts (Helm charts, AzureML, OSMO) |
-| `src/training/` | Python training package (built as wheel via hatchling) |
-| `scripts/` | AzureML and OSMO job submission scripts |
-| `workflows/` | Job definition templates (AzureML YAML, OSMO workflow YAML) |
+| `infrastructure/terraform/prerequisites/` | Azure subscription setup, provider registration |
+| `infrastructure/terraform/` | Terraform infrastructure (AKS, networking, storage, identity) |
+| `infrastructure/terraform/vpn/` | Point-to-site VPN for private cluster access |
+| `infrastructure/setup/` | Post-deploy shell scripts (Helm charts, AzureML, OSMO) |
+| `training/rl/` | RL training package (SKRL, RSL-RL, Isaac Lab) |
+| `training/il/` | IL training package (LeRobot ACT/Diffusion) |
+| `evaluation/sil/` | Software-in-the-loop evaluation scripts and workflows |
+| `data-management/viewer/` | Dataset analysis tool (FastAPI backend + React frontend) |
+| `data-pipeline/capture/` | Recording configuration and data capture |
+| `shared/lib/` | Cross-domain shared shell libraries (canonical location) |
 | `external/IsaacLab/` | NVIDIA IsaacLab (cloned for IntelliSense only, not built locally) |
 | `docs/contributing/` | Architecture, roadmap, style guides, contribution workflow |
 
 * Version: managed by release-please across `pyproject.toml` and `package.json`
-* Python: >=3.11, managed by `uv` (not pip); `hatchling` builds `src/training` into wheel
+* Python: >=3.11, managed by `uv` (not pip); `hatchling` builds `training/rl` into wheel
 * Linting: `npm run lint:md` (markdownlint-cli2), `npm run spell-check` (cspell), `npm run lint:yaml` (yaml-lint)
 
 ## Terraform Conventions
@@ -63,8 +66,8 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 Detailed template and structure in `.github/instructions/shell-scripts.instructions.md`.
 
 * Two Terraform output libraries exist (do NOT mix them):
-  * `deploy/002-setup/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy scripts
-  * `scripts/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts
+  * `shared/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy and submission scripts
+  * `shared/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts (symlinked at `scripts/lib/terraform-outputs.sh`)
 * `.env.local` load order: `common.sh` loads `.env.local` BEFORE `defaults.conf`; override defaults via `${VAR:-default}` pattern
 * Idempotent K8s operations: `kubectl create --dry-run=client -o yaml | kubectl apply -f -`
 * Every script supports `--config-preview` (print configuration and exit without changes)
@@ -88,17 +91,17 @@ Four ordered deployment steps:
 
 | Step | Directory | Description |
 | --- | --- | --- |
-| 1 | `deploy/000-prerequisites/` | Azure subscription init, provider registration |
-| 2 | `deploy/001-iac/` | Terraform infrastructure (AKS, networking, storage, identity) |
-| 3 | `deploy/001-iac/vpn/` | Point-to-site VPN (required for private clusters before any kubectl) |
-| 4 | `deploy/002-setup/` | Helm charts, AzureML extension, OSMO control plane and backend |
+| 1 | `infrastructure/terraform/prerequisites/` | Azure subscription init, provider registration |
+| 2 | `infrastructure/terraform/` | Terraform infrastructure (AKS, networking, storage, identity) |
+| 3 | `infrastructure/terraform/vpn/` | Point-to-site VPN (required for private clusters before any kubectl) |
+| 4 | `infrastructure/setup/` | Helm charts, AzureML extension, OSMO control plane and backend |
 
 * Default is private AKS — VPN step (3) is REQUIRED before any kubectl or Helm commands unless `should_enable_public_access = true`
 * Three network modes: Full Private (default), Hybrid, Full Public
-* Always run `source deploy/000-prerequisites/az-sub-init.sh` before any `terraform` or deploy script commands
+* Always run `source infrastructure/terraform/prerequisites/az-sub-init.sh` before any `terraform` or deploy script commands
   * Exports `ARM_SUBSCRIPTION_ID` and validates Azure CLI authentication
   * If the user has not done `az login`, the script requires interactive input
-* Deploy scripts (`002-setup/`) must run in numeric order (01 → 02 → 03 → 04)
+* Deploy scripts (`infrastructure/setup/`) must run in numeric order (01 → 02 → 03 → 04)
 * Each deploy script is idempotent and safe to re-run
 
 ## OSMO Platform
@@ -131,7 +134,7 @@ AzureML runs on Arc-connected AKS clusters via the AzureML Kubernetes extension.
 * Job YAML schema: `$schema: .../commandJob.schema.json`
   * No empty strings in YAML values — use sentinel values (`auto`, `none`, `placeholder`)
   * Submit with runtime overrides: `az ml job create --file <yaml> --set "display_name=..." --set "environment_variables.KEY=value"`
-* Code snapshot: `src/` directory uploaded to AzureML; exclusions controlled by `src/.amlignore`
+* Code snapshot: each domain's workflow directory uploaded to AzureML via `code: .` relative path
 * Identity chain: Terraform-created managed identity → federated credentials → K8s service accounts (`azureml:default`, `azureml:training`)
 * Model validation mode: `mode: download` (NOT `ro_mount`) — workaround for workload identity auth failures in `data-capability` sidecar
 * Multi-node: Volcano scheduler installed by AzureML extension when `installVolcano: true`
@@ -174,17 +177,17 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | File Type | Validation Commands |
 | --- | --- |
 | `*.md` | `npm run lint:md`, `npm run spell-check`, `npm run format:tables` |
-| `*.tf`, `*.tfvars` | `terraform fmt -check`, `terraform validate`, `terraform plan` |
+| `*.tf`, `*.tfvars` | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan` |
 | `*.sh` | `shellcheck <file>` |
 | `*.ps1` | `npm run lint:ps` |
 | `*.yml` (GitHub Actions) | `npm run lint:yaml` |
-| `src/dataviewer/frontend/**` | `cd src/dataviewer/frontend && npm run validate` (type-check + lint + test) |
-| `src/dataviewer/backend/**` | `cd src/dataviewer/backend && pytest` and `ruff check src/` |
+| `data-management/viewer/frontend/**` | `cd data-management/viewer/frontend && npm run validate` (type-check + lint + test) |
+| `data-management/viewer/backend/**` | `cd data-management/viewer/backend && pytest` and `ruff check src/` |
 | Any file | `npm run spell-check` |
 
 ### Linting
 
-* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` in sequence
+* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` in sequence
 * `npm run spell-check` and `npm run format:tables` are NOT included in `lint:all` — run them separately
 * `npm run lint:md:fix` and `npm run format:tables` auto-fix markdown issues
 * `.copilot-tracking/` is excluded from markdown linting via `.markdownlint-cli2.jsonc`
@@ -193,23 +196,19 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 Terraform validation is per-directory — each deployment directory has its own provider configuration and state:
 
-* `terraform fmt -check -recursive deploy/` — formatting compliance (recursive across all directories)
-* `terraform validate` — run inside each deployment directory individually:
-  * `deploy/001-iac/`
-  * `deploy/001-iac/vpn/`
-  * `deploy/001-iac/dns/`
-  * `deploy/001-iac/automation/`
-* `terraform plan -var-file=terraform.tfvars` — validates configuration against provider APIs (requires `source deploy/000-prerequisites/az-sub-init.sh` first)
+* `npm run lint:tf` — TFLint recursive linting across all directories
+* `npm run lint:tf:validate` — `terraform fmt -check -recursive` + `terraform init -backend=false && terraform validate` per deployment directory (`.`, `vpn/`, `dns/`, `automation/`)
+* `terraform plan -var-file=terraform.tfvars` — validates configuration against provider APIs (requires `source infrastructure/terraform/prerequisites/az-sub-init.sh` first)
+* CI: `.github/workflows/terraform-validation.yml` reusable workflow runs `lint:tf:validate` with `soft-fail: true`
 
 ### Shell Scripts
 
-* `shellcheck deploy/**/*.sh scripts/**/*.sh` — static analysis for deploy and submission scripts
-* Requires zsh or bash with `shopt -s globstar`; alternatively use `find deploy scripts -name '*.sh' -exec shellcheck {} +`
-* Deploy scripts (`deploy/002-setup/`) support `--config-preview` — prints configuration and exits without making changes; use for dry-run validation after modifying any deploy script
+* `shellcheck infrastructure/setup/*.sh training/**/*.sh evaluation/**/*.sh` — static analysis for deploy and submission scripts
+* Deploy scripts (`infrastructure/setup/`) support `--config-preview` — prints configuration and exits without making changes; use for dry-run validation after modifying any deploy script
 
 ### Pester Tests
 
-* `npm run test:ps` — runs Pester tests in `scripts/tests/` covering linting helpers and security checks
+* `npm run test:ps` — runs Pester tests in `shared/ci/tests/` covering linting helpers and security checks
 
 ## Contributing References
 

@@ -18,16 +18,16 @@ Infrastructure code follows strict conventions for consistency, security, and ma
 
 ```bash
 # Format all Terraform files before committing
-terraform fmt -recursive deploy/
+terraform fmt -recursive infrastructure/terraform/
 
-# Validate syntax
-terraform validate deploy/001-iac/
+# Validate formatting and syntax across all deployment directories
+npm run lint:tf:validate
 ```
 
 ### Variable Naming
 
 * Use descriptive snake_case: `gpu_node_pool_vm_size` not `vm_sku`
-* Prefix booleans with `enable_` or `is_`: `enable_private_endpoints`, `is_production`
+* Prefix booleans with `should_`: `should_enable_private_endpoints`, `should_deploy_vpn`
 * Group related variables with prefixes: `aks_cluster_name`, `aks_node_count`, `aks_version`
 
 ### Module Structure
@@ -140,7 +140,7 @@ Include header documentation:
 shellcheck deploy/**/*.sh scripts/**/*.sh
 
 # Check specific script
-shellcheck -x deploy/002-setup/01-deploy-robotics-charts.sh
+shellcheck -x infrastructure/setup/01-deploy-robotics-charts.sh
 ```
 
 ### Configuration Management

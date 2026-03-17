@@ -91,10 +91,19 @@ jobs:
               continue
             }
 
-            # Map source to test: scripts/security/Foo.ps1 -> scripts/tests/security/Foo.Tests.ps1
-            if ($file -match '^scripts/(.+)\.psm?1$') {
+            # Map source to test: shared/ci/security/Foo.ps1 -> shared/ci/tests/security/Foo.Tests.ps1
+            if ($file -match '^shared/ci/(.+)\.psm?1$') {
               $relativePath = $Matches[1]
-              $testFile = "scripts/tests/$relativePath.Tests.ps1"
+              $testFile = "shared/ci/tests/$relativePath.Tests.ps1"
+              if (Test-Path $testFile) {
+                $testPaths += $testFile
+              }
+            }
+
+            # Map scripts/lib/ source to test: scripts/lib/Foo.ps1 -> shared/ci/tests/lib/Foo.Tests.ps1
+            if ($file -match '^scripts/lib/(.+)\.psm?1$') {
+              $relativePath = $Matches[1]
+              $testFile = "shared/ci/tests/lib/$relativePath.Tests.ps1"
               if (Test-Path $testFile) {
                 $testPaths += $testFile
               }
@@ -137,7 +146,7 @@ jobs:
           }
 
           try {
-            $config = & scripts/tests/pester.config.ps1 -CI @configParams
+            $config = & shared/ci/tests/pester.config.ps1 -CI @configParams
             $config.Run.Exit = $false
             $result = Invoke-Pester -Configuration $config
             $global:LASTEXITCODE = 0
@@ -202,13 +211,13 @@ jobs:
                 $covered = [int]$_.covered
                 if (($missed + $covered) -gt 0) { [math]::Round(($covered / ($missed + $covered)) * 100, 2) } else { 0 }
               }
-            
+
             # Matches CoveragePercentTarget in pester.config.ps1
             $threshold = 80
-            
+
             Write-Host "Line coverage: $lineRate%"
             Write-Host "Threshold: $threshold%"
-            
+
             if ($lineRate -lt $threshold) {
               Write-Warning "Coverage $lineRate% is below threshold $threshold%"
               exit 1
@@ -226,7 +235,7 @@ jobs:
         run: |
           $failed = '${{ steps.pester.outputs.pester-failed }}'
           $softFail = '${{ inputs.soft-fail }}'
-          
+
           if ($failed -eq 'true' -and $softFail -ne 'true') {
             Write-Error "Pester tests failed. Review test results artifact for details."
             exit 1

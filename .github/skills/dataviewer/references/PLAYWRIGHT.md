@@ -111,7 +111,7 @@ Use Playwright's `browser_evaluate` or `browser_navigate` for direct API inspect
 
 ## Keyboard Shortcuts
 
-The app registers keyboard shortcuts via the `useKeyboardShortcuts` hook. Check `src/dataviewer/frontend/src/hooks/use-keyboard-shortcuts.ts` for current bindings.
+The app registers keyboard shortcuts via the `useKeyboardShortcuts` hook. Check `data-management/viewer/frontend/src/hooks/use-keyboard-shortcuts.ts` for current bindings.
 
 ## State Architecture
 
