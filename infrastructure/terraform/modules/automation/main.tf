@@ -11,7 +11,7 @@ locals {
   location                = coalesce(var.location, var.resource_group.location)
 
   # Construct schedule start_time: tomorrow at the configured time (RFC3339 format)
-  tomorrow_date = formatdate("YYYY-MM-DD", timeadd(timestamp(), "24h"))
+  tomorrow_date = formatdate("YYYY-MM-DD", timeadd(plantimestamp(), "24h"))
   schedule_time = "${local.tomorrow_date}T${var.schedule_config.start_time}:00+00:00"
 }
 
