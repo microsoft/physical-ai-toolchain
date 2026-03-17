@@ -122,6 +122,15 @@ jobs:
     permissions:
       contents: read
 
+  # Terraform format and validate checks
+  terraform-validation:
+    name: Terraform Validation
+    uses: ./.github/workflows/terraform-validation.yml
+    with:
+      soft-fail: true
+    permissions:
+      contents: read
+
   # CodeQL security analysis
   codeql-analysis:
     name: CodeQL Analysis
@@ -147,6 +156,7 @@ jobs:
       - pytest-tests
       - python-lint
       - terraform-lint
+      - terraform-validation
       - codeql-analysis
     name: Release Please
     runs-on: ubuntu-latest

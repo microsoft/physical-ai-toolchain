@@ -177,7 +177,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | File Type | Validation Commands |
 | --- | --- |
 | `*.md` | `npm run lint:md`, `npm run spell-check`, `npm run format:tables` |
-| `*.tf`, `*.tfvars` | `terraform fmt -check`, `terraform validate`, `terraform plan` |
+| `*.tf`, `*.tfvars` | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan` |
 | `*.sh` | `shellcheck <file>` |
 | `*.ps1` | `npm run lint:ps` |
 | `*.yml` (GitHub Actions) | `npm run lint:yaml` |
@@ -196,13 +196,10 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 Terraform validation is per-directory — each deployment directory has its own provider configuration and state:
 
-* `terraform fmt -check -recursive infrastructure/terraform/` — formatting compliance (recursive across all directories)
-* `terraform validate` — run inside each deployment directory individually:
-  * `infrastructure/terraform/`
-  * `infrastructure/terraform/vpn/`
-  * `infrastructure/terraform/dns/`
-  * `infrastructure/terraform/automation/`
+* `npm run lint:tf` — TFLint recursive linting across all directories
+* `npm run lint:tf:validate` — `terraform fmt -check -recursive` + `terraform init -backend=false && terraform validate` per deployment directory (`.`, `vpn/`, `dns/`, `automation/`)
 * `terraform plan -var-file=terraform.tfvars` — validates configuration against provider APIs (requires `source infrastructure/terraform/prerequisites/az-sub-init.sh` first)
+* CI: `.github/workflows/terraform-validation.yml` reusable workflow runs `lint:tf:validate` with `soft-fail: true`
 
 ### Shell Scripts
 
