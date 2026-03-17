@@ -1,19 +1,13 @@
 """Tests for training metrics utility helpers."""
 
 import builtins
-import importlib.util
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import load_training_module
 
-ROOT = Path(__file__).resolve().parents[2]
-METRICS_PATH = ROOT / "training" / "utils" / "metrics.py"
-SPEC = importlib.util.spec_from_file_location("metrics_under_test", METRICS_PATH)
-assert SPEC is not None and SPEC.loader is not None
-metrics_module = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(metrics_module)
+metrics_module = load_training_module("metrics_under_test", "training/utils/metrics.py")
 SystemMetricsCollector = metrics_module.SystemMetricsCollector
 
 

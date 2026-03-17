@@ -145,7 +145,7 @@ def _extract_from_value(name: str, value: int | float | Any, metrics: dict[str, 
             metrics[name] = float(value[0])
         else:
             metrics[name] = float(value)
-    except (ValueError, TypeError, AttributeError, IndexError) as exc:
+    except (ValueError, TypeError, AttributeError, IndexError, RuntimeError) as exc:
         _LOGGER.debug("Could not convert %s to float: %s", name, exc)
 
 
