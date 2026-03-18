@@ -6,35 +6,24 @@ absl-py==2.4.0
 alembic==1.18.4
     # via mlflow
 annotated-doc==0.0.4
-    # via
-    #   fastapi
-    #   typer
+    # via fastapi
 annotated-types==0.7.0
     # via pydantic
 anyio==4.12.1
-    # via
-    #   httpx
-    #   mcp
-    #   sse-starlette
-    #   starlette
+    # via starlette
 asgiref==3.11.1
     # via opentelemetry-instrumentation-asgi
-async-timeout==5.0.1
-    # via redis
 attrs==25.4.0
     # via
-    #   cyclopts
     #   jsonschema
     #   referencing
-authlib==1.6.9
-    # via fastmcp
 azure-ai-ml==1.32.0
-    # via robotics-training (training/rl/pyproject.toml)
+    # via robotics-training-rl (training/rl/pyproject.toml)
 azure-common==1.1.28
     # via azure-ai-ml
 azure-core==1.38.3
     # via
-    #   robotics-training (training/rl/pyproject.toml)
+    #   robotics-training-rl (training/rl/pyproject.toml)
     #   azure-ai-ml
     #   azure-core-tracing-opentelemetry
     #   azure-identity
@@ -50,7 +39,7 @@ azure-core-tracing-opentelemetry==1.0.0b12
     # via azure-monitor-opentelemetry
 azure-identity==1.25.3
     # via
-    #   robotics-training (training/rl/pyproject.toml)
+    #   robotics-training-rl (training/rl/pyproject.toml)
     #   azure-monitor-opentelemetry-exporter
     #   azureml-mlflow
 azure-mgmt-core==1.6.0
@@ -61,35 +50,26 @@ azure-monitor-opentelemetry==1.8.6
     # via azure-ai-ml
 azure-monitor-opentelemetry-exporter==1.0.0b48
     # via azure-monitor-opentelemetry
-azure-storage-blob==12.28.0
+azure-storage-blob==12.27.1
     # via
-    #   robotics-training (training/rl/pyproject.toml)
+    #   robotics-training-rl (training/rl/pyproject.toml)
     #   azure-ai-ml
     #   azure-storage-file-datalake
     #   azureml-mlflow
-azure-storage-file-datalake==12.23.0
+azure-storage-file-datalake==12.22.0
     # via azure-ai-ml
 azure-storage-file-share==12.24.0
     # via azure-ai-ml
 azureml-mlflow==1.62.0
-    # via robotics-training (training/rl/pyproject.toml)
-backports-tarfile==1.2.0
-    # via jaraco-context
-beartype==0.22.9
-    # via
-    #   py-key-value-aio
-    #   py-key-value-shared
+    # via robotics-training-rl (training/rl/pyproject.toml)
 blinker==1.9.0
     # via flask
-cachetools==7.0.5
+cachetools==6.2.6
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-    #   py-key-value-aio
 certifi==2026.2.25
     # via
-    #   httpcore
-    #   httpx
     #   msrest
     #   requests
 cffi==2.0.0
@@ -100,26 +80,18 @@ click==8.3.1
     # via
     #   flask
     #   mlflow-skinny
-    #   typer
     #   uvicorn
 cloudpickle==3.1.2
     # via
     #   gymnasium
     #   mlflow-skinny
-    #   pydocket
     #   tensordict
 colorama==0.4.6
-    # via
-    #   azure-ai-ml
-    #   click
-    #   tqdm
+    # via azure-ai-ml
 contourpy==1.3.3
     # via matplotlib
-croniter==6.2.2
-    # via pydocket
-cryptography==46.0.5
+cryptography==45.0.7
     # via
-    #   authlib
     #   azure-identity
     #   azure-storage-blob
     #   azure-storage-file-share
@@ -128,36 +100,22 @@ cryptography==46.0.5
     #   mlflow
     #   msal
     #   pyjwt
+cuda-bindings==12.9.4
+    # via torch
+cuda-pathfinder==1.4.3
+    # via cuda-bindings
 cycler==0.12.1
     # via matplotlib
-cyclopts==4.10.0
-    # via fastmcp
 databricks-sdk==0.100.0
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-diskcache==5.6.3
-    # via py-key-value-aio
-dnspython==2.8.0
-    # via email-validator
 docker==7.1.0
     # via mlflow
-docstring-parser==0.17.0
-    # via cyclopts
-docutils==0.22.4
-    # via rich-rst
-email-validator==2.3.0
-    # via pydantic
-exceptiongroup==1.3.1
-    # via fastmcp
-fakeredis==2.34.1
-    # via pydocket
 farama-notifications==0.0.4
     # via gymnasium
 fastapi==0.135.1
     # via mlflow-skinny
-fastmcp==3.1.1
-    # via mlflow
 filelock==3.25.2
     # via torch
 flask==3.1.3
@@ -190,29 +148,20 @@ greenlet==3.3.2
     # via sqlalchemy
 grpcio==1.78.0
     # via tensorboard
+gunicorn==23.0.0
+    # via mlflow
 gymnasium==1.2.3
     # via skrl
 h11==0.16.0
-    # via
-    #   httpcore
-    #   uvicorn
-httpcore==1.0.9
-    # via httpx
-httpx==0.28.1
-    # via
-    #   fastmcp
-    #   mcp
-httpx-sse==0.4.3
-    # via mcp
+    # via uvicorn
+huey==2.6.0
+    # via mlflow
 idna==3.11
     # via
     #   anyio
-    #   email-validator
-    #   httpx
     #   requests
 importlib-metadata==8.7.1
     # via
-    #   keyring
     #   mlflow-skinny
     #   opentelemetry-api
     #   tensordict
@@ -225,12 +174,6 @@ isodate==0.7.2
     #   msrest
 itsdangerous==2.2.0
     # via flask
-jaraco-classes==3.4.0
-    # via keyring
-jaraco-context==6.1.1
-    # via keyring
-jaraco-functools==4.4.0
-    # via keyring
 jinja2==3.1.6
     # via
     #   flask
@@ -239,62 +182,42 @@ joblib==1.5.3
     # via scikit-learn
 jsonpickle==4.1.1
     # via azureml-mlflow
-jsonref==1.1.0
-    # via fastmcp
 jsonschema==4.26.0
-    # via
-    #   azure-ai-ml
-    #   mcp
-jsonschema-path==0.4.5
-    # via fastmcp
+    # via azure-ai-ml
 jsonschema-specifications==2025.9.1
     # via jsonschema
-keyring==25.7.0
-    # via py-key-value-aio
 kiwisolver==1.5.0
     # via matplotlib
-lupa==2.6
-    # via fakeredis
 mako==1.3.10
     # via alembic
 markdown==3.10.2
     # via tensorboard
-markdown-it-py==4.0.0
-    # via rich
 markupsafe==3.0.3
     # via
     #   flask
     #   jinja2
     #   mako
     #   werkzeug
-marshmallow==4.2.2
+marshmallow==3.26.2
     # via
-    #   robotics-training (training/rl/pyproject.toml)
+    #   robotics-training-rl (training/rl/pyproject.toml)
     #   azure-ai-ml
 matplotlib==3.10.8
     # via mlflow
-mcp==1.26.0
-    # via fastmcp
-mdurl==0.1.2
-    # via markdown-it-py
 ml-dtypes==0.5.4
     # via
     #   onnx
     #   onnx-ir
     #   onnxscript
-mlflow==3.10.1
-    # via robotics-training (training/rl/pyproject.toml)
-mlflow-skinny==3.10.1
+mlflow==3.9.0
+    # via robotics-training-rl (training/rl/pyproject.toml)
+mlflow-skinny==3.9.0
     # via
     #   azureml-mlflow
     #   mlflow
-mlflow-tracing==3.10.1
+mlflow-tracing==3.9.0
     # via mlflow
-more-itertools==10.8.0
-    # via
-    #   jaraco-classes
-    #   jaraco-functools
-mpmath==1.4.1
+mpmath==1.3.0
     # via sympy
 msal==1.35.1
     # via
@@ -310,7 +233,7 @@ networkx==3.6.1
     # via torch
 numpy==2.4.3
     # via
-    #   robotics-training (training/rl/pyproject.toml)
+    #   robotics-training-rl (training/rl/pyproject.toml)
     #   contourpy
     #   gymnasium
     #   matplotlib
@@ -323,11 +246,51 @@ numpy==2.4.3
     #   rsl-rl-lib
     #   scikit-learn
     #   scipy
+    #   skops
     #   tensorboard
     #   tensordict
     #   torchvision
+nvidia-cublas-cu12==12.8.4.1
+    # via
+    #   nvidia-cudnn-cu12
+    #   nvidia-cusolver-cu12
+    #   torch
+nvidia-cuda-cupti-cu12==12.8.90
+    # via torch
+nvidia-cuda-nvrtc-cu12==12.8.93
+    # via torch
+nvidia-cuda-runtime-cu12==12.8.90
+    # via torch
+nvidia-cudnn-cu12==9.10.2.21
+    # via torch
+nvidia-cufft-cu12==11.3.3.83
+    # via torch
+nvidia-cufile-cu12==1.13.1.3
+    # via torch
+nvidia-curand-cu12==10.3.9.90
+    # via torch
+nvidia-cusolver-cu12==11.7.3.90
+    # via torch
+nvidia-cusparse-cu12==12.5.8.93
+    # via
+    #   nvidia-cusolver-cu12
+    #   torch
+nvidia-cusparselt-cu12==0.7.1
+    # via torch
 nvidia-ml-py==13.590.48
     # via pynvml
+nvidia-nccl-cu12==2.27.5
+    # via torch
+nvidia-nvjitlink-cu12==12.8.93
+    # via
+    #   nvidia-cufft-cu12
+    #   nvidia-cusolver-cu12
+    #   nvidia-cusparse-cu12
+    #   torch
+nvidia-nvshmem-cu12==3.4.5
+    # via torch
+nvidia-nvtx-cu12==12.8.90
+    # via torch
 oauthlib==3.3.1
     # via requests-oauthlib
 onnx==1.20.1
@@ -339,9 +302,7 @@ onnx-ir==0.2.0
     # via onnxscript
 onnxscript==0.6.2
     # via rsl-rl-lib
-openapi-pydantic==0.5.1
-    # via fastmcp
-opentelemetry-api==1.40.0
+opentelemetry-api==1.39.0
     # via
     #   azure-core-tracing-opentelemetry
     #   azure-monitor-opentelemetry-exporter
@@ -360,8 +321,7 @@ opentelemetry-api==1.40.0
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-    #   pydocket
-opentelemetry-instrumentation==0.61b0
+opentelemetry-instrumentation==0.60b0
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-dbapi
@@ -373,25 +333,25 @@ opentelemetry-instrumentation==0.61b0
     #   opentelemetry-instrumentation-urllib
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
-opentelemetry-instrumentation-asgi==0.61b0
+opentelemetry-instrumentation-asgi==0.60b0
     # via opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-dbapi==0.61b0
+opentelemetry-instrumentation-dbapi==0.60b0
     # via opentelemetry-instrumentation-psycopg2
-opentelemetry-instrumentation-django==0.61b0
+opentelemetry-instrumentation-django==0.60b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-fastapi==0.61b0
+opentelemetry-instrumentation-fastapi==0.60b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-flask==0.61b0
+opentelemetry-instrumentation-flask==0.60b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-psycopg2==0.61b0
+opentelemetry-instrumentation-psycopg2==0.60b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-requests==0.61b0
+opentelemetry-instrumentation-requests==0.60b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib==0.61b0
+opentelemetry-instrumentation-urllib==0.60b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib3==0.61b0
+opentelemetry-instrumentation-urllib3==0.60b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-wsgi==0.61b0
+opentelemetry-instrumentation-wsgi==0.60b0
     # via
     #   opentelemetry-instrumentation-django
     #   opentelemetry-instrumentation-flask
@@ -401,14 +361,14 @@ opentelemetry-proto==1.40.0
     #   mlflow-tracing
 opentelemetry-resource-detector-azure==0.1.5
     # via azure-monitor-opentelemetry
-opentelemetry-sdk==1.40.0
+opentelemetry-sdk==1.39.0
     # via
     #   azure-monitor-opentelemetry
     #   azure-monitor-opentelemetry-exporter
     #   mlflow-skinny
     #   mlflow-tracing
     #   opentelemetry-resource-detector-azure
-opentelemetry-semantic-conventions==0.61b0
+opentelemetry-semantic-conventions==0.60b0
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-asgi
@@ -421,7 +381,7 @@ opentelemetry-semantic-conventions==0.61b0
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
-opentelemetry-util-http==0.61b0
+opentelemetry-util-http==0.60b0
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-django
@@ -433,10 +393,10 @@ opentelemetry-util-http==0.61b0
     #   opentelemetry-instrumentation-wsgi
 orjson==3.11.7
     # via tensordict
-packaging==26.0
+packaging==25.0
     # via
-    #   robotics-training (training/rl/pyproject.toml)
-    #   fastmcp
+    #   robotics-training-rl (training/rl/pyproject.toml)
+    #   gunicorn
     #   marshmallow
     #   matplotlib
     #   mlflow-skinny
@@ -444,25 +404,20 @@ packaging==26.0
     #   onnxscript
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-flask
+    #   skops
     #   skrl
     #   tensorboard
     #   tensordict
-pandas==3.0.1
+pandas==2.3.3
     # via mlflow
-pathable==0.5.0
-    # via jsonschema-path
-pathvalidate==3.3.1
-    # via py-key-value-aio
 pillow==12.1.1
     # via
     #   matplotlib
     #   tensorboard
     #   torchvision
-platformdirs==4.9.4
-    # via fastmcp
-prometheus-client==0.24.1
-    # via pydocket
-protobuf==7.34.0
+prettytable==3.17.0
+    # via skops
+protobuf==6.33.6
     # via
     #   databricks-sdk
     #   mlflow-skinny
@@ -472,20 +427,12 @@ protobuf==7.34.0
     #   tensorboard
 psutil==7.2.2
     # via
-    #   robotics-training (training/rl/pyproject.toml)
+    #   robotics-training-rl (training/rl/pyproject.toml)
     #   azure-monitor-opentelemetry-exporter
-py-key-value-aio==0.4.4
-    # via
-    #   fastmcp
-    #   pydocket
-py-key-value-shared==0.3.0
-    # via py-key-value-aio
-pyarrow==23.0.1
+pyarrow==22.0.0
     # via mlflow
 pyasn1==0.6.3
-    # via
-    #   pyasn1-modules
-    #   rsa
+    # via pyasn1-modules
 pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.0
@@ -493,80 +440,45 @@ pycparser==3.0
 pydantic==2.12.5
     # via
     #   fastapi
-    #   fastmcp
-    #   mcp
     #   mlflow-skinny
     #   mlflow-tracing
-    #   openapi-pydantic
-    #   pydantic-settings
-pydantic-core==2.42.0
+pydantic-core==2.41.5
     # via pydantic
-pydantic-settings==2.13.1
-    # via mcp
 pydash==8.0.6
     # via azure-ai-ml
-pydocket==0.18.2
-    # via fastmcp
-pygments==2.19.2
-    # via rich
 pyjwt==2.12.1
     # via
-    #   azure-ai-ml
-    #   mcp
-    #   msal
     #   robotics-training-rl (training/rl/pyproject.toml)
+    #   azure-ai-ml
+    #   msal
 pynvml==13.0.1
-    # via robotics-training (training/rl/pyproject.toml)
+    # via robotics-training-rl (training/rl/pyproject.toml)
 pyparsing==3.3.2
     # via matplotlib
 pyperclip==1.11.0
-    # via
-    #   robotics-training (training/rl/pyproject.toml)
-    #   fastmcp
+    # via robotics-training-rl (training/rl/pyproject.toml)
 python-dateutil==2.9.0.post0
     # via
     #   azureml-mlflow
-    #   croniter
     #   graphene
     #   matplotlib
     #   pandas
     #   strictyaml
 python-dotenv==1.2.2
-    # via
-    #   fastmcp
-    #   mlflow-skinny
-    #   pydantic-settings
-python-json-logger==4.0.0
-    # via pydocket
-python-multipart==0.0.22
-    # via mcp
-pytz==2026.1.post1
+    # via mlflow-skinny
+pytz==2025.2
     # via
     #   azureml-mlflow
-    #   croniter
     #   pandas
 pyvers==0.2.2
     # via tensordict
-pywin32==311
-    # via
-    #   docker
-    #   mcp
-pywin32-ctypes==0.2.3
-    # via keyring
 pyyaml==6.0.3
     # via
     #   azure-ai-ml
-    #   jsonschema-path
     #   mlflow-skinny
-redis==7.3.0
-    # via
-    #   fakeredis
-    #   py-key-value-aio
-    #   pydocket
 referencing==0.37.0
     # via
     #   jsonschema
-    #   jsonschema-path
     #   jsonschema-specifications
 requests==2.32.5
     # via
@@ -579,54 +491,39 @@ requests==2.32.5
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via msrest
-rich==14.3.3
-    # via
-    #   cyclopts
-    #   fastmcp
-    #   pydocket
-    #   rich-rst
-    #   typer
-rich-rst==1.3.2
-    # via cyclopts
 rpds-py==0.30.0
     # via
     #   jsonschema
     #   referencing
-rsa==4.9.1
-    # via google-auth
 rsl-rl-lib==5.0.1
-    # via robotics-training (training/rl/pyproject.toml)
+    # via robotics-training-rl (training/rl/pyproject.toml)
 scikit-learn==1.8.0
-    # via mlflow
+    # via
+    #   mlflow
+    #   skops
 scipy==1.17.1
     # via
     #   mlflow
     #   scikit-learn
+    #   skops
 setuptools==82.0.1
     # via tensorboard
-shellingham==1.5.4
-    # via typer
 six==1.17.0
     # via python-dateutil
+skops==0.13.0
+    # via mlflow
 skrl==1.4.3
-    # via robotics-training (training/rl/pyproject.toml)
+    # via robotics-training-rl (training/rl/pyproject.toml)
 smmap==5.0.3
     # via gitdb
-sortedcontainers==2.4.0
-    # via fakeredis
 sqlalchemy==2.0.48
     # via
     #   alembic
     #   mlflow
 sqlparse==0.5.5
     # via mlflow-skinny
-sse-starlette==3.3.2
-    # via mcp
 starlette==0.52.1
-    # via
-    #   fastapi
-    #   mcp
-    #   sse-starlette
+    # via fastapi
 strictyaml==1.7.3
     # via azure-ai-ml
 sympy==1.14.0
@@ -639,7 +536,7 @@ tensorboard-data-server==0.7.2
     # via tensorboard
 tensordict==0.11.0
     # via
-    #   robotics-training (training/rl/pyproject.toml)
+    #   robotics-training-rl (training/rl/pyproject.toml)
     #   rsl-rl-lib
 threadpoolctl==3.6.0
     # via scikit-learn
@@ -654,8 +551,8 @@ tqdm==4.67.3
     # via
     #   azure-ai-ml
     #   skrl
-typer==0.24.1
-    # via pydocket
+triton==3.6.0
+    # via torch
 typing-extensions==4.15.0
     # via
     #   alembic
@@ -666,12 +563,10 @@ typing-extensions==4.15.0
     #   azure-storage-blob
     #   azure-storage-file-datalake
     #   azure-storage-file-share
-    #   exceptiongroup
     #   fastapi
     #   graphene
     #   grpcio
     #   gymnasium
-    #   mcp
     #   mlflow-skinny
     #   onnx
     #   onnx-ir
@@ -679,11 +574,9 @@ typing-extensions==4.15.0
     #   opentelemetry-api
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-    #   py-key-value-shared
     #   pydantic
     #   pydantic-core
     #   pydash
-    #   pydocket
     #   referencing
     #   sqlalchemy
     #   starlette
@@ -692,34 +585,23 @@ typing-extensions==4.15.0
 typing-inspection==0.4.2
     # via
     #   fastapi
-    #   mcp
     #   pydantic
-    #   pydantic-settings
 tzdata==2025.3
-    # via
-    #   pandas
-    #   pydocket
-uncalled-for==0.2.0
-    # via pydocket
+    # via pandas
 urllib3==2.6.3
     # via
     #   docker
     #   requests
 uvicorn==0.42.0
-    # via
-    #   fastmcp
-    #   mcp
-    #   mlflow-skinny
-waitress==3.0.2
-    # via mlflow
-websockets==16.0
-    # via fastmcp
+    # via mlflow-skinny
+wcwidth==0.6.0
+    # via prettytable
 werkzeug==3.1.6
     # via
     #   flask
     #   flask-cors
     #   tensorboard
-wrapt==2.1.2
+wrapt==1.17.3
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-dbapi
