@@ -482,7 +482,7 @@ py-key-value-shared==0.3.0
     # via py-key-value-aio
 pyarrow==21.0.0
     # via mlflow
-pyasn1==0.6.2
+pyasn1==0.6.3
     # via
     #   pyasn1-modules
     #   rsa
