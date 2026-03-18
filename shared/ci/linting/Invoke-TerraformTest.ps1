@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
 
@@ -152,7 +152,7 @@ function Invoke-TerraformTestCore {
 
         Push-Location $moduleDir
         try {
-            $initOutput = & terraform init -backend=false -input=false -no-color 2>&1
+            $null = & terraform init -backend=false -input=false -no-color 2>&1
             if ($LASTEXITCODE -ne 0) {
                 $totalErrors++
                 $moduleResults += @{
@@ -167,7 +167,6 @@ function Invoke-TerraformTestCore {
             }
 
             $testOutput = & terraform test -json -no-color 2>&1
-            $testExitCode = $LASTEXITCODE
 
             $modulePassed = 0
             $moduleFailed = 0
