@@ -76,6 +76,11 @@ function Invoke-TerraformTestCore {
         ForEach-Object { $_.FullName })
     $testModuleDirs += $standaloneDirs
 
+    # Root deployment directory with tests/
+    if (Test-Path (Join-Path $TerraformDir 'tests')) {
+        $testModuleDirs += $TerraformDir
+    }
+
     # Filter by changed files when requested
     if ($ChangedFilesOnly -and $testModuleDirs.Count -gt 0) {
         $changedFiles = @(Get-ChangedFilesFromGit -FileExtensions @('*.tf', '*.tftest.hcl'))

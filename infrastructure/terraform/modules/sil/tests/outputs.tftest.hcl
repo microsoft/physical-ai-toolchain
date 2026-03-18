@@ -26,17 +26,17 @@ run "aks_cluster_output_keys" {
   command = plan
 
   variables {
-    resource_prefix              = run.setup.resource_prefix
-    environment                  = run.setup.environment
-    instance                     = run.setup.instance
-    location                     = run.setup.location
-    resource_group               = run.setup.resource_group
-    virtual_network              = run.setup.virtual_network
-    subnets                      = run.setup.subnets
-    network_security_group       = run.setup.network_security_group
-    nat_gateway                  = run.setup.nat_gateway
-    log_analytics_workspace      = run.setup.log_analytics_workspace
-    container_registry           = run.setup.container_registry
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
     aks_config = {
       system_node_pool_vm_size                    = "Standard_D8ds_v5"
       system_node_pool_node_count                 = 2
@@ -60,17 +60,17 @@ run "aks_subnets_structure" {
   command = plan
 
   variables {
-    resource_prefix              = run.setup.resource_prefix
-    environment                  = run.setup.environment
-    instance                     = run.setup.instance
-    location                     = run.setup.location
-    resource_group               = run.setup.resource_group
-    virtual_network              = run.setup.virtual_network
-    subnets                      = run.setup.subnets
-    network_security_group       = run.setup.network_security_group
-    nat_gateway                  = run.setup.nat_gateway
-    log_analytics_workspace      = run.setup.log_analytics_workspace
-    container_registry           = run.setup.container_registry
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
     aks_config = {
       system_node_pool_vm_size                    = "Standard_D8ds_v5"
       system_node_pool_node_count                 = 2
@@ -93,17 +93,17 @@ run "gpu_subnets_match_pools" {
   command = plan
 
   variables {
-    resource_prefix              = run.setup.resource_prefix
-    environment                  = run.setup.environment
-    instance                     = run.setup.instance
-    location                     = run.setup.location
-    resource_group               = run.setup.resource_group
-    virtual_network              = run.setup.virtual_network
-    subnets                      = run.setup.subnets
-    network_security_group       = run.setup.network_security_group
-    nat_gateway                  = run.setup.nat_gateway
-    log_analytics_workspace      = run.setup.log_analytics_workspace
-    container_registry           = run.setup.container_registry
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
     aks_config = {
       system_node_pool_vm_size                    = "Standard_D8ds_v5"
       system_node_pool_node_count                 = 2
@@ -144,17 +144,17 @@ run "node_pools_passthrough" {
   command = plan
 
   variables {
-    resource_prefix              = run.setup.resource_prefix
-    environment                  = run.setup.environment
-    instance                     = run.setup.instance
-    location                     = run.setup.location
-    resource_group               = run.setup.resource_group
-    virtual_network              = run.setup.virtual_network
-    subnets                      = run.setup.subnets
-    network_security_group       = run.setup.network_security_group
-    nat_gateway                  = run.setup.nat_gateway
-    log_analytics_workspace      = run.setup.log_analytics_workspace
-    container_registry           = run.setup.container_registry
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
     aks_config = {
       system_node_pool_vm_size                    = "Standard_D8ds_v5"
       system_node_pool_node_count                 = 2
@@ -202,24 +202,24 @@ run "empty_pools_output" {
   command = plan
 
   variables {
-    resource_prefix              = run.setup.resource_prefix
-    environment                  = run.setup.environment
-    instance                     = run.setup.instance
-    location                     = run.setup.location
-    resource_group               = run.setup.resource_group
-    virtual_network              = run.setup.virtual_network
-    subnets                      = run.setup.subnets
-    network_security_group       = run.setup.network_security_group
-    nat_gateway                  = run.setup.nat_gateway
-    log_analytics_workspace      = run.setup.log_analytics_workspace
-    container_registry           = run.setup.container_registry
+    resource_prefix         = run.setup.resource_prefix
+    environment             = run.setup.environment
+    instance                = run.setup.instance
+    location                = run.setup.location
+    resource_group          = run.setup.resource_group
+    virtual_network         = run.setup.virtual_network
+    subnets                 = run.setup.subnets
+    network_security_group  = run.setup.network_security_group
+    nat_gateway             = run.setup.nat_gateway
+    log_analytics_workspace = run.setup.log_analytics_workspace
+    container_registry      = run.setup.container_registry
     aks_config = {
       system_node_pool_vm_size                    = "Standard_D8ds_v5"
       system_node_pool_node_count                 = 2
       should_enable_system_node_pool_auto_scaling = false
       should_enable_private_cluster               = false
     }
-    node_pools                   = {}
+    node_pools = {}
   }
 
   assert {

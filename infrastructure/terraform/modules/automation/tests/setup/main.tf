@@ -1,5 +1,5 @@
 // Setup module for automation module tests
-// Generates mock input values including AKS cluster dependency and stub script path
+// Generates mock input values with internally consistent IDs derived from the random prefix
 
 terraform {
   required_providers {
@@ -15,34 +15,45 @@ resource "random_string" "prefix" {
   upper   = false
 }
 
+locals {
+  subscription_id_part = "/subscriptions/00000000-0000-0000-0000-000000000000"
+  resource_prefix      = "t${random_string.prefix.id}"
+  environment          = "dev"
+  instance             = "001"
+  location             = "westus3"
+  resource_group_name  = "rg-${local.resource_prefix}-${local.environment}-${local.instance}"
+  resource_group_id    = "${local.subscription_id_part}/resourceGroups/${local.resource_group_name}"
+  aks_cluster_name     = "aks-${local.resource_prefix}-${local.environment}-${local.instance}"
+}
+
 output "resource_prefix" {
-  value = "t${random_string.prefix.id}"
+  value = local.resource_prefix
 }
 
 output "environment" {
-  value = "dev"
+  value = local.environment
 }
 
 output "instance" {
-  value = "001"
+  value = local.instance
 }
 
 output "location" {
-  value = "westus3"
+  value = local.location
 }
 
 output "resource_group" {
   value = {
-    id       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001"
-    name     = "rg-test-dev-001"
-    location = "westus3"
+    id       = local.resource_group_id
+    name     = local.resource_group_name
+    location = local.location
   }
 }
 
 output "aks_cluster" {
   value = {
-    id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.ContainerService/managedClusters/aks-test-dev-001"
-    name = "aks-test-dev-001"
+    id   = "${local.resource_group_id}/providers/Microsoft.ContainerService/managedClusters/${local.aks_cluster_name}"
+    name = local.aks_cluster_name
   }
 }
 

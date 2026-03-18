@@ -1,5 +1,5 @@
 // Setup module for dataviewer module tests
-// Generates mock input values including platform module dependency objects
+// Generates mock input values with internally consistent IDs derived from the random prefix
 
 terraform {
   required_providers {
@@ -15,67 +15,80 @@ resource "random_string" "prefix" {
   upper   = false
 }
 
+locals {
+  subscription_id_part = "/subscriptions/00000000-0000-0000-0000-000000000000"
+  resource_prefix      = "t${random_string.prefix.id}"
+  environment          = "dev"
+  instance             = "001"
+  location             = "westus3"
+  resource_group_name  = "rg-${local.resource_prefix}-${local.environment}-${local.instance}"
+  resource_group_id    = "${local.subscription_id_part}/resourceGroups/${local.resource_group_name}"
+  vnet_name            = "vnet-${local.resource_prefix}-${local.environment}-${local.instance}"
+  vnet_id              = "${local.resource_group_id}/providers/Microsoft.Network/virtualNetworks/${local.vnet_name}"
+  storage_account_name = "st${local.resource_prefix}${local.environment}${local.instance}"
+}
+
 output "resource_prefix" {
-  value = "t${random_string.prefix.id}"
+  value = local.resource_prefix
 }
 
 output "environment" {
-  value = "dev"
+  value = local.environment
 }
 
 output "instance" {
-  value = "001"
+  value = local.instance
 }
 
 output "location" {
-  value = "westus3"
+  value = local.location
 }
 
 output "resource_group" {
   value = {
-    id       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001"
-    name     = "rg-test-dev-001"
-    location = "westus3"
+    id       = local.resource_group_id
+    name     = local.resource_group_name
+    location = local.location
   }
 }
 
 output "virtual_network" {
   value = {
-    id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/virtualNetworks/vnet-test-dev-001"
-    name = "vnet-test-dev-001"
+    id   = local.vnet_id
+    name = local.vnet_name
   }
 }
 
 output "network_security_group" {
   value = {
-    id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/networkSecurityGroups/nsg-test-dev-001"
+    id = "${local.resource_group_id}/providers/Microsoft.Network/networkSecurityGroups/nsg-${local.resource_prefix}-${local.environment}-${local.instance}"
   }
 }
 
 output "nat_gateway" {
   value = {
-    id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/natGateways/ng-test-dev-001"
+    id = "${local.resource_group_id}/providers/Microsoft.Network/natGateways/ng-${local.resource_prefix}-${local.environment}-${local.instance}"
   }
 }
 
 output "log_analytics_workspace" {
   value = {
-    id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.OperationalInsights/workspaces/log-test-dev-001"
+    id           = "${local.resource_group_id}/providers/Microsoft.OperationalInsights/workspaces/log-${local.resource_prefix}-${local.environment}-${local.instance}"
     workspace_id = "00000000-0000-0000-0000-000000000002"
   }
 }
 
 output "container_registry" {
   value = {
-    id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.ContainerRegistry/registries/acrtestdev001"
-    name         = "acrtestdev001"
-    login_server = "acrtestdev001.azurecr.io"
+    id           = "${local.resource_group_id}/providers/Microsoft.ContainerRegistry/registries/acr${local.resource_prefix}${local.environment}${local.instance}"
+    name         = "acr${local.resource_prefix}${local.environment}${local.instance}"
+    login_server = "acr${local.resource_prefix}${local.environment}${local.instance}.azurecr.io"
   }
 }
 
 output "storage_account" {
   value = {
-    id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Storage/storageAccounts/sttestdev001"
-    name = "sttestdev001"
+    id   = "${local.resource_group_id}/providers/Microsoft.Storage/storageAccounts/${local.storage_account_name}"
+    name = local.storage_account_name
   }
 }
