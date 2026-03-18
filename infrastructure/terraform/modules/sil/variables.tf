@@ -64,7 +64,7 @@ variable "aks_config" {
     should_enable_system_node_pool_auto_scaling = bool
     system_node_pool_min_count                  = optional(number)
     system_node_pool_max_count                  = optional(number)
-    is_private_cluster                          = bool
+    should_enable_private_cluster               = bool
     system_node_pool_zones                      = optional(list(string))
     should_enable_microsoft_defender            = optional(bool, false)
   })
@@ -75,40 +75,40 @@ variable "aks_config" {
     should_enable_system_node_pool_auto_scaling = false
     system_node_pool_min_count                  = null
     system_node_pool_max_count                  = null
-    is_private_cluster                          = true
+    should_enable_private_cluster               = true
     system_node_pool_zones                      = null
   }
 }
 
 variable "node_pools" {
   type = map(object({
-    vm_size                 = string
-    node_count              = optional(number, null)
-    subnet_address_prefixes = list(string)
-    node_taints             = optional(list(string), [])
-    node_labels             = optional(map(string), {})
-    gpu_driver              = optional(string)
-    priority                = optional(string, "Regular")
-    enable_auto_scaling     = optional(bool, false)
-    min_count               = optional(number, null)
-    max_count               = optional(number, null)
-    zones                   = optional(list(string), null)
-    eviction_policy         = optional(string, "Deallocate")
+    vm_size                    = string
+    node_count                 = optional(number, null)
+    subnet_address_prefixes    = list(string)
+    node_taints                = optional(list(string), [])
+    node_labels                = optional(map(string), {})
+    gpu_driver                 = optional(string)
+    priority                   = optional(string, "Regular")
+    should_enable_auto_scaling = optional(bool, false)
+    min_count                  = optional(number, null)
+    max_count                  = optional(number, null)
+    zones                      = optional(list(string), null)
+    eviction_policy            = optional(string, "Deallocate")
   }))
   description = "Additional AKS node pools configuration. Map key is used as the node pool name. Note: Pod subnets are not used with Azure CNI Overlay mode"
   default = {
     gpu = {
-      vm_size                 = "Standard_NV36ads_A10_v5"
-      node_count              = null
-      subnet_address_prefixes = ["10.0.16.0/24"]
-      node_taints             = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
-      gpu_driver              = "Install"
-      priority                = "Spot"
-      enable_auto_scaling     = true
-      min_count               = 0
-      max_count               = 1
-      zones                   = []
-      eviction_policy         = "Delete"
+      vm_size                    = "Standard_NV36ads_A10_v5"
+      node_count                 = null
+      subnet_address_prefixes    = ["10.0.16.0/24"]
+      node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
+      gpu_driver                 = "Install"
+      priority                   = "Spot"
+      should_enable_auto_scaling = true
+      min_count                  = 0
+      max_count                  = 1
+      zones                      = []
+      eviction_policy            = "Delete"
     }
   }
 }

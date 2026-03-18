@@ -653,4 +653,10 @@ class TestLoggingSanitization:
 
         service._upload_video_to_blob("dataset\r\nname", 7.0, "cam0", tmp_path / "video.mp4")
 
-        assert logged == [("Blob upload failed for %s ep %d: %s", "datasetname", 7, "upload failed")]
+        assert len(logged) == 1
+        message, ds_id, ep_idx, exc = logged[0]
+        assert message == "Blob upload failed for %s ep %d: %s"
+        assert ds_id == "datasetname"
+        assert ep_idx == 7
+        assert isinstance(exc, RuntimeError)
+        assert str(exc) == "upload failed"

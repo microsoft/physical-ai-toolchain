@@ -22,8 +22,7 @@ Required for all contributions before submitting PR.
 
 ```bash
 # Terraform formatting and validation
-terraform fmt -check -recursive infrastructure/terraform/
-terraform validate infrastructure/terraform/
+npm run lint:tf:validate
 
 # Shell script linting
 shellcheck infrastructure/**/*.sh scripts/**/*.sh
@@ -130,8 +129,7 @@ Copy this template to PR description:
 ## Validation Performed
 
 **Static Validation:**
-- [ ] terraform fmt -check
-- [ ] terraform validate
+- [ ] npm run lint:tf:validate
 - [ ] shellcheck (if applicable)
 - [ ] npm run lint:md (if docs changed)
 

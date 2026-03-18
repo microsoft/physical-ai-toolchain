@@ -131,6 +131,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
+  # Dataviewer backend pytest execution
+  dataviewer-backend-pytests:
+    name: Dataviewer Backend Pytest
+    uses: ./.github/workflows/dataviewer-backend-pytests.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Python linting using ruff
   python-lint:
     name: Python Lint
@@ -144,6 +155,16 @@ jobs:
     uses: ./.github/workflows/terraform-lint.yml
     with:
       soft-fail: true
+    permissions:
+      contents: read
+
+  # Terraform format and validate checks
+  terraform-validation:
+    name: Terraform Validation
+    uses: ./.github/workflows/terraform-validation.yml
+    with:
+      soft-fail: true
+      changed-files-only: true
     permissions:
       contents: read
 
