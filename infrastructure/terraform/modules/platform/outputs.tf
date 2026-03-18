@@ -214,7 +214,7 @@ output "postgresql" {
 
 output "postgresql_secret_name" {
   description = "Key Vault secret name containing PostgreSQL admin password"
-  value       = try(azurerm_key_vault_secret.postgresql_password[0].name, null)
+  value       = try(azapi_resource.postgresql_password[0].name, null)
 }
 
 output "redis" {

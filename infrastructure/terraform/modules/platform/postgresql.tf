@@ -24,12 +24,18 @@ resource "random_password" "postgresql" {
   min_special      = 2
 }
 
-resource "azurerm_key_vault_secret" "postgresql_password" {
+resource "azapi_resource" "postgresql_password" {
   count = var.should_deploy_postgresql ? 1 : 0
 
-  name         = "psql-admin-password"
-  value        = random_password.postgresql[0].result
-  key_vault_id = azurerm_key_vault.main.id
+  type      = "Microsoft.KeyVault/vaults/secrets@2025-05-01"
+  name      = "psql-admin-password"
+  parent_id = azurerm_key_vault.main.id
+
+  body = {
+    properties = {
+      value = random_password.postgresql[0].result
+    }
+  }
 
   depends_on = [azurerm_role_assignment.user_kv_officer]
 }
