@@ -144,7 +144,3 @@ variable "osmo_config" {
   }
 }
 
-/*
- * Key Vault Variables
- */
-
