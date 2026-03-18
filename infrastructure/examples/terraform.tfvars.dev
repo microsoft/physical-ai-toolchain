@@ -30,7 +30,7 @@ node_pools = {
     }
     priority            = "Spot"
     eviction_policy     = "Delete"
-    enable_auto_scaling = true
+    should_enable_auto_scaling = true
     min_count           = 0
     max_count           = 1
     zones               = []
