@@ -2,9 +2,12 @@
 // Generates mock input values with internally consistent IDs derived from the random prefix
 
 terraform {
+  required_version = ">= 1.9.8, < 2.0"
+
   required_providers {
     random = {
-      source = "hashicorp/random"
+      source  = "hashicorp/random"
+      version = ">= 3.6.0"
     }
   }
 }
