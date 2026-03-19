@@ -55,7 +55,7 @@ resource "azurerm_role_assignment" "aks_dns_zone_contributor" {
 resource "azurerm_role_assignment" "aks_acr_pull" {
   scope                = var.container_registry.id
   role_definition_name = "AcrPull"
-  principal_id         = azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id
+  principal_id         = try(azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id, "unavailable")
 }
 
 // ============================================================
@@ -76,6 +76,6 @@ resource "azurerm_role_assignment" "aks_control_plane_network_contributor" {
 resource "azurerm_role_assignment" "aks_kubelet_network_contributor" {
   scope                            = var.resource_group.id
   role_definition_name             = "Network Contributor"
-  principal_id                     = azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id
+  principal_id                     = try(azurerm_kubernetes_cluster.main.kubelet_identity[0].object_id, "unavailable")
   skip_service_principal_aad_check = true
 }
