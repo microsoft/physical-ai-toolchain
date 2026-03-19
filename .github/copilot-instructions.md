@@ -203,7 +203,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 * CI: `.github/workflows/terraform-validation.yml` reusable workflow runs `lint:tf:validate` with `soft-fail: true`
 * `npm run test:tf` — `terraform test` across all modules with `tests/` directories; uses `mock_provider` and `command = plan` — no Azure credentials required
 * Per-module: `cd infrastructure/terraform/modules/<name> && terraform init -backend=false && terraform test`
-* CI: `terraform-validation.yml` runs tests alongside fmt and validate checks
+* CI: `.github/workflows/terraform-tests.yml` reusable workflow runs `terraform test` independently from validation
 
 ### Shell Scripts
 
