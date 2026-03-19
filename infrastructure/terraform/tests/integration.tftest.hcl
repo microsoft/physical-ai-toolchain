@@ -1,17 +1,52 @@
 // Root integration tests
 // Validates resource group conditional creation, module instantiation, and variable passthrough
 
-mock_provider "azurerm" {}
-mock_provider "azuread" {}
-mock_provider "azapi" {}
-mock_provider "msgraph" {}
-mock_provider "tls" {}
-mock_provider "random" {}
+mock_provider "azurerm" {
+  override_during = plan
+}
+mock_provider "azuread" {
+  override_during = plan
+}
+mock_provider "azapi" {
+  override_during = plan
+}
+mock_provider "msgraph" {
+  override_during = plan
+}
+mock_provider "tls" {
+  override_during = plan
+}
+mock_provider "random" {
+  override_during = plan
+}
 
 override_data {
   target = module.platform.data.azurerm_client_config.current
   values = {
     tenant_id = "00000000-0000-0000-0000-000000000000"
+  }
+}
+
+// Override sil module to bypass count expressions that depend on platform module try() outputs
+override_module {
+  target = module.sil
+  outputs = {
+    aks_subnets = {
+      aks = {
+        id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test/providers/Microsoft.Network/virtualNetworks/vnet-test/subnets/snet-aks"
+        name = "snet-aks"
+      }
+    }
+    aks_cluster = {
+      id                  = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test/providers/Microsoft.ContainerService/managedClusters/aks-test"
+      name                = "aks-test"
+      fqdn                = "aks-test-dns.hcp.westus3.azmk8s.io"
+      kubelet_identity    = null
+      node_resource_group = "MC_rg-test_aks-test_westus3"
+    }
+    aks_oidc_issuer_url   = "https://westus3.oic.prod-aks.azure.com/00000000-0000-0000-0000-000000000000/"
+    gpu_node_pool_subnets = {}
+    node_pools            = {}
   }
 }
 
