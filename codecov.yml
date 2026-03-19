@@ -27,6 +27,11 @@ coverage:
           - pytest
         target: auto
         threshold: 1%
+      pytest-dataviewer:
+        flags:
+          - pytest-dataviewer
+        target: auto
+        threshold: 1%
     patch:
       default:
         target: auto
@@ -40,6 +45,10 @@ flags:
   pytest:
     paths:
       - src/
+    carryforward: true
+  pytest-dataviewer:
+    paths:
+      - data-management/viewer/backend/src/
     carryforward: true
 
 parsers:

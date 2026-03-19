@@ -190,12 +190,12 @@ variable "postgresql_zone" {
 
 variable "postgresql_high_availability" {
   type = object({
-    enabled                   = bool
+    should_enable             = bool
     standby_availability_zone = optional(string)
   })
-  description = "PostgreSQL high availability configuration. Set enabled=false to deploy without HA"
+  description = "PostgreSQL high availability configuration. Set should_enable=false to deploy without HA"
   default = {
-    enabled                   = false
+    should_enable             = false
     standby_availability_zone = null
   }
 }
@@ -353,32 +353,32 @@ variable "system_node_pool_zones" {
 
 variable "node_pools" {
   type = map(object({
-    node_count              = optional(number, null)
-    vm_size                 = string
-    subnet_address_prefixes = list(string)
-    node_taints             = optional(list(string), [])
-    node_labels             = optional(map(string), {})
-    enable_auto_scaling     = optional(bool, false)
-    min_count               = optional(number, null)
-    max_count               = optional(number, null)
-    priority                = optional(string, "Regular")
-    zones                   = optional(list(string), null)
-    eviction_policy         = optional(string, "Deallocate")
-    gpu_driver              = optional(string, null)
+    node_count                 = optional(number, null)
+    vm_size                    = string
+    subnet_address_prefixes    = list(string)
+    node_taints                = optional(list(string), [])
+    node_labels                = optional(map(string), {})
+    should_enable_auto_scaling = optional(bool, false)
+    min_count                  = optional(number, null)
+    max_count                  = optional(number, null)
+    priority                   = optional(string, "Regular")
+    zones                      = optional(list(string), null)
+    eviction_policy            = optional(string, "Deallocate")
+    gpu_driver                 = optional(string, null)
   }))
   description = "Additional node pools for the AKS cluster. Map key is used as the node pool name. Note: Pod subnets are not used with Azure CNI Overlay mode"
   default = {
     gpu = {
-      vm_size                 = "Standard_NV36ads_A10_v5"
-      subnet_address_prefixes = ["10.0.7.0/24"]
-      node_taints             = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
-      gpu_driver              = "Install"
-      priority                = "Spot"
-      enable_auto_scaling     = true
-      min_count               = 1
-      max_count               = 1
-      zones                   = []
-      eviction_policy         = "Delete"
+      vm_size                    = "Standard_NV36ads_A10_v5"
+      subnet_address_prefixes    = ["10.0.7.0/24"]
+      node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
+      gpu_driver                 = "Install"
+      priority                   = "Spot"
+      should_enable_auto_scaling = true
+      min_count                  = 1
+      max_count                  = 1
+      zones                      = []
+      eviction_policy            = "Delete"
     }
   }
 }

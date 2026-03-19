@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Contribution Workflow
 description: How to contribute including legal requirements, bug reports, enhancement suggestions, and documentation improvements
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-08
+ms.date: 2026-03-18
 ms.topic: how-to
 keywords:
   - contributing
@@ -148,14 +148,17 @@ This reference architecture validates through deployment rather than automated t
 
 ### PR Workflow
 
-1. Fork the repository to your GitHub account
-2. Create a branch from `main` with descriptive name: `feature/private-endpoint-support` or `fix/gpu-scheduling-timeout`
-3. Make changes following style guides and conventions
-4. Open a draft PR early for maintainer feedback
-5. Perform validation appropriate to your contribution type (see table below)
-6. Mark PR ready for review after completing validation
-7. Address review feedback promptly
-8. Merge occurs after approval and passing maintainer integration tests
+1. **Check the issue is open and unassigned.** Comment on the issue to request assignment before starting any work. Maintainers will assign you when confirmed.
+   * If the issue is already assigned to someone, do not open a competing PR without first coordinating with the assignee or a maintainer.
+   * Issues labelled `needs-triage` are not ready to be picked up. You are welcome to comment your interest in being assigned — maintainers will follow up once triage is complete.
+2. Fork the repository to your GitHub account
+3. Create a branch from `main` with descriptive name: `feature/private-endpoint-support` or `fix/gpu-scheduling-timeout`
+4. Make changes following style guides and conventions
+5. Open a draft PR early for maintainer feedback
+6. Perform validation appropriate to your contribution type (see table below)
+7. Mark PR ready for review after completing validation
+8. Address review feedback promptly
+9. Merge occurs after approval and passing maintainer integration tests
 
 ### Validation Expectations
 

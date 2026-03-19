@@ -29,7 +29,7 @@ node_pools = {
       "nvidia.com/gpu.deploy.driver" = "false"
     }
     priority            = "Regular"
-    enable_auto_scaling = true
+    should_enable_auto_scaling = true
     min_count           = 1
     max_count           = 4
     zones               = []
@@ -47,7 +47,7 @@ node_pools = {
     }
     priority            = "Spot"
     eviction_policy     = "Delete"
-    enable_auto_scaling = true
+    should_enable_auto_scaling = true
     min_count           = 0
     max_count           = 4
     zones               = []

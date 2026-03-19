@@ -39,7 +39,7 @@ variable "should_enable_nat_gateway" {
 
 variable "vpn_gateway_config" {
   type = object({
-    sku                 = optional(string, "VpnGw1")
+    sku                 = optional(string, "VpnGw1AZ")
     generation          = optional(string, "Generation1")
     client_address_pool = optional(list(string), ["192.168.200.0/24"])
   })
@@ -47,8 +47,8 @@ variable "vpn_gateway_config" {
   default     = {}
 
   validation {
-    condition     = contains(["VpnGw1", "VpnGw2", "VpnGw3", "VpnGw1AZ", "VpnGw2AZ", "VpnGw3AZ"], var.vpn_gateway_config.sku)
-    error_message = "vpn_gateway_config.sku must be a valid VPN Gateway SKU."
+    condition     = contains(["VpnGw1AZ", "VpnGw2AZ", "VpnGw3AZ"], var.vpn_gateway_config.sku)
+    error_message = "vpn_gateway_config.sku must be an AZ VPN Gateway SKU: VpnGw1AZ, VpnGw2AZ, or VpnGw3AZ."
   }
 }
 
@@ -74,15 +74,15 @@ variable "root_certificate_public_data" {
 
 variable "aad_auth_config" {
   type = object({
-    enabled     = bool
-    tenant_id   = optional(string)
-    audience_id = optional(string, "c632b3df-fb67-4d84-bdcf-b95ad541b5c8")
+    should_enable = bool
+    tenant_id     = optional(string)
+    audience_id   = optional(string, "c632b3df-fb67-4d84-bdcf-b95ad541b5c8")
   })
   description = "Azure AD authentication configuration for P2S VPN. tenant_id defaults to current Azure client tenant if not specified. Uses Microsoft-registered Azure VPN application by default. Requires OpenVPN protocol"
   default = {
-    enabled     = false
-    tenant_id   = null
-    audience_id = "c632b3df-fb67-4d84-bdcf-b95ad541b5c8"
+    should_enable = false
+    tenant_id     = null
+    audience_id   = "c632b3df-fb67-4d84-bdcf-b95ad541b5c8"
   }
 }
 

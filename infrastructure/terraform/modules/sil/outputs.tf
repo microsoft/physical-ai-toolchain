@@ -30,7 +30,7 @@ output "aks_cluster" {
     id                  = azurerm_kubernetes_cluster.main.id
     name                = azurerm_kubernetes_cluster.main.name
     fqdn                = azurerm_kubernetes_cluster.main.fqdn
-    kubelet_identity    = azurerm_kubernetes_cluster.main.kubelet_identity[0]
+    kubelet_identity    = try(azurerm_kubernetes_cluster.main.kubelet_identity[0], null)
     node_resource_group = azurerm_kubernetes_cluster.main.node_resource_group
   }
 }

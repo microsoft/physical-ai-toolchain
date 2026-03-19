@@ -55,7 +55,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   public_network_access_enabled = false
 
   dynamic "high_availability" {
-    for_each = var.postgresql_config.high_availability_enabled ? [1] : []
+    for_each = var.postgresql_config.should_enable_high_availability ? [1] : []
     content {
       mode                      = "ZoneRedundant"
       standby_availability_zone = var.postgresql_config.standby_availability_zone

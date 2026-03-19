@@ -1312,6 +1312,7 @@ testpaths
 testsrc
 tflint
 tflite
+tftest
 tfvars
 tfvc
 thresholding

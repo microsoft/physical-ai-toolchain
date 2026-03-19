@@ -91,25 +91,25 @@ variable "should_deploy_postgresql" {
 
 variable "postgresql_config" {
   type = object({
-    location                  = string
-    sku_name                  = string
-    storage_mb                = number
-    version                   = string
-    databases                 = map(object({ collation = string, charset = string }))
-    zone                      = optional(string)
-    high_availability_enabled = optional(bool, false)
-    standby_availability_zone = optional(string)
+    location                        = string
+    sku_name                        = string
+    storage_mb                      = number
+    version                         = string
+    databases                       = map(object({ collation = string, charset = string }))
+    zone                            = optional(string)
+    should_enable_high_availability = optional(bool, false)
+    standby_availability_zone       = optional(string)
   })
   description = "PostgreSQL configuration for OSMO including location, SKU, storage, zone, HA settings, and database definitions"
   default = {
-    location                  = "westus3"
-    sku_name                  = "GP_Standard_D2s_v3"
-    storage_mb                = 32768
-    version                   = "16"
-    databases                 = { osmo = { collation = "en_US.utf8", charset = "utf8" } }
-    zone                      = null
-    high_availability_enabled = false
-    standby_availability_zone = null
+    location                        = "westus3"
+    sku_name                        = "GP_Standard_D2s_v3"
+    storage_mb                      = 32768
+    version                         = "16"
+    databases                       = { osmo = { collation = "en_US.utf8", charset = "utf8" } }
+    zone                            = null
+    should_enable_high_availability = false
+    standby_availability_zone       = null
   }
 }
 
@@ -125,15 +125,15 @@ variable "should_deploy_redis" {
 
 variable "redis_config" {
   type = object({
-    sku_name                  = string
-    clustering_policy         = string
-    high_availability_enabled = optional(bool, false)
+    sku_name                        = string
+    clustering_policy               = string
+    should_enable_high_availability = optional(bool, false)
   })
   description = "Redis configuration for OSMO including SKU, clustering policy, and HA settings. EnterpriseCluster recommended for clients that don't support Redis Cluster MOVED redirects"
   default = {
-    sku_name                  = "Balanced_B10"
-    clustering_policy         = "EnterpriseCluster"
-    high_availability_enabled = false
+    sku_name                        = "Balanced_B10"
+    clustering_policy               = "EnterpriseCluster"
+    should_enable_high_availability = false
   }
 }
 

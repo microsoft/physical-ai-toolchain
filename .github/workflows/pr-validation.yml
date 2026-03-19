@@ -131,6 +131,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
+  # Dataviewer backend pytest execution
+  dataviewer-backend-pytests:
+    name: Dataviewer Backend Pytest
+    uses: ./.github/workflows/dataviewer-backend-pytests.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Python linting using ruff
   python-lint:
     name: Python Lint
@@ -156,6 +167,18 @@ jobs:
       changed-files-only: true
     permissions:
       contents: read
+
+  # Terraform test execution with Codecov Test Analytics
+  terraform-tests:
+    name: Terraform Tests
+    uses: ./.github/workflows/terraform-tests.yml
+    with:
+      soft-fail: true
+      changed-files-only: true
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
 
   # CodeQL security analysis
   codeql-analysis:

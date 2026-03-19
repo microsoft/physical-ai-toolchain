@@ -20,6 +20,11 @@ variable "instance" {
   default     = "001"
 }
 
+variable "location" {
+  type        = string
+  description = "Location for all resources in this module"
+}
+
 variable "resource_group" {
   type = object({
     id       = string
