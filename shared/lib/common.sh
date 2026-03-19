@@ -163,6 +163,19 @@ detect_service_url() {
   echo "$url"
 }
 
+detect_default_storage_class() {
+  local storage_class
+
+  storage_class=$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -n 1)
+
+  if [[ -z "$storage_class" ]]; then
+    storage_class=$(kubectl get storageclass default -o jsonpath='{.metadata.name}' 2>/dev/null || true)
+  fi
+
+  [[ -n "$storage_class" ]] || fatal "No default StorageClass detected for in-cluster Redis"
+  echo "$storage_class"
+}
+
 # Print section header
 section() {
   echo
@@ -239,22 +252,26 @@ osmo_login_and_setup() {
   osmo login "${service_url}/" --method dev --username "$username"
   info "Ensuring dev user '$username' exists with $roles role..."
   if ! osmo user get "$username" &>/dev/null; then
-    osmo user create "$username" --roles "$roles"
+    osmo user create "$username" --roles "$roles" >/dev/null 2>&1 || warn "OSMO user management endpoint unavailable; skipping dev user setup"
   else
-    osmo user update "$username" --add-roles "$roles"
+    osmo user update "$username" --add-roles "$roles" >/dev/null 2>&1 || warn "Unable to update OSMO dev user roles; continuing"
   fi
 }
 
 # Apply SecretProviderClass for Azure Key Vault secrets sync
-# Usage: apply_secret_provider_class <namespace> <keyvault> <client_id> <tenant_id>
+# Usage: apply_secret_provider_class <namespace> <keyvault> <client_id> <tenant_id> [include_redis_secret]
 apply_secret_provider_class() {
   local namespace="${1:?namespace required}"
   local keyvault="${2:?keyvault name required}"
   local client_id="${3:?client_id required}"
   local tenant_id="${4:?tenant_id required}"
+  local include_redis_secret="${5:-true}"
 
   local manifest_dir
-  manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/infrastructure/setup/manifests"
+  manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/manifests"
+  local manifest_name="aks-secret-provider-class.yaml"
+
+  [[ "$include_redis_secret" == "true" ]] && manifest_name="aks-secret-provider-class-external-redis.yaml"
 
   export NAMESPACE="$namespace"
   export KEY_VAULT_NAME="$keyvault"
@@ -262,5 +279,5 @@ apply_secret_provider_class() {
   export TENANT_ID="$tenant_id"
 
   info "Applying SecretProviderClass to namespace $namespace..."
-  envsubst < "$manifest_dir/aks-secret-provider-class.yaml" | kubectl apply -f -
+  envsubst < "$manifest_dir/$manifest_name" | kubectl apply -f -
 }
