@@ -56,6 +56,7 @@ deviceregistry
 eastu
 eastus
 entra
+eventhub
 functionalization
 keyvault
 onedrive
@@ -67,17 +68,3 @@ sharepoint
 southeastasia
 wasbs
 westus
-azurecontainer
-azurestack
-activedirectory
-azuread
-functionalization
-azurelinux
-servicebus
-eastu
-AADSSH
-rtxprogpu
-RTXPRO
-stnvidiadev
-azureactivedirectory
-eventhub

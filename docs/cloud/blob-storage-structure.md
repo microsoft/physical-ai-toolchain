@@ -4,7 +4,7 @@ Standardized folder structure for robotics data stored in Azure Blob Storage, in
 
 ## Container and Folder Organization
 
-**Default Container:** `isaaclab-training-logs`
+**Default Container:** `ml-workspace`
 
 ### Folder Structure
 

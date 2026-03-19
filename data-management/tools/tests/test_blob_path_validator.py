@@ -1,7 +1,15 @@
 """Unit tests for blob path validator."""
 
+import sys
+from pathlib import Path
+
 import pytest
-from src.common.blob_path_validator import (
+
+_TOOLS_DIR = str(Path(__file__).resolve().parent.parent)
+if _TOOLS_DIR not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR)
+
+from blob_path_validator import (
     get_validation_error,
     validate_blob_path,
 )

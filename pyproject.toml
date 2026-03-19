@@ -31,7 +31,7 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "training/tests"]
+testpaths = ["tests", "training/tests", "data-management/tools/tests"]
 pythonpath = ["."]
 addopts = [
     "-ra",
