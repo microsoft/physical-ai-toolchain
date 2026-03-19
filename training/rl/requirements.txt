@@ -282,7 +282,7 @@ ml-dtypes==0.5.4
     #   onnx
     #   onnx-ir
     #   onnxscript
-mlflow==3.8.0rc0
+mlflow==3.9.0rc0
     # via robotics-training (training/rl/pyproject.toml)
 mlflow-skinny==3.5.0
     # via
