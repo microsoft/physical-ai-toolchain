@@ -146,6 +146,7 @@ Run these commands to validate changes before submitting a PR:
 npm run lint:md        # Markdownlint
 npm run lint:links     # Markdown link validation
 npm run spell-check    # cspell
+npm run test:tf        # Terraform module tests (no Azure credentials required)
 ```
 
 For Terraform and shell script validation, see the [Prerequisites](docs/contributing/prerequisites.md#build-and-validation-requirements) guide.
