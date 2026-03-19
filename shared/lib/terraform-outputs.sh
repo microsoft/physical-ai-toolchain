@@ -91,14 +91,14 @@ get_storage_account() {
 }
 
 # Convenience function: derive compute target name from AKS cluster name
-# Format: k8s-{first-12-chars-of-suffix}
+# Format matches infrastructure/setup/02-deploy-azureml-extension.sh
 get_compute_target() {
-  local aks_name
+  local aks_name compute_name
   aks_name=$(get_aks_cluster_name)
   if [[ -n "${aks_name}" ]]; then
-    local suffix="${aks_name#aks-}"
-    suffix="${suffix:0:12}"
-    echo "k8s-${suffix}"
+    compute_name="k8s-${aks_name#aks-}"
+    compute_name="${compute_name:0:16}"
+    echo "${compute_name%-}"
   fi
 }
 
