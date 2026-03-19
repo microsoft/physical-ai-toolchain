@@ -38,8 +38,8 @@ run "outputs_without_sites" {
   }
 
   assert {
-    condition     = output.vpn_gateway.sku == "VpnGw1"
-    error_message = "vpn_gateway.sku should default to VpnGw1"
+    condition     = output.vpn_gateway.sku == "VpnGw1AZ"
+    error_message = "vpn_gateway.sku should default to VpnGw1AZ"
   }
 
   assert {
@@ -79,8 +79,8 @@ run "outputs_with_sites" {
   }
 
   assert {
-    condition     = output.vpn_gateway.sku == "VpnGw1"
-    error_message = "vpn_gateway.sku should default to VpnGw1"
+    condition     = output.vpn_gateway.sku == "VpnGw1AZ"
+    error_message = "vpn_gateway.sku should default to VpnGw1AZ"
   }
 
   assert {

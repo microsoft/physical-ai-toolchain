@@ -64,3 +64,27 @@ run "invalid_sku_rejected" {
 
   expect_failures = [var.vpn_gateway_config]
 }
+
+// ============================================================
+// Valid VPN Gateway SKU
+// ============================================================
+
+run "valid_az_sku_accepted" {
+  command = plan
+
+  variables {
+    resource_prefix = "test"
+    environment     = "dev"
+    instance        = "001"
+    location        = "westus3"
+    vpn_gateway_config = {
+      sku        = "VpnGw2AZ"
+      generation = "Generation2"
+    }
+  }
+
+  assert {
+    condition     = output.vpn_gateway.sku == "VpnGw2AZ"
+    error_message = "Standalone VPN deployment should accept valid AZ SKU VpnGw2AZ"
+  }
+}
