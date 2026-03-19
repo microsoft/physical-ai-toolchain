@@ -32,7 +32,7 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "training/tests", "data-management/tools/tests"]
-pythonpath = ["."]
+pythonpath = [".", "data-management/tools"]
 addopts = [
     "-ra",
     "--strict-markers",
