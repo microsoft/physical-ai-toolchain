@@ -148,6 +148,17 @@ jobs:
     permissions:
       contents: read
 
+  # Terraform test execution with Codecov Test Analytics
+  terraform-tests:
+    name: Terraform Tests
+    uses: ./.github/workflows/terraform-tests.yml
+    with:
+      soft-fail: true
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # CodeQL security analysis
   codeql-analysis:
     name: CodeQL Analysis
@@ -176,6 +187,7 @@ jobs:
       - python-lint
       - terraform-lint
       - terraform-validation
+      - terraform-tests
       - codeql-analysis
     name: Release Please
     runs-on: ubuntu-latest
