@@ -3,6 +3,7 @@
 # Flags:
 #   pester — PowerShell tests covering scripts/
 #   pytest — Python tests covering src/
+#   terraform — Terraform tests covering infrastructure/terraform/
 
 codecov:
   notify:
@@ -49,6 +50,10 @@ flags:
   pytest-dataviewer:
     paths:
       - data-management/viewer/backend/src/
+    carryforward: true
+  terraform:
+    paths:
+      - infrastructure/terraform/
     carryforward: true
 
 parsers:
