@@ -7,7 +7,7 @@
 #Requires -Modules powershell-yaml
 
 BeforeAll {
-    $script:configPath = Join-Path $PSScriptRoot '..\..\..\..\' '.terraform-docs.yml' | Resolve-Path
+    $script:configPath = Join-Path $PSScriptRoot '../../../../' '.terraform-docs.yml' | Resolve-Path
     $script:config = Get-Content $script:configPath -Raw | ConvertFrom-Yaml
 }
 
