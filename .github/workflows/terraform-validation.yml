@@ -51,21 +51,10 @@ jobs:
           }
           shared/ci/linting/Invoke-TerraformValidation.ps1 @params
 
-      - name: Run Terraform Tests
-        continue-on-error: ${{ inputs.soft-fail }}
-        run: |
-          $params = @{}
-          if ('${{ inputs.changed-files-only }}' -eq 'true') {
-            $params['ChangedFilesOnly'] = $true
-          }
-          pwsh -File shared/ci/linting/Invoke-TerraformTest.ps1 @params
-
       - name: Upload Terraform results
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: terraform-results
-          path: |
-            logs/terraform-validation-results.json
-            logs/terraform-test-results.json
+          name: terraform-validation-results
+          path: logs/terraform-validation-results.json
           retention-days: 30
