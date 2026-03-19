@@ -242,7 +242,7 @@ No migration needed.
 
 **Azure Portal:**
 
-1. Navigate to Storage Account (e.g., `stnvidiadev001`)
+1. Navigate to Storage Account (e.g., `st<resource-prefix><environment><instance>`)
 2. Settings → Lifecycle management
 3. Verify rules: `delete-raw-bags`, `tier-converted-datasets-to-cool`, `tier-reports-to-cool-then-archive`
 
@@ -250,8 +250,8 @@ No migration needed.
 
 ```bash
 az storage account management-policy show \
-  --account-name stnvidiadev001 \
-  --resource-group rg-nvidia-dev-001
+  --account-name st<resource-prefix><environment><instance> \
+  --resource-group rg-<resource-prefix>-<environment>-<instance>
 ```
 
 ### Monitor Storage Costs
