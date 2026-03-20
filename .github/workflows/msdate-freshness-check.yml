@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: false
+      soft-fail:
+        description: 'Prevent PR failures when ms.date issues are detected'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read

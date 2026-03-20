@@ -2,7 +2,7 @@
 title: AzureML Workflows
 description: Azure Machine Learning job templates for robotics training and validation
 author: Edge AI Team
-ms.date: 2025-12-04
+ms.date: 2026-03-20
 ms.topic: reference
 ---
 
@@ -10,11 +10,11 @@ Azure Machine Learning job templates for Isaac Lab training and validation workl
 
 ## 📜 Available Templates
 
-| Template                                 | Purpose                               | Submission Script                            |
-|------------------------------------------|---------------------------------------|----------------------------------------------|
-| [train.yaml](train.yaml)                 | Training jobs with checkpoint support | `scripts/submit-azureml-training.sh`         |
-| [validate.yaml](validate.yaml)           | Policy validation and inference       | `scripts/submit-azureml-validation.sh`       |
-| [lerobot-train.yaml](lerobot-train.yaml) | LeRobot behavioral cloning training   | `scripts/submit-azureml-lerobot-training.sh` |
+| Template                                                                        | Purpose                               | Submission Script                                        |
+|---------------------------------------------------------------------------------|---------------------------------------|----------------------------------------------------------|
+| [train.yaml](../../training/rl/workflows/azureml/train.yaml)                    | Training jobs with checkpoint support | `training/rl/scripts/submit-azureml-training.sh`         |
+| [validate.yaml](../../evaluation/sil/workflows/azureml/validate.yaml)           | Policy validation and inference       | `evaluation/sil/scripts/submit-azureml-validation.sh`    |
+| [lerobot-train.yaml](../../training/il/workflows/azureml/lerobot-train.yaml)    | LeRobot behavioral cloning training   | `training/il/scripts/submit-azureml-lerobot-training.sh` |
 
 ## 🏋️ Training Job (`train.yaml`)
 
@@ -35,10 +35,10 @@ Submits Isaac Lab reinforcement learning training to AKS GPU nodes via Azure ML.
 
 ```bash
 # Default configuration from Terraform outputs
-./scripts/submit-azureml-training.sh
+training/rl/scripts/submit-azureml-training.sh
 
 # Override specific parameters
-./scripts/submit-azureml-training.sh \
+training/rl/scripts/submit-azureml-training.sh \
   --resource-group rg-custom \
   --workspace-name mlw-custom
 ```
@@ -60,10 +60,10 @@ Runs trained policy validation and generates inference metrics.
 
 ```bash
 # Default configuration
-./scripts/submit-azureml-validation.sh
+evaluation/sil/scripts/submit-azureml-validation.sh
 
 # With custom checkpoint
-./scripts/submit-azureml-validation.sh \
+evaluation/sil/scripts/submit-azureml-validation.sh \
   --checkpoint-path "azureml://datastores/checkpoints/paths/model.pt"
 ```
 
@@ -103,11 +103,11 @@ Submits LeRobot behavioral cloning training (ACT/Diffusion policies) to Azure ML
 
 ```bash
 # ACT policy training
-./scripts/submit-azureml-lerobot-training.sh \
+training/il/scripts/submit-azureml-lerobot-training.sh \
   -d lerobot/aloha_sim_insertion_human
 
 # Diffusion policy with model registration
-./scripts/submit-azureml-lerobot-training.sh \
+training/il/scripts/submit-azureml-lerobot-training.sh \
   -d user/custom-dataset \
   -p diffusion \
   -r my-diffusion-model \
