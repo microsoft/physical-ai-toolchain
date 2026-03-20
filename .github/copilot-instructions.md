@@ -178,6 +178,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | --- | --- |
 | `*.md` | `npm run lint:md`, `npm run spell-check`, `npm run format:tables` |
 | `*.tf`, `*.tfvars` | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan` |
+| `*.tftest.hcl` | `npm run test:tf`, `cd infrastructure/terraform/modules/<name> && terraform test` or `cd infrastructure/terraform && terraform test` |
 | `*.sh` | `shellcheck <file>` |
 | `*.ps1` | `npm run lint:ps` |
 | `*.yml` (GitHub Actions) | `npm run lint:yaml` |
@@ -200,6 +201,9 @@ Terraform validation is per-directory — each deployment directory has its own 
 * `npm run lint:tf:validate` — `terraform fmt -check -recursive` + `terraform init -backend=false && terraform validate` per deployment directory (`.`, `vpn/`, `dns/`, `automation/`)
 * `terraform plan -var-file=terraform.tfvars` — validates configuration against provider APIs (requires `source infrastructure/terraform/prerequisites/az-sub-init.sh` first)
 * CI: `.github/workflows/terraform-validation.yml` reusable workflow runs `lint:tf:validate` with `soft-fail: true`
+* `npm run test:tf` — `terraform test` across all modules with `tests/` directories; uses `mock_provider` and `command = plan` — no Azure credentials required
+* Per-module: `cd infrastructure/terraform/modules/<name> && terraform init -backend=false && terraform test`
+* CI: `.github/workflows/terraform-tests.yml` reusable workflow runs `terraform test` independently from validation
 
 ### Shell Scripts
 
