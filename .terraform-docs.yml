@@ -1,0 +1,37 @@
+formatter: "markdown table"
+
+version: ">= 0.19.0, < 1.0.0"
+
+header-from: ""
+footer-from: ""
+
+sections:
+  show:
+    - inputs
+    - outputs
+    - resources
+
+output:
+  file: README.md
+  mode: inject
+  template: |-
+    <!-- BEGIN_TF_DOCS -->
+    {{ .Content }}
+    <!-- END_TF_DOCS -->
+
+sort:
+  enabled: true
+  by: required
+
+settings:
+  anchor: false
+  default: true
+  escape: true
+  hide-empty: true
+  html: false
+  indent: 2
+  lockfile: true
+  read-comments: true
+  required: true
+  sensitive: true
+  type: true
