@@ -126,3 +126,4 @@ run "optional_outputs_null_when_disabled" {
     error_message = "aml_compute_cluster output should be null when AML compute is disabled"
   }
 }
+

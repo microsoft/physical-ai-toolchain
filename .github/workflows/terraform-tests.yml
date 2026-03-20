@@ -60,71 +60,7 @@ jobs:
 
       - name: Convert test results to JUnit XML
         if: always() && steps.terraform-tests.outcome != 'skipped'
-        run: |
-          $jsonPath = 'logs/terraform-test-results.json'
-          $xmlPath = 'logs/terraform-test-results.xml'
-
-          if (-not (Test-Path $jsonPath)) {
-            Write-Warning "Test results not found at $jsonPath"
-            return
-          }
-
-          $results = Get-Content $jsonPath -Raw | ConvertFrom-Json
-          $totalTests = $results.summary.total_passed + $results.summary.total_failed + $results.summary.total_errors
-
-          $xml = [System.Xml.XmlDocument]::new()
-          $declaration = $xml.CreateXmlDeclaration('1.0', 'UTF-8', $null)
-          $xml.AppendChild($declaration) | Out-Null
-
-          $testsuites = $xml.CreateElement('testsuites')
-          $testsuites.SetAttribute('name', 'Terraform Tests')
-          $testsuites.SetAttribute('tests', $totalTests)
-          $testsuites.SetAttribute('failures', $results.summary.total_failed)
-          $testsuites.SetAttribute('errors', $results.summary.total_errors)
-          $xml.AppendChild($testsuites) | Out-Null
-
-          foreach ($module in $results.modules) {
-            $moduleTests = $module.passed + $module.failed + $module.errors
-            $testsuite = $xml.CreateElement('testsuite')
-            $testsuite.SetAttribute('name', $module.path)
-            $testsuite.SetAttribute('tests', $moduleTests)
-            $testsuite.SetAttribute('failures', $module.failed)
-            $testsuite.SetAttribute('errors', $module.errors)
-            $testsuites.AppendChild($testsuite) | Out-Null
-
-            # Emit one testcase per passed test
-            for ($i = 1; $i -le $module.passed; $i++) {
-              $testcase = $xml.CreateElement('testcase')
-              $testcase.SetAttribute('classname', $module.path)
-              $testcase.SetAttribute('name', "test_$i")
-              $testsuite.AppendChild($testcase) | Out-Null
-            }
-
-            # Emit one testcase per failed test
-            for ($i = 1; $i -le $module.failed; $i++) {
-              $testcase = $xml.CreateElement('testcase')
-              $testcase.SetAttribute('classname', $module.path)
-              $testcase.SetAttribute('name', "failed_$i")
-              $failure = $xml.CreateElement('failure')
-              $failure.SetAttribute('message', "Test failed in $($module.path)")
-              $testcase.AppendChild($failure) | Out-Null
-              $testsuite.AppendChild($testcase) | Out-Null
-            }
-
-            # Emit one testcase per errored test
-            for ($i = 1; $i -le $module.errors; $i++) {
-              $testcase = $xml.CreateElement('testcase')
-              $testcase.SetAttribute('classname', $module.path)
-              $testcase.SetAttribute('name', "error_$i")
-              $errorEl = $xml.CreateElement('error')
-              $errorEl.SetAttribute('message', "Test errored in $($module.path)")
-              $testcase.AppendChild($errorEl) | Out-Null
-              $testsuite.AppendChild($testcase) | Out-Null
-            }
-          }
-
-          $xml.Save($xmlPath)
-          Write-Host "JUnit XML written to $xmlPath"
+        run: shared/ci/linting/ConvertTo-JUnitXml.ps1
 
       - name: Upload Terraform test results
         if: always() && steps.terraform-tests.outcome != 'skipped'
@@ -141,7 +77,7 @@ jobs:
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
         with:
           use_oidc: true
-          report-type: test_results
+          report_type: test_results
           files: logs/terraform-test-results.xml
           flags: terraform
           name: terraform-test-results
