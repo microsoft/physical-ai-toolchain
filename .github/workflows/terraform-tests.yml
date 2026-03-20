@@ -44,7 +44,7 @@ jobs:
         run: New-Item -ItemType Directory -Force -Path logs | Out-Null
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
         with:
           terraform_wrapper: false
 
@@ -138,7 +138,7 @@ jobs:
 
       - name: Upload to Codecov
         if: inputs.code-coverage && always() && steps.terraform-tests.outcome != 'skipped'
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
         with:
           use_oidc: true
           report-type: test_results
