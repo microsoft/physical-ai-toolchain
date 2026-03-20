@@ -156,11 +156,12 @@ function Invoke-TerraformTestCore {
             if ($LASTEXITCODE -ne 0) {
                 $totalErrors++
                 $moduleResults += @{
-                    path    = $displayPath
-                    passed  = 0
-                    failed  = 0
-                    errors  = 1
-                    skipped = $false
+                    path      = $displayPath
+                    passed    = 0
+                    failed    = 0
+                    errors    = 1
+                    skipped   = $false
+                    test_runs = @()
                 }
                 Write-CIAnnotation -Level Error -Message "terraform init failed in $displayPath"
                 continue
@@ -171,6 +172,7 @@ function Invoke-TerraformTestCore {
             $modulePassed = 0
             $moduleFailed = 0
             $moduleErrors = 0
+            $moduleTestRuns = @()
 
             foreach ($line in $testOutput) {
                 $lineStr = $line.ToString().Trim()
@@ -185,17 +187,18 @@ function Invoke-TerraformTestCore {
 
                 if ($jsonObj.type -eq 'test_run' -and $jsonObj.test_run.progress -eq 'complete') {
                     $status = $jsonObj.test_run.status
+                    $testName = "$($jsonObj.test_run.run)"
+                    $moduleTestRuns += @{ name = $testName; status = $status }
+
                     if ($status -eq 'pass') {
                         $modulePassed++
                     }
                     elseif ($status -eq 'fail') {
                         $moduleFailed++
-                        $testName = "$($jsonObj.test_run.run)"
                         Write-CIAnnotation -Level Error -Message "Test failed in ${displayPath}: $testName"
                     }
                     elseif ($status -eq 'error') {
                         $moduleErrors++
-                        $testName = "$($jsonObj.test_run.run)"
                         Write-CIAnnotation -Level Error -Message "Test error in ${displayPath}: $testName"
                     }
                 }
@@ -206,11 +209,12 @@ function Invoke-TerraformTestCore {
             $totalErrors += $moduleErrors
 
             $moduleResults += @{
-                path    = $displayPath
-                passed  = $modulePassed
-                failed  = $moduleFailed
-                errors  = $moduleErrors
-                skipped = $false
+                path      = $displayPath
+                passed    = $modulePassed
+                failed    = $moduleFailed
+                errors    = $moduleErrors
+                skipped   = $false
+                test_runs = @($moduleTestRuns)
             }
         }
         finally {
@@ -227,11 +231,12 @@ function Invoke-TerraformTestCore {
         terraform_version = $versionString
         modules           = @($moduleResults | ForEach-Object {
                 @{
-                    path    = $_.path
-                    passed  = $_.passed
-                    failed  = $_.failed
-                    errors  = $_.errors
-                    skipped = if ($_.skipped) { $true } else { $false }
+                    path      = $_.path
+                    passed    = $_.passed
+                    failed    = $_.failed
+                    errors    = $_.errors
+                    skipped   = if ($_.skipped) { $true } else { $false }
+                    test_runs = @($_.test_runs)
                 }
             })
         summary           = @{
