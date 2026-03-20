@@ -199,3 +199,17 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+
+  # Go module dependencies for Terraform e2e tests
+  - package-ecosystem: "gomod"
+    directory: "/infrastructure/terraform/e2e"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "infrastructure"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
