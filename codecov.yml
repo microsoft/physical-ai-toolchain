@@ -3,6 +3,7 @@
 # Flags:
 #   pester — PowerShell tests covering scripts/
 #   pytest — Python tests covering src/
+#   vitest — Vitest tests covering data-management/viewer/frontend/src/
 #   terraform — Terraform tests covering infrastructure/terraform/
 
 codecov:
@@ -33,6 +34,11 @@ coverage:
           - pytest-dataviewer
         target: auto
         threshold: 1%
+      vitest:
+        flags:
+          - vitest
+        target: auto
+        threshold: 1%
     patch:
       default:
         target: auto
@@ -50,6 +56,10 @@ flags:
   pytest-dataviewer:
     paths:
       - data-management/viewer/backend/src/
+    carryforward: true
+  vitest:
+    paths:
+      - data-management/viewer/frontend/src/
     carryforward: true
   terraform:
     paths:
