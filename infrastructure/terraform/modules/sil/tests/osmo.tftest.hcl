@@ -8,8 +8,10 @@ mock_provider "tls" {}
 mock_provider "random" {}
 
 variables {
-  should_assign_cluster_admin    = false
-  should_enable_private_endpoint = false
+  should_assign_cluster_admin     = false
+  should_enable_private_endpoint  = false
+  should_deploy_dce               = false
+  should_deploy_monitor_workspace = false
 }
 
 run "setup" {
