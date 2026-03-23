@@ -66,6 +66,12 @@ training/il/scripts/submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_inserti
 
 # LeRobot inference/evaluation
 evaluation/sil/scripts/submit-osmo-lerobot-eval.sh --policy-repo-id user/trained-policy
+
+# End-to-end pipeline: train → evaluate → register
+training/pipelines/run-lerobot-pipeline.sh \
+  -d lerobot/aloha_sim_insertion_human \
+  --policy-repo-id user/my-policy \
+  -r my-model
 ```
 
 ## 💾 OSMO Dataset Workflow
