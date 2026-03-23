@@ -248,13 +248,21 @@ osmo_login_and_setup() {
   local service_url="${1:?service URL required}"
   local username="${2:-guest}"
   local roles="${3:-osmo-backend}"
+  local lookup_output=""
+  local lookup_status=0
+
   info "Logging into OSMO at ${service_url}..."
   osmo login "${service_url}/" --method dev --username "$username"
   info "Ensuring dev user '$username' exists with $roles role..."
-  if ! osmo user get "$username" &>/dev/null; then
-    osmo user create "$username" --roles "$roles" >/dev/null 2>&1 || warn "OSMO user management endpoint unavailable; skipping dev user setup"
+  lookup_output=$(osmo user get "$username" 2>&1) || lookup_status=$?
+
+  if [[ "$lookup_status" -eq 0 ]]; then
+    osmo user update "$username" --add-roles "$roles" >/dev/null || warn "Unable to update OSMO dev user roles; continuing"
+  elif [[ "$lookup_output" == *"404"* || "$lookup_output" == *"not found"* ]]; then
+    osmo user create "$username" --roles "$roles" >/dev/null || warn "OSMO user management endpoint unavailable; skipping dev user setup"
   else
-    osmo user update "$username" --add-roles "$roles" >/dev/null 2>&1 || warn "Unable to update OSMO dev user roles; continuing"
+    printf '%s\n' "$lookup_output" >&2
+    warn "Unable to query OSMO dev user '$username'; skipping dev user setup"
   fi
 }
 
@@ -268,6 +276,7 @@ apply_secret_provider_class() {
   local include_redis_secret="${5:-true}"
 
   local manifest_dir
+  # BASH_SOURCE preserves the symlinked setup/lib path, so ../manifests resolves correctly.
   manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/manifests"
   local manifest_name="aks-secret-provider-class.yaml"
 
