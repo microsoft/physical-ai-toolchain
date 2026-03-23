@@ -49,6 +49,7 @@ azurelinux
 azureml
 azuremonitor
 azurestack
+azureuser
 azurevpnconfig
 containerapp
 cosmosdb
@@ -65,6 +66,7 @@ powerbi
 rtxprogpu
 servicebus
 sharepoint
+snet
 southeastasia
 wasbs
 westus
