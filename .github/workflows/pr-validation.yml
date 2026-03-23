@@ -120,8 +120,11 @@ jobs:
   dataviewer-frontend-tests:
     name: Dataviewer Frontend Tests
     uses: ./.github/workflows/dataviewer-frontend-tests.yml
+    with:
+      code-coverage: true
     permissions:
       contents: read
+      id-token: write
 
   # Python pytest test execution
   pytest-tests:
