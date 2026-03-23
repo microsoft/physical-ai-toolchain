@@ -892,7 +892,7 @@ dev = [
     { name = "ipywidgets" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=1.26.0,<3.0.0" },
-    { name = "pydantic" },
+    { name = "pydantic", specifier = "==2.12.5" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
