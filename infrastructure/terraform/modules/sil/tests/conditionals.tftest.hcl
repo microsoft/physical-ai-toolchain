@@ -8,7 +8,9 @@ mock_provider "tls" {}
 mock_provider "random" {}
 
 variables {
-  should_assign_cluster_admin = false
+  should_assign_cluster_admin     = false
+  should_deploy_dce               = false
+  should_deploy_monitor_workspace = false
 }
 
 run "setup" {
@@ -319,20 +321,22 @@ run "observability_with_dce" {
   command = plan
 
   variables {
-    resource_prefix                = run.setup.resource_prefix
-    environment                    = run.setup.environment
-    instance                       = run.setup.instance
-    location                       = run.setup.location
-    resource_group                 = run.setup.resource_group
-    virtual_network                = run.setup.virtual_network
-    subnets                        = run.setup.subnets
-    network_security_group         = run.setup.network_security_group
-    nat_gateway                    = run.setup.nat_gateway
-    log_analytics_workspace        = run.setup.log_analytics_workspace
-    container_registry             = run.setup.container_registry
-    data_collection_endpoint       = run.setup.data_collection_endpoint
-    monitor_workspace              = run.setup.monitor_workspace
-    should_enable_private_endpoint = false
+    resource_prefix                 = run.setup.resource_prefix
+    environment                     = run.setup.environment
+    instance                        = run.setup.instance
+    location                        = run.setup.location
+    resource_group                  = run.setup.resource_group
+    virtual_network                 = run.setup.virtual_network
+    subnets                         = run.setup.subnets
+    network_security_group          = run.setup.network_security_group
+    nat_gateway                     = run.setup.nat_gateway
+    log_analytics_workspace         = run.setup.log_analytics_workspace
+    container_registry              = run.setup.container_registry
+    data_collection_endpoint        = run.setup.data_collection_endpoint
+    monitor_workspace               = run.setup.monitor_workspace
+    should_deploy_dce               = true
+    should_deploy_monitor_workspace = true
+    should_enable_private_endpoint  = false
     aks_config = {
       system_node_pool_vm_size                    = "Standard_D8ds_v5"
       system_node_pool_node_count                 = 2
@@ -343,27 +347,27 @@ run "observability_with_dce" {
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule.logs) == 1
-    error_message = "Logs DCR should be created when DCE is provided"
+    error_message = "Logs DCR should be created when DCE deployment is enabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule.metrics) == 1
-    error_message = "Metrics DCR should be created when both DCE and monitor workspace are provided"
+    error_message = "Metrics DCR should be created when DCE and monitor workspace deployments are enabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule_association.logs) == 1
-    error_message = "Logs DCRA should be created when DCE is provided"
+    error_message = "Logs DCRA should be created when DCE deployment is enabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule_association.metrics) == 1
-    error_message = "Metrics DCRA should be created when both DCE and monitor workspace are provided"
+    error_message = "Metrics DCRA should be created when DCE and monitor workspace deployments are enabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule_association.dce) == 1
-    error_message = "DCE association should be created when DCE is provided"
+    error_message = "DCE association should be created when DCE deployment is enabled"
   }
 }
 
@@ -371,20 +375,22 @@ run "observability_without_dce" {
   command = plan
 
   variables {
-    resource_prefix                = run.setup.resource_prefix
-    environment                    = run.setup.environment
-    instance                       = run.setup.instance
-    location                       = run.setup.location
-    resource_group                 = run.setup.resource_group
-    virtual_network                = run.setup.virtual_network
-    subnets                        = run.setup.subnets
-    network_security_group         = run.setup.network_security_group
-    nat_gateway                    = run.setup.nat_gateway
-    log_analytics_workspace        = run.setup.log_analytics_workspace
-    container_registry             = run.setup.container_registry
-    data_collection_endpoint       = null
-    monitor_workspace              = null
-    should_enable_private_endpoint = false
+    resource_prefix                 = run.setup.resource_prefix
+    environment                     = run.setup.environment
+    instance                        = run.setup.instance
+    location                        = run.setup.location
+    resource_group                  = run.setup.resource_group
+    virtual_network                 = run.setup.virtual_network
+    subnets                         = run.setup.subnets
+    network_security_group          = run.setup.network_security_group
+    nat_gateway                     = run.setup.nat_gateway
+    log_analytics_workspace         = run.setup.log_analytics_workspace
+    container_registry              = run.setup.container_registry
+    data_collection_endpoint        = run.setup.data_collection_endpoint
+    monitor_workspace               = run.setup.monitor_workspace
+    should_deploy_dce               = false
+    should_deploy_monitor_workspace = true
+    should_enable_private_endpoint  = false
     aks_config = {
       system_node_pool_vm_size                    = "Standard_D8ds_v5"
       system_node_pool_node_count                 = 2
@@ -395,27 +401,27 @@ run "observability_without_dce" {
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule.logs) == 0
-    error_message = "Logs DCR should not be created when DCE is null"
+    error_message = "Logs DCR should not be created when DCE deployment is disabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule.metrics) == 0
-    error_message = "Metrics DCR should not be created when DCE is null"
+    error_message = "Metrics DCR should not be created when DCE deployment is disabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule_association.logs) == 0
-    error_message = "Logs DCRA should not be created when DCE is null"
+    error_message = "Logs DCRA should not be created when DCE deployment is disabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule_association.metrics) == 0
-    error_message = "Metrics DCRA should not be created when DCE is null"
+    error_message = "Metrics DCRA should not be created when DCE deployment is disabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule_association.dce) == 0
-    error_message = "DCE association should not be created when DCE is null"
+    error_message = "DCE association should not be created when DCE deployment is disabled"
   }
 }
 
@@ -427,20 +433,22 @@ run "metrics_with_dce_without_monitor" {
   command = plan
 
   variables {
-    resource_prefix                = run.setup.resource_prefix
-    environment                    = run.setup.environment
-    instance                       = run.setup.instance
-    location                       = run.setup.location
-    resource_group                 = run.setup.resource_group
-    virtual_network                = run.setup.virtual_network
-    subnets                        = run.setup.subnets
-    network_security_group         = run.setup.network_security_group
-    nat_gateway                    = run.setup.nat_gateway
-    log_analytics_workspace        = run.setup.log_analytics_workspace
-    container_registry             = run.setup.container_registry
-    data_collection_endpoint       = run.setup.data_collection_endpoint
-    monitor_workspace              = null
-    should_enable_private_endpoint = false
+    resource_prefix                 = run.setup.resource_prefix
+    environment                     = run.setup.environment
+    instance                        = run.setup.instance
+    location                        = run.setup.location
+    resource_group                  = run.setup.resource_group
+    virtual_network                 = run.setup.virtual_network
+    subnets                         = run.setup.subnets
+    network_security_group          = run.setup.network_security_group
+    nat_gateway                     = run.setup.nat_gateway
+    log_analytics_workspace         = run.setup.log_analytics_workspace
+    container_registry              = run.setup.container_registry
+    data_collection_endpoint        = run.setup.data_collection_endpoint
+    monitor_workspace               = run.setup.monitor_workspace
+    should_deploy_dce               = true
+    should_deploy_monitor_workspace = false
+    should_enable_private_endpoint  = false
     aks_config = {
       system_node_pool_vm_size                    = "Standard_D8ds_v5"
       system_node_pool_node_count                 = 2
@@ -451,17 +459,17 @@ run "metrics_with_dce_without_monitor" {
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule.logs) == 1
-    error_message = "Logs DCR should still be created when DCE is provided (monitor workspace not required)"
+    error_message = "Logs DCR should still be created when DCE deployment is enabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule.metrics) == 0
-    error_message = "Metrics DCR should not be created when monitor workspace is null"
+    error_message = "Metrics DCR should not be created when monitor workspace deployment is disabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule_association.metrics) == 0
-    error_message = "Metrics DCRA should not be created when monitor workspace is null"
+    error_message = "Metrics DCRA should not be created when monitor workspace deployment is disabled"
   }
 }
 
@@ -469,20 +477,22 @@ run "metrics_without_dce_with_monitor" {
   command = plan
 
   variables {
-    resource_prefix                = run.setup.resource_prefix
-    environment                    = run.setup.environment
-    instance                       = run.setup.instance
-    location                       = run.setup.location
-    resource_group                 = run.setup.resource_group
-    virtual_network                = run.setup.virtual_network
-    subnets                        = run.setup.subnets
-    network_security_group         = run.setup.network_security_group
-    nat_gateway                    = run.setup.nat_gateway
-    log_analytics_workspace        = run.setup.log_analytics_workspace
-    container_registry             = run.setup.container_registry
-    data_collection_endpoint       = null
-    monitor_workspace              = run.setup.monitor_workspace
-    should_enable_private_endpoint = false
+    resource_prefix                 = run.setup.resource_prefix
+    environment                     = run.setup.environment
+    instance                        = run.setup.instance
+    location                        = run.setup.location
+    resource_group                  = run.setup.resource_group
+    virtual_network                 = run.setup.virtual_network
+    subnets                         = run.setup.subnets
+    network_security_group          = run.setup.network_security_group
+    nat_gateway                     = run.setup.nat_gateway
+    log_analytics_workspace         = run.setup.log_analytics_workspace
+    container_registry              = run.setup.container_registry
+    data_collection_endpoint        = run.setup.data_collection_endpoint
+    monitor_workspace               = run.setup.monitor_workspace
+    should_deploy_dce               = false
+    should_deploy_monitor_workspace = true
+    should_enable_private_endpoint  = false
     aks_config = {
       system_node_pool_vm_size                    = "Standard_D8ds_v5"
       system_node_pool_node_count                 = 2
@@ -493,11 +503,11 @@ run "metrics_without_dce_with_monitor" {
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule.logs) == 0
-    error_message = "Logs DCR should not be created when DCE is null"
+    error_message = "Logs DCR should not be created when DCE deployment is disabled"
   }
 
   assert {
     condition     = length(azurerm_monitor_data_collection_rule.metrics) == 0
-    error_message = "Metrics DCR should not be created when DCE is null even if monitor workspace is provided"
+    error_message = "Metrics DCR should not be created when DCE deployment is disabled even if monitor workspace deployment is enabled"
   }
 }

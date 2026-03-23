@@ -68,6 +68,18 @@ variable "data_collection_endpoint" {
   default     = null
 }
 
+variable "should_deploy_monitor_workspace" {
+  type        = bool
+  description = "Whether Azure Monitor Workspace is enabled for AKS observability"
+  default     = true
+}
+
+variable "should_deploy_dce" {
+  type        = bool
+  description = "Whether Data Collection Endpoint is enabled for AKS observability"
+  default     = true
+}
+
 variable "container_registry" {
   type = object({
     id           = string
