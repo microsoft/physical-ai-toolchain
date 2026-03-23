@@ -3,8 +3,8 @@
 # Flags:
 #   pester — PowerShell tests covering scripts/
 #   pytest — Python tests covering src/
-#   vitest — Vitest tests covering data-management/viewer/frontend/src/
 #   terraform — Terraform tests covering infrastructure/terraform/
+#   vitest — Vitest tests covering data-management/viewer/frontend/src/
 
 codecov:
   notify:
@@ -57,13 +57,13 @@ flags:
     paths:
       - data-management/viewer/backend/src/
     carryforward: true
-  vitest:
-    paths:
-      - data-management/viewer/frontend/src/
-    carryforward: true
   terraform:
     paths:
       - infrastructure/terraform/
+    carryforward: true
+  vitest:
+    paths:
+      - data-management/viewer/frontend/src/
     carryforward: true
 
 parsers:
