@@ -158,16 +158,18 @@ module "sil" {
   current_user_oid = local.current_user_oid
 
   // Dependencies from platform module (passed as typed objects)
-  virtual_network           = module.platform.virtual_network
-  subnets                   = module.platform.subnets
-  network_security_group    = module.platform.network_security_group
-  nat_gateway               = module.platform.nat_gateway
-  should_enable_nat_gateway = var.should_enable_nat_gateway
-  log_analytics_workspace   = module.platform.log_analytics_workspace
-  monitor_workspace         = module.platform.monitor_workspace
-  data_collection_endpoint  = module.platform.data_collection_endpoint
-  container_registry        = module.platform.container_registry
-  private_dns_zones         = module.platform.private_dns_zones
+  virtual_network                 = module.platform.virtual_network
+  subnets                         = module.platform.subnets
+  network_security_group          = module.platform.network_security_group
+  nat_gateway                     = module.platform.nat_gateway
+  should_enable_nat_gateway       = var.should_enable_nat_gateway
+  log_analytics_workspace         = module.platform.log_analytics_workspace
+  monitor_workspace               = module.platform.monitor_workspace
+  data_collection_endpoint        = module.platform.data_collection_endpoint
+  container_registry              = module.platform.container_registry
+  private_dns_zones               = module.platform.private_dns_zones
+  should_deploy_monitor_workspace = var.should_deploy_monitor_workspace
+  should_deploy_dce               = var.should_deploy_dce
 
   // AKS subnet configuration - uses module defaults when null
   aks_subnet_config = {

@@ -37,13 +37,15 @@ The reference architecture deploys configurable monitoring components through Te
 | Application Insights             | Application performance monitoring | Always deployed                   |
 | Azure Monitor workspace          | Prometheus metrics backend         | `should_deploy_monitor_workspace` |
 | Managed Grafana                  | Visualization dashboards           | `should_deploy_grafana`           |
-| Container Insights               | AKS container telemetry            | `should_deploy_monitor_workspace` |
-| Prometheus data collection rules | Metric scraping configuration      | `should_deploy_monitor_workspace` |
+| Container Insights               | AKS container telemetry            | `should_deploy_dce`               |
+| Prometheus data collection rules | Metric scraping configuration      | `should_deploy_dce` and `should_deploy_monitor_workspace` |
 | Azure Monitor Private Link Scope | Private network monitoring         | `should_deploy_ampls`             |
 | Data collection endpoint         | Private ingestion endpoint         | `should_deploy_dce`               |
 
 > [!IMPORTANT]
 > The default configuration deploys a **private AKS cluster**. Connect through the VPN Gateway before running any `kubectl` or Helm commands. See [VPN Gateway](../infrastructure/vpn.md) for setup instructions.
+
+Container Insights data collection rules are created when `should_deploy_dce` is enabled. Prometheus metrics collection rules require both `should_deploy_dce` and `should_deploy_monitor_workspace`.
 
 ## 🔗 Related Resources
 
