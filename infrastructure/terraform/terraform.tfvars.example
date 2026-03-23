@@ -140,3 +140,7 @@ reports_archive_tier_days              = 180
 
 // DNS Zones
 // should_include_aks_dns_zone = true
+
+// VM Subnet
+// If you plan to add a Virtual Machine with Isaac Sim we need to enable the creating of the subnet
+// should_create_vm_subnet = true
