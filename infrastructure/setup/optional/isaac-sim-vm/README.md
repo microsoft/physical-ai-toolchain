@@ -198,9 +198,10 @@ az vm delete \
 
 The network interface and OS disk use `deleteOption: Delete` and are removed with the VM. The data disk uses `deleteOption: Detach` and remains available unless you delete it separately.
 
-If you deployed with `--isolated-vm-rg`, delete the entire derived resource group instead:
+If you deployed with `--isolated-vm-rg`, you can choose to delete the entire derived resource group. Note that deleting the resource group will **delete all VMs deployed to the resource group**:
 
 ```bash
+# Will delete all VMs in resource group, use with care!
 az group delete --name <vm-resource-group> --yes --no-wait
 ```
 
