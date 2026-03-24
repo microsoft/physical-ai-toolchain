@@ -56,6 +56,7 @@ resource "azurerm_public_ip" "vpn_gateway" {
   resource_group_name = var.resource_group.name
   allocation_method   = "Static"
   sku                 = "Standard"
+  zones               = endswith(var.vpn_gateway_config.sku, "AZ") ? ["1", "2", "3"] : []
   tags                = local.tags
 }
 
