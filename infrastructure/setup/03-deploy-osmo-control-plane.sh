@@ -27,6 +27,7 @@ OPTIONS:
     --use-acr               Pull images from ACR deployed by 001-iac
     --acr-name NAME         Pull images from specified ACR
     --use-incluster-redis   Use in-cluster Redis instead of Azure Managed Redis
+                            (unauthenticated, non-TLS; suitable for development)
     --skip-mek              Skip MEK configuration
     --force-mek             Replace existing MEK (data loss warning)
     --mek-config-file PATH  Use existing MEK config file
@@ -60,6 +61,7 @@ use_local_osmo=false
 config_preview=false
 chart_version_set=false
 image_version_set=false
+redis_storage_class="" # Will be resolved if --use-incluster-redis is set using detect_default_storage_class (requires cluster connection)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -206,7 +208,9 @@ fi
 
 if [[ -n "$osmo_identity_client_id" ]]; then
   info "Applying SecretProviderClass for Azure Key Vault CSI driver..."
-  apply_secret_provider_class "$NS_OSMO_CONTROL_PLANE" "$keyvault" "$osmo_identity_client_id" "$tenant_id"
+  include_redis_secret=true
+  [[ "$use_incluster_redis" == "true" ]] && include_redis_secret=false
+  apply_secret_provider_class "$NS_OSMO_CONTROL_PLANE" "$keyvault" "$osmo_identity_client_id" "$tenant_id" "$include_redis_secret"
 else
   info "Workload identity not configured; retrieving secrets from Key Vault..."
   pg_password=$(az keyvault secret show --vault-name "$keyvault" --name "psql-admin-password" --query value -o tsv)
@@ -225,6 +229,16 @@ else
       --from-literal=redis-password="$redis_key" \
       --dry-run=client -o yaml | kubectl apply -f -
   fi
+fi
+
+if [[ "$use_incluster_redis" == "true" ]]; then
+  redis_storage_class=$(detect_default_storage_class)
+  warn "In-cluster Redis runs without TLS or authentication. Use it only for development environments."
+  info "Creating Redis secret for in-cluster Redis..."
+  kubectl create secret generic "$SECRET_REDIS" \
+    --namespace="$NS_OSMO_CONTROL_PLANE" \
+    --from-literal=redis-password="" \
+    --dry-run=client -o yaml | kubectl apply -f -
 fi
 
 # Apply internal LB ingress if present
@@ -277,7 +291,15 @@ base_helm_args=(
 # Deploy service
 info "Deploying osmo/service..."
 helm_args=("${base_helm_args[@]}" -f "$service_values" --set "services.postgres.serviceName=$pg_fqdn" --set "services.postgres.user=$pg_user")
-[[ "$use_incluster_redis" == "false" ]] && helm_args+=(--set "services.redis.serviceName=$redis_hostname" --set "services.redis.port=$redis_port")
+if [[ "$use_incluster_redis" == "true" ]]; then
+  helm_args+=(
+    --set "services.redis.enabled=true"
+    --set "services.redis.tlsEnabled=false"
+    --set-string "services.redis.storageClassName=$redis_storage_class"
+  )
+else
+  helm_args+=(--set "services.redis.serviceName=$redis_hostname" --set "services.redis.port=$redis_port")
+fi
 [[ -n "$osmo_identity_client_id" ]] && helm_args+=(-f "$service_identity_values" --set "serviceAccount.annotations.azure\.workload\.identity/client-id=$osmo_identity_client_id")
 
 if [[ "$use_acr" == "true" ]]; then
