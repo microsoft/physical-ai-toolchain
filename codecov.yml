@@ -1,6 +1,7 @@
 # codecov.yml — Codecov configuration for unified coverage reporting
 #
 # Flags:
+#   go — Go tests covering infrastructure/terraform/e2e/
 #   pester — PowerShell tests covering scripts/
 #   pytest — Python tests covering src/
 #   terraform — Terraform tests covering infrastructure/terraform/
@@ -17,6 +18,11 @@ coverage:
   status:
     project:
       default:
+        target: auto
+        threshold: 1%
+      go:
+        flags:
+          - go
         target: auto
         threshold: 1%
       pester:
@@ -45,6 +51,10 @@ coverage:
         threshold: 5%
 
 flags:
+  go:
+    paths:
+      - infrastructure/terraform/e2e/
+    carryforward: true
   pester:
     paths:
       - scripts/
