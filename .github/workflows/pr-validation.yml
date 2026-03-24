@@ -184,6 +184,18 @@ jobs:
       contents: read
       id-token: write
 
+  # Go tests (golangci-lint + go test)
+  go-tests:
+    name: Go Tests
+    uses: ./.github/workflows/go-tests.yml
+    with:
+      soft-fail: true
+      changed-files-only: true
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # CodeQL security analysis
   codeql-analysis:
     name: CodeQL Analysis
