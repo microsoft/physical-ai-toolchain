@@ -3,8 +3,10 @@
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
 # shellcheck source=infrastructure/setup/lib/common.sh
 source "$SCRIPT_DIR/../lib/common.sh"
+# shellcheck disable=SC1091
 # shellcheck source=infrastructure/setup/defaults.conf
 source "$SCRIPT_DIR/../defaults.conf"
 
@@ -53,86 +55,41 @@ trim_whitespace() {
   printf '%s\n' "$value"
 }
 
-strip_inline_comments() {
-  local line="${1-}"
-  local output=""
-  local in_quotes=false
-  local escape=false
-  local index=0
-  local char next_char
+resolve_file_path() {
+  local file_path="${1:?file path required}"
 
-  while (( index < ${#line} )); do
-    char="${line:index:1}"
-    next_char="${line:index+1:1}"
+  if [[ "$file_path" = /* ]]; then
+    printf '%s\n' "$file_path"
+    return 0
+  fi
 
-    if [[ "$in_quotes" == "true" ]]; then
-      output+="$char"
-      if [[ "$escape" == "true" ]]; then
-        escape=false
-      elif [[ "$char" == "\\" ]]; then
-        escape=true
-      elif [[ "$char" == '"' ]]; then
-        in_quotes=false
-      fi
-      ((index += 1))
-      continue
-    fi
-
-    if [[ "$char" == '"' ]]; then
-      in_quotes=true
-      output+="$char"
-      ((index += 1))
-      continue
-    fi
-
-    if [[ "$char" == '#' ]]; then
-      break
-    fi
-
-    if [[ "$char" == '/' && "$next_char" == '/' ]]; then
-      break
-    fi
-
-    output+="$char"
-    ((index += 1))
-  done
-
-  trim_whitespace "$output"
+  printf '%s/%s\n' "$(cd "$(dirname "$file_path")" && pwd)" "$(basename "$file_path")"
 }
 
 read_tfvars_metadata() {
-  local tfvars_path="${1:?terraform variables file required}"
-  local metadata='{}'
-  local line=""
-  local key=""
-  local raw_value=""
+  local tf_dir="${1:?terraform directory required}"
+  local tfvars_path="${2:?terraform variables file required}"
+  local metadata=""
 
   [[ -f "$tfvars_path" ]] || fatal "Terraform variables file not found: $tfvars_path"
+  [[ -d "$tf_dir" ]] || fatal "Terraform directory not found: $tf_dir"
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line=$(strip_inline_comments "$line")
-    [[ -n "$line" ]] || continue
+  info "Initializing Terraform in $tf_dir for tfvars evaluation..."
+  terraform -chdir="$tf_dir" init -backend=false -input=false -no-color >/dev/null || fatal "Unable to initialize Terraform in $tf_dir"
 
-    if [[ ! "$line" =~ ^([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*(.+)$ ]]; then
-      continue
-    fi
+  metadata=$(terraform -chdir="$tf_dir" console -var-file="$tfvars_path" <<'EOF'
+jsonencode({
+  environment = var.environment
+  instance = var.instance
+  location = var.location
+  resource_group_name = var.resource_group_name
+  resource_prefix = var.resource_prefix
+  should_create_vm_subnet = var.should_create_vm_subnet
+})
+EOF
+  ) || fatal "Unable to evaluate Terraform variables from $tfvars_path"
 
-    key="${BASH_REMATCH[1]}"
-    raw_value=$(trim_whitespace "${BASH_REMATCH[2]}")
-
-    case "$key" in
-      environment|instance|location|resource_group_name|resource_prefix)
-        [[ "$raw_value" == \"*\" ]] || continue
-        metadata=$(jq --arg key "$key" --argjson value "$raw_value" '. + {($key): $value}' <<< "$metadata")
-        ;;
-      should_create_vm_subnet)
-        [[ "$raw_value" == "true" || "$raw_value" == "false" ]] || continue
-        metadata=$(jq --arg key "$key" --argjson value "$raw_value" '. + {($key): $value}' <<< "$metadata")
-        ;;
-    esac
-  done < "$tfvars_path"
-
-  printf '%s\n' "$metadata"
+  jq -r '.' <<< "$metadata"
 }
 
 print_az_command() {
@@ -236,8 +193,9 @@ require_tools az jq terraform
 [[ -f "$template_file" ]] || fatal "Bicep template not found: $template_file"
 
 if [[ -n "$tfvars_file" ]]; then
+  tfvars_file=$(resolve_file_path "$tfvars_file")
   info "Reading Terraform variables from $tfvars_file..."
-  tfvars_metadata=$(read_tfvars_metadata "$tfvars_file")
+  tfvars_metadata=$(read_tfvars_metadata "$tf_dir" "$tfvars_file")
   tfvars_environment=$(tf_get "$tfvars_metadata" 'environment')
   tfvars_instance=$(tf_get "$tfvars_metadata" 'instance' '001')
   tfvars_location=$(tf_get "$tfvars_metadata" 'location')

@@ -62,6 +62,17 @@ type DiskConfig = {
   deleteOption: 'Delete' | 'Detach'
 }
 
+@export()
+@sealed()
+@description('Auto-shutdown schedule configuration for cost control.')
+type ShutdownSchedule = {
+  @description('24-hour time string for daily shutdown (for example, 1900).')
+  time: string
+
+  @description('Windows time zone identifier for the shutdown schedule.')
+  timeZoneId: string
+}
+
 /*
   Shared defaults
 */
@@ -105,4 +116,11 @@ var defaultDataDiskConfig DiskConfig = {
   sizeGb: 512
   caching: 'ReadWrite'
   deleteOption: 'Detach'
+}
+
+@export()
+@description('Default auto-shutdown schedule aligned to a globally neutral UTC default.')
+var defaultShutdownSchedule ShutdownSchedule = {
+  time: '1900'
+  timeZoneId: 'UTC'
 }

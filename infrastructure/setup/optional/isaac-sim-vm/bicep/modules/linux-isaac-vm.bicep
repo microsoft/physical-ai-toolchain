@@ -3,6 +3,7 @@ metadata description = 'Module placeholder for deploying a single Linux Isaac VM
 
 import {
   CommonTags
+  ShutdownSchedule
   ImageConfig
   PlanConfig
   DiskConfig
@@ -45,6 +46,9 @@ param osDisk DiskConfig
 
 @description('Data disk configuration.')
 param dataDisk DiskConfig
+
+@description('Daily auto-shutdown schedule for the VM.')
+param shutdownSchedule ShutdownSchedule
 
 @description('Optional MDE.Linux extension settings. Set to null to skip extension deployment.')
 param mdeLinux object?
@@ -177,7 +181,7 @@ resource installDevDepsExtension 'Microsoft.Compute/virtualMachines/extensions@2
     typeHandlerVersion: '2.1'
     autoUpgradeMinorVersion: true
     settings: {
-      commandToExecute: format('bash -lc "echo {0} | base64 -d > /tmp/install-dev-deps.sh && echo {1} | base64 -d > /tmp/install-thinlinc-silent.sh && chmod +x /tmp/install-dev-deps.sh /tmp/install-thinlinc-silent.sh && /tmp/install-dev-deps.sh && /tmp/install-thinlinc-silent.sh"', installDevDepsScriptBase64, installThinLincScriptBase64)
+      commandToExecute: format('bash -lc "echo {0} | base64 -d > /tmp/install-dev-deps.sh && echo {1} | base64 -d > /tmp/install-thinlinc-silent.sh && chmod +x /tmp/install-dev-deps.sh /tmp/install-thinlinc-silent.sh && /tmp/install-dev-deps.sh {2} && /tmp/install-thinlinc-silent.sh"', installDevDepsScriptBase64, installThinLincScriptBase64, adminUsername)
     }
   }
 }
@@ -202,7 +206,7 @@ resource mdeExtension 'Microsoft.Compute/virtualMachines/extensions@2023-09-01' 
   }
 }
 
-@description('Daily VM auto-shutdown schedule at 19:00 (W. Europe Standard Time) without notifications.')
+@description('Daily VM auto-shutdown schedule without notifications.')
 resource autoShutdownSchedule 'Microsoft.DevTestLab/schedules@2018-09-15' = {
   name: 'shutdown-computevm-${vmName}'
   location: location
@@ -211,9 +215,9 @@ resource autoShutdownSchedule 'Microsoft.DevTestLab/schedules@2018-09-15' = {
     status: 'Enabled'
     taskType: 'ComputeVmShutdownTask'
     dailyRecurrence: {
-      time: '1900'
+      time: shutdownSchedule.time
     }
-    timeZoneId: 'W. Europe Standard Time'
+    timeZoneId: shutdownSchedule.timeZoneId
     targetResourceId: virtualMachine.id
     notificationSettings: {
       status: 'Disabled'

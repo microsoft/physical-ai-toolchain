@@ -4,6 +4,31 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 # Azure CustomScript can run without HOME set; ensure global tools (git, uv) work.
 export HOME="${HOME:-/root}"
+ADMIN_USER="${1:-azureuser}"
+
+if ! id "$ADMIN_USER" >/dev/null 2>&1; then
+  echo "Admin user does not exist: $ADMIN_USER" >&2
+  exit 1
+fi
+
+ADMIN_USER_HOME="$(getent passwd "$ADMIN_USER" | cut -d: -f6)"
+
+if [[ -z "$ADMIN_USER_HOME" || ! -d "$ADMIN_USER_HOME" ]]; then
+  echo "Admin user home directory does not exist: $ADMIN_USER_HOME" >&2
+  exit 1
+fi
+
+configure_admin_git() {
+  sudo -H -u "$ADMIN_USER" env HOME="$ADMIN_USER_HOME" bash -lc \
+    'cd "$HOME" && git config --global core.editor "code-insiders --wait"'
+}
+
+install_admin_azure_cli_extension() {
+  local extension_name="$1"
+
+  sudo -H -u "$ADMIN_USER" env HOME="$ADMIN_USER_HOME" bash -lc \
+    "az extension add --name '${extension_name}' --yes"
+}
 
 wait_for_apt_locks() {
   local timeout_seconds=900
@@ -141,12 +166,13 @@ Signed-By: /etc/apt/keyrings/microsoft.gpg
 EOF
 apt_get update
 apt_get install -y --no-install-recommends azure-cli ripgrep
-az extension add --name ml
+install_admin_azure_cli_extension "ml"
 
+# shellcheck disable=SC1091
 . /etc/os-release
 DISTRO=$ID
 VERSION=$VERSION_ID
-curl -sSL -O https://packages.microsoft.com/config/${DISTRO}/${VERSION}/packages-microsoft-prod.deb
+curl -sSL -O "https://packages.microsoft.com/config/${DISTRO}/${VERSION}/packages-microsoft-prod.deb"
 dpkg_install packages-microsoft-prod.deb
 rm packages-microsoft-prod.deb
 apt_get update
@@ -159,7 +185,7 @@ apt_get update
 apt_get install -y cuda-toolkit-12-6
 
 ## Use Docker without sudo
-sudo usermod -aG docker azureuser
+sudo usermod -aG docker "$ADMIN_USER"
 
 ## Install NVidia Container Toolkit
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor --batch --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
@@ -188,7 +214,7 @@ EOF
 apt_get install -y apt-transport-https &&
 apt_get update &&
 apt_get install -y code-insiders
-git config --global core.editor "code-insiders --wait"
+configure_admin_git
 
 
 ## Install PowerShell

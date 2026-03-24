@@ -19,6 +19,21 @@ param natGatewayName string
 @description('Name of the Public IP resource used by the NAT gateway.')
 param publicIpName string
 
+@description('Existing default outbound access setting to preserve when updating the subnet.')
+param existingDefaultOutboundAccess bool?
+
+@description('Existing network security group association to preserve when updating the subnet.')
+param existingNsg object?
+
+@description('Existing service endpoints to preserve when updating the subnet.')
+param existingServiceEndpoints array?
+
+@description('Existing subnet delegations to preserve when updating the subnet.')
+param existingDelegations array?
+
+@description('Existing route table association to preserve when updating the subnet.')
+param existingRouteTable object?
+
 @description('Tags applied to NAT resources.')
 param tags object
 
@@ -26,6 +41,30 @@ param tags object
 @minValue(4)
 @maxValue(120)
 param idleTimeoutInMinutes int = 10
+
+var subnetProperties = union(
+  {
+    addressPrefix: subnetAddressPrefix
+    natGateway: {
+      id: natGateway.id
+    }
+  },
+  existingDefaultOutboundAccess == null ? {} : {
+    defaultOutboundAccess: existingDefaultOutboundAccess
+  },
+  existingNsg == null ? {} : {
+    networkSecurityGroup: existingNsg
+  },
+  existingServiceEndpoints == null ? {} : {
+    serviceEndpoints: existingServiceEndpoints
+  },
+  existingDelegations == null ? {} : {
+    delegations: existingDelegations
+  },
+  existingRouteTable == null ? {} : {
+    routeTable: existingRouteTable
+  }
+)
 
 resource natPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
   name: publicIpName
@@ -67,12 +106,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-09-01' existing = {
 resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-09-01' = {
   parent: vnet
   name: subnetName
-  properties: {
-    addressPrefix: subnetAddressPrefix
-    natGateway: {
-      id: natGateway.id
-    }
-  }
+  properties: subnetProperties
 }
 
 output natGatewayResourceId string = natGateway.id

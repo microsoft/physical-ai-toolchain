@@ -35,17 +35,45 @@ The deployment script integrates the Isaac Sim Developer Workstation with your e
 
 Before deployment:
 
-- Accept the NVIDIA marketplace terms in the target subscription.
-- Authenticate the Azure CLI for the target subscription.
-- For Terraform-backed deployment, enable `should_create_vm_subnet = true` and apply Terraform so `vm_subnet` and `network_security_group` outputs exist.
+1. Complete Steps 1 and 2 of the deployment pipeline:
 
-## 🚀 Marketplace Terms Acceptance
+  ```bash
+  source infrastructure/terraform/prerequisites/az-sub-init.sh
 
-Run this once per subscription before deployment:
+  cd infrastructure/terraform
+  terraform apply -var-file=terraform.tfvars
+  ```
 
-```bash
-az vm image terms accept --publisher nvidia --offer isaac_sim_developer_workstation --plan isaac_sim_developer_workstation_community_linux
-```
+2. Enable the dedicated VM subnet in `infrastructure/terraform/terraform.tfvars`:
+
+  ```hcl
+  should_create_vm_subnet = true
+  ```
+
+3. Re-apply Terraform so the VM subnet and shared network security group outputs exist:
+
+  ```bash
+  cd infrastructure/terraform
+  terraform apply -var-file=terraform.tfvars
+  terraform output vm_subnet
+  terraform output network_security_group
+  ```
+
+4. If the platform uses a private AKS cluster, complete the VPN deployment step before connecting to private VM resources:
+
+  ```bash
+  cd infrastructure/terraform/vpn
+  terraform apply
+  ```
+
+5. Accept the NVIDIA marketplace terms once per subscription, or let the deployment script handle it automatically:
+
+  ```bash
+  az vm image terms accept \
+    --publisher nvidia \
+    --offer isaac_sim_developer_workstation \
+    --plan isaac_sim_developer_workstation_community_linux
+  ```
 
 ## 🚀 Terraform-Backed Deployment
 
@@ -157,6 +185,45 @@ ssh <admin-username>@<vm-private-ip>
 
 Use this option for setup, diagnostics, file transfers, or command-line workflows that do not require a UI.
 
+## 🗑️ Cleanup
+
+Delete the VM from the resource group that contains the VM resources:
+
+```bash
+az vm delete \
+  --resource-group <vm-resource-group> \
+  --name <vm-name> \
+  --yes
+```
+
+The network interface and OS disk use `deleteOption: Delete` and are removed with the VM. The data disk uses `deleteOption: Detach` and remains available unless you delete it separately.
+
+If you deployed with `--isolated-vm-rg`, delete the entire derived resource group instead:
+
+```bash
+az group delete --name <vm-resource-group> --yes --no-wait
+```
+
+Delete the ARM deployment record from the deployment resource group when you no longer need it:
+
+```bash
+az deployment group delete \
+  --resource-group <deployment-resource-group> \
+  --name <deployment-name>
+```
+
+If `enableSubnetNatGatewayEgress` was enabled, delete the NAT gateway and public IP separately from the networking resource group:
+
+```bash
+az network nat gateway delete \
+  --resource-group <network-resource-group> \
+  --name <nat-gateway-name>
+
+az network public-ip delete \
+  --resource-group <network-resource-group> \
+  --name <nat-public-ip-name>
+```
+
 ## ⚙️ Parameters
 
 The deployment template in `main.bicep` accepts the following parameters.
@@ -179,6 +246,7 @@ The deployment template in `main.bicep` accepts the following parameters.
 | `plan`                         | `PlanConfig?`  | No       | `null`                     | Marketplace plan configuration. When `null`, `defaultPlanConfig` is used as the effective value. |
 | `osDisk`                       | `DiskConfig?`  | No       | `null`                     | OS disk configuration. When `null`, `defaultOsDiskConfig` is used as the effective value. |
 | `dataDisk`                     | `DiskConfig?`  | No       | `null`                     | Data disk configuration. When `null`, `defaultDataDiskConfig` is used as the effective value. |
+| `shutdownSchedule`             | `ShutdownSchedule?` | No   | `null`                     | Daily auto-shutdown schedule. When `null`, `defaultShutdownSchedule` is used as the effective value. |
 | `mdeLinux`                     | `object?`      | No       | `null`                     | Defender for Endpoint extension settings. Set `{}` to enable with defaults. Set `null` to skip deployment. |
 
 ### Structured parameter types
@@ -187,3 +255,4 @@ The deployment template in `main.bicep` accepts the following parameters.
 - `ImageConfig`: `publisher`, `offer`, `sku`, `version`
 - `PlanConfig`: `publisher`, `product`, `name`
 - `DiskConfig`: `storageAccountType`, `sizeGb`, `caching`, `deleteOption`
+- `ShutdownSchedule`: `time`, `timeZoneId`

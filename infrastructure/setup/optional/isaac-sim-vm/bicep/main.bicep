@@ -5,10 +5,12 @@ targetScope = 'resourceGroup'
 
 import {
   CommonTags
+  ShutdownSchedule
   ImageConfig
   PlanConfig
   DiskConfig
   defaultCommonTags
+  defaultShutdownSchedule
   defaultImageConfig
   defaultPlanConfig
   defaultOsDiskConfig
@@ -76,6 +78,9 @@ param osDisk DiskConfig?
 @description('Data disk configuration.')
 param dataDisk DiskConfig?
 
+@description('Daily auto-shutdown schedule for the VM.')
+param shutdownSchedule ShutdownSchedule?
+
 @description('Optional MDE.Linux extension settings. Set to null to skip extension deployment.')
 param mdeLinux object?
 
@@ -88,6 +93,7 @@ var effectiveImage ImageConfig = image ?? defaultImageConfig
 var effectivePlan PlanConfig = plan ?? defaultPlanConfig
 var effectiveOsDisk DiskConfig = osDisk ?? defaultOsDiskConfig
 var effectiveDataDisk DiskConfig = dataDisk ?? defaultDataDiskConfig
+var effectiveShutdownSchedule ShutdownSchedule = shutdownSchedule ?? defaultShutdownSchedule
 var subnetIdParts = split(subnetId, '/')
 var subnetSubscriptionId = subnetIdParts[2]
 var subnetResourceGroupName = subnetIdParts[4]
@@ -95,6 +101,11 @@ var virtualNetworkName = subnetIdParts[8]
 var subnetName = subnetIdParts[10]
 var effectiveNatGatewayName = empty(natGatewayName) ? 'nat-${uniqueString(subnetId)}' : natGatewayName
 var effectiveNatGatewayPublicIpName = empty(natGatewayPublicIpName) ? 'pip-nat-${uniqueString(subnetId)}' : natGatewayPublicIpName
+var existingSubnetDefaultOutboundAccess = existingSubnet.properties.?defaultOutboundAccess
+var existingSubnetNsg = existingSubnet.properties.?networkSecurityGroup
+var existingSubnetServiceEndpoints = existingSubnet.properties.?serviceEndpoints
+var existingSubnetDelegations = existingSubnet.properties.?delegations
+var existingSubnetRouteTable = existingSubnet.properties.?routeTable
 
 resource existingVnet 'Microsoft.Network/virtualNetworks@2023-09-01' existing = {
   scope: resourceGroup(subnetSubscriptionId, subnetResourceGroupName)
@@ -129,6 +140,7 @@ module linuxIsaacVmModule 'modules/linux-isaac-vm.bicep' = {
     plan: effectivePlan
     osDisk: effectiveOsDisk
     dataDisk: effectiveDataDisk
+    shutdownSchedule: effectiveShutdownSchedule
     mdeLinux: mdeLinux
     tags: effectiveTags
   }
@@ -144,6 +156,11 @@ module subnetNatEgressModule 'modules/subnet-nat-egress.bicep' = if (enableSubne
     subnetAddressPrefix: discoveredSubnetAddressPrefix
     natGatewayName: effectiveNatGatewayName
     publicIpName: effectiveNatGatewayPublicIpName
+    existingDefaultOutboundAccess: existingSubnetDefaultOutboundAccess
+    existingNsg: existingSubnetNsg
+    existingServiceEndpoints: existingSubnetServiceEndpoints
+    existingDelegations: existingSubnetDelegations
+    existingRouteTable: existingSubnetRouteTable
     tags: effectiveTags
   }
 }
