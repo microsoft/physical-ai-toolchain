@@ -119,15 +119,21 @@ function Invoke-GoTestCore {
         return 1
     }
 
-    # Check golangci-lint on PATH; install if missing
+    # Check golangci-lint on PATH; install if missing via SHA256-verified binary download
     if (-not (Get-Command golangci-lint -ErrorAction SilentlyContinue)) {
-        Write-Host 'golangci-lint not found — installing...'
-        & bash -c 'curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.11.4'
+        Write-Host 'golangci-lint not found — installing via SHA256-verified binary...'
+        $lintInstallVersion = '2.11.4'
+        $lintExpectedSHA256 = '200c5b7503f67b59a6743ccf32133026c174e272b930ee79aa2aa6f37aca7ef1'
+        $lintUrl = "https://github.com/golangci/golangci-lint/releases/download/v${lintInstallVersion}/golangci-lint-${lintInstallVersion}-linux-amd64.tar.gz"
+        $lintTarball = '/tmp/golangci-lint.tar.gz'
+        $goPathBin = (& go env GOPATH) + '/bin'
+
+        & bash -c "set -euo pipefail && curl -fsSL -o '${lintTarball}' '${lintUrl}' && echo '${lintExpectedSHA256}  ${lintTarball}' | sha256sum -c --quiet - && mkdir -p '${goPathBin}' && tar -xzf '${lintTarball}' -C '${goPathBin}' --strip-components=1 'golangci-lint-${lintInstallVersion}-linux-amd64/golangci-lint' && rm -f '${lintTarball}'"
         if ($LASTEXITCODE -ne 0) {
             Write-CIAnnotation -Level Error -Message 'Failed to install golangci-lint'
             return 1
         }
-        $env:PATH = "$(& go env GOPATH)/bin" + [IO.Path]::PathSeparator + $env:PATH
+        $env:PATH = $goPathBin + [IO.Path]::PathSeparator + $env:PATH
         if (-not (Get-Command golangci-lint -ErrorAction SilentlyContinue)) {
             Write-CIAnnotation -Level Error -Message 'golangci-lint not available after install attempt'
             return 1
