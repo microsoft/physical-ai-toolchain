@@ -4,6 +4,10 @@
 #Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0' }
 
+# Stub functions for external tools trigger PSUseApprovedVerbs
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '')]
+param()
+
 BeforeAll {
     . $PSScriptRoot/../../linting/Invoke-GoTest.ps1
     $ErrorActionPreference = 'Continue'

@@ -158,7 +158,7 @@ function Invoke-GoTestCore {
         }
 
         # Run go test
-        $testOutput = & go test -race -coverprofile=$CoverageOutput -covermode=atomic -v -json './...' 2>&1
+        $testOutput = & go test -race "-coverprofile=$CoverageOutput" -covermode=atomic -v -json './...' 2>&1
 
         # Parse JSON output line by line
         $packageMap = @{}
