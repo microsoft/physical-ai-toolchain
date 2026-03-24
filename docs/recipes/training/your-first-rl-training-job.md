@@ -67,23 +67,25 @@ Override the backend to use RSL-RL instead of SKRL:
 
 ### Step 4: Monitor training progress
 
-Watch pod status:
+**OSMO UI**: Open the OSMO dashboard to view workflow status, pod logs, and real-time metrics. See [Accessing OSMO](../../training/osmo-training.md#-accessing-osmo) for connection instructions (VPN or port-forward).
+
+**Azure ML Studio**: Navigate to your workspace at [ml.azure.com](https://ml.azure.com/), open the Jobs section, and select the MLflow experiment. Training metrics (reward, episode length, loss) stream in real time as the job progresses.
+
+**CLI** (optional): Check workflow status via the OSMO CLI:
 
 ```bash
-kubectl get pods -n osmo-control-plane --watch
+osmo workflow list
 ```
-
-View training logs:
-
-```bash
-kubectl logs -n osmo-control-plane -l app=osmo-training --tail=100 -f
-```
-
-Access the OSMO UI dashboard for real-time metrics. See [Cluster Operations](../../infrastructure/cluster-setup-advanced.md) for OSMO UI access instructions.
 
 ### Step 5: Verify results in MLflow
 
-Open the Azure ML Studio portal and navigate to the MLflow experiment. Training metrics (reward, episode length, loss) appear as the job progresses.
+1. Open [ml.azure.com](https://ml.azure.com/) and select your workspace
+2. Navigate to **Jobs** in the left sidebar
+3. Find your experiment (named after the task, e.g., `isaaclab-training`) and select it
+4. Click the latest run to open the run detail page
+5. Select the **Metrics** tab to view training curves (reward, episode length, loss) — use the chart controls to overlay multiple metrics or smooth noisy curves
+6. Select the **Outputs + logs** tab to view stdout/stderr logs from the training container
+7. If `--register-checkpoint` was used, navigate to **Models** in the left sidebar to confirm the registered model and its version
 
 List registered models from the CLI:
 

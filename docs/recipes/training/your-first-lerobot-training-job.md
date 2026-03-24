@@ -13,7 +13,6 @@ Submit a LeRobot behavioral cloning training job to OSMO using a HuggingFace dat
 | OSMO | Control plane and backend running |
 | VPN | Connected to private cluster (if using private AKS) |
 | Azure CLI | Authenticated (`az login`) |
-| HuggingFace account | For accessing public datasets (no token required for public repos) |
 
 ## 🚀 Steps
 
@@ -69,19 +68,25 @@ The script downloads the dataset from Blob Storage using managed identity creden
 
 ### Step 4: Monitor training progress
 
-Watch pod status:
+**OSMO UI**: Open the OSMO dashboard to view workflow status, pod logs, and real-time metrics. See [Accessing OSMO](../../training/osmo-training.md#-accessing-osmo) for connection instructions (VPN or port-forward).
+
+**Azure ML Studio**: Navigate to your workspace at [ml.azure.com](https://ml.azure.com/), open the Jobs section, and select the MLflow experiment. Training metrics (loss, gradient norm, learning rate) stream in real time as the job progresses.
+
+To view results in detail:
+
+1. Open [ml.azure.com](https://ml.azure.com/) and select your workspace
+2. Navigate to **Jobs** in the left sidebar
+3. Find your experiment (named after the task, e.g., `lerobot-act-training`) and select it
+4. Click the latest run to open the run detail page
+5. Select the **Metrics** tab to view training curves (loss, gradient norm, learning rate) — use the chart controls to overlay multiple metrics or smooth noisy curves
+6. Select the **Outputs + logs** tab to view stdout/stderr logs from the training container
+7. If `--register-checkpoint` was used, navigate to **Models** in the left sidebar to confirm the registered model and its version
+
+**CLI** (optional): Check workflow status via the OSMO CLI:
 
 ```bash
-kubectl get pods -n osmo-control-plane --watch
+osmo workflow list
 ```
-
-View training logs:
-
-```bash
-kubectl logs -n osmo-control-plane -l app=osmo-training --tail=100 -f
-```
-
-Training metrics (loss, gradient norm, learning rate) appear in the OSMO UI and Azure ML MLflow experiment.
 
 ### Step 5: Register the trained model (optional)
 

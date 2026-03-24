@@ -39,16 +39,25 @@ huggingface-cli download \
 
 ### Step 2b: Download from Azure Blob Storage
 
-For datasets stored in Azure, use the download utility:
+> [!NOTE]
+> Steps 2b and 3 are only required for **local** usage. When training via OSMO, the `submit-osmo-lerobot-training.sh` script automatically downloads the dataset when the `--from-blob` argument is used.
+
+For datasets stored in Azure, use the download utility. Create a `.env` file in `training/il/scripts/lerobot/` with the required environment variables:
+
+```bash
+STORAGE_ACCOUNT=<your-storage-account>
+STORAGE_CONTAINER=datasets
+BLOB_PREFIX=my-dataset/v1
+DATASET_ROOT=./datasets
+DATASET_REPO_ID=my-org/my-dataset
+```
+
+Run the download script:
 
 ```bash
 cd training/il/scripts/lerobot
-python download_dataset.py \
-  --storage-account <your-storage-account> \
-  --storage-container datasets \
-  --blob-prefix my-dataset/v1 \
-  --dataset-root ./datasets \
-  --dataset-repo-id my-org/my-dataset
+set -a && source .env && set +a
+python download_dataset.py
 ```
 
 The script uses `DefaultAzureCredential` for authentication. It downloads all dataset files, skipping cache and lock files, and preserves the directory structure.
@@ -150,15 +159,15 @@ The recipe succeeded when:
 
 ## ⚙️ Configuration Reference
 
-`download_dataset.py` parameters:
+`download_dataset.py` environment variables:
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `--storage-account` | yes | Azure Storage account name |
-| `--storage-container` | yes | Blob container name |
-| `--blob-prefix` | yes | Blob path prefix for dataset files |
-| `--dataset-root` | yes | Local root directory for datasets |
-| `--dataset-repo-id` | yes | Dataset identifier (e.g., `user/dataset`) |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `STORAGE_ACCOUNT` | yes | — | Azure Storage account name |
+| `STORAGE_CONTAINER` | no | `datasets` | Blob container name |
+| `BLOB_PREFIX` | yes | — | Blob path prefix for dataset files |
+| `DATASET_ROOT` | no | `/workspace/data` | Local root directory for datasets |
+| `DATASET_REPO_ID` | yes | — | Dataset identifier (e.g., `user/dataset`) |
 
 ## 🔗 Related Recipes
 
