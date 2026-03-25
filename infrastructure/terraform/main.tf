@@ -79,6 +79,7 @@ module "platform" {
 
   // Networking configuration
   should_enable_nat_gateway = var.should_enable_nat_gateway
+  nat_gateway_zones         = var.nat_gateway_zones
   should_create_vm_subnet   = var.should_create_vm_subnet
   virtual_network_config = {
     address_space                  = var.virtual_network_config.address_space
