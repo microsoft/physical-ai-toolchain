@@ -93,6 +93,15 @@ module "platform" {
   should_add_current_user_storage_blob    = var.should_add_current_user_storage_blob
   should_enable_purge_protection          = var.should_enable_purge_protection
 
+  // Storage lifecycle management
+  should_enable_raw_bags_lifecycle_policy           = var.should_enable_raw_bags_lifecycle_policy
+  raw_bags_retention_days                           = var.raw_bags_retention_days
+  should_enable_converted_datasets_lifecycle_policy = var.should_enable_converted_datasets_lifecycle_policy
+  converted_datasets_cool_tier_days                 = var.converted_datasets_cool_tier_days
+  should_enable_reports_lifecycle_policy            = var.should_enable_reports_lifecycle_policy
+  reports_cool_tier_days                            = var.reports_cool_tier_days
+  reports_archive_tier_days                         = var.reports_archive_tier_days
+
   // OSMO services
   should_deploy_postgresql = var.should_deploy_postgresql
   should_deploy_redis      = var.should_deploy_redis
@@ -149,16 +158,18 @@ module "sil" {
   current_user_oid = local.current_user_oid
 
   // Dependencies from platform module (passed as typed objects)
-  virtual_network           = module.platform.virtual_network
-  subnets                   = module.platform.subnets
-  network_security_group    = module.platform.network_security_group
-  nat_gateway               = module.platform.nat_gateway
-  should_enable_nat_gateway = var.should_enable_nat_gateway
-  log_analytics_workspace   = module.platform.log_analytics_workspace
-  monitor_workspace         = module.platform.monitor_workspace
-  data_collection_endpoint  = module.platform.data_collection_endpoint
-  container_registry        = module.platform.container_registry
-  private_dns_zones         = module.platform.private_dns_zones
+  virtual_network                 = module.platform.virtual_network
+  subnets                         = module.platform.subnets
+  network_security_group          = module.platform.network_security_group
+  nat_gateway                     = module.platform.nat_gateway
+  should_enable_nat_gateway       = var.should_enable_nat_gateway
+  log_analytics_workspace         = module.platform.log_analytics_workspace
+  monitor_workspace               = module.platform.monitor_workspace
+  data_collection_endpoint        = module.platform.data_collection_endpoint
+  container_registry              = module.platform.container_registry
+  private_dns_zones               = module.platform.private_dns_zones
+  should_deploy_monitor_workspace = var.should_deploy_monitor_workspace
+  should_deploy_dce               = var.should_deploy_dce
 
   // AKS subnet configuration - uses module defaults when null
   aks_subnet_config = {

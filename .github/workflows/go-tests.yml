@@ -1,20 +1,20 @@
-name: Terraform Tests
+name: Go Tests
 
 on:
   workflow_call:
     inputs:
       soft-fail:
-        description: 'Whether to continue on Terraform test failures'
+        description: 'Whether to continue on Go test or lint failures'
         required: false
         type: boolean
         default: false
       changed-files-only:
-        description: 'Only test modules with changed Terraform files'
+        description: 'Only test when Go files changed'
         required: false
         type: boolean
         default: false
       code-coverage:
-        description: 'Whether to upload test results to Codecov'
+        description: 'Whether to upload coverage to Codecov'
         required: false
         type: boolean
         default: false
@@ -27,14 +27,14 @@ defaults:
     shell: pwsh
 
 jobs:
-  terraform-tests:
-    name: Terraform Tests
+  go-tests:
+    name: Go Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -43,43 +43,37 @@ jobs:
       - name: Create logs directory
         run: New-Item -ItemType Directory -Force -Path logs | Out-Null
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          terraform_wrapper: false
+          go-version-file: infrastructure/terraform/e2e/go.mod
+          cache-dependency-path: infrastructure/terraform/e2e/go.mod
 
-      - name: Run Terraform Tests
-        id: terraform-tests
+      - name: Run Go tests
+        id: go-tests
         continue-on-error: ${{ inputs.soft-fail }}
         run: |
           $params = @{}
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $params['ChangedFilesOnly'] = $true
           }
-          shared/ci/linting/Invoke-TerraformTest.ps1 @params
+          ./shared/ci/linting/Invoke-GoTest.ps1 @params
 
-      - name: Convert test results to JUnit XML
-        if: always() && steps.terraform-tests.outcome != 'skipped'
-        run: shared/ci/linting/ConvertTo-JUnitXml.ps1
-
-      - name: Upload Terraform test results
-        if: always() && steps.terraform-tests.outcome != 'skipped'
+      - name: Upload Go test results
+        if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: terraform-test-results
+          name: go-test-results
           path: |
-            logs/terraform-test-results.json
-            logs/terraform-test-results.xml
-          retention-days: 30
+            logs/go-test-results.json
+            logs/go-coverage.out
+          if-no-files-found: ignore
 
       - name: Upload to Codecov
-        if: inputs.code-coverage && always() && steps.terraform-tests.outcome != 'skipped'
+        if: inputs.code-coverage && always()
         uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
         with:
           use_oidc: true
-          report_type: test_results
-          files: logs/terraform-test-results.xml
-          flags: terraform
-          name: terraform-test-results
-          verbose: true
+          files: logs/go-coverage.out
+          flags: go
           fail_ci_if_error: false

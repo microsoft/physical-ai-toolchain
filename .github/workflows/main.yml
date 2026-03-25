@@ -110,8 +110,11 @@ jobs:
   dataviewer-frontend-tests:
     name: Dataviewer Frontend Tests
     uses: ./.github/workflows/dataviewer-frontend-tests.yml
+    with:
+      code-coverage: true
     permissions:
       contents: read
+      id-token: write
 
   # Dataviewer backend pytest execution
   dataviewer-backend-pytests:
@@ -159,6 +162,17 @@ jobs:
       contents: read
       id-token: write
 
+  # Go tests (golangci-lint + go test)
+  go-tests:
+    name: Go Tests
+    uses: ./.github/workflows/go-tests.yml
+    with:
+      soft-fail: true
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # CodeQL security analysis
   codeql-analysis:
     name: CodeQL Analysis
@@ -188,6 +202,7 @@ jobs:
       - terraform-lint
       - terraform-validation
       - terraform-tests
+      - go-tests
       - codeql-analysis
     name: Release Please
     runs-on: ubuntu-latest
@@ -361,7 +376,7 @@ jobs:
         shell: bash
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@57aae528053a48a3f6235f2d9461b05fbcb7366d  # v0.23.1
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
         with:
           path: .
           format: spdx-json

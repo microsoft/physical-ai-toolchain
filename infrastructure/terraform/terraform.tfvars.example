@@ -101,6 +101,24 @@ should_enable_public_network_access     = true
 should_add_current_user_key_vault_admin = true
 should_enable_microsoft_defender        = true
 
+// Storage Lifecycle Management
+// Configure automatic deletion and tiering policies for blob storage
+
+// Raw ROS bags: Auto-delete after 30 days (configurable)
+should_enable_raw_bags_lifecycle_policy = true
+raw_bags_retention_days                 = 30  # Set to -1 to disable auto-delete
+
+// Converted datasets: Tier to cool storage after 90 days
+should_enable_converted_datasets_lifecycle_policy = true
+converted_datasets_cool_tier_days                 = 90  # Set to -1 to disable tiering
+
+// Validation reports: Tier to cool (30 days), then archive (180 days)
+should_enable_reports_lifecycle_policy = true
+reports_cool_tier_days                 = 30
+reports_archive_tier_days              = 180
+
+// Model checkpoints: No lifecycle policy (retained indefinitely in Hot tier)
+
 // Observability
 // All observability components deploy by default. Disable individually to reduce cost.
 // should_deploy_grafana            = true

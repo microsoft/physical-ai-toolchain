@@ -2,6 +2,12 @@ name: Dataviewer Frontend Tests
 
 on:
   workflow_call:
+    inputs:
+      code-coverage:
+        description: 'Enable Codecov coverage upload'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -15,6 +21,7 @@ jobs:
         working-directory: data-management/viewer/frontend
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -41,7 +48,31 @@ jobs:
         run: npm run format
 
       - name: Unit tests
+        if: ${{ !inputs.code-coverage }}
         run: npm run test
+
+      - name: Unit tests with coverage
+        if: ${{ inputs.code-coverage }}
+        run: npm run test:coverage
 
       - name: Build
         run: npm run build
+
+      - name: Upload coverage artifact
+        if: ${{ inputs.code-coverage && always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: vitest-coverage-xml
+          path: data-management/viewer/frontend/coverage/cobertura-coverage.xml
+          retention-days: 30
+
+      - name: Upload coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
+        with:
+          files: coverage/cobertura-coverage.xml
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: vitest
+          name: vitest-coverage
