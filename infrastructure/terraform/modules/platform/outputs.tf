@@ -24,6 +24,10 @@ output "subnets" {
       id   = azurerm_subnet.main.id
       name = azurerm_subnet.main.name
     }
+    vm_subnet = try({
+      id   = azurerm_subnet.vm_subnet[0].id
+      name = azurerm_subnet.vm_subnet[0].name
+    }, null)
     private_endpoints = try({
       id   = azurerm_subnet.private_endpoints[0].id
       name = azurerm_subnet.private_endpoints[0].name

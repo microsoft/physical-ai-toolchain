@@ -43,6 +43,11 @@ run "outputs_without_sites" {
   }
 
   assert {
+    condition     = contains(keys(output.vpn_gateway_public_ip), "zones")
+    error_message = "vpn_gateway_public_ip output must include zones field"
+  }
+
+  assert {
     condition     = output.site_connections == {}
     error_message = "site_connections should be empty when no sites are configured"
   }
