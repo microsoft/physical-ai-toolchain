@@ -37,43 +37,43 @@ Before deployment:
 
 1. Complete Steps 1 and 2 of the deployment pipeline:
 
-  ```bash
-  source infrastructure/terraform/prerequisites/az-sub-init.sh
+   ```bash
+   source infrastructure/terraform/prerequisites/az-sub-init.sh
 
-  cd infrastructure/terraform
-  terraform apply -var-file=terraform.tfvars
-  ```
+   cd infrastructure/terraform
+   terraform apply -var-file=terraform.tfvars
+   ```
 
-2. Enable the dedicated VM subnet in `infrastructure/terraform/terraform.tfvars`:
+1. Enable the dedicated VM subnet in `infrastructure/terraform/terraform.tfvars`:
 
-  ```hcl
-  should_create_vm_subnet = true
-  ```
+   ```hcl
+   should_create_vm_subnet = true
+   ```
 
-3. Re-apply Terraform so the VM subnet and shared network security group outputs exist:
+1. Re-apply Terraform so the VM subnet and shared network security group outputs exist:
 
-  ```bash
-  cd infrastructure/terraform
-  terraform apply -var-file=terraform.tfvars
-  terraform output vm_subnet
-  terraform output network_security_group
-  ```
+   ```bash
+   cd infrastructure/terraform
+   terraform apply -var-file=terraform.tfvars
+   terraform output vm_subnet
+   terraform output network_security_group
+   ```
 
-4. If the platform uses a private AKS cluster, complete the VPN deployment step before connecting to private VM resources:
+1. If the platform uses a private AKS cluster, complete the VPN deployment step before connecting to private VM resources:
 
-  ```bash
-  cd infrastructure/terraform/vpn
-  terraform apply
-  ```
+   ```bash
+   cd infrastructure/terraform/vpn
+   terraform apply
+   ```
 
-5. Accept the NVIDIA marketplace terms once per subscription, or let the deployment script handle it automatically:
+1. Accept the NVIDIA marketplace terms once per subscription, or let the deployment script handle it automatically:
 
-  ```bash
-  az vm image terms accept \
-    --publisher nvidia \
-    --offer isaac_sim_developer_workstation \
-    --plan isaac_sim_developer_workstation_community_linux
-  ```
+   ```bash
+   az vm image terms accept \
+     --publisher nvidia \
+     --offer isaac_sim_developer_workstation \
+     --plan isaac_sim_developer_workstation_community_linux
+   ```
 
 ## 🚀 Terraform-Backed Deployment
 
