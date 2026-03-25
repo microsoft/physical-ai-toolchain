@@ -50,6 +50,7 @@ aravis
 architected
 architecting
 ariba
+armhf
 arrowdown
 arrowleft
 arrowright
@@ -334,6 +335,7 @@ davinci
 dbcc
 dcgm
 DDPG
+debconf
 debuggability
 dedupe
 deduplicated
@@ -459,6 +461,7 @@ frontends
 frontmatter
 fullstack
 fulltext
+fuser
 gartner
 gbps
 gcp
@@ -499,6 +502,7 @@ hardened
 hardening
 hbase
 hci
+hconf
 hdfs
 hdinsight
 heatmap
@@ -817,6 +821,8 @@ nic
 nics
 nist
 nodejs
+nodesource
+nodistro
 nojekyll
 noncompliance
 noncompliant
@@ -937,6 +943,7 @@ pipeline
 pipelines
 pitj
 pivottable
+pkgs
 platform
 platformops
 platforms
@@ -1163,6 +1170,7 @@ sdlc
 searchable
 seccomp
 sectigo
+securestring
 seealso
 Seldon
 semver
@@ -1985,3 +1993,17 @@ kolmogorov
 mqtt
 smirnov
 zustand
+
+# Cendio ThinLinc
+Cendio
+Linc
+ThinLinc
+tlwebaccess
+tlwebadm
+tlagent
+tlmaster
+thinlocal
+WEBADM
+WEBACCESS
+vsmagent
+vsmserver

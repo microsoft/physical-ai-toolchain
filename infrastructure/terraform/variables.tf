@@ -275,10 +275,17 @@ variable "should_enable_nat_gateway" {
   default     = true
 }
 
+variable "should_create_vm_subnet" {
+  type        = bool
+  description = "Whether to create a dedicated subnet for virtual machines in the platform virtual network"
+  default     = false
+}
+
 variable "virtual_network_config" {
   type = object({
     address_space                  = string
     subnet_address_prefix          = string
+    subnet_address_prefix_vm       = optional(string, "10.0.4.0/24")
     subnet_address_prefix_pe       = optional(string, "10.0.2.0/24")
     subnet_address_prefix_resolver = optional(string, "10.0.9.0/28")
   })
@@ -286,12 +293,17 @@ variable "virtual_network_config" {
   default = {
     address_space                  = "10.0.0.0/16"
     subnet_address_prefix          = "10.0.1.0/24"
+    subnet_address_prefix_vm       = "10.0.4.0/24"
     subnet_address_prefix_pe       = "10.0.2.0/24"
     subnet_address_prefix_resolver = "10.0.9.0/28"
   }
   validation {
-    condition     = can(cidrhost(var.virtual_network_config.address_space, 0)) && can(cidrhost(var.virtual_network_config.subnet_address_prefix, 0))
-    error_message = "Both address_space and subnet_address_prefix must be valid CIDR blocks."
+    condition = (
+      can(cidrhost(var.virtual_network_config.address_space, 0)) &&
+      can(cidrhost(var.virtual_network_config.subnet_address_prefix, 0)) &&
+      can(cidrhost(var.virtual_network_config.subnet_address_prefix_vm, 0))
+    )
+    error_message = "address_space, subnet_address_prefix, and subnet_address_prefix_vm must be valid CIDR blocks."
   }
 }
 
