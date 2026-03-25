@@ -59,6 +59,28 @@ run "invalid_sku_rejected" {
 }
 
 // ============================================================
+// Empty Zones Rejected
+// ============================================================
+
+run "empty_zones_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix = run.setup.resource_prefix
+    environment     = run.setup.environment
+    instance        = run.setup.instance
+    location        = run.setup.location
+    resource_group  = run.setup.resource_group
+    virtual_network = run.setup.virtual_network
+    vpn_gateway_config = {
+      zones = []
+    }
+  }
+
+  expect_failures = [var.vpn_gateway_config]
+}
+
+// ============================================================
 // Valid SKUs Accepted
 // ============================================================
 
