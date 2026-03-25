@@ -1,0 +1,79 @@
+name: Go Tests
+
+on:
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Whether to continue on Go test or lint failures'
+        required: false
+        type: boolean
+        default: false
+      changed-files-only:
+        description: 'Only test when Go files changed'
+        required: false
+        type: boolean
+        default: false
+      code-coverage:
+        description: 'Whether to upload coverage to Codecov'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  go-tests:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: ${{ inputs.changed-files-only && '0' || '1' }}
+
+      - name: Create logs directory
+        run: New-Item -ItemType Directory -Force -Path logs | Out-Null
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: infrastructure/terraform/e2e/go.mod
+          cache-dependency-path: infrastructure/terraform/e2e/go.mod
+
+      - name: Run Go tests
+        id: go-tests
+        continue-on-error: ${{ inputs.soft-fail }}
+        run: |
+          $params = @{}
+          if ('${{ inputs.changed-files-only }}' -eq 'true') {
+            $params['ChangedFilesOnly'] = $true
+          }
+          ./shared/ci/linting/Invoke-GoTest.ps1 @params
+
+      - name: Upload Go test results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: go-test-results
+          path: |
+            logs/go-test-results.json
+            logs/go-coverage.out
+          if-no-files-found: ignore
+
+      - name: Upload to Codecov
+        if: inputs.code-coverage && always()
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
+        with:
+          use_oidc: true
+          files: logs/go-coverage.out
+          flags: go
+          fail_ci_if_error: false

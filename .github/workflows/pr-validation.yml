@@ -50,6 +50,7 @@ jobs:
     with:
       staleness-threshold-days: 90
       changed-files-only: true
+      soft-fail: false
     permissions:
       contents: read
 
@@ -175,6 +176,18 @@ jobs:
   terraform-tests:
     name: Terraform Tests
     uses: ./.github/workflows/terraform-tests.yml
+    with:
+      soft-fail: true
+      changed-files-only: true
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
+  # Go tests (golangci-lint + go test)
+  go-tests:
+    name: Go Tests
+    uses: ./.github/workflows/go-tests.yml
     with:
       soft-fail: true
       changed-files-only: true

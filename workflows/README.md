@@ -2,7 +2,7 @@
 title: Workflows
 description: AzureML and OSMO workflow templates for robotics training and validation jobs
 author: Edge AI Team
-ms.date: 2026-03-16
+ms.date: 2026-03-20
 ms.topic: reference
 ---
 
@@ -43,32 +43,32 @@ workflows/
 
 ```bash
 # Training job
-./scripts/submit-azureml-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
+training/rl/scripts/submit-azureml-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
 
 # LeRobot behavioral cloning (AzureML)
-./scripts/submit-azureml-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
+training/il/scripts/submit-azureml-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
 # Validation job (model name derived from task by default)
-./scripts/submit-azureml-validation.sh --task Isaac-Velocity-Rough-Anymal-C-v0
+evaluation/sil/scripts/submit-azureml-validation.sh --task Isaac-Velocity-Rough-Anymal-C-v0
 ```
 
 ### OSMO Workflows
 
 ```bash
 # Base64 payload (< 1MB training code)
-./scripts/submit-osmo-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
+training/rl/scripts/submit-osmo-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
 
 # Dataset folder upload (unlimited size, versioned)
-./scripts/submit-osmo-dataset-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
+training/il/scripts/submit-osmo-dataset-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
 
 # LeRobot behavioral cloning (HuggingFace datasets)
-./scripts/submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
+training/il/scripts/submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
 # LeRobot inference/evaluation
-./scripts/submit-osmo-lerobot-inference.sh --policy-repo-id user/trained-policy
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh --policy-repo-id user/trained-policy
 
 # End-to-end pipeline: train → evaluate → register
-./scripts/run-lerobot-pipeline.sh \
+training/pipelines/run-lerobot-pipeline.sh \
   -d lerobot/aloha_sim_insertion_human \
   --policy-repo-id user/my-policy \
   -r my-model
@@ -89,10 +89,10 @@ The `train-dataset.yaml` template uploads `training/rl/` as a versioned OSMO dat
 
 ```bash
 # Default configuration
-./scripts/submit-osmo-dataset-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
+training/il/scripts/submit-osmo-dataset-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
 
 # Custom dataset configuration
-./scripts/submit-osmo-dataset-training.sh \
+training/il/scripts/submit-osmo-dataset-training.sh \
   --dataset-bucket custom-bucket \
   --dataset-name my-training-v1 \
   --task Isaac-Velocity-Rough-Anymal-C-v0
@@ -135,11 +135,11 @@ The `lerobot-train.yaml` workflow trains behavioral cloning policies using the L
 
 ```bash
 # ACT training with WANDB
-./scripts/submit-osmo-lerobot-training.sh \
+training/il/scripts/submit-osmo-lerobot-training.sh \
   -d lerobot/aloha_sim_insertion_human
 
 # Diffusion policy with MLflow and model registration
-./scripts/submit-osmo-lerobot-training.sh \
+training/il/scripts/submit-osmo-lerobot-training.sh \
   -d user/custom-dataset \
   -p diffusion \
   --mlflow-enable \
@@ -172,11 +172,11 @@ The `lerobot-infer.yaml` workflow evaluates trained LeRobot policies from Huggin
 
 ```bash
 # Evaluate trained policy
-./scripts/submit-osmo-lerobot-inference.sh \
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/trained-act-policy
 
 # Evaluate with model registration
-./scripts/submit-osmo-lerobot-inference.sh \
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/trained-act-policy \
   -r my-evaluated-model \
   --eval-episodes 50
@@ -208,7 +208,7 @@ The workflow accepts checkpoints from multiple sources:
 ### Basic Usage
 
 ```bash
-./scripts/submit-osmo-inference.sh \
+evaluation/sil/scripts/submit-osmo-eval.sh \
     --checkpoint-uri "runs:/abc123/checkpoints/final/model_999.pt" \
     --task Isaac-Ant-v0
 ```
@@ -228,7 +228,7 @@ The workflow accepts checkpoints from multiple sources:
 
 ```bash
 # ONNX-only inference with custom parameters
-./scripts/submit-osmo-inference.sh \
+evaluation/sil/scripts/submit-osmo-eval.sh \
     --checkpoint-uri "models:/my-model/1" \
     --task Isaac-Velocity-Rough-Anymal-C-v0 \
     --format onnx \
@@ -237,13 +237,13 @@ The workflow accepts checkpoints from multiple sources:
     --video-length 300
 
 # TorchScript-only inference
-./scripts/submit-osmo-inference.sh \
+evaluation/sil/scripts/submit-osmo-eval.sh \
     --checkpoint-uri "runs:/abc123/checkpoints/final/model_99.pt" \
     --task Isaac-Ant-v0 \
     --format jit
 
 # With explicit Azure context
-./scripts/submit-osmo-inference.sh \
+evaluation/sil/scripts/submit-osmo-eval.sh \
     --checkpoint-uri "runs:/abc123/checkpoints/model_999.pt" \
     --task Isaac-Ant-v0 \
     --azure-subscription-id "00000000-0000-0000-0000-000000000000" \
