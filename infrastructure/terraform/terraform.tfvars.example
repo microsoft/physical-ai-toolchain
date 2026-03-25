@@ -85,6 +85,11 @@ node_pools = {
 //   }
 // }
 
+// NAT Gateway Availability Zones
+// Set to ["1"] in AZ-supported regions (e.g. westus3, eastus2)
+// Leave empty for regions without AZ support (e.g. westus)
+nat_gateway_zones = []
+
 // OSMO Backend Services
 should_deploy_postgresql = true
 should_deploy_redis      = true
