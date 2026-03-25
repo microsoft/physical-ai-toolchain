@@ -43,10 +43,10 @@ function Write-EmptyResults {
     )
 
     $results = @{
-        timestamp             = (Get-Date -Format 'o')
-        go_version            = ''
-        packages              = @()
-        summary               = @{
+        timestamp  = (Get-Date -Format 'o')
+        go_version = ''
+        packages   = @()
+        summary    = @{
             packages_tested  = 0
             packages_passed  = 0
             packages_skipped = 0
@@ -208,9 +208,9 @@ function Invoke-GoTestCore {
         $overallPassed = ($totalFailed -eq 0)
 
         $results = @{
-            timestamp             = (Get-Date -Format 'o')
-            go_version            = $goVersion
-            packages              = @($packages | ForEach-Object {
+            timestamp  = (Get-Date -Format 'o')
+            go_version = $goVersion
+            packages   = @($packages | ForEach-Object {
                     @{
                         path      = $_.path
                         passed    = $_.passed
@@ -220,7 +220,7 @@ function Invoke-GoTestCore {
                         test_runs = @($_.test_runs)
                     }
                 })
-            summary               = @{
+            summary    = @{
                 packages_tested  = $packages.Count
                 packages_passed  = $packagesPassed
                 packages_skipped = $packagesSkipped
