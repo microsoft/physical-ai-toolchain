@@ -66,6 +66,15 @@ param adminPassword string
 @description('Virtual machine size.')
 param vmSize string = 'Standard_NV36ads_A10_v5'
 
+@description('Whether to enable EncryptionAtHost for the virtual machine.')
+param shouldEnableEncryptionAtHost bool = true
+
+@description('Deployment priority for the virtual machine. Use Spot only for test workloads that tolerate eviction.')
+param vmPriority 'Regular' | 'Spot' = 'Regular'
+
+@description('Eviction policy used when vmPriority is Spot.')
+param spotEvictionPolicy 'Deallocate' | 'Delete' = 'Deallocate'
+
 @description('Marketplace image configuration.')
 param image ImageConfig?
 
@@ -136,6 +145,9 @@ module linuxIsaacVmModule 'modules/linux-isaac-vm.bicep' = {
     adminUsername: adminUsername
     adminPassword: adminPassword
     vmSize: vmSize
+    shouldEnableEncryptionAtHost: shouldEnableEncryptionAtHost
+    vmPriority: vmPriority
+    spotEvictionPolicy: spotEvictionPolicy
     image: effectiveImage
     plan: effectivePlan
     osDisk: effectiveOsDisk
