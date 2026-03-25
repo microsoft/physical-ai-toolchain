@@ -178,7 +178,10 @@ shellcheck deploy/**/*.sh scripts/**/*.sh
 **Go:**
 
 ```bash
-# Lint and test all Go modules (required for Go changes)
+# Lint Go modules (required for Go changes)
+npm run lint:go
+
+# Test Go modules (required for Go changes)
 npm run test:go
 ```
 

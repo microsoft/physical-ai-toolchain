@@ -20,6 +20,7 @@
     "format:tables": "markdown-table-formatter \"**/*.md\"",
     "test:ps": "pwsh -File ./shared/ci/tests/Invoke-PesterTests.ps1",
     "test:tf": "pwsh -File shared/ci/linting/Invoke-TerraformTest.ps1",
+    "lint:go": "pwsh -File shared/ci/linting/Invoke-GoLint.ps1",
     "test:go": "pwsh -File shared/ci/linting/Invoke-GoTest.ps1",
     "prepare": "husky",
     "docs:build": "cd docs/docusaurus && npm run build",

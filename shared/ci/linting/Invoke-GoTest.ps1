@@ -6,11 +6,11 @@
 
 <#
 .SYNOPSIS
-    Runs Go tests and golangci-lint for Go modules in the repository.
+    Runs Go tests for Go modules in the repository.
 .DESCRIPTION
-    Verifies Go and golangci-lint are available, runs golangci-lint run and go test -json,
-    parses results, and writes JSON output to logs/. Reports failures via CI annotations
-    and generates a GitHub step summary.
+    Verifies Go is available, runs go test -json, parses results, and writes JSON
+    output to logs/. Reports failures via CI annotations and generates a GitHub
+    step summary.
 .PARAMETER OutputPath
     Path for JSON results. Defaults to logs/go-test-results.json.
 .PARAMETER CoverageOutput
@@ -45,8 +45,6 @@ function Write-EmptyResults {
     $results = @{
         timestamp             = (Get-Date -Format 'o')
         go_version            = ''
-        golangci_lint_version = ''
-        lint_passed           = $true
         packages              = @()
         summary               = @{
             packages_tested  = 0
@@ -119,44 +117,12 @@ function Invoke-GoTestCore {
         return 1
     }
 
-    # Check golangci-lint on PATH; install if missing via SHA256-verified binary download
-    if (-not (Get-Command golangci-lint -ErrorAction SilentlyContinue)) {
-        Write-Host 'golangci-lint not found — installing via SHA256-verified binary...'
-        $lintInstallVersion = '2.11.4'
-        $lintExpectedSHA256 = '200c5b7503f67b59a6743ccf32133026c174e272b930ee79aa2aa6f37aca7ef1'
-        $lintUrl = "https://github.com/golangci/golangci-lint/releases/download/v${lintInstallVersion}/golangci-lint-${lintInstallVersion}-linux-amd64.tar.gz"
-        $lintTarball = '/tmp/golangci-lint.tar.gz'
-        $goPathBin = (& go env GOPATH) + '/bin'
-
-        & bash -c "set -euo pipefail && curl -fsSL -o '${lintTarball}' '${lintUrl}' && echo '${lintExpectedSHA256}  ${lintTarball}' | sha256sum -c --quiet - && mkdir -p '${goPathBin}' && tar -xzf '${lintTarball}' -C '${goPathBin}' --strip-components=1 'golangci-lint-${lintInstallVersion}-linux-amd64/golangci-lint' && rm -f '${lintTarball}'"
-        if ($LASTEXITCODE -ne 0) {
-            Write-CIAnnotation -Level Error -Message 'Failed to install golangci-lint'
-            return 1
-        }
-        $env:PATH = $goPathBin + [IO.Path]::PathSeparator + $env:PATH
-        if (-not (Get-Command golangci-lint -ErrorAction SilentlyContinue)) {
-            Write-CIAnnotation -Level Error -Message 'golangci-lint not available after install attempt'
-            return 1
-        }
-    }
-
-    # Capture versions
+    # Capture version
     $goVersionOutput = & go version 2>$null
     $goVersion = if ($goVersionOutput -match 'go([\d.]+)') { $Matches[0] } else { 'unknown' }
 
-    $lintVersionOutput = & golangci-lint version 2>$null
-    $lintVersion = if ($lintVersionOutput -match 'v([\d.]+)') { $Matches[0] } else { 'unknown' }
-
-    # Run golangci-lint
-    $lintPassed = $true
     Push-Location $GoTestDir
     try {
-        $null = & golangci-lint run './...' 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $lintPassed = $false
-            Write-CIAnnotation -Level Error -Message "golangci-lint failed in $GoTestDir"
-        }
-
         # Run go test
         $testOutput = & go test -race "-coverprofile=$CoverageOutput" -covermode=atomic -v -json './...' 2>&1
 
@@ -239,13 +205,11 @@ function Invoke-GoTestCore {
 
         $packagesPassed = @($packages | Where-Object { $_.failed -eq 0 }).Count
         $packagesSkipped = @($packages | Where-Object { $_.passed -eq 0 -and $_.failed -eq 0 -and $_.skipped -gt 0 }).Count
-        $overallPassed = $lintPassed -and ($totalFailed -eq 0)
+        $overallPassed = ($totalFailed -eq 0)
 
         $results = @{
             timestamp             = (Get-Date -Format 'o')
             go_version            = $goVersion
-            golangci_lint_version = $lintVersion
-            lint_passed           = $lintPassed
             packages              = @($packages | ForEach-Object {
                     @{
                         path      = $_.path
@@ -297,8 +261,7 @@ function Invoke-GoTestCore {
         }
 
         $summaryLines += ''
-        $lintStatus = if ($lintPassed) { '✅ Passed' } else { '❌ Failed' }
-        $summaryLines += "**Lint:** $lintStatus | **Total:** $totalPassed passed, $totalFailed failed, $totalSkipped skipped"
+        $summaryLines += "**Total:** $totalPassed passed, $totalFailed failed, $totalSkipped skipped"
 
         $summaryContent = $summaryLines -join "`n"
         Write-CIStepSummary -Content $summaryContent

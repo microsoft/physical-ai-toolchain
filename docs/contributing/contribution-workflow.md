@@ -170,7 +170,7 @@ This reference architecture validates through deployment rather than automated t
 | Full infrastructure changes | Deployment testing in dev subscription with cost estimate and teardown confirmation |
 | Training scripts            | AzureML job submission in test workspace with logs                                  |
 | Workflow templates          | Workflow execution validation with job outputs                                      |
-| Go modules                  | `npm run test:go` (golangci-lint + `go test`)                                      |
+| Go modules                  | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`)                    |
 | Configuration manifests     | Syntax validation, test deployment in non-production cluster                        |
 
 ### Testing Documentation
