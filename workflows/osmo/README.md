@@ -2,7 +2,7 @@
 title: OSMO Workflows
 description: NVIDIA OSMO workflow templates for distributed robotics training
 author: Edge AI Team
-ms.date: 2026-03-16
+ms.date: 2026-03-20
 ms.topic: reference
 ---
 
@@ -55,10 +55,10 @@ Parameters are passed as key=value pairs through the submission script:
 
 ```bash
 # Default configuration from Terraform outputs
-./scripts/submit-osmo-training.sh
+training/rl/scripts/submit-osmo-training.sh
 
 # Override parameters
-./scripts/submit-osmo-training.sh \
+training/rl/scripts/submit-osmo-training.sh \
   --azure-subscription-id "your-subscription-id" \
   --azure-resource-group "rg-custom"
 ```
@@ -86,10 +86,10 @@ Submits Isaac Lab training using OSMO dataset folder injection instead of base64
 
 ```bash
 # Default configuration
-./scripts/submit-osmo-dataset-training.sh
+training/il/scripts/submit-osmo-dataset-training.sh
 
 # Custom dataset bucket
-./scripts/submit-osmo-dataset-training.sh \
+training/il/scripts/submit-osmo-dataset-training.sh \
   --dataset-bucket custom-bucket \
   --dataset-name my-training-code
 ```
@@ -124,18 +124,18 @@ Submits LeRobot behavioral cloning training for ACT and Diffusion policy archite
 
 ```bash
 # ACT training with WANDB logging
-./scripts/submit-osmo-lerobot-training.sh \
+training/il/scripts/submit-osmo-lerobot-training.sh \
   -d lerobot/aloha_sim_insertion_human
 
 # Diffusion policy with MLflow logging
-./scripts/submit-osmo-lerobot-training.sh \
+training/il/scripts/submit-osmo-lerobot-training.sh \
   -d user/custom-dataset \
   -p diffusion \
   --mlflow-enable \
   -r my-diffusion-model
 
 # Fine-tune from existing policy
-./scripts/submit-osmo-lerobot-training.sh \
+training/il/scripts/submit-osmo-lerobot-training.sh \
   -d user/dataset \
   --policy-repo-id user/pretrained-act \
   --training-steps 50000
@@ -176,7 +176,7 @@ Trains LeRobot policies using OSMO dataset mounts instead of HuggingFace Hub dow
 
 ```bash
 # Train with local dataset uploaded via OSMO
-./scripts/submit-osmo-lerobot-training.sh \
+training/il/scripts/submit-osmo-lerobot-training.sh \
   -w workflows/osmo/lerobot-train-dataset.yaml \
   -d user/fallback-dataset \
   --dataset-bucket my-bucket \
@@ -209,16 +209,16 @@ Evaluates trained LeRobot policies from HuggingFace Hub repositories. Downloads 
 
 ```bash
 # Evaluate a trained policy
-./scripts/submit-osmo-lerobot-inference.sh \
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/trained-act-policy
 
 # Evaluate with Azure ML model registration
-./scripts/submit-osmo-lerobot-inference.sh \
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/trained-act-policy \
   -r my-evaluated-model
 
 # Diffusion policy with more episodes
-./scripts/submit-osmo-lerobot-inference.sh \
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/diffusion-policy \
   -p diffusion \
   --eval-episodes 50
