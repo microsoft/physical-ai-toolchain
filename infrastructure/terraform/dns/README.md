@@ -31,6 +31,7 @@ terraform init && terraform apply -var="osmo_loadbalancer_ip=<IP_FROM_ABOVE>"
 | Guide                                                            | Description                                     |
 |------------------------------------------------------------------|-------------------------------------------------|
 | [Private DNS Configuration](../../../docs/infrastructure/dns.md) | DNS zone setup, resolution flow, and validation |
+| [Terraform Reference](TERRAFORM.md)                              | Auto-generated inputs, outputs, and resources   |
 
 ## ➡️ Next Step
 

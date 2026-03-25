@@ -5,6 +5,7 @@
  * and optional Azure Machine Learning integration.
  *
  * Architecture:
+ *
  * - Platform Module: Shared services (networking, security, observability, ACR, storage, ML workspace)
  * - SiL Module: AKS cluster with GPU node pools and ML extension integration
  */
