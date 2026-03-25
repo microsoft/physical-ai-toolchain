@@ -38,7 +38,7 @@ OPTIONS:
              Disable EncryptionAtHost for unsupported VM sizes or regions
     --spot-vm                   Deploy the VM as Azure Spot capacity for testing
     --spot-eviction-policy POLICY
-             Spot eviction policy: Deallocate or Delete (default: Deallocate)
+             Spot eviction policy for --spot-vm: Deallocate or Delete (default: Deallocate)
     --deployment-name NAME      ARM deployment name (default: isaac-lab-vms)
     --skip-marketplace-requirements
                    Skip acceptance of the Isaac Sim marketplace terms
@@ -152,6 +152,7 @@ vm_size="Standard_NV36ads_A10_v5"
 should_enable_encryption_at_host=true
 use_spot_vm=false
 spot_eviction_policy="Deallocate"
+spot_eviction_policy_explicit=false
 deployment_name="isaac-lab-vms"
 install_marketplace_requirements=true
 isolated_vm_rg=false
@@ -189,7 +190,7 @@ while [[ $# -gt 0 ]]; do
     --vm-size)             vm_size="$2"; shift 2 ;;
     --disable-encryption-at-host) should_enable_encryption_at_host=false; shift ;;
     --spot-vm)             use_spot_vm=true; shift ;;
-    --spot-eviction-policy) spot_eviction_policy="$2"; shift 2 ;;
+    --spot-eviction-policy) spot_eviction_policy="$2"; spot_eviction_policy_explicit=true; shift 2 ;;
     --deployment-name)     deployment_name="$2"; shift 2 ;;
     --install-marketplace-requirements) install_marketplace_requirements=true; shift ;;
     --skip-marketplace-requirements) install_marketplace_requirements=false; shift ;;
@@ -205,6 +206,10 @@ case "$spot_eviction_policy" in
   Deallocate|Delete) ;;
   *) fatal "Invalid --spot-eviction-policy value: $spot_eviction_policy. Use Deallocate or Delete." ;;
 esac
+
+if [[ "$spot_eviction_policy_explicit" == "true" && "$use_spot_vm" != "true" ]]; then
+  fatal "--spot-eviction-policy requires --spot-vm. Omit the eviction policy or add --spot-vm."
+fi
 
 [[ -f "$template_file" ]] || fatal "Bicep template not found: $template_file"
 
@@ -337,7 +342,9 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "VM Size" "$vm_size"
   print_kv "Encryption At Host" "$should_enable_encryption_at_host"
   print_kv "VM Priority" "$vm_priority"
-  print_kv "Spot Eviction Policy" "$spot_eviction_policy"
+  if [[ "$use_spot_vm" == "true" ]]; then
+    print_kv "Spot Eviction Policy" "$spot_eviction_policy"
+  fi
   print_kv "Admin User" "$admin_username"
   print_kv "MDE Linux" "$enable_mde_linux"
   print_kv "Template" "$template_file"
@@ -419,7 +426,9 @@ print_kv "NSG ID" "$nsg_id"
 print_kv "VM Size" "$vm_size"
 print_kv "Encryption At Host" "$should_enable_encryption_at_host"
 print_kv "VM Priority" "$vm_priority"
-print_kv "Spot Eviction Policy" "$spot_eviction_policy"
+if [[ "$use_spot_vm" == "true" ]]; then
+  print_kv "Spot Eviction Policy" "$spot_eviction_policy"
+fi
 print_kv "Admin User" "$admin_username"
 print_kv "MDE Linux" "$enable_mde_linux"
 info "Isaac Sim VM deployment complete"
