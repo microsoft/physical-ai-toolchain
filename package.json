@@ -26,7 +26,8 @@
     "docs:build": "cd docs/docusaurus && npm run build",
     "docs:start": "cd docs/docusaurus && npm start",
     "docs:test": "cd docs/docusaurus && npm test",
-    "docs:serve": "cd docs/docusaurus && npm run serve"
+    "docs:serve": "cd docs/docusaurus && npm run serve",
+    "docs:generate:tf": "pwsh -File scripts/Update-TerraformDocs.ps1"
   },
   "devDependencies": {
     "cspell": "9.4.0",
