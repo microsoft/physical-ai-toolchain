@@ -204,7 +204,7 @@ az deployment group create \
 
 Pass `vmResourceGroup=<name>` when the VM resources should be created in a different resource group than the deployment resource group.
 
-Pass `vmPriority=Spot spotEvictionPolicy=Deallocate` when you want an interruptible test VM.
+Pass `vmPriority=Spot spotEvictionPolicy=Deallocate` to use a lower-cost VM that Azure can interrupt when it needs the capacity. Use this only for test scenarios where losing access to the VM at any time is acceptable.
 
 ## 🖥️ Connect To The VM After Deployment
 
@@ -295,7 +295,7 @@ The deployment template in `main.bicep` accepts the following parameters.
 | `adminPassword`                | `securestring` | Yes      | None                       | Admin password for the Linux VM. |
 | `vmSize`                       | `string`       | No       | `Standard_NV36ads_A10_v5`  | Virtual machine size. |
 | `shouldEnableEncryptionAtHost` | `bool`         | No       | `true`                     | Enables EncryptionAtHost for the VM so host caches and temp disk data are encrypted. |
-| `vmPriority`                   | `string`       | No       | `Regular`                  | VM priority. Use `Spot` only for interruptible test workloads. |
+| `vmPriority`                   | `string`       | No       | `Regular`                  | VM priority. Use `Spot` only for test workloads that can be interrupted. |
 | `spotEvictionPolicy`           | `string`       | No       | `Deallocate`               | Eviction policy used when `vmPriority` is `Spot`. |
 | `image`                        | `ImageConfig?` | No       | `null`                     | Marketplace image configuration. When `null`, `defaultImageConfig` is used as the effective value. |
 | `plan`                         | `PlanConfig?`  | No       | `null`                     | Marketplace plan configuration. When `null`, `defaultPlanConfig` is used as the effective value. |
