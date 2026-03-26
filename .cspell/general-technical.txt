@@ -674,7 +674,6 @@ lakehouse
 lakehouses
 lalogs
 lan
-lastexitcode
 lanczos
 lavfi
 ldap
