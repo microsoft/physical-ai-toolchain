@@ -3,7 +3,7 @@ sidebar_position: 7
 title: Infrastructure as Code Style Guide
 description: Terraform conventions, shell script standards, and copyright headers for contributions
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-03
+ms.date: 2026-03-18
 ms.topic: reference
 ---
 
@@ -18,16 +18,16 @@ Infrastructure code follows strict conventions for consistency, security, and ma
 
 ```bash
 # Format all Terraform files before committing
-terraform fmt -recursive deploy/
+terraform fmt -recursive infrastructure/terraform/
 
-# Validate syntax
-terraform validate deploy/001-iac/
+# Validate formatting and syntax across all deployment directories
+npm run lint:tf:validate
 ```
 
 ### Variable Naming
 
 * Use descriptive snake_case: `gpu_node_pool_vm_size` not `vm_sku`
-* Prefix booleans with `enable_` or `is_`: `enable_private_endpoints`, `is_production`
+* Prefix booleans with `should_`: `should_enable_private_endpoints`, `should_deploy_vpn`
 * Group related variables with prefixes: `aks_cluster_name`, `aks_node_count`, `aks_version`
 
 ### Module Structure
@@ -37,12 +37,132 @@ Each Terraform module must include:
 ```text
 modules/
   module-name/
-    main.tf          # Resource definitions
-    variables.tf     # Input variables with descriptions and types
-    outputs.tf       # Output values
-    versions.tf      # Provider version constraints
-    README.md        # Module documentation
+    main.tf              # Resource definitions
+    variables.tf         # Input variables with descriptions and types
+    variables.core.tf    # Core variables (environment, resource_prefix, instance, resource_group)
+    outputs.tf           # Output values
+    versions.tf          # Provider version constraints
+    tests/
+      setup/
+        main.tf          # Mock data generator with random prefix and typed outputs
+      naming.tftest.hcl  # Resource naming convention assertions
+      conditionals.tftest.hcl  # should_* boolean conditional tests
+      outputs.tftest.hcl # Output structure and nullability tests
 ```
+
+The root deployment directory (`infrastructure/terraform/`) also has integration tests:
+
+```text
+infrastructure/terraform/
+  tests/
+    setup/
+      main.tf                # Core variables (no resource_group — root creates its own)
+    integration.tftest.hcl   # Resource group conditionals, module instantiation
+    outputs.tftest.hcl       # Output presence and nullability
+```
+
+### Terraform Testing
+
+All modules use native `terraform test` with `mock_provider` for plan-time validation. Tests require no Azure credentials.
+
+#### Running Tests
+
+```bash
+# Run all module tests via CI script
+npm run test:tf
+
+# Run tests for a specific module
+cd infrastructure/terraform/modules/platform
+terraform init -backend=false
+terraform test
+
+# Run a single test file
+terraform test -filter=tests/naming.tftest.hcl
+```
+
+#### Setup Module Pattern
+
+Each module's `tests/setup/main.tf` generates mock input values with internally consistent IDs derived from a random prefix:
+
+```hcl
+locals {
+  subscription_id_part = "/subscriptions/00000000-0000-0000-0000-000000000000"
+  resource_prefix      = "t${random_string.prefix.id}"
+  environment          = "dev"
+  instance             = "001"
+  resource_group_name  = "rg-${local.resource_prefix}-${local.environment}-${local.instance}"
+  resource_group_id    = "${local.subscription_id_part}/resourceGroups/${local.resource_group_name}"
+}
+
+output "resource_group" {
+  value = {
+    id       = local.resource_group_id
+    name     = local.resource_group_name
+    location = "westus3"
+  }
+}
+```
+
+Derive all Azure resource IDs from the random prefix using locals. Do not hardcode synthetic IDs.
+
+#### Test File Conventions
+
+Test files use `mock_provider` to intercept all provider calls and `command = plan` for assertions:
+
+```hcl
+mock_provider "azurerm" {}
+mock_provider "azapi" {}
+
+// Override data sources that generate invalid mock values
+override_data {
+  target = data.azurerm_client_config.current
+  values = {
+    tenant_id = "00000000-0000-0000-0000-000000000000"
+  }
+}
+
+run "setup" {
+  module {
+    source = "./tests/setup"
+  }
+}
+
+run "verify_naming" {
+  command = plan
+
+  variables {
+    resource_prefix = run.setup.resource_prefix
+    environment     = run.setup.environment
+    instance        = run.setup.instance
+    resource_group  = run.setup.resource_group
+  }
+
+  assert {
+    condition     = azurerm_key_vault.main.name == "kv${run.setup.resource_prefix}${run.setup.environment}${run.setup.instance}"
+    error_message = "Key Vault name must follow kv{prefix}{env}{instance}"
+  }
+}
+```
+
+#### Mock Provider Constraints
+
+| Constraint                                                                              | Resolution                                                                      |
+|-----------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| `data.azurerm_client_config.current` generates random strings that fail UUID validation | Add `override_data` block with valid tenant_id                                  |
+| `command = apply` generates invalid Azure resource IDs for role assignments             | Use `command = plan` and assert only on input-derived attributes                |
+| Computed attributes (`.id`, `.fqdn`) are unknown at plan time                           | Assert on resource count, name, and configuration values instead                |
+| `file()` built-in is not intercepted by mock providers                                  | Provide a real stub file (see automation module `tests/setup/scripts/stub.ps1`) |
+
+#### Test Categories
+
+| File                      | Purpose                                                          |
+|---------------------------|------------------------------------------------------------------|
+| `naming.tftest.hcl`       | Resource names follow `{abbreviation}-{prefix}-{env}-{instance}` |
+| `conditionals.tftest.hcl` | `should_*` booleans control resource creation via `count`        |
+| `defaults.tftest.hcl`     | Default variable values produce expected configuration           |
+| `security.tftest.hcl`     | Security settings (RBAC, TLS, network ACLs)                      |
+| `outputs.tftest.hcl`      | Output nullability when features are disabled                    |
+| `validation.tftest.hcl`   | Variable validation rules via `expect_failures`                  |
 
 ### Resource Tagging
 
@@ -140,7 +260,7 @@ Include header documentation:
 shellcheck deploy/**/*.sh scripts/**/*.sh
 
 # Check specific script
-shellcheck -x deploy/002-setup/01-deploy-robotics-charts.sh
+shellcheck -x infrastructure/setup/01-deploy-robotics-charts.sh
 ```
 
 ### Configuration Management
@@ -226,6 +346,7 @@ kind: ConfigMap
 ## Related Documentation
 
 * [Contributing Guide](README.md) - Prerequisites, workflow, commit messages
-* [Deployment Validation](deployment-validation.md) - Validation levels and testing
+* [Deployment Validation](deployment-validation.md) - Validation levels and deployment testing
 * [Security Review](security-review.md) - Security checklist and patterns
 * [Shell Scripts Instructions](https://github.com/microsoft/physical-ai-toolchain/blob/main/.github/instructions/shell-scripts.instructions.md) - Detailed shell script guidance
+* [Terraform Test Reference](https://developer.hashicorp.com/terraform/language/tests) - HashiCorp `terraform test` documentation

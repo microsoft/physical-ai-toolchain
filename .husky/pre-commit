@@ -1,1 +1,1 @@
-cd src/dataviewer/frontend && npx lint-staged
+cd data-management/viewer/frontend && npx lint-staged

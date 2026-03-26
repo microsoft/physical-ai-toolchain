@@ -3,79 +3,76 @@ name: Dataviewer Frontend Tests
 on:
   workflow_call:
     inputs:
-      soft-fail:
-        description: 'Whether to continue on test or lint failures'
+      code-coverage:
+        description: 'Enable Codecov coverage upload'
         required: false
-        type: boolean
         default: false
+        type: boolean
 
 permissions:
   contents: read
 
 jobs:
   frontend-checks:
-    name: Lint, Type-check & Test
+    name: Lint, Type-check, Test and Build
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: src/dataviewer/frontend
+        working-directory: data-management/viewer/frontend
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
-          node-version-file: src/dataviewer/frontend/.nvmrc
+          node-version-file: data-management/viewer/frontend/.nvmrc
           cache: npm
-          cache-dependency-path: src/dataviewer/frontend/package-lock.json
+          cache-dependency-path: data-management/viewer/frontend/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
       - name: ESLint
-        id: lint
-        continue-on-error: true
-        run: npm run lint 2>&1 | tee lint-results.txt
+        run: npm run lint
 
       - name: Type check
-        id: typecheck
-        continue-on-error: true
-        run: npm run type-check 2>&1 | tee typecheck-results.txt
+        run: npm run type-check
 
       - name: Format check
-        id: format
-        continue-on-error: true
-        run: npm run format 2>&1 | tee format-results.txt
+        run: npm run format
 
       - name: Unit tests
-        id: tests
-        continue-on-error: true
-        run: npm run test 2>&1 | tee test-results.txt
+        if: ${{ !inputs.code-coverage }}
+        run: npm run test
 
-      - name: Upload results
-        if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v4.4.3
+      - name: Unit tests with coverage
+        if: ${{ inputs.code-coverage }}
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload coverage artifact
+        if: ${{ inputs.code-coverage && always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: frontend-test-results
-          path: |
-            src/dataviewer/frontend/lint-results.txt
-            src/dataviewer/frontend/typecheck-results.txt
-            src/dataviewer/frontend/format-results.txt
-            src/dataviewer/frontend/test-results.txt
+          name: vitest-coverage-xml
+          path: data-management/viewer/frontend/coverage/cobertura-coverage.xml
           retention-days: 30
 
-      - name: Fail job if errors found
-        if: >-
-          (steps.lint.outcome == 'failure'
-          || steps.typecheck.outcome == 'failure'
-          || steps.format.outcome == 'failure'
-          || steps.tests.outcome == 'failure')
-          && !inputs.soft-fail
-        run: |
-          echo "::error::Frontend checks failed. Run 'npm run lint', 'npm run type-check', 'npm run format', and 'npm run test' locally to reproduce."
-          exit 1
+      - name: Upload coverage to Codecov
+        if: ${{ inputs.code-coverage && always() }}
+        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad # v5.5.3
+        with:
+          files: coverage/cobertura-coverage.xml
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: vitest
+          name: vitest-coverage

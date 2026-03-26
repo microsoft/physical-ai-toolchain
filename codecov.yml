@@ -1,8 +1,11 @@
 # codecov.yml — Codecov configuration for unified coverage reporting
 #
 # Flags:
+#   go — Go tests covering infrastructure/terraform/e2e/
 #   pester — PowerShell tests covering scripts/
 #   pytest — Python tests covering src/
+#   terraform — Terraform tests covering infrastructure/terraform/
+#   vitest — Vitest tests covering data-management/viewer/frontend/src/
 
 codecov:
   notify:
@@ -17,6 +20,11 @@ coverage:
       default:
         target: auto
         threshold: 1%
+      go:
+        flags:
+          - go
+        target: auto
+        threshold: 1%
       pester:
         flags:
           - pester
@@ -27,12 +35,26 @@ coverage:
           - pytest
         target: auto
         threshold: 1%
+      pytest-dataviewer:
+        flags:
+          - pytest-dataviewer
+        target: auto
+        threshold: 1%
+      vitest:
+        flags:
+          - vitest
+        target: auto
+        threshold: 1%
     patch:
       default:
         target: auto
         threshold: 5%
 
 flags:
+  go:
+    paths:
+      - infrastructure/terraform/e2e/
+    carryforward: true
   pester:
     paths:
       - scripts/
@@ -40,6 +62,18 @@ flags:
   pytest:
     paths:
       - src/
+    carryforward: true
+  pytest-dataviewer:
+    paths:
+      - data-management/viewer/backend/src/
+    carryforward: true
+  terraform:
+    paths:
+      - infrastructure/terraform/
+    carryforward: true
+  vitest:
+    paths:
+      - data-management/viewer/frontend/src/
     carryforward: true
 
 parsers:

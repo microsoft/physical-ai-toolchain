@@ -1,0 +1,60 @@
+name: Terraform Validation
+
+on:
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Whether to continue on Terraform validation failures'
+        required: false
+        type: boolean
+        default: false
+      changed-files-only:
+        description: 'Only validate directories with changed Terraform files'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  terraform-validation:
+    name: Terraform Validation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: ${{ inputs.changed-files-only && '0' || '1' }}
+
+      - name: Create logs directory
+        run: New-Item -ItemType Directory -Force -Path logs | Out-Null
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
+        with:
+          terraform_wrapper: false
+
+      - name: Run Terraform Validation
+        continue-on-error: ${{ inputs.soft-fail }}
+        run: |
+          $params = @{}
+          if ('${{ inputs.changed-files-only }}' -eq 'true') {
+            $params['ChangedFilesOnly'] = $true
+          }
+          shared/ci/linting/Invoke-TerraformValidation.ps1 @params
+
+      - name: Upload Terraform results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: terraform-validation-results
+          path: logs/terraform-validation-results.json
+          retention-days: 30

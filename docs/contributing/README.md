@@ -172,19 +172,18 @@ This reference architecture validates through deployment rather than automated t
 
 ### Validation Levels
 
-| Level                   | What                                                                   | When to Use                  | Cost   |
-|-------------------------|------------------------------------------------------------------------|------------------------------|--------|
-| **Level 1: Static**     | `terraform fmt`, `terraform validate`, `shellcheck`, `npm run lint:md` | Every contribution           | $0     |
-| **Level 2: Plan**       | `terraform plan` with documented output                                | Terraform changes            | $0     |
-| **Level 3: Deployment** | Full deployment in dev subscription                                    | Major infrastructure changes | $25-50 |
-| **Level 4: Workflow**   | Training job execution                                                 | Script/workflow changes      | $5-30  |
+| Level                   | What                                                        | When to Use                  | Cost   |
+|-------------------------|-------------------------------------------------------------|------------------------------|--------|
+| **Level 1: Static**     | `npm run lint:tf:validate`, `shellcheck`, `npm run lint:md` | Every contribution           | $0     |
+| **Level 2: Plan**       | `terraform plan` with documented output                     | Terraform changes            | $0     |
+| **Level 3: Deployment** | Full deployment in dev subscription                         | Major infrastructure changes | $25-50 |
+| **Level 4: Workflow**   | Training job execution                                      | Script/workflow changes      | $5-30  |
 
 Static validation is required for all PRs:
 
 ```bash
-terraform fmt -check -recursive deploy/
-terraform validate deploy/001-iac/
-shellcheck deploy/**/*.sh scripts/**/*.sh
+npm run lint:tf:validate
+shellcheck infrastructure/**/*.sh scripts/**/*.sh
 npm run lint:md
 ```
 
@@ -267,7 +266,7 @@ Documentation standards:
 CLI output standards:
 
 * Support the [NO_COLOR](https://no-color.org) standard in shell scripts
-* Shared color functions in `deploy/002-setup/lib/common.sh` check `NO_COLOR` before emitting ANSI escape sequences
+* Shared color functions in `shared/lib/common.sh` check `NO_COLOR` before emitting ANSI escape sequences
 
 See [Accessibility](accessibility.md) for full guidelines.
 

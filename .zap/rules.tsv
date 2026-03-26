@@ -1,0 +1,13 @@
+10003	WARN	Vulnerable JS Library
+10010	IGNORE	Cookie No HttpOnly Flag
+10011	IGNORE	Cookie Without Secure Flag
+10015	IGNORE	Re-examine Cache-control Directives
+10017	IGNORE	Cross-Domain JavaScript Source File Inclusion
+10020	WARN	Anti-clickjacking Header Missing
+10021	WARN	X-Content-Type-Options Header Missing
+10035	WARN	Strict-Transport-Security Header Not Set
+10036	IGNORE	Server Leaks Version Information via "Server" HTTP Response Header Field
+10038	WARN	Content Security Policy (CSP) Header Not Set
+10049	IGNORE	Storable and Cacheable Content
+10055	WARN	CSP: Wildcard Directive
+10109	IGNORE	Modern Web Application (informational)

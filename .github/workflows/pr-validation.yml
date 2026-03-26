@@ -50,6 +50,7 @@ jobs:
     with:
       staleness-threshold-days: 90
       changed-files-only: true
+      soft-fail: false
     permissions:
       contents: read
 
@@ -119,8 +120,11 @@ jobs:
   dataviewer-frontend-tests:
     name: Dataviewer Frontend Tests
     uses: ./.github/workflows/dataviewer-frontend-tests.yml
+    with:
+      code-coverage: true
     permissions:
       contents: read
+      id-token: write
 
   # Python pytest test execution
   pytest-tests:
@@ -131,12 +135,76 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
+  # Dataviewer backend pytest execution
+  dataviewer-backend-pytests:
+    name: Dataviewer Backend Pytest
+    uses: ./.github/workflows/dataviewer-backend-pytests.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Python linting using ruff
   python-lint:
     name: Python Lint
     uses: ./.github/workflows/python-lint.yml
     permissions:
       contents: read
+
+  # Terraform linting using TFLint
+  terraform-lint:
+    name: Terraform Lint
+    uses: ./.github/workflows/terraform-lint.yml
+    with:
+      soft-fail: true
+    permissions:
+      contents: read
+
+  # Terraform format and validate checks
+  terraform-validation:
+    name: Terraform Validation
+    uses: ./.github/workflows/terraform-validation.yml
+    with:
+      soft-fail: true
+      changed-files-only: true
+    permissions:
+      contents: read
+
+  # Terraform test execution with Codecov Test Analytics
+  terraform-tests:
+    name: Terraform Tests
+    uses: ./.github/workflows/terraform-tests.yml
+    with:
+      soft-fail: true
+      changed-files-only: true
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
+  # Go linting using golangci-lint
+  go-lint:
+    name: Go Lint
+    uses: ./.github/workflows/go-lint.yml
+    with:
+      soft-fail: true
+      changed-files-only: true
+    permissions:
+      contents: read
+
+  # Go tests
+  go-tests:
+    name: Go Tests
+    uses: ./.github/workflows/go-tests.yml
+    with:
+      soft-fail: true
+      changed-files-only: true
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
 
   # CodeQL security analysis
   codeql-analysis:

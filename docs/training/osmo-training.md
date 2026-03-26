@@ -75,11 +75,11 @@ Dataset folder injection via OSMO bucket system instead of base64-encoded archiv
 
 ### Dataset Parameters
 
-| Parameter            | Default         | Description                                       |
-|----------------------|-----------------|---------------------------------------------------|
-| `dataset_bucket`     | `training`      | OSMO bucket for training code                     |
-| `dataset_name`       | `training-code` | Dataset name in bucket                            |
-| `training_localpath` | (required)      | Local path to `src/training` relative to workflow |
+| Parameter            | Default         | Description                                    |
+|----------------------|-----------------|------------------------------------------------|
+| `dataset_bucket`     | `training`      | OSMO bucket for training code                  |
+| `dataset_name`       | `training-code` | Dataset name in bucket                         |
+| `training_localpath` | (required)      | Local path to `training/` relative to workflow |
 
 ### Submit Dataset Training
 

@@ -22,11 +22,10 @@ Required for all contributions before submitting PR.
 
 ```bash
 # Terraform formatting and validation
-terraform fmt -check -recursive deploy/
-terraform validate deploy/001-iac/
+npm run lint:tf:validate
 
 # Shell script linting
-shellcheck deploy/**/*.sh scripts/**/*.sh
+shellcheck infrastructure/**/*.sh scripts/**/*.sh
 
 # Documentation validation
 npm install
@@ -44,7 +43,7 @@ Required for Terraform module or configuration changes.
 **Commands:**
 
 ```bash
-cd deploy/001-iac
+cd infrastructure/terraform
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your subscription details
 
@@ -71,7 +70,7 @@ Optional for most PRs due to cost (~$25-50 for 8-hour session). Required for sig
 
 ```bash
 # Use public network mode for faster/simpler testing
-cd deploy/001-iac
+cd infrastructure/terraform
 terraform apply -var-file=terraform.tfvars -var="network_mode=public"
 
 # Test specific functionality
@@ -130,8 +129,7 @@ Copy this template to PR description:
 ## Validation Performed
 
 **Static Validation:**
-- [ ] terraform fmt -check
-- [ ] terraform validate
+- [ ] npm run lint:tf:validate
 - [ ] shellcheck (if applicable)
 - [ ] npm run lint:md (if docs changed)
 

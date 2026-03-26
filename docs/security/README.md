@@ -19,11 +19,11 @@ Security documentation for the Physical AI Toolchain covering threat analysis, d
 
 ## 📄 Documents
 
-| Document                                                     | Description                                                      |
-|--------------------------------------------------------------|------------------------------------------------------------------|
-| [Threat Model](threat-model.md)                              | STRIDE-based threat analysis and remediation roadmap             |
-| [Deployment Security Guide](../operations/security-guide.md) | Security configuration inventory and deployment responsibilities |
-| [Release Verification](release-verification.md)              | Verify release artifact provenance and SBOM attestations         |
+| Document                                                                                | Description                                                      |
+|-----------------------------------------------------------------------------------------|------------------------------------------------------------------|
+| [Threat Model](threat-model.md)                                                         | STRIDE-based threat analysis and remediation roadmap             |
+| [Deployment Security Guide](../operations/security-guide.md)                            | Security configuration inventory and deployment responsibilities |
+| [Release Verification](release-verification.md)                                         | Verify release artifact provenance and SBOM attestations         |
 | [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md) | Vulnerability disclosure and reporting process                   |
 
 ## 🔒 Security Posture

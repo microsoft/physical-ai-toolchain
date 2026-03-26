@@ -1,0 +1,30 @@
+// =============================================================================
+// VPN Terraform Variables Example
+// =============================================================================
+// Copy to terraform.tfvars and customize:  cp terraform.tfvars.example terraform.tfvars
+// Full variable reference: variables.tf
+// =============================================================================
+
+// Core Configuration (must match 001-iac deployment)
+environment     = "dev"
+location        = "westus3"
+resource_prefix = "yourprefix"
+instance        = "001"
+
+// [Optional]
+// Point-to-Site (P2S) Certificate Authentication
+root_certificate_name = "RoboticsVPNRootCert"
+
+// [Optional]
+// Generate a self-signed root certificate and paste base64-encoded public key:
+//   openssl req -x509 -nodes -newkey rsa:2048 -keyout vpn-root-key.pem -out vpn-root-cert.pem -days 365 -subj "/CN=RoboticsVPNRootCA"
+//   openssl x509 -in vpn-root-cert.pem -outform der | base64 -w0
+root_certificate_public_data = "YOUR_BASE64_ENCODED_ROOT_CERTIFICATE_HERE"
+
+// [Optional]
+// VPN Gateway configuration. Defaults to VpnGw1AZ with all 3 availability zones.
+// Adjust zones for regions with fewer availability zones.
+// vpn_gateway_config = {
+//   sku   = "VpnGw1AZ"
+//   zones = ["1", "2", "3"]
+// }

@@ -50,6 +50,7 @@ aravis
 architected
 architecting
 ariba
+armhf
 arrowdown
 arrowleft
 arrowright
@@ -334,6 +335,7 @@ davinci
 dbcc
 dcgm
 DDPG
+debconf
 debuggability
 dedupe
 deduplicated
@@ -439,10 +441,12 @@ filesystem
 Finalizer
 firewalls
 flatdict
+flatmap
 flexbox
 Flink
 fluentbit
 fluentd
+fluxcd
 flyout
 flyouts
 fontcolor
@@ -457,6 +461,7 @@ frontends
 frontmatter
 fullstack
 fulltext
+fuser
 gartner
 gbps
 gcp
@@ -481,6 +486,7 @@ gitops
 gmail
 GMSH
 golang
+golangci
 google
 googlecloud
 gpu
@@ -497,6 +503,7 @@ hardened
 hardening
 hbase
 hci
+hconf
 hdfs
 hdinsight
 heatmap
@@ -508,6 +515,7 @@ heredoc
 heredocs
 hexadecimal
 hids
+hil
 highlevel
 hipaa
 hive
@@ -647,6 +655,7 @@ kingsway
 kingswaysoft
 koalaman
 kpis
+kql
 kreps
 kube
 kubeconfig
@@ -813,6 +822,8 @@ nic
 nics
 nist
 nodejs
+nodesource
+nodistro
 nojekyll
 noncompliance
 noncompliant
@@ -933,6 +944,7 @@ pipeline
 pipelines
 pitj
 pivottable
+pkgs
 platform
 platformops
 platforms
@@ -942,6 +954,7 @@ playment
 playsinline
 Plotly
 pluggable
+pluginid
 pluralsight
 pmks
 pngs
@@ -988,6 +1001,7 @@ pretrain
 pretrained
 pricewaterhousecoopers
 privatelink
+println
 profisee
 proliant
 proseware
@@ -1106,6 +1120,7 @@ rfcs
 rgba
 rhn
 risc
+riskcode
 rlhf
 rmem
 roadmap
@@ -1150,12 +1165,14 @@ scom
 scoped
 scrum
 scsp
+sdg
 sdk
 sdks
 sdlc
 searchable
 seccomp
 sectigo
+securestring
 seealso
 Seldon
 semver
@@ -1176,6 +1193,7 @@ sigalrm
 signalr
 signingkey
 sigstore
+sil
 signup
 Silverlight
 Simbolic
@@ -1304,6 +1322,7 @@ testpaths
 testsrc
 tflint
 tflite
+tftest
 tfvars
 tfvc
 thresholding
@@ -1425,6 +1444,7 @@ visio
 visualisations
 visualstudio
 vite
+vitest
 vlan
 vlans
 vm
@@ -1505,6 +1525,7 @@ yymmddhhmmss
 yymmddhhmss
 zabbix
 Zachman
+zaproxy
 Zeebe
 Zeek
 zerega
@@ -1953,14 +1974,38 @@ desync
 dvwh
 dvwm
 emanufacturing
+fastapi
 faststart
 fourcc
 midtone
 movflags
 nameidentifier
 persistable
+pydantic
+radix
 rawvideo
 rvfc
+shadcn
 srcs
+tanstack
 tobytes
 ultrafast
+
+kolmogorov
+mqtt
+smirnov
+zustand
+
+# Cendio ThinLinc
+Cendio
+Linc
+ThinLinc
+tlwebaccess
+tlwebadm
+tlagent
+tlmaster
+thinlocal
+WEBADM
+WEBACCESS
+vsmagent
+vsmserver
