@@ -487,6 +487,7 @@ gmail
 GMSH
 golang
 golangci
+gomod
 google
 googlecloud
 gpu
