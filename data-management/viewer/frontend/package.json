@@ -72,7 +72,7 @@
     "eslint-plugin-react-refresh": "^0.4.16",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "globals": "^15.14.0",
-    "happy-dom": "^20.8.4",
+    "happy-dom": "^20.8.8",
     "lint-staged": "^16.2.7",
     "postcss": "^8.4.49",
     "prettier": "^3.8.1",
