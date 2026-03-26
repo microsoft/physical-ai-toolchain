@@ -108,6 +108,15 @@ jobs:
                 $testPaths += $testFile
               }
             }
+
+            # Map scripts/ root source to test: scripts/Foo.ps1 -> shared/ci/tests/scripts/Foo.Tests.ps1
+            if ($file -match '^scripts/([^/]+)\.psm?1$') {
+              $relativePath = $Matches[1]
+              $testFile = "shared/ci/tests/scripts/$relativePath.Tests.ps1"
+              if (Test-Path $testFile) {
+                $testPaths += $testFile
+              }
+            }
           }
 
           $uniquePaths = $testPaths | Sort-Object -Unique

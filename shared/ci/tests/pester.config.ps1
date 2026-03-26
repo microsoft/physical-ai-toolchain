@@ -57,7 +57,7 @@ if ($CodeCoverage.IsPresent) {
     $coverageSources = @(
         (Join-Path $ciRoot 'linting'),
         (Join-Path $ciRoot 'security'),
-        (Join-Path $repoRoot 'scripts' 'lib')
+        (Join-Path $repoRoot 'scripts')
     )
 
     $coveragePaths = $coverageSources | ForEach-Object {
