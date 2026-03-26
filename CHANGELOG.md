@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.5.1](https://github.com/microsoft/physical-ai-toolchain/compare/v0.5.0...v0.5.1) (2026-03-26)
+
+
+### 🔒 Security
+
+* **deps-dev:** bump the npm_and_yarn group across 2 directories with 2 updates ([#363](https://github.com/microsoft/physical-ai-toolchain/issues/363)) ([aeae624](https://github.com/microsoft/physical-ai-toolchain/commit/aeae6245623a3bdd0cc9a2c8b8efc823a4ec9c0f))
+
 ## [0.5.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.4.0...v0.5.0) (2026-03-26)
 
 
