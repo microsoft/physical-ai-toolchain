@@ -5,6 +5,7 @@
  * and optional Azure Machine Learning integration.
  *
  * Architecture:
+ *
  * - Platform Module: Shared services (networking, security, observability, ACR, storage, ML workspace)
  * - SiL Module: AKS cluster with GPU node pools and ML extension integration
  */
@@ -79,9 +80,11 @@ module "platform" {
 
   // Networking configuration
   should_enable_nat_gateway = var.should_enable_nat_gateway
+  should_create_vm_subnet   = var.should_create_vm_subnet
   virtual_network_config = {
     address_space                  = var.virtual_network_config.address_space
     subnet_address_prefix_main     = var.virtual_network_config.subnet_address_prefix
+    subnet_address_prefix_vm       = var.virtual_network_config.subnet_address_prefix_vm
     subnet_address_prefix_pe       = var.virtual_network_config.subnet_address_prefix_pe
     subnet_address_prefix_resolver = var.virtual_network_config.subnet_address_prefix_resolver
   }

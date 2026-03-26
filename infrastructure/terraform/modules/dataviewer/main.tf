@@ -1,7 +1,10 @@
 /**
  * # Dataviewer Module
  *
- * Deploys the dataviewer application on Azure Container Apps including:
+ * Deploys the dataviewer application on Azure Container Apps with networking, identity, and app-level resources.
+ *
+ * Resources deployed:
+ *
  * - Container Apps Environment with optional VNet integration
  * - Backend (FastAPI) and Frontend (nginx + React) container apps
  * - User-assigned managed identity for ACR and Storage access

@@ -179,6 +179,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | `*.md` | `npm run lint:md`, `npm run spell-check`, `npm run format:tables` |
 | `*.tf`, `*.tfvars` | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan` |
 | `*.tftest.hcl` | `npm run test:tf`, `cd infrastructure/terraform/modules/<name> && terraform test` or `cd infrastructure/terraform && terraform test` |
+| `*.go` | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`) |
 | `*.sh` | `shellcheck <file>` |
 | `*.ps1` | `npm run lint:ps` |
 | `*.yml` (GitHub Actions) | `npm run lint:yaml` |
@@ -188,7 +189,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 ### Linting
 
-* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` in sequence
+* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` + `lint:go` in sequence
 * `npm run spell-check` and `npm run format:tables` are NOT included in `lint:all` — run them separately
 * `npm run lint:md:fix` and `npm run format:tables` auto-fix markdown issues
 * `.copilot-tracking/` is excluded from markdown linting via `.markdownlint-cli2.jsonc`

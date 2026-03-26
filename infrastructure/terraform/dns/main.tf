@@ -1,5 +1,5 @@
 /**
- * Private DNS Zone for OSMO UI Service
+ * # Private DNS Zone for OSMO UI Service
  *
  * Creates a private DNS zone for internal resolution of the OSMO UI service
  * running on an internal LoadBalancer within the AKS cluster.

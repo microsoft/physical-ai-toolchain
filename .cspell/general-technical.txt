@@ -50,6 +50,7 @@ aravis
 architected
 architecting
 ariba
+armhf
 arrowdown
 arrowleft
 arrowright
@@ -334,6 +335,7 @@ davinci
 dbcc
 dcgm
 DDPG
+debconf
 debuggability
 dedupe
 deduplicated
@@ -459,6 +461,7 @@ frontends
 frontmatter
 fullstack
 fulltext
+fuser
 gartner
 gbps
 gcp
@@ -483,6 +486,8 @@ gitops
 gmail
 GMSH
 golang
+golangci
+gomod
 google
 googlecloud
 gpu
@@ -499,6 +504,7 @@ hardened
 hardening
 hbase
 hci
+hconf
 hdfs
 hdinsight
 heatmap
@@ -817,6 +823,8 @@ nic
 nics
 nist
 nodejs
+nodesource
+nodistro
 nojekyll
 noncompliance
 noncompliant
@@ -937,6 +945,7 @@ pipeline
 pipelines
 pitj
 pivottable
+pkgs
 platform
 platformops
 platforms
@@ -993,6 +1002,7 @@ pretrain
 pretrained
 pricewaterhousecoopers
 privatelink
+println
 profisee
 proliant
 proseware
@@ -1163,6 +1173,7 @@ sdlc
 searchable
 seccomp
 sectigo
+securestring
 seealso
 Seldon
 semver
@@ -1493,6 +1504,7 @@ workday
 workgroup
 workitem
 workitems
+wordlist
 workstream
 wsus
 wwwroot
@@ -1985,3 +1997,17 @@ kolmogorov
 mqtt
 smirnov
 zustand
+
+# Cendio ThinLinc
+Cendio
+Linc
+ThinLinc
+tlwebaccess
+tlwebadm
+tlagent
+tlmaster
+thinlocal
+WEBADM
+WEBACCESS
+vsmagent
+vsmserver

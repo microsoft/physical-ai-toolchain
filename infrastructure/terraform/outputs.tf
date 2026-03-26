@@ -106,6 +106,16 @@ output "subnets" {
   value       = module.platform.subnets
 }
 
+output "vm_subnet" {
+  description = "Dedicated VM subnet. Null when should_create_vm_subnet is false."
+  value       = module.platform.subnets.vm_subnet
+}
+
+output "network_security_group" {
+  description = "Shared network security group for robotics infrastructure."
+  value       = module.platform.network_security_group
+}
+
 // ============================================================
 // DNS Private Resolver Outputs
 // ============================================================

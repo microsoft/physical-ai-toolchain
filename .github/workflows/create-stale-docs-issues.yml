@@ -47,9 +47,16 @@ jobs:
           path: logs
 
       - name: Create or Update Issues (One Per File)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULTS_FILE: ${{ inputs.results-file }}
+          THRESHOLD_DAYS: ${{ inputs.threshold-days }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           # Extract stale files from JSON
-          $results = Get-Content '${{ inputs.results-file }}' | ConvertFrom-Json
+          $results = Get-Content $env:RESULTS_FILE | ConvertFrom-Json
           $staleFiles = $results | Where-Object { $_.IsStale -eq $true }
 
           if (-not $staleFiles) {
@@ -73,9 +80,9 @@ jobs:
 
             # Check for existing open issue for this specific file using search
             # Search by automation marker in issue body
-            $searchQuery = "repo:${{ github.repository }} is:issue is:open in:body `"automation:stale-docs:$filePath`""
+            $searchQuery = "repo:$env:GITHUB_REPOSITORY is:issue is:open in:body `"automation:stale-docs:$filePath`""
             $existingIssueJson = gh issue list `
-              --repo "${{ github.repository }}" `
+              --repo $env:GITHUB_REPOSITORY `
               --search "$searchQuery" `
               --limit 1 `
               --json number `
@@ -89,10 +96,10 @@ jobs:
 
           **File:** ``$filePath``
           **Current ms.date:** ``$msDate``
-          **Age:** $ageDays days (threshold: ${{ inputs.threshold-days }} days)
+          **Age:** $ageDays days (threshold: $env:THRESHOLD_DAYS days)
 
           ---
-          **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          **Workflow Run:** $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
           **Detection Date:** $(Get-Date -Format 'yyyy-MM-dd' -AsUTC)
 
           ### Action Required
@@ -107,17 +114,17 @@ jobs:
             if ($existingIssue) {
               Write-Host "Updating existing issue #$existingIssue for $filePath"
               gh issue edit $existingIssue `
-                --repo "${{ github.repository }}" `
+                --repo $env:GITHUB_REPOSITORY `
                 --body $issueBody
 
               $updateDate = Get-Date -Format 'yyyy-MM-dd' -AsUTC
               gh issue comment $existingIssue `
-                --repo "${{ github.repository }}" `
+                --repo $env:GITHUB_REPOSITORY `
                 --body "🔄 **Weekly validation update:** Still stale ($ageDays days) as of $updateDate"
             } else {
               Write-Host "Creating new issue for $filePath"
               gh issue create `
-                --repo "${{ github.repository }}" `
+                --repo $env:GITHUB_REPOSITORY `
                 --title $issueTitle `
                 --body $issueBody `
                 --label "documentation,stale-docs,automated,needs-triage"
@@ -125,5 +132,3 @@ jobs:
           }
 
           Write-Host "Issue creation/update complete"
-        env:
-          GH_TOKEN: ${{ github.token }}

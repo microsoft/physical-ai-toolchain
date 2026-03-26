@@ -25,10 +25,17 @@ variable "should_enable_nat_gateway" {
   default     = true
 }
 
+variable "should_create_vm_subnet" {
+  type        = bool
+  description = "Whether to create a dedicated subnet for virtual machines in the platform virtual network"
+  default     = false
+}
+
 variable "virtual_network_config" {
   type = object({
     address_space                  = string
     subnet_address_prefix_main     = string
+    subnet_address_prefix_vm       = optional(string)
     subnet_address_prefix_pe       = optional(string)
     subnet_address_prefix_resolver = optional(string)
   })
@@ -36,6 +43,7 @@ variable "virtual_network_config" {
   default = {
     address_space                  = "10.0.0.0/16"
     subnet_address_prefix_main     = "10.0.1.0/24"
+    subnet_address_prefix_vm       = "10.0.4.0/24"
     subnet_address_prefix_pe       = "10.0.2.0/24"
     subnet_address_prefix_resolver = "10.0.9.0/28"
   }

@@ -37,6 +37,7 @@ terraform init && terraform apply
 |-----------------------------------------------------------------------------------|------------------------------------------------------|
 | [Infrastructure Deployment](../../docs/infrastructure/infrastructure.md)          | Configuration, variables, and deployment walkthrough |
 | [Infrastructure Reference](../../docs/infrastructure/infrastructure-reference.md) | Architecture, module structure, and troubleshooting  |
+| [Terraform Reference](TERRAFORM.md)                                               | Auto-generated inputs, outputs, and resources        |
 
 ## ➡️ Next Step
 

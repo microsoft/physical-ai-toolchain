@@ -28,6 +28,7 @@ terraform init && terraform apply
 | Guide                                                            | Description                                               |
 |------------------------------------------------------------------|-----------------------------------------------------------|
 | [VPN Gateway Configuration](../../../docs/infrastructure/vpn.md) | Authentication options, client setup, and troubleshooting |
+| [Terraform Reference](TERRAFORM.md)                              | Auto-generated inputs, outputs, and resources             |
 
 ## ➡️ Next Step
 

@@ -146,23 +146,23 @@ run "verify_naming" {
 
 #### Mock Provider Constraints
 
-| Constraint | Resolution |
-| --- | --- |
-| `data.azurerm_client_config.current` generates random strings that fail UUID validation | Add `override_data` block with valid tenant_id |
-| `command = apply` generates invalid Azure resource IDs for role assignments | Use `command = plan` and assert only on input-derived attributes |
-| Computed attributes (`.id`, `.fqdn`) are unknown at plan time | Assert on resource count, name, and configuration values instead |
-| `file()` built-in is not intercepted by mock providers | Provide a real stub file (see automation module `tests/setup/scripts/stub.ps1`) |
+| Constraint                                                                              | Resolution                                                                      |
+|-----------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| `data.azurerm_client_config.current` generates random strings that fail UUID validation | Add `override_data` block with valid tenant_id                                  |
+| `command = apply` generates invalid Azure resource IDs for role assignments             | Use `command = plan` and assert only on input-derived attributes                |
+| Computed attributes (`.id`, `.fqdn`) are unknown at plan time                           | Assert on resource count, name, and configuration values instead                |
+| `file()` built-in is not intercepted by mock providers                                  | Provide a real stub file (see automation module `tests/setup/scripts/stub.ps1`) |
 
 #### Test Categories
 
-| File | Purpose |
-| --- | --- |
-| `naming.tftest.hcl` | Resource names follow `{abbreviation}-{prefix}-{env}-{instance}` |
-| `conditionals.tftest.hcl` | `should_*` booleans control resource creation via `count` |
-| `defaults.tftest.hcl` | Default variable values produce expected configuration |
-| `security.tftest.hcl` | Security settings (RBAC, TLS, network ACLs) |
-| `outputs.tftest.hcl` | Output nullability when features are disabled |
-| `validation.tftest.hcl` | Variable validation rules via `expect_failures` |
+| File                      | Purpose                                                          |
+|---------------------------|------------------------------------------------------------------|
+| `naming.tftest.hcl`       | Resource names follow `{abbreviation}-{prefix}-{env}-{instance}` |
+| `conditionals.tftest.hcl` | `should_*` booleans control resource creation via `count`        |
+| `defaults.tftest.hcl`     | Default variable values produce expected configuration           |
+| `security.tftest.hcl`     | Security settings (RBAC, TLS, network ACLs)                      |
+| `outputs.tftest.hcl`      | Output nullability when features are disabled                    |
+| `validation.tftest.hcl`   | Variable validation rules via `expect_failures`                  |
 
 ### Resource Tagging
 

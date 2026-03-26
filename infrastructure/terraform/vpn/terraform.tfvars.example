@@ -20,3 +20,11 @@ root_certificate_name = "RoboticsVPNRootCert"
 //   openssl req -x509 -nodes -newkey rsa:2048 -keyout vpn-root-key.pem -out vpn-root-cert.pem -days 365 -subj "/CN=RoboticsVPNRootCA"
 //   openssl x509 -in vpn-root-cert.pem -outform der | base64 -w0
 root_certificate_public_data = "YOUR_BASE64_ENCODED_ROOT_CERTIFICATE_HERE"
+
+// [Optional]
+// VPN Gateway configuration. Defaults to VpnGw1AZ with all 3 availability zones.
+// Adjust zones for regions with fewer availability zones.
+// vpn_gateway_config = {
+//   sku   = "VpnGw1AZ"
+//   zones = ["1", "2", "3"]
+// }

@@ -162,6 +162,26 @@ jobs:
       contents: read
       id-token: write
 
+  # Go linting using golangci-lint
+  go-lint:
+    name: Go Lint
+    uses: ./.github/workflows/go-lint.yml
+    with:
+      soft-fail: true
+    permissions:
+      contents: read
+
+  # Go tests
+  go-tests:
+    name: Go Tests
+    uses: ./.github/workflows/go-tests.yml
+    with:
+      soft-fail: true
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # CodeQL security analysis
   codeql-analysis:
     name: CodeQL Analysis
@@ -191,6 +211,8 @@ jobs:
       - terraform-lint
       - terraform-validation
       - terraform-tests
+      - go-lint
+      - go-tests
       - codeql-analysis
     name: Release Please
     runs-on: ubuntu-latest
