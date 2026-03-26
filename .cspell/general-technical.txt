@@ -486,6 +486,7 @@ gitops
 gmail
 GMSH
 golang
+golangci
 google
 googlecloud
 gpu

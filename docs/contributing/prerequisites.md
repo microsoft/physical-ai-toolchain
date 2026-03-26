@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Prerequisites and Build Validation
 description: Required tools, Azure access, NGC credentials, and build validation commands for contributing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-08
+ms.date: 2026-03-25
 ms.topic: how-to
 keywords:
   - prerequisites
@@ -33,6 +33,8 @@ Install these tools before contributing:
 | Python      | 3.11+           | <https://www.python.org/downloads/>                                   |
 | shellcheck  | 0.10+           | <https://www.shellcheck.net/>                                         |
 | uv          | latest          | <https://docs.astral.sh/uv/>                                          |
+| Go          | 1.24+           | <https://go.dev/dl/>                                                  |
+| golangci-lint | 2.11+         | <https://golangci-lint.run/welcome/install/>                          |
 | Docker      | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit) |
 | OSMO CLI    | latest          | <https://developer.nvidia.com/osmo>                                   |
 | hve-core    | latest          | <https://github.com/microsoft/hve-core>                               |
@@ -130,6 +132,12 @@ shellcheck --version  # >= 0.10
 # uv (Python package manager)
 uv --version
 
+# Go
+go version  # >= 1.24
+
+# golangci-lint
+golangci-lint version  # >= 2.11
+
 # Docker with NVIDIA Container Toolkit
 docker --version
 nvidia-ctk --version
@@ -165,6 +173,16 @@ tflint --recursive infrastructure/terraform/
 ```bash
 # Lint all shell scripts (required)
 shellcheck deploy/**/*.sh scripts/**/*.sh
+```
+
+**Go:**
+
+```bash
+# Lint Go modules (required for Go changes)
+npm run lint:go
+
+# Test Go modules (required for Go changes)
+npm run test:go
 ```
 
 **Documentation:**

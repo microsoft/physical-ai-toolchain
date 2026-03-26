@@ -13,7 +13,6 @@ BeforeAll {
     $ErrorActionPreference = 'Continue'
     Import-Module (Join-Path $PSScriptRoot '../Mocks/GitMocks.psm1') -Force
     function go { }
-    function golangci-lint { }
 }
 
 Describe 'Invoke-GoTestCore' -Tag 'Unit' {
@@ -37,25 +36,10 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
             return 'go version go1.26 linux/amd64'
         } -ParameterFilter { $args[0] -eq 'version' }
 
-        Mock golangci-lint {
-            $global:LASTEXITCODE = 0
-            return 'golangci-lint has version v2.11.4'
-        } -ParameterFilter { $args[0] -eq 'version' }
-
-        Mock golangci-lint {
-            $global:LASTEXITCODE = 0
-            return ''
-        } -ParameterFilter { $args[0] -eq 'run' }
-
         Mock go {
             $global:LASTEXITCODE = 0
             return ''
         } -ParameterFilter { $args[0] -eq 'test' }
-
-        Mock go {
-            $global:LASTEXITCODE = 0
-            return '/usr/local/go/bin'
-        } -ParameterFilter { $args[0] -eq 'env' }
     }
 
     AfterEach {
@@ -77,24 +61,6 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
             Should -Invoke Write-CIAnnotation -Times 1 -ParameterFilter {
                 $Level -eq 'Error' -and $Message -like '*go*not*'
-            }
-        }
-
-        It 'Returns 1 when golangci-lint not found and install fails' {
-            Mock Get-Command { return $null } -ParameterFilter { $Name -eq 'golangci-lint' }
-            Mock bash { $global:LASTEXITCODE = 1 }
-            $result = Invoke-GoTestCore -OutputPath $script:TestOutputPath `
-                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            $result | Should -Be 1
-        }
-
-        It 'Writes error annotation when golangci-lint install fails' {
-            Mock Get-Command { return $null } -ParameterFilter { $Name -eq 'golangci-lint' }
-            Mock bash { $global:LASTEXITCODE = 1 }
-            Invoke-GoTestCore -OutputPath $script:TestOutputPath `
-                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            Should -Invoke Write-CIAnnotation -ParameterFilter {
-                $Level -eq 'Error' -and $Message -like '*golangci-lint*'
             }
         }
     }
@@ -141,15 +107,15 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
             $json.summary.overall_passed | Should -BeTrue
         }
 
-        It 'Reports lint passed with no tests' {
+        It 'Reports overall_passed true with no tests' {
             Invoke-GoTestCore -OutputPath $script:TestOutputPath `
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.lint_passed | Should -BeTrue
+            $json.summary.overall_passed | Should -BeTrue
         }
     }
 
-    Context 'lint success and test pass' {
+    Context 'test pass' {
         BeforeEach {
             Mock go {
                 $global:LASTEXITCODE = 0
@@ -177,13 +143,6 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
             $json.summary.overall_passed | Should -BeTrue
         }
 
-        It 'Reports lint passed in JSON' {
-            Invoke-GoTestCore -OutputPath $script:TestOutputPath `
-                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.lint_passed | Should -BeTrue
-        }
-
         It 'Captures Go version in JSON' {
             Invoke-GoTestCore -OutputPath $script:TestOutputPath `
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
@@ -195,36 +154,6 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
             Invoke-GoTestCore -OutputPath $script:TestOutputPath `
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
             Should -Invoke Write-CIStepSummary -Times 1
-        }
-    }
-
-    Context 'lint failure' {
-        BeforeEach {
-            Mock golangci-lint {
-                $global:LASTEXITCODE = 1
-                return 'some lint error'
-            } -ParameterFilter { $args[0] -eq 'run' }
-        }
-
-        It 'Returns 1 when golangci-lint fails' {
-            $result = Invoke-GoTestCore -OutputPath $script:TestOutputPath `
-                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            $result | Should -Be 1
-        }
-
-        It 'Reports lint_passed false in JSON' {
-            Invoke-GoTestCore -OutputPath $script:TestOutputPath `
-                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
-            $json.lint_passed | Should -BeFalse
-        }
-
-        It 'Writes error annotation for lint failure' {
-            Invoke-GoTestCore -OutputPath $script:TestOutputPath `
-                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            Should -Invoke Write-CIAnnotation -ParameterFilter {
-                $Level -eq 'Error' -and $Message -like '*golangci-lint*failed*'
-            }
         }
     }
 
@@ -348,31 +277,6 @@ Describe 'Invoke-GoTestCore' -Tag 'Unit' {
             $result = Invoke-GoTestCore -OutputPath $script:TestOutputPath `
                 -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
             $result | Should -Be 1
-        }
-    }
-
-    Context 'golangci-lint installation' {
-        It 'Calls install script via bash when lint not found' {
-            $script:getLintCallCount = 0
-            Mock Get-Command {
-                $script:getLintCallCount++
-                if ($script:getLintCallCount -le 1) { return $null }
-                return @{ Source = '/usr/local/bin/golangci-lint' }
-            } -ParameterFilter { $Name -eq 'golangci-lint' }
-            Mock bash { $global:LASTEXITCODE = 0 }
-
-            Invoke-GoTestCore -OutputPath $script:TestOutputPath `
-                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            Should -Invoke bash -Times 1
-        }
-
-        It 'Returns 1 when install fails' {
-            Mock Get-Command { return $null } -ParameterFilter { $Name -eq 'golangci-lint' }
-            Mock bash { $global:LASTEXITCODE = 1 }
-
-            $exitCode = Invoke-GoTestCore -OutputPath $script:TestOutputPath `
-                -CoverageOutput $script:TestCoveragePath -GoTestDir $script:TestGoDir
-            $exitCode | Should -Be 1
         }
     }
 }
