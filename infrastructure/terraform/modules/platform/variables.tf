@@ -25,6 +25,12 @@ variable "should_enable_nat_gateway" {
   default     = true
 }
 
+variable "nat_gateway_zones" {
+  type        = list(string)
+  description = "Availability zones for NAT Gateway and its public IP. Leave empty for regions without AZ support"
+  default     = []
+}
+
 variable "should_create_vm_subnet" {
   type        = bool
   description = "Whether to create a dedicated subnet for virtual machines in the platform virtual network"
