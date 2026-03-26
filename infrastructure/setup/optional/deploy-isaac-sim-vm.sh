@@ -34,6 +34,11 @@ OPTIONS:
     --admin-username NAME       Admin username (default: azureuser)
     --admin-password VALUE      Admin password override
     --vm-size SIZE              VM size (default: Standard_NV36ads_A10_v5)
+    --disable-encryption-at-host
+             Disable EncryptionAtHost for unsupported VM sizes or regions
+    --spot-vm                   Deploy the VM as Azure Spot capacity for testing
+    --spot-eviction-policy POLICY
+             Spot eviction policy for --spot-vm: Deallocate or Delete (default: Deallocate)
     --deployment-name NAME      ARM deployment name (default: isaac-lab-vms)
     --skip-marketplace-requirements
                    Skip acceptance of the Isaac Sim marketplace terms
@@ -144,6 +149,10 @@ nsg_id=""
 admin_username="azureuser"
 admin_password="${ISAAC_LAB_VM_ADMIN_PASSWORD:-}"
 vm_size="Standard_NV36ads_A10_v5"
+should_enable_encryption_at_host=true
+use_spot_vm=false
+spot_eviction_policy="Deallocate"
+spot_eviction_policy_explicit=false
 deployment_name="isaac-lab-vms"
 install_marketplace_requirements=true
 isolated_vm_rg=false
@@ -179,6 +188,9 @@ while [[ $# -gt 0 ]]; do
     --admin-username)      admin_username="$2"; shift 2 ;;
     --admin-password)      admin_password="$2"; shift 2 ;;
     --vm-size)             vm_size="$2"; shift 2 ;;
+    --disable-encryption-at-host) should_enable_encryption_at_host=false; shift ;;
+    --spot-vm)             use_spot_vm=true; shift ;;
+    --spot-eviction-policy) spot_eviction_policy="$2"; spot_eviction_policy_explicit=true; shift 2 ;;
     --deployment-name)     deployment_name="$2"; shift 2 ;;
     --install-marketplace-requirements) install_marketplace_requirements=true; shift ;;
     --skip-marketplace-requirements) install_marketplace_requirements=false; shift ;;
@@ -189,6 +201,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_tools az jq terraform
+
+case "$spot_eviction_policy" in
+  Deallocate|Delete) ;;
+  *) fatal "Invalid --spot-eviction-policy value: $spot_eviction_policy. Use Deallocate or Delete." ;;
+esac
+
+if [[ "$spot_eviction_policy_explicit" == "true" && "$use_spot_vm" != "true" ]]; then
+  fatal "--spot-eviction-policy requires --spot-vm. Omit the eviction policy or add --spot-vm."
+fi
 
 [[ -f "$template_file" ]] || fatal "Bicep template not found: $template_file"
 
@@ -301,6 +322,11 @@ if [[ -z "$admin_password" && "$config_preview" != "true" ]]; then
   fi
 fi
 
+vm_priority="Regular"
+if [[ "$use_spot_vm" == "true" ]]; then
+  vm_priority="Spot"
+fi
+
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Deployment" "$deployment_name"
@@ -314,6 +340,11 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Subnet ID" "$subnet_id"
   print_kv "NSG ID" "$nsg_id"
   print_kv "VM Size" "$vm_size"
+  print_kv "Encryption At Host" "$should_enable_encryption_at_host"
+  print_kv "VM Priority" "$vm_priority"
+  if [[ "$use_spot_vm" == "true" ]]; then
+    print_kv "Spot Eviction Policy" "$spot_eviction_policy"
+  fi
   print_kv "Admin User" "$admin_username"
   print_kv "MDE Linux" "$enable_mde_linux"
   print_kv "Template" "$template_file"
@@ -349,6 +380,7 @@ deployment_args=(
   --parameters "adminUsername=$admin_username"
   --parameters "adminPassword=$admin_password"
   --parameters "vmSize=$vm_size"
+  --parameters "shouldEnableEncryptionAtHost=$should_enable_encryption_at_host"
 )
 
 if [[ -n "$location" ]]; then
@@ -361,6 +393,11 @@ fi
 
 if [[ "$enable_mde_linux" == "true" ]]; then
   deployment_args+=(--parameters 'mdeLinux={}')
+fi
+
+if [[ "$use_spot_vm" == "true" ]]; then
+  deployment_args+=(--parameters "vmPriority=Spot")
+  deployment_args+=(--parameters "spotEvictionPolicy=$spot_eviction_policy")
 fi
 
 if [[ "$isolated_vm_rg" == "true" ]]; then
@@ -387,6 +424,11 @@ print_kv "VM Name" "$vm_name"
 print_kv "Subnet ID" "$subnet_id"
 print_kv "NSG ID" "$nsg_id"
 print_kv "VM Size" "$vm_size"
+print_kv "Encryption At Host" "$should_enable_encryption_at_host"
+print_kv "VM Priority" "$vm_priority"
+if [[ "$use_spot_vm" == "true" ]]; then
+  print_kv "Spot Eviction Policy" "$spot_eviction_policy"
+fi
 print_kv "Admin User" "$admin_username"
 print_kv "MDE Linux" "$enable_mde_linux"
 info "Isaac Sim VM deployment complete"

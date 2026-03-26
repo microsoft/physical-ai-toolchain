@@ -35,6 +35,15 @@ param adminPassword string
 @description('VM size for the deployed VM.')
 param vmSize string
 
+@description('Whether to enable EncryptionAtHost for the virtual machine.')
+param shouldEnableEncryptionAtHost bool
+
+@description('Deployment priority for the virtual machine.')
+param vmPriority 'Regular' | 'Spot'
+
+@description('Eviction policy used when vmPriority is Spot.')
+param spotEvictionPolicy 'Deallocate' | 'Delete'
+
 @description('Marketplace image configuration.')
 param image ImageConfig
 
@@ -67,6 +76,17 @@ var installDevDepsScript = loadTextContent('../../scripts/install-dev-deps.sh')
 var installDevDepsScriptBase64 = base64(installDevDepsScript)
 var installThinLincScript = loadTextContent('../../scripts/install-thinlinc-silent.sh')
 var installThinLincScriptBase64 = base64(installThinLincScript)
+var vmPriorityProperties = vmPriority == 'Spot'
+  ? {
+      billingProfile: {
+        maxPrice: -1
+      }
+      evictionPolicy: spotEvictionPolicy
+      priority: vmPriority
+    }
+  : {
+      priority: vmPriority
+    }
 
 /*
   Resources
@@ -109,7 +129,7 @@ resource virtualMachine 'Microsoft.Compute/virtualMachines@2023-09-01' = {
     product: plan.product
     name: plan.name
   }
-  properties: {
+  properties: union(vmPriorityProperties, {
     hardwareProfile: {
       vmSize: vmSize
     }
@@ -166,7 +186,10 @@ resource virtualMachine 'Microsoft.Compute/virtualMachines@2023-09-01' = {
         }
       ]
     }
-  }
+    securityProfile: {
+      encryptionAtHost: shouldEnableEncryptionAtHost
+    }
+  })
 }
 
 @description('Runs install-dev-deps.sh and install-thinlinc-silent.sh on the VM during provisioning via CustomScript extension.')

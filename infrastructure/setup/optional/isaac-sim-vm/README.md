@@ -1,6 +1,6 @@
 ---
 description: Minimal prerequisites and commands for deploying Isaac Linux VMs with Bicep.
-ms.date: 2026-02-24
+ms.date: 2026-03-25
 ---
 
 # Deploy an Isaac VM for development on Azure
@@ -8,6 +8,8 @@ ms.date: 2026-02-24
 This optional setup deploys an Azure Virtual Machine into the same network as your platform infrastructure so you can run Isaac Sim for development. Use it when your team does not have local workstations that can run Isaac Sim reliably.
 
 It installs the [Isaac Sim Developer Workstation](https://marketplace.microsoft.com/product/nvidia.isaac_sim_developer_workstation?tab=Overview) marketplace offer.
+
+The deployment enables EncryptionAtHost by default so the VM OS disk, data disk caches, and temp disk data are encrypted at the host.
 
 ## 🔧 Why Use The Script?
 
@@ -28,6 +30,7 @@ The deployment script integrates the Isaac Sim Developer Workstation with your e
 - Only private networking is supported. Public IPs are not supported.
 - The template reuses an existing subnet and an existing network security group.
 - Direct Bicep deployment requires explicit values for `subnetId` and `nsgId`.
+- EncryptionAtHost must be registered for the subscription and supported by the selected VM size.
 - Only password authentication is supported.
 - [Cendio's ThinLinc server](https://www.cendio.com/) is always installed, we will make optional in the future.
 
@@ -43,6 +46,22 @@ Before deployment:
    cd infrastructure/terraform
    terraform apply -var-file=terraform.tfvars
    ```
+
+1. Register the `EncryptionAtHost` feature for the subscription if it is not already enabled:
+
+   ```bash
+   az feature register \
+     --namespace Microsoft.Compute \
+     --name EncryptionAtHost
+
+   az feature show \
+     --namespace Microsoft.Compute \
+     --name EncryptionAtHost \
+     --query properties.state \
+     --output tsv
+   ```
+
+   Wait until the feature state is `Registered` before deploying the VM.
 
 1. Enable the dedicated VM subnet in `infrastructure/terraform/terraform.tfvars`:
 
@@ -127,6 +146,14 @@ bash infrastructure/setup/optional/deploy-isaac-sim-vm.sh \
   --nsg-id /subscriptions/.../networkSecurityGroups/...
 ```
 
+If the selected VM size or region does not support EncryptionAtHost yet, disable it explicitly:
+
+```bash
+bash infrastructure/setup/optional/deploy-isaac-sim-vm.sh \
+  --vm-name isaac-sim-dev-01 \
+  --disable-encryption-at-host
+```
+
 Enable Microsoft Defender for Endpoint on the VM extension deployment:
 
 ```bash
@@ -134,6 +161,28 @@ bash infrastructure/setup/optional/deploy-isaac-sim-vm.sh \
   --vm-name isaac-sim-dev-01 \
   --enable-mde-linux
 ```
+
+Deploy a Spot VM for testing workloads that tolerate eviction:
+
+```bash
+bash infrastructure/setup/optional/deploy-isaac-sim-vm.sh \
+  --vm-name isaac-sim-test-spot-01 \
+  --spot-vm \
+  --spot-eviction-policy Deallocate
+```
+
+### Spot VM operating model
+
+Use Spot only for test work that can stop at any time. In this deployment, Spot VMs use `maxPrice = -1`. That means Azure will not remove the VM because you set a low price limit, but Azure can still remove it at any time if it needs the capacity back.
+
+- Spot VMs do not come with an availability guarantee. Azure might remove the VM with very little warning.
+- Azure may send a scheduled event before eviction, but that warning is best effort and can be short.
+- `Deallocate` is the default eviction policy. It keeps the disks so you can try to start the VM again later, but the disks still cost money and the VM still uses quota while it is stopped.
+- `Delete` removes the VM when Azure evicts it. Use this for short-lived test machines that you do not need to recover.
+- If a Spot VM with `Deallocate` is evicted, you must start it again yourself. Restart is not guaranteed because the same size might not be available anymore in that region.
+- If a Spot VM with `Delete` is evicted, redeploy the VM. The VM resource is removed during eviction.
+- This deployment does not install any special eviction-handling software. Save important work outside the VM.
+- Use `Regular` priority for long Isaac Sim sessions, debugging, or any work where interruption would be a problem.
 
 If you do not want the script to accept marketplace terms automatically, pass `--skip-marketplace-requirements`.
 
@@ -154,6 +203,8 @@ az deployment group create \
 ```
 
 Pass `vmResourceGroup=<name>` when the VM resources should be created in a different resource group than the deployment resource group.
+
+Pass `vmPriority=Spot spotEvictionPolicy=Deallocate` to use a lower-cost VM that Azure can interrupt when it needs the capacity. Use this only for test scenarios where losing access to the VM at any time is acceptable.
 
 ## 🖥️ Connect To The VM After Deployment
 
@@ -243,6 +294,9 @@ The deployment template in `main.bicep` accepts the following parameters.
 | `adminUsername`                | `string`       | Yes      | None                       | Admin username for the Linux VM. |
 | `adminPassword`                | `securestring` | Yes      | None                       | Admin password for the Linux VM. |
 | `vmSize`                       | `string`       | No       | `Standard_NV36ads_A10_v5`  | Virtual machine size. |
+| `shouldEnableEncryptionAtHost` | `bool`         | No       | `true`                     | Enables EncryptionAtHost for the VM so host caches and temp disk data are encrypted. |
+| `vmPriority`                   | `string`       | No       | `Regular`                  | VM priority. Use `Spot` only for test workloads that can be interrupted. |
+| `spotEvictionPolicy`           | `string`       | No       | `Deallocate`               | Eviction policy used when `vmPriority` is `Spot`. |
 | `image`                        | `ImageConfig?` | No       | `null`                     | Marketplace image configuration. When `null`, `defaultImageConfig` is used as the effective value. |
 | `plan`                         | `PlanConfig?`  | No       | `null`                     | Marketplace plan configuration. When `null`, `defaultPlanConfig` is used as the effective value. |
 | `osDisk`                       | `DiskConfig?`  | No       | `null`                     | OS disk configuration. When `null`, `defaultOsDiskConfig` is used as the effective value. |
