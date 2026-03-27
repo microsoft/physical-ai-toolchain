@@ -7,13 +7,13 @@ Submit an Isaac Lab RL training job to OSMO and verify that training metrics app
 
 ## 📋 Prerequisites
 
-| Requirement | Details |
-|-------------|---------|
-| Infrastructure | Azure resources deployed via Terraform |
-| OSMO | Control plane and backend running (`kubectl get pods -n osmo-control-plane`) |
-| VPN | Connected to private cluster (if using private AKS) |
-| Azure CLI | Authenticated (`az login`) |
-| kubectl | Connected to AKS cluster |
+| Requirement    | Details                                                                      |
+|----------------|------------------------------------------------------------------------------|
+| Infrastructure | Azure resources deployed via Terraform                                       |
+| OSMO           | Control plane and backend running (`kubectl get pods -n osmo-control-plane`) |
+| VPN            | Connected to private cluster (if using private AKS)                          |
+| Azure CLI      | Authenticated (`az login`)                                                   |
+| kubectl        | Connected to AKS cluster                                                     |
 
 ## 🚀 Steps
 
@@ -105,15 +105,15 @@ The recipe succeeded when:
 
 ## ⚙️ Configuration Reference
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--task` | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task environment |
-| `--num-envs` | `2048` | Parallel simulation environments |
-| `--max-iterations` | (unset) | Training iterations; omit for task default |
-| `--backend` | `skrl` | Training backend (`skrl` or `rsl_rl`) |
-| `--gpu` | `1` | GPU count |
-| `--checkpoint-mode` | `from-scratch` | `from-scratch`, `warm-start`, or `resume` |
-| `--register-checkpoint` | (none) | Model name for Azure ML registration |
+| Parameter               | Default                            | Description                                |
+|-------------------------|------------------------------------|--------------------------------------------|
+| `--task`                | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task environment                 |
+| `--num-envs`            | `2048`                             | Parallel simulation environments           |
+| `--max-iterations`      | (unset)                            | Training iterations; omit for task default |
+| `--backend`             | `skrl`                             | Training backend (`skrl` or `rsl_rl`)      |
+| `--gpu`                 | `1`                                | GPU count                                  |
+| `--checkpoint-mode`     | `from-scratch`                     | `from-scratch`, `warm-start`, or `resume`  |
+| `--register-checkpoint` | (none)                             | Model name for Azure ML registration       |
 
 See [Scripts Reference](../../reference/scripts.md) for the full parameter table.
 
