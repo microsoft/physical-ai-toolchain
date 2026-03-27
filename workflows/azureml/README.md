@@ -10,11 +10,11 @@ Azure Machine Learning job templates for Isaac Lab training and validation workl
 
 ## 📜 Available Templates
 
-| Template                                                                        | Purpose                               | Submission Script                                        |
-|---------------------------------------------------------------------------------|---------------------------------------|----------------------------------------------------------|
-| [train.yaml](../../training/rl/workflows/azureml/train.yaml)                    | Training jobs with checkpoint support | `training/rl/scripts/submit-azureml-training.sh`         |
-| [validate.yaml](../../evaluation/sil/workflows/azureml/validate.yaml)           | Policy validation and inference       | `evaluation/sil/scripts/submit-azureml-validation.sh`    |
-| [lerobot-train.yaml](../../training/il/workflows/azureml/lerobot-train.yaml)    | LeRobot behavioral cloning training   | `training/il/scripts/submit-azureml-lerobot-training.sh` |
+| Template                                                                     | Purpose                               | Submission Script                                        |
+|------------------------------------------------------------------------------|---------------------------------------|----------------------------------------------------------|
+| [train.yaml](../../training/rl/workflows/azureml/train.yaml)                 | Training jobs with checkpoint support | `training/rl/scripts/submit-azureml-training.sh`         |
+| [validate.yaml](../../evaluation/sil/workflows/azureml/validate.yaml)        | Policy validation and inference       | `evaluation/sil/scripts/submit-azureml-validation.sh`    |
+| [lerobot-train.yaml](../../training/il/workflows/azureml/lerobot-train.yaml) | LeRobot behavioral cloning training   | `training/il/scripts/submit-azureml-lerobot-training.sh` |
 
 ## 🏋️ Training Job (`train.yaml`)
 

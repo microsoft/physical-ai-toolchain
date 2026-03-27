@@ -7,12 +7,12 @@ Create a recording configuration for ROS 2 edge data capture on NVIDIA Jetson de
 
 ## 📋 Prerequisites
 
-| Requirement | Details |
-|-------------|---------|
-| NVIDIA Jetson | JetPack 6.0+ installed |
-| ROS 2 | Humble or later with `rosbag2` packages |
-| Storage | Sufficient disk space for recording sessions (SSD recommended) |
-| IDE | VS Code or any editor with YAML support (optional: JSON Schema validation) |
+| Requirement   | Details                                                                    |
+|---------------|----------------------------------------------------------------------------|
+| NVIDIA Jetson | JetPack 6.0+ installed                                                     |
+| ROS 2         | Humble or later with `rosbag2` packages                                    |
+| Storage       | Sufficient disk space for recording sessions (SSD recommended)             |
+| IDE           | VS Code or any editor with YAML support (optional: JSON Schema validation) |
 
 ## 🚀 Steps
 
@@ -49,11 +49,11 @@ topics:
 
 Choose compression based on data characteristics:
 
-| Algorithm | Ratio | CPU Overhead | Best For |
-|-----------|-------|--------------|----------|
-| `none` | 1x | 0% | Debugging, maximum write speed |
-| `lz4` | 2-3x | <10% | High-frequency numeric data (joints, IMU) |
-| `zstd` | 3-5x | 20-30% | Images and low-frequency data |
+| Algorithm | Ratio | CPU Overhead | Best For                                  |
+|-----------|-------|--------------|-------------------------------------------|
+| `none`    | 1x    | 0%           | Debugging, maximum write speed            |
+| `lz4`     | 2-3x  | <10%         | High-frequency numeric data (joints, IMU) |
+| `zstd`    | 3-5x  | 20-30%       | Images and low-frequency data             |
 
 ### Step 3: Configure episode triggers
 
@@ -144,16 +144,16 @@ A successful validation prints the topic count and trigger type without errors.
 
 ## ⚙️ Configuration Reference
 
-| Section | Field | Type | Required | Description |
-|---------|-------|------|----------|-------------|
-| `topics[]` | `name` | string | yes | ROS 2 topic path starting with `/` |
-| `topics[]` | `frequency_hz` | float | yes | Target recording frequency (0, 1000] |
-| `topics[]` | `compression` | string | no | `none`, `lz4`, or `zstd` (default: `none`) |
-| `trigger` | `type` | string | yes | `gpio`, `service`, or `timer` |
-| `disk_thresholds` | `warning_percent` | int | no | Disk usage warning threshold |
-| `disk_thresholds` | `critical_percent` | int | no | Disk usage stop threshold |
-| `gap_detection` | `threshold_ms` | float | no | Missing message detection threshold |
-| `output_dir` | — | string | no | Recording output directory |
+| Section           | Field              | Type   | Required | Description                                |
+|-------------------|--------------------|--------|----------|--------------------------------------------|
+| `topics[]`        | `name`             | string | yes      | ROS 2 topic path starting with `/`         |
+| `topics[]`        | `frequency_hz`     | float  | yes      | Target recording frequency (0, 1000]       |
+| `topics[]`        | `compression`      | string | no       | `none`, `lz4`, or `zstd` (default: `none`) |
+| `trigger`         | `type`             | string | yes      | `gpio`, `service`, or `timer`              |
+| `disk_thresholds` | `warning_percent`  | int    | no       | Disk usage warning threshold               |
+| `disk_thresholds` | `critical_percent` | int    | no       | Disk usage stop threshold                  |
+| `gap_detection`   | `threshold_ms`     | float  | no       | Missing message detection threshold        |
+| `output_dir`      | —                  | string | no       | Recording output directory                 |
 
 See [Chunking and Compression Configuration](../../data-pipeline/chunking-compression-config.md) for advanced bag splitting options.
 

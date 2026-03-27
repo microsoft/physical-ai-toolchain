@@ -12,8 +12,8 @@ and Data Collection Rule associations for observability.
 
 ## 📖 Documentation
 
-| Reference                          | Description                                   |
-|------------------------------------|-----------------------------------------------|
+| Reference                           | Description                                   |
+|-------------------------------------|-----------------------------------------------|
 | [Terraform Reference](TERRAFORM.md) | Auto-generated inputs, outputs, and resources |
 
 <!-- markdownlint-disable MD036 -->

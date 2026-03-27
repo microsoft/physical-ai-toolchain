@@ -7,12 +7,12 @@ Submit a LeRobot behavioral cloning training job to OSMO using a HuggingFace dat
 
 ## 📋 Prerequisites
 
-| Requirement | Details |
-|-------------|---------|
-| Infrastructure | Azure resources deployed via Terraform |
-| OSMO | Control plane and backend running |
-| VPN | Connected to private cluster (if using private AKS) |
-| Azure CLI | Authenticated (`az login`) |
+| Requirement    | Details                                             |
+|----------------|-----------------------------------------------------|
+| Infrastructure | Azure resources deployed via Terraform              |
+| OSMO           | Control plane and backend running                   |
+| VPN            | Connected to private cluster (if using private AKS) |
+| Azure CLI      | Authenticated (`az login`)                          |
 
 ## 🚀 Steps
 
@@ -110,17 +110,17 @@ The recipe succeeded when:
 
 ## ⚙️ Configuration Reference
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `-d, --dataset-repo-id` | (required) | HuggingFace dataset repository |
-| `--policy-type` | `act` | Policy architecture (`act` or `diffusion`) |
-| `--training-steps` | `100000` | Total training iterations |
-| `--batch-size` | `32` | Training batch size |
-| `--learning-rate` | `1e-4` | Optimizer learning rate |
-| `--save-freq` | `5000` | Checkpoint save frequency |
-| `--val-split` | `0.1` | Validation split ratio |
-| `--from-blob` | (disabled) | Use Azure Blob Storage as data source |
-| `--register-checkpoint` | (none) | Model name for Azure ML registration |
+| Parameter               | Default    | Description                                |
+|-------------------------|------------|--------------------------------------------|
+| `-d, --dataset-repo-id` | (required) | HuggingFace dataset repository             |
+| `--policy-type`         | `act`      | Policy architecture (`act` or `diffusion`) |
+| `--training-steps`      | `100000`   | Total training iterations                  |
+| `--batch-size`          | `32`       | Training batch size                        |
+| `--learning-rate`       | `1e-4`     | Optimizer learning rate                    |
+| `--save-freq`           | `5000`     | Checkpoint save frequency                  |
+| `--val-split`           | `0.1`      | Validation split ratio                     |
+| `--from-blob`           | (disabled) | Use Azure Blob Storage as data source      |
+| `--register-checkpoint` | (none)     | Model name for Azure ML registration       |
 
 See [Scripts Reference](../../reference/scripts.md) for the full parameter table.
 

@@ -114,12 +114,12 @@ bash infrastructure/setup/optional/deploy-isaac-sim-vm.sh \
 
 The script reads these values from Terraform outputs by default:
 
-| Value | Terraform output |
-| ----- | ---------------- |
-| Resource group | `resource_group.value.name` |
-| Location | `resource_group.value.location` |
-| Dedicated VM subnet | `vm_subnet.value.id` |
-| Shared NSG | `network_security_group.value.id` |
+| Value               | Terraform output                  |
+|---------------------|-----------------------------------|
+| Resource group      | `resource_group.value.name`       |
+| Location            | `resource_group.value.location`   |
+| Dedicated VM subnet | `vm_subnet.value.id`              |
+| Shared NSG          | `network_security_group.value.id` |
 
 If `terraform.tfstate` is unavailable, pass `--tfvars-file` with a Terraform variables file that includes the same top-level fields used in `terraform.tfvars.example`. The script derives the standard resource names from that file, then resolves the subnet and NSG IDs from Azure.
 
@@ -280,29 +280,29 @@ az network public-ip delete \
 
 The deployment template in `main.bicep` accepts the following parameters.
 
-| Name                           | Type           | Required | Declared default           | Description |
-| ------------------------------ | -------------- | -------- | -------------------------- | ----------- |
-| `vmName`                       | `string`       | Yes      | None                       | Name of the virtual machine to deploy. |
-| `location`                     | `string`       | No       | `resourceGroup().location` | Azure region for deployed resources. |
-| `vmResourceGroup`              | `string`       | No       | `resourceGroup().name`     | Resource group that receives the VM resources. |
-| `tags`                         | `CommonTags?`  | No       | `null`                     | Tags applied to created resources. When `null`, `defaultCommonTags` is used as the effective value. |
-| `subnetId`                     | `string`       | Yes      | None                       | Resource ID of the existing subnet used by the VM NIC. |
-| `nsgId`                        | `string`       | Yes      | None                       | Resource ID of the existing network security group associated with the VM NIC. |
-| `enableSubnetNatGatewayEgress` | `bool`         | No       | `false`                    | Deploy a NAT gateway and attach it to the target subnet for outbound internet egress without a VM public IP. |
-| `natGatewayName`               | `string`       | No       | `''`                       | NAT gateway name override when `enableSubnetNatGatewayEgress` is `true`. |
-| `natGatewayPublicIpName`       | `string`       | No       | `''`                       | Public IP name override for the NAT gateway when `enableSubnetNatGatewayEgress` is `true`. |
-| `adminUsername`                | `string`       | Yes      | None                       | Admin username for the Linux VM. |
-| `adminPassword`                | `securestring` | Yes      | None                       | Admin password for the Linux VM. |
-| `vmSize`                       | `string`       | No       | `Standard_NV36ads_A10_v5`  | Virtual machine size. |
-| `shouldEnableEncryptionAtHost` | `bool`         | No       | `true`                     | Enables EncryptionAtHost for the VM so host caches and temp disk data are encrypted. |
-| `vmPriority`                   | `string`       | No       | `Regular`                  | VM priority. Use `Spot` only for test workloads that can be interrupted. |
-| `spotEvictionPolicy`           | `string`       | No       | `Deallocate`               | Eviction policy used when `vmPriority` is `Spot`. |
-| `image`                        | `ImageConfig?` | No       | `null`                     | Marketplace image configuration. When `null`, `defaultImageConfig` is used as the effective value. |
-| `plan`                         | `PlanConfig?`  | No       | `null`                     | Marketplace plan configuration. When `null`, `defaultPlanConfig` is used as the effective value. |
-| `osDisk`                       | `DiskConfig?`  | No       | `null`                     | OS disk configuration. When `null`, `defaultOsDiskConfig` is used as the effective value. |
-| `dataDisk`                     | `DiskConfig?`  | No       | `null`                     | Data disk configuration. When `null`, `defaultDataDiskConfig` is used as the effective value. |
-| `shutdownSchedule`             | `ShutdownSchedule?` | No   | `null`                     | Daily auto-shutdown schedule. When `null`, `defaultShutdownSchedule` is used as the effective value. |
-| `mdeLinux`                     | `object?`      | No       | `null`                     | Defender for Endpoint extension settings. Set `{}` to enable with defaults. Set `null` to skip deployment. |
+| Name                           | Type                | Required | Declared default           | Description                                                                                                  |
+|--------------------------------|---------------------|----------|----------------------------|--------------------------------------------------------------------------------------------------------------|
+| `vmName`                       | `string`            | Yes      | None                       | Name of the virtual machine to deploy.                                                                       |
+| `location`                     | `string`            | No       | `resourceGroup().location` | Azure region for deployed resources.                                                                         |
+| `vmResourceGroup`              | `string`            | No       | `resourceGroup().name`     | Resource group that receives the VM resources.                                                               |
+| `tags`                         | `CommonTags?`       | No       | `null`                     | Tags applied to created resources. When `null`, `defaultCommonTags` is used as the effective value.          |
+| `subnetId`                     | `string`            | Yes      | None                       | Resource ID of the existing subnet used by the VM NIC.                                                       |
+| `nsgId`                        | `string`            | Yes      | None                       | Resource ID of the existing network security group associated with the VM NIC.                               |
+| `enableSubnetNatGatewayEgress` | `bool`              | No       | `false`                    | Deploy a NAT gateway and attach it to the target subnet for outbound internet egress without a VM public IP. |
+| `natGatewayName`               | `string`            | No       | `''`                       | NAT gateway name override when `enableSubnetNatGatewayEgress` is `true`.                                     |
+| `natGatewayPublicIpName`       | `string`            | No       | `''`                       | Public IP name override for the NAT gateway when `enableSubnetNatGatewayEgress` is `true`.                   |
+| `adminUsername`                | `string`            | Yes      | None                       | Admin username for the Linux VM.                                                                             |
+| `adminPassword`                | `securestring`      | Yes      | None                       | Admin password for the Linux VM.                                                                             |
+| `vmSize`                       | `string`            | No       | `Standard_NV36ads_A10_v5`  | Virtual machine size.                                                                                        |
+| `shouldEnableEncryptionAtHost` | `bool`              | No       | `true`                     | Enables EncryptionAtHost for the VM so host caches and temp disk data are encrypted.                         |
+| `vmPriority`                   | `string`            | No       | `Regular`                  | VM priority. Use `Spot` only for test workloads that can be interrupted.                                     |
+| `spotEvictionPolicy`           | `string`            | No       | `Deallocate`               | Eviction policy used when `vmPriority` is `Spot`.                                                            |
+| `image`                        | `ImageConfig?`      | No       | `null`                     | Marketplace image configuration. When `null`, `defaultImageConfig` is used as the effective value.           |
+| `plan`                         | `PlanConfig?`       | No       | `null`                     | Marketplace plan configuration. When `null`, `defaultPlanConfig` is used as the effective value.             |
+| `osDisk`                       | `DiskConfig?`       | No       | `null`                     | OS disk configuration. When `null`, `defaultOsDiskConfig` is used as the effective value.                    |
+| `dataDisk`                     | `DiskConfig?`       | No       | `null`                     | Data disk configuration. When `null`, `defaultDataDiskConfig` is used as the effective value.                |
+| `shutdownSchedule`             | `ShutdownSchedule?` | No       | `null`                     | Daily auto-shutdown schedule. When `null`, `defaultShutdownSchedule` is used as the effective value.         |
+| `mdeLinux`                     | `object?`           | No       | `null`                     | Defender for Endpoint extension settings. Set `{}` to enable with defaults. Set `null` to skip deployment.   |
 
 ### Structured parameter types
 
