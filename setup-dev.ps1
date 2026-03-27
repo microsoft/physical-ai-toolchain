@@ -118,6 +118,35 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 
 Write-Info "Using uv: $(uv --version)"
 
+# ===================================================================
+# Terraform-Docs
+# ===================================================================
+Write-Section 'Terraform-Docs Setup'
+
+$TerraformDocsVersion = '0.21.0'
+
+if (Get-Command terraform-docs -ErrorAction SilentlyContinue) {
+    Write-Info "terraform-docs: $(terraform-docs --version)"
+} else {
+    Write-Info "Installing terraform-docs v$TerraformDocsVersion..."
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+    $os = if ($IsLinux) { 'linux' } elseif ($IsMacOS) { 'darwin' } else { 'windows' }
+    $ext = if ($os -eq 'windows') { 'zip' } else { 'tar.gz' }
+    $url = "https://github.com/terraform-docs/terraform-docs/releases/download/v$TerraformDocsVersion/terraform-docs-v$TerraformDocsVersion-$os-$arch.$ext"
+    $dest = Join-Path $env:TEMP "terraform-docs.$ext"
+    Invoke-WebRequest -Uri $url -OutFile $dest
+    if ($os -eq 'windows') {
+        Expand-Archive -Path $dest -DestinationPath $env:TEMP -Force
+        Move-Item (Join-Path $env:TEMP 'terraform-docs.exe') (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\terraform-docs.exe') -Force
+    } else {
+        tar -xzf $dest -C /tmp terraform-docs
+        sudo mv /tmp/terraform-docs /usr/local/bin/terraform-docs
+        sudo chmod +x /usr/local/bin/terraform-docs
+    }
+    Remove-Item $dest -ErrorAction SilentlyContinue
+    Write-Info "terraform-docs: v$TerraformDocsVersion (installed)"
+}
+
 Write-Section 'Python Environment Setup'
 
 $PythonVersion = Get-Content (Join-Path $ScriptDir '.python-version') -Raw

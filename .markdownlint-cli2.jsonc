@@ -7,7 +7,8 @@
     "**/.venv/**",
     "external/**",
     "shared/ci/tests/Fixtures/**",
-    "logs/**"
+    "logs/**",
+    "**/TERRAFORM.md"
   ],
   "config": {
     "default": true,
