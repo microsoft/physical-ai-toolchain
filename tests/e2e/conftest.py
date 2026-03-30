@@ -169,10 +169,9 @@ def _subscription_id_from_az_cli() -> str:
     if result.returncode != 0:
         pytest.skip("Azure CLI is not logged in or account context is unavailable")
 
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        pytest.skip("Azure CLI account output was not valid JSON")
+    payload = _json_object_from_output(result.stdout)
+    if not payload:
+        pytest.skip("Azure CLI account output was not a valid JSON object")
 
     subscription_id = payload.get("id")
     if not isinstance(subscription_id, str) or not subscription_id:
@@ -258,10 +257,9 @@ def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> None
     if result.returncode != 0:
         pytest.skip(f"AzureML compute target is unavailable: {compute_name}")
 
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        pytest.skip(f"AzureML compute target response was not valid JSON: {compute_name}")
+    payload = _json_object_from_output(result.stdout)
+    if not payload:
+        pytest.skip(f"AzureML compute target response was not a valid JSON object: {compute_name}")
 
     provisioning_state = payload.get("provisioning_state")
     if isinstance(provisioning_state, str) and provisioning_state.lower() != "succeeded":
@@ -303,10 +301,9 @@ def ensure_gpu_nodes_available(repo_root: Path) -> None:
     if result.returncode != 0:
         pytest.skip("Unable to query GPU nodes from the Kubernetes cluster")
 
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        pytest.skip("kubectl GPU node output was not valid JSON")
+    payload = _json_object_from_output(result.stdout)
+    if not payload:
+        pytest.skip("kubectl GPU node output was not a valid JSON object")
 
     items = payload.get("items")
     if not isinstance(items, list) or not items:

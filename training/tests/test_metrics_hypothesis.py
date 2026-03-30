@@ -1,10 +1,11 @@
 """Hypothesis property-based tests for _extract_from_value."""
 
 import numpy as np
-from conftest import load_training_module
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
+
+from .conftest import load_training_module
 
 metrics_module = load_training_module("metrics_under_test", "training/utils/metrics.py")
 _extract_from_value = metrics_module._extract_from_value
