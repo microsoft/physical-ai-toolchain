@@ -1,0 +1,199 @@
+workflow:
+  name: vla-openvla-training
+  timeout:
+    exec_timeout: 24h
+  resources:
+    default:
+      gpu: "{{ gpu }}"
+      cpu: "{{ cpu }}"
+      memory: "{{ memory }}"
+      storage: 250Gi
+  tasks:
+    - name: openvla-train
+      image: "{{ image }}"
+      command:
+        - /bin/bash
+        - /tmp/entry.sh
+      credentials:
+        huggingface:
+          HF_TOKEN: hf_token
+      environment:
+        NVIDIA_DRIVER_CAPABILITIES: "all"
+        VLA_MODEL_ID: "{{ vla_model_id }}"
+        DATASET_REPO_ID: "{{ dataset_repo_id }}"
+        DATASET_ROOT: "{{ dataset_root }}"
+        DATASET_FORMAT: "{{ dataset_format }}"
+        LANGUAGE_INSTRUCTION: "{{ language_instruction }}"
+        OUTPUT_DIR: "{{ output_dir }}"
+        JOB_NAME: "{{ job_name }}"
+        TRAINING_STEPS: "{{ training_steps }}"
+        BATCH_SIZE: "{{ batch_size }}"
+        LEARNING_RATE: "{{ learning_rate }}"
+        LR_WARMUP_STEPS: "{{ lr_warmup_steps }}"
+        LORA_RANK: "{{ lora_rank }}"
+        LORA_ALPHA: "{{ lora_alpha }}"
+        FINE_TUNING_MODE: "{{ fine_tuning_mode }}"
+        QUANTIZATION: "{{ quantization }}"
+        ACTION_TOKENIZER: "{{ action_tokenizer }}"
+        FAST_TOKENIZER_BINS: "{{ fast_tokenizer_bins }}"
+        GRADIENT_ACCUMULATION_STEPS: "{{ gradient_accumulation_steps }}"
+        SAVE_FREQ: "{{ save_freq }}"
+        SYSTEM_METRICS: "{{ system_metrics }}"
+        EXPERIMENT_NAME: "{{ experiment_name }}"
+        REGISTER_CHECKPOINT: "{{ register_checkpoint }}"
+        STORAGE_ACCOUNT: "{{ storage_account }}"
+        STORAGE_CONTAINER: "{{ storage_container }}"
+        BLOB_PREFIX: "{{ blob_prefix }}"
+        AZURE_SUBSCRIPTION_ID: "{{ azure_subscription_id }}"
+        AZURE_RESOURCE_GROUP: "{{ azure_resource_group }}"
+        AZUREML_WORKSPACE_NAME: "{{ azure_workspace_name }}"
+        AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
+        MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
+        MLFLOW_HTTP_REQUEST_TIMEOUT: "{{ mlflow_http_request_timeout }}"
+        ENCODED_ARCHIVE: "{{ encoded_archive }}"
+        PAYLOAD_ROOT: "{{ payload_root }}"
+      files:
+        - path: /tmp/entry.sh
+          contents: |
+            #!/bin/bash
+            set -euo pipefail
+
+            echo "=== OpenVLA Training Workflow ==="
+            echo "Base Model: ${VLA_MODEL_ID}"
+            echo "Fine-Tuning Mode: ${FINE_TUNING_MODE}"
+            echo "Quantization: ${QUANTIZATION}"
+            echo "Action Tokenizer: ${ACTION_TOKENIZER}"
+            echo "Dataset: ${DATASET_REPO_ID}"
+            echo "Dataset Format: ${DATASET_FORMAT}"
+            echo "Language Instruction: ${LANGUAGE_INSTRUCTION}"
+            echo "LoRA Rank: ${LORA_RANK}"
+            echo "Gradient Accumulation: ${GRADIENT_ACCUMULATION_STEPS}"
+            echo "Job Name: ${JOB_NAME}"
+            echo "Output Dir: ${OUTPUT_DIR}"
+            echo "Logging: Azure ML MLflow"
+
+            # Install system dependencies
+            echo "Installing system dependencies..."
+            apt-get update -qq && apt-get install -y -qq \
+              ffmpeg \
+              libgl1-mesa-glx \
+              libglib2.0-0 \
+              build-essential \
+              gcc \
+              unzip \
+              python3-dev \
+              git \
+              > /dev/null 2>&1
+
+            # Install UV package manager
+            echo "Installing UV package manager..."
+            pip install --quiet uv==0.7.12
+
+            # Unpack training scripts from base64-encoded payload
+            ARCHIVE_PATH="/tmp/vla_payload.zip"
+            PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/vla_payload}"
+            mkdir -p "${PAYLOAD_ROOT}"
+            if [[ -z "${ENCODED_ARCHIVE:-}" ]]; then
+              echo "ERROR: ENCODED_ARCHIVE is not set or empty; training payload is required." >&2
+              exit 1
+            fi
+            printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"
+            unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
+            export PYTHONPATH="${PAYLOAD_ROOT}/src:${PYTHONPATH:-}"
+            echo "Training scripts unpacked to ${PAYLOAD_ROOT}/src"
+
+            # Install OpenVLA dependencies
+            echo "Installing OpenVLA dependencies..."
+            uv pip install --system \
+              "transformers>=4.40.0" \
+              "peft>=0.10.0" \
+              "accelerate>=0.28.0" \
+              "flash-attn>=2.5.0" \
+              "bitsandbytes>=0.43.0" \
+              "huggingface-hub[hf_xet]>=0.31.4,<1.0.0" \
+              "datasets" \
+              "timm>=0.9.0" \
+              "azure-identity" \
+              "azure-ai-ml" \
+              "azureml-mlflow" \
+              "mlflow>=2.8.0,<3.0.0"
+
+            # Install OpenVLA from source for fine-tuning scripts
+            echo "Installing OpenVLA from source..."
+            pip install --quiet "openvla @ git+https://github.com/openvla/openvla.git"
+
+            # Install RLDS conversion tools if dataset format requires it
+            if [[ "${DATASET_FORMAT}" == "rlds" ]]; then
+              echo "Installing RLDS dataset tools..."
+              uv pip install --system "tensorflow-datasets" "dlimp"
+            fi
+
+            # Download dataset from Azure Blob Storage when configured
+            if [[ -n "${STORAGE_ACCOUNT:-}" ]]; then
+              echo "Downloading dataset from Azure Blob Storage..."
+              python3 -m training.scripts.lerobot.download_dataset
+              echo "Dataset downloaded to: ${DATASET_ROOT}/${DATASET_REPO_ID}"
+            fi
+
+            # Run OpenVLA training via Python orchestrator
+            echo "Starting OpenVLA fine-tuning..."
+            python3 -m training.scripts.vla.train \
+              --model-type openvla \
+              --model-id "${VLA_MODEL_ID}" \
+              --dataset-repo-id "${DATASET_REPO_ID}" \
+              --dataset-root "${DATASET_ROOT}" \
+              --dataset-format "${DATASET_FORMAT}" \
+              --language-instruction "${LANGUAGE_INSTRUCTION}" \
+              --output-dir "${OUTPUT_DIR}" \
+              --training-steps "${TRAINING_STEPS}" \
+              --batch-size "${BATCH_SIZE}" \
+              --learning-rate "${LEARNING_RATE}" \
+              --fine-tuning-mode "${FINE_TUNING_MODE}" \
+              --quantization "${QUANTIZATION}" \
+              --action-tokenizer "${ACTION_TOKENIZER}" \
+              --lora-rank "${LORA_RANK}" \
+              --lora-alpha "${LORA_ALPHA}" \
+              --gradient-accumulation-steps "${GRADIENT_ACCUMULATION_STEPS}" \
+              --save-freq "${SAVE_FREQ}"
+
+            echo "=== OpenVLA Training Complete ==="
+            ls -la "${OUTPUT_DIR}/" 2>/dev/null || true
+
+default-values:
+  image: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+  encoded_archive: ""
+  payload_root: /workspace/vla_payload
+  vla_model_id: openvla/openvla-7b
+  gpu: 1
+  cpu: 16
+  memory: 96Gi
+  dataset_repo_id: ""
+  dataset_root: /workspace/data
+  dataset_format: lerobot
+  language_instruction: "Pick up the object and place it in the target location"
+  output_dir: /workspace/outputs/train
+  job_name: openvla-training
+  training_steps: "50000"
+  batch_size: "2"
+  learning_rate: "2e-5"
+  lr_warmup_steps: "500"
+  lora_rank: "32"
+  lora_alpha: "32"
+  fine_tuning_mode: qlora
+  quantization: "4bit"
+  action_tokenizer: fast
+  fast_tokenizer_bins: "256"
+  gradient_accumulation_steps: "8"
+  save_freq: "5000"
+  system_metrics: "true"
+  experiment_name: ""
+  register_checkpoint: ""
+  storage_account: ""
+  storage_container: ""
+  blob_prefix: ""
+  azure_subscription_id: ""
+  azure_resource_group: ""
+  azure_workspace_name: ""
+  azure_authority_host: ""
+  mlflow_token_refresh_retries: "5"
+  mlflow_http_request_timeout: "1200"

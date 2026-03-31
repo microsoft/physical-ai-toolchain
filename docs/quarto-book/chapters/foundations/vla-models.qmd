@@ -1,290 +1,50 @@
 ---
-title: "Vision-Language-Action Models"
+title: "VLA Fundamentals"
 ---
 
-Vision-Language-Action (VLA) models are multimodal foundation models that unify perception,
-language understanding, and robot control in a single architecture. Given a camera image and
-a natural language instruction, a VLA directly outputs motor commands—collapsing the
-traditional perception-planning-control pipeline into one neural network. This chapter covers
-VLA architectures, key models, and their role in the Physical AI Toolchain.
+Vision-language-action models combine visual understanding, instruction grounding, and action generation in one policy system. This guide summarizes core VLA concepts and maps them to the repository roadmap.
 
-![Multimodal AI systems integrate vision and language understanding for robot control.
-*Image: [Artificial neural network](https://commons.wikimedia.org/wiki/File:Artificial_neural_network.svg)
-by Glosser.ca, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*
-](https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/Artificial_neural_network.svg/512px-Artificial_neural_network.svg.png){fig-alt="Artificial neural network diagram showing interconnected layers" width="50%"}
+## Core Concepts
 
-## What Are VLAs?
+| Concept | Practical meaning in this toolchain |
+| --- | --- |
+| Vision encoder | Converts camera observations into latent features for control |
+| Language conditioning | Encodes task intent or instruction context |
+| Action head | Produces joint or control actions from fused multimodal context |
+| Embodiment transfer | Adapting policy behavior across robot hardware variants |
+| Fine-tuning strategy | LoRA or full-parameter updates based on compute and latency targets |
 
-Traditional robot learning separates perception (what do I see?), planning (what should I
-do?), and control (how do I move?). VLAs replace this decomposition with an end-to-end
-model:
+## Why VLA Matters
 
-$$
-a_t = \pi_\theta(I_t, l)
-$$
+| Driver | Impact |
+| --- | --- |
+| Multi-task scaling | One policy family can cover broader skill sets |
+| Natural instruction interfaces | Language prompts can parameterize behavior goals |
+| Foundation model reuse | Pretrained visual/language priors reduce task-specific data burden |
 
-where $I_t$ is the current image observation, $l$ is a natural language task instruction
-(e.g., "pick up the red cube and place it on the blue plate"), and $a_t$ is the robot action.
-The model $\pi_\theta$ is a large neural network—typically billions of parameters—trained on
-both internet-scale vision-language data and robot manipulation datasets.
+## Architecture Tradeoffs
 
-The key insight is that pre-training on internet data gives the model rich visual and
-semantic representations (understanding objects, spatial relationships, physical affordances)
-that transfer to robot control tasks, even with relatively small amounts of robot-specific
-data.
+| Axis | Option A | Option B | Decision impact |
+| --- | --- | --- | --- |
+| Action representation | Continuous | Tokenized/discrete | Latency, smoothness, and deployment complexity |
+| Adaptation | LoRA | Full fine-tuning | Cost, storage, and iteration speed |
+| Inference strategy | Synchronous | Asynchronous pipeline | Throughput and control frequency |
 
-## Architecture
+## Integration Considerations
 
-VLA models share a common three-component architecture:
+| Area | Guidance |
+| --- | --- |
+| Data interface | Align VLA training data with LeRobot-compatible schema where possible |
+| Runtime constraints | Validate control frequency and end-to-end latency for SIL and edge paths |
+| Evaluation | Use SIL scenarios before robot runtime promotion |
+| Registry strategy | Track base model, adapter version, and dataset lineage in model metadata |
 
-```{mermaid}
-%%| label: fig-vla-architecture
-%%| fig-cap: "Vision-Language-Action Model Architecture"
-flowchart LR
-    subgraph Input["Inputs"]
-        IMG[Camera Image I_t]
-        LANG[Language Instruction l]
-        STATE[Robot State s_t]
-    end
+## Current Repository Status
 
-    subgraph Encoder["Encoding"]
-        VIS_ENC[Vision Encoder<br>ViT / SigLIP]
-        LANG_ENC[Language Tokenizer]
-        STATE_ENC[State Encoder<br>MLP]
-    end
+VLA implementation is currently specification-first and roadmap-driven. Use the specification document for detailed model options, staged implementation, and integration architecture.
 
-    subgraph Backbone["Foundation Model Backbone"]
-        LLM[Large Language Model<br>Transformer Decoder]
-    end
+## Next Steps
 
-    subgraph Decoder["Action Decoding"]
-        ACT_HEAD[Action Head<br>MLP / Diffusion / Discretization]
-    end
-
-    subgraph Output["Output"]
-        ACTIONS[Robot Actions a_t<br>Δposition, Δrotation, gripper]
-    end
-
-    IMG --> VIS_ENC
-    LANG --> LANG_ENC
-    STATE --> STATE_ENC
-    VIS_ENC -- "visual tokens" --> LLM
-    LANG_ENC -- "language tokens" --> LLM
-    STATE_ENC -- "state tokens" --> LLM
-    LLM -- "fused representation" --> ACT_HEAD
-    ACT_HEAD --> ACTIONS
-```
-
-### Vision Encoder
-
-Converts raw camera images into a sequence of visual tokens. Most VLAs use a pre-trained
-Vision Transformer (ViT), often SigLIP or DINOv2, that provides strong visual features
-without task-specific training. The image is split into patches, embedded, and processed
-through transformer layers to produce visual tokens.
-
-### Language Model Backbone
-
-A pre-trained large language model (LLM) serves as the backbone, processing interleaved
-visual and language tokens. The LLM's pre-training on internet text gives it semantic
-understanding of objects, actions, and spatial relationships. Models like Llama, PaLM, or
-Gemma provide the backbone in current VLAs.
-
-### Action Decoder
-
-Maps the LLM's output representation to continuous robot actions. Three strategies exist:
-
-| Strategy | Mechanism | Trade-offs |
-|----------|-----------|------------|
-| **Discretization** | Bin continuous actions into tokens, predict via next-token prediction | Simple, leverages LLM training; loses precision |
-| **Regression MLP** | Linear/MLP head maps LLM features to continuous actions | Precise; cannot capture multi-modal distributions |
-| **Diffusion head** | Denoising diffusion generates actions conditioned on LLM features | Multi-modal, precise; higher inference latency |
-
-## Key Models
-
-The VLA field has evolved rapidly since 2023. The following models represent the progression
-from proof-of-concept to practical deployment.
-
-### RT-2: Robotic Transformer 2
-
-RT-2 (Brohan et al., 2023) was the first large-scale VLA, built on PaLM-E (a 12B or 55B
-parameter vision-language model). It discretizes actions into text tokens and fine-tunes the
-entire model on robot demonstration data. RT-2 demonstrated that internet-scale pre-training
-enables semantic generalization—the robot could follow instructions involving novel object
-categories it had never manipulated during robot training.
-
-### Octo
-
-Octo (Ghosh et al., 2024) is a generalist robot policy trained on the Open X-Embodiment
-dataset spanning 25 robots and 100k+ demonstrations. It uses a transformer architecture
-with a diffusion action head and supports language and goal-image conditioning. Octo is
-designed as a starting point for fine-tuning: users adapt the pre-trained model to their
-specific robot and task with as few as 50 demonstrations.
-
-### OpenVLA
-
-OpenVLA (Kim et al., 2024) is an open-source 7B parameter VLA built on Llama 2 with a
-SigLIP vision encoder. It discretizes 7-DoF actions into 256 bins per dimension and predicts
-action tokens autoregressively. OpenVLA achieves strong performance on the RT-2 benchmark
-while being fully open-weight, enabling fine-tuning on custom hardware and datasets.
-
-### π0 (Pi-Zero)
-
-π0 (Black et al., 2024) introduces a flow-matching action head instead of token
-discretization, enabling continuous action generation with multi-modal support. Built on a
-3B parameter vision-language backbone, π0 demonstrates strong dexterous manipulation
-capabilities including cloth folding, object rearrangement, and multi-step assembly tasks.
-
-## VLA Model Comparison
-
-| Model | Parameters | Vision Encoder | Backbone | Action Decoding | Training Data | Open Weights |
-|-------|-----------|---------------|----------|----------------|---------------|-------------|
-| **RT-2** | 12B / 55B | ViT-22B | PaLM-E | Token discretization | RT dataset (~130k demos) | No |
-| **Octo** | 93M | ViT-B | Transformer | Diffusion head | Open X-Embodiment (800k demos) | Yes |
-| **OpenVLA** | 7B | SigLIP | Llama 2 | Token discretization (256 bins) | Open X-Embodiment | Yes |
-| **π0** | 3B | SigLIP | PaliGemma | Flow matching | Diverse multi-task (10k hrs) | Partial |
-
-## Pre-Training and Fine-Tuning
-
-VLA training follows a two-stage paradigm:
-
-**Stage 1: Vision-language pre-training** on internet-scale data (image-caption pairs,
-visual question answering, web text). This builds general visual and semantic representations.
-This stage uses standard language modeling objectives—next-token prediction on interleaved
-image-text sequences.
-
-**Stage 2: Robot fine-tuning** on demonstration datasets. The model learns to map its
-visual-semantic representations to motor commands. Fine-tuning can use:
-
-- **Full fine-tuning**: update all parameters (requires significant GPU memory)
-- **LoRA**: low-rank adaptation of attention weights (memory-efficient, faster convergence)
-- **Adapter layers**: insert trainable modules between frozen backbone layers
-
-The fine-tuning loss for a discretized VLA is the standard cross-entropy:
-
-$$
-\mathcal{L}(\theta) = -\mathbb{E}_{(I, l, a) \sim \mathcal{D}} \left[ \sum_{d=1}^{D} \log p_\theta(a_d \mid I, l, a_{<d}) \right]
-$$
-
-where $D$ is the action dimensionality and $a_d$ is the discretized token for dimension $d$.
-
-## Zero-Shot and Few-Shot Generalization
-
-The most compelling property of VLAs is their ability to generalize to novel situations
-without task-specific training:
-
-**Zero-shot generalization**: the model follows instructions involving objects or concepts
-it encountered during vision-language pre-training but never during robot fine-tuning. For
-example, a VLA trained to pick up fruits might successfully pick up a "toy dinosaur" because
-the language model understands the concept.
-
-**Few-shot generalization**: providing a small number of demonstrations (5–50) of a new task
-enables rapid adaptation, either through fine-tuning or in-context learning.
-
-This generalization is what distinguishes VLAs from task-specific policies—a single model
-can potentially handle an open-ended set of manipulation tasks specified through language.
-
-## Language-Conditioned Control
-
-Natural language provides an intuitive, flexible task specification:
-
-```{python}
-#| eval: false
-#| code-fold: false
-# VLA inference pseudocode for language-conditioned manipulation
-import torch
-import numpy as np
-from PIL import Image
-
-class VLAInference:
-    """Pseudocode for VLA policy inference on a robot."""
-
-    def __init__(self, model_path: str, device: str = "cuda"):
-        # Load pre-trained VLA model
-        # self.model = AutoModelForVLA.from_pretrained(model_path)
-        # self.processor = AutoProcessor.from_pretrained(model_path)
-        self.device = device
-        self.action_bins = 256
-        self.action_ranges = {
-            "x": (-0.05, 0.05),   # meters per step
-            "y": (-0.05, 0.05),
-            "z": (-0.05, 0.05),
-            "rx": (-0.1, 0.1),    # radians per step
-            "ry": (-0.1, 0.1),
-            "rz": (-0.1, 0.1),
-            "gripper": (0.0, 1.0),
-        }
-
-    def predict_action(
-        self,
-        image: np.ndarray,
-        instruction: str,
-        robot_state: np.ndarray,
-    ) -> np.ndarray:
-        """Generate robot action from image and language instruction."""
-        # Preprocess inputs
-        # inputs = self.processor(
-        #     images=Image.fromarray(image),
-        #     text=instruction,
-        #     return_tensors="pt",
-        # ).to(self.device)
-
-        # Forward pass through VLA
-        # action_tokens = self.model.generate(**inputs, max_new_tokens=7)
-
-        # Decode discretized tokens to continuous actions
-        # action = self.decode_action_tokens(action_tokens)
-        # return action
-        pass
-
-    def decode_action_tokens(self, tokens: torch.Tensor) -> np.ndarray:
-        """Convert discretized action tokens to continuous values."""
-        actions = []
-        for i, (dim_name, (lo, hi)) in enumerate(self.action_ranges.items()):
-            bin_idx = tokens[0, i].item()
-            continuous = lo + (hi - lo) * bin_idx / (self.action_bins - 1)
-            actions.append(continuous)
-        return np.array(actions)
-
-# Usage
-# vla = VLAInference("path/to/model")
-# action = vla.predict_action(
-#     image=camera.capture(),
-#     instruction="pick up the red cube and place it in the bowl",
-#     robot_state=robot.get_joint_positions(),
-# )
-# robot.execute(action)
-```
-
-## Challenges
-
-VLAs face several practical challenges that are active areas of research:
-
-| Challenge | Description | Mitigation |
-|-----------|-------------|------------|
-| **Inference latency** | 7B+ models require 50–200 ms per forward pass | Model distillation, quantization, speculative decoding |
-| **Compute requirements** | Fine-tuning requires 4–8 GPUs with 80 GB VRAM each | LoRA, QLoRA, gradient checkpointing |
-| **Safety** | Language-conditioned models can be prompted into unsafe behaviors | Action space constraints, safety filters, workspace limits |
-| **Sim-to-real** | Pre-training is on real images; simulation images have a domain gap | Fine-tune on mixed real + sim data, domain randomization |
-| **Action precision** | Token discretization loses fine-grained precision | Higher bin counts (512–1024), continuous heads, flow matching |
-| **Temporal consistency** | Single-frame input limits understanding of dynamics | Action chunking, frame stacking, video encoders |
-
-::: {.callout-note}
-## Inference Speed and Control Frequency
-Most manipulation tasks require control at 10–50 Hz. A 7B VLA running at 5 Hz is too slow
-for reactive tasks. Practical deployment strategies include: running the VLA at low frequency
-for high-level action chunks while a fast low-level controller interpolates at 50–200 Hz,
-distilling the VLA into a smaller student model, or using INT4/INT8 quantization to reduce
-inference latency to 20–30 ms on edge GPUs.
-:::
-
-::: {.callout-important}
-## VLA Training in the Physical AI Toolchain
-The toolchain's training infrastructure supports VLA fine-tuning through AzureML compute
-targets with multi-GPU configurations. VLA training jobs use the same submission workflow as
-other training modalities—YAML job specifications submitted via `az ml job create` with
-environment variables for model selection, dataset paths, and LoRA configuration. The GPU
-nodes provisioned by the toolchain (H100 80GB, RTX PRO 6000 48GB) provide the VRAM capacity
-required for VLA fine-tuning. Training metrics (loss, action accuracy, gradient norms) are
-logged to MLflow, and fine-tuned model weights are registered in the AzureML model registry
-for evaluation and edge deployment via the fleet deployment pipeline.
-:::
+- [Vision-Language-Action Models: Integration Specification](https://github.com/microsoft/physical-ai-toolchain/blob/main/docs/vla-specification.md)
+- [IL to RL Warm-Start Strategies](https://github.com/microsoft/physical-ai-toolchain/blob/main/docs/il-to-rl-warm-start-strategies.md)
+- [Training Guide](../training/overview.qmd)

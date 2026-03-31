@@ -23,12 +23,24 @@ book:
     - index.qmd
     - part: "Foundations"
       chapters:
+        - chapters/foundations/overview.qmd
         - chapters/foundations/mdp.qmd
         - chapters/foundations/reward-functions.qmd
         - chapters/foundations/simulation.qmd
         - chapters/foundations/reinforcement-learning.qmd
         - chapters/foundations/imitation-learning.qmd
         - chapters/foundations/vla-models.qmd
+
+    - part: "Inference"
+      chapters:
+        - chapters/inference/overview.qmd
+        - chapters/inference/lerobot-inference.qmd
+
+    - part: "MLOps"
+      chapters:
+        - chapters/mlops/overview.qmd
+        - chapters/mlops/training-lifecycle.qmd
+        - chapters/mlops/sil-inference-lifecycle.qmd
 
     - part: "Getting Started"
       chapters:

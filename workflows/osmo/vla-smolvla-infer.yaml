@@ -1,0 +1,158 @@
+workflow:
+  name: vla-smolvla-inference
+  timeout:
+    exec_timeout: 2h
+  resources:
+    default:
+      gpu: 1
+      cpu: 4
+      memory: 32Gi
+      storage: 60Gi
+  tasks:
+    - name: smolvla-eval
+      image: "{{ image }}"
+      command:
+        - /bin/bash
+        - /tmp/entry.sh
+      credentials:
+        huggingface:
+          HF_TOKEN: hf_token
+      environment:
+        NVIDIA_DRIVER_CAPABILITIES: "all"
+        VLA_MODEL_ID: "{{ vla_model_id }}"
+        VLA_CHECKPOINT: "{{ vla_checkpoint }}"
+        DATASET_REPO_ID: "{{ dataset_repo_id }}"
+        LANGUAGE_INSTRUCTION: "{{ language_instruction }}"
+        EVAL_EPISODES: "{{ eval_episodes }}"
+        OUTPUT_DIR: "{{ output_dir }}"
+        JOB_NAME: "{{ job_name }}"
+        RECORD_VIDEO: "{{ record_video }}"
+        MLFLOW_ENABLE: "{{ mlflow_enable }}"
+        EXPERIMENT_NAME: "{{ experiment_name }}"
+        REGISTER_MODEL: "{{ register_model }}"
+        AML_MODEL_NAME: "{{ aml_model_name }}"
+        AML_MODEL_VERSION: "{{ aml_model_version }}"
+        BLOB_STORAGE_ACCOUNT: "{{ blob_storage_account }}"
+        BLOB_STORAGE_CONTAINER: "{{ blob_storage_container }}"
+        BLOB_PREFIX: "{{ blob_prefix }}"
+        AZURE_SUBSCRIPTION_ID: "{{ azure_subscription_id }}"
+        AZURE_RESOURCE_GROUP: "{{ azure_resource_group }}"
+        AZUREML_WORKSPACE_NAME: "{{ azure_workspace_name }}"
+        AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
+        MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
+        MLFLOW_HTTP_REQUEST_TIMEOUT: "{{ mlflow_http_request_timeout }}"
+        ENCODED_ARCHIVE: "{{ encoded_archive }}"
+        PAYLOAD_ROOT: "{{ payload_root }}"
+      files:
+        - path: /tmp/entry.sh
+          contents: |
+            #!/bin/bash
+            set -euo pipefail
+
+            echo "=== SmolVLA Inference Workflow ==="
+            echo "Base Model: ${VLA_MODEL_ID}"
+            echo "Checkpoint: ${VLA_CHECKPOINT:-base}"
+            echo "Language Instruction: ${LANGUAGE_INSTRUCTION}"
+            echo "Dataset: ${DATASET_REPO_ID:-none}"
+            echo "Eval Episodes: ${EVAL_EPISODES}"
+            echo "Output Dir: ${OUTPUT_DIR}"
+            echo "AML Model: ${AML_MODEL_NAME:-none}:${AML_MODEL_VERSION:-none}"
+
+            # Install system dependencies
+            echo "Installing system dependencies..."
+            apt-get update -qq && apt-get install -y -qq \
+              ffmpeg \
+              libgl1-mesa-glx \
+              libglib2.0-0 \
+              build-essential \
+              gcc \
+              unzip \
+              python3-dev \
+              > /dev/null 2>&1
+
+            # Install UV package manager
+            echo "Installing UV package manager..."
+            pip install --quiet uv==0.7.12
+
+            # Unpack runtime payload
+            ARCHIVE_PATH="/tmp/vla_payload.zip"
+            PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/vla_payload}"
+            mkdir -p "${PAYLOAD_ROOT}"
+            if [[ -z "${ENCODED_ARCHIVE:-}" ]]; then
+              echo "ERROR: ENCODED_ARCHIVE is not set or empty; runtime payload is required." >&2
+              exit 1
+            fi
+            printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"
+            unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
+            export PYTHONPATH="${PAYLOAD_ROOT}/src:${PYTHONPATH:-}"
+
+            # Install SmolVLA inference dependencies
+            echo "Installing SmolVLA inference dependencies..."
+            uv pip install --system \
+              "lerobot>=0.3.0,<0.4.0" \
+              "transformers>=4.40.0" \
+              "peft>=0.10.0" \
+              "accelerate>=0.28.0" \
+              "flash-attn>=2.5.0" \
+              "huggingface-hub[hf_xet]>=0.31.4,<1.0.0" \
+              "datasets" \
+              "matplotlib"
+
+            # Install MLflow when enabled
+            if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
+              echo "Installing MLflow dependencies..."
+              uv pip install --system \
+                "azure-identity" "azure-ai-ml" "azureml-mlflow" "mlflow>=2.8.0,<3.0.0"
+            fi
+
+            # Download model from AzureML registry if specified
+            if [[ -n "${AML_MODEL_NAME:-}" && -n "${AML_MODEL_VERSION:-}" ]]; then
+              echo "Downloading model from AzureML registry: ${AML_MODEL_NAME}:${AML_MODEL_VERSION}..."
+              python3 -m training.scripts.vla.download_model \
+                --model-name "${AML_MODEL_NAME}" \
+                --model-version "${AML_MODEL_VERSION}" \
+                --output-dir "/tmp/aml-model"
+              export VLA_CHECKPOINT="/tmp/aml-model/${AML_MODEL_NAME}"
+            fi
+
+            # Run SmolVLA inference evaluation
+            echo "Starting SmolVLA inference..."
+            python3 -m training.scripts.vla.infer \
+              --model-type smolvla \
+              --model-id "${VLA_MODEL_ID}" \
+              --checkpoint "${VLA_CHECKPOINT:-}" \
+              --language-instruction "${LANGUAGE_INSTRUCTION}" \
+              --dataset-repo-id "${DATASET_REPO_ID:-}" \
+              --eval-episodes "${EVAL_EPISODES}" \
+              --output-dir "${OUTPUT_DIR}" \
+              --record-video "${RECORD_VIDEO}"
+
+            echo "=== SmolVLA Inference Complete ==="
+            ls -la "${OUTPUT_DIR}/" 2>/dev/null || true
+
+default-values:
+  image: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+  encoded_archive: ""
+  payload_root: /workspace/vla_payload
+  vla_model_id: HuggingFaceTB/SmolVLA-base
+  vla_checkpoint: ""
+  dataset_repo_id: ""
+  language_instruction: "Pick up the object and place it in the target location"
+  eval_episodes: "10"
+  output_dir: /workspace/outputs/eval
+  job_name: smolvla-inference
+  record_video: "true"
+  mlflow_enable: "true"
+  experiment_name: ""
+  register_model: ""
+  aml_model_name: ""
+  aml_model_version: ""
+  blob_storage_account: ""
+  blob_storage_container: ""
+  blob_prefix: ""
+  azure_subscription_id: ""
+  azure_resource_group: ""
+  azure_workspace_name: ""
+  azure_authority_host: ""
+  mlflow_token_refresh_retries: "5"
+  mlflow_http_request_timeout: "1200"

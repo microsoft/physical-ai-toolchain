@@ -1,6 +1,6 @@
 ---
 sidebar_position: 3
-title: OSMO Inference Workflows
+title: OSMO Evaluation Workflows
 description: Execute trained robotics policy inference using NVIDIA OSMO with Isaac Lab and LeRobot frameworks
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-24
@@ -19,7 +19,7 @@ Run trained policy inference through NVIDIA OSMO workflows on GPU-accelerated Ku
 ## 📋 Prerequisites
 
 | Tool      | Version | Purpose                            |
-|-----------|---------|------------------------------------|
+| --------- | ------- | ---------------------------------- |
 | OSMO CLI  | Latest  | Workflow submission and monitoring |
 | Azure CLI | 2.65+   | Azure authentication               |
 | kubectl   | 1.28+   | Cluster access                     |
@@ -39,7 +39,7 @@ osmo workflow submit \
 ## ⚖️ Workflow Comparison
 
 | Feature            | Isaac Lab                   | LeRobot                                |
-|--------------------|-----------------------------|----------------------------------------|
+| ------------------ | --------------------------- | -------------------------------------- |
 | Config file        | `infer.yaml`                | `lerobot-infer.yaml`                   |
 | Checkpoint format  | ONNX, TorchScript           | PyTorch (.pt)                          |
 | Task specification | `--task` (Isaac Gym env)    | `--policy-type` (model arch)           |
@@ -51,7 +51,7 @@ osmo workflow submit \
 ### Checkpoint URI Formats
 
 | Format       | Example                                       | Use Case             |
-|--------------|-----------------------------------------------|----------------------|
+| ------------ | --------------------------------------------- | -------------------- |
 | MLflow run   | `runs:/<run-id>/model`                        | Direct from training |
 | MLflow model | `models:/<name>/<version>`                    | Model registry       |
 | Azure Blob   | `https://<account>.blob.core.windows.net/...` | External storage     |
@@ -60,7 +60,7 @@ osmo workflow submit \
 ### Supported Model Formats
 
 | Format      | Extension       | Frameworks         |
-|-------------|-----------------|--------------------|
+| ----------- | --------------- | ------------------ |
 | ONNX        | `.onnx`         | Isaac Lab          |
 | TorchScript | `.pt`           | Isaac Lab, LeRobot |
 | Both        | `.onnx` + `.pt` | Full compatibility |
@@ -68,7 +68,7 @@ osmo workflow submit \
 ### Isaac Lab CLI Parameters
 
 | Parameter              | Required | Default       | Description                |
-|------------------------|----------|---------------|----------------------------|
+| ---------------------- | -------- | ------------- | -------------------------- |
 | `-c, --checkpoint-uri` | Yes      | —             | Checkpoint location URI    |
 | `--task`               | No       | from workflow | Isaac Gym environment name |
 | `--format`             | No       | `onnx`        | Model format               |
@@ -86,7 +86,7 @@ osmo workflow logs <workflow-id> | grep "checkpoint"
 ### Configuration Resolution Order
 
 | Priority    | Source                | Example                    |
-|-------------|-----------------------|----------------------------|
+| ----------- | --------------------- | -------------------------- |
 | 1 (highest) | CLI arguments         | `--set checkpoint_uri=...` |
 | 2           | Environment variables | `CHECKPOINT_URI=...`       |
 | 3 (lowest)  | Terraform outputs     | Auto-detected from state   |
@@ -94,7 +94,7 @@ osmo workflow logs <workflow-id> | grep "checkpoint"
 ### Workflow Outputs
 
 | Artifact      | Path               | Description          |
-|---------------|--------------------|----------------------|
+| ------------- | ------------------ | -------------------- |
 | `policy.onnx` | `outputs/`         | Exported ONNX policy |
 | `policy.pt`   | `outputs/`         | TorchScript policy   |
 | Metrics JSON  | `outputs/metrics/` | Evaluation results   |
@@ -105,7 +105,7 @@ osmo workflow logs <workflow-id> | grep "checkpoint"
 ### LeRobot CLI Parameters
 
 | Parameter           | Required | Default | Description                   |
-|---------------------|----------|---------|-------------------------------|
+| ------------------- | -------- | ------- | ----------------------------- |
 | `--policy-repo-id`  | Yes      | —       | HuggingFace model repo        |
 | `--policy-type`     | No       | `act`   | Policy architecture           |
 | `--dataset-repo-id` | No       | —       | Evaluation dataset            |

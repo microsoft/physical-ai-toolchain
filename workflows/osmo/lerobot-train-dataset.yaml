@@ -1,0 +1,329 @@
+workflow:
+  name: lerobot-dataset-training
+  timeout:
+    exec_timeout: 12h
+  resources:
+    default:
+      gpu: 1
+      cpu: 8
+      memory: 48Gi
+      storage: 80Gi
+  tasks:
+    - name: lerobot-train
+      image: "{{ image }}"
+      command:
+        - /bin/bash
+        - /tmp/entry.sh
+      credentials:
+        wandb:
+          WANDB_API_KEY: wandb_api_key
+        huggingface:
+          HF_TOKEN: hf_token
+      environment:
+        DATASET_REPO_ID: "{{ dataset_repo_id }}"
+        POLICY_TYPE: "{{ policy_type }}"
+        OUTPUT_DIR: "{{ output_dir }}"
+        JOB_NAME: "{{ job_name }}"
+        POLICY_REPO_ID: "{{ policy_repo_id }}"
+        WANDB_ENABLE: "{{ wandb_enable }}"
+        WANDB_PROJECT: "{{ wandb_project }}"
+        TRAINING_STEPS: "{{ training_steps }}"
+        BATCH_SIZE: "{{ batch_size }}"
+        EVAL_FREQ: "{{ eval_freq }}"
+        SAVE_FREQ: "{{ save_freq }}"
+        LEROBOT_VERSION: "{{ lerobot_version }}"
+        MLFLOW_ENABLE: "{{ mlflow_enable }}"
+        EXPERIMENT_NAME: "{{ experiment_name }}"
+        REGISTER_CHECKPOINT: "{{ register_checkpoint }}"
+        AZURE_SUBSCRIPTION_ID: "{{ azure_subscription_id }}"
+        AZURE_RESOURCE_GROUP: "{{ azure_resource_group }}"
+        AZUREML_WORKSPACE_NAME: "{{ azure_workspace_name }}"
+        AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
+        MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
+        MLFLOW_HTTP_REQUEST_TIMEOUT: "{{ mlflow_http_request_timeout }}"
+        DATASET_ROOT: "{{input:0}}/{{ dataset_name }}"
+        LOCAL_DATASET: "true"
+      inputs:
+        - dataset:
+            name: "{{ dataset_bucket }}/{{ dataset_name }}"
+            localpath: "{{ dataset_localpath }}"
+      files:
+        - path: /tmp/entry.sh
+          contents: |
+            #!/bin/bash
+            set -euo pipefail
+
+            echo "=== LeRobot Dataset Training Workflow ==="
+            echo "Dataset Source: ${LOCAL_DATASET:-false}=true -> OSMO Dataset | HuggingFace Hub"
+            echo "Dataset Root: ${DATASET_ROOT:-}"
+            echo "Dataset Repo ID: ${DATASET_REPO_ID:-}"
+            echo "Policy Type: ${POLICY_TYPE}"
+            echo "Job Name: ${JOB_NAME}"
+            echo "Output Dir: ${OUTPUT_DIR}"
+
+            # Install system dependencies
+            echo "Installing system dependencies..."
+            apt-get update -qq && apt-get install -y -qq \
+              ffmpeg \
+              libgl1-mesa-glx \
+              libglib2.0-0 \
+              git \
+              build-essential \
+              gcc \
+              python3-dev \
+              > /dev/null 2>&1
+
+            # Install UV package manager
+            echo "Installing UV package manager..."
+            pip install --quiet uv
+
+            # Install LeRobot and dependencies based on logging backend
+            echo "Installing LeRobot ${LEROBOT_VERSION:-latest}..."
+            if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
+              echo "Installing Azure ML dependencies for MLflow logging..."
+              if [[ -n "${LEROBOT_VERSION:-}" && "${LEROBOT_VERSION}" != "latest" ]]; then
+                uv pip install "lerobot==${LEROBOT_VERSION}" huggingface-hub \
+                  azure-identity azure-ai-ml azureml-mlflow "mlflow>=2.8.0,<3.0.0" --system
+              else
+                uv pip install lerobot huggingface-hub \
+                  azure-identity azure-ai-ml azureml-mlflow "mlflow>=2.8.0,<3.0.0" --system
+              fi
+            else
+              if [[ -n "${LEROBOT_VERSION:-}" && "${LEROBOT_VERSION}" != "latest" ]]; then
+                uv pip install "lerobot==${LEROBOT_VERSION}" wandb huggingface-hub --system
+              else
+                uv pip install lerobot wandb huggingface-hub --system
+              fi
+            fi
+
+            # Authenticate with HuggingFace Hub
+            echo "Authenticating with HuggingFace Hub..."
+            if [[ -n "${HF_TOKEN:-}" ]]; then
+              python3 -c "from huggingface_hub import login; login(token='${HF_TOKEN}', add_to_git_credential=False)"
+            else
+              echo "Warning: HF_TOKEN not set, skipping HuggingFace authentication"
+            fi
+
+            # Verify dataset mount
+            if [[ "${LOCAL_DATASET:-false}" == "true" ]]; then
+              if [[ ! -d "${DATASET_ROOT:-}" ]]; then
+                echo "Error: Dataset root not found at ${DATASET_ROOT:-}" >&2
+                echo "Contents of OSMO input mount:" >&2
+                ls -la "{{input:0}}/" 2>/dev/null || echo "  (mount not found)"
+                exit 1
+              fi
+              echo "Dataset mounted at: ${DATASET_ROOT}"
+              ls -la "${DATASET_ROOT}/"
+            fi
+
+            # Configure logging backend
+            if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
+              echo "Configuring Azure ML MLflow tracking..."
+
+              if [[ -z "${AZURE_SUBSCRIPTION_ID:-}" || -z "${AZURE_RESOURCE_GROUP:-}" || -z "${AZUREML_WORKSPACE_NAME:-}" ]]; then
+                echo "Error: Azure ML requires AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, and AZUREML_WORKSPACE_NAME"
+                exit 1
+              fi
+
+              python3 << 'BOOTSTRAP_SCRIPT'
+            import os
+            import sys
+
+            try:
+                import mlflow
+                from azure.ai.ml import MLClient
+                from azure.identity import DefaultAzureCredential
+
+                credential = DefaultAzureCredential(
+                    managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID"),
+                    authority=os.environ.get("AZURE_AUTHORITY_HOST"),
+                )
+
+                client = MLClient(
+                    credential=credential,
+                    subscription_id=os.environ["AZURE_SUBSCRIPTION_ID"],
+                    resource_group_name=os.environ["AZURE_RESOURCE_GROUP"],
+                    workspace_name=os.environ["AZUREML_WORKSPACE_NAME"],
+                )
+
+                workspace = client.workspaces.get(os.environ["AZUREML_WORKSPACE_NAME"])
+                tracking_uri = workspace.mlflow_tracking_uri
+
+                if not tracking_uri:
+                    print("[ERROR] Azure ML workspace does not expose MLflow tracking URI")
+                    sys.exit(1)
+
+                mlflow.set_tracking_uri(tracking_uri)
+                experiment_name = os.environ.get("EXPERIMENT_NAME") or f"lerobot-{os.environ.get('POLICY_TYPE', 'act')}-{os.environ.get('JOB_NAME', 'training')}"
+                mlflow.set_experiment(experiment_name)
+                mlflow.autolog(log_models=False, log_input_examples=False)
+
+                with open("/tmp/mlflow_config.env", "w") as f:
+                    f.write(f"MLFLOW_TRACKING_URI={tracking_uri}\n")
+                    f.write(f"MLFLOW_EXPERIMENT_NAME={experiment_name}\n")
+
+                print(f"[INFO] MLflow configured: {experiment_name}")
+
+            except Exception as e:
+                print(f"[ERROR] Failed to configure Azure ML: {e}")
+                sys.exit(1)
+            BOOTSTRAP_SCRIPT
+
+              if [[ -f /tmp/mlflow_config.env ]]; then
+                export $(cat /tmp/mlflow_config.env | xargs)
+              fi
+            else
+              if [[ -n "${WANDB_API_KEY:-}" ]]; then
+                echo "WANDB authentication configured via environment"
+              else
+                echo "Warning: WANDB_API_KEY not set"
+              fi
+            fi
+
+            # Build training arguments
+            train_args=(
+              --policy.type="${POLICY_TYPE}"
+              --output_dir="${OUTPUT_DIR}"
+              --job_name="${JOB_NAME}"
+              --policy.device=cuda
+            )
+
+            # Dataset source: OSMO mount or HuggingFace Hub
+            if [[ "${LOCAL_DATASET:-false}" == "true" && -d "${DATASET_ROOT:-}" ]]; then
+              train_args+=(--dataset.root="${DATASET_ROOT}")
+            elif [[ -n "${DATASET_REPO_ID:-}" ]]; then
+              train_args+=(--dataset.repo_id="${DATASET_REPO_ID}")
+            else
+              echo "Error: Either DATASET_ROOT (via OSMO dataset mount) or DATASET_REPO_ID is required" >&2
+              exit 1
+            fi
+
+            # Configure logging
+            if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
+              train_args+=(--wandb.enable=false)
+            elif [[ "${WANDB_ENABLE:-true}" == "true" ]]; then
+              train_args+=(--wandb.enable=true)
+              [[ -n "${WANDB_PROJECT:-}" ]] && train_args+=(--wandb.project="${WANDB_PROJECT}")
+            else
+              train_args+=(--wandb.enable=false)
+            fi
+
+            if [[ -n "${POLICY_REPO_ID:-}" ]]; then
+              train_args+=(--policy.repo_id="${POLICY_REPO_ID}")
+            else
+              hf_user=$(python3 -c "from huggingface_hub import whoami; print(whoami()['name'])" 2>/dev/null || echo "")
+              if [[ -n "$hf_user" ]]; then
+                default_repo="${hf_user}/${JOB_NAME}"
+                echo "Auto-derived policy.repo_id: ${default_repo}"
+                train_args+=(--policy.repo_id="${default_repo}")
+              else
+                echo "Warning: Cannot derive policy.repo_id (no HF auth). Training may fail."
+              fi
+            fi
+            [[ -n "${TRAINING_STEPS:-}" ]] && train_args+=(--steps="${TRAINING_STEPS}")
+            [[ -n "${BATCH_SIZE:-}" ]] && train_args+=(--batch_size="${BATCH_SIZE}")
+            [[ -n "${EVAL_FREQ:-}" ]] && train_args+=(--eval_freq="${EVAL_FREQ}")
+            [[ -n "${SAVE_FREQ:-}" ]] && train_args+=(--save_freq="${SAVE_FREQ}")
+
+            echo "Starting LeRobot training..."
+            echo "Command: lerobot-train ${train_args[*]}"
+
+            lerobot-train "${train_args[@]}"
+
+            echo "=== Training Complete ==="
+
+            # Post-training: Register checkpoint to Azure ML if enabled
+            if [[ "${MLFLOW_ENABLE:-false}" == "true" && -n "${REGISTER_CHECKPOINT:-}" ]]; then
+              echo "=== Registering Checkpoint to Azure ML ==="
+
+              python3 << 'REGISTER_SCRIPT'
+            import os
+            import sys
+            from pathlib import Path
+
+            try:
+                from azure.ai.ml import MLClient
+                from azure.ai.ml.entities import Model
+                from azure.ai.ml.constants import AssetTypes
+                from azure.identity import DefaultAzureCredential
+
+                output_dir = Path(os.environ["OUTPUT_DIR"])
+                model_name = os.environ["REGISTER_CHECKPOINT"]
+                job_name = os.environ.get("JOB_NAME", "lerobot-training")
+                policy_type = os.environ.get("POLICY_TYPE", "act")
+
+                checkpoint_dirs = sorted(output_dir.glob("checkpoints/*"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if not checkpoint_dirs:
+                    pretrained_dir = output_dir / "pretrained_model"
+                    checkpoint_path = pretrained_dir if pretrained_dir.exists() else None
+                else:
+                    pretrained = checkpoint_dirs[0] / "pretrained_model"
+                    checkpoint_path = pretrained if pretrained.exists() else checkpoint_dirs[0]
+
+                if not checkpoint_path:
+                    print("[WARNING] No checkpoints found")
+                    sys.exit(0)
+
+                credential = DefaultAzureCredential(
+                    managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID"),
+                    authority=os.environ.get("AZURE_AUTHORITY_HOST"),
+                )
+                client = MLClient(
+                    credential=credential,
+                    subscription_id=os.environ["AZURE_SUBSCRIPTION_ID"],
+                    resource_group_name=os.environ["AZURE_RESOURCE_GROUP"],
+                    workspace_name=os.environ["AZUREML_WORKSPACE_NAME"],
+                )
+
+                model = Model(
+                    path=str(checkpoint_path),
+                    name=model_name,
+                    description=f"LeRobot {policy_type} policy trained with job: {job_name}",
+                    type=AssetTypes.CUSTOM_MODEL,
+                    tags={
+                        "framework": "lerobot",
+                        "policy_type": policy_type,
+                        "job_name": job_name,
+                        "source": "osmo-dataset-workflow",
+                    },
+                )
+
+                registered = client.models.create_or_update(model)
+                print(f"[INFO] Model registered: {registered.name} (version: {registered.version})")
+
+            except Exception as e:
+                print(f"[ERROR] Failed to register checkpoint: {e}")
+                import traceback
+                traceback.print_exc()
+                sys.exit(0)
+            REGISTER_SCRIPT
+
+              echo "=== Checkpoint Registration Complete ==="
+            fi
+
+default-values:
+  image: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+  dataset_repo_id: ""
+  policy_type: act
+  output_dir: /workspace/outputs/train
+  job_name: lerobot-act-training
+  policy_repo_id: ""
+  wandb_enable: "true"
+  wandb_project: lerobot-training
+  training_steps: ""
+  batch_size: ""
+  eval_freq: ""
+  save_freq: "5000"
+  lerobot_version: ""
+  mlflow_enable: "false"
+  experiment_name: ""
+  register_checkpoint: ""
+  azure_subscription_id: ""
+  azure_resource_group: ""
+  azure_workspace_name: ""
+  azure_authority_host: https://login.microsoftonline.com
+  mlflow_token_refresh_retries: "3"
+  mlflow_http_request_timeout: "60"
+  dataset_bucket: lerobot-datasets
+  dataset_name: training-data
+  dataset_localpath: ""

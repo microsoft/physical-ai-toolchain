@@ -2,4 +2,38 @@
 title: "SO-101 Training & Inference"
 ---
 
-{{< include ../../../../docs/so101-training-inference.md >}}
+Use this chapter as a reference pattern for end-to-end training and inference on SO-101 style tasks. It defines a lightweight flow from dataset preparation through policy validation.
+
+## Workflow Overview
+
+| Stage | Objective | Typical output |
+| --- | --- | --- |
+| Dataset preparation | Validate schema and split episodes | Cleaned dataset and metadata |
+| Training run | Fit policy with reproducible parameters | Checkpoints and run metrics |
+| Inference test | Replay policy against held-out data | Success, latency, and drift signals |
+| Promotion review | Decide whether to publish candidate | Promote, hold, or retrain decision |
+
+## Baseline Command Pattern
+
+```bash
+cd training/il
+uv run python src/lerobot/train.py \
+	--dataset.path <dataset-path> \
+	--policy.type act \
+	--output.dir <output-dir>
+```
+
+## Inference Smoke Test
+
+```bash
+python scripts/test-lerobot-inference.py \
+	--policy-repo <policy-path-or-repo> \
+	--dataset-dir <dataset-path> \
+	--episode 0 --num-steps 30
+```
+
+## Related Documentation
+
+- [LeRobot Training](lerobot-training.qmd)
+- [LeRobot Inference](../inference/lerobot-inference.qmd)
+- [MLOps SIL Inference Lifecycle](../mlops/sil-inference-lifecycle.qmd)

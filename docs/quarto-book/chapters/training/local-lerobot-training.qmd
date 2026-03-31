@@ -2,4 +2,44 @@
 title: "Local LeRobot Training"
 ---
 
-{{< include ../../../../docs/local-lerobot-training.md >}}
+Use this chapter to run LeRobot training without Azure ML or OSMO. Local execution is useful for quick configuration validation, dataset checks, and short baseline experiments before cluster submission.
+
+## Prerequisites
+
+| Component | Requirement |
+| --- | --- |
+| Python | 3.11 or later |
+| Dependency manager | `uv` configured for this repository |
+| Dataset | Local LeRobot-compatible dataset path |
+| GPU | Optional for smoke tests, recommended for full runs |
+
+## Local Workflow
+
+1. Set up the Python environment with `uv`.
+2. Validate dataset structure and metadata.
+3. Run a short LeRobot training job with reduced steps.
+4. Review logs and checkpoints before scaling out.
+
+## Example Command
+
+```bash
+cd training/il
+uv run python src/lerobot/train.py \
+	--dataset.path <local-dataset-path> \
+	--policy.type act \
+	--output.dir <local-output-dir> \
+	--max-steps 1000
+```
+
+## Validation Checklist
+
+- Training starts without dataset schema errors.
+- Loss decreases for initial iterations.
+- Checkpoint files are produced in the output directory.
+- Run metadata is captured for reproducibility.
+
+## Related Documentation
+
+- [LeRobot Training](lerobot-training.qmd)
+- [Inference Guide](../inference/overview.qmd)
+- [MLOps Training Lifecycle](../mlops/training-lifecycle.qmd)
