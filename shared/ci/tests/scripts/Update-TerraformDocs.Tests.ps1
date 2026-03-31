@@ -137,9 +137,9 @@ Describe 'Update-TerraformDocsCore' -Tag 'Unit' {
                 )
             } -ParameterFilter { $args[0] -eq 'diff' }
 
-            $result = Update-TerraformDocsCore -Check `
-                -TerraformDir $script:TestTerraformDir -ConfigPath $script:TestConfigPath
-            $result | Should -Be 1
+            $result = @(Update-TerraformDocsCore -Check `
+                -TerraformDir $script:TestTerraformDir -ConfigPath $script:TestConfigPath)
+            $result[-1] | Should -Be 1
         }
 
         It 'Outputs diff for CI wrapper to parse' {
@@ -153,7 +153,7 @@ Describe 'Update-TerraformDocsCore' -Tag 'Unit' {
             } -ParameterFilter { $args[0] -eq 'diff' }
 
             $output = Update-TerraformDocsCore -Check `
-                -TerraformDir $script:TestTerraformDir -ConfigPath $script:TestConfigPath 6>&1
+                -TerraformDir $script:TestTerraformDir -ConfigPath $script:TestConfigPath
             $strings = $output | ForEach-Object { "$_" }
             $strings | Should -Contain 'diff --git a/infrastructure/terraform/README.md b/infrastructure/terraform/README.md'
         }
