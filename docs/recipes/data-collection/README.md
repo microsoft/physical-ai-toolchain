@@ -4,10 +4,10 @@ Guides for capturing, processing, and managing robotic training datasets.
 
 ## 📖 Recipes
 
-| Recipe | Description | Time |
-|--------|-------------|------|
+| Recipe                                                                | Description                                                         | Time   |
+|-----------------------------------------------------------------------|---------------------------------------------------------------------|--------|
 | [Configuring Edge Data Recording](configuring-edge-data-recording.md) | Set up ROS 2 edge recording on Jetson with chunking and compression | 20 min |
-| [Preparing Datasets for Training](preparing-datasets-for-training.md) | Download, inspect, and validate datasets for LeRobot training | 30 min |
+| [Preparing Datasets for Training](preparing-datasets-for-training.md) | Download, inspect, and validate datasets for LeRobot training       | 30 min |
 
 ## 🔗 Related
 

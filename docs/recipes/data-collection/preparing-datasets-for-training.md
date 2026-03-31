@@ -7,12 +7,12 @@ Download a dataset from Azure Blob Storage or HuggingFace, inspect its structure
 
 ## 📋 Prerequisites
 
-| Requirement | Details |
-|-------------|---------|
-| Python | 3.11+ with `uv` or `pip` |
-| Azure CLI | Authenticated (`az login`) — for Azure Blob datasets |
-| Azure Storage | Storage account with dataset container — for Azure Blob datasets |
-| HuggingFace CLI | `pip install huggingface-hub` — for HuggingFace datasets |
+| Requirement     | Details                                                          |
+|-----------------|------------------------------------------------------------------|
+| Python          | 3.11+ with `uv` or `pip`                                         |
+| Azure CLI       | Authenticated (`az login`) — for Azure Blob datasets             |
+| Azure Storage   | Storage account with dataset container — for Azure Blob datasets |
+| HuggingFace CLI | `pip install huggingface-hub` — for HuggingFace datasets         |
 
 ## 🚀 Steps
 
@@ -20,10 +20,10 @@ Download a dataset from Azure Blob Storage or HuggingFace, inspect its structure
 
 LeRobot datasets come from two sources:
 
-| Source | When to use | Example |
-|--------|-------------|---------|
-| HuggingFace Hub | Public community datasets, quick experimentation | `lerobot/aloha_sim_insertion_human` |
-| Azure Blob Storage | Private datasets, recorded edge data uploaded to Azure | Custom organization datasets |
+| Source             | When to use                                            | Example                             |
+|--------------------|--------------------------------------------------------|-------------------------------------|
+| HuggingFace Hub    | Public community datasets, quick experimentation       | `lerobot/aloha_sim_insertion_human` |
+| Azure Blob Storage | Private datasets, recorded edge data uploaded to Azure | Custom organization datasets        |
 
 ### Step 2a: Download from HuggingFace
 
@@ -161,13 +161,13 @@ The recipe succeeded when:
 
 `download_dataset.py` environment variables:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `STORAGE_ACCOUNT` | yes | — | Azure Storage account name |
-| `STORAGE_CONTAINER` | no | `datasets` | Blob container name |
-| `BLOB_PREFIX` | yes | — | Blob path prefix for dataset files |
-| `DATASET_ROOT` | no | `/workspace/data` | Local root directory for datasets |
-| `DATASET_REPO_ID` | yes | — | Dataset identifier (e.g., `user/dataset`) |
+| Variable            | Required | Default           | Description                               |
+|---------------------|----------|-------------------|-------------------------------------------|
+| `STORAGE_ACCOUNT`   | yes      | —                 | Azure Storage account name                |
+| `STORAGE_CONTAINER` | no       | `datasets`        | Blob container name                       |
+| `BLOB_PREFIX`       | yes      | —                 | Blob path prefix for dataset files        |
+| `DATASET_ROOT`      | no       | `/workspace/data` | Local root directory for datasets         |
+| `DATASET_REPO_ID`   | yes      | —                 | Dataset identifier (e.g., `user/dataset`) |
 
 ## 🔗 Related Recipes
 

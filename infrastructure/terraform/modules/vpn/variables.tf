@@ -132,3 +132,11 @@ variable "vpn_site_default_ipsec_policy" {
   description = "Default IPsec policy for all S2S connections"
   default     = null
 }
+
+// === Tags ===
+
+variable "tags" {
+  description = "Tags to apply to all resources created by this module"
+  type        = map(string)
+  default     = {}
+}

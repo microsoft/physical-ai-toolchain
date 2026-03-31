@@ -28,7 +28,8 @@
 		"*megalinter_file_names_cspell.txt",
 		"**/.terraform/**",
 		"**/.terraform.lock.hcl",
-		"**/shared/ci/tests/Fixtures/**"
+		"**/shared/ci/tests/Fixtures/**",
+		"**/TERRAFORM.md"
 	],
 	"dictionaryDefinitions": [
 		{
