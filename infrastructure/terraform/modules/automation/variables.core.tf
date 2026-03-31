@@ -12,7 +12,6 @@
 variable "environment" {
   type        = string
   description = "Environment for all resources in this module: dev, test, or prod"
-  default     = "dev"
 }
 
 variable "instance" {
@@ -24,7 +23,6 @@ variable "instance" {
 variable "location" {
   type        = string
   description = "Location for all resources in this module"
-  default     = null
 }
 
 variable "resource_group" {
@@ -39,10 +37,4 @@ variable "resource_group" {
 variable "resource_prefix" {
   type        = string
   description = "Prefix for all resources in this module"
-}
-
-variable "tags" {
-  type        = map(string)
-  description = "Tags to apply to all resources"
-  default     = {}
 }

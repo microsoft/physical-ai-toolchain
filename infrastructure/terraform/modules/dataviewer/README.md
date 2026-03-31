@@ -15,8 +15,8 @@ Supports internal (VNet/VPN) and external (public) deployment modes.
 
 ## 📖 Documentation
 
-| Reference                          | Description                                   |
-|------------------------------------|-----------------------------------------------|
+| Reference                           | Description                                   |
+|-------------------------------------|-----------------------------------------------|
 | [Terraform Reference](TERRAFORM.md) | Auto-generated inputs, outputs, and resources |
 
 <!-- markdownlint-disable MD036 -->
