@@ -7,12 +7,12 @@ Run the full LeRobot pipeline — train a policy, evaluate it against simulation
 
 ## 📋 Prerequisites
 
-| Requirement | Details |
-|-------------|---------|
-| Infrastructure | Azure resources deployed via Terraform |
-| OSMO | Control plane and backend running |
-| Basic LeRobot recipe | Single-stage training verified successfully |
-| HuggingFace account | Write access to a policy repo for pushing trained weights |
+| Requirement          | Details                                                   |
+|----------------------|-----------------------------------------------------------|
+| Infrastructure       | Azure resources deployed via Terraform                    |
+| OSMO                 | Control plane and backend running                         |
+| Basic LeRobot recipe | Single-stage training verified successfully               |
+| HuggingFace account  | Write access to a policy repo for pushing trained weights |
 
 ## 🚀 Steps
 
@@ -116,18 +116,18 @@ az ml model show \
 
 ## ⚙️ Configuration Reference
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `-d, --dataset-repo-id` | (required) | HuggingFace dataset repository |
-| `--policy-repo-id` | (required) | HuggingFace repo for trained policy |
-| `--policy-type` | `act` | Policy architecture (`act` or `diffusion`) |
-| `--training-steps` | (task default) | Total training iterations |
-| `--eval-episodes` | `10` | Evaluation episodes |
-| `--poll-interval` | `60` | Status check interval in seconds |
-| `--timeout` | `720` | Training timeout in minutes |
-| `--skip-inference` | (disabled) | Skip evaluation stage |
-| `--skip-wait` | (disabled) | Async mode — submit without waiting |
-| `-r, --register-model` | (none) | Model name for Azure ML registration |
+| Parameter               | Default        | Description                                |
+|-------------------------|----------------|--------------------------------------------|
+| `-d, --dataset-repo-id` | (required)     | HuggingFace dataset repository             |
+| `--policy-repo-id`      | (required)     | HuggingFace repo for trained policy        |
+| `--policy-type`         | `act`          | Policy architecture (`act` or `diffusion`) |
+| `--training-steps`      | (task default) | Total training iterations                  |
+| `--eval-episodes`       | `10`           | Evaluation episodes                        |
+| `--poll-interval`       | `60`           | Status check interval in seconds           |
+| `--timeout`             | `720`          | Training timeout in minutes                |
+| `--skip-inference`      | (disabled)     | Skip evaluation stage                      |
+| `--skip-wait`           | (disabled)     | Async mode — submit without waiting        |
+| `-r, --register-model`  | (none)         | Model name for Azure ML registration       |
 
 See [Scripts Reference](../../reference/scripts.md) for the full parameter table.
 

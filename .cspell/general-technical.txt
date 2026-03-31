@@ -676,6 +676,7 @@ lakehouses
 lalogs
 lan
 lanczos
+lastexitcode
 lavfi
 ldap
 leaderboard

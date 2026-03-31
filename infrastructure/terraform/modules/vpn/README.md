@@ -11,8 +11,8 @@ Creates GatewaySubnet within the platform's virtual network.
 
 ## 📖 Documentation
 
-| Reference                          | Description                                   |
-|------------------------------------|-----------------------------------------------|
+| Reference                           | Description                                   |
+|-------------------------------------|-----------------------------------------------|
 | [Terraform Reference](TERRAFORM.md) | Auto-generated inputs, outputs, and resources |
 
 <!-- markdownlint-disable MD036 -->

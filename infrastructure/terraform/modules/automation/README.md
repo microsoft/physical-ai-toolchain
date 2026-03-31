@@ -11,8 +11,8 @@ for automated startup of AKS clusters and PostgreSQL servers.
 
 ## 📖 Documentation
 
-| Reference                          | Description                                   |
-|------------------------------------|-----------------------------------------------|
+| Reference                           | Description                                   |
+|-------------------------------------|-----------------------------------------------|
 | [Terraform Reference](TERRAFORM.md) | Auto-generated inputs, outputs, and resources |
 
 <!-- markdownlint-disable MD036 -->

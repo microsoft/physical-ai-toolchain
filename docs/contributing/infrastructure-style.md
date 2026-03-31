@@ -3,7 +3,7 @@ sidebar_position: 7
 title: Infrastructure as Code Style Guide
 description: Terraform conventions, shell script standards, and copyright headers for contributions
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-18
+ms.date: 2026-03-26
 ms.topic: reference
 ---
 
@@ -342,6 +342,48 @@ kind: ConfigMap
 * Place immediately after shebang line in executable scripts
 * Place at the top of the file for other file types
 * Include blank line between copyright header and code
+
+## Documentation Generation
+
+Terraform module documentation generates from source using [terraform-docs](https://terraform-docs.io/) v0.21.0. Each module and deployment directory contains a `TERRAFORM.md` file that terraform-docs produces automatically.
+
+### Configuration
+
+The repository-wide configuration lives in `.terraform-docs.yml` at the workspace root. This file controls output format, section ordering, and content templates.
+
+### Generated Files
+
+Generated `TERRAFORM.md` files exist in every Terraform module and deployment directory. These files are excluded from cspell and markdownlint because their content derives from HCL source code.
+
+| Directory                                    | File           |
+|----------------------------------------------|----------------|
+| `infrastructure/terraform/`                  | `TERRAFORM.md` |
+| `infrastructure/terraform/vpn/`              | `TERRAFORM.md` |
+| `infrastructure/terraform/modules/platform/` | `TERRAFORM.md` |
+| `infrastructure/terraform/modules/sil/`      | `TERRAFORM.md` |
+| `infrastructure/terraform/modules/vpn/`      | `TERRAFORM.md` |
+
+### Regenerating Documentation
+
+Run terraform-docs against a specific directory:
+
+```bash
+terraform-docs markdown table --output-file TERRAFORM.md infrastructure/terraform/modules/platform/
+```
+
+Or regenerate all modules using the PowerShell helper:
+
+```powershell
+./scripts/Update-TerraformDocs.ps1
+```
+
+### Quality Standards
+
+Variable descriptions serve as the primary documentation source. Write descriptions that:
+
+* Use sentence case without trailing periods
+* Explain purpose and expected values, not just the variable name restated
+* Include examples for complex types (e.g., `object`, `map`)
 
 ## Related Documentation
 
