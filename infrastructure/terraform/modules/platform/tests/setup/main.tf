@@ -29,22 +29,27 @@ locals {
 }
 
 output "resource_prefix" {
-  value = local.resource_prefix
+  description = "Generated resource naming prefix for test isolation."
+  value       = local.resource_prefix
 }
 
 output "environment" {
-  value = local.environment
+  description = "Environment identifier for test configuration."
+  value       = local.environment
 }
 
 output "instance" {
-  value = local.instance
+  description = "Instance identifier for test configuration."
+  value       = local.instance
 }
 
 output "location" {
-  value = local.location
+  description = "Azure region for test resources."
+  value       = local.location
 }
 
 output "resource_group" {
+  description = "Mock resource group object for test input."
   value = {
     id       = local.resource_group_id
     name     = local.resource_group_name
@@ -53,5 +58,6 @@ output "resource_group" {
 }
 
 output "current_user_oid" {
-  value = "00000000-0000-0000-0000-000000000001"
+  description = "Stub user object ID for RBAC test assignments."
+  value       = "00000000-0000-0000-0000-000000000001"
 }

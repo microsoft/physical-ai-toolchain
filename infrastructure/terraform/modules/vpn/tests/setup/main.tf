@@ -31,22 +31,27 @@ locals {
 }
 
 output "resource_prefix" {
-  value = local.resource_prefix
+  description = "Generated resource naming prefix for test isolation."
+  value       = local.resource_prefix
 }
 
 output "environment" {
-  value = local.environment
+  description = "Environment identifier for test configuration."
+  value       = local.environment
 }
 
 output "instance" {
-  value = local.instance
+  description = "Instance identifier for test configuration."
+  value       = local.instance
 }
 
 output "location" {
-  value = local.location
+  description = "Azure region for test resources."
+  value       = local.location
 }
 
 output "resource_group" {
+  description = "Mock resource group object for test input."
   value = {
     id       = local.resource_group_id
     name     = local.resource_group_name
@@ -55,6 +60,7 @@ output "resource_group" {
 }
 
 output "virtual_network" {
+  description = "Mock virtual network reference for test input."
   value = {
     id   = local.vnet_id
     name = local.vnet_name
