@@ -6,7 +6,11 @@ set -o errexit -o nounset
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || dirname "$SCRIPT_DIR")"
 
+# shellcheck source=../../../shared/lib/common.sh
+# shellcheck disable=SC1091
 source "$REPO_ROOT/shared/lib/common.sh"
+# shellcheck source=lib/terraform-outputs.sh
+# shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/terraform-outputs.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
@@ -315,6 +319,8 @@ fi
 
 [[ "$headless" == "true" ]] && cmd="$cmd --headless"
 
+# AML snapshots training/ as the code root, so recreate the top-level training path
+# expected by the shell entrypoint and Python imports inside the job container.
 az_args+=(--set "command=if [ ! -e training ]; then ln -s . training; fi && bash training/rl/scripts/train.sh $cmd")
 
 # Input values
