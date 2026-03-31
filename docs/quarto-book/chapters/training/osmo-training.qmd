@@ -1,0 +1,5 @@
+---
+title: "OSMO Training"
+---
+
+{{< include ../../../../docs/training/osmo-training.md >}}

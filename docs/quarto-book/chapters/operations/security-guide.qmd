@@ -1,0 +1,5 @@
+---
+title: "Security Guide"
+---
+
+{{< include ../../../../docs/operations/security-guide.md >}}

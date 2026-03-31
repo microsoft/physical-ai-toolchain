@@ -1,0 +1,235 @@
+---
+title: "Markov Decision Processes"
+---
+
+Markov Decision Processes provide the mathematical foundation for sequential decision-making
+under uncertainty. Every reinforcement learning algorithm in the Physical AI Toolchain—from
+PPO in SKRL to SAC in RSL-RL—operates on an MDP defined by an Isaac Lab environment.
+
+![State-based decision-making under uncertainty is central to robotics planning.
+*Image: [Finite state machine](https://commons.wikimedia.org/wiki/File:Finite_state_machine_example_with_comments.svg)
+by Ferrislucas, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/Finite_state_machine_example_with_comments.svg/600px-Finite_state_machine_example_with_comments.svg.png){fig-alt="Finite state machine diagram illustrating state transitions" width="60%"}
+
+## What Is an MDP?
+
+A Markov Decision Process is a tuple $\mathcal{M} = (\mathcal{S}, \mathcal{A}, P, R, \gamma)$:
+
+| Symbol | Name | Description |
+|--------|------|-------------|
+| $\mathcal{S}$ | State space | Set of all possible states the agent can occupy |
+| $\mathcal{A}$ | Action space | Set of all actions available to the agent |
+| $P(s' \mid s, a)$ | Transition function | Probability of reaching state $s'$ from state $s$ after taking action $a$ |
+| $R(s, a, s')$ | Reward function | Immediate scalar reward received after transitioning from $s$ to $s'$ via $a$ |
+| $\gamma \in [0, 1)$ | Discount factor | Weight applied to future rewards, encoding time preference |
+
+The agent interacts with the environment in discrete timesteps. At each step $t$, the agent
+observes state $s_t$, selects action $a_t$ according to its policy $\pi(a \mid s)$, receives
+reward $r_t$, and transitions to state $s_{t+1}$.
+
+## The Markov Property
+
+The defining characteristic of an MDP is the **Markov property**: the future is conditionally
+independent of the past given the present.
+
+$$
+P(s_{t+1} \mid s_t, a_t, s_{t-1}, a_{t-1}, \ldots, s_0, a_0) = P(s_{t+1} \mid s_t, a_t)
+$$
+
+This property matters for robotics because it dictates what constitutes a sufficient state
+representation. A joint-angle vector alone may satisfy the Markov property for a fully
+actuated arm, but a camera image may not—the robot might need velocity information or a
+history of frames to make the state Markov. When the Markov property does not hold, the
+problem becomes a POMDP (discussed below).
+
+## Policies and Value Functions
+
+A **policy** $\pi(a \mid s)$ maps states to a probability distribution over actions. The goal
+is to find a policy that maximizes expected cumulative discounted reward.
+
+The **state-value function** under policy $\pi$ gives the expected return starting from
+state $s$:
+
+$$
+V^\pi(s) = \mathbb{E}_\pi \left[ \sum_{t=0}^{\infty} \gamma^t r_t \;\middle|\; s_0 = s \right]
+$$
+
+The **action-value function** gives the expected return from taking action $a$ in state $s$
+and following $\pi$ thereafter:
+
+$$
+Q^\pi(s, a) = \mathbb{E}_\pi \left[ \sum_{t=0}^{\infty} \gamma^t r_t \;\middle|\; s_0 = s, a_0 = a \right]
+$$
+
+The relationship between the two:
+
+$$
+V^\pi(s) = \sum_{a \in \mathcal{A}} \pi(a \mid s) \, Q^\pi(s, a)
+$$
+
+## Bellman Equations
+
+Value functions satisfy recursive relationships known as the **Bellman equations**. These
+decompose the value of a state into the immediate reward plus the discounted value of the
+successor state.
+
+### Bellman Expectation Equation
+
+For a fixed policy $\pi$:
+
+$$
+V^\pi(s) = \sum_{a} \pi(a \mid s) \sum_{s'} P(s' \mid s, a) \left[ R(s, a, s') + \gamma \, V^\pi(s') \right]
+$$
+
+$$
+Q^\pi(s, a) = \sum_{s'} P(s' \mid s, a) \left[ R(s, a, s') + \gamma \sum_{a'} \pi(a' \mid s') \, Q^\pi(s', a') \right]
+$$
+
+### Bellman Optimality Equation
+
+The optimal value functions satisfy:
+
+$$
+V^*(s) = \max_{a} \sum_{s'} P(s' \mid s, a) \left[ R(s, a, s') + \gamma \, V^*(s') \right]
+$$
+
+$$
+Q^*(s, a) = \sum_{s'} P(s' \mid s, a) \left[ R(s, a, s') + \gamma \max_{a'} Q^*(s', a') \right]
+$$
+
+The optimal policy selects the action maximizing $Q^*$: $\pi^*(s) = \arg\max_a Q^*(s, a)$.
+
+## MDP for a Pick-and-Place Task
+
+The following diagram models a simplified pick-and-place robot as an MDP, where each node is
+a state and edges represent actions with associated rewards.
+
+```{mermaid}
+%%| label: fig-mdp-pick-place
+%%| fig-cap: "MDP State Transition Graph for a Pick-and-Place Task"
+stateDiagram-v2
+    [*] --> Approach: move_to_object / r=-1
+    Approach --> PreGrasp: align_gripper / r=-1
+    PreGrasp --> Grasp: close_gripper / r=-1
+    Grasp --> Lift: lift_object / r=-1
+    Grasp --> PreGrasp: grasp_failed / r=-5
+    Lift --> Transport: move_to_target / r=-1
+    Transport --> Place: open_gripper / r=+10
+    Place --> [*]: reset / r=0
+    Lift --> Approach: object_dropped / r=-5
+```
+
+Each action incurs a small step penalty ($r = -1$) to encourage efficiency. Failures return
+the agent to earlier states with a larger penalty. Successful placement yields a positive
+reward of $+10$.
+
+## Value Iteration: A Gridworld Example
+
+Value iteration computes $V^*$ by repeatedly applying the Bellman optimality operator until
+convergence. This example implements a 4×4 gridworld where the agent navigates to a goal cell.
+
+```{python}
+#| eval: false
+#| code-fold: false
+import numpy as np
+
+GRID_SIZE = 4
+GAMMA = 0.99
+THETA = 1e-6  # convergence threshold
+GOAL = (3, 3)
+
+ACTIONS = {"up": (-1, 0), "down": (1, 0), "left": (0, -1), "right": (0, 1)}
+
+def step(state, action):
+    """Deterministic transition: returns (next_state, reward)."""
+    dr, dc = ACTIONS[action]
+    nr, nc = state[0] + dr, state[1] + dc
+    if 0 <= nr < GRID_SIZE and 0 <= nc < GRID_SIZE:
+        next_state = (nr, nc)
+    else:
+        next_state = state  # wall collision
+    reward = 0.0 if next_state == GOAL else -1.0
+    return next_state, reward
+
+# Value iteration
+V = np.zeros((GRID_SIZE, GRID_SIZE))
+
+for iteration in range(1000):
+    delta = 0.0
+    for r in range(GRID_SIZE):
+        for c in range(GRID_SIZE):
+            if (r, c) == GOAL:
+                continue
+            old_v = V[r, c]
+            values = []
+            for action in ACTIONS:
+                (nr, nc), reward = step((r, c), action)
+                values.append(reward + GAMMA * V[nr, nc])
+            V[r, c] = max(values)
+            delta = max(delta, abs(old_v - V[r, c]))
+    if delta < THETA:
+        print(f"Converged after {iteration + 1} iterations")
+        break
+
+print("Optimal Value Function:")
+print(np.round(V, 2))
+```
+
+::: {.callout-tip}
+## Understanding Convergence
+Value iteration converges because the Bellman optimality operator is a contraction mapping
+with factor $\gamma < 1$. Each iteration reduces the maximum error by at least a factor of
+$\gamma$, guaranteeing convergence to $V^*$ regardless of initialization.
+:::
+
+## Partially Observable MDPs
+
+Real robots rarely have access to the full environment state. Cameras have limited fields of
+view, encoders have noise, and objects may be occluded. A **Partially Observable MDP (POMDP)**
+extends the MDP with:
+
+- An observation space $\Omega$ and observation function $O(o \mid s', a)$
+- A belief state $b(s) = P(s_t = s \mid o_1, a_1, \ldots, o_t)$
+
+The agent maintains a probability distribution over states (the belief) and selects actions
+based on this belief rather than the true state. In practice, deep RL sidesteps explicit
+belief tracking by using observation histories—stacking frames, recurrent networks, or
+transformer architectures—to approximate sufficient statistics of the belief.
+
+| Aspect | MDP | POMDP |
+|--------|-----|-------|
+| State access | Full state $s_t$ observed | Partial observation $o_t$ received |
+| Decision input | Current state | Belief distribution or observation history |
+| Complexity | Polynomial (tabular) | Undecidable in general |
+| Robotics example | Joint angles + velocities | Camera images, tactile sensors |
+| Practical approach | Direct policy on state | Frame stacking, RNNs, transformers |
+
+::: {.callout-important}
+## Isaac Lab and the MDP Interface
+Isaac Lab environments implement the MDP interface through the `ManagerBasedRLEnv` class.
+Each environment defines its state space via `ObservationManager`, action space via
+`ActionManager`, reward via `RewardManager`, and termination conditions via
+`TerminationManager`. The transition dynamics are handled by PhysX 5 physics simulation.
+When you configure a task in `task_cfg.py`, you are specifying the components of
+$\mathcal{M} = (\mathcal{S}, \mathcal{A}, P, R, \gamma)$. The discount factor $\gamma$
+is set in the RL algorithm configuration (SKRL or RSL-RL), not in the environment itself.
+:::
+
+## From Theory to Practice
+
+MDPs bridge the gap between mathematical formalism and practical robot learning. The key
+mapping for the Physical AI Toolchain:
+
+| MDP Component | Toolchain Implementation |
+|---------------|--------------------------|
+| $\mathcal{S}$ | `ObservationManager` tensors (joint positions, velocities, object poses) |
+| $\mathcal{A}$ | `ActionManager` tensors (joint torques, position targets) |
+| $P$ | PhysX 5 rigid-body simulation at 200 Hz |
+| $R$ | `RewardManager` with configurable reward terms |
+| $\gamma$ | SKRL/RSL-RL agent config (typically 0.99) |
+| $\pi$ | Neural network policy trained via PPO or SAC |
+
+Understanding MDPs is essential because every design decision in the training pipeline—reward
+function shape, observation space composition, discount factor tuning—corresponds to a
+specific element of the MDP formulation. The chapters that follow build on this foundation
+to cover reward engineering, simulation, and the learning algorithms themselves.

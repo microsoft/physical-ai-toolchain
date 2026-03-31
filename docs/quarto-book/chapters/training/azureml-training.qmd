@@ -1,0 +1,5 @@
+---
+title: "AzureML Training"
+---
+
+{{< include ../../../../docs/training/azureml-training.md >}}

@@ -1,0 +1,110 @@
+---
+title: "Training Overview"
+---
+
+Training runs on GPU-accelerated Kubernetes clusters via Azure ML and NVIDIA OSMO. The toolchain
+supports both reinforcement learning (Isaac Lab + SKRL) and imitation learning (LeRobot).
+
+![Robotic systems learn manipulation tasks through iterative training in simulated environments.
+*Image: [Humanoid robot](https://commons.wikimedia.org/wiki/File:ASIMO_4.28.11.jpg)
+by Vanillase, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/ASIMO_4.28.11.jpg/429px-ASIMO_4.28.11.jpg){fig-alt="Honda ASIMO humanoid robot" width="60%"}
+
+## Training Frameworks
+
+```{mermaid}
+%%| label: fig-training-pipelines
+%%| fig-cap: "Reinforcement Learning and Imitation Learning Training Pipelines"
+flowchart LR
+    subgraph RL["Reinforcement Learning"]
+        ISIM[Isaac Sim] --> ILAB[Isaac Lab]
+        ILAB --> SKRL[SKRL Agent]
+        SKRL --> CKPT_RL[Checkpoint]
+    end
+
+    subgraph IL["Imitation Learning"]
+        DATA[Demo Data] --> LRBT[LeRobot]
+        LRBT --> ACT[ACT Policy]
+        LRBT --> DIFF[Diffusion Policy]
+        ACT --> CKPT_IL[Checkpoint]
+        DIFF --> CKPT_IL
+    end
+
+    CKPT_RL --> MLF[MLflow Registry]
+    CKPT_IL --> MLF
+    MLF --> DEPLOY[Edge Deployment]
+```
+
+| Framework | Type | Use Case |
+|-----------|------|----------|
+| **SKRL** | Reinforcement Learning | Primary RL framework for Isaac Lab tasks |
+| **RSL-RL** | Reinforcement Learning | Alternative RL framework |
+| **LeRobot ACT** | Imitation Learning | Action Chunking Transformer policy |
+| **LeRobot Diffusion** | Imitation Learning | Diffusion-based policy |
+
+## Submitting a Training Job
+
+### Via Azure ML
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Submit RL training to Azure ML
+az ml job create \
+  --file workflows/azureml/rl-training-job.yml \
+  --resource-group rg-nvidia-dev-001 \
+  --workspace-name mlw-nvidia-dev-001 \
+  --set display_name="cartpole-ppo-$(date +%Y%m%d-%H%M)" \
+  --set environment_variables.ACCEPT_EULA="Y" \
+  --set environment_variables.PRIVACY_CONSENT="Y"
+```
+
+### Via OSMO
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Login to OSMO
+osmo login https://osmo.example.com --method dev --username guest
+
+# Submit workflow
+osmo workflow submit \
+  --name rl-cartpole \
+  --config workflows/osmo/rl-training.yml
+```
+
+## Experiment Tracking with MLflow
+
+Training metrics are automatically logged to Azure ML via MLflow:
+
+```{python}
+#| eval: false
+#| code-fold: false
+import mlflow
+from skrl.agents.torch.ppo import PPO
+
+# MLflow monkey-patches agent._update for metric interception
+# Logging intervals: "step", "balanced" (default), "rollout", or integer
+
+mlflow.log_params({
+    "algorithm": "PPO",
+    "num_envs": 4096,
+    "learning_rate": 3e-4,
+    "clip_range": 0.2,
+    "entropy_coef": 0.01,
+})
+```
+
+## GPU Requirements
+
+| GPU | Driver | MIG | Notes |
+|-----|--------|-----|-------|
+| H100 | GPU Operator datacenter | Disabled | Standard |
+| RTX PRO 6000 | Azure GRID DaemonSet | `single` (required) | `nvidia.com/gpu.deploy.driver=false` |
+
+::: {.callout-warning}
+`NVIDIA_DRIVER_CAPABILITIES=all` is **required** for all GPU workloads — Isaac Sim
+needs Vulkan for rendering.
+:::
+
+{{< include ../../../../docs/training/README.md >}}

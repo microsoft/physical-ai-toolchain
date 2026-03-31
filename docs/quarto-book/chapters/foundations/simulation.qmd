@@ -1,0 +1,263 @@
+---
+title: "Simulation for Robotics"
+---
+
+Simulation enables robot learning at a scale and speed impossible in the physical world.
+A single GPU cluster can run thousands of parallel environments, generating years of
+experience in hours. The Physical AI Toolchain builds on NVIDIA Isaac Sim to provide
+production-grade simulation infrastructure for reinforcement learning and evaluation.
+
+![Virtual environments enable safe, scalable robot training before real-world deployment.
+*Image: [Computer simulation](https://commons.wikimedia.org/wiki/File:Blender3D_HottubAfter.jpg)
+by Blender Foundation, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Blender3D_HottubAfter.jpg/512px-Blender3D_HottubAfter.jpg){fig-alt="3D rendered simulation environment" width="55%"}
+
+## Why Simulation?
+
+Training a robot policy requires millions of environment interactions. Collecting this data
+on physical hardware is impractical for four reasons:
+
+| Motivation | Physical World | Simulation |
+|------------|---------------|------------|
+| **Safety** | Collisions damage hardware and surroundings | Collisions are free |
+| **Scale** | One robot, real-time speed | Thousands of parallel environments, faster than real-time |
+| **Cost** | Hardware wear, human supervision | GPU compute only |
+| **Repeatability** | Environment varies uncontrollably | Deterministic resets, controlled randomization |
+
+These advantages make simulation the standard first stage in the robot learning pipeline.
+The challenge is ensuring that policies trained in simulation transfer to real hardware—the
+*sim-to-real gap*.
+
+## Physics Engines
+
+A physics engine computes how objects move and interact. Robotics simulation requires
+multiple physics modalities:
+
+**Rigid-body dynamics** models objects as non-deformable solids with mass, inertia, and
+contact forces. This covers most manipulation scenarios: grasping boxes, stacking objects,
+pushing items on a table.
+
+**Articulated-body dynamics** extends rigid-body simulation to kinematic chains—robot arms,
+hands, and legged platforms. Joints introduce constraints that couple the motion of
+connected links. The recursive Newton-Euler algorithm and Featherstone's Articulated Body
+Algorithm are standard solvers.
+
+**Soft-body and deformable simulation** handles cloth, rubber, and biological tissue. These
+require finite element methods (FEM) or position-based dynamics (PBD) and are significantly
+more expensive than rigid-body simulation.
+
+**Fluid dynamics** simulates liquids and granular materials using smoothed-particle
+hydrodynamics (SPH) or material point methods (MPM). Relevant for food handling, pouring,
+and agricultural robotics.
+
+## NVIDIA Isaac Sim Architecture
+
+Isaac Sim is NVIDIA's robotics simulation platform built on three pillars:
+
+```{mermaid}
+%%| label: fig-isaac-arch
+%%| fig-cap: "NVIDIA Isaac Sim Architecture Stack"
+flowchart TB
+    subgraph Omniverse["NVIDIA Omniverse Platform"]
+        USD[Universal Scene Description]
+        RENDER[RTX Renderer]
+    end
+
+    subgraph Physics["Physics Engine"]
+        PHYSX[PhysX 5 SDK]
+        RIGID[Rigid Body Solver]
+        ARTIC[Articulation Solver]
+        SOFT[Soft Body / FEM]
+        GPU_ACCEL[GPU-Accelerated Pipeline]
+    end
+
+    subgraph IsaacLab["Isaac Lab Framework"]
+        ENV[Environment Manager]
+        OBS[Observation Manager]
+        ACT[Action Manager]
+        REW[Reward Manager]
+        TERM[Termination Manager]
+    end
+
+    subgraph RL["RL Training"]
+        SKRL_A[SKRL Agent]
+        RSL[RSL-RL Agent]
+        VEC[Vectorized Environments]
+    end
+
+    USD --> PHYSX
+    RENDER --> GPU_ACCEL
+    PHYSX --> RIGID & ARTIC & SOFT
+    GPU_ACCEL --> ENV
+    RIGID & ARTIC --> ENV
+    ENV --> OBS & ACT & REW & TERM
+    OBS & ACT --> VEC
+    VEC --> SKRL_A & RSL
+```
+
+**Omniverse** provides the scene representation layer using Universal Scene Description (USD),
+NVIDIA's adopted extension of Pixar's scene format. USD enables composable, layered scene
+authoring—robots, objects, and environments are assembled from reusable components.
+
+**PhysX 5** is the physics engine, fully GPU-accelerated. It solves rigid-body contacts,
+articulated-body dynamics, and collision detection on the GPU without CPU round-trips. This
+enables thousands of environments to run in parallel on a single GPU.
+
+**RTX rendering** produces photorealistic images via ray tracing and path tracing. For RL
+training that uses state observations (joint positions, object poses), rendering is disabled
+to maximize simulation throughput. For vision-based policies or synthetic data generation,
+RTX rendering provides camera images indistinguishable from real photographs.
+
+## The Simulation Loop
+
+Every training step follows the same cycle:
+
+```{mermaid}
+%%| label: fig-sim-loop
+%%| fig-cap: "Simulation Training Loop"
+flowchart LR
+    RESET[Reset Environments] --> OBS[Observe State]
+    OBS --> POLICY[Policy Selects Action]
+    POLICY --> STEP[Physics Step]
+    STEP --> REWARD[Compute Reward]
+    REWARD --> DONE{Episode Done?}
+    DONE -->|No| OBS
+    DONE -->|Yes| RESET
+```
+
+In vectorized training, all environments execute each stage simultaneously. A single call to
+`env.step(actions)` advances all $N$ environments in parallel, returning $N$ observations,
+$N$ rewards, and $N$ termination flags. This batched execution is what makes GPU-accelerated
+simulation orders of magnitude faster than sequential alternatives.
+
+## Sim-to-Real Transfer
+
+A policy trained in simulation encounters discrepancies when deployed on real hardware:
+
+- **Dynamics mismatch**: simulated friction, damping, and contact models are approximations
+- **Sensor noise**: real cameras and encoders produce noise absent in clean simulation
+- **Actuator lag**: real motors have latency and bandwidth limits not modeled precisely
+- **Visual gap**: rendered images differ from real-world appearance
+
+### Domain Randomization
+
+The primary technique for bridging the sim-to-real gap is **domain randomization**: varying
+simulation parameters during training so the policy learns to be robust to a range of
+conditions that brackets reality.
+
+Common randomization targets:
+
+| Parameter | Randomization Range | Effect |
+|-----------|-------------------|--------|
+| Object mass | ±30% of nominal | Robustness to payload variation |
+| Friction coefficients | 0.3–1.0 | Handling different surfaces |
+| Joint damping | ±20% | Compensating for actuator modeling errors |
+| Observation noise | Gaussian $\sigma = 0.01$ | Tolerance to sensor imprecision |
+| Action delay | 0–3 steps | Robustness to communication latency |
+| Gravity vector | ±0.5° tilt | Compensating for mounting imprecision |
+
+By training over a distribution of environments, the policy learns behaviors that work
+across the entire range—including the real world, which is (ideally) one sample from that
+distribution.
+
+## Photorealistic vs Headless Simulation
+
+Isaac Sim operates in two modes:
+
+**Headless (state-based training)**: rendering is disabled entirely. The environment returns
+numerical state vectors—joint positions, object poses, contact forces—directly from the
+physics engine. This mode maximizes throughput and is used for all RL training in the
+Physical AI Toolchain.
+
+**Rendered (vision-based training and evaluation)**: RTX rendering generates camera images.
+This is necessary for training vision-based policies, generating synthetic training data
+for perception models, and visual evaluation of learned behaviors. Rendering reduces
+environment throughput by approximately 10×.
+
+## Parallel Environments
+
+The performance advantage of GPU simulation is dramatic:
+
+```{python}
+#| eval: false
+#| code-fold: false
+import omni.isaac.lab as lab
+from omni.isaac.lab.envs import ManagerBasedRLEnvCfg
+
+# Configuration for parallel environments
+env_cfg = ManagerBasedRLEnvCfg(
+    num_envs=4096,              # 4096 environments in parallel
+    episode_length_s=5.0,       # 5-second episodes
+    sim=lab.sim.SimulationCfg(
+        dt=0.005,               # 200 Hz physics
+        render_interval=0,      # headless mode (no rendering)
+        gravity=(0.0, 0.0, -9.81),
+        physx=lab.sim.PhysxCfg(
+            num_threads=0,      # GPU solver (no CPU threads)
+            solver_type=1,      # TGS solver
+            num_position_iterations=4,
+            num_velocity_iterations=0,
+            gpu_found_lost_pairs_capacity=2**21,
+            gpu_total_aggregate_pairs_capacity=2**21,
+        ),
+    ),
+)
+
+# Stepping 4096 environments simultaneously
+# env = ManagerBasedRLEnv(cfg=env_cfg)
+# obs, info = env.reset()
+# for step in range(1000):
+#     actions = policy(obs)
+#     obs, rewards, terminated, truncated, info = env.step(actions)
+```
+
+At 4096 environments and 200 Hz physics, a single training step generates 4096 transitions.
+A 5-second episode at 200 Hz produces 1000 steps. One pass through all environments yields
+~4 million transitions—collected in seconds of wall-clock time on a single GPU.
+
+## Digital Twins
+
+A **digital twin** is a simulation environment that mirrors a specific physical installation
+with high fidelity: exact robot model, workspace geometry, sensor placement, and object
+properties. Unlike generic simulation environments used for pre-training, digital twins
+enable:
+
+- Fine-tuning policies for a specific deployment site
+- Validating behavior changes before deploying to physical hardware
+- Monitoring real-time state by synchronizing sensor data into the simulation
+
+The toolchain supports digital twin workflows through USD scene composition—real-world
+environments are modeled as USD stages that can be loaded into Isaac Sim for both training
+and evaluation.
+
+## Robotics Simulator Comparison
+
+| Simulator | Physics Engine | GPU Parallel | Rendering | Language | License |
+|-----------|---------------|-------------|-----------|----------|---------|
+| **Isaac Sim** | PhysX 5 (GPU) | Thousands of envs | RTX ray tracing | Python | Proprietary (free) |
+| **MuJoCo** | Custom (CPU/GPU) | MJX for GPU | OpenGL | Python/C | Apache 2.0 |
+| **PyBullet** | Bullet (CPU) | Limited | OpenGL | Python | zlib |
+| **Gazebo** | ODE/DART/Bullet | No | OGRE | C++/Python | Apache 2.0 |
+| **Drake** | Custom (CPU) | No | VTK | C++/Python | BSD-3 |
+| **Brax** | Custom (JAX) | TPU/GPU native | None | Python | Apache 2.0 |
+
+Isaac Sim's combination of GPU-accelerated physics, photorealistic rendering, and massive
+parallelism makes it the preferred choice for the Physical AI Toolchain.
+
+::: {.callout-tip}
+## Throughput Rule of Thumb
+For state-based RL, expect ~50,000 environment steps per second per GPU with 4096
+environments on an H100. Vision-based training with 128×128 RGB cameras drops to ~5,000
+steps per second. Plan GPU hours accordingly when estimating training job costs.
+:::
+
+::: {.callout-important}
+## Isaac Sim Containers on AKS
+The Physical AI Toolchain runs Isaac Sim inside NVIDIA containers (`nvcr.io/nvidia/isaac-lab`)
+on AKS GPU nodes. Training jobs submitted via AzureML or OSMO pull this container image and
+execute headless simulation on H100 or RTX PRO 6000 GPUs. The container requires
+`ACCEPT_EULA=Y`, `PRIVACY_CONSENT=Y`, and `NVIDIA_DRIVER_CAPABILITIES=all` environment
+variables. PhysX 5 runs entirely on the GPU—no CPU physics threads are used. The Vulkan
+graphics API is required even in headless mode for GPU resource management, which is why
+`NVIDIA_DRIVER_CAPABILITIES` must include the `graphics` capability (included in `all`).
+:::

@@ -1,0 +1,5 @@
+---
+title: "DNS Configuration"
+---
+
+{{< include ../../../../docs/infrastructure/dns.md >}}

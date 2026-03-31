@@ -1,0 +1,118 @@
+---
+title: "Infrastructure Overview"
+---
+
+Azure infrastructure forms the foundation of the Physical AI Toolchain. This chapter covers
+the Terraform-managed resources that power GPU training, container orchestration, and edge connectivity.
+
+![Cloud data center infrastructure powers GPU-accelerated robotics training.
+*Image: [Inside a data center](https://commons.wikimedia.org/wiki/File:CERN_Server_03.jpg)
+by Florian Hirzinger, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/b/b8/CERN_Server_03.jpg/640px-CERN_Server_03.jpg){fig-alt="Server racks inside a data center" width="80%"}
+
+## Core Resources
+
+The infrastructure deploys the following Azure resources via Terraform:
+
+```{mermaid}
+%%| label: fig-infra-resources
+%%| fig-cap: "Azure Resource Topology"
+flowchart TB
+    RG[Resource Group] --> VNET[Virtual Network]
+    RG --> AKS[AKS Cluster]
+    RG --> ACR[Container Registry]
+    RG --> SA[Storage Account]
+    RG --> MLW[ML Workspace]
+
+    VNET --> SNET_AKS[AKS Subnet]
+    VNET --> SNET_PE[Private Endpoint Subnet]
+    VNET --> SNET_GW[Gateway Subnet]
+
+    AKS --> NP_SYS[System Pool]
+    AKS --> NP_GPU[GPU Node Pool]
+    AKS --> NP_SPOT[GPU Spot Pool]
+```
+
+## Deployment Pipeline
+
+Infrastructure deploys in four ordered steps:
+
+| Step | Directory | Purpose |
+|------|-----------|---------|
+| 1 | `prerequisites/` | Azure subscription init and provider registration |
+| 2 | `terraform/` | Core AKS, networking, storage, identity |
+| 3 | `terraform/vpn/` | Point-to-site VPN for private cluster access |
+| 4 | `setup/` | Helm charts, AzureML extension, OSMO |
+
+## Terraform Quick Start
+
+Initialize and plan infrastructure:
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Step 1: Initialize Azure subscription
+source infrastructure/terraform/prerequisites/az-sub-init.sh
+
+# Step 2: Plan infrastructure
+cd infrastructure/terraform
+terraform init
+terraform plan -var-file=terraform.tfvars
+```
+
+Validate the Terraform configuration:
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Format check
+terraform fmt -check -recursive
+
+# Validate
+terraform validate
+
+# Run module tests (no Azure credentials required)
+terraform test
+```
+
+## Resource Naming Convention
+
+Resources follow the pattern: `{abbreviation}-{resource_prefix}-{environment}-{instance}`
+
+```{python}
+#| eval: false
+#| code-fold: false
+# Example: Generate resource names for a deployment
+config = {
+    "resource_prefix": "nvidia",
+    "environment": "dev",
+    "instance": "001",
+}
+
+resources = {
+    "aks": f"aks-{config['resource_prefix']}-{config['environment']}-{config['instance']}",
+    "acr": f"acr{config['resource_prefix']}{config['environment']}{config['instance']}",
+    "vnet": f"vnet-{config['resource_prefix']}-{config['environment']}-{config['instance']}",
+    "mlw": f"mlw-{config['resource_prefix']}-{config['environment']}-{config['instance']}",
+}
+
+for resource_type, name in resources.items():
+    print(f"  {resource_type}: {name}")
+```
+
+## Network Topology
+
+Three network modes are supported:
+
+| Mode | Public API | Private Endpoints | VPN Required |
+|------|-----------|-------------------|--------------|
+| **Full Private** (default) | No | Yes | Yes |
+| **Hybrid** | Yes | Yes | No |
+| **Full Public** | Yes | No | No |
+
+::: {.callout-important}
+Default is private AKS — VPN step 3 is **required** before any `kubectl` or Helm
+commands unless `should_enable_public_access = true`.
+:::
+
+{{< include ../../../../docs/infrastructure/infrastructure.md >}}

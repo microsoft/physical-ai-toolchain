@@ -1,0 +1,19 @@
+---
+title: "License"
+---
+
+## MIT License
+
+This project is licensed under the MIT License. See the full license text at
+[LICENSE](https://github.com/microsoft/physical-ai-toolchain/blob/main/LICENSE).
+
+## Documentation License
+
+Documentation text in this book is available under
+[Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).
+
+![Creative Commons Attribution 4.0 International License](https://licensebuttons.net/l/by/4.0/88x31.png){fig-alt="CC BY 4.0 license badge"}
+
+You are free to share and adapt the material for any purpose, even commercially,
+as long as you give appropriate credit, provide a link to the license, and
+indicate if changes were made.

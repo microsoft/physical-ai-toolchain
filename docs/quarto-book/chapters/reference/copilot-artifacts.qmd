@@ -1,0 +1,5 @@
+---
+title: "Copilot Artifacts"
+---
+
+{{< include ../../../../docs/reference/copilot-artifacts.md >}}

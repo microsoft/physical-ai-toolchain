@@ -1,0 +1,275 @@
+---
+title: "Imitation Learning"
+---
+
+Imitation learning trains robot policies from human demonstrations rather than reward signals.
+An expert operator teleoperates a robot, recording observations and actions. The policy
+learns to reproduce this behavior through supervised learning. The Physical AI Toolchain
+integrates LeRobot for imitation learning, supporting Action Chunking Transformers and
+Diffusion Policies for manipulation tasks.
+
+![Learning from demonstration is a natural paradigm for teaching robots complex tasks.
+*Image: [Teacher and student](https://commons.wikimedia.org/wiki/File:Teachingblackandwhiteconvertimage.jpg)
+by Mosborne01, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/Teachingblackandwhiteconvertimage.jpg/512px-Teachingblackandwhiteconvertimage.jpg){fig-alt="Teaching and learning interaction" width="50%"}
+
+## Learning from Demonstrations
+
+Reinforcement learning requires a reward function—a mathematical specification of the task.
+For many real-world tasks, writing a reward function is harder than simply showing the robot
+what to do. Imitation learning bypasses reward design entirely by learning from a dataset of
+expert demonstrations:
+
+$$
+\mathcal{D} = \{(o_1, a_1), (o_2, a_2), \ldots, (o_N, a_N)\}
+$$
+
+where $o_t$ is an observation (joint states, camera images) and $a_t$ is the expert's action
+at timestep $t$. The two primary approaches to imitation learning are **behavioral cloning**
+and **inverse reinforcement learning**.
+
+```{mermaid}
+%%| label: fig-il-pipeline
+%%| fig-cap: "Imitation Learning Pipeline: From Demonstration to Deployment"
+flowchart LR
+    subgraph Collection["Data Collection"]
+        TELEOP[Teleoperation] --> REC[Record Episodes]
+        REC --> DS[Dataset]
+    end
+
+    subgraph Training["Policy Training"]
+        DS --> PREP[Preprocess & Augment]
+        PREP --> TRAIN[Train Policy Network]
+        TRAIN --> CKPT[Checkpoint]
+    end
+
+    subgraph Evaluation["Evaluation"]
+        CKPT --> SIL[Sim Evaluation]
+        CKPT --> HIL[Hardware Evaluation]
+        SIL --> METRICS[Success Rate]
+        HIL --> METRICS
+    end
+
+    subgraph Deployment["Deployment"]
+        METRICS --> GATE{Pass?}
+        GATE -->|Yes| EDGE[Edge Inference]
+        GATE -->|No| TELEOP
+    end
+```
+
+## Behavioral Cloning
+
+Behavioral cloning (BC) treats imitation as a supervised learning problem. Given the expert
+dataset $\mathcal{D}$, the policy $\pi_\theta$ is trained to minimize the prediction error:
+
+$$
+\mathcal{L}(\theta) = \mathbb{E}_{(o, a) \sim \mathcal{D}} \left[ \| \pi_\theta(o) - a \|^2 \right]
+$$
+
+For continuous action spaces, this is typically an MSE loss. For stochastic policies, the
+loss can be the negative log-likelihood of the expert actions under the policy's predicted
+distribution.
+
+BC is simple, stable, and efficient. It requires no environment interaction during training
+and converges quickly with sufficient data. However, it suffers from a fundamental problem:
+**distribution shift**.
+
+## Distribution Shift and Compounding Errors
+
+During training, BC sees observations drawn from the expert's state distribution. At
+deployment, the policy's own imperfect actions lead to states the expert never visited. Small
+prediction errors compound over time as the policy drifts further from the expert's
+trajectory distribution.
+
+The error compounds quadratically with the episode horizon $T$:
+
+$$
+\mathbb{E}\left[\sum_{t=0}^{T} \ell(s_t)\right] \leq \epsilon T^2
+$$
+
+where $\epsilon$ is the single-step imitation error. For a 200-step episode with 1% per-step
+error, the cumulative error grows to $200^2 \times 0.01 = 400$—far exceeding acceptable
+levels.
+
+### DAgger: Dataset Aggregation
+
+DAgger (Ross et al., 2011) addresses distribution shift by iteratively collecting data under
+the learned policy with expert corrections:
+
+1. Train $\pi_\theta$ on $\mathcal{D}$
+2. Execute $\pi_\theta$ in the environment, collecting observations $\{o_t\}$
+3. Query the expert for labels: $\{a_t^* = \pi^*(o_t)\}$
+4. Aggregate: $\mathcal{D} \leftarrow \mathcal{D} \cup \{(o_t, a_t^*)\}$
+5. Repeat from step 1
+
+DAgger achieves a linear rather than quadratic error bound: $\mathbb{E}[\sum_t \ell(s_t)]
+\leq \epsilon T$. The trade-off is requiring interactive expert access during training, which
+is expensive for physical robot tasks.
+
+## Modern Architectures
+
+Recent advances in imitation learning use expressive neural architectures that mitigate
+compounding errors through multi-step action prediction and stochastic generation.
+
+### Action Chunking Transformers (ACT)
+
+ACT (Zhao et al., 2023) predicts a *chunk* of $k$ future actions simultaneously rather than
+one action at a time:
+
+$$
+(a_t, a_{t+1}, \ldots, a_{t+k-1}) = \pi_\theta(o_t)
+$$
+
+The architecture uses a transformer encoder-decoder with a conditional variational
+autoencoder (CVAE) for capturing multi-modal action distributions:
+
+- **Encoder**: processes observation tokens (robot state, camera images) via self-attention
+- **Style variable**: a CVAE latent $z$ captures demonstration variability
+- **Decoder**: cross-attends to encoder features and autoregressively predicts the action chunk
+
+Action chunking reduces the effective horizon from $T$ to $T/k$, directly mitigating
+compounding errors. With $k = 20$ at 50 Hz control, each prediction covers 400 ms of
+robot motion—enough for smooth, coherent manipulation primitives.
+
+::: {.callout-tip}
+## Chunk Size Selection
+Larger chunks reduce compounding errors but increase the latency of reacting to unexpected
+perturbations. A chunk size of 20–100 at 50 Hz is typical for manipulation. For tasks
+requiring fast reactive behavior (catching, insertion under uncertainty), use smaller chunks
+(5–10) or a temporal ensemble that blends overlapping predictions.
+:::
+
+### Diffusion Policy
+
+Diffusion Policy (Chi et al., 2023) generates actions through iterative denoising, treating
+action prediction as a conditional generation problem:
+
+$$
+a_t^{(0)} \sim \mathcal{N}(0, I), \quad a_t^{(k)} = \text{denoise}(a_t^{(k-1)}, o_t, k), \quad k = 1, \ldots, K
+$$
+
+Starting from Gaussian noise, the model applies $K$ learned denoising steps conditioned on
+the observation to produce an action (or action chunk). The training objective is the
+denoising score matching loss:
+
+$$
+\mathcal{L}(\theta) = \mathbb{E}_{k, \epsilon, (o, a) \sim \mathcal{D}} \left[ \| \epsilon - \epsilon_\theta(a^{(k)}, o, k) \|^2 \right]
+$$
+
+Diffusion policies excel at capturing multi-modal action distributions—when multiple valid
+strategies exist for a task, the diffusion process can generate any of them depending on the
+initial noise sample. This is critical for contact-rich manipulation where multiple grasp
+approaches may be equally valid.
+
+## Dataset Requirements
+
+The quality and diversity of the demonstration dataset are the primary determinants of
+imitation learning success.
+
+| Factor | Requirement | Impact |
+|--------|------------|--------|
+| Number of demonstrations | 50–200 episodes per task | Minimum viable dataset |
+| Episode success rate | >95% expert demonstrations | Failed demos inject noise |
+| Task coverage | All relevant object positions, orientations | Generalization to unseen configurations |
+| Camera viewpoints | Consistent mounting, calibrated intrinsics | Visual feature stability |
+| Control frequency | 30–50 Hz for manipulation | Temporal resolution for smooth actions |
+| Data format | HuggingFace LeRobot format (Parquet + video) | Compatibility with training pipeline |
+
+### Teleoperation Methods
+
+| Method | Fidelity | Setup Cost | Throughput |
+|--------|----------|-----------|------------|
+| Leader-follower arms | High | Medium | 5–10 demos/hour |
+| VR controllers | Medium | Low | 10–20 demos/hour |
+| Keyboard/spacemouse | Low | Very low | 2–5 demos/hour |
+| Kinesthetic teaching | High | None (direct guiding) | 3–8 demos/hour |
+
+## Imitation Learning Methods Comparison
+
+| Method | Requires Environment | Multi-Modal Actions | Compounding Error | Data Efficiency | Compute |
+|--------|---------------------|--------------------|--------------------|----------------|---------|
+| **Behavioral Cloning** | No | Poor (MSE averages modes) | Quadratic in $T$ | High | Low |
+| **DAgger** | Yes (interactive expert) | Poor | Linear in $T$ | Very high | Low |
+| **ACT** | No | Good (CVAE latent) | Reduced by chunking | High | Medium |
+| **Diffusion Policy** | No | Excellent (denoising) | Reduced by chunking | High | High |
+
+## LeRobot Training Configuration
+
+The following configuration demonstrates an ACT policy training job using LeRobot, matching
+the format used in the Physical AI Toolchain for AzureML submission.
+
+```{python}
+#| eval: false
+#| code-fold: false
+# LeRobot ACT policy training configuration
+# Corresponds to a training YAML submitted via az ml job create
+
+training_config = {
+    "policy": {
+        "name": "act",
+        # Architecture
+        "chunk_size": 20,              # predict 20 future actions
+        "n_obs_steps": 1,             # single observation frame
+        "dim_model": 512,             # transformer hidden dimension
+        "n_heads": 8,                 # attention heads
+        "n_encoder_layers": 4,        # encoder depth
+        "n_decoder_layers": 7,        # decoder depth
+        "feedforward_dim": 3200,      # FFN intermediate dimension
+
+        # CVAE for multi-modal action distribution
+        "latent_dim": 32,
+        "n_vae_encoder_layers": 4,
+        "kl_weight": 10.0,
+
+        # Input configuration
+        "input_shapes": {
+            "observation.state": [14],  # 7 joint positions + 7 joint velocities
+            "observation.images.top": [3, 480, 640],
+        },
+        "output_shapes": {
+            "action": [14],             # 7 joint position targets + 7 gripper
+        },
+    },
+
+    "training": {
+        "num_epochs": 2000,
+        "batch_size": 64,
+        "learning_rate": 1e-5,
+        "lr_scheduler": "cosine",
+        "lr_warmup_steps": 500,
+        "grad_clip_norm": 10.0,
+        "seed": 1000,
+        "eval_freq": 10,              # evaluate every 10 epochs
+    },
+
+    "dataset": {
+        "repo_id": "physical-ai/pick-place-demos",
+        "episodes": 100,
+        "delta_timestamps": {
+            "observation.state": [0.0],
+            "observation.images.top": [0.0],
+            "action": [0.0, 0.02, 0.04],  # timestamps relative to current frame
+        },
+    },
+}
+```
+
+::: {.callout-note}
+## Delta Timestamps
+The `delta_timestamps` field controls which timesteps are included in each training sample.
+For actions, specifying multiple future timestamps (e.g., `[0.0, 0.02, 0.04, ...]`) defines
+the action chunk. For observations, negative timestamps enable frame stacking to provide
+temporal context. This mechanism is how LeRobot implements the observation and action windows
+that ACT and Diffusion Policy require.
+:::
+
+::: {.callout-important}
+## LeRobot in the Physical AI Toolchain
+The toolchain runs LeRobot training jobs on AzureML-connected AKS clusters. Training
+scripts install LeRobot via `uv pip` inside the container at runtime, load datasets from
+Azure Blob Storage or HuggingFace Hub, and log metrics to MLflow. The training configuration
+shown above maps to environment variables and YAML overrides passed to `az ml job create`.
+Trained checkpoints are uploaded to AzureML as `uri_folder` outputs and registered in the
+MLflow model registry. For evaluation, the toolchain supports both simulated rollouts (SIL)
+and hardware deployment (HIL) using the same checkpoint artifacts.
+:::

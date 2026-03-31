@@ -1,0 +1,103 @@
+/* Physical AI Toolchain — Bookdown-style Quarto theme overrides */
+
+/* Bookdown-inspired serif headings with sans body */
+:root {
+  --bs-body-font-family: "Source Sans Pro", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --bs-heading-font-family: "Source Serif Pro", Georgia, "Times New Roman", serif;
+}
+
+/* Title page styling */
+.quarto-title-block .quarto-title {
+  font-size: 2.8rem;
+  font-weight: 700;
+  border-bottom: 3px solid #0078d4;
+  padding-bottom: 0.5rem;
+}
+
+.quarto-title-block .subtitle {
+  color: #505050;
+  font-style: italic;
+}
+
+/* Microsoft Azure blue accents */
+a {
+  color: #0078d4;
+}
+
+a:hover {
+  color: #005a9e;
+}
+
+/* Sidebar styling */
+.sidebar nav .sidebar-item .sidebar-item-text {
+  font-size: 0.9rem;
+}
+
+/* Code block enhancements */
+div.sourceCode {
+  border-left: 4px solid #0078d4;
+  border-radius: 4px;
+}
+
+pre.sourceCode {
+  font-size: 0.88rem;
+  padding: 1rem;
+}
+
+/* Part dividers — bookdown style */
+.quarto-book .body-content .part-title {
+  font-size: 1.8rem;
+  border-top: 2px solid #76b900;
+  padding-top: 1rem;
+  margin-top: 3rem;
+  color: #333;
+}
+
+/* NVIDIA green accent for part headers */
+.quarto-book .body-content .part-title::before {
+  content: "Part ";
+  color: #76b900;
+  font-weight: 700;
+}
+
+/* Figure captions */
+figcaption {
+  font-style: italic;
+  font-size: 0.9rem;
+  color: #666;
+  text-align: center;
+}
+
+/* Callout box refinements */
+.callout {
+  border-radius: 6px;
+}
+
+/* Table styling */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+table th {
+  background-color: #f0f6ff;
+  border-bottom: 2px solid #0078d4;
+}
+
+/* Dark mode overrides */
+[data-bs-theme="dark"] table th {
+  background-color: #1a2332;
+  border-bottom: 2px solid #4db8ff;
+}
+
+[data-bs-theme="dark"] .quarto-book .body-content .part-title {
+  color: #e0e0e0;
+  border-top-color: #76b900;
+}
+
+/* Print-friendly */
+@media print {
+  .sidebar, .quarto-title-meta {
+    display: none;
+  }
+}

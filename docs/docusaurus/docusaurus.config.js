@@ -76,6 +76,11 @@ const config = {
             label: 'Documentation',
           },
           {
+            href: '/physical-ai-toolchain/book/',
+            label: '📖 Book',
+            position: 'left',
+          },
+          {
             href: 'https://github.com/microsoft/physical-ai-toolchain',
             label: 'GitHub',
             position: 'right',
@@ -118,6 +123,10 @@ const config = {
           {
             title: 'More',
             items: [
+              {
+                label: '📖 Book',
+                href: '/physical-ai-toolchain/book/',
+              },
               {
                 label: 'GitHub',
                 href: 'https://github.com/microsoft/physical-ai-toolchain',

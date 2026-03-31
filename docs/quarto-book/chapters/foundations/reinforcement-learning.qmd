@@ -1,0 +1,257 @@
+---
+title: "Reinforcement Learning for Robotics"
+---
+
+Reinforcement learning trains robot policies through trial and error in simulation. The agent
+takes actions, observes outcomes, receives rewards, and updates its behavior to maximize
+long-term return. The Physical AI Toolchain integrates two RL frameworks—SKRL and RSL-RL—with
+Isaac Lab environments running on GPU-accelerated Kubernetes clusters.
+
+![An agent learns by interacting with its environment and receiving reward feedback.
+*Image: [Industrial robot arm](https://commons.wikimedia.org/wiki/File:KUKA_robot_for_flat_glass_handling.jpg)
+by KUKA Roboter GmbH, Bachmann, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/KUKA_robot_for_flat_glass_handling.jpg/512px-KUKA_robot_for_flat_glass_handling.jpg){fig-alt="KUKA industrial robot arm for glass handling" width="55%"}
+
+## The Agent-Environment Loop
+
+RL formalizes the interaction between an agent and its environment as a loop operating on
+the MDP $\mathcal{M} = (\mathcal{S}, \mathcal{A}, P, R, \gamma)$:
+
+```{mermaid}
+%%| label: fig-rl-loop
+%%| fig-cap: "Reinforcement Learning Training Loop with Vectorized Environments"
+flowchart LR
+    subgraph VecEnv["Vectorized Environments (N=4096)"]
+        E1[Env 1]
+        E2[Env 2]
+        EN[Env N]
+    end
+
+    subgraph Agent["RL Agent"]
+        POLICY[Policy Network π_θ]
+        VALUE[Value Network V_φ]
+        BUFFER[Experience Buffer]
+        OPT[Optimizer]
+    end
+
+    VecEnv -- "obs (N × |S|)" --> POLICY
+    POLICY -- "actions (N × |A|)" --> VecEnv
+    VecEnv -- "rewards, dones" --> BUFFER
+    POLICY -- "log probs" --> BUFFER
+    VALUE -- "values" --> BUFFER
+    BUFFER -- "batched data" --> OPT
+    OPT -- "∇θ, ∇φ" --> POLICY & VALUE
+```
+
+At each timestep, all $N$ environments produce observations simultaneously. The policy
+network maps observations to actions in a single batched forward pass. The environments
+step in parallel, returning rewards and termination signals. After collecting a fixed number
+of steps, the agent computes advantages, forms mini-batches, and updates the policy and value
+networks via gradient descent.
+
+## Algorithm Families
+
+RL algorithms fall into three broad families, each with distinct trade-offs for robotics.
+
+### Value-Based Methods
+
+Value-based methods learn an action-value function $Q(s, a)$ and derive the policy by
+selecting the action with the highest value: $\pi(s) = \arg\max_a Q(s, a)$.
+
+**DQN** (Deep Q-Network) approximates $Q$ with a neural network and trains via the loss:
+
+$$
+\mathcal{L}(\theta) = \mathbb{E} \left[ \left( r + \gamma \max_{a'} Q_{\bar{\theta}}(s', a') - Q_\theta(s, a) \right)^2 \right]
+$$
+
+where $\bar{\theta}$ denotes a slowly-updated target network. DQN works well for discrete
+action spaces but does not extend naturally to the continuous actions required by robot
+joints.
+
+### Policy Gradient Methods
+
+Policy gradient methods directly parameterize and optimize the policy $\pi_\theta(a \mid s)$.
+The foundational result is the **policy gradient theorem**:
+
+$$
+\nabla_\theta J(\theta) = \mathbb{E}_{\pi_\theta} \left[ \nabla_\theta \log \pi_\theta(a_t \mid s_t) \, A^{\pi}(s_t, a_t) \right]
+$$
+
+where $A^\pi(s, a) = Q^\pi(s, a) - V^\pi(s)$ is the advantage function. The advantage
+measures how much better action $a$ is compared to the average action under the current
+policy.
+
+**REINFORCE** is the simplest policy gradient algorithm: collect a full episode, compute
+returns, and update the policy. It suffers from high variance and poor sample efficiency.
+
+### Actor-Critic Methods
+
+Actor-critic methods combine both approaches: a **critic** network estimates the value
+function, and an **actor** network parameterizes the policy. The critic provides low-variance
+baselines for policy gradient updates.
+
+**PPO**, **SAC**, and **TD3** are all actor-critic algorithms. They differ in how they
+balance exploration and exploitation, handle the policy update step, and whether they operate
+on-policy or off-policy.
+
+## On-Policy vs Off-Policy
+
+| Property | On-Policy (PPO) | Off-Policy (SAC, TD3) |
+|----------|----------------|----------------------|
+| Data reuse | Discarded after each update | Stored in replay buffer, reused many times |
+| Sample efficiency | Lower (needs fresh data) | Higher (data recycling) |
+| Stability | More stable (smaller policy changes) | Can be unstable (distributional shift) |
+| Parallelization | Naturally parallel (collect → update → collect) | Asynchronous updates possible |
+| Robotics fit | Dominant choice with fast simulators | Preferred when simulation is expensive |
+
+With Isaac Sim generating millions of transitions per second, on-policy methods like PPO
+become practical despite their lower sample efficiency—raw throughput compensates.
+
+## PPO Deep Dive
+
+Proximal Policy Optimization is the dominant algorithm for robotics RL. It constrains policy
+updates to a trust region, preventing the large destructive updates that plague vanilla policy
+gradient methods.
+
+### Clipped Surrogate Objective
+
+PPO defines the probability ratio between the new and old policy:
+
+$$
+r_t(\theta) = \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)}
+$$
+
+The clipped surrogate objective prevents the ratio from deviating too far from 1:
+
+$$
+\mathcal{L}^{\text{CLIP}}(\theta) = \mathbb{E}_t \left[ \min \left( r_t(\theta) \, \hat{A}_t, \; \text{clip}(r_t(\theta), 1 - \epsilon, 1 + \epsilon) \, \hat{A}_t \right) \right]
+$$
+
+where $\epsilon$ (typically 0.2) controls the maximum allowed policy change. If the advantage
+$\hat{A}_t$ is positive (the action was better than average), the objective increases
+$r_t(\theta)$ but clips it at $1 + \epsilon$. If the advantage is negative, it decreases
+$r_t(\theta)$ but clips at $1 - \epsilon$.
+
+### Why PPO Dominates Robotics
+
+1. **Stability**: the clipping mechanism prevents catastrophic policy updates
+2. **Parallelism**: on-policy data collection maps naturally to vectorized environments
+3. **Simplicity**: fewer hyperparameters than SAC or TD3
+4. **Generality**: works for both continuous and discrete action spaces
+5. **GPU efficiency**: the entire collect-update cycle runs on GPU without CPU bottlenecks
+
+## Sample Efficiency and Sim-to-Real
+
+The fundamental challenge of robotics RL is sample efficiency. A single grasp attempt takes
+seconds on real hardware. PPO might require $10^8$ environment steps to learn a manipulation
+policy—infeasible without simulation.
+
+### Transfer Strategies
+
+| Strategy | Mechanism | Toolchain Support |
+|----------|-----------|-------------------|
+| Domain randomization | Train over parameter distributions | Isaac Lab randomization events |
+| Asymmetric actor-critic | Critic sees privileged sim state, actor sees only real-world observations | SKRL agent configuration |
+| Action space design | Position/velocity targets (not raw torques) | Isaac Lab action managers |
+| Observation normalization | Running mean/std normalization | SKRL preprocessors |
+| Fine-tuning on real data | Adapt sim-trained policy with limited real transitions | Off-policy replay buffer |
+
+## PPO Configuration for SKRL
+
+The following configuration demonstrates PPO hyperparameters for a manipulation task, matching
+the structure used by SKRL with Isaac Lab in the toolchain.
+
+```{python}
+#| eval: false
+#| code-fold: false
+# SKRL PPO configuration for Isaac Lab manipulation tasks
+ppo_config = {
+    # Rollout
+    "rollouts": 24,                  # steps per environment before update
+    "learning_epochs": 8,            # epochs over collected data per update
+    "mini_batches": 4,               # mini-batches per epoch
+
+    # Discount and advantage
+    "discount_factor": 0.99,         # γ
+    "lambda": 0.95,                  # GAE λ for advantage estimation
+    "learning_rate": 3e-4,           # Adam learning rate
+    "learning_rate_scheduler": "KLAdaptiveLR",
+
+    # PPO-specific
+    "ratio_clip": 0.2,              # ε clipping parameter
+    "value_clip": 0.2,              # value function clipping
+    "entropy_loss_scale": 0.0,      # entropy bonus (0 for deterministic tasks)
+
+    # Normalization
+    "state_preprocessor": "RunningStandardScaler",
+    "value_preprocessor": "RunningStandardScaler",
+
+    # Network architecture
+    "policy_network": [256, 128, 64],  # MLP hidden layers
+    "value_network": [256, 128, 64],
+    "activation": "elu",
+}
+```
+
+::: {.callout-note}
+## Key Hyperparameters
+The most impactful PPO hyperparameters for robotics are: **rollout length** (longer rollouts
+capture more temporal structure but increase memory), **learning rate** (too high causes
+instability, too low slows convergence), and **clip ratio** (0.2 is the standard starting
+point). The adaptive KL-based learning rate scheduler adjusts the learning rate to maintain
+a target KL divergence between policy updates, providing automatic stability control.
+:::
+
+## Algorithm Comparison for Robotics
+
+| Algorithm | Type | Action Space | Sample Efficiency | Stability | Parallelization | Best For |
+|-----------|------|-------------|-------------------|-----------|-----------------|----------|
+| **PPO** | On-policy AC | Continuous/Discrete | Moderate | High | Excellent | Most robotics tasks |
+| **SAC** | Off-policy AC | Continuous | High | Moderate | Good | Dexterous manipulation |
+| **TD3** | Off-policy AC | Continuous | High | Moderate | Good | Locomotion |
+| **DrQ-v2** | Off-policy AC | Continuous | High (from pixels) | Moderate | Limited | Vision-based control |
+| **DQN** | Off-policy value | Discrete only | High | High | Good | Discrete decision tasks |
+
+## Multi-Environment Training at Scale
+
+The toolchain leverages GPU parallelism to train with thousands of environments
+simultaneously. The training pipeline runs entirely on-device:
+
+1. **Environment step**: PhysX 5 advances all environments in a single GPU kernel
+2. **Observation collection**: tensors remain on GPU memory
+3. **Policy inference**: forward pass through the neural network on the same GPU
+4. **Advantage computation**: GAE computed on GPU tensors
+5. **Policy update**: mini-batch SGD on GPU
+
+No data transfers between CPU and GPU occur during training. This architecture enables
+throughput exceeding 50,000 environment steps per second on a single H100.
+
+```{python}
+#| eval: false
+#| code-fold: false
+# Training throughput estimation
+num_envs = 4096
+physics_hz = 200           # simulation steps per second
+policy_hz = 50             # policy queries per second (decimation = 4)
+steps_per_second = num_envs * policy_hz  # 204,800 transitions/s
+
+rollout_length = 24        # steps per rollout
+transitions_per_update = num_envs * rollout_length  # 98,304
+
+target_steps = 100_000_000  # 100M total steps
+wall_time_hours = target_steps / steps_per_second / 3600
+print(f"Estimated wall time: {wall_time_hours:.1f} hours")
+# ~135 hours on 1 GPU → ~17 hours on 8 GPUs with linear scaling
+```
+
+::: {.callout-important}
+## SKRL and RSL-RL in the Physical AI Toolchain
+The toolchain integrates two RL frameworks with Isaac Lab. **SKRL** is the primary framework,
+offering a clean API with PPO, SAC, TD3, and other algorithms. It supports asymmetric
+actor-critic training and adaptive learning rate scheduling. **RSL-RL** is an alternative
+framework optimized for locomotion tasks, originally developed for legged robots. Both
+frameworks train on GPU-accelerated Isaac Lab environments and log metrics to MLflow via the
+toolchain's monkey-patched metric interception. Training checkpoints are saved to AzureML as
+`uri_folder` outputs and registered in the MLflow model registry for downstream evaluation
+and deployment.
+:::

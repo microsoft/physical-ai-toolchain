@@ -1,0 +1,61 @@
+---
+title: "Evaluation Overview"
+---
+
+Model evaluation validates trained policies before edge deployment. The toolchain supports
+software-in-the-loop (SIL) evaluation in simulation and hardware-in-the-loop (HIL) testing
+on physical robots.
+
+![Evaluation validates robot behavior in simulated and real environments before deployment.
+*Image: [Robot testing](https://commons.wikimedia.org/wiki/File:Baxter_robot.jpg)
+by Humanrobo, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Baxter_robot.jpg/567px-Baxter_robot.jpg){fig-alt="Baxter research robot in a lab environment" width="60%"}
+
+## Evaluation Pipeline
+
+```{mermaid}
+%%| label: fig-eval-pipeline
+%%| fig-cap: "Model Evaluation Pipeline"
+flowchart LR
+    MODEL[Trained Model] --> SIL[SIL Evaluation]
+    MODEL --> HIL[HIL Evaluation]
+
+    SIL --> METRICS[Metrics Dashboard]
+    HIL --> METRICS
+
+    METRICS --> GATE{Pass?}
+    GATE -->|Yes| DEPLOY[Deploy to Fleet]
+    GATE -->|No| RETRAIN[Retrain]
+```
+
+## Evaluation Metrics
+
+```{python}
+#| eval: false
+#| code-fold: false
+# Standard evaluation metrics for manipulation tasks
+metrics = {
+    "success_rate": "Percentage of episodes completing the task",
+    "grasp_accuracy": "Percentage of successful object grasps",
+    "cycle_time": "Average time to complete one task cycle (seconds)",
+    "path_efficiency": "Ratio of actual vs optimal path length",
+    "collision_rate": "Number of unplanned collisions per episode",
+}
+
+for name, desc in metrics.items():
+    print(f"  {name}: {desc}")
+```
+
+## Running SIL Evaluation
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Submit evaluation job to Azure ML
+az ml job create \
+  --file workflows/azureml/sil-evaluation.yml \
+  --set inputs.model_path="azureml://models/pick-place-ppo/versions/latest" \
+  --set environment_variables.NUM_EVAL_EPISODES=100
+```
+
+{{< include ../../../../docs/evaluation/README.md >}}

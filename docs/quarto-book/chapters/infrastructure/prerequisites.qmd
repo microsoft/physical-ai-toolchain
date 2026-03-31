@@ -1,0 +1,5 @@
+---
+title: "Infrastructure Prerequisites"
+---
+
+{{< include ../../../../docs/infrastructure/prerequisites.md >}}

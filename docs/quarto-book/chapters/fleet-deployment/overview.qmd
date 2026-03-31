@@ -1,0 +1,178 @@
+---
+title: "Fleet Deployment"
+---
+
+Fleet deployment bridges the gap between a validated model checkpoint in the cloud and a running inference process on a physical robot. The Physical AI Toolchain implements this bridge through a GitOps architecture built on FluxCD, Azure Arc-connected edge clusters, and an automated deployment gating service that prevents untested models from reaching production hardware.
+
+![Automated guided vehicles operating in a logistics warehouse represent the target deployment environment for fleet-scale robot policy rollout.
+*Image: [Automated Guided Vehicle](https://commons.wikimedia.org/wiki/File:Automated_guided_vehicle.jpg) by Grendelkhan, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/6/65/Automated_guided_vehicle.jpg/640px-Automated_guided_vehicle.jpg){fig-alt="Automated guided vehicle in a warehouse" width="70%"}
+
+## GitOps Architecture
+
+The deployment pipeline follows GitOps principles: a Git repository serves as the single source of truth for the desired state of every edge cluster. FluxCD controllers running on each Arc-connected device continuously reconcile the cluster state against the manifests in that repository. When a new model image appears in Azure Container Registry, an image automation controller detects the tag, commits an updated manifest to Git, and FluxCD propagates the change to every target cluster.
+
+This architecture eliminates imperative `kubectl apply` commands from the deployment workflow entirely. Operators interact only with Git — pull requests serve as the change control mechanism, and the audit trail is the commit history.
+
+```{mermaid}
+%%| label: fig-gitops-pipeline
+%%| fig-cap: "End-to-end GitOps pipeline from model registry through container build and FluxCD reconciliation to the edge fleet."
+flowchart LR
+    REG["Model Registry\n(ACR)"] --> SCAN["Image Reflector\nController"]
+    SCAN --> POL["ImagePolicy\n(semver filter)"]
+    POL --> AUTO["ImageUpdate\nAutomation"]
+    AUTO --> GIT["Git Commit\n(manifest update)"]
+    GIT --> SRC["FluxCD Source\nController"]
+    SRC --> GATE{"Deployment\nGating Service"}
+    GATE -->|approved| HELM["Helm / Kustomize\nController"]
+    GATE -->|rejected| ALERT["Operator\nNotification"]
+    HELM --> EDGE1["Edge Cluster A\n(K3s + Jetson)"]
+    HELM --> EDGE2["Edge Cluster B\n(K3s + Jetson)"]
+    HELM --> EDGE3["Edge Cluster N\n(K3s + Jetson)"]
+    EDGE1 --> TEL["Fleet Intelligence\nTelemetry"]
+    EDGE2 --> TEL
+    EDGE3 --> TEL
+```
+
+## FluxCD Components
+
+Six FluxCD custom resources form the deployment backbone:
+
+| Resource | Role |
+|----------|------|
+| `GitRepository` | Points the source controller at the fleet manifests repository |
+| `OCIRepository` | Tracks container image artifacts in Azure Container Registry |
+| `HelmRelease` | Declares Helm chart deployments with values overrides per cluster |
+| `Kustomization` | Applies Kustomize overlays for cluster-specific patches |
+| `ImagePolicy` | Defines semver or regex filters for acceptable image tags |
+| `ImageUpdateAutomation` | Commits updated image tags back to the Git repository |
+
+A typical edge inference workload is deployed via a `HelmRelease` that references a chart stored alongside the fleet manifests:
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Example FluxCD HelmRelease for an ACT inference node on Jetson Orin
+cat <<'EOF'
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: act-inference
+  namespace: robotics
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: ./charts/act-inference
+      sourceRef:
+        kind: GitRepository
+        name: fleet-manifests
+  values:
+    image:
+      repository: myacr.azurecr.io/act-inference
+      tag: 1.4.2  # {"$imagepolicy": "flux-system:act-inference"}
+    inference:
+      policyRepo: "alizaidi/hve-robo-act-train"
+      device: cuda
+      controlHz: 30
+      actionMode: absolute
+    resources:
+      limits:
+        nvidia.com/gpu: "1"
+        memory: 4Gi
+      requests:
+        memory: 2Gi
+  upgrade:
+    remediation:
+      retries: 3
+EOF
+```
+
+The `# {"$imagepolicy": ...}` marker tells the image update automation controller exactly which line to patch when a new tag matches the policy.
+
+## Model Conversion and Container Packaging
+
+Before deployment, trained PyTorch checkpoints undergo a conversion pipeline that targets the edge inference runtime:
+
+1. **ONNX export** — The policy network is traced and exported to ONNX format with fixed batch size and input dimensions matching the robot's sensor configuration.
+2. **TensorRT optimization** — The ONNX graph is compiled with `trtexec` targeting the Jetson Orin's GPU architecture (`sm_87`), producing an engine file with FP16 or INT8 precision.
+3. **Container packaging** — The TensorRT engine, ROS 2 inference node, and runtime dependencies are packaged into a multi-architecture container image (arm64 for Jetson, amd64 for simulation).
+4. **Registry push** — The image is tagged with a semver version and pushed to Azure Container Registry, triggering the image automation pipeline.
+
+::: {.callout-tip}
+## TensorRT Engine Portability
+TensorRT engines are not portable across GPU architectures. Build separate engines for each target platform (e.g., Orin NX `sm_87` vs. desktop RTX `sm_89`). The container build pipeline handles this via multi-stage Docker builds with architecture-specific compilation stages.
+:::
+
+## Deployment Gating Service
+
+The gating service intercepts FluxCD alert webhooks and blocks rollout until a model passes automated validation. When the image update automation commits a new tag, FluxCD generates a notification event. The gating service receives this event, retrieves evaluation metrics from MLflow, and makes an approve/reject decision.
+
+| Gate Criterion | Source | Threshold | Operator |
+|----------------|--------|-----------|----------|
+| SiL success rate | MLflow experiment metrics | 95% | ≥ |
+| Inference latency (p99) | Model evaluation pipeline | 50 ms | ≤ |
+| Collision rate | SiL evaluation episodes | 1% | ≤ |
+| Model artifact size | Container registry metadata | 500 MB | ≤ |
+
+```{python}
+#| eval: false
+#| code-fold: false
+import httpx
+
+response = httpx.post(
+    "https://gating-service.internal/api/v1/evaluate",
+    json={
+        "model_image": "myacr.azurecr.io/act-inference:1.4.2",
+        "mlflow_run_id": "a1b2c3d4e5f6",
+        "gates": {
+            "sil_success_rate": {"threshold": 0.95, "operator": ">="},
+            "latency_p99_ms": {"threshold": 50, "operator": "<="},
+            "collision_rate": {"threshold": 0.01, "operator": "<="},
+            "model_size_mb": {"threshold": 500, "operator": "<="},
+        },
+    },
+)
+
+result = response.json()
+# {"approved": true, "scores": {"sil_success_rate": 0.97, ...}}
+```
+
+::: {.callout-warning}
+## Manual Override
+The gating service supports a manual approval endpoint for emergency deployments. Manual overrides are logged with operator identity and bypass reason for audit compliance. Use sparingly — bypassed models skip safety validation entirely.
+:::
+
+## Rollout Strategies
+
+The toolchain supports two rollout strategies for fleet-wide updates:
+
+**Canary deployment** — A subset of edge clusters (typically 5–10%) receives the update first. The fleet intelligence pipeline monitors telemetry from canary devices for a configurable soak period (default: 4 hours). If drift detection or error rate thresholds trigger, the rollout halts automatically and the canary clusters roll back to the previous revision.
+
+**Rolling update** — After canary validation passes, the remaining fleet receives the update in configurable batch sizes. FluxCD's `maxUnavailable` setting controls how many devices update simultaneously, ensuring minimum fleet capacity is maintained throughout the rollout window.
+
+```{mermaid}
+%%| label: fig-rollout-strategy
+%%| fig-cap: "Canary-then-rolling rollout strategy with automated soak period validation."
+flowchart TD
+    NEW["New Model\nApproved"] --> CANARY["Deploy to\nCanary Fleet (5%)"]
+    CANARY --> SOAK["Soak Period\n(4 hours)"]
+    SOAK --> CHECK{"Telemetry\nHealthy?"}
+    CHECK -->|yes| ROLL["Rolling Update\nRemaining 95%"]
+    CHECK -->|no| BACK["Rollback\nCanary Fleet"]
+    BACK --> NOTIFY["Alert Operator\n+ Log Failure"]
+    ROLL --> DONE["Fleet Updated"]
+```
+
+## Cluster Overlay Structure
+
+Per-cluster customization uses Kustomize overlays stored in the Git repository under `gitops/clusters/`. Each cluster directory contains patches for resource limits, node selectors, and environment-specific configuration. This structure allows a single base chart to serve heterogeneous edge hardware — from Jetson Orin Nano devices running lightweight policies to AGX Orin units running full sensor fusion stacks.
+
+::: {.callout-note}
+## Azure Arc Integration
+Each edge cluster runs Azure Arc agents that provide centralized inventory, policy compliance, and GitOps configuration from the Azure portal. Arc-connected clusters appear in Azure Resource Manager alongside cloud resources, enabling unified RBAC and monitoring across the entire fleet.
+:::
+
+## Inference Runtime
+
+The deployed inference container runs an **ACT Inference Node** as a ROS 2 lifecycle node. It subscribes to `/joint_states` at 100 Hz and `/camera/color/image_raw` at 30 Hz, executes the policy forward pass on the Jetson GPU, and publishes joint trajectory commands at 30 Hz on `/lerobot/joint_commands`. A safety-gated `enable_control` parameter allows operators to disable command publishing without stopping the node, useful during commissioning and debugging on live hardware.

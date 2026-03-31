@@ -1,0 +1,116 @@
+---
+title: "Physical AI Toolchain"
+subtitle: "Production-Ready Robotics on Azure with NVIDIA Isaac"
+---
+
+# Welcome {.unnumbered}
+
+::: {.callout-note appearance="simple"}
+**Physical AI Toolchain** is an open-source, production-ready framework integrating
+[Microsoft Azure](https://azure.microsoft.com/) cloud services with
+[NVIDIA's](https://developer.nvidia.com/) physical AI stack — accelerating robotics
+developers from data curation through training to edge deployment.
+:::
+
+![Physical AI spans the full lifecycle from simulation through cloud training to edge deployment.
+*Image: [Robotic arm in manufacturing](https://commons.wikimedia.org/wiki/File:KUKA_robot_for_welding.jpg) by KUKA Roboter GmbH, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*](https://upload.wikimedia.org/wikipedia/commons/thumb/5/5e/KUKA_robot_for_welding.jpg/640px-KUKA_robot_for_welding.jpg){fig-alt="Industrial robotic arm performing welding operations" width="80%"}
+
+## What This Book Covers
+
+This book is the comprehensive reference for deploying, training, and operating
+physical AI workloads on Azure with NVIDIA Isaac. It covers:
+
+| Capability | Description |
+|---|---|
+| **Simulation & Synthetic Data** | Isaac Sim/Lab environments for RL training and synthetic data generation |
+| **Edge Data Capture** | ROS 2 recording on Jetson with chunking, compression, and cloud upload |
+| **Cloud Data Pipeline** | Automated ROS-to-LeRobot conversion, quality validation, orchestration |
+| **Training Infrastructure** | OSMO + Azure ML for scalable RL and IL training with experiment tracking |
+| **Model Evaluation** | Offline replay, Isaac Sim validation, and evaluation dashboards |
+| **Model Deployment** | ONNX/TensorRT conversion, container packaging, GitOps edge deployment |
+| **Fleet Intelligence** | Drift detection, telemetry, and retraining triggers |
+
+## Architecture Overview
+
+The toolchain follows a **hub-spoke architecture** where Azure cloud services
+form the hub and edge devices (NVIDIA Jetson) form the spokes:
+
+```{mermaid}
+%%| label: fig-architecture
+%%| fig-cap: "Physical AI Toolchain — Hub and Spoke Architecture"
+%%| fig-width: 100%
+flowchart LR
+    subgraph Edge["Edge (Jetson)"]
+        DC[Data Capture]
+        INF[Inference]
+        TEL[Telemetry]
+    end
+
+    subgraph Azure["Azure Cloud"]
+        AKS[AKS + GPU]
+        AML[Azure ML]
+        OSMO[NVIDIA OSMO]
+        STOR[Blob Storage]
+        ARC[Azure Arc]
+    end
+
+    subgraph Training["Training Pipeline"]
+        RL[RL — Isaac Lab]
+        IL[IL — LeRobot]
+        MLF[MLflow Tracking]
+    end
+
+    DC -->|Upload| STOR
+    STOR --> AML
+    AML --> RL
+    AML --> IL
+    RL --> MLF
+    IL --> MLF
+    OSMO --> AKS
+    MLF -->|Model Registry| ARC
+    ARC -->|GitOps| INF
+    INF --> TEL
+    TEL -->|MQTT| Azure
+```
+
+## Who This Is For
+
+- **Robotics researchers** moving from Isaac Sim prototypes to production
+- **Platform engineers** standardizing physical AI pipelines across teams
+- **Enterprise teams** piloting Jetson + Azure deployments with security and compliance
+
+## Quick Example
+
+Here is a minimal example of submitting a training job to Azure ML:
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Submit an Isaac Lab RL training job
+az ml job create \
+  --file workflows/azureml/rl-training-job.yml \
+  --resource-group rg-nvidia-dev-001 \
+  --workspace-name mlw-nvidia-dev-001 \
+  --set display_name="pick-place-rl-$(date +%Y%m%d)" \
+  --set environment_variables.ACCEPT_EULA="Y"
+```
+
+```{python}
+#| eval: false
+#| code-fold: false
+# Connect to MLflow experiment tracking
+import mlflow
+
+mlflow.set_tracking_uri("azureml://westus2.api.azureml.ms/mlflow/v1.0/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.MachineLearningServices/workspaces/{ws}")
+mlflow.set_experiment("pick-place-rl")
+
+with mlflow.start_run():
+    mlflow.log_param("algorithm", "PPO")
+    mlflow.log_param("framework", "skrl")
+    mlflow.log_metric("reward_mean", 245.6)
+```
+
+## License
+
+This project is licensed under the [MIT License](https://github.com/microsoft/physical-ai-toolchain/blob/main/LICENSE).
+Documentation text is available under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

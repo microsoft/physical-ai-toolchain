@@ -1,0 +1,5 @@
+---
+title: "Infrastructure Style"
+---
+
+{{< include ../../../../docs/contributing/infrastructure-style.md >}}

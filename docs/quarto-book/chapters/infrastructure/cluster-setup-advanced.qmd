@@ -1,0 +1,5 @@
+---
+title: "Advanced Cluster Setup"
+---
+
+{{< include ../../../../docs/infrastructure/cluster-setup-advanced.md >}}

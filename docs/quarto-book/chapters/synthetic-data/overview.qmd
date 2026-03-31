@@ -1,0 +1,206 @@
+---
+title: "Synthetic Data Generation"
+---
+
+Synthetic data generation bridges the sim-to-real gap by transforming simulation-rendered frames into photorealistic training images using NVIDIA Cosmos world foundation models. The Physical AI Toolchain chains three Cosmos stages — Transfer, Predict, and Reason — into an automated pipeline that produces curated, high-quality datasets from Isaac Sim environments without collecting a single real-world demonstration.
+
+![Virtual simulation environments produce synthetic training data that, after neural style transfer, becomes indistinguishable from real sensor captures for policy training.
+*Image: [Simulation of Mars Rover](https://commons.wikimedia.org/wiki/File:PIA16239_High-Resolution_Self-Portrait_by_Curiosity_Rover_Arm_Camera.jpg) by NASA/JPL-Caltech/Malin Space Science Systems, Public Domain*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/f/f3/PIA16239_High-Resolution_Self-Portrait_by_Curiosity_Rover_Arm_Camera.jpg/640px-PIA16239_High-Resolution_Self-Portrait_by_Curiosity_Rover_Arm_Camera.jpg){fig-alt="Mars rover self-portrait demonstrating complex robotic system in varied environment" width="70%"}
+
+## The Sim-to-Real Gap
+
+Policies trained purely on simulation data perform poorly when deployed to physical hardware. Lighting conditions, surface textures, camera noise, and physical dynamics differ between simulation and reality in ways that confound neural network generalization. Domain randomization — varying simulation parameters like lighting, color, and object pose — narrows this gap but cannot close it entirely.
+
+Cosmos world foundation models attack the problem from the opposite direction: rather than making the simulator more realistic, they transform simulator output into photorealistic imagery using neural style transfer trained on massive real-world video corpora. The result is synthetic data that retains the precise state labels from simulation (joint angles, object poses, contact forces) while exhibiting the visual characteristics of real sensor data.
+
+::: {.callout-note}
+## Why Not Just Collect Real Data?
+Real-world data collection requires physical hardware, human operators, and hours of teleoperation. Synthetic generation produces thousands of episodes in parallel on GPU clusters. The economics favor a hybrid approach: a small real-world dataset for validation, augmented with large-scale synthetic data for policy pretraining.
+:::
+
+## Three-Stage SDG Pipeline
+
+The pipeline processes data through three sequential Cosmos model stages, each adding a distinct capability:
+
+```{mermaid}
+%%| label: fig-sdg-pipeline
+%%| fig-cap: "Three-stage synthetic data generation pipeline using NVIDIA Cosmos world foundation models."
+flowchart LR
+    subgraph Sim["Isaac Sim"]
+        SCENE["Scene Config\n(USD + task def)"] --> RENDER["Render Engine\n(ray tracing)"]
+        RENDER --> FRAMES["Simulation Frames\n+ State Labels"]
+    end
+
+    subgraph Transfer["Stage 1: Cosmos Transfer"]
+        FRAMES --> CT["Cosmos Transfer 2.5\n(sim → real style)"]
+        CT --> PHOTO["Photorealistic\nFrames"]
+    end
+
+    subgraph Predict["Stage 2: Cosmos Predict"]
+        PHOTO --> CP["Cosmos Predict 2.5\n(future frames)"]
+        CP --> AUG["Augmented\nSequences"]
+    end
+
+    subgraph Reason["Stage 3: Cosmos Reason"]
+        AUG --> CR["Cosmos Reason 2\n(quality scoring)"]
+        CR --> CURATED["Curated\nDataset"]
+    end
+
+    CURATED --> REG["Dataset Registry\n(AzureML)"]
+    REG --> TRAIN["Policy Training"]
+```
+
+### Stage 1: Cosmos Transfer
+
+Cosmos Transfer 2.5 converts simulation-rendered RGB frames into photorealistic images. The model applies neural style transfer and domain adaptation that transforms synthetic lighting, textures, and material properties to match real-world visual distributions. Input frames retain their spatial structure and state labels — only the pixel-level appearance changes.
+
+| Property | Value |
+|----------|-------|
+| Model | Cosmos Transfer 2.5 |
+| Input | Isaac Sim RGB frames (arbitrary resolution) |
+| Output | Photorealistic frames with preserved geometry |
+| Processing | Batch — full episode sequences |
+| GPU requirement | Minimum 1× A100 (40 GB) |
+
+### Stage 2: Cosmos Predict
+
+Cosmos Predict 2.5 generates plausible future environment states from the photorealistic frames produced by Transfer. Given a sequence of frames, it predicts the next N frames using diffusion-based generation. This temporal augmentation multiplies the effective dataset size — a 1,000-episode dataset with 5-frame predictions per frame yields 6× the training data.
+
+Prediction can be conditioned on text prompts or action vectors, enabling controlled generation of specific scenarios (e.g., "robot grasps object from left side" or "object falls off table"). This targeted augmentation fills gaps in the training distribution without additional simulation runs.
+
+### Stage 3: Cosmos Reason
+
+Cosmos Reason 2 acts as an automated quality curator. The vision-language model evaluates each generated frame for physical plausibility, visual consistency, and task relevance. Frames receive a quality score between 0.0 and 1.0, along with natural-language reasoning annotations explaining the assessment.
+
+Frames below the quality threshold (default 0.8) are filtered from the final dataset. This curation step prevents hallucinated or physically implausible frames from corrupting the training distribution — a critical safeguard when generating data at scale.
+
+::: {.callout-tip}
+## Quality Threshold Tuning
+The 0.8 default threshold balances data volume against quality. For safety-critical tasks (e.g., human-robot interaction), raise the threshold to 0.9+. For large-scale pretraining where diversity matters more than individual frame quality, lower to 0.7.
+:::
+
+## Pipeline Data Flow Example
+
+A concrete example illustrates the multiplicative effect of the pipeline for a UR10e pick-and-place task:
+
+```{mermaid}
+%%| label: fig-sdg-dataflow
+%%| fig-cap: "Data volume amplification through the three-stage SDG pipeline for a UR10e manipulation task."
+flowchart TD
+    SIM["Isaac Sim\n1,000 episodes × 30 frames\n= 30,000 frames"] --> T["Cosmos Transfer\n30,000 → 30,000\nphotorealistic frames"]
+    T --> P["Cosmos Predict\n+5 predicted per frame\n= 180,000 total frames"]
+    P --> R["Cosmos Reason\nFilter threshold 0.8\n≈ 144,000 curated frames"]
+    R --> DS["Final Dataset\n144,000 high-quality\ntraining frames"]
+```
+
+## OSMO Workflow Integration
+
+The SDG pipeline stages execute as OSMO workflows on GPU-equipped Kubernetes clusters. OSMO provides dataset injection (mounting input frames as volumes), Jinja-templated parameterization, and inter-stage data passing through shared storage.
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Example OSMO workflow definition for Cosmos Transfer stage
+cat <<'EOF'
+name: cosmos-transfer-sdg
+description: "Cosmos Transfer 2.5 — sim-to-real style transfer"
+
+container:
+  image: nvcr.io/nvidia/cosmos-transfer:2.5
+  env:
+    ACCEPT_EULA: "Y"
+    PRIVACY_CONSENT: "Y"
+    NVIDIA_DRIVER_CAPABILITIES: "all"
+    INPUT_DIR: "{{ dataset_mount }}/sim-frames"
+    OUTPUT_DIR: "{{ dataset_mount }}/photorealistic-frames"
+    BATCH_SIZE: "{{ batch_size | default(16) }}"
+    RESOLUTION: "{{ resolution | default('480x848') }}"
+
+resources:
+  gpu: 1
+  gpu_type: "nvidia-a100"
+  memory: "40Gi"
+
+datasets:
+  - name: sim-renders
+    mount: /data/input
+  - name: transfer-output
+    mount: /data/output
+EOF
+```
+
+::: {.callout-warning}
+## EULA Requirements
+All Cosmos containers require explicit EULA acceptance via the `ACCEPT_EULA=Y` and `PRIVACY_CONSENT=Y` environment variables. Jobs submitted without these variables will fail immediately at container startup. This requirement applies to both OSMO workflows and AzureML jobs.
+:::
+
+## AzureML Job Submission
+
+For teams using AzureML instead of OSMO, each pipeline stage maps to a command job targeting a GPU compute instance:
+
+```{python}
+#| eval: false
+#| code-fold: false
+from azure.ai.ml import MLClient, command, Input, Output
+from azure.identity import DefaultAzureCredential
+
+ml_client = MLClient(
+    DefaultAzureCredential(),
+    subscription_id="<subscription-id>",
+    resource_group_name="<resource-group>",
+    workspace_name="<workspace>",
+)
+
+cosmos_transfer_job = command(
+    display_name="cosmos-transfer-ur10e-pick-place",
+    experiment_name="sdg-pipeline",
+    compute="gpu",
+    environment="cosmos-transfer:2.5",
+    inputs={
+        "sim_frames": Input(
+            type="uri_folder",
+            path="azureml://datastores/datasets/paths/sim-renders/ur10e-pick-place",
+        ),
+    },
+    outputs={
+        "photorealistic_frames": Output(
+            type="uri_folder",
+            path="azureml://datastores/datasets/paths/cosmos-transfer/ur10e-pick-place",
+        ),
+    },
+    environment_variables={
+        "ACCEPT_EULA": "Y",
+        "PRIVACY_CONSENT": "Y",
+        "NVIDIA_DRIVER_CAPABILITIES": "all",
+        "BATCH_SIZE": "16",
+    },
+    command="python run_transfer.py --input ${{inputs.sim_frames}} --output ${{outputs.photorealistic_frames}}",
+)
+
+returned_job = ml_client.jobs.create_or_update(cosmos_transfer_job)
+print(f"Job submitted: {returned_job.studio_url}")
+```
+
+## Domain Randomization Integration
+
+Cosmos Transfer works best when the simulation input already includes moderate domain randomization. Isaac Sim scene configurations vary lighting direction and intensity, object textures, camera viewpoint jitter, and background clutter. This variation gives the Transfer model a diverse input distribution, producing photorealistic output that spans a wider range of real-world conditions.
+
+| Randomization Parameter | Range | Purpose |
+|------------------------|-------|---------|
+| Lighting direction | Full hemisphere | Shadow variation |
+| Light intensity | 0.5–2.0× baseline | Exposure variation |
+| Object textures | 10–50 material variants | Surface appearance |
+| Camera jitter | ±5° rotation, ±2 cm translation | Viewpoint robustness |
+| Background objects | 0–10 distractor items | Clutter robustness |
+
+## Integration with the Training Pipeline
+
+The curated synthetic dataset registers in the AzureML dataset catalog with a content-addressable version hash. Training jobs reference specific dataset versions, enabling reproducible experiments that mix synthetic and real-world data in controlled proportions. A typical training recipe uses 80% synthetic data for pretraining followed by 20% real-world data for fine-tuning — leveraging the scale of synthetic generation while grounding the policy in real sensor characteristics.
+
+::: {.callout-note}
+## Cosmos Model References
+- **Cosmos Transfer 2.5**: [github.com/NVIDIA/Cosmos-Transfer2.5](https://github.com/NVIDIA/Cosmos-Transfer2.5)
+- **Cosmos Predict 2.5**: [github.com/NVIDIA/Cosmos-Predict2.5](https://github.com/NVIDIA/Cosmos-Predict2.5)
+- **Cosmos Reason 2**: [github.com/NVIDIA/Cosmos-Cookbook](https://github.com/NVIDIA/Cosmos-Cookbook)
+:::

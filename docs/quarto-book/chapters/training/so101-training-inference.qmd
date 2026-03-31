@@ -1,0 +1,5 @@
+---
+title: "SO-101 Training & Inference"
+---
+
+{{< include ../../../../docs/so101-training-inference.md >}}

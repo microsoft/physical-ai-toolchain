@@ -1,0 +1,5 @@
+---
+title: "Blob Storage Structure"
+---
+
+{{< include ../../../../docs/cloud/blob-storage-structure.md >}}

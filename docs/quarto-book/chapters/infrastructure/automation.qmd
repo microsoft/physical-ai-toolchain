@@ -1,0 +1,5 @@
+---
+title: "Automation"
+---
+
+{{< include ../../../../docs/infrastructure/automation.md >}}

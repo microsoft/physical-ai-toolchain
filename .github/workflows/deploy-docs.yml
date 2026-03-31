@@ -58,6 +58,18 @@ jobs:
         working-directory: docs/docusaurus
         run: npm run build
 
+      - name: Install Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: '1.7.29'
+
+      - name: Build Quarto book
+        working-directory: docs/quarto-book
+        run: quarto render
+
+      - name: Merge Quarto book into Docusaurus output
+        run: cp -r docs/quarto-book/_book docs/docusaurus/build/book
+
       - name: Configure Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 

@@ -1,0 +1,153 @@
+project:
+  type: book
+  output-dir: _book
+
+website:
+  site-url: https://microsoft.github.io/physical-ai-toolchain/book/
+
+book:
+  title: "Physical AI Toolchain"
+  subtitle: "Production-Ready Robotics on Azure with NVIDIA Isaac"
+  author: "Microsoft Physical AI Team"
+  date: "2026-03-25"
+  license: "MIT"
+  repo-url: https://github.com/microsoft/physical-ai-toolchain
+  repo-actions: [edit, issue]
+  sharing: [twitter, linkedin]
+  sidebar:
+    style: docked
+    search: true
+    collapse-level: 2
+
+  chapters:
+    - index.qmd
+    - part: "Foundations"
+      chapters:
+        - chapters/foundations/mdp.qmd
+        - chapters/foundations/reward-functions.qmd
+        - chapters/foundations/simulation.qmd
+        - chapters/foundations/reinforcement-learning.qmd
+        - chapters/foundations/imitation-learning.qmd
+        - chapters/foundations/vla-models.qmd
+
+    - part: "Getting Started"
+      chapters:
+        - chapters/getting-started/quickstart.qmd
+        - chapters/getting-started/prerequisites.qmd
+
+    - part: "Infrastructure"
+      chapters:
+        - chapters/infrastructure/overview.qmd
+        - chapters/infrastructure/prerequisites.qmd
+        - chapters/infrastructure/cluster-setup.qmd
+        - chapters/infrastructure/cluster-setup-advanced.qmd
+        - chapters/infrastructure/vpn.qmd
+        - chapters/infrastructure/dns.qmd
+        - chapters/infrastructure/automation.qmd
+        - chapters/infrastructure/cleanup.qmd
+        - chapters/infrastructure/reference.qmd
+
+    - part: "Training"
+      chapters:
+        - chapters/training/overview.qmd
+        - chapters/training/isaac-lab-training.qmd
+        - chapters/training/lerobot-training.qmd
+        - chapters/training/azureml-training.qmd
+        - chapters/training/osmo-training.qmd
+        - chapters/training/experiment-tracking.qmd
+        - chapters/training/mlflow-integration.qmd
+        - chapters/training/local-lerobot-training.qmd
+        - chapters/training/so101-training-inference.qmd
+
+    - part: "Data Management"
+      chapters:
+        - chapters/data/pipeline-overview.qmd
+        - chapters/data/chunking-compression.qmd
+        - chapters/data/blob-storage.qmd
+
+    - part: "Synthetic Data"
+      chapters:
+        - chapters/synthetic-data/overview.qmd
+
+    - part: "Evaluation"
+      chapters:
+        - chapters/evaluation/overview.qmd
+        - chapters/evaluation/lerobot-evaluation.qmd
+        - chapters/evaluation/osmo-evaluation.qmd
+        - chapters/evaluation/debugging.qmd
+
+    - part: "Fleet Deployment"
+      chapters:
+        - chapters/fleet-deployment/overview.qmd
+
+    - part: "Fleet Intelligence"
+      chapters:
+        - chapters/fleet-intelligence/overview.qmd
+
+    - part: "Operations"
+      chapters:
+        - chapters/operations/security-guide.qmd
+        - chapters/operations/troubleshooting.qmd
+
+    - part: "Recipes"
+      chapters:
+        - chapters/recipes/data-collection.qmd
+        - chapters/recipes/preparing-datasets.qmd
+        - chapters/recipes/first-lerobot-job.qmd
+        - chapters/recipes/first-rl-job.qmd
+        - chapters/recipes/end-to-end-pipeline.qmd
+
+    - part: "Reference"
+      chapters:
+        - chapters/reference/gpu-configuration.qmd
+        - chapters/reference/scripts.qmd
+        - chapters/reference/scripts-examples.qmd
+        - chapters/reference/copilot-artifacts.qmd
+        - chapters/reference/deprecation-policy.qmd
+
+    - part: "Contributing"
+      chapters:
+        - chapters/contributing/overview.qmd
+        - chapters/contributing/architecture.qmd
+        - chapters/contributing/roadmap.qmd
+        - chapters/contributing/contribution-workflow.qmd
+        - chapters/contributing/pull-request-process.qmd
+        - chapters/contributing/infrastructure-style.qmd
+        - chapters/contributing/prerequisites.qmd
+        - chapters/contributing/deployment-validation.qmd
+        - chapters/contributing/cost-considerations.qmd
+        - chapters/contributing/security-review.qmd
+        - chapters/contributing/accessibility.qmd
+        - chapters/contributing/documentation-maintenance.qmd
+        - chapters/contributing/component-updates.qmd
+
+    - part: "Security"
+      chapters:
+        - chapters/security/threat-model.qmd
+        - chapters/security/release-verification.qmd
+
+  appendices:
+    - chapters/appendix/license.qmd
+
+format:
+  html:
+    theme:
+      light: cosmo
+      dark: darkly
+    css: styles.css
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: true
+    code-tools: true
+    code-copy: true
+    code-overflow: wrap
+    highlight-style: github
+    link-external-icon: true
+    link-external-newwindow: true
+    fig-responsive: true
+
+execute:
+  enabled: false
+  echo: true
+  warning: false

@@ -1,0 +1,5 @@
+---
+title: "Isaac Lab Training"
+---
+
+{{< include ../../../../docs/training/isaac-lab-training.md >}}

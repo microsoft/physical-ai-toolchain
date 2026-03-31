@@ -1,0 +1,5 @@
+---
+title: "Your First LeRobot Job"
+---
+
+{{< include ../../../../docs/recipes/training/your-first-lerobot-training-job.md >}}

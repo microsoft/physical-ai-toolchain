@@ -1,0 +1,5 @@
+---
+title: "Preparing Datasets"
+---
+
+{{< include ../../../../docs/recipes/data-collection/preparing-datasets-for-training.md >}}

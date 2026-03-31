@@ -1,0 +1,5 @@
+---
+title: "Threat Model"
+---
+
+{{< include ../../../../docs/security/threat-model.md >}}

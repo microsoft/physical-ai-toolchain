@@ -1,0 +1,5 @@
+---
+title: "Configuring Edge Data Recording"
+---
+
+{{< include ../../../../docs/recipes/data-collection/configuring-edge-data-recording.md >}}

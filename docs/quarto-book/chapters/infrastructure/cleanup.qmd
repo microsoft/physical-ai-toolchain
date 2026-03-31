@@ -1,0 +1,5 @@
+---
+title: "Cleanup"
+---
+
+{{< include ../../../../docs/infrastructure/cleanup.md >}}

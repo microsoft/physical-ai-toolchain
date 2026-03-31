@@ -1,0 +1,239 @@
+---
+title: "Reward Functions & Reward Shaping"
+---
+
+The reward function is the sole specification of desired behavior in reinforcement learning.
+A well-designed reward function guides a robot toward task completion; a poorly designed one
+produces agents that exploit loopholes or fail to learn entirely. This chapter covers the
+principles and practical techniques for reward engineering in robotic manipulation.
+
+![Optimization toward a well-defined objective is central to reward function design.
+*Image: [Gradient descent](https://commons.wikimedia.org/wiki/File:Gradient_descent.svg)
+by Olegalexandrov, public domain](https://upload.wikimedia.org/wikipedia/commons/thumb/f/ff/Gradient_descent.svg/512px-Gradient_descent.svg.png){fig-alt="Gradient descent on a surface showing convergence toward a minimum" width="50%"}
+
+## The Role of the Reward Function
+
+In an MDP $\mathcal{M} = (\mathcal{S}, \mathcal{A}, P, R, \gamma)$, the reward function
+$R(s, a, s')$ returns a scalar signal after each transition. The agent's objective is to
+maximize expected cumulative discounted reward:
+
+$$
+J(\pi) = \mathbb{E}_\pi \left[ \sum_{t=0}^{\infty} \gamma^t R(s_t, a_t, s_{t+1}) \right]
+$$
+
+The reward function encodes *what* the robot should achieve, while the learning algorithm
+determines *how* it achieves the objective. This separation is powerful but places the full
+burden of task specification on the reward designer.
+
+## Sparse vs Dense Rewards
+
+The most fundamental design choice is the reward density.
+
+```{mermaid}
+%%| label: fig-reward-landscape
+%%| fig-cap: "Sparse vs Dense Reward Signals Over an Episode"
+%%{init: {"themeVariables": {"xyChart": {"plotColorPalette": "#4a90d9, #e74c3c"}}}}%%
+xychart-beta
+    title "Reward Signal Over Episode Steps"
+    x-axis "Timestep" [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    y-axis "Reward" -1 --> 12
+    line "Dense" [0, 0.5, 1.2, 1.8, 2.5, 3.2, 4.0, 5.5, 7.0, 8.5, 10]
+    line "Sparse" [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10]
+```
+
+**Sparse rewards** provide a signal only upon task completion (e.g., $+1$ when the object
+reaches the target). They define the task cleanly but make credit assignment extremely
+difficult—the agent must discover the rewarding behavior through random exploration.
+
+**Dense rewards** provide continuous feedback proportional to progress (e.g., negative
+distance to the target at every step). They accelerate learning but risk introducing
+unintended incentives that produce suboptimal behavior.
+
+| Property | Sparse Rewards | Dense Rewards |
+|----------|---------------|---------------|
+| Signal frequency | Only at success/failure | Every timestep |
+| Credit assignment | Very difficult | Straightforward |
+| Exploration requirement | High | Low |
+| Risk of reward hacking | Low | Higher |
+| Task specification fidelity | Clean and unambiguous | May encode unintended shortcuts |
+| Sample efficiency | Poor without shaping | Good |
+| Example | $+1$ if object placed correctly | $-\|p_{\text{obj}} - p_{\text{goal}}\|$ |
+
+## Reward Shaping
+
+Reward shaping adds auxiliary reward terms to accelerate learning without changing the
+optimal policy. The seminal result from Ng, Harada, and Russell (1999) establishes
+**potential-based reward shaping** as the principled approach.
+
+Given a potential function $\Phi : \mathcal{S} \to \mathbb{R}$, the shaped reward is:
+
+$$
+R'(s, a, s') = R(s, a, s') + \gamma \, \Phi(s') - \Phi(s)
+$$
+
+The key theorem: adding potential-based shaping to any MDP preserves the set of optimal
+policies. This guarantee means you can provide dense guidance without distorting the task
+objective.
+
+A natural choice for manipulation tasks is the negative distance to the goal:
+
+$$
+\Phi(s) = -\| p_{\text{end\text{-}effector}}(s) - p_{\text{target}} \|_2
+$$
+
+This creates a reward gradient that draws the robot's end-effector toward the target while
+preserving optimality of the original sparse reward.
+
+::: {.callout-note}
+## Policy Invariance Guarantee
+Potential-based shaping is the *only* form of state-based shaping that guarantees policy
+invariance in the general case. Arbitrary additive reward terms—even intuitive ones—can
+change the optimal policy. Always verify that hand-crafted reward terms either follow the
+potential-based form or that the policy change is intentional and tested.
+:::
+
+## Common Reward Engineering Patterns
+
+Practical reward functions for robotic manipulation combine multiple terms. Each term
+addresses a different aspect of desired behavior.
+
+### Distance-Based Rewards
+
+The most common dense reward component. Measures proximity between relevant bodies and
+target locations:
+
+$$
+r_{\text{dist}} = -\alpha \| p_{\text{ee}} - p_{\text{goal}} \|_2
+$$
+
+where $\alpha$ is a scaling coefficient. Variants include L1 distance, exponential decay
+($\exp(-\beta \| \cdot \|)$), and per-axis weighting for orientation-sensitive tasks.
+
+### Success Bonus
+
+A large positive reward upon task completion, combined with episode termination:
+
+$$
+r_{\text{success}} = \begin{cases} B & \text{if } \|p_{\text{obj}} - p_{\text{goal}}\| < \epsilon \\ 0 & \text{otherwise} \end{cases}
+$$
+
+### Energy and Smoothness Penalties
+
+Penalize large or jerky actions to produce smooth, hardware-friendly trajectories:
+
+$$
+r_{\text{energy}} = -\lambda_a \|a_t\|^2 - \lambda_{\Delta a} \|a_t - a_{t-1}\|^2
+$$
+
+### Curriculum Rewards
+
+Progressively tighten success thresholds or increase task difficulty as training advances.
+Start with wide tolerances and easy configurations, then narrow and complicate the task.
+
+## Reward Hacking and Specification Gaming
+
+Reward hacking occurs when the agent finds a high-reward behavior that satisfies the
+reward function literally but violates the designer's intent. Examples in robotics:
+
+- A reaching task rewards proximity to the target, and the robot learns to extend a joint
+  to its limit rather than navigate its end-effector
+- A pick-and-place reward based on object height causes the robot to fling the object
+  upward rather than place it gently
+- A locomotion reward based on forward velocity produces a tall robot that falls forward
+
+These failures arise from the gap between the reward function (what is measured) and the
+task objective (what is intended). Mitigation strategies include:
+
+1. **Constraint terms**: explicitly penalize undesired behaviors (collisions, joint limits)
+2. **Multi-term rewards**: combine complementary objectives that are harder to game jointly
+3. **Reward visualization**: plot per-term reward contributions during training to detect
+   exploitation
+4. **Evaluation metrics**: measure task success independently from the training reward
+
+## Multi-Objective Rewards and Scalarization
+
+Robot tasks often involve competing objectives: speed versus safety, precision versus energy
+efficiency. The standard approach is **linear scalarization**:
+
+$$
+R_{\text{total}} = \sum_{i=1}^{k} w_i \, R_i(s, a, s')
+$$
+
+where $w_i$ are hand-tuned weights balancing the objectives. This reduces a multi-objective
+problem to a single-objective one solvable by standard RL algorithms.
+
+The weight vector $\mathbf{w}$ controls the trade-off between objectives and is one of the
+most important hyperparameters in robotic RL. Small changes in relative weights can
+drastically alter learned behavior.
+
+## Example: Robotic Arm Reach Task Reward
+
+The following reward function implements a reach task with distance shaping, success bonus,
+and action penalty—matching the pattern used in Isaac Lab task configurations.
+
+```{python}
+#| eval: false
+#| code-fold: false
+import torch
+
+def compute_reach_reward(
+    ee_pos: torch.Tensor,       # (num_envs, 3) end-effector position
+    goal_pos: torch.Tensor,     # (num_envs, 3) target position
+    actions: torch.Tensor,      # (num_envs, action_dim)
+    prev_actions: torch.Tensor, # (num_envs, action_dim)
+    success_threshold: float = 0.02,
+) -> tuple[torch.Tensor, dict]:
+    """Compute shaped reward for a robotic arm reach task."""
+    distance = torch.norm(ee_pos - goal_pos, dim=-1)
+
+    # Dense distance reward (exponential decay for smoother gradient)
+    r_distance = 1.0 - torch.tanh(5.0 * distance)
+
+    # Sparse success bonus
+    r_success = torch.where(distance < success_threshold, 10.0, 0.0)
+
+    # Action magnitude penalty
+    r_action = -0.01 * torch.sum(actions ** 2, dim=-1)
+
+    # Action smoothness penalty
+    r_smooth = -0.005 * torch.sum((actions - prev_actions) ** 2, dim=-1)
+
+    total = r_distance + r_success + r_action + r_smooth
+
+    info = {
+        "r_distance": r_distance.mean().item(),
+        "r_success": r_success.mean().item(),
+        "r_action": r_action.mean().item(),
+        "r_smooth": r_smooth.mean().item(),
+    }
+    return total, info
+```
+
+::: {.callout-tip}
+## Debugging Reward Functions
+Log each reward component separately to MLflow during training. When an agent exhibits
+unexpected behavior, inspect the per-term reward curves to identify which component is being
+exploited. The `info` dictionary pattern shown above feeds directly into the toolchain's
+MLflow integration for per-term tracking.
+:::
+
+## Reward Strategies Comparison
+
+| Strategy | Pros | Cons | Best For |
+|----------|------|------|----------|
+| Pure sparse | Clean task specification, no hacking | Extremely poor sample efficiency | Simple tasks with short horizons |
+| Distance shaping | Fast learning, strong gradient signal | Can produce suboptimal trajectories | Reaching, navigation |
+| Potential-based shaping | Preserves optimal policy, principled | Requires designing potential function | Any task with sparse base reward |
+| Multi-term weighted | Encodes complex requirements | Weight tuning is fragile | Manipulation with constraints |
+| Curriculum | Handles hard exploration problems | Requires schedule design | Long-horizon, multi-stage tasks |
+
+::: {.callout-important}
+## Reward Configuration in the Physical AI Toolchain
+Isaac Lab tasks define rewards through the `RewardManager` in each task's configuration
+module. Each reward term is a separate class with a `weight` parameter for scalarization.
+The toolchain's training scripts pass these configurations to the environment factory,
+meaning reward tuning is a configuration change—not a code change. Adjust weights in the
+task config YAML or Python dataclass, re-submit the training job via AzureML or OSMO, and
+compare results in MLflow. The per-term logging described above maps directly to MLflow
+metrics for experiment comparison.
+:::

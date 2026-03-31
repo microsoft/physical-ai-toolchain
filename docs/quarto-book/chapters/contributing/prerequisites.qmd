@@ -1,0 +1,5 @@
+---
+title: "Contributor Prerequisites"
+---
+
+{{< include ../../../../docs/contributing/prerequisites.md >}}

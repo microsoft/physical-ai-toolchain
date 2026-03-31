@@ -1,0 +1,5 @@
+---
+title: "Component Updates"
+---
+
+{{< include ../../../../docs/contributing/component-updates.md >}}

@@ -1,0 +1,287 @@
+---
+title: "Fleet Intelligence"
+---
+
+Fleet intelligence provides real-time operational visibility across geographically distributed robot fleets. The system collects telemetry from every deployed inference node, routes it through Azure IoT Operations to cloud analytics, detects behavioral drift that signals model degradation, and triggers automated retraining when performance falls below thresholds. Operators monitor fleet health through Grafana dashboards backed by Microsoft Fabric's real-time analytics engine.
+
+![Industrial control room monitoring dashboards represent the operational visibility that fleet intelligence provides for distributed robot fleets.
+*Image: [CERN Control Centre](https://commons.wikimedia.org/wiki/File:CERN_Control_Centre.jpg) by Torkild Retvedt, [CC BY-SA 2.0](https://creativecommons.org/licenses/by-sa/2.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/CERN_Control_Centre.jpg/640px-CERN_Control_Centre.jpg){fig-alt="Control centre with multiple monitoring screens and dashboards" width="70%"}
+
+## Telemetry Architecture
+
+The telemetry pipeline spans four layers: edge collection, message transport, cloud analytics, and visualization. Each layer is decoupled through standard protocols — MQTT at the edge, Event Hubs for cloud ingestion, KQL for analytics — allowing independent scaling and replacement.
+
+```{mermaid}
+%%| label: fig-telemetry-pipeline
+%%| fig-cap: "End-to-end telemetry pipeline from edge inference nodes through cloud analytics to dashboards and automated retraining triggers."
+flowchart LR
+    subgraph Edge["Edge Device"]
+        INF["Inference Node\n(ACT policy)"] --> AGT["Telemetry Agent\n(sidecar container)"]
+        AGT --> MQTT["MQTT Broker\n(IoT Operations)"]
+    end
+
+    subgraph Transport["Azure IoT Operations"]
+        MQTT --> ROUTE["Message Router"]
+        ROUTE --> EH["Event Hubs\n(partitioned)"]
+    end
+
+    subgraph Analytics["Cloud Analytics"]
+        EH --> FABRIC["Microsoft Fabric\nReal-Time Intelligence"]
+        EH --> GRAF["Grafana\nData Source"]
+        FABRIC --> KQL["KQL Queries\n(aggregation)"]
+        FABRIC --> DRIFT["Drift Detection\nEngine"]
+    end
+
+    subgraph Action["Automated Response"]
+        DRIFT --> EVAL{"Threshold\nBreached?"}
+        EVAL -->|yes| RETRAIN["Trigger\nRetraining"]
+        EVAL -->|no| CONT["Continue\nMonitoring"]
+        GRAF --> DASH["Fleet\nDashboards"]
+        RETRAIN --> TRAIN["AzureML\nTraining Pipeline"]
+    end
+```
+
+## Edge Telemetry Collection
+
+A lightweight Python sidecar container runs alongside every inference node on the edge device. The agent collects two categories of telemetry: policy execution metrics and robot health metrics. Both schemas are validated against JSON Schema definitions before publication.
+
+### Policy Execution Schema
+
+Published on each inference cycle, capturing model behavior characteristics:
+
+```{python}
+#| eval: false
+#| code-fold: false
+# Policy execution telemetry payload (published at inference frequency)
+telemetry_payload = {
+    "timestamp": "2025-01-15T14:30:00.123Z",
+    "robot_id": "jetson-floor3-arm02",
+    "policy_name": "act-ur10e-pick-place",
+    "policy_version": "1.4.2",
+    "inference_latency_ms": 12.4,
+    "action_norm": 0.342,
+    "observation_summary": {
+        "mean": [0.12, -0.45, 0.78, 0.33, -0.21, 0.56],
+        "variance": [0.001, 0.003, 0.002, 0.001, 0.004, 0.002],
+    },
+}
+```
+
+### Robot Health Schema
+
+Published at a lower frequency (every 10 seconds), capturing device-level resource utilization:
+
+```{python}
+#| eval: false
+#| code-fold: false
+# Robot health telemetry payload (published every 10 seconds)
+health_payload = {
+    "timestamp": "2025-01-15T14:30:00.000Z",
+    "robot_id": "jetson-floor3-arm02",
+    "gpu_utilization_pct": 67.3,
+    "gpu_memory_used_mb": 2841.0,
+    "cpu_utilization_pct": 42.1,
+    "memory_used_mb": 5120.0,
+    "disk_free_mb": 28400.0,
+    "network_latency_ms": 8.2,
+    "uptime_seconds": 86400,
+}
+```
+
+## MQTT Topic Structure
+
+The edge MQTT broker organizes telemetry into topics that map directly to Event Hubs partitions:
+
+| MQTT Topic | Schema | Frequency | Partition Key |
+|------------|--------|-----------|---------------|
+| `telemetry/policy-execution` | `policy-execution.schema.json` | Per-inference (~30 Hz) | `robot_id` |
+| `telemetry/robot-health` | `robot-health.schema.json` | Every 10 s | `robot_id` |
+
+Partitioning by `robot_id` ensures per-device message ordering in Event Hubs, which simplifies downstream time-series processing.
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Edge-to-cloud routing configuration (IoT Operations)
+cat <<'EOF'
+apiVersion: connectivity.iotoperations.azure.com/v1
+kind: DataflowEndpoint
+metadata:
+  name: fleet-eventhub
+  namespace: azure-iot-operations
+spec:
+  endpointType: eventHub
+  eventHubNamespaceRef:
+    name: fleet-telemetry-ns
+  routes:
+    - source: "telemetry/policy-execution"
+      destination: "policy-execution"
+      format: json
+    - source: "telemetry/robot-health"
+      destination: "robot-health"
+      format: json
+EOF
+```
+
+## Grafana Fleet Dashboards
+
+The fleet overview dashboard provides five panels covering the operational state of every deployed robot:
+
+| Panel | Visualization | Data Source | Purpose |
+|-------|---------------|-------------|---------|
+| Fleet Map | Status tiles | robot-health | Online/offline per device |
+| Inference Latency | Time-series (p50/p95/p99) | policy-execution | Detect performance degradation |
+| GPU Heatmap | Heatmap matrix | robot-health | Resource utilization by device |
+| Drift Indicators | Gauge + time-series | drift-detection | Action distribution shift magnitude |
+| Availability | Bar chart | robot-health | Uptime percentage by robot |
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Grafana dashboard panel configuration (inference latency)
+cat <<'EOF'
+{
+  "title": "Inference Latency (ms)",
+  "type": "timeseries",
+  "datasource": "fabric-rti",
+  "targets": [
+    {
+      "query": "PolicyExecution | where Timestamp > ago(6h) | summarize p50=percentile(InferenceLatencyMs, 50), p95=percentile(InferenceLatencyMs, 95), p99=percentile(InferenceLatencyMs, 99) by bin(Timestamp, 1m), RobotId",
+      "resultFormat": "time_series"
+    }
+  ],
+  "fieldConfig": {
+    "defaults": {
+      "unit": "ms",
+      "thresholds": {
+        "steps": [
+          { "value": 0, "color": "green" },
+          { "value": 30, "color": "yellow" },
+          { "value": 50, "color": "red" }
+        ]
+      }
+    }
+  },
+  "options": {
+    "tooltip": { "mode": "multi" }
+  }
+}
+EOF
+```
+
+::: {.callout-tip}
+## Dashboard Time Range
+The default dashboard time range is 6 hours with a 30-second refresh interval. For incident investigation, narrow to 1 hour with 5-second refresh. Template variables for `robot_id` and `policy_name` allow filtering to specific devices or model versions.
+:::
+
+## Microsoft Fabric KQL Analytics
+
+Microsoft Fabric Real-Time Intelligence processes the Event Hubs streams and exposes them through KQL (Kusto Query Language) queries. These queries power both the Grafana dashboards and the drift detection engine.
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# KQL query: policy execution latency percentiles (last hour)
+cat <<'QUERY'
+PolicyExecution
+| where Timestamp > ago(1h)
+| summarize
+    p50=percentile(InferenceLatencyMs, 50),
+    p95=percentile(InferenceLatencyMs, 95),
+    p99=percentile(InferenceLatencyMs, 99)
+  by bin(Timestamp, 5m), RobotId
+| order by Timestamp desc
+
+// Fleet health summary (last 30 minutes)
+RobotHealth
+| where Timestamp > ago(30m)
+| summarize
+    LastSeen=max(Timestamp),
+    AvgGpuUtil=avg(GpuUtilizationPct),
+    AvgCpuUtil=avg(CpuUtilizationPct)
+  by RobotId
+| extend IsOnline = LastSeen > ago(10m)
+
+// Drift signal aggregation (last 24 hours)
+PolicyExecution
+| where Timestamp > ago(24h)
+| summarize
+    AvgActionNorm=avg(ActionNorm),
+    StdActionNorm=stdev(ActionNorm)
+  by bin(Timestamp, 1h), PolicyName, PolicyVersion
+QUERY
+```
+
+## Drift Detection
+
+Drift detection identifies when a deployed model's behavior diverges from its training-time baseline. The system implements four complementary detection methods, each targeting a different failure mode:
+
+| Method | Metric | Technique | Detects |
+|--------|--------|-----------|---------|
+| Distribution shift | Action vector norms | KL divergence, KS test | Changed environment dynamics |
+| Observation statistics | Input feature mean/variance | CUSUM, EMA | Sensor degradation, lighting changes |
+| Performance regression | Task success rate | Sliding window regression | Policy capability loss |
+| Latency anomaly | Inference time p95/p99 | Threshold counting | Hardware issues, model bloat |
+
+### Composite Drift Score
+
+Individual drift signals are combined into a weighted composite score:
+
+$$
+\text{drift}_{\text{composite}} = w_1 \cdot \text{distribution\_shift} + w_2 \cdot \text{performance\_drop} + w_3 \cdot \text{latency\_spike}
+$$
+
+The baseline store holds training-time metric distributions (mean, variance, percentiles) computed during model evaluation. Drift detection compares live telemetry windows against these baselines to produce normalized shift magnitudes.
+
+::: {.callout-warning}
+## Drift vs. Normal Variation
+Not all metric shifts indicate drift. Seasonal changes (temperature affecting joint compliance), planned environment modifications (new shelving layouts), and batch-to-batch object variation all cause legitimate distribution shifts. Tune detection sensitivity using the soak period and threshold parameters to match your operational environment's natural variability.
+:::
+
+## Automated Retraining Triggers
+
+When drift signals exceed configured thresholds, the system automatically initiates the retraining pipeline:
+
+| Signal | Threshold | Sustained Duration | Action |
+|--------|-----------|-------------------|--------|
+| Composite drift score | > 0.75 | 30 minutes | Initiate retraining |
+| Task success rate | < 85% | Moving average (1 hour) | Initiate retraining |
+| Manual override | Operator request | Immediate | Emergency retraining |
+| Scheduled cadence | Daily / weekly | N/A | Incremental retraining |
+
+The retraining trigger launches an AzureML pipeline job that:
+
+1. **Selects training data** — Recent episodes from the data pipeline, combined with synthetic augmentation from the SDG pipeline.
+2. **Trains updated policy** — Runs the standard IL or RL training pipeline on the selected data.
+3. **Evaluates checkpoint** — Executes SiL evaluation against the standard benchmark suite.
+4. **Gates deployment** — Passes the validated checkpoint to the fleet deployment gating service.
+
+```{mermaid}
+%%| label: fig-retraining-loop
+%%| fig-cap: "Closed-loop retraining pipeline triggered by drift detection, completing the fleet intelligence feedback cycle."
+flowchart LR
+    DRIFT["Drift Detection\nThreshold Exceeded"] --> SELECT["Dataset Selection\n(recent + synthetic)"]
+    SELECT --> TRAIN["Policy Training\n(AzureML)"]
+    TRAIN --> EVAL["SiL Evaluation"]
+    EVAL --> GATE["Deployment Gate"]
+    GATE -->|approved| DEPLOY["Fleet Deployment\n(FluxCD)"]
+    GATE -->|rejected| REVIEW["Human Review"]
+    DEPLOY --> TEL["Telemetry\nCollection"]
+    TEL --> DRIFT
+```
+
+## Alert Rules and Escalation
+
+The monitoring system defines three escalation tiers:
+
+| Tier | Condition | Response | Notification |
+|------|-----------|----------|--------------|
+| **Info** | Single metric crosses warning threshold | Log event, update dashboard | Slack channel |
+| **Warning** | Composite drift > 0.5 for 15 minutes | Automated retraining evaluation | On-call page |
+| **Critical** | Success rate < 70% or device offline > 5 min | Pause affected devices, alert on-call | PagerDuty + Slack |
+
+::: {.callout-note}
+## Feedback Loop Convergence
+The drift → retrain → deploy → monitor cycle forms a closed feedback loop. Convergence depends on the retraining pipeline producing models that genuinely address the detected drift. If successive retraining iterations fail to reduce drift scores, the system escalates to human review rather than entering an infinite retraining loop. The maximum automated retraining frequency is configurable (default: once per 24 hours per policy).
+:::

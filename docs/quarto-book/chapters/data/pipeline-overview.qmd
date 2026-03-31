@@ -1,0 +1,217 @@
+---
+title: "Data Pipeline Overview"
+---
+
+The data pipeline captures robot sensor streams on edge devices, compresses and chunks the recordings for efficient transfer, uploads them to Azure Blob Storage, and converts the raw ROS 2 bag files into training-ready datasets compatible with LeRobot. Every stage is designed for the constraints of edge hardware — limited disk, intermittent connectivity, and real-time sensor rates that can exceed 200 Hz.
+
+![A robotic sensor suite capturing multi-modal data streams during a manipulation task. High-fidelity recording is the foundation of imitation learning pipelines.
+*Image: [KUKA robot for teaching](https://commons.wikimedia.org/wiki/File:KUKA_robot_for_teaching.jpg) by Mixabest, [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)*
+](https://upload.wikimedia.org/wikipedia/commons/thumb/8/8b/KUKA_robot_for_teaching.jpg/640px-KUKA_robot_for_teaching.jpg){fig-alt="KUKA industrial robot arm in a teaching environment" width="70%"}
+
+## Pipeline Architecture
+
+The data pipeline spans three domains: edge capture, cloud ingestion, and dataset assembly. Each domain operates asynchronously — recordings accumulate on-device, upload when bandwidth is available, and conversion runs as an event-driven cloud pipeline.
+
+```{mermaid}
+%%| label: fig-data-pipeline
+%%| fig-cap: "End-to-end data pipeline from edge sensors through cloud storage to training-ready datasets."
+flowchart LR
+    subgraph Edge["Edge Device (Jetson)"]
+        ROS["ROS 2 Topics\n(cameras, joints, IMU)"] --> REC["Recording Service\n(rosbag2 + MCAP)"]
+        REC --> CHUNK["Chunked Bag Files\n(1 GB / 5 min splits)"]
+        CHUNK --> COMP["Compression\n(zstd / lz4)"]
+        COMP --> VAL["Local Validation\n(gap detection)"]
+    end
+
+    subgraph Upload["Transfer"]
+        VAL --> AZ["Azure Blob Upload\n(multipart, incremental)"]
+    end
+
+    subgraph Cloud["Azure Cloud"]
+        AZ --> BLOB["Blob Storage\n(raw bags)"]
+        BLOB --> EVT["Event Grid\nTrigger"]
+        EVT --> CONV["ROS → LeRobot\nConversion"]
+        CONV --> QA["Quality Gates\n(frame counts, gaps)"]
+        QA --> DS["Versioned Dataset\n(LeRobot format)"]
+    end
+
+    DS --> TRAIN["Training Pipeline"]
+```
+
+## Recording Configuration
+
+The recording service uses a Pydantic-validated YAML configuration that specifies which ROS 2 topics to capture, at what frequency, and with which compression algorithm. The configuration model enforces constraints at parse time — frequencies within sensor capabilities, valid compression choices, and GPIO pin ranges for hardware triggers.
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Reference recording configuration for a UR10e manipulation setup
+cat <<'EOF'
+# yaml-language-server: $schema=./recording_config.schema.json
+
+topics:
+  - name: /joint_states
+    frequency_hz: 100.0
+    compression: lz4
+
+  - name: /camera/color/image_raw
+    frequency_hz: 30.0
+    compression: zstd
+
+  - name: /camera/depth/image_raw
+    frequency_hz: 30.0
+    compression: zstd
+
+  - name: /imu/data
+    frequency_hz: 200.0
+    compression: lz4
+
+trigger:
+  type: gpio
+  pin: 17
+  active_high: true
+
+disk_thresholds:
+  warning_percent: 80
+  critical_percent: 95
+
+gap_detection:
+  threshold_ms: 100.0
+  severity: warning
+
+output_dir: /data/recordings
+EOF
+```
+
+### Topic Compression Strategy
+
+Compression choice balances CPU overhead against storage savings. On ARM-based Jetson hardware, CPU headroom is limited during active inference, making algorithm selection critical.
+
+| Algorithm | Image Ratio | Sensor Ratio | Encode Speed (ARM) | CPU Cost | Recommended Use |
+|-----------|-------------|--------------|---------------------|----------|-----------------|
+| `none` | 1.0× | 1.0× | N/A | 0% | Debugging, short captures |
+| `lz4` | 1.5–2.0× | 2.0–3.0× | ~500 MB/s | <10% | High-frequency streams (≥100 Hz) |
+| `zstd` | 2.5–6.0× | 3.0–10.0× | 50–300 MB/s | 20–30% | Images, bandwidth-limited uploads |
+
+::: {.callout-tip}
+## Compression Rule of Thumb
+Use `lz4` for any topic above 50 Hz — the CPU cost is negligible and it prevents disk saturation. Use `zstd` for image topics where the higher compression ratio significantly reduces upload time over constrained network links.
+:::
+
+### Episode Triggers
+
+Episodes are the fundamental unit of training data. Four trigger types control when recording starts and stops:
+
+| Trigger | Mechanism | Use Case |
+|---------|-----------|----------|
+| `gpio` | Physical button or switch (BCM pin numbering) | Teleoperation demonstrations |
+| `position` | Robot joints reach a target pose within tolerance | Repeatable task setups |
+| `vr` | VR controller button press (left/right, trigger/grip) | Immersive teleoperation |
+| `time` | Fixed duration windows | Autonomous data collection |
+
+## MCAP Storage Format
+
+All recordings use the [MCAP](https://mcap.dev) container format instead of the default SQLite3 backend. MCAP provides chunk-level compression, sequential write optimization, and inline chunk manifests that enable partial reads without scanning the entire file.
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Record with MCAP format, 1 GB bag splits, and 5-minute duration limits
+ros2 bag record \
+  --storage mcap \
+  --max-bag-size 1073741824 \
+  --max-bag-duration 300 \
+  --max-cache-size 104857600 \
+  /joint_states /camera/color/image_raw /camera/depth/image_raw /imu/data
+```
+
+### Chunking Parameters
+
+Bag files are split by size and duration to enable incremental uploads and parallel processing:
+
+| Parameter | Default | Recommended | Purpose |
+|-----------|---------|-------------|---------|
+| `--max-bag-size` | 0 (no split) | 1 GB | Split at size threshold |
+| `--max-bag-duration` | 0 (no split) | 300 s (5 min) | Split at duration threshold |
+| `--max-cache-size` | 100 MB | 100 MB | In-memory write buffer |
+| `--storage` | sqlite3 | `mcap` | Storage backend |
+
+## Storage Capacity Planning
+
+Full sensor suite recording (RGB + depth + joints + IMU) generates substantial data volumes. Capacity planning is essential for edge devices with limited NVMe storage.
+
+| Device | Storage | Raw Duration | With zstd-3 | With zstd-6 |
+|--------|---------|-------------|-------------|-------------|
+| Orin Nano (SSD) | 60 GB | 32 min | 51 min | 1 h 17 min |
+| Orin Nano + M.2 | 200 GB | 2 h 8 min | 3 h 23 min | 5 h 8 min |
+| AGX Orin (NVMe) | 450 GB | 4 h 47 min | 7 h 37 min | 11 h 32 min |
+
+::: {.callout-warning}
+## Disk Monitoring
+The recording service monitors disk usage continuously. At the `warning_percent` threshold (default 80%), it logs a warning. At `critical_percent` (default 95%), recording stops immediately to prevent filesystem corruption. Plan upload cadence around these limits.
+:::
+
+## Cloud Upload and Ingestion
+
+Completed bag chunks upload to Azure Blob Storage via the Azure Arc-connected data agent. Uploads are incremental and resumable — each chunk is a standalone file that can transfer independently. An Azure Event Grid trigger fires on blob creation, initiating the cloud-side conversion pipeline.
+
+```{bash}
+#| eval: false
+#| code-fold: false
+# Upload recorded bags to Azure Blob Storage
+az storage blob upload-batch \
+  --account-name "${STORAGE_ACCOUNT}" \
+  --destination "raw-recordings/${ROBOT_ID}/${SESSION_ID}" \
+  --source /data/recordings/ \
+  --pattern "*.mcap" \
+  --overwrite false
+```
+
+## ROS-to-LeRobot Conversion
+
+The conversion pipeline transforms raw ROS 2 bag files into the LeRobot dataset format — a structured directory of HDF5 episode files with synchronized observation and action tensors. The conversion process:
+
+1. **Deserializes** MCAP messages using the embedded schema definitions.
+2. **Aligns** multi-rate topics to a common timeline using nearest-neighbor interpolation.
+3. **Extracts** image frames as tensors and joint states as action vectors.
+4. **Segments** continuous recordings into discrete episodes based on trigger markers.
+5. **Validates** frame counts, temporal gaps, and data integrity.
+6. **Writes** LeRobot-compatible HDF5 files with metadata.
+
+```{python}
+#| eval: false
+#| code-fold: false
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+
+dataset = LeRobotDataset.from_folder(
+    root="data/converted/ur10e-pick-place",
+    split="train",
+)
+
+# Inspect episode structure
+print(f"Episodes: {dataset.num_episodes}")
+print(f"Frames per episode: {dataset.num_frames}")
+print(f"Observation keys: {dataset.meta.observation_keys}")
+print(f"Action dimension: {dataset.meta.action_dim}")
+```
+
+## Quality Gates
+
+Every converted dataset passes through automated quality validation before it becomes available for training:
+
+| Check | Criterion | Action on Failure |
+|-------|-----------|-------------------|
+| Frame count | Minimum frames per episode | Quarantine episode |
+| Temporal gaps | No gaps exceeding threshold | Flag for review |
+| Sensor completeness | All configured topics present | Reject dataset |
+| Image integrity | Decodable frames, correct resolution | Quarantine frame |
+| Action bounds | Joint commands within safe limits | Reject episode |
+
+::: {.callout-note}
+## Dataset Versioning
+Converted datasets are registered in the dataset catalog with a content-addressable version hash. Training jobs reference specific dataset versions, ensuring reproducibility. Re-running conversion on the same raw data produces the same version hash — the pipeline is deterministic.
+:::
+
+## Platform-Specific Configurations
+
+The recording configuration adapts to different robot platforms. A mobile manipulator adds LiDAR and odometry topics with tighter gap detection thresholds, while a fixed-base arm focuses on high-frequency joint states and camera feeds. The Pydantic configuration model validates platform-specific constraints — for example, ensuring that position trigger tolerances match the robot's joint count.

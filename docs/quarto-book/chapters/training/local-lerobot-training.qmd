@@ -1,0 +1,5 @@
+---
+title: "Local LeRobot Training"
+---
+
+{{< include ../../../../docs/local-lerobot-training.md >}}

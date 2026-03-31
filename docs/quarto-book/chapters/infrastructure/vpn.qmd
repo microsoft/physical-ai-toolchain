@@ -1,0 +1,5 @@
+---
+title: "VPN Configuration"
+---
+
+{{< include ../../../../docs/infrastructure/vpn.md >}}
