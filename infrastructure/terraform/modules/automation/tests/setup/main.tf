@@ -30,22 +30,27 @@ locals {
 }
 
 output "resource_prefix" {
-  value = local.resource_prefix
+  description = "Generated resource naming prefix for test isolation."
+  value       = local.resource_prefix
 }
 
 output "environment" {
-  value = local.environment
+  description = "Environment identifier for test configuration."
+  value       = local.environment
 }
 
 output "instance" {
-  value = local.instance
+  description = "Instance identifier for test configuration."
+  value       = local.instance
 }
 
 output "location" {
-  value = local.location
+  description = "Azure region for test resources."
+  value       = local.location
 }
 
 output "resource_group" {
+  description = "Mock resource group object for test input."
   value = {
     id       = local.resource_group_id
     name     = local.resource_group_name
@@ -54,6 +59,7 @@ output "resource_group" {
 }
 
 output "aks_cluster" {
+  description = "Mock AKS cluster reference for test input."
   value = {
     id   = "${local.resource_group_id}/providers/Microsoft.ContainerService/managedClusters/${local.aks_cluster_name}"
     name = local.aks_cluster_name
@@ -61,5 +67,6 @@ output "aks_cluster" {
 }
 
 output "runbook_script_path" {
-  value = "./tests/setup/scripts/stub.ps1"
+  description = "Path to stub runbook script for test execution."
+  value       = "./tests/setup/scripts/stub.ps1"
 }

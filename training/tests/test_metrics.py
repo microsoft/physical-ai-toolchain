@@ -5,7 +5,8 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from conftest import load_training_module
+
+from .conftest import load_training_module
 
 metrics_module = load_training_module("metrics_under_test", "training/utils/metrics.py")
 SystemMetricsCollector = metrics_module.SystemMetricsCollector

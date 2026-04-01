@@ -26,17 +26,21 @@ locals {
 }
 
 output "resource_prefix" {
-  value = local.resource_prefix
+  description = "Generated resource naming prefix for test isolation."
+  value       = local.resource_prefix
 }
 
 output "environment" {
-  value = local.environment
+  description = "Environment identifier for test configuration."
+  value       = local.environment
 }
 
 output "instance" {
-  value = local.instance
+  description = "Instance identifier for test configuration."
+  value       = local.instance
 }
 
 output "location" {
-  value = local.location
+  description = "Azure region for test resources."
+  value       = local.location
 }
