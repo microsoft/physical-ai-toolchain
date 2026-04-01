@@ -1,0 +1,60 @@
+name: ShellCheck
+
+on:
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Whether to continue on ShellCheck failures'
+        required: false
+        type: boolean
+        default: false
+      changed-files-only:
+        description: 'Only lint when shell files changed'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: ${{ inputs.changed-files-only && '0' || '1' }}
+
+      - name: Create logs directory
+        run: New-Item -ItemType Directory -Force -Path logs | Out-Null
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+        shell: bash
+
+      - name: Run ShellCheck
+        id: shellcheck
+        continue-on-error: ${{ inputs.soft-fail }}
+        run: |
+          $params = @{}
+          if ('${{ inputs.changed-files-only }}' -eq 'true') {
+            $params['ChangedFilesOnly'] = $true
+          }
+          ./shared/ci/linting/Invoke-ShellCheck.ps1 @params
+
+      - name: Upload ShellCheck results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: shellcheck-results
+          path: logs/shellcheck-results.json
+          if-no-files-found: ignore

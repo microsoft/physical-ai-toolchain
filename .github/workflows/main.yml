@@ -147,7 +147,7 @@ jobs:
     name: Terraform Validation
     uses: ./.github/workflows/terraform-validation.yml
     with:
-      soft-fail: true
+      soft-fail: false
     permissions:
       contents: read
 
@@ -167,7 +167,7 @@ jobs:
     name: Go Lint
     uses: ./.github/workflows/go-lint.yml
     with:
-      soft-fail: true
+      soft-fail: false
     permissions:
       contents: read
 
@@ -181,6 +181,15 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
+  # ShellCheck linting for shell scripts
+  shellcheck:
+    name: ShellCheck
+    uses: ./.github/workflows/shellcheck.yml
+    with:
+      soft-fail: false
+    permissions:
+      contents: read
 
   # CodeQL security analysis
   codeql-analysis:
@@ -213,6 +222,7 @@ jobs:
       - terraform-tests
       - go-lint
       - go-tests
+      - shellcheck
       - codeql-analysis
     name: Release Please
     runs-on: ubuntu-latest
