@@ -45,6 +45,7 @@ AZURE CONTEXT:
         --azure-subscription-id ID    Azure subscription ID
         --azure-resource-group NAME   Azure resource group
         --azure-workspace-name NAME   Azure ML workspace
+        --correlation-id ID           Optional MLflow correlation ID tag value
 
 OTHER:
         --sleep-after-unpack VALUE  Sleep seconds post-unpack (for debugging)
@@ -106,6 +107,7 @@ skip_register=false
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
+correlation_id="${MLFLOW_CORRELATION_ID:-}"
 
 sleep_after_unpack="${SLEEP_AFTER_UNPACK:-}"
 run_smoke="${RUN_AZURE_SMOKE_TEST:-0}"
@@ -138,6 +140,7 @@ while [[ $# -gt 0 ]]; do
     --azure-subscription-id)      subscription_id="$2"; shift 2 ;;
     --azure-resource-group)       resource_group="$2"; shift 2 ;;
     --azure-workspace-name)       workspace_name="$2"; shift 2 ;;
+    --correlation-id)             correlation_id="$2"; shift 2 ;;
     --sleep-after-unpack)         sleep_after_unpack="$2"; shift 2 ;;
     -s|--run-smoke-test)          run_smoke="1"; shift ;;
     --use-local-osmo)             use_local_osmo=true; shift ;;
@@ -185,6 +188,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Subscription" "${subscription_id:-<not set>}"
   print_kv "Resource Group" "${resource_group:-<not set>}"
   print_kv "Workspace" "${workspace_name:-<not set>}"
+  print_kv "Correlation ID" "${correlation_id:-<not set>}"
   exit 0
 fi
 
@@ -234,6 +238,7 @@ submit_args=(
   "num_envs=$num_envs"
   "payload_root=$payload_root"
   "run_azure_smoke_test=$run_smoke"
+  "mlflow_correlation_id=$correlation_id"
   "checkpoint_uri=$checkpoint_uri"
   "checkpoint_mode=$checkpoint_mode"
   "register_checkpoint=$register_checkpoint"
@@ -280,5 +285,6 @@ print_kv "GPU" "$gpu"
 print_kv "Checkpoint Mode" "$checkpoint_mode"
 print_kv "Register Model" "${register_checkpoint:-<none>}"
 print_kv "Workflow" "$workflow"
+print_kv "Correlation ID" "${correlation_id:-<none>}"
 
 info "Workflow submitted successfully"
