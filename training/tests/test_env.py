@@ -1,7 +1,8 @@
 """Tests for training environment utility helpers."""
 
 import pytest
-from conftest import load_training_module
+
+from .conftest import load_training_module
 
 _ENV_MODULE = load_training_module("training_utils_env", "training/utils/env.py")
 require_env = _ENV_MODULE.require_env
