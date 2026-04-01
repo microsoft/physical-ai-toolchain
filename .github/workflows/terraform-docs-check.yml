@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: 'v0.21.0'
+      terraform-docs-sha256:
+        description: 'SHA256 checksum of terraform-docs linux-amd64 tarball'
+        required: false
+        type: string
+        default: '2fdd81b8d21ff1498cd559af0dcc5d155835f84600db06d3923e217124fc735a'
 
 permissions:
   contents: read
@@ -48,9 +53,19 @@ jobs:
       - name: Install terraform-docs
         run: |
           $version = '${{ inputs.terraform-docs-version }}'
+          $expectedSha = '${{ inputs.terraform-docs-sha256 }}'
+          $tarball = 'terraform-docs.tar.gz'
           $url = "https://github.com/terraform-docs/terraform-docs/releases/download/${version}/terraform-docs-${version}-linux-amd64.tar.gz"
-          Invoke-WebRequest -Uri $url -OutFile 'terraform-docs.tar.gz'
-          tar -xzf terraform-docs.tar.gz
+
+          Invoke-WebRequest -Uri $url -OutFile $tarball
+
+          $actualSha = (Get-FileHash -Path $tarball -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha -ne $expectedSha) {
+            throw "SHA256 mismatch for terraform-docs ${version}: expected '${expectedSha}', got '${actualSha}'"
+          }
+          Write-Output "SHA256 verified: ${actualSha}"
+
+          tar -xzf $tarball
           sudo mv terraform-docs /usr/local/bin/
           terraform-docs --version
 
