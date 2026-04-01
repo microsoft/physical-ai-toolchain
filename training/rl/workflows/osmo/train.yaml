@@ -30,6 +30,7 @@ workflow:
         AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
         MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
         MLFLOW_HTTP_REQUEST_TIMEOUT: "{{ mlflow_http_request_timeout }}"
+        MLFLOW_CORRELATION_ID: "{{ mlflow_correlation_id }}"
         RUN_AZURE_SMOKE_TEST: "{{ run_azure_smoke_test }}"
         PYTHON: "{{ python }}"
         CHECKPOINT_URI: "{{ checkpoint_uri }}"
@@ -94,6 +95,7 @@ default-values:
   azure_authority_host: https://login.microsoftonline.com
   mlflow_token_refresh_retries: "3"
   mlflow_http_request_timeout: "60"
+  mlflow_correlation_id: ""
   python: "/workspace/isaaclab/isaaclab.sh -p"
   run_azure_smoke_test: "0"
   checkpoint_uri: ""

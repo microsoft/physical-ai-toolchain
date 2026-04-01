@@ -32,6 +32,10 @@ resource "azurerm_storage_account" "main" {
       days = 7
     }
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 // ============================================================
@@ -43,6 +47,10 @@ resource "azurerm_storage_container" "ml_workspace" {
   name                  = "ml-workspace"
   storage_account_id    = azurerm_storage_account.main.id
   container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 // ============================================================
@@ -105,6 +113,10 @@ resource "azurerm_storage_management_policy" "main" {
   }
 
   // Note: No lifecycle policy for checkpoints/ prefix — model checkpoints retained indefinitely in Hot tier
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 // ============================================================

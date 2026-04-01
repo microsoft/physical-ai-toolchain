@@ -28,6 +28,10 @@ resource "azurerm_key_vault" "main" {
     // Allow public access when enabled, otherwise deny (PE-only)
     default_action = var.should_enable_public_network_access ? "Allow" : "Deny"
   }
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 // ============================================================

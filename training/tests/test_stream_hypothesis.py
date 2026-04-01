@@ -2,9 +2,10 @@
 
 import io
 
-from conftest import load_training_module
 from hypothesis import given
 from hypothesis import strategies as st
+
+from .conftest import load_training_module
 
 stream_module = load_training_module("stream_under_test", "training/stream.py")
 AnsiStrippingStream = stream_module.AnsiStrippingStream

@@ -32,22 +32,27 @@ locals {
 }
 
 output "resource_prefix" {
-  value = local.resource_prefix
+  description = "Generated resource naming prefix for test isolation."
+  value       = local.resource_prefix
 }
 
 output "environment" {
-  value = local.environment
+  description = "Environment identifier for test configuration."
+  value       = local.environment
 }
 
 output "instance" {
-  value = local.instance
+  description = "Instance identifier for test configuration."
+  value       = local.instance
 }
 
 output "location" {
-  value = local.location
+  description = "Azure region for test resources."
+  value       = local.location
 }
 
 output "resource_group" {
+  description = "Mock resource group object for test input."
   value = {
     id       = local.resource_group_id
     name     = local.resource_group_name
@@ -56,6 +61,7 @@ output "resource_group" {
 }
 
 output "virtual_network" {
+  description = "Mock virtual network reference for test input."
   value = {
     id   = local.vnet_id
     name = local.vnet_name
@@ -63,18 +69,21 @@ output "virtual_network" {
 }
 
 output "network_security_group" {
+  description = "Mock network security group reference for test input."
   value = {
     id = "${local.resource_group_id}/providers/Microsoft.Network/networkSecurityGroups/nsg-${local.resource_prefix}-${local.environment}-${local.instance}"
   }
 }
 
 output "nat_gateway" {
+  description = "Mock NAT gateway reference for test input."
   value = {
     id = "${local.resource_group_id}/providers/Microsoft.Network/natGateways/ng-${local.resource_prefix}-${local.environment}-${local.instance}"
   }
 }
 
 output "log_analytics_workspace" {
+  description = "Mock Log Analytics workspace reference for test input."
   value = {
     id           = "${local.resource_group_id}/providers/Microsoft.OperationalInsights/workspaces/log-${local.resource_prefix}-${local.environment}-${local.instance}"
     workspace_id = "00000000-0000-0000-0000-000000000002"
@@ -82,6 +91,7 @@ output "log_analytics_workspace" {
 }
 
 output "container_registry" {
+  description = "Mock container registry reference for test input."
   value = {
     id           = "${local.resource_group_id}/providers/Microsoft.ContainerRegistry/registries/acr${local.resource_prefix}${local.environment}${local.instance}"
     name         = "acr${local.resource_prefix}${local.environment}${local.instance}"
@@ -90,6 +100,7 @@ output "container_registry" {
 }
 
 output "storage_account" {
+  description = "Mock storage account reference for test input."
   value = {
     id   = "${local.resource_group_id}/providers/Microsoft.Storage/storageAccounts/${local.storage_account_name}"
     name = local.storage_account_name

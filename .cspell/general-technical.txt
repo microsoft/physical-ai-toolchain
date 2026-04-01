@@ -5,6 +5,7 @@ abfs
 acrolinx
 activex
 acunetix
+addfinalizer
 adobe
 adrm
 adrs
@@ -1420,7 +1421,7 @@ upskill
 upskilling
 uri
 url
-usrr
+usefixtures
 utcnow
 uuid
 uvicorn
