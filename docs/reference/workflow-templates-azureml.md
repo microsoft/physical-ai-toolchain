@@ -63,7 +63,7 @@ in `training/` and `evaluation/`.
 | Source YAML path | `evaluation/sil/workflows/azureml/lerobot-eval.yaml` |
 | Primary parameters and overrides | `inputs.policy_repo_id` (`none`), `inputs.policy_type` (`act`), `inputs.dataset_repo_id` (`none`), `inputs.eval_episodes` (`"10"`), `inputs.eval_batch_size` (`"10"`), `inputs.record_video` (`"false"`), `inputs.mlflow_enable` (`"false"`), `inputs.register_model` (`none`), `inputs.blob_storage_container` (`datasets`). |
 | Typical submit path | `evaluation/sil/scripts/submit-azureml-lerobot-eval.sh` |
-| Usage notes | This template is the canonical AzureML LeRobot evaluation reference. Legacy names like `lerobot-infer.yaml` in older scripts are transitional and should not be used for new documentation. |
+| Usage notes | This template is the canonical AzureML LeRobot evaluation reference. |
 
 ## Usage Notes
 

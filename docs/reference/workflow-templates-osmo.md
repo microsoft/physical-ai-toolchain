@@ -74,7 +74,7 @@ legacy naming.
 | Source YAML path | `evaluation/sil/workflows/osmo/lerobot-eval.yaml` |
 | Primary parameters and overrides | `default-values.policy_repo_id` (empty), `default-values.policy_type` (`act`), `default-values.dataset_repo_id` (empty), `default-values.eval_episodes` (`"10"`), `default-values.eval_batch_size` (`"10"`), `default-values.record_video` (`"false"`), `default-values.mlflow_enable` (`"false"`), `default-values.register_model` (empty), `default-values.blob_storage_container` (`datasets`). |
 | Typical submit path | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh` |
-| Usage notes | This is the canonical LeRobot OSMO evaluation template. Exclude stale names such as `lerobot-infer.yaml` and `lerobot-train-dataset.yaml` in new references. |
+| Usage notes | This is the canonical LeRobot OSMO evaluation template. |
 
 ## Usage Notes
 
