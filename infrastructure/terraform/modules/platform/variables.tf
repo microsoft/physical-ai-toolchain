@@ -25,6 +25,9 @@ variable "should_enable_nat_gateway" {
   default     = true
 }
 
+// WARNING: Changing zones on an existing deployment forces replacement of both the
+// NAT Gateway and its Public IP. This causes a brief outbound connectivity interruption
+// while Azure provisions new resources. Plan changes during a maintenance window.
 variable "nat_gateway_zones" {
   type        = list(string)
   description = "Availability zones for NAT Gateway and its public IP. Leave empty for regions without AZ support"

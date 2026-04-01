@@ -88,6 +88,10 @@ node_pools = {
 // NAT Gateway Availability Zones
 // Set to ["1"] in AZ-supported regions (e.g. westus3, eastus2)
 // Leave empty for regions without AZ support (e.g. westus)
+// NOTE: Changing zones on an existing deployment forces replacement of both the NAT Gateway
+// and its Public IP. To preserve existing zonal behavior, set nat_gateway_zones to your current
+// zone (e.g. ["1"]) explicitly before applying. Run `terraform plan` to confirm no unintended
+// NAT/Public IP recreation.
 nat_gateway_zones = []
 
 // OSMO Backend Services
