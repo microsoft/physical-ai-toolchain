@@ -22,7 +22,7 @@ Technical reference documentation for submission scripts, workflow templates, en
 | [Script Reference](scripts.md)            | Submission script inventory, CLI arguments, and configuration      | Available   |
 | [Script Examples](scripts-examples.md)    | Detailed examples for training, inference, and pipeline submission | Available   |
 | [Copilot Artifacts](copilot-artifacts.md) | Agents, instructions, prompts, and skills inventory                | Available   |
-| Workflow Templates                        | AzureML and OSMO workflow YAML templates and configuration         | Coming soon |
+| [Workflow Templates](workflow-templates-azureml.md) | AzureML and OSMO workflow YAML templates and configuration ([AzureML](workflow-templates-azureml.md), [OSMO](workflow-templates-osmo.md)) | Available |
 | Terraform Variables                       | Terraform input variables and outputs reference                    | Coming soon |
 | Environment Variables                     | Environment variables for training and deployment                  | Coming soon |
 
