@@ -1180,6 +1180,9 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "fastapi" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "pyarrow" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
@@ -1188,9 +1191,7 @@ dependencies = [
 
 [package.optional-dependencies]
 analysis = [
-    { name = "numpy" },
     { name = "pandas" },
-    { name = "pyarrow" },
     { name = "scikit-learn" },
     { name = "scipy" },
 ]
@@ -1211,8 +1212,6 @@ dev = [
 ]
 export = [
     { name = "h5py" },
-    { name = "numpy" },
-    { name = "pillow" },
 ]
 hdf5 = [
     { name = "h5py" },
@@ -1221,8 +1220,6 @@ huggingface = [
     { name = "huggingface-hub" },
 ]
 yolo = [
-    { name = "numpy" },
-    { name = "pillow" },
     { name = "ultralytics" },
 ]
 
@@ -1237,13 +1234,10 @@ requires-dist = [
     { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.12.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = ">=0.27.0" },
-    { name = "numpy", marker = "extra == 'analysis'", specifier = ">=2.2.0" },
-    { name = "numpy", marker = "extra == 'export'", specifier = ">=2.2.0" },
-    { name = "numpy", marker = "extra == 'yolo'", specifier = ">=2.2.0" },
+    { name = "numpy", specifier = ">=2.2.0" },
     { name = "pandas", marker = "extra == 'analysis'", specifier = ">=2.2.0" },
-    { name = "pillow", marker = "extra == 'export'", specifier = ">=10.0.0" },
-    { name = "pillow", marker = "extra == 'yolo'", specifier = ">=10.0.0" },
-    { name = "pyarrow", marker = "extra == 'analysis'", specifier = ">=18.1.0" },
+    { name = "pillow", specifier = ">=10.0.0" },
+    { name = "pyarrow", specifier = ">=18.1.0" },
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'auth'", specifier = ">=2.12.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
