@@ -6,7 +6,7 @@
 # Purpose: Shared helper functions for linting scripts and workflows
 # Author: HVE Core Team
 
-Import-Module (Join-Path $PSScriptRoot "../../../../scripts/lib/Modules/CIHelpers.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "../../../../shared/lib/Modules/CIHelpers.psm1") -Force
 
 function Get-ChangedFilesFromGit {
     <#
