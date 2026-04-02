@@ -299,6 +299,7 @@ class TestVideoGenerationFallback:
     def test_cv2_fallback_returns_false_without_opencv(self, tmp_path, monkeypatch):
         """_generate_video_cv2 returns False when cv2 is not installed."""
         import builtins
+        import sys
 
         real_import = builtins.__import__
 
@@ -307,6 +308,7 @@ class TestVideoGenerationFallback:
                 raise ImportError("No module named 'cv2'")
             return real_import(name, *args, **kwargs)
 
+        monkeypatch.delitem(sys.modules, "cv2", raising=False)
         monkeypatch.setattr(builtins, "__import__", mock_import)
 
         from src.api.services.dataset_service.hdf5_handler import _generate_video_cv2

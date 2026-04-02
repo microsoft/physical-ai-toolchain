@@ -11,6 +11,8 @@ LeRobot v3 structure:
 - videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from dataclasses import dataclass, field
@@ -19,20 +21,13 @@ from typing import Any
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.parquet as pq
 from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-# PyArrow is an optional dependency
-try:
-    import pyarrow.parquet as pq
 
-    PARQUET_AVAILABLE = True
-except ImportError:
-    PARQUET_AVAILABLE = False
-
-
-def _column_to_numpy(table: "pa.Table", name: str) -> NDArray:
+def _column_to_numpy(table: pa.Table, name: str) -> NDArray:
     """Extract a pyarrow column as a numpy array, stacking list elements."""
     col = table.column(name)
     if pa.types.is_list(col.type) or pa.types.is_fixed_size_list(col.type):
@@ -128,12 +123,8 @@ class LeRobotLoader:
             base_path: Path to the LeRobot dataset directory.
 
         Raises:
-            ImportError: If pyarrow is not installed.
             LeRobotLoaderError: If the dataset structure is invalid.
         """
-        if not PARQUET_AVAILABLE:
-            raise ImportError("LeRobot support requires pyarrow package. Install with: pip install pyarrow")
-
         self.base_path = Path(base_path)
         self._info: LeRobotDatasetInfo | None = None
         self._episode_index_cache: dict[int, tuple[int, int]] = {}  # episode -> (chunk, file)

@@ -15,7 +15,7 @@ applyTo: "**/*.sh"
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"
 # shellcheck source=../../shared/lib/common.sh
 source "$REPO_ROOT/shared/lib/common.sh"
 # shellcheck source=defaults.conf
@@ -108,7 +108,7 @@ info "Operation complete"
 
 **Repository Root:**
 
-- Always derive `REPO_ROOT` with git fallback: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$SCRIPT_DIR/../.." && pwd)"`
+- Always derive `REPO_ROOT` with git fallback: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"`
 - Adjust the `cd` traversal depth to match the script's location relative to the repo root
 - Source all shared libraries via `$REPO_ROOT/shared/lib/` — never via symlinks or `$SCRIPT_DIR/lib/`
 

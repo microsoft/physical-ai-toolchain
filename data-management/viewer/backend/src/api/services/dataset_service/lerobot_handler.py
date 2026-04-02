@@ -5,6 +5,8 @@ Implements DatasetFormatHandler for LeRobot datasets with support for
 parquet data files, mp4 video files, and meta/info.json metadata.
 """
 
+from __future__ import annotations
+
 import io
 import logging
 import shutil
