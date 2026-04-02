@@ -61,7 +61,7 @@ jobs:
         id: changed-files
         if: inputs.changed-files-only
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
+          Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
 
           # Determine base ref for comparison
           if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
@@ -100,8 +100,8 @@ jobs:
               }
             }
 
-            # Map scripts/lib/ source to test: scripts/lib/Foo.ps1 -> shared/ci/tests/lib/Foo.Tests.ps1
-            if ($file -match '^scripts/lib/(.+)\.psm?1$') {
+            # Map shared/lib/ source to test: shared/lib/Foo.ps1 -> shared/ci/tests/lib/Foo.Tests.ps1
+            if ($file -match '^shared/lib/(.+)\.psm?1$') {
               $relativePath = $Matches[1]
               $testFile = "shared/ci/tests/lib/$relativePath.Tests.ps1"
               if (Test-Path $testFile) {
@@ -137,7 +137,7 @@ jobs:
         run: |
           # Capture workspace root before Pester — test mocks may clear $env:GITHUB_WORKSPACE
           $workspaceRoot = $env:GITHUB_WORKSPACE
-          $ciHelpersPath = Join-Path $workspaceRoot 'scripts/lib/Modules/CIHelpers.psm1'
+          $ciHelpersPath = Join-Path $workspaceRoot 'shared/lib/Modules/CIHelpers.psm1'
 
           Import-Module $ciHelpersPath
 

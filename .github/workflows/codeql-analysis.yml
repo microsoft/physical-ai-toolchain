@@ -54,7 +54,7 @@ jobs:
       - name: Add job summary
         if: always()
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
+          Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
           $md = @(
             '## CodeQL Security Analysis Complete'
             '**Language:** ${{ matrix.language }}'

@@ -43,7 +43,7 @@ jobs:
       - name: Create annotations
         if: env.TABLE_FORMAT_FAILED == 'true'
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
+          Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
           $changed = (git diff --name-only -- '*.md' 2>$null) | Where-Object { $_ }
           if ($changed) {
             foreach ($file in $changed) {
@@ -65,7 +65,7 @@ jobs:
       - name: Add job summary
         if: always()
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
+          Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
           if ($env:TABLE_FORMAT_FAILED -eq 'true') {
             $changed = (git diff --name-only -- '*.md' 2>$null) | Where-Object { $_ }
             $md = @(
@@ -104,6 +104,6 @@ jobs:
       - name: Fail job if issues found
         if: env.TABLE_FORMAT_FAILED == 'true' && !inputs.soft-fail
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
+          Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
           Write-CIAnnotation -Level Error -Message "Table format check failed — run 'npm run format:tables' locally to fix. See step summary for details"
           exit 1

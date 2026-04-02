@@ -48,7 +48,7 @@ jobs:
       - name: Create annotations
         if: env.SPELL_CHECK_FAILED == 'true'
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
+          Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
           foreach ($line in (Get-Content logs/spell-check-results.txt -ErrorAction SilentlyContinue)) {
             if ($line -match '^(.+):(\d+):(\d+)\s-\s(.+)$') {
               $file = $Matches[1] -replace [regex]::Escape("$env:GITHUB_WORKSPACE/"), ''
@@ -67,7 +67,7 @@ jobs:
       - name: Add job summary
         if: always()
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
+          Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
           if ($env:SPELL_CHECK_FAILED -eq 'true') {
             $rows = @()
             foreach ($line in (Get-Content logs/spell-check-results.txt -ErrorAction SilentlyContinue)) {
@@ -98,6 +98,6 @@ jobs:
       - name: Fail job if errors found
         if: env.SPELL_CHECK_FAILED == 'true' && !inputs.soft-fail
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
+          Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
           Write-CIAnnotation -Level Error -Message 'Spell check found errors — see step summary and spell-check-results artifact for details'
           exit 1
