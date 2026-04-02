@@ -35,7 +35,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot "lib/Modules/CIHelpers.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "../shared/lib/Modules/CIHelpers.psm1") -Force
 
 function Update-TerraformDocsCore {
     [CmdletBinding()]

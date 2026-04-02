@@ -17,7 +17,7 @@ BeforeAll {
     # Import modules
     $lintingDir = Join-Path $PSScriptRoot '..' '..' 'linting'
     $modulePath = Join-Path $lintingDir 'Modules' 'FrontmatterValidation.psm1'
-    $ciHelpersPath = Join-Path $PSScriptRoot '..' '..' '..' '..' 'scripts' 'lib' 'Modules' 'CIHelpers.psm1'
+    $ciHelpersPath = Join-Path $PSScriptRoot '..' '..' '..' '..' 'shared' 'lib' 'Modules' 'CIHelpers.psm1'
     $lintingHelpersPath = Join-Path $lintingDir 'Modules' 'LintingHelpers.psm1'
     $gitMocksPath = Join-Path $PSScriptRoot '..' 'Mocks' 'GitMocks.psm1'
 

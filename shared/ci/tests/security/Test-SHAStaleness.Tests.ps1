@@ -20,7 +20,7 @@ BeforeAll {
     . $scriptPath
     # Re-import CIHelpers so Pester can resolve its commands for mocking;
     # the nested-module import inside SecurityHelpers shadows the standalone copy.
-    Import-Module (Join-Path $PSScriptRoot '../../../../scripts/lib/Modules/CIHelpers.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '../../../../shared/lib/Modules/CIHelpers.psm1') -Force
 
     $mockPath = Join-Path $PSScriptRoot '../Mocks/GitMocks.psm1'
     Import-Module $mockPath -Force

@@ -34,7 +34,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot "Modules/LintingHelpers.psm1") -Force
-Import-Module (Join-Path $PSScriptRoot "../../../scripts/lib/Modules/CIHelpers.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "../../../shared/lib/Modules/CIHelpers.psm1") -Force
 
 function Invoke-YamlLintCore {
     [CmdletBinding()]

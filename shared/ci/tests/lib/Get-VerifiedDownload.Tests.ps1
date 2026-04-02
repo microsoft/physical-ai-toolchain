@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MIT
 
 BeforeAll {
-    . $PSScriptRoot/../../../../scripts/lib/Get-VerifiedDownload.ps1
+    . $PSScriptRoot/../../../../shared/lib/Get-VerifiedDownload.ps1
 }
 Describe 'Get-FileHashValue' {
     It 'Returns uppercase hash string for valid file' {
@@ -582,7 +582,7 @@ Describe 'Invoke-VerifiedDownload' {
 
     Describe 'Main Execution Block' -Tag 'Integration' {
         BeforeAll {
-            $script:scriptPath = Join-Path $PSScriptRoot '../../../../scripts/lib/Get-VerifiedDownload.ps1'
+            $script:scriptPath = Join-Path $PSScriptRoot '../../../../shared/lib/Get-VerifiedDownload.ps1'
         }
 
         It 'Exits 1 when required parameters are missing' {

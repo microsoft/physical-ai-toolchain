@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MIT
 
 BeforeAll {
-    $ciHelpersPath = Join-Path $PSScriptRoot '..' '..' '..' '..' 'scripts' 'lib' 'Modules' 'CIHelpers.psm1'
+    $ciHelpersPath = Join-Path $PSScriptRoot '..' '..' '..' '..' 'shared' 'lib' 'Modules' 'CIHelpers.psm1'
     Import-Module $ciHelpersPath -Force
 
     $gitMocksPath = Join-Path $PSScriptRoot '..' 'Mocks' 'GitMocks.psm1'

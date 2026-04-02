@@ -1,1 +1,0 @@
-../../shared/lib/terraform-outputs.ps1

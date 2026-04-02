@@ -50,7 +50,7 @@ $result = Invoke-Pester -Configuration $config
 
 # Write step summary in CI environments when CIHelpers is available
 if ($CI.IsPresent) {
-    $ciHelpersPath = Join-Path $PSScriptRoot '../../../scripts/lib/Modules/CIHelpers.psm1'
+    $ciHelpersPath = Join-Path $PSScriptRoot '../../../shared/lib/Modules/CIHelpers.psm1'
     if (Test-Path $ciHelpersPath) {
         Import-Module $ciHelpersPath -Force
         if (Get-Command -Name Write-CIStepSummary -ErrorAction SilentlyContinue) {

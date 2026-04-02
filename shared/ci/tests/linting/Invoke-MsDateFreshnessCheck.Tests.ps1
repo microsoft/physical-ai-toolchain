@@ -9,7 +9,7 @@ BeforeAll {
     $ErrorActionPreference = 'Continue'
 
     $lintingHelpersPath = Join-Path $PSScriptRoot '../../linting/Modules/LintingHelpers.psm1'
-    $ciHelpersPath = Join-Path $PSScriptRoot '../../../../scripts/lib/Modules/CIHelpers.psm1'
+    $ciHelpersPath = Join-Path $PSScriptRoot '../../../../shared/lib/Modules/CIHelpers.psm1'
     Import-Module $lintingHelpersPath -Force
     Import-Module $ciHelpersPath -Force
     Import-Module (Join-Path $PSScriptRoot '../Mocks/GitMocks.psm1') -Force

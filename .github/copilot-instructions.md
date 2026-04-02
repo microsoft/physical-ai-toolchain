@@ -81,7 +81,7 @@ Detailed template and structure in `.github/instructions/shell-scripts.instructi
 
 * Two Terraform output libraries exist (do NOT mix them):
   * `shared/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy and submission scripts
-  * `shared/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts (symlinked at `scripts/lib/terraform-outputs.sh`)
+  * `shared/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts
 * `.env.local` load order: `common.sh` loads `.env.local` BEFORE `defaults.conf`; override defaults via `${VAR:-default}` pattern
 * Idempotent K8s operations: `kubectl create --dry-run=client -o yaml | kubectl apply -f -`
 * Every script supports `--config-preview` (print configuration and exit without changes)
@@ -357,7 +357,7 @@ AzureML runs on Arc-connected AKS clusters via the AzureML Kubernetes extension.
 * Identity chain: Terraform-created managed identity → federated credentials → K8s service accounts (`azureml:default`, `azureml:training`)
 * Model validation mode: `mode: download` (NOT `ro_mount`) — workaround for workload identity auth failures in `data-capability` sidecar
 * Multi-node: Volcano scheduler installed by AzureML extension when `installVolcano: true`
-* Training submission scripts in `scripts/` use `scripts/lib/terraform-outputs.sh` to resolve infrastructure values
+* Training submission scripts use `shared/lib/terraform-outputs.sh` to resolve infrastructure values
 
 ## Training Pipeline
 

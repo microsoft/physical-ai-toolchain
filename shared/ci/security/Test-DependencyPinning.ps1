@@ -122,7 +122,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # Import CIHelpers for workflow command escaping
-Import-Module (Join-Path $PSScriptRoot '../../../scripts/lib/Modules/CIHelpers.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '../../../shared/lib/Modules/CIHelpers.psm1') -Force
 
 # Define dependency patterns for different ecosystems
 $DependencyPatterns = @{

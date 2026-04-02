@@ -82,7 +82,7 @@ Set-StrictMode -Version Latest
 
 $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 Import-Module (Join-Path $scriptRoot 'Modules' 'LintingHelpers.psm1') -Force
-Import-Module (Join-Path $scriptRoot '..' '..' '..' 'scripts' 'lib' 'Modules' 'CIHelpers.psm1') -Force
+Import-Module (Join-Path $scriptRoot '..' '..' '..' 'shared' 'lib' 'Modules' 'CIHelpers.psm1') -Force
 
 #region Schema Validation
 

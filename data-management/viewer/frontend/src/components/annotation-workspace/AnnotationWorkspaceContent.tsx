@@ -76,11 +76,11 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
   )
 
   return (
-    <div className="flex h-full flex-col gap-2.5 px-3 py-2">
+    <div className="flex h-full flex-col gap-2.5 overflow-y-auto px-3 py-2">
       <Tabs
         value={shell.activeTab}
         onValueChange={shell.handleTabChange}
-        className="flex min-h-0 flex-1 flex-col"
+        className="flex flex-1 flex-col"
       >
         <AnnotationWorkspaceTopBar
           episodeIndex={currentEpisode.meta.index}

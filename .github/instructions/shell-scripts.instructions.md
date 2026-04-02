@@ -15,8 +15,9 @@ applyTo: "**/*.sh"
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/common.sh
-source "$SCRIPT_DIR/lib/common.sh"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=../../shared/lib/common.sh
+source "$REPO_ROOT/shared/lib/common.sh"
 # shellcheck source=defaults.conf
 source "$SCRIPT_DIR/defaults.conf"
 
@@ -85,7 +86,7 @@ info "Operation complete"
 ## Section Order
 
 1. Shebang + description + `set -o errexit -o nounset`
-2. `SCRIPT_DIR` resolution and library sourcing
+2. `SCRIPT_DIR` + `REPO_ROOT` resolution and library sourcing
 3. `show_help()` function
 4. Default variables
 5. Argument parsing (`while [[ $# -gt 0 ]]`)
@@ -104,6 +105,12 @@ info "Operation complete"
 - Short: `-h`, `-t` | Long: `--help`, `--tf-dir`
 - Value options: `shift 2` | Flags: `shift`
 - Unknown options: `fatal "Unknown option: $1"`
+
+**Repository Root:**
+
+- Always derive `REPO_ROOT` with git fallback: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$SCRIPT_DIR/../.." && pwd)"`
+- Adjust the `cd` traversal depth to match the script's location relative to the repo root
+- Source all shared libraries via `$REPO_ROOT/shared/lib/` — never via symlinks or `$SCRIPT_DIR/lib/`
 
 **Variables:**
 
@@ -142,7 +149,7 @@ command "${args[@]}"
 
 <!-- </important-conventions> -->
 
-## Library Functions (lib/common.sh)
+## Library Functions (`shared/lib/common.sh`)
 
 | Function                           | Purpose                       |
 |------------------------------------|-------------------------------|
