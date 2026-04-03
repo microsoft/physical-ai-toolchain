@@ -281,7 +281,7 @@ variable "should_enable_nat_gateway" {
 variable "nat_gateway_zones" {
   type        = list(string)
   description = "Availability zones for NAT Gateway and its public IP. Set to [\"1\"] in regions with AZ support. Leave empty for regions without AZ support (e.g. westus)"
-  default     = []
+  default     = ["1"]
 }
 
 variable "should_create_vm_subnet" {
