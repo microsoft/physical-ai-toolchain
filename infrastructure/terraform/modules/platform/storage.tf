@@ -1,10 +1,10 @@
 /**
  * # Storage Resources
  *
- * This file creates the Storage Account for the Platform module including:
- * - Storage Account for ML workspace and general purpose
- * - Default container for ML workspace
- * - Private endpoints for blob and file services
+ * This file creates storage infrastructure for the Platform module including:
+ * - Storage Account for ML workspace (system data, logs, snapshots)
+ * - Optional ADLS Gen2 Data Lake storage account for domain data (datasets, model checkpoints)
+ * - Storage containers, lifecycle policies, and private endpoints
  */
 
 // ============================================================
@@ -54,11 +54,75 @@ resource "azurerm_storage_container" "ml_workspace" {
 }
 
 // ============================================================
-// Storage Lifecycle Management Policy
+// Data Lake Storage Account (ADLS Gen2)
 // ============================================================
 
-resource "azurerm_storage_management_policy" "main" {
-  storage_account_id = azurerm_storage_account.main.id
+resource "azurerm_storage_account" "data_lake" {
+  count = var.should_create_data_lake_storage ? 1 : 0
+
+  name                            = "stdl${var.resource_prefix}${var.environment}${var.instance}"
+  location                        = var.resource_group.location
+  resource_group_name             = var.resource_group.name
+  account_tier                    = "Standard"
+  account_replication_type        = "LRS"
+  access_tier                     = "Hot"
+  min_tls_version                 = "TLS1_2"
+  is_hns_enabled                  = true
+  shared_access_key_enabled       = var.should_enable_storage_shared_access_key
+  public_network_access_enabled   = var.should_enable_public_network_access
+  allow_nested_items_to_be_public = false
+
+  blob_properties {
+    delete_retention_policy {
+      days = 7
+    }
+
+    container_delete_retention_policy {
+      days = 7
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+// ============================================================
+// Data Lake Containers
+// ============================================================
+
+resource "azurerm_storage_container" "datasets" {
+  count = var.should_create_data_lake_storage ? 1 : 0
+
+  name                  = "datasets"
+  storage_account_id    = azurerm_storage_account.data_lake[0].id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "azurerm_storage_container" "models" {
+  count = var.should_create_data_lake_storage ? 1 : 0
+
+  name                  = "models"
+  storage_account_id    = azurerm_storage_account.data_lake[0].id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+// ============================================================
+// Data Lake Lifecycle Management Policy
+// ============================================================
+
+resource "azurerm_storage_management_policy" "data_lake" {
+  count = var.should_create_data_lake_storage ? 1 : 0
+
+  storage_account_id = azurerm_storage_account.data_lake[0].id
 
   // Rule 1: Delete raw ROS bags after retention period
   rule {
@@ -112,8 +176,6 @@ resource "azurerm_storage_management_policy" "main" {
     }
   }
 
-  // Note: No lifecycle policy for checkpoints/ prefix — model checkpoints retained indefinitely in Hot tier
-
   lifecycle {
     prevent_destroy = true
   }
@@ -165,5 +227,53 @@ resource "azurerm_private_endpoint" "storage_file" {
   private_dns_zone_group {
     name                 = "pdz-file-${local.resource_name_suffix}"
     private_dns_zone_ids = [azurerm_private_dns_zone.core["storage_file"].id]
+  }
+}
+
+// ============================================================
+// Data Lake Private Endpoints
+// ============================================================
+
+// Data Lake Blob Private Endpoint
+resource "azurerm_private_endpoint" "data_lake_blob" {
+  count = var.should_create_data_lake_storage && local.pe_enabled ? 1 : 0
+
+  name                = "pe-datalake-blob-${local.resource_name_suffix}"
+  location            = var.resource_group.location
+  resource_group_name = var.resource_group.name
+  subnet_id           = azurerm_subnet.private_endpoints[0].id
+
+  private_service_connection {
+    name                           = "psc-datalake-blob-${local.resource_name_suffix}"
+    private_connection_resource_id = azurerm_storage_account.data_lake[0].id
+    subresource_names              = ["blob"]
+    is_manual_connection           = false
+  }
+
+  private_dns_zone_group {
+    name                 = "pdz-datalake-blob-${local.resource_name_suffix}"
+    private_dns_zone_ids = [azurerm_private_dns_zone.core["storage_blob"].id]
+  }
+}
+
+// Data Lake DFS Private Endpoint
+resource "azurerm_private_endpoint" "data_lake_dfs" {
+  count = var.should_create_data_lake_storage && local.pe_enabled ? 1 : 0
+
+  name                = "pe-datalake-dfs-${local.resource_name_suffix}"
+  location            = var.resource_group.location
+  resource_group_name = var.resource_group.name
+  subnet_id           = azurerm_subnet.private_endpoints[0].id
+
+  private_service_connection {
+    name                           = "psc-datalake-dfs-${local.resource_name_suffix}"
+    private_connection_resource_id = azurerm_storage_account.data_lake[0].id
+    subresource_names              = ["dfs"]
+    is_manual_connection           = false
+  }
+
+  private_dns_zone_group {
+    name                 = "pdz-datalake-dfs-${local.resource_name_suffix}"
+    private_dns_zone_ids = [azurerm_private_dns_zone.core["storage_dfs"].id]
   }
 }
