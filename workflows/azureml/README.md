@@ -1,120 +1,29 @@
 ---
 title: AzureML Workflows
-description: Azure Machine Learning job templates for robotics training and validation
+description: Pointer page for AzureML workflow template documentation.
 author: Edge AI Team
-ms.date: 2026-03-20
+ms.date: 2026-04-01
 ms.topic: reference
 ---
 
-Azure Machine Learning job templates for Isaac Lab training and validation workloads.
+AzureML workflow template details are documented in reference pages.
+Use this README as a concise pointer.
 
-## 📜 Available Templates
+## 📚 Reference Pages
 
-| Template                                                                     | Purpose                               | Submission Script                                        |
-|------------------------------------------------------------------------------|---------------------------------------|----------------------------------------------------------|
-| [train.yaml](../../training/rl/workflows/azureml/train.yaml)                 | Training jobs with checkpoint support | `training/rl/scripts/submit-azureml-training.sh`         |
-| [validate.yaml](../../evaluation/sil/workflows/azureml/validate.yaml)        | Policy validation and inference       | `evaluation/sil/scripts/submit-azureml-validation.sh`    |
-| [lerobot-train.yaml](../../training/il/workflows/azureml/lerobot-train.yaml) | LeRobot behavioral cloning training   | `training/il/scripts/submit-azureml-lerobot-training.sh` |
+* [Workflow Templates (AzureML)](../../docs/reference/workflow-templates-azureml.md)
+* [Workflow Templates (OSMO)](../../docs/reference/workflow-templates-osmo.md)
 
-## 🏋️ Training Job (`train.yaml`)
+## 🧭 Canonical Scope
 
-Submits Isaac Lab reinforcement learning training to AKS GPU nodes via Azure ML.
+This folder maps to AzureML template sources under
+`training/*/workflows/azureml/` and `evaluation/sil/workflows/azureml/`.
 
-### Key Parameters
+## 🔗 Submission Paths
 
-| Input             | Description                     | Default                            |
-|-------------------|---------------------------------|------------------------------------|
-| `mode`            | Execution mode                  | `train`                            |
-| `checkpoint_mode` | Checkpoint loading strategy     | `from-scratch`                     |
-| `task`            | Isaac Lab task name             | `Isaac-Velocity-Rough-Anymal-C-v0` |
-| `num_envs`        | Number of parallel environments | `4096`                             |
-| `headless`        | Run without rendering           | `true`                             |
-| `max_iterations`  | Training iterations             | `4500`                             |
+Use script-based submission from:
 
-### Training Usage
-
-```bash
-# Default configuration from Terraform outputs
-training/rl/scripts/submit-azureml-training.sh
-
-# Override specific parameters
-training/rl/scripts/submit-azureml-training.sh \
-  --resource-group rg-custom \
-  --workspace-name mlw-custom
-```
-
-## ✅ Validation Job (`validate.yaml`)
-
-Runs trained policy validation and generates inference metrics.
-
-### Validation Parameters
-
-| Input             | Description                 | Default                            |
-|-------------------|-----------------------------|------------------------------------|
-| `mode`            | Execution mode              | `play`                             |
-| `checkpoint_mode` | Must use trained checkpoint | `from-trained`                     |
-| `task`            | Isaac Lab task name         | `Isaac-Velocity-Rough-Anymal-C-v0` |
-| `num_envs`        | Environments for validation | `1024`                             |
-
-### Validation Usage
-
-```bash
-# Default configuration
-evaluation/sil/scripts/submit-azureml-validation.sh
-
-# With custom checkpoint
-evaluation/sil/scripts/submit-azureml-validation.sh \
-  --checkpoint-path "azureml://datastores/checkpoints/paths/model.pt"
-```
-
-## ⚙️ Environment Variables
-
-All scripts support environment variable configuration:
-
-| Variable                 | Description             |
-|--------------------------|-------------------------|
-| `AZURE_SUBSCRIPTION_ID`  | Azure subscription ID   |
-| `AZURE_RESOURCE_GROUP`   | Resource group name     |
-| `AZUREML_WORKSPACE_NAME` | Azure ML workspace name |
-| `AZUREML_COMPUTE`        | Compute target name     |
-
-## 📋 Prerequisites
-
-1. Azure ML extension installed on AKS cluster
-2. Kubernetes compute target attached to workspace
-3. GPU instance types configured in cluster
-
-## 🤖 LeRobot Training Job (`lerobot-train.yaml`)
-
-Submits LeRobot behavioral cloning training (ACT/Diffusion policies) to Azure ML. Installs LeRobot dynamically in the container and trains from HuggingFace Hub datasets.
-
-### LeRobot Parameters
-
-| Input             | Description                    | Default                                         |
-|-------------------|--------------------------------|-------------------------------------------------|
-| `dataset_repo_id` | HuggingFace dataset repository | (required)                                      |
-| `policy_type`     | Policy architecture            | `act`                                           |
-| `job_name`        | Job identifier                 | `lerobot-act-training`                          |
-| `image`           | Container image                | `pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime` |
-| `wandb_enable`    | Enable WANDB logging           | `true`                                          |
-| `save_freq`       | Checkpoint save frequency      | `5000`                                          |
-
-### LeRobot Usage
-
-```bash
-# ACT policy training
-training/il/scripts/submit-azureml-lerobot-training.sh \
-  -d lerobot/aloha_sim_insertion_human
-
-# Diffusion policy with model registration
-training/il/scripts/submit-azureml-lerobot-training.sh \
-  -d user/custom-dataset \
-  -p diffusion \
-  -r my-diffusion-model \
-  --stream
-```
-
-<!-- markdownlint-disable MD036 -->
-*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
-then carefully refined by our team of discerning human reviewers.*
-<!-- markdownlint-enable MD036 -->
+* `training/rl/scripts/submit-azureml-training.sh`
+* `training/il/scripts/submit-azureml-lerobot-training.sh`
+* `evaluation/sil/scripts/submit-azureml-validation.sh`
+* `evaluation/sil/scripts/submit-azureml-lerobot-eval.sh`
