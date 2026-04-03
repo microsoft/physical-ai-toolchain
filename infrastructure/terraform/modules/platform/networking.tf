@@ -84,7 +84,7 @@ resource "azurerm_public_ip" "nat_gateway" {
   resource_group_name = var.resource_group.name
   allocation_method   = "Static"
   sku                 = "Standard"
-  zones               = ["1"]
+  zones               = var.nat_gateway_zones
 
   lifecycle {
     ignore_changes = [ip_tags]
@@ -100,7 +100,7 @@ resource "azurerm_nat_gateway" "main" {
   resource_group_name     = var.resource_group.name
   sku_name                = "Standard"
   idle_timeout_in_minutes = 10
-  zones                   = ["1"]
+  zones                   = var.nat_gateway_zones
 }
 
 // NAT Gateway Public IP Association

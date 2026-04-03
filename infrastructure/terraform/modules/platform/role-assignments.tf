@@ -70,6 +70,14 @@ resource "azurerm_role_assignment" "ml_storage_file" {
   principal_id         = azurerm_user_assigned_identity.ml.principal_id
 }
 
+// Grant ML identity Storage File Data Privileged Contributor role
+// Required for Azure ML compute instance storage mounting
+resource "azurerm_role_assignment" "ml_storage_file_privileged" {
+  scope                = azurerm_storage_account.main.id
+  role_definition_name = "Storage File Data Privileged Contributor"
+  principal_id         = azurerm_user_assigned_identity.ml.principal_id
+}
+
 // ============================================================
 // OSMO Identity Role Assignments
 // ============================================================
