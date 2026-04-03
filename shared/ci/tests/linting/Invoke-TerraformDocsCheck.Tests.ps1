@@ -22,15 +22,13 @@ Describe 'Invoke-TerraformDocsCheckCore' -Tag 'Unit' {
     BeforeEach {
         $script:MockFiles = Initialize-MockCIEnvironment -Workspace $TestDrive
         $script:TestOutputPath = Join-Path $TestDrive 'logs/terraform-docs-check-results.json'
-        $script:TestTerraformDir = Join-Path $TestDrive 'infrastructure/terraform'
-        New-Item -ItemType Directory -Force -Path $script:TestTerraformDir | Out-Null
 
         Mock git { return $TestDrive } -ParameterFilter { $args[0] -eq 'rev-parse' }
         Mock Get-Command { return @{ Name = 'terraform-docs' } } -ParameterFilter { $Name -eq 'terraform-docs' }
         Mock Write-CIAnnotation {}
         Mock Write-CIStepSummary {}
 
-        # Default: npm run docs:tf -- --check succeeds (no drift)
+        # Default: npm run docs:generate:tf -- --check succeeds (no drift)
         Mock npm {
             $global:LASTEXITCODE = 0
             return 'All documents are up to date'
@@ -45,15 +43,13 @@ Describe 'Invoke-TerraformDocsCheckCore' -Tag 'Unit' {
     Context 'tool availability' {
         It 'Returns 1 when terraform-docs is not in PATH' {
             Mock Get-Command { return $null } -ParameterFilter { $Name -eq 'terraform-docs' }
-            $result = Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            $result = Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             $result | Should -Be 1
         }
 
         It 'Writes error annotation when terraform-docs missing' {
             Mock Get-Command { return $null } -ParameterFilter { $Name -eq 'terraform-docs' }
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             Should -Invoke Write-CIAnnotation -Times 1 -ParameterFilter {
                 $Level -eq 'Error' -and $Message -like '*terraform-docs*not*'
             }
@@ -61,21 +57,18 @@ Describe 'Invoke-TerraformDocsCheckCore' -Tag 'Unit' {
     }
 
     Context 'clean run (no drift)' {
-        It 'Returns 0 when npm run docs:tf passes' {
-            $result = Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+        It 'Returns 0 when npm run docs:generate:tf passes' {
+            $result = Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             $result | Should -Be 0
         }
 
         It 'Creates output JSON file' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             $script:TestOutputPath | Should -Exist
         }
 
         It 'JSON has correct structure' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json | Should -Not -BeNullOrEmpty
             $json.PSObject.Properties.Name | Should -Contain 'drift_detected'
@@ -84,15 +77,13 @@ Describe 'Invoke-TerraformDocsCheckCore' -Tag 'Unit' {
         }
 
         It 'summary.overall_passed is true' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.summary.overall_passed | Should -BeTrue
         }
 
         It 'Step summary is written' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             Should -Invoke Write-CIStepSummary -Times 1
         }
     }
@@ -111,29 +102,25 @@ Describe 'Invoke-TerraformDocsCheckCore' -Tag 'Unit' {
         }
 
         It 'Returns 1 when drift detected' {
-            $result = Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            $result = Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             $result | Should -Be 1
         }
 
         It 'Captures drifted files in JSON output' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.drifted_files | Should -Contain 'infrastructure/terraform/README.md'
         }
 
         It 'Writes error annotations for drifted files' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             Should -Invoke Write-CIAnnotation -ParameterFilter {
                 $Level -eq 'Error' -and $Message -like '*out of date*'
             }
         }
 
         It 'drift_detected is true in output' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.drift_detected | Should -BeTrue
         }
@@ -145,20 +132,17 @@ Describe 'Invoke-TerraformDocsCheckCore' -Tag 'Unit' {
         }
 
         It 'Returns 0 early when no terraform files changed' {
-            $result = Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir -ChangedFilesOnly
+            $result = Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath -ChangedFilesOnly
             $result | Should -Be 0
         }
 
         It 'Does not invoke npm when no files changed' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir -ChangedFilesOnly
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath -ChangedFilesOnly
             Should -Invoke npm -Times 0
         }
 
         It 'Sets skipped=true in JSON when no files changed' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir -ChangedFilesOnly
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath -ChangedFilesOnly
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $json.skipped | Should -BeTrue
         }
@@ -175,8 +159,7 @@ Describe 'Invoke-TerraformDocsCheckCore' -Tag 'Unit' {
         }
 
         It 'Runs full check when config file changed' {
-            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath `
-                -TerraformDir $script:TestTerraformDir -ChangedFilesOnly
+            Invoke-TerraformDocsCheckCore -OutputPath $script:TestOutputPath -ChangedFilesOnly
             Should -Invoke npm -Times 1
         }
     }

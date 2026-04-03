@@ -8,12 +8,10 @@
 .SYNOPSIS
     Checks that terraform-docs generated documentation is up to date.
 .DESCRIPTION
-    Runs npm run docs:tf -- --check to compare generated documentation against committed
+    Runs npm run docs:generate:tf -- --check to compare generated documentation against committed
     files. Reports drift via CI annotations and writes JSON results to logs/.
 .PARAMETER OutputPath
     Path for JSON results. Defaults to logs/terraform-docs-check-results.json.
-.PARAMETER TerraformDir
-    Root directory containing Terraform files. Defaults to infrastructure/terraform.
 .PARAMETER ChangedFilesOnly
     When set, only check if directories containing changed .tf files have doc drift.
 #>
@@ -21,7 +19,6 @@
 [CmdletBinding()]
 param(
     [string]$OutputPath,
-    [string]$TerraformDir,
     [switch]$ChangedFilesOnly
 )
 
@@ -35,7 +32,6 @@ function Invoke-TerraformDocsCheckCore {
     [CmdletBinding()]
     param(
         [string]$OutputPath,
-        [string]$TerraformDir,
         [switch]$ChangedFilesOnly
     )
 
@@ -45,7 +41,6 @@ function Invoke-TerraformDocsCheckCore {
     }
 
     if (-not $OutputPath) { $OutputPath = Join-Path $repoRoot 'logs/terraform-docs-check-results.json' }
-    if (-not $TerraformDir) { $TerraformDir = Join-Path $repoRoot 'infrastructure/terraform' }
 
     $outputDir = Split-Path $OutputPath -Parent
     if (-not (Test-Path $outputDir)) {
@@ -90,8 +85,8 @@ function Invoke-TerraformDocsCheckCore {
     }
 
     # Run terraform-docs check via npm script
-    Write-Host 'Running npm run docs:tf -- --check...'
-    $output = & npm run docs:tf -- --check 2>&1 | ForEach-Object { $_.ToString() }
+    Write-Host 'Running npm run docs:generate:tf -- --check...'
+    $output = & npm run docs:generate:tf -- --check 2>&1 | ForEach-Object { $_.ToString() }
     $exitCode = $LASTEXITCODE
     $driftDetected = ($exitCode -ne 0)
     $driftedFiles = @()
@@ -103,11 +98,11 @@ function Invoke-TerraformDocsCheckCore {
             } | Where-Object { $_ } | Sort-Object -Unique)
 
         foreach ($file in $driftedFiles) {
-            Write-CIAnnotation -Level Error -Message "Documentation is out of date: $file. Run 'npm run docs:tf' to regenerate." -File $file
+            Write-CIAnnotation -Level Error -Message "Documentation is out of date: $file. Run 'npm run docs:generate:tf' to regenerate." -File $file
         }
 
         if ($driftedFiles.Count -eq 0) {
-            Write-CIAnnotation -Level Error -Message "terraform-docs detected documentation drift. Run 'npm run docs:tf' to regenerate."
+            Write-CIAnnotation -Level Error -Message "terraform-docs detected documentation drift. Run 'npm run docs:generate:tf' to regenerate."
         }
     }
 
@@ -136,7 +131,7 @@ function Invoke-TerraformDocsCheckCore {
     if ($driftDetected) {
         $summaryLines += '**Status:** ❌ Documentation drift detected'
         $summaryLines += ''
-        $summaryLines += 'Run `npm run docs:tf` to regenerate documentation.'
+        $summaryLines += 'Run `npm run docs:generate:tf` to regenerate documentation.'
         $summaryLines += ''
         if ($driftedFiles.Count -gt 0) {
             $summaryLines += '| File | Status |'

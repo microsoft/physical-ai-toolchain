@@ -117,6 +117,13 @@ Describe 'Update-TerraformDocsCore' -Tag 'Unit' {
                 $args -contains $script:TestConfigPath
             }
         }
+
+        It 'Returns 1 when terraform-docs fails' {
+            Mock terraform-docs { $global:LASTEXITCODE = 1 }
+            $result = Update-TerraformDocsCore -TerraformDir $script:TestTerraformDir `
+                -ConfigPath $script:TestConfigPath
+            $result | Should -Be 1
+        }
     }
 
     Context 'check mode (-Check)' {

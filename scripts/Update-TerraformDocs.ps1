@@ -129,6 +129,7 @@ function Update-TerraformDocsCore {
         $diffOutput = & git diff -- @tfDocFiles
         if ($diffOutput) {
             $diffOutput
+            Write-Host 'Restoring modified files to original state...'
             & git checkout -- @tfDocFiles
             return 1
         }
