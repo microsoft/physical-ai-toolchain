@@ -58,6 +58,7 @@ arrowright
 arrowup
 ascs
 asctime
+asgi
 asgs
 assetguidance
 asyncio
@@ -1161,6 +1162,7 @@ scalability
 scalesetpriority
 scenario
 schedules
+schemathesis
 schwinn
 scikit
 scm
