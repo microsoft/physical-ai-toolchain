@@ -1,0 +1,57 @@
+name: Terraform Docs Check
+
+on:
+  workflow_call:
+    inputs:
+      terraform-docs-version:
+        description: 'Version of terraform-docs to install'
+        required: false
+        type: string
+        default: 'v0.21.0'
+      break-build:
+        description: 'Whether to fail the workflow when documentation is out of date'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  terraform-docs-check:
+    name: Terraform Docs Freshness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 20
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install terraform-docs
+        shell: bash
+        run: |
+          version="${{ inputs.terraform-docs-version }}"
+          version="${version#v}"
+          curl -sSLo /tmp/terraform-docs.tar.gz \
+            "https://github.com/terraform-docs/terraform-docs/releases/download/v${version}/terraform-docs-v${version}-linux-amd64.tar.gz"
+          tar -xzf /tmp/terraform-docs.tar.gz -C /tmp terraform-docs
+          sudo install /tmp/terraform-docs /usr/local/bin/terraform-docs
+          terraform-docs --version
+
+      - name: Check terraform-docs freshness
+        continue-on-error: ${{ !inputs.break-build }}
+        run: scripts/Update-TerraformDocs.ps1 -Check

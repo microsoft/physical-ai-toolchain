@@ -151,6 +151,15 @@ jobs:
     permissions:
       contents: read
 
+  # Terraform docs freshness check
+  terraform-docs-check:
+    name: Terraform Docs Check
+    uses: ./.github/workflows/terraform-docs-check.yml
+    with:
+      break-build: true
+    permissions:
+      contents: read
+
   # Terraform test execution with Codecov Test Analytics
   terraform-tests:
     name: Terraform Tests
@@ -211,6 +220,7 @@ jobs:
       - terraform-lint
       - terraform-validation
       - terraform-tests
+      - terraform-docs-check
       - go-lint
       - go-tests
       - codeql-analysis
