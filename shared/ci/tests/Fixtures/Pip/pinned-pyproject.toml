@@ -1,0 +1,15 @@
+[project]
+name = "pinned-project"
+version = "1.0.0"
+
+dependencies = [
+    "numpy==1.26.4",
+    "pandas==2.2.0",
+    "requests==2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.0.0",
+    "ruff==0.2.0",
+]

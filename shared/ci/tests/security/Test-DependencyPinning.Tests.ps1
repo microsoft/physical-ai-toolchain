@@ -356,16 +356,15 @@ Describe 'Dot-sourced execution protection' -Tag 'Unit' {
             Test-Path $tempOutputPath | Should -BeFalse
         }
 
-        It 'Writes error message when dot-sourced' {
+        It 'Makes functions available when dot-sourced' {
             # Arrange
             $testScript = Join-Path $PSScriptRoot '../../security/Test-DependencyPinning.ps1'
-            
-            # Act - Invoke in new process to test dot-sourcing error handling
-            $result = pwsh -Command ". '$testScript'" 2>&1
-            $errorOutput = $result | Where-Object { $_ -match 'dot-sourced' -or $_ -match 'will not execute' }
-            
-            # Assert - Should write error message about dot-sourcing
-            $errorOutput | Should -Not -BeNullOrEmpty
+
+            # Act - Dot-source in subprocess and check function availability
+            $result = pwsh -Command ". '$testScript'; if (Get-Command -Name 'Test-SHAPinning' -ErrorAction SilentlyContinue) { 'available' } else { 'missing' }" 2>&1
+
+            # Assert - Functions should be importable via dot-sourcing
+            $result | Should -Contain 'available'
         }
     }
 }
@@ -708,6 +707,201 @@ Describe 'Get-NpmDependencyViolations' -Tag 'Unit' {
 
             $violations.Count | Should -BeGreaterThan 0
             $violations | Where-Object { $_.Name -eq 'valid-package' } | Should -Not -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Get-PipDependencyViolations' -Tag 'Unit' {
+    BeforeAll {
+        . $PSScriptRoot/../../security/Test-DependencyPinning.ps1
+        $script:FixturesPath = Join-Path $PSScriptRoot '../Fixtures/Pip'
+    }
+
+    Context 'Fully pinned requirements.txt' {
+        It 'Returns zero violations when all deps use ==' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'pinned-requirements.txt'
+                Type         = 'pip'
+                RelativePath = 'pinned-requirements.txt'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+
+            $violations.Count | Should -Be 0
+        }
+    }
+
+    Context 'Unpinned requirements.txt' {
+        It 'Detects unpinned dependencies' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'unpinned-requirements.txt'
+                Type         = 'pip'
+                RelativePath = 'unpinned-requirements.txt'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+
+            $violations.Count | Should -BeGreaterThan 0
+        }
+
+        It 'Detects >= range operators as unpinned' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'unpinned-requirements.txt'
+                Type         = 'pip'
+                RelativePath = 'unpinned-requirements.txt'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+            $numpyViolation = $violations | Where-Object { $_.Name -eq 'numpy' }
+
+            $numpyViolation | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Detects bare package names as unpinned' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'unpinned-requirements.txt'
+                Type         = 'pip'
+                RelativePath = 'unpinned-requirements.txt'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+            $flaskViolation = $violations | Where-Object { $_.Name -eq 'flask' }
+
+            $flaskViolation | Should -Not -BeNullOrEmpty
+            $flaskViolation.Version | Should -Be '(none)'
+        }
+
+        It 'Does not flag == pinned deps as violations' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'unpinned-requirements.txt'
+                Type         = 'pip'
+                RelativePath = 'unpinned-requirements.txt'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+            $requestsViolation = $violations | Where-Object { $_.Name -eq 'requests' }
+
+            $requestsViolation | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Pinned pyproject.toml' {
+        It 'Returns zero violations when all deps use ==' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'pinned-pyproject.toml'
+                Type         = 'pip'
+                RelativePath = 'pinned-pyproject.toml'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+
+            $violations.Count | Should -Be 0
+        }
+    }
+
+    Context 'Unpinned pyproject.toml' {
+        It 'Detects unpinned dependencies in main array' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'unpinned-pyproject.toml'
+                Type         = 'pip'
+                RelativePath = 'unpinned-pyproject.toml'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+
+            $violations.Count | Should -BeGreaterThan 0
+        }
+
+        It 'Detects unpinned deps in optional-dependencies' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'unpinned-pyproject.toml'
+                Type         = 'pip'
+                RelativePath = 'unpinned-pyproject.toml'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+            $pytestViolation = $violations | Where-Object { $_.Name -eq 'pytest' }
+
+            $pytestViolation | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Does not flag == pinned deps' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'unpinned-pyproject.toml'
+                Type         = 'pip'
+                RelativePath = 'unpinned-pyproject.toml'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+            $requestsViolation = $violations | Where-Object { $_.Name -eq 'requests' }
+
+            $requestsViolation | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Non-existent file' {
+        It 'Returns empty array for missing file' {
+            $fileInfo = @{
+                Path         = '/nonexistent/requirements.txt'
+                Type         = 'pip'
+                RelativePath = 'nonexistent/requirements.txt'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+
+            $violations.Count | Should -Be 0
+        }
+    }
+}
+
+Describe 'Test-SHAPinning ecosystem awareness' -Tag 'Unit' {
+    BeforeAll {
+        . $PSScriptRoot/../../security/Test-DependencyPinning.ps1
+    }
+
+    Context 'GitHub Actions (SHA-based)' {
+        It 'Returns true for valid 40-char hex SHA' {
+            Test-SHAPinning -Version 'abc123def456abc123def456abc123def456abc1' -Type 'github-actions' | Should -BeTrue
+        }
+
+        It 'Returns false for tag reference' {
+            Test-SHAPinning -Version 'v4' -Type 'github-actions' | Should -BeFalse
+        }
+    }
+
+    Context 'npm (PinPattern-based)' {
+        It 'Returns true for exact semver' {
+            Test-SHAPinning -Version '4.17.21' -Type 'npm' | Should -BeTrue
+        }
+
+        It 'Returns false for caret range' {
+            Test-SHAPinning -Version '^4.17.21' -Type 'npm' | Should -BeFalse
+        }
+
+        It 'Returns false for tilde range' {
+            Test-SHAPinning -Version '~4.18.2' -Type 'npm' | Should -BeFalse
+        }
+
+        It 'Returns false for wildcard' {
+            Test-SHAPinning -Version '*' -Type 'npm' | Should -BeFalse
+        }
+
+        It 'Returns false for >= range' {
+            Test-SHAPinning -Version '>=17.0.0' -Type 'npm' | Should -BeFalse
+        }
+    }
+
+    Context 'pip (PinPattern-based)' {
+        It 'Returns true for == equality pin' {
+            Test-SHAPinning -Version 'numpy==1.26.4' -Type 'pip' | Should -BeTrue
+        }
+
+        It 'Returns false for >= range' {
+            Test-SHAPinning -Version 'numpy>=1.26.0' -Type 'pip' | Should -BeFalse
+        }
+
+        It 'Returns false for ~= compatible release' {
+            Test-SHAPinning -Version 'pandas~=2.2.0' -Type 'pip' | Should -BeFalse
         }
     }
 }

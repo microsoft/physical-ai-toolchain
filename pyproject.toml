@@ -14,23 +14,24 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis>=6.100.0",
-    "numpy>=1.26.0,<3.0.0",
-    "ruff",
-    "pytest",
-    "pytest-mock",
-    "pytest-cov",
+    "hypothesis==6.151.9",
+    "numpy==2.4.3",
+    "ruff==0.15.4",
+    "pytest==9.0.2",
+    "pytest-mock==3.15.1",
+    "pytest-cov==7.0.0",
     "pydantic==2.12.5",
-    "ipykernel",
-    "ipywidgets",
-    "tqdm",
-    "matplotlib>=3.10.8",
-    "azureml-mlflow>=1.62.0.post2",
-    "azure-ai-ml>=1.32.0",
+    "ipykernel==7.2.0",
+    "ipywidgets==8.1.8",
+    "tqdm==4.67.3",
+    "matplotlib==3.10.8",
+    "azureml-mlflow==1.62.0.post2",
+    "azure-ai-ml==1.32.0",
 ]
 
 [tool.uv]
 package = false
+constraint-dependencies = ["pygments==2.20.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "training/tests", "data-management/tools/tests"]
