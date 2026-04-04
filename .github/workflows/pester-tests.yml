@@ -149,7 +149,6 @@ jobs:
             $config = & shared/ci/tests/pester.config.ps1 -CI @configParams
             $config.Run.Exit = $false
             $result = Invoke-Pester -Configuration $config
-            $global:LASTEXITCODE = 0
 
             # Re-import CIHelpers — Pester module isolation unloads it during test execution
             Import-Module $ciHelpersPath -Force
@@ -158,6 +157,7 @@ jobs:
               $env:PESTER_FAILED = 'true'
               Set-CIOutput -Name 'pester-failed' -Value 'true'
               Write-Warning "$($result.FailedCount) test(s) failed"
+              exit 1
             }
             else {
               Set-CIOutput -Name 'pester-failed' -Value 'false'
@@ -165,11 +165,11 @@ jobs:
             }
           }
           catch {
-            $global:LASTEXITCODE = 0
             $env:PESTER_FAILED = 'true'
             Import-Module $ciHelpersPath -Force -ErrorAction SilentlyContinue
             Set-CIOutput -Name 'pester-failed' -Value 'true'
             Write-Error "Pester execution failed: $_"
+            exit 1
           }
 
       - name: Upload test results
