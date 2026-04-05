@@ -29,9 +29,13 @@ jobs:
           # mlflow <3.0.0 required by azureml-mlflow; these are server-side/model-loading vulns not applicable to client-only usage
           # GHSA-w8v5-vhqr-4h9v: diskcache unsafe pickle — no upstream fix; exploitable only with write access to local cache directory
           # onnx: GHSA-hqmj-h5c6-369m is in onnx.hub.load() (Model Zoo downloads); this repo uses onnx only for model serialization via rsl-rl-lib, no fix released yet
+          # lodash@4.17.21 (latest): transitive Docusaurus dependency; no upstream fix available
           allow-ghsas: >-
             GHSA-w8v5-vhqr-4h9v,
             GHSA-wf7f-8fxf-xfxc,
             GHSA-pgqp-8h46-6x4j,
             GHSA-4x5p-f36r-mxxr,
-            GHSA-hqmj-h5c6-369m
+            GHSA-hqmj-h5c6-369m,
+            GHSA-r5fr-rjxr-66jc,
+            GHSA-xxjr-mmjv-4gpg,
+            GHSA-f23m-r3pf-42rh

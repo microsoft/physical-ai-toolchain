@@ -255,6 +255,15 @@ function Get-PipDependencyViolations {
     $fileName = Split-Path $filePath -Leaf
 
     if ($fileName -match 'pyproject\.toml$') {
+        # Extract project name to skip self-referencing extras groups
+        $projectName = ''
+        foreach ($l in $lines) {
+            if ($l -match '^\s*name\s*=\s*"([^"]+)"') {
+                $projectName = $Matches[1]
+                break
+            }
+        }
+
         # Parse pyproject.toml dependency arrays
         $inDependencySection = $false
         $inArray = $false
@@ -300,6 +309,11 @@ function Get-PipDependencyViolations {
                 if ($spec -match '^([a-zA-Z0-9_][\w.\-]*)(.*)$') {
                     $packageName = $Matches[1]
                     $versionSpec = $Matches[2].Trim()
+
+                    # Skip self-referencing extras (e.g. "mypackage[dev,test]")
+                    if ($projectName -and $packageName -eq $projectName) {
+                        continue
+                    }
 
                     # Skip entries with no version constraint (bare package names)
                     if ([string]::IsNullOrWhiteSpace($versionSpec)) {
