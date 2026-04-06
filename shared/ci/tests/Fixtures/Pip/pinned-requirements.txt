@@ -1,5 +1,5 @@
 # Fully pinned requirements
 numpy==1.26.4
 pandas==2.2.0
-requests==2.32.3
+requests==2.33.1
 flask==3.0.0
