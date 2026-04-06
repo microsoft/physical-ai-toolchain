@@ -6,6 +6,8 @@ per-episode .hdf5 files containing trajectory, image, and metadata.
 Generates cached mp4 videos from HDF5 image arrays for unified playback.
 """
 
+from __future__ import annotations
+
 import io
 import logging
 from pathlib import Path
