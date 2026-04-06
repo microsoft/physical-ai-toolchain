@@ -1,5 +1,5 @@
 # Mixed pinning — some pinned, some not
 numpy>=1.26.0,<2.0.0
 pandas~=2.2.0
-requests==2.31.0
+requests==2.32.3
 flask

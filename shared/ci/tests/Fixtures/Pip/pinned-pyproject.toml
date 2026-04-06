@@ -5,7 +5,7 @@ version = "1.0.0"
 dependencies = [
     "numpy==1.26.4",
     "pandas==2.2.0",
-    "requests==2.31.0",
+    "requests==2.32.3",
 ]
 
 [project.optional-dependencies]
