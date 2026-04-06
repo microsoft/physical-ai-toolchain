@@ -95,7 +95,7 @@ jobs:
           }
 
           # Run validation script (JSON format)
-          & shared/ci/security/Test-DependencyPinning.ps1 @params
+          & scripts/security/Test-DependencyPinning.ps1 @params
           $jsonExitCode = $LASTEXITCODE
 
           # Generate SARIF format if requested
@@ -104,7 +104,7 @@ jobs:
             $params['Format'] = 'sarif'
             $params['OutputPath'] = 'logs/dependency-pinning-results.sarif'
 
-            & shared/ci/security/Test-DependencyPinning.ps1 @params
+            & scripts/security/Test-DependencyPinning.ps1 @params
           }
 
           # Extract metrics from JSON report

@@ -33,7 +33,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path logs | Out-Null
 
       - name: Run Link Language Check
-        run: shared/ci/linting/Invoke-LinkLanguageCheck.ps1
+        run: scripts/linting/Invoke-LinkLanguageCheck.ps1
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Upload link language check results

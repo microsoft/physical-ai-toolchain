@@ -266,7 +266,7 @@ Documentation standards:
 CLI output standards:
 
 * Support the [NO_COLOR](https://no-color.org) standard in shell scripts
-* Shared color functions in `shared/lib/common.sh` check `NO_COLOR` before emitting ANSI escape sequences
+* Shared color functions in `scripts/lib/common.sh` check `NO_COLOR` before emitting ANSI escape sequences
 
 See [Accessibility](accessibility.md) for full guidelines.
 

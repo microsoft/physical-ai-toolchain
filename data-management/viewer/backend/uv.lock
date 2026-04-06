@@ -1313,6 +1313,9 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "fastapi" },
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "pyarrow" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
@@ -1321,9 +1324,7 @@ dependencies = [
 
 [package.optional-dependencies]
 analysis = [
-    { name = "numpy" },
     { name = "pandas" },
-    { name = "pyarrow" },
     { name = "scikit-learn" },
     { name = "scipy" },
 ]
@@ -1345,8 +1346,6 @@ dev = [
 ]
 export = [
     { name = "h5py" },
-    { name = "numpy" },
-    { name = "pillow" },
 ]
 hdf5 = [
     { name = "h5py" },
@@ -1355,8 +1354,6 @@ huggingface = [
     { name = "huggingface-hub" },
 ]
 yolo = [
-    { name = "numpy" },
-    { name = "pillow" },
     { name = "ultralytics" },
 ]
 
@@ -1371,13 +1368,10 @@ requires-dist = [
     { name = "h5py", marker = "extra == 'hdf5'", specifier = "==3.15.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = "==0.28.1" },
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = "==1.4.1" },
-    { name = "numpy", marker = "extra == 'analysis'", specifier = "==2.4.2" },
-    { name = "numpy", marker = "extra == 'export'", specifier = "==2.4.2" },
-    { name = "numpy", marker = "extra == 'yolo'", specifier = "==2.4.2" },
+    { name = "numpy", specifier = "==2.4.2" },
     { name = "pandas", marker = "extra == 'analysis'", specifier = "==3.0.1" },
-    { name = "pillow", marker = "extra == 'export'", specifier = "==12.1.1" },
-    { name = "pillow", marker = "extra == 'yolo'", specifier = "==12.1.1" },
-    { name = "pyarrow", marker = "extra == 'analysis'", specifier = "==23.0.1" },
+    { name = "pillow", specifier = "==12.1.1" },
+    { name = "pyarrow", specifier = "==23.0.1" },
     { name = "pydantic", specifier = "==2.12.5" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'auth'", specifier = "==2.12.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.0.2" },

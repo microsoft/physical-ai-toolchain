@@ -91,19 +91,28 @@ jobs:
               continue
             }
 
-            # Map source to test: shared/ci/security/Foo.ps1 -> shared/ci/tests/security/Foo.Tests.ps1
-            if ($file -match '^shared/ci/(.+)\.psm?1$') {
+            # Map source to test: scripts/security/Foo.ps1 -> scripts/tests/security/Foo.Tests.ps1
+            if ($file -match '^scripts/(?!tests/)(.+)\.psm?1$') {
               $relativePath = $Matches[1]
-              $testFile = "shared/ci/tests/$relativePath.Tests.ps1"
+              $testFile = "scripts/tests/$relativePath.Tests.ps1"
               if (Test-Path $testFile) {
                 $testPaths += $testFile
               }
             }
 
-            # Map scripts/lib/ source to test: scripts/lib/Foo.ps1 -> shared/ci/tests/lib/Foo.Tests.ps1
+            # Map scripts/lib/ source to test: scripts/lib/Foo.ps1 -> scripts/tests/lib/Foo.Tests.ps1
             if ($file -match '^scripts/lib/(.+)\.psm?1$') {
               $relativePath = $Matches[1]
-              $testFile = "shared/ci/tests/lib/$relativePath.Tests.ps1"
+              $testFile = "scripts/tests/lib/$relativePath.Tests.ps1"
+              if (Test-Path $testFile) {
+                $testPaths += $testFile
+              }
+            }
+
+            # Map scripts/ root source to test: scripts/Foo.ps1 -> scripts/tests/Foo.Tests.ps1
+            if ($file -match '^scripts/([^/]+)\.psm?1$') {
+              $relativePath = $Matches[1]
+              $testFile = "scripts/tests/$relativePath.Tests.ps1"
               if (Test-Path $testFile) {
                 $testPaths += $testFile
               }
@@ -146,7 +155,7 @@ jobs:
           }
 
           try {
-            $config = & shared/ci/tests/pester.config.ps1 -CI @configParams
+            $config = & scripts/tests/pester.config.ps1 -CI @configParams
             $config.Run.Exit = $false
             $result = Invoke-Pester -Configuration $config
             $global:LASTEXITCODE = 0

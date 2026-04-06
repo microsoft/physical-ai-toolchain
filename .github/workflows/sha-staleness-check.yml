@@ -47,7 +47,7 @@ jobs:
 
           Write-Host "Running SHA staleness check with $thresholdDays day threshold..."
 
-          & shared/ci/security/Test-SHAStaleness.ps1 `
+          & scripts/security/Test-SHAStaleness.ps1 `
             -MaxAge $thresholdDays `
             -OutputFormat github `
             -OutputPath logs/sha-staleness-results.json

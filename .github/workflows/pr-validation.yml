@@ -194,6 +194,16 @@ jobs:
     permissions:
       contents: read
 
+  # Terraform documentation freshness check
+  terraform-docs-check:
+    name: Terraform Docs Check
+    uses: ./.github/workflows/terraform-docs-check.yml
+    with:
+      soft-fail: true
+      changed-files-only: true
+    permissions:
+      contents: read
+
   # Go tests
   go-tests:
     name: Go Tests
@@ -205,6 +215,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
 
   # CodeQL security analysis
   codeql-analysis:

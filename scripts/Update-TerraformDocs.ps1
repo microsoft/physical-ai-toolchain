@@ -15,24 +15,36 @@
     Check mode: generate docs and verify no uncommitted changes (for CI).
 .PARAMETER ConfigPreview
     Print configuration and exit without making changes.
+.PARAMETER TerraformDir
+    Root directory containing Terraform files. Defaults to infrastructure/terraform.
+.PARAMETER ConfigPath
+    Path to the .terraform-docs.yml configuration file. Defaults to repo root.
+.PARAMETER PassthroughArgs
+    Additional arguments. When --check is included, activates check mode.
 #>
 
 [CmdletBinding()]
 param(
     [switch]$Check,
-    [switch]$ConfigPreview
+    [switch]$ConfigPreview,
+    [string]$TerraformDir,
+    [string]$ConfigPath,
+    [string[]]$PassthroughArgs
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot "lib/Modules/CIHelpers.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "./lib/Modules/CIHelpers.psm1") -Force
 
 function Update-TerraformDocsCore {
     [CmdletBinding()]
     param(
         [switch]$Check,
-        [switch]$ConfigPreview
+        [switch]$ConfigPreview,
+        [string]$TerraformDir,
+        [string]$ConfigPath,
+        [string[]]$PassthroughArgs
     )
 
     $repoRoot = & git rev-parse --show-toplevel 2>$null
@@ -40,8 +52,13 @@ function Update-TerraformDocsCore {
         $repoRoot = (Get-Item $PSScriptRoot).Parent.FullName
     }
 
-    $tfBaseDir = Join-Path $repoRoot 'infrastructure/terraform'
-    $configFile = Join-Path $repoRoot '.terraform-docs.yml'
+    if (-not $TerraformDir) { $TerraformDir = Join-Path $repoRoot 'infrastructure/terraform' }
+    if (-not $ConfigPath) { $ConfigPath = Join-Path $repoRoot '.terraform-docs.yml' }
+
+    $isCheckMode = $Check.IsPresent
+    if ($PassthroughArgs -contains '--check') {
+        $isCheckMode = $true
+    }
 
     # Validate required tools
     foreach ($tool in @('terraform-docs', 'npx', 'git')) {
@@ -51,17 +68,22 @@ function Update-TerraformDocsCore {
         }
     }
 
+    if (-not (Test-Path $ConfigPath)) {
+        Write-CIAnnotation -Level Error -Message "Config file not found: $ConfigPath"
+        return 1
+    }
+
     # Discover Terraform directories (exclude tests/ and setup/)
-    $tfDirs = Get-ChildItem -Path $tfBaseDir -Filter '*.tf' -Recurse -File |
+    $tfDirs = Get-ChildItem -Path $TerraformDir -Filter '*.tf' -Recurse -File |
         Where-Object { $_.FullName -notmatch '[/\\]tests[/\\]' -and $_.FullName -notmatch '[/\\]setup[/\\]' } |
         ForEach-Object { $_.DirectoryName } |
         Sort-Object -Unique
 
     if ($ConfigPreview) {
         Write-Host '=== Configuration Preview ==='
-        Write-Host "Base Directory : $tfBaseDir"
-        Write-Host "Config File    : $configFile"
-        Write-Host "Check Mode     : $Check"
+        Write-Host "Base Directory : $TerraformDir"
+        Write-Host "Config File    : $ConfigPath"
+        Write-Host "Check Mode     : $isCheckMode"
         Write-Host "Directories    : $($tfDirs.Count)"
         foreach ($dir in $tfDirs) {
             $relDir = $dir.Substring($repoRoot.Length + 1)
@@ -77,7 +99,7 @@ function Update-TerraformDocsCore {
     foreach ($dir in $tfDirs) {
         $relDir = $dir.Substring($repoRoot.Length + 1)
         Write-Host "Processing: $relDir"
-        & terraform-docs markdown table --config $configFile --output-file TERRAFORM.md $dir
+        & terraform-docs markdown table --config $ConfigPath --output-file TERRAFORM.md $dir
         if ($LASTEXITCODE -ne 0) {
             Write-CIAnnotation -Level Error -Message "terraform-docs failed for $relDir"
             return 1
@@ -100,13 +122,15 @@ function Update-TerraformDocsCore {
     }
 
     # Check mode: verify no uncommitted changes to generated files
-    if ($Check) {
+    if ($isCheckMode) {
         Write-Host '=== Checking for Changes ==='
-        $tfDocFiles = Get-ChildItem -Path $tfBaseDir -Filter 'TERRAFORM.md' -Recurse -File |
+        $tfDocFiles = Get-ChildItem -Path $TerraformDir -Filter 'TERRAFORM.md' -Recurse -File |
             ForEach-Object { $_.FullName }
-        & git diff --exit-code -- @tfDocFiles
-        if ($LASTEXITCODE -ne 0) {
-            Write-CIAnnotation -Level Error -Message "terraform-docs output is out of date. Run 'npm run docs:generate:tf' to update."
+        $diffOutput = & git diff -- @tfDocFiles
+        if ($diffOutput) {
+            $diffOutput
+            Write-Host 'Restoring modified files to original state...'
+            & git checkout -- @tfDocFiles
             return 1
         }
     }

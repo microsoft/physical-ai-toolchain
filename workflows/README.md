@@ -16,10 +16,10 @@ Use this page as a pointer index.
 
 ## 🧭 Directory Pointers
 
-| Path                    | Purpose                                   |
-|-------------------------|-------------------------------------------|
-| `workflows/azureml/`    | AzureML workflow pointer documentation    |
-| `workflows/osmo/`       | OSMO workflow pointer documentation       |
+| Path                 | Purpose                                |
+|----------------------|----------------------------------------|
+| `workflows/azureml/` | AzureML workflow pointer documentation |
+| `workflows/osmo/`    | OSMO workflow pointer documentation    |
 
 ## 🔗 Canonical Sources
 
