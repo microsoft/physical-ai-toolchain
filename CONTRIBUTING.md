@@ -313,14 +313,14 @@ Optionally run the RL end-to-end suite to capture regressions. This is good prac
 
 Requirements:
 
-| Requirement | Details |
-|-------------|---------|
-| Azure CLI | `az` must be installed and authenticated. The Azure ML CLI extension must also be available. |
-| Azure subscription context | Set `AZURE_SUBSCRIPTION_ID`, or make sure `az account show` resolves to the subscription you want the test to use. |
-| Azure workspace context | Set `AZURE_RESOURCE_GROUP` and `AZUREML_WORKSPACE_NAME`, or make sure `terraform output -json` or `infrastructure/terraform/terraform.tfvars` resolves them. |
-| Azure ML compute target | For Azure ML validation, the compute target must resolve from `AZUREML_COMPUTE` or Terraform naming and its provisioning state must be `Succeeded`. |
+| Requirement                | Details                                                                                                                                                                                        |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Azure CLI                  | `az` must be installed and authenticated. The Azure ML CLI extension must also be available.                                                                                                   |
+| Azure subscription context | Set `AZURE_SUBSCRIPTION_ID`, or make sure `az account show` resolves to the subscription you want the test to use.                                                                             |
+| Azure workspace context    | Set `AZURE_RESOURCE_GROUP` and `AZUREML_WORKSPACE_NAME`, or make sure `terraform output -json` or `infrastructure/terraform/terraform.tfvars` resolves them.                                   |
+| Azure ML compute target    | For Azure ML validation, the compute target must resolve from `AZUREML_COMPUTE` or Terraform naming and its provisioning state must be `Succeeded`.                                            |
 | OSMO and Kubernetes access | For OSMO validation, `osmo` and `kubectl` must be installed and authenticated, and the target cluster must expose at least one reachable GPU node. Connect the VPN first for private clusters. |
-| MLflow access | The Azure ML workspace used by the tests must expose a working MLflow tracking URI because both validation paths assert metrics and parameters after the run completes. |
+| MLflow access              | The Azure ML workspace used by the tests must expose a working MLflow tracking URI because both validation paths assert metrics and parameters after the run completes.                        |
 
 Run these commands from the repository root:
 

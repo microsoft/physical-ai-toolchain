@@ -62,8 +62,8 @@ CI mode enables NUnit XML output, non-zero exit on failure, and GitHub Actions a
 
 Test files use `.Tests.ps1` extension and mirror source layout:
 
-| Source Path                                     | Test Path                                                   |
-|-------------------------------------------------|-------------------------------------------------------------|
+| Source Path                                   | Test Path                                                 |
+|-----------------------------------------------|-----------------------------------------------------------|
 | `scripts/security/Test-DependencyPinning.ps1` | `scripts/tests/security/Test-DependencyPinning.Tests.ps1` |
 | `scripts/linting/Check-Something.ps1`         | `scripts/tests/linting/Check-Something.Tests.ps1`         |
 

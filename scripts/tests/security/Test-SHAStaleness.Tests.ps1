@@ -362,7 +362,7 @@ Describe 'Get-ToolStaleness' -Tag 'Integration', 'RequiresNetwork' {
     }
 }
 
-Describe 'Main Script Execution' {
+Describe 'Main Script Execution' -Tag 'Integration' {
     BeforeAll {
         # Create test repo structure (script expects .github/workflows from current directory)
         $script:TestRepo = Join-Path $TestDrive 'test-repo'

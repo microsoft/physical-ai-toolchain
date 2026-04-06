@@ -429,7 +429,7 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
     #endregion
 }
 
-Describe 'Dot-sourced execution protection' -Tag 'Unit' {
+Describe 'Dot-sourced execution protection' -Tag 'Integration' {
     It 'Does not execute main block when dot-sourced' {
         $testScript = Join-Path $PSScriptRoot '../../linting/Invoke-YamlLint.ps1'
         $tempOutputPath = Join-Path $TestDrive 'dot-source-test.json'

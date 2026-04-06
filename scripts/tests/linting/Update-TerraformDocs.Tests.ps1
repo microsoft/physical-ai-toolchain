@@ -8,7 +8,7 @@
 param()
 
 BeforeAll {
-    . $PSScriptRoot/../../../../scripts/Update-TerraformDocs.ps1
+    . $PSScriptRoot/../../Update-TerraformDocs.ps1
     $ErrorActionPreference = 'Continue'
     Import-Module (Join-Path $PSScriptRoot '../Mocks/GitMocks.psm1') -Force
     function terraform-docs { }

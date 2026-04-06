@@ -241,8 +241,8 @@ Scripts resolve values in order: CLI arguments → environment variables → Ter
 
 ## Script Library
 
-| File                            | Purpose                                        |
-|---------------------------------|------------------------------------------------|
+| File                               | Purpose                                        |
+|------------------------------------|------------------------------------------------|
 | `scripts/lib/terraform-outputs.sh` | Shared functions for reading Terraform outputs |
 
 Source the library to use helper functions:

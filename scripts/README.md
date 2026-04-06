@@ -33,43 +33,43 @@ scripts/
 
 Shared utility modules used across scripts and workflows.
 
-| File | Purpose |
-|------|---------|
-| `lib/common.sh` | Shell logging, Terraform output accessors, AKS helpers |
-| `lib/terraform-outputs.sh` | jq-path accessor (`get_output`) for submission scripts |
-| `lib/terraform-outputs.ps1` | PowerShell Terraform output accessors |
-| `lib/Get-VerifiedDownload.ps1` | Download files with SHA verification |
-| `lib/Modules/CIHelpers.psm1` | CI output formatting, annotations, step summaries |
+| File                           | Purpose                                                |
+|--------------------------------|--------------------------------------------------------|
+| `lib/common.sh`                | Shell logging, Terraform output accessors, AKS helpers |
+| `lib/terraform-outputs.sh`     | jq-path accessor (`get_output`) for submission scripts |
+| `lib/terraform-outputs.ps1`    | PowerShell Terraform output accessors                  |
+| `lib/Get-VerifiedDownload.ps1` | Download files with SHA verification                   |
+| `lib/Modules/CIHelpers.psm1`   | CI output formatting, annotations, step summaries      |
 
 ## 🔍 Linting Scripts
 
 PowerShell scripts for validating code quality and documentation.
 
-| Script | Purpose |
-|--------|---------|
-| `Invoke-PSScriptAnalyzer.ps1` | Static analysis for PowerShell files |
+| Script                             | Purpose                                     |
+|------------------------------------|---------------------------------------------|
+| `Invoke-PSScriptAnalyzer.ps1`      | Static analysis for PowerShell files        |
 | `Invoke-FrontmatterValidation.ps1` | Validate YAML frontmatter in markdown files |
-| `Invoke-LinkLanguageCheck.ps1` | Detect en-us language paths in URLs |
-| `Link-Lang-Check.ps1` | Link language checking entry point |
-| `Markdown-Link-Check.ps1` | Validate markdown links |
-| `Invoke-YamlLint.ps1` | YAML file validation |
-| `Invoke-TFLint.ps1` | Terraform linting |
-| `Invoke-TerraformValidation.ps1` | Terraform format and validate |
-| `Invoke-TerraformTest.ps1` | Terraform test runner |
-| `Invoke-GoLint.ps1` | Go linting via golangci-lint |
-| `Invoke-GoTest.ps1` | Go test runner |
-| `Invoke-MsDateFreshnessCheck.ps1` | Check ms.date frontmatter freshness |
-| `ConvertTo-JUnitXml.ps1` | Convert test results to JUnit XML |
+| `Invoke-LinkLanguageCheck.ps1`     | Detect en-us language paths in URLs         |
+| `Link-Lang-Check.ps1`              | Link language checking entry point          |
+| `Markdown-Link-Check.ps1`          | Validate markdown links                     |
+| `Invoke-YamlLint.ps1`              | YAML file validation                        |
+| `Invoke-TFLint.ps1`                | Terraform linting                           |
+| `Invoke-TerraformValidation.ps1`   | Terraform format and validate               |
+| `Invoke-TerraformTest.ps1`         | Terraform test runner                       |
+| `Invoke-GoLint.ps1`                | Go linting via golangci-lint                |
+| `Invoke-GoTest.ps1`                | Go test runner                              |
+| `Invoke-MsDateFreshnessCheck.ps1`  | Check ms.date frontmatter freshness         |
+| `ConvertTo-JUnitXml.ps1`           | Convert test results to JUnit XML           |
 
 ## 🔒 Security Scripts
 
 Security scanning and dependency management scripts.
 
-| Script | Purpose |
-|--------|---------|
+| Script                       | Purpose                                |
+|------------------------------|----------------------------------------|
 | `Test-DependencyPinning.ps1` | Validate dependency pinning compliance |
-| `Test-SHAStaleness.ps1` | Check for outdated SHA pins |
-| `zap-to-sarif.py` | Convert ZAP results to SARIF format |
+| `Test-SHAStaleness.ps1`      | Check for outdated SHA pins            |
+| `zap-to-sarif.py`            | Convert ZAP results to SARIF format    |
 
 ## 🧪 Tests
 
