@@ -6,6 +6,8 @@ per-episode .hdf5 files containing trajectory, image, and metadata.
 Generates cached mp4 videos from HDF5 image arrays for unified playback.
 """
 
+from __future__ import annotations
+
 import io
 import logging
 from pathlib import Path
@@ -86,7 +88,11 @@ def _generate_video_cv2(images, output_path: Path, fps: float = 30.0) -> bool:
     """Fallback: encode using cv2 VideoWriter."""
     try:
         import cv2
+    except ImportError:
+        logger.warning("cv2 not available for video generation fallback")
+        return False
 
+    try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         h, w = images.shape[1], images.shape[2]
         fourcc = cv2.VideoWriter_fourcc(*"avc1")

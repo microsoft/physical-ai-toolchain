@@ -116,7 +116,7 @@ export function ExportDialog({ open, onOpenChange, datasetId, episodeIndices }: 
             </div>
 
             <div className="space-y-1 text-sm text-muted-foreground">
-              <div>Episodes to export: {episodeIndices.join(', ')}</div>
+              <div>Episodes to export: {episodeIndices.length}</div>
               {totalFrames > 0 && (
                 <div>
                   Frames: {effectiveFrameCount}

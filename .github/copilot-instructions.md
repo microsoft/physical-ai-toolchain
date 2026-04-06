@@ -40,10 +40,12 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 | `evaluation/sil/` | Software-in-the-loop evaluation scripts and workflows |
 | `data-management/viewer/` | Dataset analysis tool (FastAPI backend + React frontend) |
 | `data-pipeline/capture/` | Recording configuration and data capture |
-| `shared/lib/` | Cross-domain shared shell libraries (canonical location) |
+| `scripts/` | CI/CD scripts, shared libraries, linting, security, and Pester tests |
+| `scripts/lib/` | Cross-domain shared shell and PowerShell libraries |
 | `external/IsaacLab/` | NVIDIA IsaacLab (cloned for IntelliSense only, not built locally) |
 | `docs/contributing/` | Architecture, roadmap, style guides, contribution workflow |
 
+* Do not modify files in `external/`
 * Version: managed by release-please across `pyproject.toml` and `package.json`
 * Python: >=3.11, managed by `uv` (not pip); `hatchling` builds `training/rl` into wheel
 * Linting: `npm run lint:md` (markdownlint-cli2), `npm run spell-check` (cspell), `npm run lint:yaml` (yaml-lint)
@@ -53,26 +55,226 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 * Boolean variable prefix: `should_` exclusively (NOT `enable_` or `is_`)
 * `resource_group` variable type: `object({ id, name, location })` — never a string
 * `variables.core.tf`: every module contains the SAME five core variables (`environment`, `resource_prefix`, `instance`, `resource_group`, optionally `location`)
+* `variables.deps.tf`: typed object dependencies from other modules (used in `modules/sil/`, `modules/dataviewer/`)
+* Root deployments do NOT have `variables.core.tf`; core variables live in `variables.tf`
 * Resource naming: `{abbreviation}-{resource_prefix}-{environment}-{instance}` (e.g., `aks-nvidia-dev-001`)
+* No-hyphen naming for Key Vault (`kv`), Storage (`st`), ACR (`acr`): `kv{prefix}{env}{instance}`
 * Standalone deployments (`vpn/`, `automation/`, `dns/`): use `data` sources to discover existing resources — no remote state references
 * State management: local `.tfstate` files only (no remote backend)
 * Resource conditionals: `should_*` boolean flags with `count` meta-argument
 * Module file order: `main.tf`, `variables.tf`, `variables.core.tf`, `outputs.tf`, `versions.tf`
 * Comment style: `/** */` file-level, `/* */` variable groups, `//` inline, `// ===` section separators
-* Provider tracking: Microsoft partner ID `acce1e78-0375-4637-a593-86aa36dcfeac` in `versions.tf`
+* Provider: Microsoft partner ID `acce1e78-0375-4637-a593-86aa36dcfeac` in `versions.tf`; `required_version = ">= 1.9.8, < 2.0"`
+
+```hcl
+# Resource naming
+locals {
+  resource_name_suffix = "${var.resource_prefix}-${var.environment}-${var.instance}"
+}
+
+# Boolean variable convention
+variable "should_deploy_postgresql" { type = bool; default = true }
+```
 
 ## Shell Script Conventions
 
 Detailed template and structure in `.github/instructions/shell-scripts.instructions.md`.
 
 * Two Terraform output libraries exist (do NOT mix them):
-  * `shared/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy and submission scripts
-  * `shared/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts (symlinked at `scripts/lib/terraform-outputs.sh`)
+  * `scripts/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy and submission scripts
+  * `scripts/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts
 * `.env.local` load order: `common.sh` loads `.env.local` BEFORE `defaults.conf`; override defaults via `${VAR:-default}` pattern
 * Idempotent K8s operations: `kubectl create --dry-run=client -o yaml | kubectl apply -f -`
 * Every script supports `--config-preview` (print configuration and exit without changes)
 * Every script ends with `section "Deployment Summary"` + `print_kv` calls
 * `defaults.conf` is the central version and namespace configuration file for all deploy scripts
+
+### Library Functions (`scripts/lib/common.sh`)
+
+| Function | Purpose |
+| --- | --- |
+| `info`, `warn`, `error`, `fatal` | Colored logging (fatal exits) |
+| `section "Title"` | Print section header |
+| `print_kv "Key" "$val"` | Print key-value pair |
+| `require_tools tool1 tool2` | Validate CLI tools exist |
+| `tf_get "$json" "path" "default"` | Extract optional Terraform output |
+| `tf_require "$json" "path" "desc"` | Extract required Terraform output |
+| `connect_aks "$rg" "$cluster"` | Get AKS credentials |
+| `ensure_namespace "$ns"` | Create namespace idempotently |
+
+## Python Conventions
+
+* Package management: `uv` (not pip); `hatchling` builds; Python >=3.11
+* Child configs extend root ruff config: `extend = "../../pyproject.toml"`
+* `from __future__ import annotations` required as the first import in every module
+
+### Import Ordering
+
+```python
+from __future__ import annotations
+
+import logging
+import os
+from collections.abc import Iterator, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+from fastapi import APIRouter, Depends, HTTPException
+
+from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
+
+if TYPE_CHECKING:
+    from azure.storage.blob import BlobServiceClient
+```
+
+stdlib → third-party → first-party (blank-line separated). `collections.abc` over `typing` for `Iterator`, `Sequence`, `Callable`. `TYPE_CHECKING` guard for heavy optional imports.
+
+### Naming
+
+| Pattern | Convention | Examples |
+| --- | --- | --- |
+| Classes | PascalCase | `AzureMLContext`, `StorageError` |
+| Enums | PascalCase StrEnum | `TaskCompletenessRating(StrEnum)` |
+| Public functions | snake_case | `load_metadata()`, `prepare_for_shutdown()` |
+| Private functions | _snake_case | `_parse_mlflow_log_interval()` |
+| Module constants (private) | _UPPER_SNAKE | `_LOGGER`, `_DEFAULT_MLFLOW_INTERVAL` |
+| Module constants (public) | UPPER_SNAKE | `NUM_JOINTS`, `CONTROL_HZ` |
+
+### Type Annotations
+
+All functions (public and private) have full parameter + return annotations. Local variables are NOT annotated.
+
+```python
+# Built-in generics (not typing.List, typing.Dict)
+list[str], dict[str, int], tuple[int, int]
+
+# Union with pipe (not Optional)
+str | None, Path | None
+
+# Constrained types
+Annotated[float, Field(gt=0)]
+Literal["local", "azure"]
+```
+
+### Logging
+
+| Domain | Variable | Logger Name |
+| --- | --- | --- |
+| Training/RL/Eval | `_LOGGER` | Custom domain (`"isaaclab.skrl"`) |
+| Backend/Dataviewer | `logger` | `__name__` |
+
+Always %-style formatting: `_LOGGER.warning("Invalid %s, using default (%d)", arg, default)`. Never f-strings in log calls.
+
+### Error Handling
+
+* Domain-specific exceptions: `AzureConfigError(RuntimeError)`, `StorageError(Exception)`
+* API errors: `raise HTTPException(status_code=404, detail="Dataset not found")`
+* Required env vars: `require_env("AZURE_SUBSCRIPTION_ID")` (raises `RuntimeError`)
+* Optional deps: `try: import pyarrow ... except ImportError: PARQUET_AVAILABLE = False`
+
+### FastAPI Architecture
+
+* Layer flow: `routers/` → `services/` → `storage/` (ABC adapter pattern)
+* Singletons: module-level variable + factory (`_dataset_service` + `get_dataset_service()`)
+* Input validation: `Depends()` factories (`path_string_param()`, `query_string_param()`)
+* Auth: global `Depends(require_auth)` on router-level; CSRF via `Depends(require_csrf_token)` on mutations
+* Input sanitization: CR/LF stripping, null byte rejection, path traversal prevention
+
+### Ruff Configuration
+
+```toml
+target-version = "py311"
+line-length = 120
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+quote-style = "double"
+```
+
+## React/TypeScript Conventions
+
+Detailed rules in `.github/instructions/dataviewer.instructions.md`.
+
+* Stack: Vite 6, React 18, TypeScript ~5.6, Tailwind CSS v3 + shadcn/ui, Zustand v5, TanStack Query v5
+
+### File Naming
+
+| Category | Convention | Examples |
+| --- | --- | --- |
+| Components | PascalCase `.tsx` | `TrajectoryPlot.tsx`, `CameraSelector.tsx` |
+| Stores | kebab-case `.ts` | `annotation-store.ts`, `edit-store.ts` |
+| Hooks | kebab-case `.ts` | `use-datasets.ts`, `use-annotations.ts` |
+| Types | kebab-case `.ts` | `annotations.ts`, `api.ts` |
+| UI primitives | kebab-case `.tsx` | `button.tsx`, `dialog.tsx` |
+| Barrels | `index.ts` | Every feature folder |
+
+### Component Patterns
+
+* Named exports only (no `export default`)
+* `memo` for expensive renders
+* `forwardRef` for shadcn/ui primitives
+* Props interfaces defined in-file above the component
+
+### TypeScript
+
+* `interface` for object shapes (props, state, API types)
+* `type` for unions, aliases, literals, store intersections
+* `@/` path alias → `./src/*`; strict mode enabled
+* `export type` in barrel files for type-only re-exports
+
+### State Management
+
+* Zustand for client state (devtools middleware, separate selectors files)
+* TanStack Query for server state (query key factory pattern)
+* Hybrid sync: query hooks fetch → `useEffect` syncs to Zustand stores
+
+### Styling
+
+* Tailwind CSS v3 utility-first + `cn()` utility (`clsx` + `tailwind-merge`)
+* CVA (class-variance-authority) for component variants
+* No CSS modules, no styled-components
+
+### API Client
+
+* Raw `fetch` in `src/lib/api-client.ts` (no axios)
+* CSRF token caching + `X-CSRF-Token` header on mutations
+* MSAL auth via `getAuthHeaders()`
+* Automatic `snakeToCamel` key transformation on responses
+
+### ESLint/Prettier
+
+* ESLint flat config: `simple-import-sort` (error), `jsx-a11y`, `@tanstack/query`
+* Prettier: no semicolons, single quotes, trailing commas, 100 char width, Tailwind plugin
+
+## Testing Patterns
+
+Tests always test behaviors. Mocks reserved for external dependencies (Azure SDK, MLflow, YOLO).
+
+### Python Tests
+
+* File naming: `test_*.py`
+* Class-based grouping by feature (`class TestDatasetDiscovery:`)
+* Patching: `monkeypatch` (not `unittest.mock.patch` decorator)
+* Async: `asyncio_mode = "auto"` (no per-test decorator)
+* Fixtures: session-scoped for expensive setup; function-scoped for isolation
+* Heavy deps: `sys.modules` injection for Azure/MLflow stubs
+* Singletons: reset module-level `_service = None` between tests
+* Coverage: `--cov=training --cov-report=term-missing --cov-report=xml`
+
+### TypeScript Tests
+
+* Framework: Vitest + `@testing-library/react` + `jest-dom`
+* File naming: `*.test.ts` (logic), `*.test.tsx` (React)
+* Module mocking: `vi.mock('@/path')` with `vi.hoisted()`
+* Store tests: direct `getState()` calls, `reset()` in `beforeEach`
+* Component tests: `render()` + `screen` queries + `userEvent`
+* Hook tests: `renderHook()` from `@testing-library/react`
+* Cleanup: `vi.restoreAllMocks()` in `afterEach`
+
+### PowerShell Tests
+
+* Framework: Pester 5; file naming: `*.Tests.ps1`
+* Structure: `Describe`/`Context`/`It` with tags (`Unit`, `Integration`)
+* Mocking: `Mock -ModuleName` + `-ParameterFilter`
 
 ## Documentation Conventions
 
@@ -84,6 +286,24 @@ Detailed rules in `.github/instructions/docs-style-and-conventions.instructions.
 | Setup | Post-deploy configuration | |
 | Cleanup | Remove components, keep infrastructure | |
 | Destroy | Delete Azure infrastructure | Teardown |
+
+* Voice: direct, technical, imperative. No hedging, no conversational filler.
+* H2 in README.md files: prefix with emoji (`## 📋 Prerequisites`, `## 🚀 Quick Start`)
+* Alerts: GitHub-flavored `> [!NOTE]`, `> [!WARNING]` — NOT legacy `> **Note**:`
+* Structured data: use tables, not bold-prefix list items
+* Avoid H4+ headings; restructure instead
+* Numbered lists only for sequential content
+* Code blocks: always specify language
+
+## Git Workflow
+
+Full specification in `.github/instructions/commit-message.instructions.md`.
+
+* Conventional commits: `type(scope): description` (<100 bytes subject line)
+* Types: `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, `chore`, `security`
+* Scopes: `(infrastructure)`, `(pipeline)`, `(data)`, `(sdg)`, `(training)`, `(evaluation)`, `(deployment)`, `(intelligence)`, `(scripts)`, `(docs)`, `(agents)`, `(prompts)`, `(instructions)`, `(skills)`, `(templates)`, `(adrs)`, `(settings)`, `(build)`
+* Body: 0-5 bulleted items, <300 bytes total
+* Footer: always ends with emoji + `- Generated by Copilot`
 
 ## Deployment Pipeline
 
@@ -138,7 +358,7 @@ AzureML runs on Arc-connected AKS clusters via the AzureML Kubernetes extension.
 * Identity chain: Terraform-created managed identity → federated credentials → K8s service accounts (`azureml:default`, `azureml:training`)
 * Model validation mode: `mode: download` (NOT `ro_mount`) — workaround for workload identity auth failures in `data-capability` sidecar
 * Multi-node: Volcano scheduler installed by AzureML extension when `installVolcano: true`
-* Training submission scripts in `scripts/` use `scripts/lib/terraform-outputs.sh` to resolve infrastructure values
+* Training submission scripts use `scripts/lib/terraform-outputs.sh` to resolve infrastructure values
 
 ## Training Pipeline
 
@@ -185,6 +405,9 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | `*.yml` (GitHub Actions) | `npm run lint:yaml` |
 | `data-management/viewer/frontend/**` | `cd data-management/viewer/frontend && npm run validate` (type-check + lint + test) |
 | `data-management/viewer/backend/**` | `cd data-management/viewer/backend && pytest` and `ruff check src/` |
+| `training/**/*.py` | `cd training && ruff check . && pytest` |
+| `evaluation/**/*.py` | `cd evaluation && ruff check . && pytest` |
+| `data-pipeline/**/*.py` | `cd data-pipeline && ruff check .` |
 | Any file | `npm run spell-check` |
 
 ### Linting
@@ -213,7 +436,16 @@ Terraform validation is per-directory — each deployment directory has its own 
 
 ### Pester Tests
 
-* `npm run test:ps` — runs Pester tests in `shared/ci/tests/` covering linting helpers and security checks
+* `npm run test:ps` — runs Pester tests in `scripts/tests/` covering linting helpers and security checks
+
+## CI/CD Pipeline
+
+* Two orchestrators: `main.yml` (push to main), `pr-validation.yml` (PRs) using reusable `workflow_call` workflows
+* PR validation sequence: spell check → markdown lint → table format → frontmatter → PSScriptAnalyzer → YAML lint → link check → Python lint → Python tests → frontend tests → Pester → dependency review → dependency pinning → CodeQL
+* Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
+* Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main)
+* Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)
+* Codecov: `pytest` and `pester` flags, 80-100% range, carryforward enabled
 
 ## Contributing References
 
@@ -229,3 +461,6 @@ Terraform validation is per-directory — each deployment directory has its own 
 | `docs/contributing/security-review.md` | Security review checklist |
 | `docs/gpu-configuration.md` | Detailed GPU driver and operator configuration |
 | `docs/mlflow-integration.md` | MLflow tracking and experiment management |
+| `.github/instructions/dataviewer.instructions.md` | Frontend coding patterns, component design, testing philosophy |
+| `.github/instructions/shell-scripts.instructions.md` | Shell script template, section order, library function reference |
+| `.github/instructions/commit-message.instructions.md` | Conventional commit format, types, scopes, footer requirements |
