@@ -9,7 +9,7 @@ dependencies = [
     "azure-storage-blob>=12.10.0",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.32.0",
-    "marshmallow>=3.5,<4.3.0",
+    "marshmallow>=3.5,<4.4.0",
     "mlflow>=2.0.0,<4.0.0",
     "packaging>=25,<27",
     "psutil>=5.9.0",
