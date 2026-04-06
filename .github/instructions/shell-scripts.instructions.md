@@ -16,8 +16,8 @@ set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"
-# shellcheck source=../../shared/lib/common.sh
-source "$REPO_ROOT/shared/lib/common.sh"
+# shellcheck source=../../scripts/lib/common.sh
+source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=defaults.conf
 source "$SCRIPT_DIR/defaults.conf"
 
@@ -110,7 +110,7 @@ info "Operation complete"
 
 - Always derive `REPO_ROOT` with git fallback: `REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"`
 - Adjust the `cd` traversal depth to match the script's location relative to the repo root
-- Source all shared libraries via `$REPO_ROOT/shared/lib/` — never via symlinks or `$SCRIPT_DIR/lib/`
+- Source all shared libraries via `$REPO_ROOT/scripts/lib/` — never via symlinks or `$SCRIPT_DIR/lib/`
 
 **Variables:**
 
@@ -149,7 +149,7 @@ command "${args[@]}"
 
 <!-- </important-conventions> -->
 
-## Library Functions (`shared/lib/common.sh`)
+## Library Functions (`scripts/lib/common.sh`)
 
 | Function                           | Purpose                       |
 |------------------------------------|-------------------------------|

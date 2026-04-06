@@ -9,9 +9,9 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 TMP_DIR="$SCRIPT_DIR/.tmp"
 STAGING_DIR="$TMP_DIR/osmo-dataset-staging"
 
-source "$REPO_ROOT/shared/lib/common.sh"
-# shellcheck source=../../../shared/lib/terraform-outputs.sh
-source "$REPO_ROOT/shared/lib/terraform-outputs.sh"
+source "$REPO_ROOT/scripts/lib/common.sh"
+# shellcheck source=../../../scripts/lib/terraform-outputs.sh
+source "$REPO_ROOT/scripts/lib/terraform-outputs.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
 #------------------------------------------------------------------------------

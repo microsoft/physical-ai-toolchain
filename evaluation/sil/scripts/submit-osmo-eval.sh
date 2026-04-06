@@ -19,12 +19,12 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
-# shellcheck source=../../../shared/lib/terraform-outputs.sh
-source "${REPO_ROOT}/shared/lib/terraform-outputs.sh"
+# shellcheck source=../../../scripts/lib/terraform-outputs.sh
+source "${REPO_ROOT}/scripts/lib/terraform-outputs.sh"
 read_terraform_outputs "${REPO_ROOT}/infrastructure/terraform" 2>/dev/null || true
 
-# shellcheck source=../../../shared/lib/common.sh
-source "${REPO_ROOT}/shared/lib/common.sh"
+# shellcheck source=../../../scripts/lib/common.sh
+source "${REPO_ROOT}/scripts/lib/common.sh"
 
 usage() {
   cat <<'EOF'

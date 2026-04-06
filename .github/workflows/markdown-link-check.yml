@@ -33,9 +33,9 @@ jobs:
         id: changed-files
         run: |
           if ('${{ github.event_name }}' -eq 'pull_request') {
-            $changedFiles = (git diff --name-only --diff-filter=ACMRT '${{ github.event.pull_request.base.sha }}' '${{ github.sha }}' -- '*.md' ':!shared/ci/tests/') -join ' '
+            $changedFiles = (git diff --name-only --diff-filter=ACMRT '${{ github.event.pull_request.base.sha }}' '${{ github.sha }}' -- '*.md' ':!scripts/tests/') -join ' '
           } else {
-            $changedFiles = (git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD -- '*.md' ':!shared/ci/tests/') -join ' '
+            $changedFiles = (git diff --name-only --diff-filter=ACMRT HEAD~1 HEAD -- '*.md' ':!scripts/tests/') -join ' '
           }
           "files=$changedFiles" >> $env:GITHUB_OUTPUT
           if ([string]::IsNullOrWhiteSpace($changedFiles)) {
@@ -59,7 +59,7 @@ jobs:
         if: steps.changed-files.outputs.has_changes == 'true'
         run: |
           $changedFiles = "${{ steps.changed-files.outputs.files }}" -split '\s+' | Where-Object { $_ }
-          & shared/ci/linting/Markdown-Link-Check.ps1 -Path $changedFiles
+          & scripts/linting/Markdown-Link-Check.ps1 -Path $changedFiles
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Skip notification
@@ -77,6 +77,6 @@ jobs:
       - name: Check results and fail if needed
         if: steps.changed-files.outputs.has_changes == 'true' && !inputs.soft-fail && steps.link-check.outcome == 'failure'
         run: |
-          Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
+          Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
           Write-CIAnnotation -Level Error -Message 'Markdown link check found broken links — see annotations and step summary above for details'
           exit 1

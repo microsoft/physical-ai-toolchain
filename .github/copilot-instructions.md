@@ -40,7 +40,8 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 | `evaluation/sil/` | Software-in-the-loop evaluation scripts and workflows |
 | `data-management/viewer/` | Dataset analysis tool (FastAPI backend + React frontend) |
 | `data-pipeline/capture/` | Recording configuration and data capture |
-| `shared/lib/` | Cross-domain shared shell libraries (canonical location) |
+| `scripts/` | CI/CD scripts, shared libraries, linting, security, and Pester tests |
+| `scripts/lib/` | Cross-domain shared shell and PowerShell libraries |
 | `external/IsaacLab/` | NVIDIA IsaacLab (cloned for IntelliSense only, not built locally) |
 | `docs/contributing/` | Architecture, roadmap, style guides, contribution workflow |
 
@@ -80,15 +81,15 @@ variable "should_deploy_postgresql" { type = bool; default = true }
 Detailed template and structure in `.github/instructions/shell-scripts.instructions.md`.
 
 * Two Terraform output libraries exist (do NOT mix them):
-  * `shared/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy and submission scripts
-  * `shared/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts
+  * `scripts/lib/common.sh`: dot-path accessors (`tf_get`, `tf_require`) for deploy and submission scripts
+  * `scripts/lib/terraform-outputs.sh`: jq-path accessor (`get_output`) for submission scripts
 * `.env.local` load order: `common.sh` loads `.env.local` BEFORE `defaults.conf`; override defaults via `${VAR:-default}` pattern
 * Idempotent K8s operations: `kubectl create --dry-run=client -o yaml | kubectl apply -f -`
 * Every script supports `--config-preview` (print configuration and exit without changes)
 * Every script ends with `section "Deployment Summary"` + `print_kv` calls
 * `defaults.conf` is the central version and namespace configuration file for all deploy scripts
 
-### Library Functions (`shared/lib/common.sh`)
+### Library Functions (`scripts/lib/common.sh`)
 
 | Function | Purpose |
 | --- | --- |
@@ -357,7 +358,7 @@ AzureML runs on Arc-connected AKS clusters via the AzureML Kubernetes extension.
 * Identity chain: Terraform-created managed identity → federated credentials → K8s service accounts (`azureml:default`, `azureml:training`)
 * Model validation mode: `mode: download` (NOT `ro_mount`) — workaround for workload identity auth failures in `data-capability` sidecar
 * Multi-node: Volcano scheduler installed by AzureML extension when `installVolcano: true`
-* Training submission scripts use `shared/lib/terraform-outputs.sh` to resolve infrastructure values
+* Training submission scripts use `scripts/lib/terraform-outputs.sh` to resolve infrastructure values
 
 ## Training Pipeline
 
@@ -435,7 +436,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 
 ### Pester Tests
 
-* `npm run test:ps` — runs Pester tests in `shared/ci/tests/` covering linting helpers and security checks
+* `npm run test:ps` — runs Pester tests in `scripts/tests/` covering linting helpers and security checks
 
 ## CI/CD Pipeline
 

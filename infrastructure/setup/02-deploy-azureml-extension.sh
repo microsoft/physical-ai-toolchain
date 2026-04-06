@@ -4,8 +4,8 @@ set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"
-# shellcheck source=../../shared/lib/common.sh
-source "$REPO_ROOT/shared/lib/common.sh"
+# shellcheck source=../../scripts/lib/common.sh
+source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=defaults.conf
 source "$SCRIPT_DIR/defaults.conf"
 

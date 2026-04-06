@@ -243,12 +243,12 @@ Scripts resolve values in order: CLI arguments → environment variables → Ter
 
 | File                            | Purpose                                        |
 |---------------------------------|------------------------------------------------|
-| `shared/lib/terraform-outputs.sh` | Shared functions for reading Terraform outputs |
+| `scripts/lib/terraform-outputs.sh` | Shared functions for reading Terraform outputs |
 
 Source the library to use helper functions:
 
 ```bash
-source "$REPO_ROOT/shared/lib/terraform-outputs.sh"
+source "$REPO_ROOT/scripts/lib/terraform-outputs.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform"
 get_aks_cluster_name   # Returns AKS cluster name
 get_azureml_workspace  # Returns ML workspace name

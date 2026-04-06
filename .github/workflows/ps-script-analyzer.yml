@@ -45,7 +45,7 @@ jobs:
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $scriptArgs['ChangedFilesOnly'] = $true
           }
-          & shared/ci/linting/Invoke-PSScriptAnalyzer.ps1 @scriptArgs
+          & scripts/linting/Invoke-PSScriptAnalyzer.ps1 @scriptArgs
 
       - name: Upload PSScriptAnalyzer results
         if: always()
@@ -59,7 +59,7 @@ jobs:
         if: ${{ !inputs.soft-fail }}
         run: |
           if ($env:PSSCRIPTANALYZER_FAILED -eq 'true') {
-            Import-Module $env:GITHUB_WORKSPACE/shared/lib/Modules/CIHelpers.psm1
+            Import-Module $env:GITHUB_WORKSPACE/scripts/lib/Modules/CIHelpers.psm1
             Write-CIAnnotation -Level Error -Message 'PSScriptAnalyzer found violations — see annotations above for details'
             exit 1
           }
