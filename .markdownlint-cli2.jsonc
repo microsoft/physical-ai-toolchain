@@ -6,7 +6,7 @@
     ".venv/**",
     "**/.venv/**",
     "external/**",
-    "shared/ci/tests/Fixtures/**",
+    "scripts/tests/Fixtures/**",
     "logs/**",
     "**/TERRAFORM.md"
   ],

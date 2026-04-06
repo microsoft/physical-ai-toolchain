@@ -51,7 +51,7 @@ jobs:
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $params['ChangedFilesOnly'] = $true
           }
-          ./shared/ci/linting/Invoke-GoLint.ps1 @params
+          ./scripts/linting/Invoke-GoLint.ps1 @params
 
       - name: Upload Go lint results
         if: always()

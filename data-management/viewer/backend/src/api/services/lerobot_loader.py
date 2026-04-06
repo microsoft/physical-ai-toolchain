@@ -11,6 +11,8 @@ LeRobot v3 structure:
 - videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from dataclasses import dataclass, field
@@ -18,17 +20,19 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-# PyArrow is an optional dependency
-try:
-    import pyarrow.parquet as pq
 
-    PARQUET_AVAILABLE = True
-except ImportError:
-    PARQUET_AVAILABLE = False
+def _column_to_numpy(table: pa.Table, name: str) -> NDArray:
+    """Extract a pyarrow column as a numpy array, stacking list elements."""
+    col = table.column(name)
+    if pa.types.is_list(col.type) or pa.types.is_fixed_size_list(col.type):
+        return np.array([row.as_py() for row in col], dtype=np.float64)
+    return col.to_numpy()
 
 
 @dataclass
@@ -119,12 +123,8 @@ class LeRobotLoader:
             base_path: Path to the LeRobot dataset directory.
 
         Raises:
-            ImportError: If pyarrow is not installed.
             LeRobotLoaderError: If the dataset structure is invalid.
         """
-        if not PARQUET_AVAILABLE:
-            raise ImportError("LeRobot support requires pyarrow package. Install with: pip install pyarrow")
-
         self.base_path = Path(base_path)
         self._info: LeRobotDatasetInfo | None = None
         self._episode_index_cache: dict[int, tuple[int, int]] = {}  # episode -> (chunk, file)
@@ -211,9 +211,8 @@ class LeRobotLoader:
                         for parquet_file in chunk_dir.glob("*.parquet"):
                             try:
                                 table = pq.read_table(parquet_file)
-                                df = table.to_pandas()
-                                if "episode_index" in df.columns:
-                                    episodes_in_file = df["episode_index"].unique()
+                                if "episode_index" in table.column_names:
+                                    episodes_in_file = set(table.column("episode_index").to_pylist())
                                     if episode_index in episodes_in_file:
                                         chunk_num = int(chunk_dir.name.split("-")[1])
                                         file_num = int(parquet_file.stem.split("-")[1])
@@ -271,12 +270,14 @@ class LeRobotLoader:
                 for parquet_file in sorted(chunk_dir.glob("*.parquet")):
                     try:
                         table = pq.read_table(parquet_file)
-                        df = table.to_pandas()
-                        for _, row in df.iterrows():
-                            idx = int(row["episode_index"]) if "episode_index" in df.columns else int(row.name)
+                        col_names = table.column_names
+                        for i in range(table.num_rows):
+                            idx = int(table.column("episode_index")[i].as_py()) if "episode_index" in col_names else i
+                            length = int(table.column("length")[i].as_py()) if "length" in col_names else 0
+                            task_idx = int(table.column("task_index")[i].as_py()) if "task_index" in col_names else 0
                             result[idx] = {
-                                "length": int(row.get("length", 0)),
-                                "task_index": int(row.get("task_index", 0)),
+                                "length": length,
+                                "task_index": task_idx,
                                 "cameras": cameras,
                                 "fps": info.fps,
                                 "robot_type": info.robot_type,
@@ -321,51 +322,54 @@ class LeRobotLoader:
 
         try:
             table = pq.read_table(full_path)
-            df = table.to_pandas()
 
             # Filter to requested episode
-            if "episode_index" in df.columns:
-                df = df[df["episode_index"] == episode_index]
+            if "episode_index" in table.column_names:
+                mask = pa.compute.equal(table.column("episode_index"), episode_index)
+                table = table.filter(mask)
 
-            if df.empty:
+            if table.num_rows == 0:
                 raise LeRobotLoaderError(f"Episode {episode_index} not found in {full_path}")
 
             # Sort by frame_index
-            if "frame_index" in df.columns:
-                df = df.sort_values("frame_index")
+            if "frame_index" in table.column_names:
+                sort_indices = pa.compute.sort_indices(table.column("frame_index"))
+                table = table.take(sort_indices)
 
-            length = len(df)
+            length = table.num_rows
+            col_names = table.column_names
 
             # Extract timestamps
-            timestamps = df["timestamp"].values if "timestamp" in df.columns else np.arange(length) / info.fps
+            timestamps = (
+                table.column("timestamp").to_numpy() if "timestamp" in col_names else np.arange(length) / info.fps
+            )
 
             # Extract frame indices
-            frame_indices = df["frame_index"].values if "frame_index" in df.columns else np.arange(length)
+            frame_indices = table.column("frame_index").to_numpy() if "frame_index" in col_names else np.arange(length)
 
             # Extract observation state (joint positions)
             joint_positions: NDArray[np.float64]
-            if "observation.state" in df.columns:
-                joint_positions = np.stack(df["observation.state"].values)
-            elif "qpos" in df.columns:
-                joint_positions = np.stack(df["qpos"].values)
+            if "observation.state" in col_names:
+                joint_positions = _column_to_numpy(table, "observation.state")
+            elif "qpos" in col_names:
+                joint_positions = _column_to_numpy(table, "qpos")
             else:
-                # Create zeros if no state data
                 joint_positions = np.zeros((length, 6), dtype=np.float64)
 
             # Extract joint velocities if available
             joint_velocities: NDArray[np.float64] | None = None
-            if "observation.velocity" in df.columns:
-                joint_velocities = np.stack(df["observation.velocity"].values)
-            elif "qvel" in df.columns:
-                joint_velocities = np.stack(df["qvel"].values)
+            if "observation.velocity" in col_names:
+                joint_velocities = _column_to_numpy(table, "observation.velocity")
+            elif "qvel" in col_names:
+                joint_velocities = _column_to_numpy(table, "qvel")
 
             # Extract actions
             actions: NDArray[np.float64] = (
-                np.stack(df["action"].values) if "action" in df.columns else np.zeros_like(joint_positions)
+                _column_to_numpy(table, "action") if "action" in col_names else np.zeros_like(joint_positions)
             )
 
             # Get task index
-            task_index = int(df["task_index"].iloc[0]) if "task_index" in df.columns else 0
+            task_index = int(table.column("task_index")[0].as_py()) if "task_index" in col_names else 0
 
             # Find video paths
             video_paths: dict[str, Path] = {}
@@ -429,13 +433,13 @@ class LeRobotLoader:
 
         try:
             table = pq.read_table(full_path)
-            df = table.to_pandas()
 
-            if "episode_index" in df.columns:
-                df = df[df["episode_index"] == episode_index]
+            if "episode_index" in table.column_names:
+                mask = pa.compute.equal(table.column("episode_index"), episode_index)
+                table = table.filter(mask)
 
-            length = len(df)
-            task_index = int(df["task_index"].iloc[0]) if "task_index" in df.columns else 0
+            length = table.num_rows
+            task_index = int(table.column("task_index")[0].as_py()) if "task_index" in table.column_names else 0
 
             cameras: list[str] = []
             for feature_name, feature_info in info.features.items():
