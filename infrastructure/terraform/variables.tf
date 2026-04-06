@@ -69,6 +69,72 @@ variable "should_enable_purge_protection" {
 }
 
 /*
+ * Storage Lifecycle Management
+ */
+
+variable "should_enable_raw_bags_lifecycle_policy" {
+  type        = bool
+  description = "Whether to enable lifecycle policy for raw ROS bags (auto-delete after retention period)"
+  default     = true
+}
+
+variable "raw_bags_retention_days" {
+  type        = number
+  description = "Number of days to retain raw ROS bags before automatic deletion. Set to -1 to disable deletion"
+  default     = 30
+
+  validation {
+    condition     = var.raw_bags_retention_days == -1 || (var.raw_bags_retention_days >= 0 && var.raw_bags_retention_days <= 99999)
+    error_message = "raw_bags_retention_days must be -1 (disabled) or between 0 and 99999"
+  }
+}
+
+variable "should_enable_converted_datasets_lifecycle_policy" {
+  type        = bool
+  description = "Whether to enable lifecycle policy for converted LeRobot datasets (auto-tier to cool storage)"
+  default     = true
+}
+
+variable "converted_datasets_cool_tier_days" {
+  type        = number
+  description = "Number of days before tiering converted datasets to cool storage. Set to -1 to disable tiering"
+  default     = 90
+
+  validation {
+    condition     = var.converted_datasets_cool_tier_days == -1 || (var.converted_datasets_cool_tier_days >= 0 && var.converted_datasets_cool_tier_days <= 99999)
+    error_message = "converted_datasets_cool_tier_days must be -1 (disabled) or between 0 and 99999"
+  }
+}
+
+variable "should_enable_reports_lifecycle_policy" {
+  type        = bool
+  description = "Whether to enable lifecycle policy for validation reports (auto-tier to cool then archive)"
+  default     = true
+}
+
+variable "reports_cool_tier_days" {
+  type        = number
+  description = "Number of days before tiering validation reports to cool storage"
+  default     = 30
+
+  validation {
+    condition     = var.reports_cool_tier_days >= 0 && var.reports_cool_tier_days <= 99999
+    error_message = "reports_cool_tier_days must be between 0 and 99999"
+  }
+}
+
+variable "reports_archive_tier_days" {
+  type        = number
+  description = "Number of days before tiering validation reports to archive storage. Must be greater than reports_cool_tier_days"
+  default     = 180
+
+  validation {
+    condition     = var.reports_archive_tier_days >= 0 && var.reports_archive_tier_days <= 99999
+    error_message = "reports_archive_tier_days must be between 0 and 99999"
+  }
+}
+
+/*
  * PostgreSQL Configuration
  */
 
@@ -124,12 +190,12 @@ variable "postgresql_zone" {
 
 variable "postgresql_high_availability" {
   type = object({
-    enabled                   = bool
+    should_enable             = bool
     standby_availability_zone = optional(string)
   })
-  description = "PostgreSQL high availability configuration. Set enabled=false to deploy without HA"
+  description = "PostgreSQL high availability configuration. Set should_enable=false to deploy without HA"
   default = {
-    enabled                   = false
+    should_enable             = false
     standby_availability_zone = null
   }
 }
@@ -209,10 +275,26 @@ variable "should_enable_nat_gateway" {
   default     = true
 }
 
+// WARNING: Changing zones on an existing deployment forces replacement of both the
+// NAT Gateway and its Public IP. This causes a brief outbound connectivity interruption
+// while Azure provisions new resources. Plan changes during a maintenance window.
+variable "nat_gateway_zones" {
+  type        = list(string)
+  description = "Availability zones for NAT Gateway and its public IP. Set to [\"1\"] in regions with AZ support. Leave empty for regions without AZ support (e.g. westus)"
+  default     = ["1"]
+}
+
+variable "should_create_vm_subnet" {
+  type        = bool
+  description = "Whether to create a dedicated subnet for virtual machines in the platform virtual network"
+  default     = false
+}
+
 variable "virtual_network_config" {
   type = object({
     address_space                  = string
     subnet_address_prefix          = string
+    subnet_address_prefix_vm       = optional(string, "10.0.4.0/24")
     subnet_address_prefix_pe       = optional(string, "10.0.2.0/24")
     subnet_address_prefix_resolver = optional(string, "10.0.9.0/28")
   })
@@ -220,12 +302,17 @@ variable "virtual_network_config" {
   default = {
     address_space                  = "10.0.0.0/16"
     subnet_address_prefix          = "10.0.1.0/24"
+    subnet_address_prefix_vm       = "10.0.4.0/24"
     subnet_address_prefix_pe       = "10.0.2.0/24"
     subnet_address_prefix_resolver = "10.0.9.0/28"
   }
   validation {
-    condition     = can(cidrhost(var.virtual_network_config.address_space, 0)) && can(cidrhost(var.virtual_network_config.subnet_address_prefix, 0))
-    error_message = "Both address_space and subnet_address_prefix must be valid CIDR blocks."
+    condition = (
+      can(cidrhost(var.virtual_network_config.address_space, 0)) &&
+      can(cidrhost(var.virtual_network_config.subnet_address_prefix, 0)) &&
+      can(cidrhost(var.virtual_network_config.subnet_address_prefix_vm, 0))
+    )
+    error_message = "address_space, subnet_address_prefix, and subnet_address_prefix_vm must be valid CIDR blocks."
   }
 }
 
@@ -287,32 +374,32 @@ variable "system_node_pool_zones" {
 
 variable "node_pools" {
   type = map(object({
-    node_count              = optional(number, null)
-    vm_size                 = string
-    subnet_address_prefixes = list(string)
-    node_taints             = optional(list(string), [])
-    node_labels             = optional(map(string), {})
-    enable_auto_scaling     = optional(bool, false)
-    min_count               = optional(number, null)
-    max_count               = optional(number, null)
-    priority                = optional(string, "Regular")
-    zones                   = optional(list(string), null)
-    eviction_policy         = optional(string, "Deallocate")
-    gpu_driver              = optional(string, null)
+    node_count                 = optional(number, null)
+    vm_size                    = string
+    subnet_address_prefixes    = list(string)
+    node_taints                = optional(list(string), [])
+    node_labels                = optional(map(string), {})
+    should_enable_auto_scaling = optional(bool, false)
+    min_count                  = optional(number, null)
+    max_count                  = optional(number, null)
+    priority                   = optional(string, "Regular")
+    zones                      = optional(list(string), null)
+    eviction_policy            = optional(string, "Deallocate")
+    gpu_driver                 = optional(string, null)
   }))
   description = "Additional node pools for the AKS cluster. Map key is used as the node pool name. Note: Pod subnets are not used with Azure CNI Overlay mode"
   default = {
     gpu = {
-      vm_size                 = "Standard_NV36ads_A10_v5"
-      subnet_address_prefixes = ["10.0.7.0/24"]
-      node_taints             = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
-      gpu_driver              = "Install"
-      priority                = "Spot"
-      enable_auto_scaling     = true
-      min_count               = 1
-      max_count               = 1
-      zones                   = []
-      eviction_policy         = "Delete"
+      vm_size                    = "Standard_NV36ads_A10_v5"
+      subnet_address_prefixes    = ["10.0.7.0/24"]
+      node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
+      gpu_driver                 = "Install"
+      priority                   = "Spot"
+      should_enable_auto_scaling = true
+      min_count                  = 1
+      max_count                  = 1
+      zones                      = []
+      eviction_policy            = "Delete"
     }
   }
 }

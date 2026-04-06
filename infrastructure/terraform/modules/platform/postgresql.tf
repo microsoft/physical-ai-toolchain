@@ -24,12 +24,18 @@ resource "random_password" "postgresql" {
   min_special      = 2
 }
 
-resource "azurerm_key_vault_secret" "postgresql_password" {
+resource "azapi_resource" "postgresql_password" {
   count = var.should_deploy_postgresql ? 1 : 0
 
-  name         = "psql-admin-password"
-  value        = random_password.postgresql[0].result
-  key_vault_id = azurerm_key_vault.main.id
+  type      = "Microsoft.KeyVault/vaults/secrets@2025-05-01"
+  name      = "psql-admin-password"
+  parent_id = azurerm_key_vault.main.id
+
+  body = {
+    properties = {
+      value = random_password.postgresql[0].result
+    }
+  }
 
   depends_on = [azurerm_role_assignment.user_kv_officer]
 }
@@ -55,7 +61,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   public_network_access_enabled = false
 
   dynamic "high_availability" {
-    for_each = var.postgresql_config.high_availability_enabled ? [1] : []
+    for_each = var.postgresql_config.should_enable_high_availability ? [1] : []
     content {
       mode                      = "ZoneRedundant"
       standby_availability_zone = var.postgresql_config.standby_availability_zone

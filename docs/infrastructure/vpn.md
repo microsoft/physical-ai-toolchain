@@ -49,9 +49,11 @@ Deployment takes 20-30 minutes for the VPN Gateway.
 | Variable                                 | Description                  | Default                |
 |------------------------------------------|------------------------------|------------------------|
 | `gateway_subnet_address_prefix`          | GatewaySubnet CIDR (min /27) | `10.0.3.0/27`          |
-| `vpn_gateway_config.sku`                 | Gateway SKU                  | `VpnGw1`               |
+| `vpn_gateway_config.sku`                 | Gateway SKU                  | `VpnGw1AZ`             |
 | `vpn_gateway_config.client_address_pool` | P2S client IP range          | `["192.168.200.0/24"]` |
-| `aad_auth_config.enabled`                | Enable Azure AD auth         | `true`                 |
+| `aad_auth_config.should_enable`          | Enable Azure AD auth         | `true`                 |
+
+Non-AZ VPN Gateway SKUs are being deprecated by Azure. Use the AZ equivalents (`VpnGw1AZ`, `VpnGw2AZ`, `VpnGw3AZ`) to avoid portal warnings and unplanned SKU updates outside Terraform.
 
 ## 🔐 Authentication Options
 
@@ -61,7 +63,7 @@ Enabled by default. Users authenticate with their Azure AD credentials via the A
 
 ```hcl
 aad_auth_config = {
-  enabled = true
+  should_enable = true
 }
 ```
 
@@ -71,7 +73,7 @@ For environments without Azure AD integration:
 
 ```hcl
 aad_auth_config = {
-  enabled = false
+  should_enable = false
 }
 root_certificate_public_data = "MIIC5jCCAc6g..." # Base64-encoded cert
 ```

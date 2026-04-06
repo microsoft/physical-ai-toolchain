@@ -5,6 +5,7 @@ abfs
 acrolinx
 activex
 acunetix
+addfinalizer
 adobe
 adrm
 adrs
@@ -50,12 +51,14 @@ aravis
 architected
 architecting
 ariba
+armhf
 arrowdown
 arrowleft
 arrowright
 arrowup
 ascs
 asctime
+asgi
 asgs
 assetguidance
 asyncio
@@ -334,6 +337,7 @@ davinci
 dbcc
 dcgm
 DDPG
+debconf
 debuggability
 dedupe
 deduplicated
@@ -459,6 +463,7 @@ frontends
 frontmatter
 fullstack
 fulltext
+fuser
 gartner
 gbps
 gcp
@@ -483,6 +488,8 @@ gitops
 gmail
 GMSH
 golang
+golangci
+gomod
 google
 googlecloud
 gpu
@@ -499,6 +506,7 @@ hardened
 hardening
 hbase
 hci
+hconf
 hdfs
 hdinsight
 heatmap
@@ -670,6 +678,7 @@ lakehouses
 lalogs
 lan
 lanczos
+lastexitcode
 lavfi
 ldap
 leaderboard
@@ -729,6 +738,7 @@ mcse
 mdlint
 mdutils
 meks
+mjpeg
 Memberwise
 memprofile
 mergetool
@@ -817,6 +827,8 @@ nic
 nics
 nist
 nodejs
+nodesource
+nodistro
 nojekyll
 noncompliance
 noncompliant
@@ -937,6 +949,7 @@ pipeline
 pipelines
 pitj
 pivottable
+pkgs
 platform
 platformops
 platforms
@@ -993,6 +1006,7 @@ pretrain
 pretrained
 pricewaterhousecoopers
 privatelink
+println
 profisee
 proliant
 proseware
@@ -1149,6 +1163,7 @@ scalability
 scalesetpriority
 scenario
 schedules
+schemathesis
 schwinn
 scikit
 scm
@@ -1163,6 +1178,7 @@ sdlc
 searchable
 seccomp
 sectigo
+securestring
 seealso
 Seldon
 semver
@@ -1312,6 +1328,7 @@ testpaths
 testsrc
 tflint
 tflite
+tftest
 tfvars
 tfvc
 thresholding
@@ -1407,7 +1424,7 @@ upskill
 upskilling
 uri
 url
-usrr
+usefixtures
 utcnow
 uuid
 uvicorn
@@ -1433,6 +1450,7 @@ visio
 visualisations
 visualstudio
 vite
+vitest
 vlan
 vlans
 vm
@@ -1491,6 +1509,7 @@ workday
 workgroup
 workitem
 workitems
+wordlist
 workstream
 wsus
 wwwroot
@@ -1983,3 +2002,17 @@ kolmogorov
 mqtt
 smirnov
 zustand
+
+# Cendio ThinLinc
+Cendio
+Linc
+ThinLinc
+tlwebaccess
+tlwebadm
+tlagent
+tlmaster
+thinlocal
+WEBADM
+WEBACCESS
+vsmagent
+vsmserver

@@ -38,7 +38,7 @@ jobs:
         run: New-Item -ItemType Directory -Force -Path logs | Out-Null
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
         with:
           terraform_wrapper: false
 
@@ -49,9 +49,9 @@ jobs:
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $params['ChangedFilesOnly'] = $true
           }
-          shared/ci/linting/Invoke-TerraformValidation.ps1 @params
+          scripts/linting/Invoke-TerraformValidation.ps1 @params
 
-      - name: Upload Terraform validation results
+      - name: Upload Terraform results
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:

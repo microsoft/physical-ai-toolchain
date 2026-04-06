@@ -82,13 +82,14 @@ The setup script installs Python 3.11 via [uv](https://docs.astral.sh/uv/), crea
 
 Full documentation is available in the [docs/](docs/README.md) directory.
 
-| Guide                                             | Description                                               |
-|---------------------------------------------------|-----------------------------------------------------------|
-| [Getting Started](docs/getting-started/README.md) | Prerequisites, quickstart, and first training job         |
-| [Deployment](docs/infrastructure/README.md)       | Infrastructure provisioning and setup                     |
-| [Training](docs/training/README.md)               | RL and IL training workflows, MLflow, and checkpointing   |
-| [Security](docs/security/README.md)               | Threat model, security guide, deployment responsibilities |
-| [Contributing](docs/contributing/README.md)       | Architecture, style guides, contribution workflow         |
+| Guide                                             | Description                                                    |
+|---------------------------------------------------|----------------------------------------------------------------|
+| [Getting Started](docs/getting-started/README.md) | Prerequisites, quickstart, and first training job              |
+| [Deployment](docs/infrastructure/README.md)       | Infrastructure provisioning and setup                          |
+| [Training](docs/training/README.md)               | RL and IL training workflows, MLflow, and checkpointing        |
+| [Security](docs/security/README.md)               | Threat model, security guide, deployment responsibilities      |
+| [Recipes](docs/recipes/README.md)                 | Guides that take you from a standing start to a working result |
+| [Contributing](docs/contributing/README.md)       | Architecture, style guides, contribution workflow              |
 
 ## Architecture
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
 
@@ -89,6 +89,48 @@ Write-Host ''
 Write-Host 'If this script fails, the devcontainer is your fallback.'
 Write-Host ''
 
+Write-Section 'Git Symlink Resolution'
+
+# Git symlinks are stored as text files on Windows when core.symlinks=false.
+# Replace broken symlinks with junctions (directories) or hard links (files).
+$symlinkEntries = git ls-files -s 2>$null | Select-String '120000' | ForEach-Object {
+    ($_ -split '\s+', 4)[3]
+}
+$repairedCount = 0
+foreach ($entry in $symlinkEntries) {
+    $fullPath = Join-Path $ScriptDir $entry
+    if (-not (Test-Path $fullPath)) { continue }
+
+    $item = Get-Item $fullPath -Force
+    # Already a junction/symlink — nothing to fix
+    if ($item.LinkType) { continue }
+    # Only fix plain text files (broken symlink placeholders)
+    if ($item.PSIsContainer) { continue }
+
+    $target = (Get-Content $fullPath -Raw).Trim()
+    $resolvedTarget = Resolve-Path (Join-Path (Split-Path $fullPath) $target) -ErrorAction SilentlyContinue
+    if (-not $resolvedTarget) {
+        Write-Warn "Symlink target not found: $entry -> $target"
+        continue
+    }
+
+    Remove-Item $fullPath -Force
+    $targetItem = Get-Item $resolvedTarget.Path
+    if ($targetItem.PSIsContainer) {
+        New-Item -ItemType Junction -Path $fullPath -Target $resolvedTarget.Path | Out-Null
+    }
+    else {
+        New-Item -ItemType HardLink -Path $fullPath -Target $resolvedTarget.Path | Out-Null
+    }
+    $repairedCount++
+}
+if ($repairedCount -gt 0) {
+    Write-Info "Repaired $repairedCount broken git symlink(s) (junctions/hard links)"
+}
+else {
+    Write-Info 'All git symlinks are intact'
+}
+
 Write-Section 'Tool Verification'
 
 Assert-Tools az, terraform, kubectl, helm, jq
@@ -117,6 +159,35 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 
 Write-Info "Using uv: $(uv --version)"
+
+# ===================================================================
+# Terraform-Docs
+# ===================================================================
+Write-Section 'Terraform-Docs Setup'
+
+$TerraformDocsVersion = '0.21.0'
+
+if (Get-Command terraform-docs -ErrorAction SilentlyContinue) {
+    Write-Info "terraform-docs: $(terraform-docs --version)"
+} else {
+    Write-Info "Installing terraform-docs v$TerraformDocsVersion..."
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+    $os = if ($IsLinux) { 'linux' } elseif ($IsMacOS) { 'darwin' } else { 'windows' }
+    $ext = if ($os -eq 'windows') { 'zip' } else { 'tar.gz' }
+    $url = "https://github.com/terraform-docs/terraform-docs/releases/download/v$TerraformDocsVersion/terraform-docs-v$TerraformDocsVersion-$os-$arch.$ext"
+    $dest = Join-Path $env:TEMP "terraform-docs.$ext"
+    Invoke-WebRequest -Uri $url -OutFile $dest
+    if ($os -eq 'windows') {
+        Expand-Archive -Path $dest -DestinationPath $env:TEMP -Force
+        Move-Item (Join-Path $env:TEMP 'terraform-docs.exe') (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\terraform-docs.exe') -Force
+    } else {
+        tar -xzf $dest -C /tmp terraform-docs
+        sudo mv /tmp/terraform-docs /usr/local/bin/terraform-docs
+        sudo chmod +x /usr/local/bin/terraform-docs
+    }
+    Remove-Item $dest -ErrorAction SilentlyContinue
+    Write-Info "terraform-docs: v$TerraformDocsVersion (installed)"
+}
 
 Write-Section 'Python Environment Setup'
 

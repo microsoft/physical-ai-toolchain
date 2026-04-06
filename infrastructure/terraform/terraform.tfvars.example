@@ -39,9 +39,9 @@ node_pools = {
     node_labels = {
       "kubernetes.azure.com/scalesetpriority" = "spot"
     }
-    priority                = "Spot"
-    enable_auto_scaling     = true
-    min_count               = 1
+    priority                   = "Spot"
+    should_enable_auto_scaling = true
+    min_count                  = 1
     max_count               = 1
     zones                   = []
     eviction_policy         = "Delete"
@@ -59,9 +59,9 @@ node_pools = {
 //     node_labels = {
 //       "nvidia.com/gpu.deploy.driver" = "false"
 //     }
-//     priority            = "Regular"
-//     enable_auto_scaling = true
-//     min_count           = 1
+//     priority                   = "Regular"
+//     should_enable_auto_scaling = true
+//     min_count                  = 1
 //     max_count           = 1
 //     zones               = []
 //   }
@@ -77,13 +77,22 @@ node_pools = {
 //       "kubernetes.azure.com/scalesetpriority" = "spot"
 //     }
 //     priority            = "Spot"
-//     eviction_policy     = "Delete"
-//     enable_auto_scaling = true
-//     min_count           = 1
+//     eviction_policy            = "Delete"
+//     should_enable_auto_scaling = true
+//     min_count                  = 1
 //     max_count           = 1
 //     zones               = []
 //   }
 // }
+
+// NAT Gateway Availability Zones
+// Set to ["1"] in AZ-supported regions (e.g. westus3, eastus2)
+// Leave empty for regions without AZ support (e.g. westus)
+// NOTE: Changing zones on an existing deployment forces replacement of both the NAT Gateway
+// and its Public IP. To preserve existing zonal behavior, set nat_gateway_zones to your current
+// zone (e.g. ["1"]) explicitly before applying. Run `terraform plan` to confirm no unintended
+// NAT/Public IP recreation.
+nat_gateway_zones = []
 
 // OSMO Backend Services
 should_deploy_postgresql = true
@@ -100,6 +109,24 @@ should_enable_private_aks_cluster = true
 should_enable_public_network_access     = true
 should_add_current_user_key_vault_admin = true
 should_enable_microsoft_defender        = true
+
+// Storage Lifecycle Management
+// Configure automatic deletion and tiering policies for blob storage
+
+// Raw ROS bags: Auto-delete after 30 days (configurable)
+should_enable_raw_bags_lifecycle_policy = true
+raw_bags_retention_days                 = 30  # Set to -1 to disable auto-delete
+
+// Converted datasets: Tier to cool storage after 90 days
+should_enable_converted_datasets_lifecycle_policy = true
+converted_datasets_cool_tier_days                 = 90  # Set to -1 to disable tiering
+
+// Validation reports: Tier to cool (30 days), then archive (180 days)
+should_enable_reports_lifecycle_policy = true
+reports_cool_tier_days                 = 30
+reports_archive_tier_days              = 180
+
+// Model checkpoints: No lifecycle policy (retained indefinitely in Hot tier)
 
 // Observability
 // All observability components deploy by default. Disable individually to reduce cost.
@@ -122,3 +149,7 @@ should_enable_microsoft_defender        = true
 
 // DNS Zones
 // should_include_aks_dns_zone = true
+
+// VM Subnet
+// If you plan to add a Virtual Machine with Isaac Sim we need to enable the creating of the subnet
+// should_create_vm_subnet = true

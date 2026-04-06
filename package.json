@@ -1,6 +1,6 @@
 {
   "name": "physical-ai-toolchain",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "engines": {
     "node": ">=20"
@@ -11,19 +11,23 @@
     "spell-check:fix": "cspell \"**/*.{md,ts,js,json,yaml,yml,py,sh}\" --show-suggestions",
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "lint:md:fix": "markdownlint-cli2 \"**/*.md\" --fix",
-    "lint:ps": "pwsh -File shared/ci/linting/Invoke-PSScriptAnalyzer.ps1",
-    "lint:links": "pwsh -File shared/ci/linting/Invoke-LinkLanguageCheck.ps1",
-    "lint:yaml": "pwsh -File shared/ci/linting/Invoke-YamlLint.ps1",
-    "lint:tf": "pwsh -File shared/ci/linting/Invoke-TFLint.ps1",
-    "lint:tf:validate": "pwsh -File shared/ci/linting/Invoke-TerraformValidation.ps1",
-    "lint:all": "npm run lint:md && npm run lint:ps && npm run lint:links && npm run lint:yaml && npm run lint:tf",
+    "lint:ps": "pwsh -File scripts/linting/Invoke-PSScriptAnalyzer.ps1",
+    "lint:links": "pwsh -File scripts/linting/Invoke-LinkLanguageCheck.ps1",
+    "lint:go": "pwsh -File scripts/linting/Invoke-GoLint.ps1",
+    "lint:yaml": "pwsh -File scripts/linting/Invoke-YamlLint.ps1",
+    "lint:tf": "pwsh -File scripts/linting/Invoke-TFLint.ps1",
+    "lint:tf:validate": "pwsh -File scripts/linting/Invoke-TerraformValidation.ps1",
+    "lint:all": "npm run lint:md && npm run lint:ps && npm run lint:links && npm run lint:yaml && npm run lint:tf && npm run lint:go",
     "format:tables": "markdown-table-formatter \"**/*.md\"",
-    "test:ps": "pwsh -File ./shared/ci/tests/Invoke-PesterTests.ps1",
+    "test:ps": "pwsh -File ./scripts/tests/Invoke-PesterTests.ps1",
+    "test:tf": "pwsh -File scripts/linting/Invoke-TerraformTest.ps1",
+    "test:go": "pwsh -File scripts/linting/Invoke-GoTest.ps1",
     "prepare": "husky",
     "docs:build": "cd docs/docusaurus && npm run build",
     "docs:start": "cd docs/docusaurus && npm start",
     "docs:test": "cd docs/docusaurus && npm test",
-    "docs:serve": "cd docs/docusaurus && npm run serve"
+    "docs:serve": "cd docs/docusaurus && npm run serve",
+    "docs:generate:tf": "pwsh -File scripts/Update-TerraformDocs.ps1"
   },
   "devDependencies": {
     "cspell": "9.4.0",

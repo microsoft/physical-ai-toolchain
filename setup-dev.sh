@@ -18,8 +18,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# shellcheck source=shared/lib/common.sh
-source "${SCRIPT_DIR}/shared/lib/common.sh"
+# shellcheck source=scripts/lib/common.sh
+source "${SCRIPT_DIR}/scripts/lib/common.sh"
 
 # Preamble: Recommend devcontainer for easier setup
 echo
@@ -51,6 +51,33 @@ if ! command -v uv &>/dev/null; then
 fi
 
 info "Using uv: $(uv --version)"
+
+# ===================================================================
+# Terraform-Docs
+# ===================================================================
+section "Terraform-Docs Setup"
+
+TERRAFORM_DOCS_VERSION="0.21.0"
+
+ARCH=$(uname -m)
+case "${ARCH}" in
+  x86_64)  ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+  *) error "Unsupported architecture: ${ARCH}"; exit 1 ;;
+esac
+
+if command -v terraform-docs &>/dev/null; then
+  info "terraform-docs: $(terraform-docs --version)"
+else
+  info "Installing terraform-docs v${TERRAFORM_DOCS_VERSION}..."
+  curl -sSLo /tmp/terraform-docs.tar.gz \
+    "https://github.com/terraform-docs/terraform-docs/releases/download/v${TERRAFORM_DOCS_VERSION}/terraform-docs-v${TERRAFORM_DOCS_VERSION}-$(uname -s | tr '[:upper:]' '[:lower:]')-${ARCH}.tar.gz"
+  tar -xzf /tmp/terraform-docs.tar.gz -C /tmp terraform-docs
+  sudo mv /tmp/terraform-docs /usr/local/bin/terraform-docs
+  sudo chmod +x /usr/local/bin/terraform-docs
+  rm -f /tmp/terraform-docs.tar.gz
+  info "terraform-docs: v${TERRAFORM_DOCS_VERSION} (installed)"
+fi
 
 section "Python Environment Setup"
 

@@ -34,6 +34,16 @@ resource "azurerm_subnet" "main" {
   default_outbound_access_enabled = !var.should_enable_nat_gateway
 }
 
+resource "azurerm_subnet" "vm_subnet" {
+  count = var.should_create_vm_subnet ? 1 : 0
+
+  name                            = "snet-isaaclab-vm-${local.resource_name_suffix}"
+  resource_group_name             = var.resource_group.name
+  virtual_network_name            = azurerm_virtual_network.main.name
+  address_prefixes                = [var.virtual_network_config.subnet_address_prefix_vm]
+  default_outbound_access_enabled = !var.should_enable_nat_gateway
+}
+
 // Private Endpoints Subnet (conditional - only created when private endpoints are enabled)
 resource "azurerm_subnet" "private_endpoints" {
   count = local.pe_enabled ? 1 : 0
@@ -48,6 +58,13 @@ resource "azurerm_subnet" "private_endpoints" {
 // NSG Associations
 resource "azurerm_subnet_network_security_group_association" "main" {
   subnet_id                 = azurerm_subnet.main.id
+  network_security_group_id = azurerm_network_security_group.main.id
+}
+
+resource "azurerm_subnet_network_security_group_association" "vm_subnet" {
+  count = var.should_create_vm_subnet ? 1 : 0
+
+  subnet_id                 = azurerm_subnet.vm_subnet[0].id
   network_security_group_id = azurerm_network_security_group.main.id
 }
 
@@ -67,7 +84,7 @@ resource "azurerm_public_ip" "nat_gateway" {
   resource_group_name = var.resource_group.name
   allocation_method   = "Static"
   sku                 = "Standard"
-  zones               = ["1"]
+  zones               = var.nat_gateway_zones
 
   lifecycle {
     ignore_changes = [ip_tags]
@@ -83,7 +100,7 @@ resource "azurerm_nat_gateway" "main" {
   resource_group_name     = var.resource_group.name
   sku_name                = "Standard"
   idle_timeout_in_minutes = 10
-  zones                   = ["1"]
+  zones                   = var.nat_gateway_zones
 }
 
 // NAT Gateway Public IP Association
@@ -99,6 +116,13 @@ resource "azurerm_subnet_nat_gateway_association" "main" {
   count = var.should_enable_nat_gateway ? 1 : 0
 
   subnet_id      = azurerm_subnet.main.id
+  nat_gateway_id = azurerm_nat_gateway.main[0].id
+}
+
+resource "azurerm_subnet_nat_gateway_association" "vm_subnet" {
+  count = var.should_create_vm_subnet && var.should_enable_nat_gateway ? 1 : 0
+
+  subnet_id      = azurerm_subnet.vm_subnet[0].id
   nat_gateway_id = azurerm_nat_gateway.main[0].id
 }
 

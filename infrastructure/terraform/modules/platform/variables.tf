@@ -25,10 +25,36 @@ variable "should_enable_nat_gateway" {
   default     = true
 }
 
+// WARNING: Changing zones on an existing deployment forces replacement of both the
+// NAT Gateway and its Public IP. This causes a brief outbound connectivity interruption
+// while Azure provisions new resources. Plan changes during a maintenance window.
+variable "nat_gateway_zones" {
+  type        = list(string)
+  description = "Availability zones for NAT Gateway and its public IP. Leave empty for regions without AZ support"
+  default     = ["1"]
+
+  validation {
+    condition     = alltrue([for z in var.nat_gateway_zones : contains(["1", "2", "3"], z)])
+    error_message = "Each zone must be \"1\", \"2\", or \"3\""
+  }
+
+  validation {
+    condition     = length(var.nat_gateway_zones) == length(distinct(var.nat_gateway_zones))
+    error_message = "nat_gateway_zones must not contain duplicates"
+  }
+}
+
+variable "should_create_vm_subnet" {
+  type        = bool
+  description = "Whether to create a dedicated subnet for virtual machines in the platform virtual network"
+  default     = false
+}
+
 variable "virtual_network_config" {
   type = object({
     address_space                  = string
     subnet_address_prefix_main     = string
+    subnet_address_prefix_vm       = optional(string)
     subnet_address_prefix_pe       = optional(string)
     subnet_address_prefix_resolver = optional(string)
   })
@@ -36,6 +62,7 @@ variable "virtual_network_config" {
   default = {
     address_space                  = "10.0.0.0/16"
     subnet_address_prefix_main     = "10.0.1.0/24"
+    subnet_address_prefix_vm       = "10.0.4.0/24"
     subnet_address_prefix_pe       = "10.0.2.0/24"
     subnet_address_prefix_resolver = "10.0.9.0/28"
   }
@@ -91,25 +118,25 @@ variable "should_deploy_postgresql" {
 
 variable "postgresql_config" {
   type = object({
-    location                  = string
-    sku_name                  = string
-    storage_mb                = number
-    version                   = string
-    databases                 = map(object({ collation = string, charset = string }))
-    zone                      = optional(string)
-    high_availability_enabled = optional(bool, false)
-    standby_availability_zone = optional(string)
+    location                        = string
+    sku_name                        = string
+    storage_mb                      = number
+    version                         = string
+    databases                       = map(object({ collation = string, charset = string }))
+    zone                            = optional(string)
+    should_enable_high_availability = optional(bool, false)
+    standby_availability_zone       = optional(string)
   })
   description = "PostgreSQL configuration for OSMO including location, SKU, storage, zone, HA settings, and database definitions"
   default = {
-    location                  = "westus3"
-    sku_name                  = "GP_Standard_D2s_v3"
-    storage_mb                = 32768
-    version                   = "16"
-    databases                 = { osmo = { collation = "en_US.utf8", charset = "utf8" } }
-    zone                      = null
-    high_availability_enabled = false
-    standby_availability_zone = null
+    location                        = "westus3"
+    sku_name                        = "GP_Standard_D2s_v3"
+    storage_mb                      = 32768
+    version                         = "16"
+    databases                       = { osmo = { collation = "en_US.utf8", charset = "utf8" } }
+    zone                            = null
+    should_enable_high_availability = false
+    standby_availability_zone       = null
   }
 }
 
@@ -125,15 +152,15 @@ variable "should_deploy_redis" {
 
 variable "redis_config" {
   type = object({
-    sku_name                  = string
-    clustering_policy         = string
-    high_availability_enabled = optional(bool, false)
+    sku_name                        = string
+    clustering_policy               = string
+    should_enable_high_availability = optional(bool, false)
   })
   description = "Redis configuration for OSMO including SKU, clustering policy, and HA settings. EnterpriseCluster recommended for clients that don't support Redis Cluster MOVED redirects"
   default = {
-    sku_name                  = "Balanced_B10"
-    clustering_policy         = "EnterpriseCluster"
-    high_availability_enabled = false
+    sku_name                        = "Balanced_B10"
+    clustering_policy               = "EnterpriseCluster"
+    should_enable_high_availability = false
   }
 }
 
@@ -155,6 +182,72 @@ variable "should_enable_storage_shared_access_key" {
   type        = bool
   description = "Whether to enable Shared Key (SAS token) authorization for the storage account. When false, all requests must use Azure AD authentication"
   default     = false
+}
+
+/*
+ * Storage Lifecycle Management Variables
+ */
+
+variable "should_enable_raw_bags_lifecycle_policy" {
+  type        = bool
+  description = "Whether to enable lifecycle policy for raw ROS bags (auto-delete after retention period)"
+  default     = true
+}
+
+variable "raw_bags_retention_days" {
+  type        = number
+  description = "Number of days to retain raw ROS bags before automatic deletion. Set to -1 to disable deletion"
+  default     = 30
+
+  validation {
+    condition     = var.raw_bags_retention_days == -1 || (var.raw_bags_retention_days >= 0 && var.raw_bags_retention_days <= 99999)
+    error_message = "raw_bags_retention_days must be -1 (disabled) or between 0 and 99999"
+  }
+}
+
+variable "should_enable_converted_datasets_lifecycle_policy" {
+  type        = bool
+  description = "Whether to enable lifecycle policy for converted LeRobot datasets (auto-tier to cool storage)"
+  default     = true
+}
+
+variable "converted_datasets_cool_tier_days" {
+  type        = number
+  description = "Number of days before tiering converted datasets to cool storage. Set to -1 to disable tiering"
+  default     = 90
+
+  validation {
+    condition     = var.converted_datasets_cool_tier_days == -1 || (var.converted_datasets_cool_tier_days >= 0 && var.converted_datasets_cool_tier_days <= 99999)
+    error_message = "converted_datasets_cool_tier_days must be -1 (disabled) or between 0 and 99999"
+  }
+}
+
+variable "should_enable_reports_lifecycle_policy" {
+  type        = bool
+  description = "Whether to enable lifecycle policy for validation reports (auto-tier to cool then archive)"
+  default     = true
+}
+
+variable "reports_cool_tier_days" {
+  type        = number
+  description = "Number of days before tiering validation reports to cool storage"
+  default     = 30
+
+  validation {
+    condition     = var.reports_cool_tier_days >= 0 && var.reports_cool_tier_days <= 99999
+    error_message = "reports_cool_tier_days must be between 0 and 99999"
+  }
+}
+
+variable "reports_archive_tier_days" {
+  type        = number
+  description = "Number of days before tiering validation reports to archive storage. Must be greater than reports_cool_tier_days"
+  default     = 180
+
+  validation {
+    condition     = var.reports_archive_tier_days >= 0 && var.reports_archive_tier_days <= 99999
+    error_message = "reports_archive_tier_days must be between 0 and 99999"
+  }
 }
 
 /*

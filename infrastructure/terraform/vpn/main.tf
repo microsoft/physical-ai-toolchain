@@ -1,5 +1,5 @@
 /**
- * VPN Gateway Standalone Configuration
+ * # VPN Gateway Standalone Configuration
  *
  * Deploys VPN Gateway for Point-to-Site and Site-to-Site connectivity
  * using data sources to reference existing platform infrastructure.

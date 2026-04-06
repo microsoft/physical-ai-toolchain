@@ -291,3 +291,28 @@ class TestVideoGeneration:
 
         path = handler._video_cache_path("test", 0, "il-camera")
         assert path == tmp_path / "meta" / "videos" / "il-camera" / "episode_000000.mp4"
+
+
+class TestVideoGenerationFallback:
+    """Test video generation when cv2 is unavailable."""
+
+    def test_cv2_fallback_returns_false_without_opencv(self, tmp_path, monkeypatch):
+        """_generate_video_cv2 returns False when cv2 is not installed."""
+        import builtins
+        import sys
+
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "cv2":
+                raise ImportError("No module named 'cv2'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.delitem(sys.modules, "cv2", raising=False)
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+
+        from src.api.services.dataset_service.hdf5_handler import _generate_video_cv2
+
+        images = np.zeros((5, 48, 64, 3), dtype=np.uint8)
+        result = _generate_video_cv2(images, tmp_path / "out.mp4", 30.0)
+        assert result is False

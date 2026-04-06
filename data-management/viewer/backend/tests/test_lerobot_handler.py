@@ -143,3 +143,66 @@ class TestCamerasAndVideo:
     def test_get_video_path_missing_camera(self, handler):
         path = handler.get_video_path(DATASET_ID, 0, "fake_camera")
         assert path is None
+
+
+class TestFfmpegExtraction:
+    """Test ffmpeg-based frame extraction."""
+
+    FAKE_JPEG = b"\xff\xd8\xff\xe0fake-jpeg-data"
+
+    def test_successful_extraction(self, monkeypatch):
+        """Verify _extract_frame_ffmpeg returns stdout bytes on success."""
+        import shutil
+        import subprocess as sp
+
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+
+        def mock_run(cmd, *, capture_output=False, timeout=None):
+            assert cmd[0] == "ffmpeg"
+            assert "-ss" in cmd
+            return sp.CompletedProcess(cmd, returncode=0, stdout=self.FAKE_JPEG, stderr=b"")
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        result = LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 5, 30.0)
+        assert result == self.FAKE_JPEG
+
+    def test_returns_none_when_ffmpeg_missing(self, monkeypatch):
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda cmd: None)
+        result = LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 0, 30.0)
+        assert result is None
+
+    def test_returns_none_on_nonzero_exit(self, monkeypatch):
+        import shutil
+        import subprocess as sp
+
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(
+            sp,
+            "run",
+            lambda *a, **kw: sp.CompletedProcess(a[0], returncode=1, stdout=b"", stderr=b"error"),
+        )
+
+        result = LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 0, 30.0)
+        assert result is None
+
+    def test_seek_time_calculation(self, monkeypatch):
+        """Verify frame_idx / fps produces correct -ss argument."""
+        import shutil
+        import subprocess as sp
+
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+
+        captured_cmd = []
+
+        def mock_run(cmd, *, capture_output=False, timeout=None):
+            captured_cmd.extend(cmd)
+            return sp.CompletedProcess(cmd, returncode=0, stdout=self.FAKE_JPEG, stderr=b"")
+
+        monkeypatch.setattr(sp, "run", mock_run)
+
+        LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 90, 30.0)
+        ss_idx = captured_cmd.index("-ss")
+        assert captured_cmd[ss_idx + 1] == "3.000000"

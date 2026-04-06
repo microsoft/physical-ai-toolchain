@@ -146,6 +146,7 @@ Run these commands to validate changes before submitting a PR:
 npm run lint:md        # Markdownlint
 npm run lint:links     # Markdown link validation
 npm run spell-check    # cspell
+npm run test:tf        # Terraform module tests (no Azure credentials required)
 ```
 
 For Terraform and shell script validation, see the [Prerequisites](docs/contributing/prerequisites.md#build-and-validation-requirements) guide.
@@ -297,6 +298,42 @@ A regression test may be omitted when:
 | Integration test covering the scenario | Yes                                   |
 | Manual test documented in PR           | Only if automated test is impractical |
 | Informal local verification            | No                                    |
+
+### End-to-End Tests
+
+Optionally run the RL end-to-end suite to capture regressions. This is good practice for changes to submission scripts, workflow templates, MLflow wiring, checkpoint handling, or shared RL training assets. The end-to-end suite validates:
+
+- Azure ML or OSMO job submission and lifecycle transitions
+- MLflow metrics and parameter tracking for the completed run
+- Checkpoint output upload for Azure ML runs
+- Workflow task success for OSMO runs
+
+> [!CAUTION]
+> These tests submit real GPU workloads and consume Azure ML, OSMO, Kubernetes, and MLflow resources. They are intentionally excluded from default `pytest` runs and must be invoked explicitly.
+
+Requirements:
+
+| Requirement                | Details                                                                                                                                                                                        |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Azure CLI                  | `az` must be installed and authenticated. The Azure ML CLI extension must also be available.                                                                                                   |
+| Azure subscription context | Set `AZURE_SUBSCRIPTION_ID`, or make sure `az account show` resolves to the subscription you want the test to use.                                                                             |
+| Azure workspace context    | Set `AZURE_RESOURCE_GROUP` and `AZUREML_WORKSPACE_NAME`, or make sure `terraform output -json` or `infrastructure/terraform/terraform.tfvars` resolves them.                                   |
+| Azure ML compute target    | For Azure ML validation, the compute target must resolve from `AZUREML_COMPUTE` or Terraform naming and its provisioning state must be `Succeeded`.                                            |
+| OSMO and Kubernetes access | For OSMO validation, `osmo` and `kubectl` must be installed and authenticated, and the target cluster must expose at least one reachable GPU node. Connect the VPN first for private clusters. |
+| MLflow access              | The Azure ML workspace used by the tests must expose a working MLflow tracking URI because both validation paths assert metrics and parameters after the run completes.                        |
+
+Run these commands from the repository root:
+
+```bash
+# Azure ML submission path only
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py::test_aml_rl_training_e2e
+
+# OSMO submission path only
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py::test_osmo_rl_training_e2e
+
+# Full RL e2e suite
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py
+```
 
 #### Bug Fix PR Requirements
 

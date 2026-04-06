@@ -14,6 +14,7 @@
 		},
 		"ghcr.io/devcontainers/features/github-cli:1": {},
 		"ghcr.io/devcontainers/features/node:1": {},
+		"ghcr.io/devcontainers/features/go:1": {},
 		"ghcr.io/devcontainers/features/terraform:1": {
 			"installTerraformDocs": true
 		},
@@ -95,6 +96,7 @@
 		"apt": "sudo apt update && sudo apt install -y shellcheck jq unzip",
 		"tflint": "TFLINT_VERSION=v0.61.0 && curl -sSfL \"https://raw.githubusercontent.com/terraform-linters/tflint/${TFLINT_VERSION}/install_linux.sh\" | bash && tflint --init",
 		"actionlint": "ACTIONLINT_VERSION=1.7.10 && ACTIONLINT_SHA256=f4c76b71db5755a713e6055cbb0857ed07e103e028bda117817660ebadb4386f && curl -sSfL \"https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz\" -o /tmp/actionlint.tar.gz && echo \"${ACTIONLINT_SHA256} /tmp/actionlint.tar.gz\" | sha256sum -c --quiet - && sudo tar -xzf /tmp/actionlint.tar.gz -C /usr/local/bin actionlint && rm /tmp/actionlint.tar.gz",
+		"golangci-lint": "GOLANGCI_LINT_VERSION=2.11.4 && GOLANGCI_LINT_SHA256=200c5b7503f67b59a6743ccf32133026c174e272b930ee79aa2aa6f37aca7ef1 && curl -fsSL \"https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz\" -o /tmp/golangci-lint.tar.gz && echo \"${GOLANGCI_LINT_SHA256}  /tmp/golangci-lint.tar.gz\" | sha256sum -c --quiet - && sudo tar -xzf /tmp/golangci-lint.tar.gz -C /usr/local/bin --strip-components=1 \"golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64/golangci-lint\" && rm /tmp/golangci-lint.tar.gz",
 		"update-bashrc": "echo 'export PATH=\"${containerWorkspaceFolder}/scripts:${containerWorkspaceFolder}/node_modules/.bin:$PATH\"' | sudo tee -a  ~/.bashrc",
 		"osmo-cli": "curl -fsSL https://raw.githubusercontent.com/NVIDIA/OSMO/refs/heads/main/install.sh | bash || true",
 		"ngc-cli": "wget -qO /tmp/ngccli.zip https://ngc.nvidia.com/downloads/ngccli_linux.zip && sudo unzip -o /tmp/ngccli.zip -d /usr/local/bin && rm /tmp/ngccli.zip && sudo chmod u+x /usr/local/bin/ngc || true",

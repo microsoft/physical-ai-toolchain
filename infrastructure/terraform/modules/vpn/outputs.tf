@@ -23,6 +23,7 @@ output "vpn_gateway_public_ip" {
   value = {
     id         = azurerm_public_ip.vpn_gateway.id
     ip_address = azurerm_public_ip.vpn_gateway.ip_address
+    zones      = azurerm_public_ip.vpn_gateway.zones
   }
 }
 

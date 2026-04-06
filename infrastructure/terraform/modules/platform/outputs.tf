@@ -24,6 +24,10 @@ output "subnets" {
       id   = azurerm_subnet.main.id
       name = azurerm_subnet.main.name
     }
+    vm_subnet = try({
+      id   = azurerm_subnet.vm_subnet[0].id
+      name = azurerm_subnet.vm_subnet[0].name
+    }, null)
     private_endpoints = try({
       id   = azurerm_subnet.private_endpoints[0].id
       name = azurerm_subnet.private_endpoints[0].name
@@ -214,7 +218,7 @@ output "postgresql" {
 
 output "postgresql_secret_name" {
   description = "Key Vault secret name containing PostgreSQL admin password"
-  value       = try(azurerm_key_vault_secret.postgresql_password[0].name, null)
+  value       = try(azapi_resource.postgresql_password[0].name, null)
 }
 
 output "redis" {

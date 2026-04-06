@@ -49,6 +49,7 @@ azurelinux
 azureml
 azuremonitor
 azurestack
+azureuser
 azurevpnconfig
 containerapp
 cosmosdb
@@ -56,6 +57,7 @@ deviceregistry
 eastu
 eastus
 entra
+eventhub
 functionalization
 keyvault
 onedrive
@@ -64,8 +66,7 @@ powerbi
 rtxprogpu
 servicebus
 sharepoint
+snet
 southeastasia
 wasbs
 westus
-
-eventhub

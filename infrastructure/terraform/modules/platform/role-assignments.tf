@@ -17,7 +17,7 @@
 
 // Grant current user Key Vault Secrets Officer (for initial secret management)
 resource "azurerm_role_assignment" "user_kv_officer" {
-  count = var.should_add_current_user_key_vault_admin != null ? 1 : 0
+  count = var.should_add_current_user_key_vault_admin ? 1 : 0
 
   scope                = azurerm_key_vault.main.id
   role_definition_name = "Key Vault Secrets Officer"
@@ -67,6 +67,14 @@ resource "azurerm_role_assignment" "ml_storage_blob" {
 resource "azurerm_role_assignment" "ml_storage_file" {
   scope                = azurerm_storage_account.main.id
   role_definition_name = "Storage File Data SMB Share Contributor"
+  principal_id         = azurerm_user_assigned_identity.ml.principal_id
+}
+
+// Grant ML identity Storage File Data Privileged Contributor role
+// Required for Azure ML compute instance storage mounting
+resource "azurerm_role_assignment" "ml_storage_file_privileged" {
+  scope                = azurerm_storage_account.main.id
+  role_definition_name = "Storage File Data Privileged Contributor"
   principal_id         = azurerm_user_assigned_identity.ml.principal_id
 }
 

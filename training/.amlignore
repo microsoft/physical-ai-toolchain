@@ -37,3 +37,6 @@ build/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Temp folders used in OSMO jobs
+.tmp/

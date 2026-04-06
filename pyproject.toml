@@ -1,6 +1,6 @@
 [project]
 name = "physical-ai-toolchain"
-version = "0.4.0"
+version = "0.5.0"
 description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,23 +25,33 @@ dev = [
     "ipywidgets",
     "tqdm",
     "matplotlib>=3.10.8",
+    "azureml-mlflow>=1.62.0.post2",
+    "azure-ai-ml>=1.32.0",
 ]
 
 [tool.uv]
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "training/tests"]
-pythonpath = ["."]
+testpaths = ["tests", "training/tests", "data-management/tools/tests"]
+pythonpath = [".", "data-management/tools"]
 addopts = [
     "-ra",
+    "-m",
+    "not e2e",
     "--strict-markers",
     "--strict-config",
     "--cov=training",
     "--cov-report=term-missing",
     "--cov-report=xml",
 ]
-markers = []
+markers = [
+    "e2e: marks tests that submit real GPU training jobs (deselect: -m 'not e2e')",
+]
+filterwarnings = [
+    "ignore::marshmallow.warnings.RemovedInMarshmallow4Warning",
+    "ignore::marshmallow.warnings.ChangedInMarshmallow4Warning",
+]
 
 [tool.hypothesis]
 max_examples = 50

@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Prerequisites and Build Validation
 description: Required tools, Azure access, NGC credentials, and build validation commands for contributing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-08
+ms.date: 2026-03-25
 ms.topic: how-to
 keywords:
   - prerequisites
@@ -22,20 +22,23 @@ Tools, Azure access, and build validation requirements for contributing to the P
 
 Install these tools before contributing:
 
-| Tool        | Minimum Version | Installation                                                          |
-|-------------|-----------------|-----------------------------------------------------------------------|
-| Terraform   | 1.9.8           | <https://developer.hashicorp.com/terraform/install>                   |
-| TFLint      | 0.61.0          | <https://github.com/terraform-linters/tflint>                         |
-| Azure CLI   | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>             |
-| kubectl     | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
-| Helm        | 3.16            | <https://helm.sh/docs/intro/install/>                                 |
-| Node.js/npm | 20+ LTS         | <https://nodejs.org/>                                                 |
-| Python      | 3.11+           | <https://www.python.org/downloads/>                                   |
-| shellcheck  | 0.10+           | <https://www.shellcheck.net/>                                         |
-| uv          | latest          | <https://docs.astral.sh/uv/>                                          |
-| Docker      | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit) |
-| OSMO CLI    | latest          | <https://developer.nvidia.com/osmo>                                   |
-| hve-core    | latest          | <https://github.com/microsoft/hve-core>                               |
+| Tool           | Minimum Version | Installation                                                          |
+|----------------|-----------------|-----------------------------------------------------------------------|
+| Terraform      | 1.9.8           | <https://developer.hashicorp.com/terraform/install>                   |
+| TFLint         | 0.61.0          | <https://github.com/terraform-linters/tflint>                         |
+| Azure CLI      | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>             |
+| kubectl        | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
+| Helm           | 3.16            | <https://helm.sh/docs/intro/install/>                                 |
+| Node.js/npm    | 20+ LTS         | <https://nodejs.org/>                                                 |
+| Python         | 3.11+           | <https://www.python.org/downloads/>                                   |
+| shellcheck     | 0.10+           | <https://www.shellcheck.net/>                                         |
+| uv             | latest          | <https://docs.astral.sh/uv/>                                          |
+| Go             | 1.24+           | <https://go.dev/dl/>                                                  |
+| golangci-lint  | 2.11+           | <https://golangci-lint.run/welcome/install/>                          |
+| Docker         | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit) |
+| OSMO CLI       | latest          | <https://developer.nvidia.com/osmo>                                   |
+| terraform-docs | 0.21.0          | <https://github.com/terraform-docs/terraform-docs/releases>           |
+| hve-core       | latest          | <https://github.com/microsoft/hve-core>                               |
 
 ## Azure Access Requirements
 
@@ -130,12 +133,21 @@ shellcheck --version  # >= 0.10
 # uv (Python package manager)
 uv --version
 
+# Go
+go version  # >= 1.24
+
+# golangci-lint
+golangci-lint version  # >= 2.11
+
 # Docker with NVIDIA Container Toolkit
 docker --version
 nvidia-ctk --version
 
 # OSMO CLI
 osmo --version
+
+# terraform-docs
+terraform-docs --version  # >= 0.21.0
 
 # hve-core (VS Code extension — verify via extensions list)
 code --list-extensions | grep -i hve-core
@@ -165,6 +177,16 @@ tflint --recursive infrastructure/terraform/
 ```bash
 # Lint all shell scripts (required)
 shellcheck deploy/**/*.sh scripts/**/*.sh
+```
+
+**Go:**
+
+```bash
+# Lint Go modules (required for Go changes)
+npm run lint:go
+
+# Test Go modules (required for Go changes)
+npm run test:go
 ```
 
 **Documentation:**

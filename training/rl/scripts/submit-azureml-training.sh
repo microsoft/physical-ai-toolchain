@@ -4,10 +4,14 @@
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || dirname "$SCRIPT_DIR")"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 
-source "$REPO_ROOT/shared/lib/common.sh"
-source "$SCRIPT_DIR/lib/terraform-outputs.sh"
+# shellcheck source=../../../scripts/lib/common.sh
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/lib/common.sh"
+# shellcheck source=../../../scripts/lib/terraform-outputs.sh
+# shellcheck disable=SC1091
+source "$REPO_ROOT/scripts/lib/terraform-outputs.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
 #------------------------------------------------------------------------------
@@ -219,9 +223,9 @@ if [[ "$skip_register" == "false" && -z "$register_checkpoint" ]]; then
   info "Auto-derived model name: $register_checkpoint"
 fi
 
-code_path="$REPO_ROOT"
-[[ -d "$code_path/training" ]] || fatal "Training source not found: $code_path/training"
-[[ -f "$code_path/training/.amlignore" ]] || warn "No .amlignore found; __pycache__ may be included in snapshot"
+code_path="$REPO_ROOT/training"
+[[ -d "$code_path/rl" ]] || fatal "RL training source not found: $code_path/rl"
+[[ -f "$code_path/.amlignore" ]] || warn "No training/.amlignore found; the AML snapshot may include unrelated files"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
@@ -251,7 +255,7 @@ fi
 register_environment "$environment_name" "$environment_version" "$image" \
   "$resource_group" "$workspace_name"
 
-info "Code path: $code_path"
+info "Code path: $code_path (training/ contents only)"
 info "Environment: ${environment_name}:${environment_version}"
 
 if [[ "$assets_only" == "true" ]]; then
@@ -315,7 +319,9 @@ fi
 
 [[ "$headless" == "true" ]] && cmd="$cmd --headless"
 
-az_args+=(--set "command=bash training/scripts/train.sh $cmd")
+# AML snapshots training/ as the code root, so recreate the top-level training path
+# expected by the shell entrypoint and Python imports inside the job container.
+az_args+=(--set "command=if [ ! -e training ]; then ln -s . training; fi && bash training/rl/scripts/train.sh $cmd")
 
 # Input values
 az_args+=(
