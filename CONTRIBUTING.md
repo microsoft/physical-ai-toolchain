@@ -158,7 +158,7 @@ All CI linters enforce warnings-as-errors. PRs that introduce new warnings will 
 | Linter               | Enforcement       | Configuration                                 |
 |----------------------|-------------------|-----------------------------------------------|
 | Markdown (lint:md)   | Errors block      | .markdownlint-cli2.jsonc                      |
-| PowerShell (lint:ps) | Errors + warnings | shared/ci/linting/Invoke-PSScriptAnalyzer.ps1 |
+| PowerShell (lint:ps) | Errors + warnings | scripts/linting/Invoke-PSScriptAnalyzer.ps1 |
 | YAML (lint:yaml)     | Errors + warnings | .yamllint.yml                                 |
 | Terraform (lint:tf)  | Errors block      | .tflint.hcl                                   |
 | Go (lint:go)         | Errors block      | .golangci.yml                                 |
