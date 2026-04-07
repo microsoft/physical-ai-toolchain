@@ -2,7 +2,7 @@
 title: Private DNS Zone for OSMO UI Service
 description: Creates a private DNS zone for internal resolution of the OSMO UI service running on an internal LoadBalancer within the AKS cluster.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-25
+ms.date: 2026-04-07
 ms.topic: reference
 ---
 

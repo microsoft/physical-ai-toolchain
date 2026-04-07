@@ -2,7 +2,7 @@
 title: Dataviewer Module
 description: Deploys the dataviewer application on Azure Container Apps with networking, identity, and app-level resources.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-25
+ms.date: 2026-04-07
 ms.topic: reference
 ---
 
@@ -48,6 +48,7 @@ Supports internal (VNet/VPN) and external (public) deployment modes.
 | [azurerm_private_dns_zone.container_apps](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/private_dns_zone)                                                   | resource    |
 | [azurerm_private_dns_zone_virtual_network_link.container_apps](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/private_dns_zone_virtual_network_link)         | resource    |
 | [azurerm_role_assignment.dataviewer_acr_pull](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment)                                                | resource    |
+| [azurerm_role_assignment.dataviewer_data_lake_blob](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment)                                          | resource    |
 | [azurerm_role_assignment.dataviewer_storage_blob](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment)                                            | resource    |
 | [azurerm_subnet.container_apps](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/subnet)                                                                       | resource    |
 | [azurerm_subnet_nat_gateway_association.container_apps](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/subnet_nat_gateway_association)                       | resource    |
@@ -75,6 +76,7 @@ Supports internal (VNet/VPN) and external (public) deployment modes.
 | backend\_cpu                     | CPU allocation for the backend container                                                                                                                         | `number`                                                          | `0.5`                                                        |    no    |
 | backend\_image                   | Full image reference for the backend container (e.g., acr.azurecr.io/dataviewer-backend:latest). Leave empty to use a placeholder for initial IaC provisioning   | `string`                                                          | `""`                                                         |    no    |
 | backend\_memory                  | Memory allocation for the backend container                                                                                                                      | `string`                                                          | `"1Gi"`                                                      |    no    |
+| data\_lake\_storage\_account     | Data lake storage account from platform module. Null when data lake is disabled                                                                                  | ```object({ id = string name = string })```                       | `null`                                                       |    no    |
 | dataviewer\_redirect\_uris       | SPA redirect URIs for MSAL.js authentication (local development)                                                                                                 | `list(string)`                                                    | ```[ "http://localhost:5173/", "http://localhost:5174/" ]``` |    no    |
 | frontend\_cpu                    | CPU allocation for the frontend container                                                                                                                        | `number`                                                          | `0.25`                                                       |    no    |
 | frontend\_image                  | Full image reference for the frontend container (e.g., acr.azurecr.io/dataviewer-frontend:latest). Leave empty to use a placeholder for initial IaC provisioning | `string`                                                          | `""`                                                         |    no    |
