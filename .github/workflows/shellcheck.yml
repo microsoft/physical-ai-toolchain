@@ -49,7 +49,7 @@ jobs:
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $params['ChangedFilesOnly'] = $true
           }
-          ./shared/ci/linting/Invoke-ShellCheck.ps1 @params
+          ./scripts/linting/Invoke-ShellCheck.ps1 @params
 
       - name: Upload ShellCheck results
         if: always()

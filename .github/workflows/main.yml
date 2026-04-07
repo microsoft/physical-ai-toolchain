@@ -191,6 +191,14 @@ jobs:
     permissions:
       contents: read
 
+  # Terraform documentation freshness check
+  terraform-docs-check:
+    name: Terraform Docs Check
+    uses: ./.github/workflows/terraform-docs-check.yml
+    with:
+      soft-fail: true
+    permissions:
+      contents: read
   # CodeQL security analysis
   codeql-analysis:
     name: CodeQL Analysis
@@ -223,6 +231,7 @@ jobs:
       - go-lint
       - go-tests
       - shellcheck
+      - terraform-docs-check
       - codeql-analysis
     name: Release Please
     runs-on: ubuntu-latest
