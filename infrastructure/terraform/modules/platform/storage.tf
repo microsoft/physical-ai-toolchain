@@ -116,6 +116,71 @@ resource "azurerm_storage_container" "models" {
 }
 
 // ============================================================
+// Storage Lifecycle Management Policy (ML storage fallback)
+// ============================================================
+// Active when data lake is disabled — ensures existing deployments retain lifecycle
+// cost controls. Removed when data lake is enabled (rules move to data lake account).
+
+resource "azurerm_storage_management_policy" "main" {
+  count = var.should_create_data_lake_storage ? 0 : 1
+
+  storage_account_id = azurerm_storage_account.main.id
+
+  rule {
+    name    = "delete-raw-bags"
+    enabled = var.should_enable_raw_bags_lifecycle_policy
+
+    filters {
+      prefix_match = ["raw/"]
+      blob_types   = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        delete_after_days_since_modification_greater_than = var.raw_bags_retention_days
+      }
+    }
+  }
+
+  rule {
+    name    = "tier-converted-datasets-to-cool"
+    enabled = var.should_enable_converted_datasets_lifecycle_policy
+
+    filters {
+      prefix_match = ["converted/"]
+      blob_types   = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        tier_to_cool_after_days_since_modification_greater_than = var.converted_datasets_cool_tier_days
+      }
+    }
+  }
+
+  rule {
+    name    = "tier-reports-to-cool-then-archive"
+    enabled = var.should_enable_reports_lifecycle_policy
+
+    filters {
+      prefix_match = ["reports/"]
+      blob_types   = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        tier_to_cool_after_days_since_modification_greater_than    = var.reports_cool_tier_days
+        tier_to_archive_after_days_since_modification_greater_than = var.reports_archive_tier_days
+      }
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+// ============================================================
 // Data Lake Lifecycle Management Policy
 // ============================================================
 
