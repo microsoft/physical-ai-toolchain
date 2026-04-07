@@ -230,81 +230,81 @@ All documentation files with ms.date frontmatter are within the $Threshold-day f
 #endregion
 
 #region Main Logic
+if ($MyInvocation.InvocationName -ne '.') {
+    Write-Verbose "Starting ms.date freshness check with $ThresholdDays-day threshold"
 
-Write-Verbose "Starting ms.date freshness check with $ThresholdDays-day threshold"
+    $markdownFiles = @(Get-MarkdownFiles -SearchPaths $Paths -ChangedOnly:$ChangedFilesOnly -Base $BaseBranch)
 
-$markdownFiles = @(Get-MarkdownFiles -SearchPaths $Paths -ChangedOnly:$ChangedFilesOnly -Base $BaseBranch)
+    if (@($markdownFiles).Count -eq 0) {
+        Write-Warning "No markdown files found to check"
+        exit 0
+    }
 
-if (@($markdownFiles).Count -eq 0) {
-    Write-Warning "No markdown files found to check"
-    exit 0
-}
+    Write-Verbose "Checking $(@($markdownFiles).Count) markdown files"
 
-Write-Verbose "Checking $(@($markdownFiles).Count) markdown files"
+    $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+    $currentDate = Get-Date
 
-$results = [System.Collections.Generic.List[PSCustomObject]]::new()
-$currentDate = Get-Date
+    foreach ($file in $markdownFiles) {
+        $relativePath = if ($file -is [System.IO.FileInfo]) {
+            $file.FullName.Replace("$PWD$([System.IO.Path]::DirectorySeparatorChar)", '')
+        }
+        else {
+            $file.Replace("$PWD$([System.IO.Path]::DirectorySeparatorChar)", '')
+        }
 
-foreach ($file in $markdownFiles) {
-    $relativePath = if ($file -is [System.IO.FileInfo]) {
-        $file.FullName.Replace("$PWD$([System.IO.Path]::DirectorySeparatorChar)", '')
+        $msDate = Get-MsDateFromFrontmatter -FilePath $file
+
+        if ($null -eq $msDate) {
+            Write-Verbose "Skipping $relativePath (no ms.date)"
+            continue
+        }
+
+        $age = $currentDate - $msDate
+        $ageDays = [int]$age.TotalDays
+        $isStale = $ageDays -gt $ThresholdDays
+
+        $result = [PSCustomObject]@{
+            File      = $relativePath
+            MsDate    = $msDate.ToString('yyyy-MM-dd')
+            AgeDays   = $ageDays
+            IsStale   = $isStale
+            Threshold = $ThresholdDays
+        }
+
+        $results.Add($result)
+
+        if ($isStale) {
+            Write-Verbose "Stale file detected: $relativePath ($ageDays days old)"
+            Write-CIAnnotation -Message "${relativePath}: ms.date is $ageDays days old (threshold: $ThresholdDays days)" -Level 'Warning' -File $relativePath
+        }
+    }
+
+    if (@($results).Count -eq 0) {
+        Write-Warning "No files with ms.date frontmatter found"
+        exit 0
+    }
+
+    $report = New-MsDateReport -Results $results -Threshold $ThresholdDays
+
+    Write-Host "`nms.date Freshness Check Summary:"
+    Write-Host "  Files Checked: $(@($results).Count)"
+    Write-Host "  Stale Files: $($report.StaleCount)"
+    Write-Host "  Threshold: $ThresholdDays days"
+
+    if (Test-Path $report.MarkdownPath) {
+        if ($env:GITHUB_STEP_SUMMARY) {
+            Get-Content $report.MarkdownPath | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+        }
+    }
+
+    if ($report.StaleCount -gt 0) {
+        Write-Host "`n❌ Found $($report.StaleCount) stale documentation file(s)"
+        exit 1
     }
     else {
-        $file.Replace("$PWD$([System.IO.Path]::DirectorySeparatorChar)", '')
-    }
-
-    $msDate = Get-MsDateFromFrontmatter -FilePath $file
-
-    if ($null -eq $msDate) {
-        Write-Verbose "Skipping $relativePath (no ms.date)"
-        continue
-    }
-
-    $age = $currentDate - $msDate
-    $ageDays = [int]$age.TotalDays
-    $isStale = $ageDays -gt $ThresholdDays
-
-    $result = [PSCustomObject]@{
-        File      = $relativePath
-        MsDate    = $msDate.ToString('yyyy-MM-dd')
-        AgeDays   = $ageDays
-        IsStale   = $isStale
-        Threshold = $ThresholdDays
-    }
-
-    $results.Add($result)
-
-    if ($isStale) {
-        Write-Verbose "Stale file detected: $relativePath ($ageDays days old)"
-        Write-CIAnnotation -Message "${relativePath}: ms.date is $ageDays days old (threshold: $ThresholdDays days)" -Level 'Warning' -File $relativePath
+        Write-Host "`n✅ All files are fresh"
+        exit 0
     }
 }
-
-if (@($results).Count -eq 0) {
-    Write-Warning "No files with ms.date frontmatter found"
-    exit 0
-}
-
-$report = New-MsDateReport -Results $results -Threshold $ThresholdDays
-
-Write-Host "`nms.date Freshness Check Summary:"
-Write-Host "  Files Checked: $(@($results).Count)"
-Write-Host "  Stale Files: $($report.StaleCount)"
-Write-Host "  Threshold: $ThresholdDays days"
-
-if (Test-Path $report.MarkdownPath) {
-    if ($env:GITHUB_STEP_SUMMARY) {
-        Get-Content $report.MarkdownPath | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-    }
-}
-
-if ($report.StaleCount -gt 0) {
-    Write-Host "`n❌ Found $($report.StaleCount) stale documentation file(s)"
-    exit 1
-}
-else {
-    Write-Host "`n✅ All files are fresh"
-    exit 0
-}
-
 #endregion
