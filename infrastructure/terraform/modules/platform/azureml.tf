@@ -99,6 +99,11 @@ resource "azurerm_monitor_diagnostic_setting" "ml_workspace_logs" {
   enabled_log {
     category_group = "allLogs"
   }
+
+  metric {
+    category = "AllMetrics"
+    enabled  = false
+  }
 }
 
 // ============================================================
