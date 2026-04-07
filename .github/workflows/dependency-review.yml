@@ -26,10 +26,14 @@ jobs:
         with:
           fail-on-severity: moderate
           comment-summary-in-pr: always
-          # mlflow <3.0.0 required by azureml-mlflow; these are server-side/model-loading vulns not applicable to client-only usage
-          # GHSA-w8v5-vhqr-4h9v: diskcache unsafe pickle — no upstream fix; exploitable only with write access to local cache directory
-          # onnx: GHSA-hqmj-h5c6-369m is in onnx.hub.load() (Model Zoo downloads); this repo uses onnx only for model serialization via rsl-rl-lib, no fix released yet
-          # lodash@4.17.21 (latest): transitive Docusaurus dependency; no upstream fix available
+          # GHSA-w8v5-vhqr-4h9v: diskcache — unsafe pickle deserialization allows RCE with cache write access; no upstream fix (CVE-2025-69872)
+          # GHSA-wf7f-8fxf-xfxc: mlflow — unsafe deserialization of malicious PyTorch models; no upstream fix; server-side/model-loading only (CVE-2024-37059)
+          # GHSA-pgqp-8h46-6x4j: mlflow — DNS rebinding via missing Origin header validation; fixed in 3.5.0; azureml-mlflow constrains mlflow<3.0.0 (CVE-2025-14279)
+          # GHSA-4x5p-f36r-mxxr: mlflow — world-writable temp dir enables race-condition RCE; fixed in 3.4.0; azureml-mlflow constrains mlflow<3.0.0 (CVE-2025-10279)
+          # GHSA-hqmj-h5c6-369m: onnx — hub.load() suppresses trust warnings; no fix released; repo uses onnx for model serialization only (CVE-2026-28500)
+          # GHSA-r5fr-rjxr-66jc: lodash — code injection via _.template; fixed in 4.18.0 (unreleased on npm); transitive Docusaurus dep at 4.17.21 (CVE-2026-4800)
+          # GHSA-xxjr-mmjv-4gpg: lodash — prototype pollution in _.unset/_.omit; fixed in 4.17.23 (unreleased on npm); transitive Docusaurus dep at 4.17.21 (CVE-2025-13465)
+          # GHSA-f23m-r3pf-42rh: lodash — array-path bypass re-enables prototype pollution; fixed in 4.18.0 (unreleased on npm); transitive Docusaurus dep at 4.17.21 (CVE-2026-2950)
           allow-ghsas: >-
             GHSA-w8v5-vhqr-4h9v,
             GHSA-wf7f-8fxf-xfxc,

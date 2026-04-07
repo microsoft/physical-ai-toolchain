@@ -837,6 +837,33 @@ Describe 'Get-PipDependencyViolations' -Tag 'Unit' {
 
             $requestsViolation | Should -BeNullOrEmpty
         }
+
+        It 'Detects unpinned deps in dependency-groups' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'unpinned-pyproject.toml'
+                Type         = 'pip'
+                RelativePath = 'unpinned-pyproject.toml'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+            $coverageViolation = $violations | Where-Object { $_.Name -eq 'coverage' }
+
+            $coverageViolation | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Context 'Pinned pyproject.toml with dependency-groups' {
+        It 'Returns zero violations when all deps including dependency-groups use ==' {
+            $fileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'pinned-pyproject.toml'
+                Type         = 'pip'
+                RelativePath = 'pinned-pyproject.toml'
+            }
+
+            $violations = Get-PipDependencyViolations -FileInfo $fileInfo
+
+            $violations.Count | Should -Be 0
+        }
     }
 
     Context 'Non-existent file' {

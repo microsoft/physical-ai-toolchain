@@ -280,7 +280,7 @@ function Get-PipDependencyViolations {
                 continue
             }
 
-            # Detect [project.optional-dependencies] or [project] sections
+            # Detect dependency-bearing sections
             if ($line -match '^\s*\[(project\.optional-dependencies)\]') {
                 $inDependencySection = $true
                 continue
@@ -289,7 +289,11 @@ function Get-PipDependencyViolations {
                 $inDependencySection = $true
                 continue
             }
-            elseif ($line -match '^\s*\[' -and $line -notmatch '^\s*\[project') {
+            elseif ($line -match '^\s*\[dependency-groups\]') {
+                $inDependencySection = $true
+                continue
+            }
+            elseif ($line -match '^\s*\[' -and $line -notmatch '^\s*\[project' -and $line -notmatch '^\s*\[dependency-groups') {
                 $inDependencySection = $false
                 $inArray = $false
                 continue
