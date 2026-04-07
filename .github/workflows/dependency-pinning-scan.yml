@@ -28,6 +28,11 @@ on:
         required: false
         type: boolean
         default: true
+      exclude-paths:
+        description: 'Comma-separated glob patterns for paths to exclude from scanning'
+        required: false
+        type: string
+        default: ''
     outputs:
       compliance-score:
         description: 'Compliance score percentage'
@@ -92,6 +97,11 @@ jobs:
           # Pass compliance threshold to script (script handles enforcement)
           if ('${{ inputs.threshold }}') {
             $params['Threshold'] = [int]'${{ inputs.threshold }}'
+          }
+
+          # Pass exclude paths to script
+          if ('${{ inputs.exclude-paths }}') {
+            $params['ExcludePaths'] = '${{ inputs.exclude-paths }}'
           }
 
           # Run validation script (JSON format)

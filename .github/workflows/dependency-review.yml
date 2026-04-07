@@ -34,6 +34,7 @@ jobs:
           # GHSA-r5fr-rjxr-66jc: lodash — code injection via _.template; fixed in 4.18.0 (unreleased on npm); transitive Docusaurus dep at 4.17.21 (CVE-2026-4800)
           # GHSA-xxjr-mmjv-4gpg: lodash — prototype pollution in _.unset/_.omit; fixed in 4.17.23 (unreleased on npm); transitive Docusaurus dep at 4.17.21 (CVE-2025-13465)
           # GHSA-f23m-r3pf-42rh: lodash — array-path bypass re-enables prototype pollution; fixed in 4.18.0 (unreleased on npm); transitive Docusaurus dep at 4.17.21 (CVE-2026-2950)
+          # GHSA-7qhf-v65m-g5f3: mlflow — unauthenticated FastAPI job endpoints under /ajax-api/3.0/jobs/*; no upstream fix; server-side only (CVE-2026-0545)
           allow-ghsas: >-
             GHSA-w8v5-vhqr-4h9v,
             GHSA-wf7f-8fxf-xfxc,
@@ -42,4 +43,5 @@ jobs:
             GHSA-hqmj-h5c6-369m,
             GHSA-r5fr-rjxr-66jc,
             GHSA-xxjr-mmjv-4gpg,
-            GHSA-f23m-r3pf-42rh
+            GHSA-f23m-r3pf-42rh,
+            GHSA-7qhf-v65m-g5f3
