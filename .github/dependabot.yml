@@ -1,7 +1,25 @@
 version: 2
 updates:
+  # npm dependencies for root tooling
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      root-npm-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
   # Python dependencies
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -129,23 +147,28 @@ updates:
       prefix: "chore"
       include: "scope"
 
-  # Docker base images for AzureML workflows
-  - package-ecosystem: "docker"
-    directory: "/workflows/azureml"
+  # Python dependencies for dataviewer
+  - package-ecosystem: "uv"
+    directory: "/data-management/viewer"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
+    groups:
+      dataviewer-dependencies:
+        patterns:
+          - "*"
     labels:
       - "dependencies"
-      - "docker"
+      - "python"
+      - "dataviewer"
     commit-message:
       prefix: "chore"
       include: "scope"
 
   # Python dependencies for dataviewer backend
-  - package-ecosystem: "pip"
-    directory: "/src/dataviewer/backend"
+  - package-ecosystem: "uv"
+    directory: "/data-management/viewer/backend"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -164,7 +187,7 @@ updates:
 
   # npm dependencies for dataviewer frontend
   - package-ecosystem: "npm"
-    directory: "/src/dataviewer/frontend"
+    directory: "/data-management/viewer/frontend"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -181,21 +204,20 @@ updates:
       prefix: "chore"
       include: "scope"
 
-  # Python dependencies for LeRobot inference
-  - package-ecosystem: "pip"
-    directory: "/workflows/azureml"
+  # npm dependencies for Docusaurus
+  - package-ecosystem: "npm"
+    directory: "/docs/docusaurus"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
     groups:
-      lerobot-inference-dependencies:
+      docusaurus-dependencies:
         patterns:
           - "*"
     labels:
       - "dependencies"
-      - "python"
-      - "inference"
+      - "npm"
     commit-message:
       prefix: "chore"
       include: "scope"

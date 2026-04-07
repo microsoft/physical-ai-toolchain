@@ -142,21 +142,15 @@ $DependencyPatterns = @{
     'npm'            = @{
         FilePatterns   = @('**/package.json')
         ValidationFunc = 'Get-NpmDependencyViolations'
-        SHAPattern     = '^[a-fA-F0-9]{40}$'
+        PinPattern     = '^\d+\.\d+\.\d+'
         RemediationUrl = 'https://registry.npmjs.org/{0}/{1}'
     }
 
     'pip'              = @{
-        FilePatterns    = @('**/requirements*.txt', '**/Pipfile', '**/pyproject.toml', '**/setup.py')
-        VersionPatterns = @(
-            @{
-                Pattern     = '([a-zA-Z0-9\-_]+)==([^#\s]+)'
-                Groups      = @{ Package = 1; Version = 2 }
-                Description = 'Python pip requirements'
-            }
-        )
-        SHAPattern      = '^[a-fA-F0-9]{40}$'
-        RemediationUrl  = 'https://pypi.org/pypi/{0}/{1}/json'
+        FilePatterns   = @('**/requirements*.txt', '**/Pipfile', '**/pyproject.toml', '**/setup.py')
+        ValidationFunc = 'Get-PipDependencyViolations'
+        PinPattern     = '^.+==.+'
+        RemediationUrl = 'https://pypi.org/pypi/{0}/{1}/json'
     }
 
     'shell-downloads'  = @{
@@ -231,6 +225,186 @@ function Test-ShellDownloadSecurity {
     return $violations
 }
 
+function Get-PipDependencyViolations {
+    <#
+    .SYNOPSIS
+        Analyzes Python dependency files for unpinned pip dependencies.
+    .DESCRIPTION
+        Handles requirements*.txt (line-based), pyproject.toml (TOML array),
+        Pipfile, and setup.py. Checks that each dependency uses the ==
+        equality pin operator.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    $lines = Get-Content -Path $filePath
+    $fileName = Split-Path $filePath -Leaf
+
+    if ($fileName -match 'pyproject\.toml$') {
+        # Extract project name to skip self-referencing extras groups
+        $projectName = ''
+        foreach ($l in $lines) {
+            if ($l -match '^\s*name\s*=\s*"([^"]+)"') {
+                $projectName = $Matches[1]
+                break
+            }
+        }
+
+        # Parse pyproject.toml dependency arrays
+        $inDependencySection = $false
+        $inArray = $false
+        $sectionName = ''
+
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
+
+            # Detect dependency array start: dependencies = [ or optional-dependencies.*= [
+            if ($line -match '^\s*(dependencies)\s*=\s*\[' -or
+                $line -match '^\s*(\w[\w-]*)\s*=\s*\[' -and $inDependencySection) {
+                $inArray = $true
+                $sectionName = $Matches[1]
+                continue
+            }
+
+            # Detect dependency-bearing sections
+            if ($line -match '^\s*\[(project\.optional-dependencies)\]') {
+                $inDependencySection = $true
+                continue
+            }
+            elseif ($line -match '^\s*\[project\]') {
+                $inDependencySection = $true
+                continue
+            }
+            elseif ($line -match '^\s*\[dependency-groups\]') {
+                $inDependencySection = $true
+                continue
+            }
+            elseif ($line -match '^\s*\[' -and $line -notmatch '^\s*\[project' -and $line -notmatch '^\s*\[dependency-groups') {
+                $inDependencySection = $false
+                $inArray = $false
+                continue
+            }
+
+            # End of array
+            if ($inArray -and $line -match '^\s*\]') {
+                $inArray = $false
+                continue
+            }
+
+            # Inside array — parse quoted dependency specifiers
+            if ($inArray -and $line -match '"([^"]+)"') {
+                $spec = $Matches[1].Trim()
+
+                # Extract package name and check for == pin
+                if ($spec -match '^([a-zA-Z0-9_][\w.\-]*)(.*)$') {
+                    $packageName = $Matches[1]
+                    $versionSpec = $Matches[2].Trim()
+
+                    # Skip self-referencing extras (e.g. "mypackage[dev,test]")
+                    if ($projectName -and $packageName -eq $projectName) {
+                        continue
+                    }
+
+                    # Skip entries with no version constraint (bare package names)
+                    if ([string]::IsNullOrWhiteSpace($versionSpec)) {
+                        $violation = [DependencyViolation]::new()
+                        $violation.File = $relativePath
+                        $violation.Line = $i + 1
+                        $violation.Type = $type
+                        $violation.Name = $packageName
+                        $violation.Version = '(none)'
+                        $violation.Severity = 'warning'
+                        $violation.Description = "Unpinned pip dependency in $sectionName (no version specified)"
+                        $violation.Metadata = @{ Section = $sectionName; Format = 'pyproject.toml' }
+                        $violations += $violation
+                        continue
+                    }
+
+                    # Pinned means exactly ==version (may include extras like [extra])
+                    $isPinned = $versionSpec -match '^(\[[\w,]+\])?\s*==\s*\S+'
+
+                    if (-not $isPinned) {
+                        $violation = [DependencyViolation]::new()
+                        $violation.File = $relativePath
+                        $violation.Line = $i + 1
+                        $violation.Type = $type
+                        $violation.Name = $packageName
+                        $violation.Version = $versionSpec
+                        $violation.Severity = 'warning'
+                        $violation.Description = "Unpinned pip dependency in $sectionName"
+                        $violation.Metadata = @{ Section = $sectionName; Format = 'pyproject.toml' }
+                        $violations += $violation
+                    }
+                }
+            }
+        }
+    }
+    else {
+        # requirements*.txt, Pipfile, setup.py — line-based format
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i].Trim()
+
+            # Skip comments and blank lines
+            if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#') -or $line.StartsWith('-')) {
+                continue
+            }
+
+            # Extract package name and version spec
+            if ($line -match '^([a-zA-Z0-9_][\w.\-]*)(.*)$') {
+                $packageName = $Matches[1]
+                $versionSpec = $Matches[2].Trim()
+
+                # Skip bare package names with no version
+                if ([string]::IsNullOrWhiteSpace($versionSpec)) {
+                    $violation = [DependencyViolation]::new()
+                    $violation.File = $relativePath
+                    $violation.Line = $i + 1
+                    $violation.Type = $type
+                    $violation.Name = $packageName
+                    $violation.Version = '(none)'
+                    $violation.Severity = 'warning'
+                    $violation.Description = 'Unpinned pip dependency (no version specified)'
+                    $violation.Metadata = @{ Format = $fileName }
+                    $violations += $violation
+                    continue
+                }
+
+                # Pinned means ==version
+                $isPinned = $versionSpec -match '^(\[[\w,]+\])?\s*==\s*\S+'
+
+                if (-not $isPinned) {
+                    $violation = [DependencyViolation]::new()
+                    $violation.File = $relativePath
+                    $violation.Line = $i + 1
+                    $violation.Type = $type
+                    $violation.Name = $packageName
+                    $violation.Version = $versionSpec
+                    $violation.Severity = 'warning'
+                    $violation.Description = 'Unpinned pip dependency'
+                    $violation.Metadata = @{ Format = $fileName }
+                    $violations += $violation
+                }
+            }
+        }
+    }
+
+    return $violations
+}
+
 function Get-NpmDependencyViolations {
     <#
     .SYNOPSIS
@@ -238,8 +412,8 @@ function Get-NpmDependencyViolations {
     .DESCRIPTION
         Parses package.json as JSON and checks only actual dependency sections
         (dependencies, devDependencies, peerDependencies, optionalDependencies)
-        for SHA-pinned versions. Ignores metadata fields like name, version,
-        description, contributes, scripts, repository, etc.
+        for exact version pinning. Rejects range operators (^, ~, >=, *, etc.).
+        Ignores metadata fields like name, version, description, scripts, etc.
     .PARAMETER FileInfo
         Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
     .OUTPUTS
@@ -396,16 +570,32 @@ function Get-FilesToScan {
 function Test-SHAPinning {
     <#
     .SYNOPSIS
-    Tests if a version reference is properly SHA-pinned.
+    Tests if a version reference is properly pinned for its ecosystem.
+    .DESCRIPTION
+    For github-actions: checks for 40-character hex SHA.
+    For npm: checks for exact semver (no range operators like ^, ~, >=, *, x).
+    For pip: checks for == equality pin operator.
+    Falls back to PinPattern from DependencyPatterns when defined.
     #>
     param(
         [string]$Version,
         [string]$Type
     )
 
-    if ($DependencyPatterns.ContainsKey($Type) -and $DependencyPatterns[$Type].SHAPattern) {
-        $shaPattern = $DependencyPatterns[$Type].SHAPattern
-        return $Version -match $shaPattern
+    if (-not $DependencyPatterns.ContainsKey($Type)) {
+        return $false
+    }
+
+    $config = $DependencyPatterns[$Type]
+
+    # Use SHAPattern for ecosystems that require commit SHA pinning (github-actions)
+    if ($config.SHAPattern) {
+        return $Version -match $config.SHAPattern
+    }
+
+    # Use PinPattern for ecosystems with version-based pinning (npm, pip)
+    if ($config.PinPattern) {
+        return $Version -match $config.PinPattern
     }
 
     return $false
@@ -880,8 +1070,8 @@ try {
         }
     }
     else {
-        Write-Error "Test Dependency Pinning failed: will not execute if dot-sourced"
-        exit 1
+        # Dot-sourced: functions are available in caller scope, skip main execution
+        return
     }
 }
 catch {

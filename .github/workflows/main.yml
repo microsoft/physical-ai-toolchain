@@ -84,6 +84,7 @@ jobs:
       security-events: write  # Required for SARIF upload to Security tab
     with:
       upload-sarif: true
+      exclude-paths: 'scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**'
 
   # PowerShell Pester test execution
   pester-tests:
