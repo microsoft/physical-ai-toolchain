@@ -39,7 +39,7 @@ VALIDATION OPTIONS:
     --gui                         Disable headless mode
 
 AZURE CONTEXT:
-    --job-file PATH               Job YAML template (default: workflows/azureml/validate.yaml)
+    --job-file PATH               Job YAML template (default: evaluation/sil/workflows/azureml/validate.yaml)
     --compute TARGET              Compute target override
     --instance-type TYPE          Instance type (default: gpuspot)
     --experiment-name NAME        Experiment name override

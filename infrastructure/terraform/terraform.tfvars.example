@@ -92,7 +92,7 @@ node_pools = {
 // and its Public IP. To preserve existing zonal behavior, set nat_gateway_zones to your current
 // zone (e.g. ["1"]) explicitly before applying. Run `terraform plan` to confirm no unintended
 // NAT/Public IP recreation.
-nat_gateway_zones = []
+nat_gateway_zones = ["1"]
 
 // OSMO Backend Services
 should_deploy_postgresql = true
