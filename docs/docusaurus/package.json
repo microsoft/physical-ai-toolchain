@@ -47,6 +47,6 @@
     "serialize-javascript": "7.0.5"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   }
 }
