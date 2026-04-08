@@ -1,10 +1,6 @@
 name: Docusaurus Tests
 
 on:
-  pull_request:
-    paths:
-      - 'docs/docusaurus/**'
-      - '.github/workflows/docusaurus-tests.yml'
   workflow_call:
     inputs:
       soft-fail:
