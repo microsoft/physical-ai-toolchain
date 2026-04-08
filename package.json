@@ -1,9 +1,9 @@
 {
   "name": "physical-ai-toolchain",
-  "version": "0.5.0",
+  "version": "0.6.1",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "description": "Physical AI Toolchain",
   "scripts": {
@@ -12,12 +12,14 @@
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "lint:md:fix": "markdownlint-cli2 \"**/*.md\" --fix",
     "lint:ps": "pwsh -File scripts/linting/Invoke-PSScriptAnalyzer.ps1",
+    "lint:py": "uvx ruff check .",
     "lint:links": "pwsh -File scripts/linting/Invoke-LinkLanguageCheck.ps1",
     "lint:go": "pwsh -File scripts/linting/Invoke-GoLint.ps1",
+    "lint:sh": "pwsh -File scripts/linting/Invoke-ShellCheck.ps1",
     "lint:yaml": "pwsh -File scripts/linting/Invoke-YamlLint.ps1",
     "lint:tf": "pwsh -File scripts/linting/Invoke-TFLint.ps1",
     "lint:tf:validate": "pwsh -File scripts/linting/Invoke-TerraformValidation.ps1",
-    "lint:all": "npm run lint:md && npm run lint:ps && npm run lint:links && npm run lint:yaml && npm run lint:tf && npm run lint:go",
+    "lint:all": "npm run lint:md && npm run lint:ps && npm run lint:links && npm run lint:yaml && npm run lint:tf && npm run lint:go && npm run lint:sh && npm run lint:py",
     "format:tables": "markdown-table-formatter \"**/*.md\"",
     "test:ps": "pwsh -File ./scripts/tests/Invoke-PesterTests.ps1",
     "test:tf": "pwsh -File scripts/linting/Invoke-TerraformTest.ps1",
@@ -30,12 +32,12 @@
     "docs:generate:tf": "pwsh -File scripts/Update-TerraformDocs.ps1"
   },
   "devDependencies": {
-    "cspell": "9.4.0",
+    "cspell": "10.0.0",
     "husky": "9.1.7",
-    "lint-staged": "16.2.7",
+    "lint-staged": "16.4.0",
     "markdown-link-check": "3.14.2",
-    "markdown-table-formatter": "1.6.0",
-    "markdownlint-cli2": "0.21.0"
+    "markdown-table-formatter": "1.7.0",
+    "markdownlint-cli2": "0.22.0"
   },
   "repository": {
     "type": "git",

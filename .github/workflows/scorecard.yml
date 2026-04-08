@@ -11,13 +11,26 @@ on:
   schedule:
     # Weekly scan: Sundays at 03:00 UTC
     - cron: "0 3 * * 0"
+  # Re-scan immediately after releases so Scorecard detects signing artifacts
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   scorecard:
     name: Scorecard analysis
+    # Skip workflow_run triggers from failed CI runs
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       security-events: write
