@@ -42,6 +42,7 @@ Contributions can include:
 | [Accessibility](accessibility.md)                         | Accessibility scope, documentation and CLI output guidelines     |
 | [Updating External Components](component-updates.md)      | Process for updating reused externally-maintained components     |
 | [Documentation Maintenance](documentation-maintenance.md) | Update triggers, ownership, review criteria, freshness policy    |
+| [Fuzzing and Property-Based Testing](fuzzing.md)          | Fuzz targets, property tests, Hypothesis and fast-check patterns |
 | [Roadmap](ROADMAP.md)                                     | 12-month project roadmap, priorities, and success metrics        |
 
 ### Quick Reference
