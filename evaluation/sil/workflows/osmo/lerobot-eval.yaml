@@ -63,7 +63,7 @@ workflow:
             echo "Installing system dependencies..."
             apt-get update -qq && apt-get install -y -qq \
               ffmpeg \
-              libgl1-mesa-glx \
+              libgl1 \
               libglib2.0-0 \
               git \
               build-essential \
@@ -74,7 +74,7 @@ workflow:
 
             # Install UV package manager
             echo "Installing UV package manager..."
-            pip install --quiet uv==0.7.12
+            pip install --quiet --break-system-packages uv==0.7.12
 
             # Unpack runtime payload and install dependencies from workflow manifest
             ARCHIVE_PATH="/tmp/lerobot_payload.zip"
@@ -90,17 +90,24 @@ workflow:
 
             LEROBOT_MANIFEST="${PAYLOAD_ROOT}/training/il/lerobot/pyproject.toml"
             LEROBOT_REQUIREMENTS="/tmp/lerobot-runtime-requirements.txt"
+            TORCH_OVERRIDES="/tmp/torch-overrides.txt"
             if [[ ! -f "${LEROBOT_MANIFEST}" ]]; then
               echo "ERROR: LeRobot workflow manifest not found at ${LEROBOT_MANIFEST}" >&2
               exit 1
             fi
-            uv pip compile "${LEROBOT_MANIFEST}" -o "${LEROBOT_REQUIREMENTS}"
-            uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
+            # Pin torch/torchvision to the container's pre-installed versions
+            TORCH_VER=$(python3 -c "import torch; print(torch.__version__.split('+')[0])")
+            TV_VER=$(python3 -c "import torchvision; print(torchvision.__version__.split('+')[0])")
+            printf "torch==%s\ntorchvision==%s\n" "$TORCH_VER" "$TV_VER" > "$TORCH_OVERRIDES"
+            echo "Overriding torch==$TORCH_VER, torchvision==$TV_VER from container"
+            uv pip compile "${LEROBOT_MANIFEST}" -o "${LEROBOT_REQUIREMENTS}" \
+              --override "$TORCH_OVERRIDES"
+            uv pip install --system --break-system-packages --no-deps --requirement "${LEROBOT_REQUIREMENTS}"
 
             # Install MLflow and matplotlib when MLflow tracking is enabled
             if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
               echo "Installing MLflow and plotting dependencies..."
-              uv pip install azureml-mlflow "mlflow>=2.8.0,<3.0.0" matplotlib --system
+              uv pip install --break-system-packages azureml-mlflow "mlflow>=2.8.0,<3.0.0" matplotlib --system
             fi
 
             # Download model from AzureML registry if specified
@@ -181,7 +188,7 @@ workflow:
             # Download dataset from Azure Blob Storage if configured
             if [[ -n "${BLOB_STORAGE_ACCOUNT:-}" && -n "${BLOB_PREFIX:-}" ]]; then
               echo "Installing Azure storage dependencies..."
-              uv pip install azure-storage-blob azure-identity --system
+              uv pip install --break-system-packages azure-storage-blob azure-identity --system
 
               echo "Downloading dataset from Azure Blob: ${BLOB_STORAGE_ACCOUNT}/${BLOB_STORAGE_CONTAINER}/${BLOB_PREFIX}..."
 

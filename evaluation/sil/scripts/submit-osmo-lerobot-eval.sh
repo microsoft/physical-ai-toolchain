@@ -76,7 +76,7 @@ EOF
 # Defaults
 #------------------------------------------------------------------------------
 
-workflow="$REPO_ROOT/workflows/osmo/lerobot-infer.yaml"
+workflow="$REPO_ROOT/evaluation/sil/workflows/osmo/lerobot-eval.yaml"
 policy_repo_id="${POLICY_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 dataset_repo_id="${DATASET_REPO_ID:-}"
@@ -233,7 +233,10 @@ rm -f "$ARCHIVE_PATH" "$B64_PATH"
   -x "*.pyo" \
   -x "**/.pytest_cache/*" \
   -x "**/.mypy_cache/*" \
-  -x "**/*.egg-info/*") || fatal "Failed to create runtime archive"
+  -x "**/*.egg-info/*" \
+  -x "**/.tmp/*" \
+  -x "**/*.sh" \
+  -x "**/workflows/*") || fatal "Failed to create runtime archive"
 
 [[ -f "$ARCHIVE_PATH" ]] || fatal "Archive not created: $ARCHIVE_PATH"
 

@@ -71,7 +71,7 @@ workflow:
             echo "Installing system dependencies..."
             apt-get update -qq && apt-get install -y -qq \
               ffmpeg \
-              libgl1-mesa-glx \
+              libgl1 \
               libglib2.0-0 \
               build-essential \
               gcc \
@@ -81,7 +81,7 @@ workflow:
 
             # Install UV package manager
             echo "Installing UV package manager..."
-            pip install --quiet uv==0.7.12
+            pip install --quiet --break-system-packages uv==0.7.12
 
             # Unpack training scripts from base64-encoded payload
             ARCHIVE_PATH="/tmp/lerobot_payload.zip"
@@ -99,12 +99,21 @@ workflow:
             # Install runtime dependencies from workflow manifest
             LEROBOT_MANIFEST="${PAYLOAD_ROOT}/training/il/lerobot/pyproject.toml"
             LEROBOT_REQUIREMENTS="/tmp/lerobot-runtime-requirements.txt"
+            TORCH_OVERRIDES="/tmp/torch-overrides.txt"
             if [[ ! -f "${LEROBOT_MANIFEST}" ]]; then
               echo "ERROR: LeRobot workflow manifest not found at ${LEROBOT_MANIFEST}" >&2
               exit 1
             fi
-            uv pip compile "${LEROBOT_MANIFEST}" -o "${LEROBOT_REQUIREMENTS}"
-            uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
+            # Pin torch/torchvision to the container's pre-installed versions
+            TORCH_VER=$(python3 -c "import torch; print(torch.__version__.split('+')[0])")
+            TV_VER=$(python3 -c "import torchvision; print(torchvision.__version__.split('+')[0])")
+            printf "torch==%s\ntorchvision==%s\n" "$TORCH_VER" "$TV_VER" > "$TORCH_OVERRIDES"
+            echo "Overriding torch==$TORCH_VER, torchvision==$TV_VER from container"
+            uv pip compile "${LEROBOT_MANIFEST}" -o "${LEROBOT_REQUIREMENTS}" \
+              --override "$TORCH_OVERRIDES"
+            # Install with --no-deps: the compile step already resolved all
+            # dependencies; skip re-checking against lerobot's torch constraint
+            uv pip install --system --break-system-packages --no-deps --requirement "${LEROBOT_REQUIREMENTS}"
 
             # Build training command arguments
             TRAIN_ARGS=()
@@ -119,7 +128,8 @@ workflow:
               TRAIN_ARGS+=(
                 "--dataset.root=${FULL_DATASET_PATH}"
                 "--dataset.use_imagenet_stats=false"
-                "--dataset.video_backend=pyav"
+                "--dataset.video_backend=torchcodec"
+                "--num_workers=0"
               )
             fi
 
