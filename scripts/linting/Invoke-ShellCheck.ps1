@@ -94,8 +94,8 @@ function Invoke-ShellCheckCore {
         return 1
     }
 
-    # Capture version
-    $scVersionOutput = & shellcheck --version 2>$null
+    # Capture version (join array to string so -match populates $Matches under StrictMode)
+    $scVersionOutput = (& shellcheck --version 2>$null) -join "`n"
     $scVersion = if ($scVersionOutput -match 'version:\s*([\d.]+)') { $Matches[1] } else { 'unknown' }
 
     # Discover .sh files, excluding directories that should not be linted
