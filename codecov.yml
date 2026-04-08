@@ -45,10 +45,35 @@ coverage:
           - vitest
         target: auto
         threshold: 1%
+      pytest-fuzz:
+        flags:
+          - pytest-fuzz
+        target: auto
+        threshold: 1%
     patch:
       default:
         target: auto
         threshold: 5%
+      go:
+        flags:
+          - go
+        informational: true
+      pester:
+        flags:
+          - pester
+        informational: true
+      pytest:
+        flags:
+          - pytest
+        informational: true
+      pytest-dataviewer:
+        flags:
+          - pytest-dataviewer
+        informational: true
+      vitest:
+        flags:
+          - vitest
+        informational: true
 
 flags:
   go:
@@ -61,7 +86,7 @@ flags:
     carryforward: true
   pytest:
     paths:
-      - src/
+      - training/
     carryforward: true
   pytest-dataviewer:
     paths:
@@ -74,6 +99,12 @@ flags:
   vitest:
     paths:
       - data-management/viewer/frontend/src/
+    carryforward: true
+  pytest-fuzz:
+    paths:
+      - tests/
+      - data-management/viewer/backend/src/
+      - training/
     carryforward: true
 
 parsers:
