@@ -71,7 +71,7 @@
     "eslint-plugin-react-hooks": "5.2.0",
     "eslint-plugin-react-refresh": "0.4.26",
     "eslint-plugin-simple-import-sort": "12.1.1",
-    "fast-check": "^4.6.0",
+    "fast-check": "4.6.0",
     "globals": "15.15.0",
     "happy-dom": "20.8.9",
     "lint-staged": "16.2.7",
