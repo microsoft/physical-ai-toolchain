@@ -143,9 +143,9 @@ Lifecycle policies on the data lake storage account automatically manage storage
 
 ### Configuration
 
-Lifecycle policies are defined in Terraform variables:
+Lifecycle policies are configured in the root Terraform deployment:
 
-**File:** `deploy/001-iac/terraform.tfvars`
+**Example File:** `infrastructure/terraform/terraform.tfvars.example`
 
 ```hcl
 should_enable_raw_bags_lifecycle_policy          = true

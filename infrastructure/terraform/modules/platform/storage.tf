@@ -131,7 +131,7 @@ resource "azurerm_storage_management_policy" "main" {
     enabled = var.should_enable_raw_bags_lifecycle_policy
 
     filters {
-      prefix_match = ["raw/"]
+      prefix_match = ["ml-workspace/raw/"]
       blob_types   = ["blockBlob"]
     }
 
@@ -147,7 +147,7 @@ resource "azurerm_storage_management_policy" "main" {
     enabled = var.should_enable_converted_datasets_lifecycle_policy
 
     filters {
-      prefix_match = ["converted/"]
+      prefix_match = ["ml-workspace/converted/"]
       blob_types   = ["blockBlob"]
     }
 
@@ -163,7 +163,7 @@ resource "azurerm_storage_management_policy" "main" {
     enabled = var.should_enable_reports_lifecycle_policy
 
     filters {
-      prefix_match = ["reports/"]
+      prefix_match = ["ml-workspace/reports/"]
       blob_types   = ["blockBlob"]
     }
 
@@ -195,7 +195,7 @@ resource "azurerm_storage_management_policy" "data_lake" {
     enabled = var.should_enable_raw_bags_lifecycle_policy
 
     filters {
-      prefix_match = ["raw/"]
+      prefix_match = ["datasets/raw/"]
       blob_types   = ["blockBlob"]
     }
 
@@ -212,7 +212,7 @@ resource "azurerm_storage_management_policy" "data_lake" {
     enabled = var.should_enable_converted_datasets_lifecycle_policy
 
     filters {
-      prefix_match = ["converted/"]
+      prefix_match = ["datasets/converted/"]
       blob_types   = ["blockBlob"]
     }
 
@@ -229,7 +229,7 @@ resource "azurerm_storage_management_policy" "data_lake" {
     enabled = var.should_enable_reports_lifecycle_policy
 
     filters {
-      prefix_match = ["reports/"]
+      prefix_match = ["datasets/reports/"]
       blob_types   = ["blockBlob"]
     }
 

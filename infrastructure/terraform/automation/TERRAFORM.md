@@ -2,7 +2,7 @@
 title: Azure Automation Standalone Configuration
 description: Deploys Azure Automation Account with scheduled runbook to start AKS cluster and PostgreSQL server every morning. Uses data sources to reference existing platform infrastructure.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-07
+ms.date: 2026-04-08
 ms.topic: reference
 ---
 
