@@ -1,6 +1,6 @@
 [project]
 name = "physical-ai-toolchain"
-version = "0.6.0"
+version = "0.6.1"
 description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
 requires-python = ">=3.11"
