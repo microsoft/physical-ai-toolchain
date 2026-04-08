@@ -89,6 +89,23 @@ resource "azurerm_private_endpoint" "azureml_api" {
   }
 }
 
+resource "azurerm_monitor_diagnostic_setting" "ml_workspace_logs" {
+  count = var.should_enable_aml_diagnostic_logs ? 1 : 0
+
+  name                       = "diag-mlw-${local.resource_name_suffix}"
+  target_resource_id         = azapi_resource.ml_workspace.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
+
+  enabled_log {
+    category_group = "allLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+    enabled  = false
+  }
+}
+
 // ============================================================
 // AzureML Managed Compute Cluster (Optional)
 // ============================================================

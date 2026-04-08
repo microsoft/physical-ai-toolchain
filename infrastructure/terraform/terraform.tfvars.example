@@ -134,6 +134,7 @@ reports_archive_tier_days              = 180
 // should_deploy_monitor_workspace  = true
 // should_deploy_ampls              = true
 // should_deploy_dce                = true
+// should_enable_aml_diagnostic_logs = false
 
 // AzureML Managed Compute (disabled by default)
 // Enable to provision GPU compute directly in the AzureML workspace.
