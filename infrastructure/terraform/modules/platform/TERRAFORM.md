@@ -97,6 +97,7 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 | [azurerm_storage_account.data_lake](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_account)                                                             | resource    |
 | [azurerm_storage_account.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_account)                                                                  | resource    |
 | [azurerm_storage_container.datasets](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_container)                                                          | resource    |
+| [azurerm_storage_container.evaluation](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_container)                                                        | resource    |
 | [azurerm_storage_container.ml_workspace](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_container)                                                      | resource    |
 | [azurerm_storage_container.models](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_container)                                                            | resource    |
 | [azurerm_storage_management_policy.data_lake](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_management_policy)                                         | resource    |

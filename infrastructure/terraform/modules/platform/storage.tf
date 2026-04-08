@@ -115,6 +115,18 @@ resource "azurerm_storage_container" "models" {
   }
 }
 
+resource "azurerm_storage_container" "evaluation" {
+  count = var.should_create_data_lake_storage ? 1 : 0
+
+  name                  = "evaluation"
+  storage_account_id    = azurerm_storage_account.data_lake[0].id
+  container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 // ============================================================
 // Storage Lifecycle Management Policy (ML storage fallback)
 // ============================================================
@@ -229,7 +241,7 @@ resource "azurerm_storage_management_policy" "data_lake" {
     enabled = var.should_enable_reports_lifecycle_policy
 
     filters {
-      prefix_match = ["datasets/reports/"]
+      prefix_match = ["evaluation/reports/"]
       blob_types   = ["blockBlob"]
     }
 

@@ -728,6 +728,11 @@ run "data_lake_enabled" {
   }
 
   assert {
+    condition     = length(azurerm_storage_container.evaluation) == 1
+    error_message = "Evaluation container should be created when data lake is enabled"
+  }
+
+  assert {
     condition     = length(azurerm_storage_management_policy.data_lake) == 1
     error_message = "Data lake lifecycle policy should be created when data lake is enabled"
   }
@@ -759,5 +764,10 @@ run "data_lake_disabled" {
   assert {
     condition     = length(azurerm_storage_container.models) == 0
     error_message = "Models container should not exist when data lake is disabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.evaluation) == 0
+    error_message = "Evaluation container should not exist when data lake is disabled"
   }
 }
