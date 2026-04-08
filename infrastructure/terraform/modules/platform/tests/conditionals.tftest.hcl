@@ -694,3 +694,80 @@ run "aml_compute_disabled" {
     error_message = "AML compute cluster should not be created when disabled"
   }
 }
+
+// ============================================================
+// Data Lake Storage Conditionals
+// ============================================================
+
+run "data_lake_enabled" {
+  command = plan
+
+  variables {
+    resource_prefix                 = run.setup.resource_prefix
+    environment                     = run.setup.environment
+    instance                        = run.setup.instance
+    location                        = run.setup.location
+    resource_group                  = run.setup.resource_group
+    current_user_oid                = run.setup.current_user_oid
+    should_create_data_lake_storage = true
+  }
+
+  assert {
+    condition     = length(azurerm_storage_account.data_lake) == 1
+    error_message = "Data lake storage account should be created when enabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.datasets) == 1
+    error_message = "Datasets container should be created when data lake is enabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.models) == 1
+    error_message = "Models container should be created when data lake is enabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.evaluation) == 1
+    error_message = "Evaluation container should be created when data lake is enabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_management_policy.data_lake) == 1
+    error_message = "Data lake lifecycle policy should be created when data lake is enabled"
+  }
+}
+
+run "data_lake_disabled" {
+  command = plan
+
+  variables {
+    resource_prefix                 = run.setup.resource_prefix
+    environment                     = run.setup.environment
+    instance                        = run.setup.instance
+    location                        = run.setup.location
+    resource_group                  = run.setup.resource_group
+    current_user_oid                = run.setup.current_user_oid
+    should_create_data_lake_storage = false
+  }
+
+  assert {
+    condition     = length(azurerm_storage_account.data_lake) == 0
+    error_message = "Data lake storage account should not be created when disabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.datasets) == 0
+    error_message = "Datasets container should not exist when data lake is disabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.models) == 0
+    error_message = "Models container should not exist when data lake is disabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.evaluation) == 0
+    error_message = "Evaluation container should not exist when data lake is disabled"
+  }
+}

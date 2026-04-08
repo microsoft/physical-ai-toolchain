@@ -1259,6 +1259,7 @@ stackexchange
 stackoverflow
 statefulness
 stderr
+stdl
 stdout
 stig
 stonith

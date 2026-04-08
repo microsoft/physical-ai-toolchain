@@ -144,6 +144,11 @@ output "storage_account" {
   value       = module.platform.storage_account
 }
 
+output "data_lake_storage_account" {
+  description = "Data lake storage account for domain data. Null when data lake is disabled."
+  value       = module.platform.data_lake_storage_account
+}
+
 // ============================================================
 // AzureML Compute Outputs
 // ============================================================

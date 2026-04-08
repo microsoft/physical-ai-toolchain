@@ -79,6 +79,28 @@ resource "azurerm_role_assignment" "ml_storage_file_privileged" {
 }
 
 // ============================================================
+// Data Lake Storage Role Assignments
+// ============================================================
+
+// Grant current user Storage Blob Data Contributor on data lake
+resource "azurerm_role_assignment" "user_data_lake_blob" {
+  count = var.should_add_current_user_storage_blob && var.should_create_data_lake_storage ? 1 : 0
+
+  scope                = azurerm_storage_account.data_lake[0].id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = var.current_user_oid
+}
+
+// Grant ML identity Storage Blob Data Contributor on data lake
+resource "azurerm_role_assignment" "ml_data_lake_blob" {
+  count = var.should_create_data_lake_storage ? 1 : 0
+
+  scope                = azurerm_storage_account.data_lake[0].id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.ml.principal_id
+}
+
+// ============================================================
 // OSMO Identity Role Assignments
 // ============================================================
 
@@ -86,6 +108,14 @@ resource "azurerm_role_assignment" "ml_storage_file_privileged" {
 resource "azurerm_role_assignment" "osmo_storage_blob_contributor" {
   count                = var.should_enable_osmo_identity ? 1 : 0
   scope                = azurerm_storage_account.main.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.osmo[0].principal_id
+}
+
+// Grant OSMO identity Storage Blob Data Contributor on data lake
+resource "azurerm_role_assignment" "osmo_data_lake_blob" {
+  count                = var.should_enable_osmo_identity && var.should_create_data_lake_storage ? 1 : 0
+  scope                = azurerm_storage_account.data_lake[0].id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.osmo[0].principal_id
 }
