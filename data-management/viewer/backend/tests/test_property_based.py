@@ -8,15 +8,14 @@ from __future__ import annotations
 
 import json
 import re
-from collections import OrderedDict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import hypothesis.strategies as st
 import numpy as np
 from hypothesis import assume, given, settings
 from hypothesis.extra.numpy import arrays
-from hypothesis.stateful import Bundle, RuleBasedStateMachine, rule
+from numpy.typing import NDArray
 
 from src.api.services.dataset_service.service import _validate_dataset_id
 from src.api.services.episode_cache import CacheStats, EpisodeCache
@@ -38,15 +37,6 @@ from src.api.validation import (
 # ===================================================================
 # Strategies
 # ===================================================================
-
-_printable_text = st.text(
-    alphabet=st.characters(categories=("L", "M", "N", "P", "S", "Z"), max_codepoint=0xFFFF),  # cspell:ignore codepoint
-    max_size=300,
-)
-
-_safe_id_chars = st.sampled_from(
-    list("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
-)
 
 _valid_dataset_ids = st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,50}"), fullmatch=True)
 
@@ -279,7 +269,7 @@ class TestDateTimeEncoderProperties:
         dt=st.datetimes(
             min_value=datetime(1, 1, 1),
             max_value=datetime(9999, 12, 31),
-            timezones=st.just(timezone.utc),
+            timezones=st.just(UTC),
         )
     )
     def test_datetime_produces_iso_string(self, dt: datetime) -> None:
@@ -292,7 +282,7 @@ class TestDateTimeEncoderProperties:
         dt=st.datetimes(
             min_value=datetime(1, 1, 1),
             max_value=datetime(9999, 12, 31),
-            timezones=st.just(timezone.utc),
+            timezones=st.just(UTC),
         )
     )
     def test_roundtrip_preserves_value(self, dt: datetime) -> None:
@@ -480,14 +470,6 @@ _small_float_array = st.integers(min_value=3, max_value=50).flatmap(
     )
 )
 
-_monotonic_timestamps = st.integers(min_value=3, max_value=50).flatmap(
-    lambda n: arrays(
-        np.float64,
-        (n,),
-        elements=st.floats(0.001, 1.0, allow_nan=False, allow_infinity=False),
-    ).map(lambda deltas: np.cumsum(np.abs(deltas)))
-)
-
 
 # ===================================================================
 # Frame Interpolation — Property Tests
@@ -535,7 +517,7 @@ class TestInterpolateImageProperties:
         img2 = np.zeros(shape_b, dtype=np.uint8)
         try:
             interpolate_image(img1, img2)
-            assert False, "Expected ValueError"
+            raise AssertionError("Expected ValueError")
         except ValueError:
             pass
 
@@ -589,7 +571,7 @@ class TestInterpolateFrameDataProperties:
         data = np.zeros((n, 3))
         try:
             interpolate_frame_data(data, -1)
-            assert False, "Expected IndexError"
+            raise AssertionError("Expected IndexError")
         except IndexError:
             pass
 
@@ -599,7 +581,7 @@ class TestInterpolateFrameDataProperties:
         data = np.zeros((n, 3))
         try:
             interpolate_frame_data(data, n - 1)
-            assert False, "Expected IndexError"
+            raise AssertionError("Expected IndexError")
         except IndexError:
             pass
 

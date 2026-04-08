@@ -21,10 +21,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import re
 import sys
 from contextlib import suppress
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -194,7 +193,7 @@ def fuzz_datetime_encoder(data: bytes) -> None:
     hour = fdp.ConsumeIntInRange(0, 23)
     minute = fdp.ConsumeIntInRange(0, 59)
     second = fdp.ConsumeIntInRange(0, 59)
-    dt = datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
+    dt = datetime(year, month, day, hour, minute, second, tzinfo=UTC)
     encoder = _DateTimeEncoder()
     with suppress(TypeError, ValueError, OverflowError):
         encoder.encode({"ts": dt})
@@ -324,7 +323,7 @@ class TestFuzzSanitizeUserString:
         assert _sanitize_user_string("") == ""
 
     def test_unicode_passthrough(self) -> None:
-        result = _sanitize_user_string("café-über")
+        result = _sanitize_user_string("café-über")  # cspell:ignore über
         assert "\r" not in result
         assert "\n" not in result
 
@@ -406,7 +405,7 @@ class TestFuzzDatasetIdToBlobPrefix:
 
 class TestFuzzDateTimeEncoder:
     def test_datetime_serialized(self) -> None:
-        dt = datetime(2026, 3, 15, 14, 30, 22, tzinfo=timezone.utc)
+        dt = datetime(2026, 3, 15, 14, 30, 22, tzinfo=UTC)
         result = json.loads(json.dumps({"ts": dt}, cls=_DateTimeEncoder))
         assert result["ts"] == "2026-03-15T14:30:22+00:00"
 
@@ -432,7 +431,7 @@ if __name__ == "__main__" and FUZZING:
     _crash_dir.mkdir(parents=True, exist_ok=True)
 
     _corpus_dir = Path(__file__).parent / "fuzz-corpus"
-    _argv = sys.argv + [f"-artifact_prefix={_crash_dir}/"]
+    _argv = [*sys.argv, f"-artifact_prefix={_crash_dir}/"]
     if _corpus_dir.is_dir() and str(_corpus_dir) not in sys.argv:
         _argv.append(str(_corpus_dir))
 

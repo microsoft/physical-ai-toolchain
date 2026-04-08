@@ -78,7 +78,7 @@ _SEEDS: list[tuple[str, bytes]] = [
     ("t4_cr", _T4 + b"hello\rworld"),
     ("t4_lf", _T4 + b"hello\nworld"),
     ("t4_null_byte", _T4 + b"hello\x00world"),
-    ("t4_unicode", _T4 + "café-über".encode()),
+    ("t4_unicode", _T4 + "café-über".encode()),  # cspell:ignore über
     ("t4_empty", _T4),
     ("t4_long", _T4 + b"a" * 512),
     # ----------------------------------------------------------------
@@ -108,7 +108,7 @@ _SEEDS: list[tuple[str, bytes]] = [
     # ----------------------------------------------------------------
     # Target 8: fuzz_datetime_encoder
     # ----------------------------------------------------------------
-    ("t8_normal", _T8 + struct.pack("<HBBBBBB", 2026, 3, 15, 14, 30, 22, 0)),
+    ("t8_normal", _T8 + struct.pack("<HBBBBBB", 2026, 3, 15, 14, 30, 22, 0)),  # cspell:ignore HBBBBBB
     ("t8_epoch", _T8 + struct.pack("<HBBBBBB", 1970, 1, 1, 0, 0, 0, 0)),
     ("t8_max_year", _T8 + struct.pack("<HBBBBBB", 9999, 12, 28, 23, 59, 59, 0)),
     ("t8_min_year", _T8 + struct.pack("<HBBBBBB", 1, 1, 1, 0, 0, 0, 0)),
