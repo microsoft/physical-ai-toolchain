@@ -282,6 +282,12 @@ variable "should_deploy_dce" {
  * AzureML Compute Configuration
  */
 
+variable "should_enable_aml_diagnostic_logs" {
+  type        = bool
+  description = "Whether to enable AML workspace diagnostic logs in Log Analytics"
+  default     = false
+}
+
 variable "should_deploy_aml_compute" {
   type        = bool
   description = "Whether to deploy an AzureML managed compute cluster for GPU workloads"
