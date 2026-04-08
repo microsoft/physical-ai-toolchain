@@ -4,10 +4,11 @@
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || dirname "$SCRIPT_DIR")"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 
-source "$REPO_ROOT/shared/lib/common.sh"
-source "$SCRIPT_DIR/lib/terraform-outputs.sh"
+source "$REPO_ROOT/scripts/lib/common.sh"
+# shellcheck source=../../../scripts/lib/terraform-outputs.sh
+source "$REPO_ROOT/scripts/lib/terraform-outputs.sh"
 read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 
 #------------------------------------------------------------------------------

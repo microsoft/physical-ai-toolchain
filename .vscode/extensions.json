@@ -5,6 +5,6 @@
         "streetsidesoftware.code-spell-checker-cspell-bundled-dictionaries",
         "ms-python.vscode-pylance",
         "ms-python.python",
-        "ise-hve-essentials.hve-core",
+        "ise-hve-essentials.hve-core-all",
     ]
 }

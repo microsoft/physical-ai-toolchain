@@ -164,3 +164,50 @@ run "acr_security" {
     error_message = "ACR anonymous pull must be disabled"
   }
 }
+
+run "data_lake_security" {
+  command = plan
+
+  variables {
+    resource_prefix                 = run.setup.resource_prefix
+    environment                     = run.setup.environment
+    instance                        = run.setup.instance
+    location                        = run.setup.location
+    resource_group                  = run.setup.resource_group
+    current_user_oid                = run.setup.current_user_oid
+    should_create_data_lake_storage = true
+  }
+
+  assert {
+    condition     = azurerm_storage_account.data_lake[0].is_hns_enabled == true
+    error_message = "Data lake storage account must have hierarchical namespace enabled"
+  }
+
+  assert {
+    condition     = azurerm_storage_account.data_lake[0].min_tls_version == "TLS1_2"
+    error_message = "Data lake storage account must enforce TLS 1.2 minimum"
+  }
+
+  assert {
+    condition     = azurerm_storage_account.data_lake[0].allow_nested_items_to_be_public == false
+    error_message = "Data lake storage account must not allow public blob access"
+  }
+}
+
+run "data_lake_disabled_by_default" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+  }
+
+  assert {
+    condition     = length(azurerm_storage_account.data_lake) == 0
+    error_message = "Data lake storage account should not exist when flag is false"
+  }
+}

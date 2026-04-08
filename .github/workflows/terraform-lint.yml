@@ -44,7 +44,7 @@ jobs:
 
       - name: Run TFLint
         continue-on-error: ${{ inputs.soft-fail }}
-        run: shared/ci/linting/Invoke-TFLint.ps1
+        run: scripts/linting/Invoke-TFLint.ps1
 
       - name: Upload TFLint results
         if: always()

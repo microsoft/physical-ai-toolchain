@@ -5,8 +5,12 @@ Implements DatasetFormatHandler for LeRobot datasets with support for
 parquet data files, mp4 video files, and meta/info.json metadata.
 """
 
+from __future__ import annotations
+
 import io
 import logging
+import shutil
+import subprocess
 from pathlib import Path
 
 from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TrajectoryPoint
@@ -220,9 +224,6 @@ class LeRobotFormatHandler:
         if loader is None:
             return None
 
-        import cv2
-        from PIL import Image
-
         video_path = loader.get_video_path(episode_idx, camera)
         if video_path is None:
             logger.warning(
@@ -231,15 +232,66 @@ class LeRobotFormatHandler:
             )
             return None
 
-        cap = cv2.VideoCapture(str(video_path))
+        info = loader.get_dataset_info()
+        fps = info.fps or 30.0
+
+        result = self._extract_frame_ffmpeg(str(video_path), frame_idx, fps)
+        if result is not None:
+            return result
+
+        return self._extract_frame_cv2(str(video_path), frame_idx)
+
+    @staticmethod
+    def _extract_frame_ffmpeg(video_path: str, frame_idx: int, fps: float) -> bytes | None:
+        """Extract a single frame as JPEG using ffmpeg."""
+        if shutil.which("ffmpeg") is None:
+            return None
+
+        seek_time = frame_idx / fps
+        try:
+            proc = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-ss",
+                    f"{seek_time:.6f}",
+                    "-i",
+                    video_path,
+                    "-frames:v",
+                    "1",
+                    "-f",
+                    "image2",
+                    "-c:v",
+                    "mjpeg",
+                    "-q:v",
+                    "2",
+                    "pipe:1",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            if proc.returncode == 0 and proc.stdout:
+                return proc.stdout
+        except Exception as e:
+            logger.warning("ffmpeg frame extraction failed: %s", e)
+
+        return None
+
+    @staticmethod
+    def _extract_frame_cv2(video_path: str, frame_idx: int) -> bytes | None:
+        """Extract a single frame as JPEG using OpenCV (fallback)."""
+        try:
+            import cv2
+            from PIL import Image
+        except ImportError:
+            logger.warning("Neither ffmpeg nor cv2 available for frame extraction")
+            return None
+
+        cap = cv2.VideoCapture(video_path)
         try:
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if not ret or frame is None:
-                logger.warning(
-                    "Failed to read frame %s",
-                    frame_idx,
-                )
+                logger.warning("Failed to read frame %s", frame_idx)
                 return None
 
             img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))

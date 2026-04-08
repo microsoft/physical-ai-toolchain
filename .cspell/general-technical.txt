@@ -58,9 +58,11 @@ arrowright
 arrowup
 ascs
 asctime
+asgi
 asgs
 assetguidance
 asyncio
+atheris
 attestations
 attunity
 audiologs
@@ -543,6 +545,7 @@ Hypervelocity
 hypervisor
 iaas
 ibm
+hypothesis
 ibpms
 icmp
 iconmonstr
@@ -584,6 +587,7 @@ interceptable
 interconnectivity
 interdependencies
 interdomain
+interp
 interoperate
 interoperates
 interpretability
@@ -737,6 +741,7 @@ mcse
 mdlint
 mdutils
 meks
+mjpeg
 Memberwise
 memprofile
 mergetool
@@ -1161,6 +1166,7 @@ scalability
 scalesetpriority
 scenario
 schedules
+schemathesis
 schwinn
 scikit
 scm
@@ -1253,6 +1259,7 @@ stackexchange
 stackoverflow
 statefulness
 stderr
+stdl
 stdout
 stig
 stonith

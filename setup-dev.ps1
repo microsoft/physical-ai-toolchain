@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
 
@@ -88,6 +88,48 @@ Write-Host '  Codespaces -> Open in Codespace from GitHub'
 Write-Host ''
 Write-Host 'If this script fails, the devcontainer is your fallback.'
 Write-Host ''
+
+Write-Section 'Git Symlink Resolution'
+
+# Git symlinks are stored as text files on Windows when core.symlinks=false.
+# Replace broken symlinks with junctions (directories) or hard links (files).
+$symlinkEntries = git ls-files -s 2>$null | Select-String '120000' | ForEach-Object {
+    ($_ -split '\s+', 4)[3]
+}
+$repairedCount = 0
+foreach ($entry in $symlinkEntries) {
+    $fullPath = Join-Path $ScriptDir $entry
+    if (-not (Test-Path $fullPath)) { continue }
+
+    $item = Get-Item $fullPath -Force
+    # Already a junction/symlink — nothing to fix
+    if ($item.LinkType) { continue }
+    # Only fix plain text files (broken symlink placeholders)
+    if ($item.PSIsContainer) { continue }
+
+    $target = (Get-Content $fullPath -Raw).Trim()
+    $resolvedTarget = Resolve-Path (Join-Path (Split-Path $fullPath) $target) -ErrorAction SilentlyContinue
+    if (-not $resolvedTarget) {
+        Write-Warn "Symlink target not found: $entry -> $target"
+        continue
+    }
+
+    Remove-Item $fullPath -Force
+    $targetItem = Get-Item $resolvedTarget.Path
+    if ($targetItem.PSIsContainer) {
+        New-Item -ItemType Junction -Path $fullPath -Target $resolvedTarget.Path | Out-Null
+    }
+    else {
+        New-Item -ItemType HardLink -Path $fullPath -Target $resolvedTarget.Path | Out-Null
+    }
+    $repairedCount++
+}
+if ($repairedCount -gt 0) {
+    Write-Info "Repaired $repairedCount broken git symlink(s) (junctions/hard links)"
+}
+else {
+    Write-Info 'All git symlinks are intact'
+}
 
 Write-Section 'Tool Verification'
 
