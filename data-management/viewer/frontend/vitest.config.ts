@@ -14,6 +14,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    reporters: ['default', 'junit'],
+    outputFile: {
+      junit: '../../../logs/vitest-results.xml',
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'cobertura', 'json-summary'],

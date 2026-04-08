@@ -194,7 +194,7 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: coverage-report-${{ matrix.os }}
-          path: logs/coverage.xml
+          path: logs/coverage-pester.xml
           retention-days: 30
 
       - name: Upload to Codecov
@@ -202,7 +202,7 @@ jobs:
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
           use_oidc: true
-          files: logs/coverage.xml
+          files: logs/coverage-pester.xml
           flags: pester
           name: pester-coverage
           verbose: true
@@ -211,8 +211,8 @@ jobs:
       - name: Coverage Threshold Check
         if: matrix.os == 'ubuntu-latest' && inputs.code-coverage && always() && steps.pester.outcome != 'skipped'
         run: |
-          if (Test-Path logs/coverage.xml) {
-            [xml]$coverage = Get-Content logs/coverage.xml
+          if (Test-Path logs/coverage-pester.xml) {
+            [xml]$coverage = Get-Content logs/coverage-pester.xml
             $lineRate = $coverage.report.counter |
               Where-Object { $_.type -eq 'LINE' } |
               ForEach-Object {

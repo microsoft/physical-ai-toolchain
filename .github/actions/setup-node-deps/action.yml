@@ -8,7 +8,7 @@ inputs:
   node-version:
     description: Node.js version to install
     required: false
-    default: '20'
+    default: '24.14.1'
   cache:
     description: Package manager cache to use
     required: false
