@@ -188,6 +188,7 @@ describe('transformKeys fuzz', () => {
       fc.property(
         fc
           .array(fc.integer(), { minLength: 1, maxLength: 10 })
+          // cspell:ignore nums
           .map((nums) => nums.map((n, i) => ({ item_index: i, item_value: n }))),
         (arr) => {
           const result = transformKeys(arr) as Array<{ itemIndex: number; itemValue: number }>

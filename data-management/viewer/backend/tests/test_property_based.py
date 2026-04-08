@@ -308,23 +308,17 @@ class TestCacheStatsProperties:
         misses=st.integers(min_value=0, max_value=10_000),
     )
     def test_hit_rate_in_unit_interval(self, hits: int, misses: int) -> None:
-        stats = CacheStats(
-            capacity=32, size=0, hits=hits, misses=misses, total_bytes=0, max_memory_bytes=0
-        )
+        stats = CacheStats(capacity=32, size=0, hits=hits, misses=misses, total_bytes=0, max_memory_bytes=0)
         assert 0.0 <= stats.hit_rate <= 1.0
 
     @given(hits=st.integers(min_value=0, max_value=10_000))
     def test_zero_misses_gives_perfect_rate(self, hits: int) -> None:
         assume(hits > 0)
-        stats = CacheStats(
-            capacity=32, size=0, hits=hits, misses=0, total_bytes=0, max_memory_bytes=0
-        )
+        stats = CacheStats(capacity=32, size=0, hits=hits, misses=0, total_bytes=0, max_memory_bytes=0)
         assert stats.hit_rate == 1.0
 
     def test_zero_total_gives_zero_rate(self) -> None:
-        stats = CacheStats(
-            capacity=32, size=0, hits=0, misses=0, total_bytes=0, max_memory_bytes=0
-        )
+        stats = CacheStats(capacity=32, size=0, hits=0, misses=0, total_bytes=0, max_memory_bytes=0)
         assert stats.hit_rate == 0.0
 
 
@@ -685,7 +679,11 @@ class TestDetermineFlagsProperties:
     )
     @settings(max_examples=100)
     def test_returns_list_of_strings(
-        self, smoothness: float, jitter: float, hesitation_count: int, correction_count: int,
+        self,
+        smoothness: float,
+        jitter: float,
+        hesitation_count: int,
+        correction_count: int,
     ) -> None:
         analyzer = TrajectoryAnalyzer()
         result = analyzer._determine_flags(smoothness, jitter, hesitation_count, correction_count)
@@ -738,8 +736,12 @@ class TestComputeOverallScoreProperties:
     )
     @settings(max_examples=120)
     def test_score_in_valid_range(
-        self, smoothness: float, efficiency: float, jitter: float,
-        hesitation_count: int, correction_count: int,
+        self,
+        smoothness: float,
+        efficiency: float,
+        jitter: float,
+        hesitation_count: int,
+        correction_count: int,
     ) -> None:
         analyzer = TrajectoryAnalyzer()
         result = analyzer._compute_overall_score(smoothness, efficiency, jitter, hesitation_count, correction_count)
@@ -748,14 +750,22 @@ class TestComputeOverallScoreProperties:
     def test_perfect_metrics_return_five(self) -> None:
         analyzer = TrajectoryAnalyzer()
         result = analyzer._compute_overall_score(
-            smoothness=1.0, efficiency=1.0, jitter=0.0, hesitation_count=0, correction_count=0,
+            smoothness=1.0,
+            efficiency=1.0,
+            jitter=0.0,
+            hesitation_count=0,
+            correction_count=0,
         )
         assert result == 5
 
     def test_worst_metrics_return_one(self) -> None:
         analyzer = TrajectoryAnalyzer()
         result = analyzer._compute_overall_score(
-            smoothness=0.0, efficiency=0.0, jitter=1.0, hesitation_count=20, correction_count=30,
+            smoothness=0.0,
+            efficiency=0.0,
+            jitter=1.0,
+            hesitation_count=20,
+            correction_count=30,
         )
         assert result == 1
 
