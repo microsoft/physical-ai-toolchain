@@ -180,9 +180,9 @@ No workflow files to lint.
 "@
     Write-CIStepSummary -Content $summary
 
-    if ($errorCount -gt 0) {
+    if ($errorCount -gt 0 -or $warningCount -gt 0) {
         Set-CIEnv -Name "YAML_LINT_FAILED" -Value "true"
-        Write-CIAnnotation -Message "actionlint found $errorCount error(s). Fix the issues above." -Level Error
+        Write-CIAnnotation -Message "actionlint found $errorCount error(s) and $warningCount warning(s). Fix the issues above." -Level Error
         return 1
     }
 
