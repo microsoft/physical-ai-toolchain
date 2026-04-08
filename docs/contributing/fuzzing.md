@@ -25,7 +25,7 @@ This repository uses fuzz testing and property-based testing to find edge cases 
 | Python property tests | [Hypothesis](https://hypothesis.readthedocs.io/) | Deterministic pytest classes in the fuzz harness |
 | TypeScript property tests | [fast-check](https://fast-check.dev/) | Pure utility functions in the dataviewer frontend |
 
-All fuzz and property tests run in CI through the existing pytest and vitest workflows. Coverage data merges into the `pytest` and `vitest` Codecov flags without a separate fuzz flag.
+Python fuzz regression tests run in a dedicated CI workflow that uploads coverage under the `pytest-fuzz` Codecov flag. TypeScript property tests run through the existing vitest workflow and merge into the `vitest` flag.
 
 ## Python Fuzz Harness
 
@@ -43,7 +43,7 @@ uv sync --group dev
 uv run pytest tests/fuzz_harness.py -v
 ```
 
-All fuzz targets produce deterministic test classes prefixed with `Test*`. These run as part of the standard pytest suite and contribute to the `pytest` Codecov flag.
+All fuzz targets produce deterministic test classes prefixed with `Test*`. These run as part of the fuzz regression workflow and contribute to the `pytest-fuzz` Codecov flag.
 
 ### Running Atheris Mode
 
@@ -197,7 +197,7 @@ Fuzz and property test coverage merges into existing Codecov flags:
 
 | Test type | Codecov flag | Coverage file |
 |---|---|---|
-| Python fuzz harness | `pytest` | `logs/coverage.xml` |
+| Python fuzz harness | `pytest-fuzz` | `logs/coverage-fuzz.xml` |
 | Dataviewer backend | `pytest-dataviewer` | `logs/coverage-dataviewer.xml` |
 | TypeScript property tests | `vitest` | `coverage/cobertura-coverage.xml` |
 

@@ -3,7 +3,9 @@
 # Flags:
 #   go — Go tests covering infrastructure/terraform/e2e/
 #   pester — PowerShell tests covering scripts/
-#   pytest — Python tests covering src/
+#   pytest — Python tests covering training/
+#   pytest-dataviewer — Dataviewer backend tests covering data-management/viewer/backend/src/
+#   pytest-fuzz — Python fuzz regression tests covering tests/, backend, and training
 #   terraform — Terraform tests covering infrastructure/terraform/
 #   vitest — Vitest tests covering data-management/viewer/frontend/src/
 
@@ -40,6 +42,11 @@ coverage:
           - pytest-dataviewer
         target: auto
         threshold: 1%
+      terraform:
+        flags:
+          - terraform
+        target: auto
+        threshold: 1%
       vitest:
         flags:
           - vitest
@@ -70,9 +77,17 @@ coverage:
         flags:
           - pytest-dataviewer
         informational: true
+      terraform:
+        flags:
+          - terraform
+        informational: true
       vitest:
         flags:
           - vitest
+        informational: true
+      pytest-fuzz:
+        flags:
+          - pytest-fuzz
         informational: true
 
 flags:
