@@ -1,0 +1,14 @@
+# Syft SBOM cataloger configuration
+# Used by anchore/sbom-action during release pipeline
+
+javascript:
+  include-dev-dependencies: true
+  search-remote-licenses: true
+  npm-base-url: https://registry.npmjs.org
+
+python:
+  include-dev-dependencies: true
+  search-remote-licenses: true
+
+golang:
+  search-remote-licenses: true

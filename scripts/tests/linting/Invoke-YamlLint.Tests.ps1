@@ -140,12 +140,12 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
             $result | Should -Be 1
         }
 
-        It 'Returns 0 when only warnings found' {
+        It 'Returns 1 when only warnings found (strict mode)' {
             Mock actionlint {
                 return '{"filepath":"test.yml","line":5,"column":3,"kind":"warning","message":"style issue"}'
             }
             $result = Invoke-YamlLintCore -OutputPath $script:TestOutputPath
-            $result | Should -Be 0
+            $result | Should -Be 1
         }
 
         It 'Writes YAML_LINT_FAILED to CI env file on errors' {
@@ -158,15 +158,14 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
             $envContent | Should -Match 'true'
         }
 
-        It 'Does not write YAML_LINT_FAILED when no errors' {
+        It 'Writes YAML_LINT_FAILED when only warnings found (strict mode)' {
             Mock actionlint {
                 return '{"filepath":"test.yml","line":5,"column":3,"kind":"warning","message":"warn"}'
             }
             Invoke-YamlLintCore -OutputPath $script:TestOutputPath
-            $envContent = Get-Content $env:GITHUB_ENV -Raw -ErrorAction SilentlyContinue
-            if ($envContent) {
-                $envContent | Should -Not -Match 'YAML_LINT_FAILED'
-            }
+            $envContent = Get-Content $env:GITHUB_ENV -Raw
+            $envContent | Should -Match 'YAML_LINT_FAILED'
+            $envContent | Should -Match 'true'
         }
 
         It 'Counts errors and warnings separately' {

@@ -1,0 +1,22 @@
+[project]
+name = "unpinned-project"
+version = "1.0.0"
+
+dependencies = [
+    "numpy>=1.26.0,<2.0.0",
+    "pandas~=2.2.0",
+    "requests==2.33.1",
+    "flask",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff==0.2.0",
+]
+
+[dependency-groups]
+test = [
+    "coverage>=7.0",
+    "hypothesis==6.98.0",
+]
