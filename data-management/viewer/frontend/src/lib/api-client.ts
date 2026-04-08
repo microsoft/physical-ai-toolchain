@@ -65,11 +65,11 @@ export function _resetCsrfToken(): void {
 /**
  * Convert snake_case keys to camelCase recursively.
  */
-function snakeToCamel(str: string): string {
+export function snakeToCamel(str: string): string {
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
 }
 
-function transformKeys<T>(obj: unknown): T {
+export function transformKeys<T>(obj: unknown): T {
   if (Array.isArray(obj)) {
     return obj.map(transformKeys) as T
   }

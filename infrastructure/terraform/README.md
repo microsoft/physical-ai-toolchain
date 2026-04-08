@@ -31,6 +31,14 @@ cp terraform.tfvars.example terraform.tfvars
 terraform init && terraform apply
 ```
 
+## ⚙️ Optional AML diagnostics
+
+Set `should_enable_aml_diagnostic_logs = true` in `terraform.tfvars` to create an AML workspace diagnostic setting that sends all AML resource logs to the platform Log Analytics workspace. The default is `false`.
+
+```hcl
+should_enable_aml_diagnostic_logs = true
+```
+
 ## 📖 Documentation
 
 | Guide                                                                             | Description                                          |

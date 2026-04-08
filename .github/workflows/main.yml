@@ -127,6 +127,16 @@ jobs:
       contents: read
       id-token: write
 
+  # Fuzz regression via deterministic corpus-based tests
+  fuzz-regression-tests:
+    name: Fuzz Regression Tests
+    uses: ./.github/workflows/fuzz-regression-tests.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Python linting using ruff
   python-lint:
     name: Python Lint
@@ -377,10 +387,69 @@ jobs:
           $tag = '${{ steps.release.outputs.tag_name }}'
           git tag -v $tag
 
+  # Generate dependency SBOM from all package manifests
+  generate-dependency-sbom:
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    needs: [release-please]
+    name: Generate Dependency SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - name: Checkout dependency manifests
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+        with:
+          sparse-checkout: |
+            .syft.yaml
+            package.json
+            package-lock.json
+            pyproject.toml
+            uv.lock
+            evaluation/pyproject.toml
+            evaluation/uv.lock
+            training/rl/pyproject.toml
+            training/il/lerobot/pyproject.toml
+            data-management/viewer/pyproject.toml
+            data-management/viewer/package.json
+            data-management/viewer/backend/pyproject.toml
+            data-management/viewer/backend/uv.lock
+            data-management/viewer/frontend/package.json
+            data-management/viewer/frontend/package-lock.json
+            docs/docusaurus/package.json
+            docs/docusaurus/package-lock.json
+            infrastructure/terraform/e2e/go.mod
+
+      - name: Generate dependency SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          config: .syft.yaml
+          output-file: dependencies.spdx.json
+          artifact-name: ''
+          dependency-snapshot: true
+
+      - name: Upload dependency SBOM artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        with:
+          name: sbom-dependencies
+          path: dependencies.spdx.json
+
+      - name: Upload dependency SBOM to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          gh release upload "${TAG}" \
+            dependencies.spdx.json \
+            --clobber
+        shell: bash
+
   # Sign release artifacts and generate SBOM attestation
   attest-release:
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    needs: [release-please]
+    needs: [release-please, generate-dependency-sbom]
     name: Attest Release
     runs-on: ubuntu-latest
     permissions:
@@ -390,6 +459,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+
+      - name: Download dependency SBOM
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e  # v4.2.2
+        with:
+          name: sbom-dependencies
 
       - name: Create source archive
         env:
@@ -406,6 +480,7 @@ jobs:
           artifact-name: ''
 
       - name: Attest build provenance
+        id: attest
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
         with:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
@@ -416,6 +491,21 @@ jobs:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
           sbom-path: sbom.spdx.json
 
+      - name: Attest dependency SBOM
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        with:
+          subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
+          sbom-path: dependencies.spdx.json
+
+      - name: Create signing artifacts for Scorecard detection
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          cp "${BUNDLE_PATH}" "source-${TAG}.sigstore.json"
+          jq -c '.dsseEnvelope' "${BUNDLE_PATH}" > "source-${TAG}.intoto.jsonl"
+        shell: bash
+
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -424,13 +514,150 @@ jobs:
           gh release upload "${TAG}" \
             "source-${TAG}.tar.gz" \
             sbom.spdx.json \
+            "source-${TAG}.sigstore.json" \
+            "source-${TAG}.intoto.jsonl" \
             --clobber
+        shell: bash
+
+  # Compare dependency SBOM against previous release
+  sbom-diff:
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    needs: [release-please, generate-dependency-sbom]
+    name: SBOM Diff
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - name: Download current dependency SBOM
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e  # v4.2.2
+        with:
+          name: sbom-dependencies
+
+      - name: Download previous release SBOM
+        id: prev-sbom
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          prev_tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 10 --json tagName,isDraft --jq '[.[] | select(.tagName != env.TAG and .isDraft == false)] | first | .tagName // empty')
+          if [ -z "$prev_tag" ]; then
+            echo "No previous release found"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Previous release: $prev_tag"
+          gh release download "$prev_tag" --repo "$GITHUB_REPOSITORY" --pattern "dependencies.spdx.json" --dir previous || {
+            echo "No dependency SBOM in previous release $prev_tag"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          echo "found=true" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Generate dependency diff
+        if: steps.prev-sbom.outputs.found == 'true'
+        run: |
+          python3 - <<'DIFF_SCRIPT'
+          import json, pathlib
+
+          def load_packages(path):
+              doc = json.loads(pathlib.Path(path).read_text())
+              pkgs = {}
+              for p in doc.get("packages", []):
+                  name = p.get("name", "UNKNOWN")
+                  version = p.get("versionInfo", "unknown")
+                  pkgs[name] = version
+              return pkgs
+
+          current = load_packages("dependencies.spdx.json")
+          previous = load_packages("previous/dependencies.spdx.json")
+          all_names = sorted(set(current) | set(previous))
+
+          added, removed, changed = [], [], []
+          for name in all_names:
+              cur_ver = current.get(name)
+              prev_ver = previous.get(name)
+              if cur_ver and not prev_ver:
+                  added.append(f"| {name} | {cur_ver} |")
+              elif prev_ver and not cur_ver:
+                  removed.append(f"| {name} | {prev_ver} |")
+              elif cur_ver != prev_ver:
+                  changed.append(f"| {name} | {prev_ver} | {cur_ver} |")
+
+          lines = ["# Dependency Diff\n"]
+          if added:
+              lines += ["\n## Added\n", "| Package | Version |", "| --- | --- |"] + added
+          if removed:
+              lines += ["\n## Removed\n", "| Package | Version |", "| --- | --- |"] + removed
+          if changed:
+              lines += ["\n## Changed\n", "| Package | Previous | Current |", "| --- | --- | --- |"] + changed
+          if not (added or removed or changed):
+              lines.append("\nNo dependency changes detected.")
+
+          pathlib.Path("dependency-diff.md").write_text("\n".join(lines) + "\n")
+          print(f"Diff: {len(added)} added, {len(removed)} removed, {len(changed)} changed")
+          DIFF_SCRIPT
+        shell: bash
+
+      - name: Upload dependency diff to release
+        if: steps.prev-sbom.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          gh release upload "${TAG}" \
+            dependency-diff.md \
+            --clobber
+        shell: bash
+
+  # Append attestation verification instructions to release notes
+  append-verification-notes:
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    needs: [release-please, attest-release]
+    name: Append Verification Notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Append verification instructions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          body=$(gh release view "${TAG}" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
+
+          verification=$(cat <<'EOF'
+
+          ---
+
+          ## Artifact Verification
+
+          All release artifacts include [Sigstore](https://www.sigstore.dev/) provenance attestations. Verify with the [GitHub CLI](https://cli.github.com/):
+
+          ```bash
+          # Download the source archive
+          gh release download TAG_PLACEHOLDER --repo microsoft/physical-ai-toolchain --pattern 'source-TAG_PLACEHOLDER.tar.gz'
+
+          # Verify build provenance
+          gh attestation verify source-TAG_PLACEHOLDER.tar.gz --repo microsoft/physical-ai-toolchain
+
+          # Verify SBOM attestation
+          gh attestation verify source-TAG_PLACEHOLDER.tar.gz --repo microsoft/physical-ai-toolchain --predicate-type https://spdx.dev/Document
+          ```
+
+          EOF
+          )
+
+          verification="${verification//TAG_PLACEHOLDER/${TAG}}"
+          printf '%s\n%s\n' "$body" "$verification" > notes.md
+          gh release edit "${TAG}" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
         shell: bash
 
   # Promote draft release to published
   publish-release:
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    needs: [release-please, attest-release]
+    needs: [release-please, attest-release, sbom-diff, append-verification-notes]
     name: Publish Release
     runs-on: ubuntu-latest
     concurrency:

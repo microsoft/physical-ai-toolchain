@@ -156,6 +156,16 @@ jobs:
       contents: read
       id-token: write
 
+  # Fuzz regression via deterministic corpus-based tests
+  fuzz-regression-tests:
+    name: Fuzz Regression Tests
+    uses: ./.github/workflows/fuzz-regression-tests.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Python linting using ruff
   python-lint:
     name: Python Lint

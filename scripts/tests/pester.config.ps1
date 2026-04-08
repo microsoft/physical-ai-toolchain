@@ -49,7 +49,7 @@ $configuration.TestResult.TestSuiteName = 'Robotics-RefArch-PowerShell-Tests'
 if ($CodeCoverage.IsPresent) {
     $configuration.CodeCoverage.Enabled = $true
     $configuration.CodeCoverage.OutputFormat = 'JaCoCo'
-    $configuration.CodeCoverage.OutputPath = Join-Path $PSScriptRoot '../../logs/coverage.xml'
+    $configuration.CodeCoverage.OutputPath = Join-Path $PSScriptRoot '../../logs/coverage-pester.xml'
 
     # Resolve coverage paths explicitly - Join-Path with wildcards returns literal paths without file system expansion in Pester configuration
     $ciRoot = Split-Path $PSScriptRoot -Parent

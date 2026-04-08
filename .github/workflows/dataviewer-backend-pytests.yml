@@ -43,21 +43,21 @@ jobs:
         run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Run pytest with coverage
-        run: uv run pytest -v --cov=src --cov-report=xml --cov-report=term-missing
+        run: uv run pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && always() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: pytest-dataviewer-coverage-xml
-          path: data-management/viewer/backend/coverage.xml
+          path: logs/coverage-dataviewer.xml
           retention-days: 30
 
       - name: Upload coverage to Codecov
         if: ${{ inputs.code-coverage && always() }}
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
-          files: coverage.xml
+          files: logs/coverage-dataviewer.xml
           use_oidc: true
           fail_ci_if_error: false
           verbose: true
