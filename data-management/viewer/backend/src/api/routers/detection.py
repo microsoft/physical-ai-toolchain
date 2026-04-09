@@ -22,6 +22,12 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 logger = logging.getLogger(__name__)
 
+
+def _sanitize_for_log(value: object) -> str:
+    """Sanitize user-controlled values before writing to logs to prevent log-forging via CR/LF injection."""
+    return str(value).replace("\r", "\\r").replace("\n", "\\n")
+
+
 RATE_LIMIT_DETECT = os.environ.get("RATE_LIMIT_DETECT", "10/minute")
 RATE_LIMIT_DETECTIONS = os.environ.get("RATE_LIMIT_DETECTIONS", "120/minute")
 
@@ -49,16 +55,16 @@ async def run_detection(
     """
     logger.info(
         "POST /detect: dataset=%s, episode=%d, model=%s, confidence=%s",
-        dataset_id,
-        episode_idx,
-        request_body.model,
-        request_body.confidence,
+        _sanitize_for_log(dataset_id),
+        int(episode_idx),
+        _sanitize_for_log(request_body.model),
+        float(request_body.confidence),
     )
 
     # Validate episode exists
     episode = await dataset_service.get_episode(dataset_id, episode_idx)
     if episode is None:
-        logger.warning("Episode %d not found in dataset %s", episode_idx, dataset_id)
+        logger.warning("Episode %d not found in dataset %s", int(episode_idx), _sanitize_for_log(dataset_id))
         raise HTTPException(
             status_code=404,
             detail=f"Episode {episode_idx} not found in dataset '{dataset_id}'",

@@ -85,7 +85,7 @@ class ContentSizeLimitMiddleware:
                     await response(scope, receive, send)
                     return
             except ValueError:
-                pass
+                pass  # Malformed Content-Length header; fall through to streaming byte check
 
         bytes_received = 0
         limit = self.max_content_length
