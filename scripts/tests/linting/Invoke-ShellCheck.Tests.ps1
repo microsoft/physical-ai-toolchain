@@ -331,4 +331,105 @@ Describe 'Invoke-ShellCheckCore' -Tag 'Unit' {
             $defaultPath | Should -Exist
         }
     }
+
+    Context 'info and style severity mapping' {
+        BeforeEach {
+            $shDir = Join-Path $TestDrive 'scripts'
+            New-Item -ItemType Directory -Force -Path $shDir | Out-Null
+            '#!/bin/bash' | Set-Content (Join-Path $shDir 'info.sh')
+        }
+
+        It 'Maps info level to Notice annotation' {
+            Mock shellcheck {
+                return '[{"file":"info.sh","line":2,"column":1,"level":"info","code":2154,"message":"var is referenced but not assigned"}]'
+            } -ParameterFilter { $args[0] -eq '--format=json' }
+
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
+            Should -Invoke Write-CIAnnotation -ParameterFilter { $Level -eq 'Notice' }
+        }
+
+        It 'Maps style level to Notice annotation' {
+            Mock shellcheck {
+                return '[{"file":"info.sh","line":2,"column":1,"level":"style","code":2006,"message":"Use $(...) notation"}]'
+            } -ParameterFilter { $args[0] -eq '--format=json' }
+
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
+            Should -Invoke Write-CIAnnotation -ParameterFilter { $Level -eq 'Notice' }
+        }
+
+        It 'Does not increment error or warning counts for info level' {
+            Mock shellcheck {
+                return '[{"file":"info.sh","line":2,"column":1,"level":"info","code":2154,"message":"info issue"}]'
+            } -ParameterFilter { $args[0] -eq '--format=json' }
+
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.error_count | Should -Be 0
+            $json.warning_count | Should -Be 0
+        }
+
+        It 'Does not increment error or warning counts for style level' {
+            Mock shellcheck {
+                return '[{"file":"info.sh","line":2,"column":1,"level":"style","code":2006,"message":"style issue"}]'
+            } -ParameterFilter { $args[0] -eq '--format=json' }
+
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.error_count | Should -Be 0
+            $json.warning_count | Should -Be 0
+        }
+
+        It 'Reports lint_passed as true when only info and style issues present' {
+            Mock shellcheck {
+                return '[{"file":"info.sh","line":2,"column":1,"level":"info","code":2154,"message":"info"},{"file":"info.sh","line":3,"column":1,"level":"style","code":2006,"message":"style"}]'
+            } -ParameterFilter { $args[0] -eq '--format=json' }
+
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.lint_passed | Should -BeTrue
+        }
+    }
+
+    Context 'version parsing' {
+        BeforeEach {
+            $shDir = Join-Path $TestDrive 'scripts'
+            New-Item -ItemType Directory -Force -Path $shDir | Out-Null
+            '#!/bin/bash' | Set-Content (Join-Path $shDir 'test.sh')
+            Mock shellcheck { return $null } -ParameterFilter { $args[0] -eq '--format=json' }
+        }
+
+        It 'Extracts version from shellcheck output' {
+            Mock shellcheck {
+                return @(
+                    'ShellCheck - shell script analysis tool'
+                    'version: 0.9.0'
+                    'license: GNU General Public License, version 3'
+                )
+            } -ParameterFilter { $args[0] -eq '--version' }
+
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.shellcheck_version | Should -Be '0.9.0'
+        }
+
+        It 'Defaults to unknown when version pattern does not match' {
+            Mock shellcheck {
+                return 'ShellCheck - shell script analysis tool'
+            } -ParameterFilter { $args[0] -eq '--version' }
+
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.shellcheck_version | Should -Be 'unknown'
+        }
+
+        It 'Defaults to unknown when version output is empty' {
+            Mock shellcheck {
+                return $null
+            } -ParameterFilter { $args[0] -eq '--version' }
+
+            Invoke-ShellCheckCore -OutputPath $script:TestOutputPath
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.shellcheck_version | Should -Be 'unknown'
+        }
+    }
 }
