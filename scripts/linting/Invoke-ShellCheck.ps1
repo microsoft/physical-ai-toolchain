@@ -145,7 +145,7 @@ function Invoke-ShellCheckCore {
                 $level = switch ($issue.level) {
                     'error'   { 'Error' }
                     'warning' { 'Warning' }
-                    default   { $issue.level }
+                    default   { 'Notice' }
                 }
 
                 if ($level -eq 'Error') { $errorCount++ }
