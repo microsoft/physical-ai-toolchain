@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.7.1](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.0...v0.7.1) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the docusaurus-dependencies group in /docs/docusaurus with 14 updates ([#404](https://github.com/microsoft/physical-ai-toolchain/issues/404)) ([ada7211](https://github.com/microsoft/physical-ai-toolchain/commit/ada721127ef0eb1cdfb5b3de6b74323ea9569cff))
+
 ## [0.7.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.6.1...v0.7.0) (2026-04-09)
 
 
