@@ -9,6 +9,7 @@ dependencies = [
     "pydantic==2.12.5",
     "python-multipart==0.0.22",
     "python-dotenv==1.2.1",
+    "slowapi==0.1.9",
     "aiofiles==25.1.0",
     "numpy==2.4.2",
     "pyarrow==23.0.1",

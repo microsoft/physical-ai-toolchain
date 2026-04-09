@@ -8,11 +8,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from .auth import require_auth
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token
+from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels
 from .routes import ai_analysis
 
@@ -81,13 +86,39 @@ app = FastAPI(
     },
 )
 
-# Configure CORS — origins are read from CORS_ORIGINS env var (comma-separated)
+# Rate limiter shared state
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc: Exception) -> JSONResponse:
+    """Log full traceback server-side, return generic error to client."""
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError) -> JSONResponse:
+    """Return validation errors without internal paths."""
+    errors = [{"loc": error.get("loc"), "msg": error.get("msg"), "type": error.get("type")} for error in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
+# Middleware stack (last added = outermost = first to execute)
+# Order: SecurityHeaders → ContentSizeLimit → CORS → FastAPI App
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(
+    ContentSizeLimitMiddleware,
+    max_content_length=int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024))),
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_config.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "X-Request-ID"],
 )
 
 # All /api/* routes require authentication (health and csrf-token are on app directly)
@@ -105,8 +136,28 @@ app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-con
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy"}
+    """Health check verifying API and storage connectivity."""
+    checks: dict[str, str] = {"api": "healthy"}
+
+    try:
+        from .services.dataset_service import get_dataset_service
+
+        service = get_dataset_service()
+        if hasattr(service, "base_path"):
+            from pathlib import Path as _Path
+
+            if _Path(service.base_path).exists():
+                checks["storage"] = "healthy"
+            else:
+                checks["storage"] = "unhealthy"
+        else:
+            checks["storage"] = "healthy"
+    except Exception:
+        checks["storage"] = "unhealthy"
+
+    overall = "healthy" if all(v == "healthy" for v in checks.values()) else "degraded"
+    status_code = 200 if overall == "healthy" else 503
+    return JSONResponse(content={"status": overall, "checks": checks}, status_code=status_code)
 
 
 @app.get("/api/csrf-token", tags=["auth"])
@@ -130,5 +181,6 @@ async def get_csrf_token() -> JSONResponse:
         httponly=False,
         samesite="strict",
         secure=secure,
+        path="/",
     )
     return response

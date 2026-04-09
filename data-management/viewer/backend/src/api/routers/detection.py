@@ -6,9 +6,11 @@ and retrieving cached results.
 """
 
 import logging
-import sys
+import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..csrf import require_csrf_token
 from ..models.detection import DetectionRequest, EpisodeDetectionSummary
@@ -17,7 +19,11 @@ from ..services.detection_service import DetectionService, get_detection_service
 from ..validation import SAFE_DATASET_ID_PATTERN, path_int_param, path_string_param
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 logger = logging.getLogger(__name__)
+
+RATE_LIMIT_DETECT = os.environ.get("RATE_LIMIT_DETECT", "10/minute")
+RATE_LIMIT_DETECTIONS = os.environ.get("RATE_LIMIT_DETECTIONS", "120/minute")
 
 
 @router.post(
@@ -25,10 +31,12 @@ logger = logging.getLogger(__name__)
     response_model=EpisodeDetectionSummary,
     dependencies=[Depends(require_csrf_token)],
 )
+@limiter.limit(RATE_LIMIT_DETECT)
 async def run_detection(
+    request: Request,
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
-    request: DetectionRequest = DetectionRequest(),
+    request_body: DetectionRequest = DetectionRequest(),
     detection_service: DetectionService = Depends(get_detection_service),
     dataset_service: DatasetService = Depends(get_dataset_service),
 ) -> EpisodeDetectionSummary:
@@ -39,30 +47,25 @@ async def run_detection(
     returns detection results with bounding boxes and class labels.
     Results are cached for subsequent retrieval.
     """
-    print(f"\n{'=' * 60}", file=sys.stderr, flush=True)
-    print(
-        f"[API] POST /detect called: dataset={dataset_id}, episode={episode_idx}",
-        file=sys.stderr,
-        flush=True,
+    logger.info(
+        "POST /detect: dataset=%s, episode=%d, model=%s, confidence=%s",
+        dataset_id,
+        episode_idx,
+        request_body.model,
+        request_body.confidence,
     )
-    print(
-        f"[API] Request: model={request.model}, confidence={request.confidence}",
-        file=sys.stderr,
-        flush=True,
-    )
-    print(f"{'=' * 60}", file=sys.stderr, flush=True)
 
     # Validate episode exists
     episode = await dataset_service.get_episode(dataset_id, episode_idx)
     if episode is None:
-        print("[API] ERROR: Episode not found", file=sys.stderr, flush=True)
+        logger.warning("Episode %d not found in dataset %s", episode_idx, dataset_id)
         raise HTTPException(
             status_code=404,
             detail=f"Episode {episode_idx} not found in dataset '{dataset_id}'",
         )
 
     total_frames = episode.meta.length
-    print(f"[API] Episode has {total_frames} frames", file=sys.stderr, flush=True)
+    logger.info("Episode has %d frames", total_frames)
 
     # Create frame image getter
     async def get_frame_image(frame_idx: int) -> bytes | None:
@@ -72,7 +75,7 @@ async def run_detection(
         summary = await detection_service.detect_episode(
             dataset_id,
             episode_idx,
-            request,
+            request_body,
             get_frame_image,
             total_frames,
         )
@@ -82,11 +85,11 @@ async def run_detection(
             status_code=503,
             detail="YOLO dependencies not installed. Run: uv sync --extra yolo",
         )
-    except Exception as e:
+    except Exception:
         logger.exception("Detection failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Detection failed: {e!s}",
+            detail="Detection failed",
         )
 
 
@@ -94,7 +97,9 @@ async def run_detection(
     "/{dataset_id}/episodes/{episode_idx}/detections",
     response_model=EpisodeDetectionSummary | None,
 )
+@limiter.limit(RATE_LIMIT_DETECTIONS)
 async def get_detections(
+    request: Request,
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     detection_service: DetectionService = Depends(get_detection_service),
@@ -107,8 +112,13 @@ async def get_detections(
     return detection_service.get_cached(dataset_id, episode_idx)
 
 
-@router.delete("/{dataset_id}/episodes/{episode_idx}/detections")
+@router.delete(
+    "/{dataset_id}/episodes/{episode_idx}/detections",
+    dependencies=[Depends(require_csrf_token)],
+)
+@limiter.limit(RATE_LIMIT_DETECTIONS)
 async def clear_detections(
+    request: Request,
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     detection_service: DetectionService = Depends(get_detection_service),
