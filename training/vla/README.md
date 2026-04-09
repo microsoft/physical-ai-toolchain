@@ -37,7 +37,7 @@ vla/
 │   ├── train_twinvla.py              # TwinVLA training orchestrator
 │   ├── robotwin_config.py            # RoboTwin 2.0 task catalog and dataset config
 │   ├── submit-osmo-twinvla-training.sh  # OSMO submission CLI
-│   ├── setup-local-vla.sh           # Local environment setup (conda, deps, datasets, sims)
+│   ├── setup-local-vla.sh           # Local environment setup (micromamba, deps, datasets, sims)
 │   ├── train-local-twinvla.sh       # Local single-GPU training
 │   └── eval-local-twinvla.sh        # Local simulation evaluation (RoboTwin / Tabletop-Sim)
 └── workflows/
@@ -54,7 +54,7 @@ The local workflow covers data annotation, training, and simulation evaluation o
 #### Step 1: Environment Setup
 
 ```bash
-# Set up conda env, clone TwinVLA, download RoboTwin dataset, install simulators
+# Set up micromamba env, clone TwinVLA, download RoboTwin dataset, install simulators
 training/vla/scripts/setup-local-vla.sh -t open_laptop
 
 # Preview what will be installed

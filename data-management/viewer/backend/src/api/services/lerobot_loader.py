@@ -230,8 +230,19 @@ class LeRobotLoader:
         return chunk_idx, file_idx
 
     def _format_path(self, template: str, chunk_index: int, file_index: int, video_key: str = "") -> str:
-        """Format a path template with indices."""
-        return template.format(chunk_index=chunk_index, file_index=file_index, video_key=video_key)
+        """Format a path template with indices.
+
+        Supports both naming conventions:
+          - v2 templates: {chunk_index:03d}, {file_index:03d}
+          - LeRobot hub templates: {episode_chunk:03d}, {episode_index:03d}
+        """
+        return template.format(
+            chunk_index=chunk_index,
+            file_index=file_index,
+            episode_chunk=chunk_index,
+            episode_index=file_index,
+            video_key=video_key,
+        )
 
     def list_episodes(self) -> list[int]:
         """

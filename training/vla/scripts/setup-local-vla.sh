@@ -19,7 +19,7 @@ Set up a local TwinVLA development environment for bimanual VLA training
 and evaluation on a single GPU (RTX 3090/4090/5090 with 24-32 GB VRAM).
 
 Performs the following steps:
-  1. Create or reuse a conda environment with Python 3.10
+  1. Create or reuse a micromamba environment with Python 3.10
   2. Clone and install TwinVLA from source
   3. Download a RoboTwin 2.0 dataset task (RLDS format)
   4. Clone and install RoboTwin simulation for evaluation
@@ -27,7 +27,7 @@ Performs the following steps:
 
 OPTIONS:
     -h, --help               Show this help message
-    -e, --env-name NAME      Conda environment name (default: twinvla)
+    -e, --env-name NAME      Micromamba environment name (default: twinvla)
     -w, --workspace DIR      Working directory for cloned repos (default: ./workspace)
     -d, --dataset-dir DIR    Dataset download directory (default: ./datasets)
     -t, --task NAME          RoboTwin task to download (default: open_laptop)
@@ -85,7 +85,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-require_tools git conda python
+require_tools git micromamba
 
 # =============================================================================
 # Gather Configuration
@@ -98,7 +98,7 @@ rlds_dataset_dir="${dataset_dir}/robotwin2_rlds"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
-  print_kv "Conda environment" "$env_name"
+  print_kv "Micromamba environment" "$env_name"
   print_kv "Workspace" "$workspace_dir"
   print_kv "Dataset directory" "$dataset_dir"
   print_kv "Task" "$task_name"
@@ -110,22 +110,22 @@ if [[ "$config_preview" == "true" ]]; then
 fi
 
 # =============================================================================
-# Step 1: Conda Environment
+# Step 1: Micromamba Environment
 # =============================================================================
-section "Conda Environment"
+section "Micromamba Environment"
 
-if conda env list | grep -q "^${env_name} "; then
-  info "Conda environment '$env_name' already exists"
+if micromamba env list 2>/dev/null | grep -q "${env_name}"; then
+  info "Micromamba environment '$env_name' already exists"
 else
-  info "Creating conda environment '$env_name' (Python 3.10)"
-  conda create -n "$env_name" python=3.10 -y
+  info "Creating micromamba environment '$env_name' (Python 3.10)"
+  micromamba create -n "$env_name" python=3.10 -c conda-forge -y
 fi
 
-info "Activating conda environment '$env_name'"
-eval "$(conda shell.bash hook)"
-conda activate "$env_name"
+info "Activating micromamba environment '$env_name'"
+eval "$(micromamba shell hook -s bash)"
+micromamba activate "$env_name"
 
-conda install -c conda-forge rust -y 2>/dev/null || warn "Rust install skipped (may already be present)"
+micromamba install -c conda-forge rust -y 2>/dev/null || warn "Rust install skipped (may already be present)"
 
 # =============================================================================
 # Step 2: Clone and Install TwinVLA
@@ -215,12 +215,12 @@ fi
 # Summary
 # =============================================================================
 section "Setup Summary"
-print_kv "Conda environment" "$env_name"
+print_kv "Micromamba environment" "$env_name"
 print_kv "TwinVLA" "$twinvla_dir"
 print_kv "RoboTwin sim" "$([[ "$skip_robotwin" == "true" ]] && echo 'Skipped' || echo "$robotwin_dir")"
 print_kv "Tabletop-Sim" "$([[ "$skip_tabletop" == "true" ]] && echo 'Skipped' || echo "$tabletop_dir")"
 print_kv "RLDS dataset" "$([[ "$skip_dataset" == "true" ]] && echo 'Skipped' || echo "$rlds_dataset_dir")"
-info "Activate with: conda activate $env_name"
+info "Activate with: micromamba activate $env_name"
 info "Next steps:"
 info "  1. Annotate data: npm run dev:backend && npm run dev:frontend (data-management/viewer)"
 info "  2. Train: training/vla/scripts/train-local-twinvla.sh -t $task_name"
