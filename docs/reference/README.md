@@ -30,7 +30,6 @@ Technical reference documentation for submission scripts, workflow templates, en
 ## 📚 Related Documentation
 
 * [Training Guide](../training/README.md) for RL and behavioral cloning workflows
-* [Inference Guide](../inference/README.md) for running trained policies
 * [Deployment Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md) for infrastructure provisioning
 
 <!-- markdownlint-disable MD036 -->

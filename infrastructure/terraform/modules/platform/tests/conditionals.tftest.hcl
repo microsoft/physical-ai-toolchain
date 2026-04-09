@@ -602,6 +602,58 @@ run "osmo_identity_disabled" {
 }
 
 // ============================================================
+// AML Diagnostic Logs Conditional
+// ============================================================
+
+run "aml_diagnostic_logs_enabled" {
+  command = plan
+
+  variables {
+    resource_prefix                   = run.setup.resource_prefix
+    environment                       = run.setup.environment
+    instance                          = run.setup.instance
+    location                          = run.setup.location
+    resource_group                    = run.setup.resource_group
+    current_user_oid                  = run.setup.current_user_oid
+    should_enable_aml_diagnostic_logs = true
+  }
+
+  assert {
+    condition     = length(azurerm_monitor_diagnostic_setting.ml_workspace_logs) == 1
+    error_message = "AML diagnostic setting should be created when enabled"
+  }
+
+  assert {
+    condition     = azurerm_monitor_diagnostic_setting.ml_workspace_logs[0].name == "diag-mlw-${run.setup.resource_prefix}-${run.setup.environment}-${run.setup.instance}"
+    error_message = "AML diagnostic setting should use the standard diagnostic setting name"
+  }
+
+  assert {
+    condition     = one(azurerm_monitor_diagnostic_setting.ml_workspace_logs[0].enabled_log).category_group == "allLogs"
+    error_message = "AML diagnostic setting should enable all AML log categories"
+  }
+}
+
+run "aml_diagnostic_logs_disabled" {
+  command = plan
+
+  variables {
+    resource_prefix                   = run.setup.resource_prefix
+    environment                       = run.setup.environment
+    instance                          = run.setup.instance
+    location                          = run.setup.location
+    resource_group                    = run.setup.resource_group
+    current_user_oid                  = run.setup.current_user_oid
+    should_enable_aml_diagnostic_logs = false
+  }
+
+  assert {
+    condition     = length(azurerm_monitor_diagnostic_setting.ml_workspace_logs) == 0
+    error_message = "AML diagnostic setting should not be created when disabled"
+  }
+}
+
+// ============================================================
 // AML Compute Conditional
 // ============================================================
 
@@ -640,5 +692,82 @@ run "aml_compute_disabled" {
   assert {
     condition     = length(azurerm_machine_learning_compute_cluster.gpu) == 0
     error_message = "AML compute cluster should not be created when disabled"
+  }
+}
+
+// ============================================================
+// Data Lake Storage Conditionals
+// ============================================================
+
+run "data_lake_enabled" {
+  command = plan
+
+  variables {
+    resource_prefix                 = run.setup.resource_prefix
+    environment                     = run.setup.environment
+    instance                        = run.setup.instance
+    location                        = run.setup.location
+    resource_group                  = run.setup.resource_group
+    current_user_oid                = run.setup.current_user_oid
+    should_create_data_lake_storage = true
+  }
+
+  assert {
+    condition     = length(azurerm_storage_account.data_lake) == 1
+    error_message = "Data lake storage account should be created when enabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.datasets) == 1
+    error_message = "Datasets container should be created when data lake is enabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.models) == 1
+    error_message = "Models container should be created when data lake is enabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.evaluation) == 1
+    error_message = "Evaluation container should be created when data lake is enabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_management_policy.data_lake) == 1
+    error_message = "Data lake lifecycle policy should be created when data lake is enabled"
+  }
+}
+
+run "data_lake_disabled" {
+  command = plan
+
+  variables {
+    resource_prefix                 = run.setup.resource_prefix
+    environment                     = run.setup.environment
+    instance                        = run.setup.instance
+    location                        = run.setup.location
+    resource_group                  = run.setup.resource_group
+    current_user_oid                = run.setup.current_user_oid
+    should_create_data_lake_storage = false
+  }
+
+  assert {
+    condition     = length(azurerm_storage_account.data_lake) == 0
+    error_message = "Data lake storage account should not be created when disabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.datasets) == 0
+    error_message = "Datasets container should not exist when data lake is disabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.models) == 0
+    error_message = "Models container should not exist when data lake is disabled"
+  }
+
+  assert {
+    condition     = length(azurerm_storage_container.evaluation) == 0
+    error_message = "Evaluation container should not exist when data lake is disabled"
   }
 }

@@ -13,12 +13,13 @@ const config = {
   organizationName: 'microsoft',
   projectName: 'physical-ai-toolchain',
 
-  onBrokenLinks: 'warn',
+  onBrokenLinks: 'throw',
+  onDuplicateRoutes: 'throw',
 
   markdown: {
     format: 'detect',
     hooks: {
-      onBrokenMarkdownLinks: 'warn',
+      onBrokenMarkdownLinks: 'throw',
     },
   },
 
@@ -94,7 +95,7 @@ const config = {
               },
               {
                 label: 'Deploy',
-                to: '/deploy/',
+                to: '/infrastructure/',
               },
               {
                 label: 'Training',

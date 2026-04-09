@@ -15,6 +15,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.7.2](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.1...v0.7.2) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the dataviewer-dependencies group in /data-management/viewer with 13 updates ([#405](https://github.com/microsoft/physical-ai-toolchain/issues/405)) ([fb7b4a4](https://github.com/microsoft/physical-ai-toolchain/commit/fb7b4a4f0af826ab94c155e22921d55e94af469b))
+
+## [0.7.1](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.0...v0.7.1) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the docusaurus-dependencies group in /docs/docusaurus with 14 updates ([#404](https://github.com/microsoft/physical-ai-toolchain/issues/404)) ([ada7211](https://github.com/microsoft/physical-ai-toolchain/commit/ada721127ef0eb1cdfb5b3de6b74323ea9569cff))
+
+## [0.7.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.6.1...v0.7.0) (2026-04-09)
+
+
+### ✨ Features
+
+* **build:** add hve-core release pipeline with dependency SBOM and signing artifacts ([#420](https://github.com/microsoft/physical-ai-toolchain/issues/420)) ([2ff839a](https://github.com/microsoft/physical-ai-toolchain/commit/2ff839a7583d0129a060316ecd3ef2fbcd9ef26d))
+* **build:** enforce strict warnings across all linters ([#392](https://github.com/microsoft/physical-ai-toolchain/issues/392)) ([b75e217](https://github.com/microsoft/physical-ai-toolchain/commit/b75e21735ed655a1c9e027193c9b5939e2eb1c18))
+* **evaluation:** add fuzz testing infrastructure and property-based tests ([#416](https://github.com/microsoft/physical-ai-toolchain/issues/416)) ([d97d42c](https://github.com/microsoft/physical-ai-toolchain/commit/d97d42cea662e825c1dd92bdbb1aa8bdb3521bc6))
+* **infrastructure:** add optional ADLS Gen2 data lake storage account ([#398](https://github.com/microsoft/physical-ai-toolchain/issues/398)) ([3bb9012](https://github.com/microsoft/physical-ai-toolchain/commit/3bb9012be9d5004404064d7b0e9a1fda783c4981))
+* **settings:** add HVE Core extension to workspace and devcontainer recommendations ([#226](https://github.com/microsoft/physical-ai-toolchain/issues/226)) ([f0735d8](https://github.com/microsoft/physical-ai-toolchain/commit/f0735d8e25a4a42dee9448351d6059609f10aef8))
+
+
+### 🐛 Bug Fixes
+
+* **docs:** fix broken links, harden Docusaurus config, and integrate CI workflow ([#430](https://github.com/microsoft/physical-ai-toolchain/issues/430)) ([ea99997](https://github.com/microsoft/physical-ai-toolchain/commit/ea9999735c8e20bb1420a540be2beb4ec48d7cbc))
+* **scripts:** join shellcheck version output before -match to populate $Matches ([#432](https://github.com/microsoft/physical-ai-toolchain/issues/432)) ([8768e76](https://github.com/microsoft/physical-ai-toolchain/commit/8768e7635db46f772e38531a0535b1f7bcf117aa))
+* **scripts:** map unmapped ShellCheck severity levels and harden version parsing ([#434](https://github.com/microsoft/physical-ai-toolchain/issues/434)) ([1e95a17](https://github.com/microsoft/physical-ai-toolchain/commit/1e95a17f7d03b8e4db752ee8758a95842918e5c0))
+* **scripts:** resolve ShellCheck SC2034 and enable source-path resolution ([#443](https://github.com/microsoft/physical-ai-toolchain/issues/443)) ([04438ea](https://github.com/microsoft/physical-ai-toolchain/commit/04438ea5aee4c1cdd5e0ba74e12241935bb02387))
+
+
+### 🔧 Miscellaneous
+
+* **deps-dev:** bump basic-ftp from 5.2.0 to 5.2.1 ([#429](https://github.com/microsoft/physical-ai-toolchain/issues/429)) ([438660a](https://github.com/microsoft/physical-ai-toolchain/commit/438660acf1dd30f56c5ac81986daad9b1585f83d))
+* **deps:** bump cryptography from 46.0.6 to 46.0.7 ([#425](https://github.com/microsoft/physical-ai-toolchain/issues/425)) ([2366647](https://github.com/microsoft/physical-ai-toolchain/commit/236664758681e6682cfa854c63619be3344058fb))
+
+## [0.6.1](https://github.com/microsoft/physical-ai-toolchain/compare/v0.6.0...v0.6.1) (2026-04-08)
+
+
+### 📦 Build System
+
+* **build:** upgrade to Node 24 and bump npm devDependencies ([#414](https://github.com/microsoft/physical-ai-toolchain/issues/414)) ([e46ddcd](https://github.com/microsoft/physical-ai-toolchain/commit/e46ddcd8408de65166a2b0ab4e972cfa10556577))
+
+## [0.6.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.5.0...v0.6.0) (2026-04-08)
+
+
+### ✨ Features
+
+* **build:** add terraform-docs generation pipeline ([#378](https://github.com/microsoft/physical-ai-toolchain/issues/378)) ([78e90d0](https://github.com/microsoft/physical-ai-toolchain/commit/78e90d07c4622e8cbaddb3d2696087775fafff6d))
+* **infrastructure:** enable optional AML diagnostic logs ([#400](https://github.com/microsoft/physical-ai-toolchain/issues/400)) ([58dd8db](https://github.com/microsoft/physical-ai-toolchain/commit/58dd8dbcad4495b31ec4d1310d3663c7c36a03f0))
+* **scripts:** consolidate scripts library paths and enhance dataviewer ([#383](https://github.com/microsoft/physical-ai-toolchain/issues/383)) ([176d9c9](https://github.com/microsoft/physical-ai-toolchain/commit/176d9c964264fff0765af741c5af113801a2a976))
+
+
+### 🐛 Bug Fixes
+
+* **build:** remediate CVEs, enforce equality pinning, repair Dependabot config ([#391](https://github.com/microsoft/physical-ai-toolchain/issues/391)) ([0c29148](https://github.com/microsoft/physical-ai-toolchain/commit/0c29148b99cc9547f2f70a24d13c9a07957999eb))
+* **infrastructure:** add Storage File Data Privileged Contributor role for ML identity ([#380](https://github.com/microsoft/physical-ai-toolchain/issues/380)) ([378f7ed](https://github.com/microsoft/physical-ai-toolchain/commit/378f7ede40adcaf505c48200fa0539a3b402f452))
+* **infrastructure:** replace hardcoded NAT Gateway availability zones with variable ([#356](https://github.com/microsoft/physical-ai-toolchain/issues/356)) ([a1397bd](https://github.com/microsoft/physical-ai-toolchain/commit/a1397bd3378fdddefb11396905b81233cf3f4ce5))
+* **infrastructure:** resolve TFLint violations and enable hard-fail ([#376](https://github.com/microsoft/physical-ai-toolchain/issues/376)) ([dfb55cd](https://github.com/microsoft/physical-ai-toolchain/commit/dfb55cd6a0f7e0ec39080eae35e052500cabfc19))
+* **scripts:** add dot-source guard to Invoke-MsDateFreshnessCheck.ps1 ([#397](https://github.com/microsoft/physical-ai-toolchain/issues/397)) ([f6f22c3](https://github.com/microsoft/physical-ai-toolchain/commit/f6f22c383583021fb4a694060eb5015f2eef777c))
+* **training:** validate AzureML and OSMO RL submissions end to end ([#372](https://github.com/microsoft/physical-ai-toolchain/issues/372)) ([49904d3](https://github.com/microsoft/physical-ai-toolchain/commit/49904d3cb4ea36c635cb8de313e344845e6371cb))
+
+
+### 📚 Documentation
+
+* **infrastructure:** add terraform-docs tooling and improve developer experience ([#365](https://github.com/microsoft/physical-ai-toolchain/issues/365)) ([a0fb03a](https://github.com/microsoft/physical-ai-toolchain/commit/a0fb03abc3ecf6cc208719e99c93b260e83762d1))
+* **reference:** centralize workflow template docs and convert workflow READMEs to pointer index ([#379](https://github.com/microsoft/physical-ai-toolchain/issues/379)) ([68097e4](https://github.com/microsoft/physical-ai-toolchain/commit/68097e4406dfa4fe77ae71d2b78a76580f3e61d0))
+
+
+### 🔧 Miscellaneous
+
+* **deps-dev:** bump the npm_and_yarn group across 1 directory with 2 updates ([#374](https://github.com/microsoft/physical-ai-toolchain/issues/374)) ([d848c8b](https://github.com/microsoft/physical-ai-toolchain/commit/d848c8bdc978275b020f3350d0b92f227d7795ee))
+* **deps-dev:** bump vite from 6.4.1 to 6.4.2 in /data-management/viewer/frontend in the npm_and_yarn group across 1 directory ([#395](https://github.com/microsoft/physical-ai-toolchain/issues/395)) ([6ec7f19](https://github.com/microsoft/physical-ai-toolchain/commit/6ec7f1985534f85634d19e89240421b4441b796a))
+* **deps:** bump the github-actions group across 1 directory with 7 updates ([#370](https://github.com/microsoft/physical-ai-toolchain/issues/370)) ([4d1b951](https://github.com/microsoft/physical-ai-toolchain/commit/4d1b9515ea389baf3ba06b54a7d9de6bea910cd5))
+* **deps:** bump the uv group across 2 directories with 1 update ([#373](https://github.com/microsoft/physical-ai-toolchain/issues/373)) ([ba66ed9](https://github.com/microsoft/physical-ai-toolchain/commit/ba66ed9e272ba2872eb468d3228b333788173a4e))
+
+
+### 🔒 Security
+
+* **deps-dev:** bump brace-expansion from 1.1.12 to 1.1.13 in /docs/docusaurus in the npm_and_yarn group across 1 directory ([#389](https://github.com/microsoft/physical-ai-toolchain/issues/389)) ([27129d9](https://github.com/microsoft/physical-ai-toolchain/commit/27129d9ac3b0792eaa4eb11fb49c67bd8788f441))
+* **deps-dev:** bump the npm_and_yarn group across 2 directories with 2 updates ([#363](https://github.com/microsoft/physical-ai-toolchain/issues/363)) ([aeae624](https://github.com/microsoft/physical-ai-toolchain/commit/aeae6245623a3bdd0cc9a2c8b8efc823a4ec9c0f))
+* **deps-dev:** bump the python-dependencies group with 5 updates ([#403](https://github.com/microsoft/physical-ai-toolchain/issues/403)) ([bb85560](https://github.com/microsoft/physical-ai-toolchain/commit/bb85560ab0cea3f5b7178dc69a4b650fbfe79665))
+* **deps:** bump cryptography from 46.0.5 to 46.0.6 in /training/rl ([#367](https://github.com/microsoft/physical-ai-toolchain/issues/367)) ([a82dd68](https://github.com/microsoft/physical-ai-toolchain/commit/a82dd687b89481d95a2d92eebe72a3c358c4a52c))
+* **deps:** bump the inference-dependencies group in /evaluation with 2 updates ([#401](https://github.com/microsoft/physical-ai-toolchain/issues/401)) ([c88d253](https://github.com/microsoft/physical-ai-toolchain/commit/c88d253fa8dde725cbb75936243769d5f17720e0))
+* **deps:** bump the pip group across 4 directories with 2 updates ([#411](https://github.com/microsoft/physical-ai-toolchain/issues/411)) ([1230fe0](https://github.com/microsoft/physical-ai-toolchain/commit/1230fe0891dd9bbe0833c9670bce93bbb7359c09))
+* **deps:** bump the training-dependencies group across 1 directory with 67 updates ([#375](https://github.com/microsoft/physical-ai-toolchain/issues/375)) ([8e05172](https://github.com/microsoft/physical-ai-toolchain/commit/8e051726b1e89a328b831802c6d09fe5d250a2e6))
+* **deps:** bump the uv group across 2 directories with 1 update ([#382](https://github.com/microsoft/physical-ai-toolchain/issues/382)) ([b6c7aea](https://github.com/microsoft/physical-ai-toolchain/commit/b6c7aea8df3e8adbfc56474d452126df434f5daf))
+* **deps:** update marshmallow requirement from &lt;4.3.0,&gt;=3.5 to &gt;=3.5,&lt;4.4.0 in /evaluation in the inference-dependencies group ([#393](https://github.com/microsoft/physical-ai-toolchain/issues/393)) ([599c7eb](https://github.com/microsoft/physical-ai-toolchain/commit/599c7eb7d3549fece16c92d55853765295d93092))
+
 ## [0.5.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.4.0...v0.5.0) (2026-03-26)
 
 
