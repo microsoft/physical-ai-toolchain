@@ -9,6 +9,7 @@ import type {
   Anomaly,
   DataQualityAnnotation,
   EpisodeAnnotation,
+  LanguageInstructionAnnotation,
   TaskCompletenessAnnotation,
   TrajectoryQualityAnnotation,
 } from '@/types'
@@ -49,6 +50,10 @@ interface AnnotationActions {
   toggleAnomalyVerified: (id: string) => void
   /** Update notes */
   updateNotes: (notes: string) => void
+  /** Update language instruction annotation */
+  updateLanguageInstruction: (update: Partial<LanguageInstructionAnnotation>) => void
+  /** Clear language instruction */
+  clearLanguageInstruction: () => void
   /** Set saving state */
   setSaving: (isSaving: boolean) => void
   /** Set error state */
@@ -313,6 +318,53 @@ export const useAnnotationStore = create<AnnotationStore>()(
           },
           false,
           'updateNotes',
+        )
+      },
+
+      updateLanguageInstruction: (update) => {
+        const { currentAnnotation } = get()
+        if (!currentAnnotation) return
+
+        const existing = currentAnnotation.languageInstruction ?? {
+          instruction: '',
+          source: 'human' as const,
+          language: 'en',
+          paraphrases: [],
+          subtaskInstructions: [],
+        }
+
+        set(
+          {
+            currentAnnotation: {
+              ...currentAnnotation,
+              timestamp: new Date().toISOString(),
+              languageInstruction: {
+                ...existing,
+                ...update,
+              },
+            },
+            isDirty: true,
+          },
+          false,
+          'updateLanguageInstruction',
+        )
+      },
+
+      clearLanguageInstruction: () => {
+        const { currentAnnotation } = get()
+        if (!currentAnnotation) return
+
+        const { languageInstruction: _, ...rest } = currentAnnotation
+        set(
+          {
+            currentAnnotation: {
+              ...rest,
+              timestamp: new Date().toISOString(),
+            },
+            isDirty: true,
+          },
+          false,
+          'clearLanguageInstruction',
         )
       },
 
