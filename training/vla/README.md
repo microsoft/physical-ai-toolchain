@@ -36,7 +36,10 @@ vla/
 ├── scripts/
 │   ├── train_twinvla.py              # TwinVLA training orchestrator
 │   ├── robotwin_config.py            # RoboTwin 2.0 task catalog and dataset config
-│   └── submit-osmo-twinvla-training.sh  # OSMO submission CLI
+│   ├── submit-osmo-twinvla-training.sh  # OSMO submission CLI
+│   ├── setup-local-vla.sh           # Local environment setup (conda, deps, datasets, sims)
+│   ├── train-local-twinvla.sh       # Local single-GPU training
+│   └── eval-local-twinvla.sh        # Local simulation evaluation (RoboTwin / Tabletop-Sim)
 └── workflows/
     └── osmo/
         └── twinvla-train.yaml        # OSMO workflow template
@@ -44,7 +47,80 @@ vla/
 
 ## 🚀 Quick Start
 
-### Train on RoboTwin 2.0 (RLDS format)
+### Local Development (Single GPU)
+
+The local workflow covers data annotation, training, and simulation evaluation on a single GPU (RTX 3090/4090/5090 with 24-32 GB VRAM).
+
+#### Step 1: Environment Setup
+
+```bash
+# Set up conda env, clone TwinVLA, download RoboTwin dataset, install simulators
+training/vla/scripts/setup-local-vla.sh -t open_laptop
+
+# Preview what will be installed
+training/vla/scripts/setup-local-vla.sh --config-preview
+
+# Training-only setup (skip simulators)
+training/vla/scripts/setup-local-vla.sh --skip-robotwin --skip-tabletop
+```
+
+#### Step 2: Annotate Data
+
+Use the dataviewer to add language instructions to episodes:
+
+```bash
+cd data-management/viewer && npm run dev:backend
+cd data-management/viewer && npm run dev:frontend
+# Browse to http://localhost:5173, select episodes, add language annotations
+```
+
+The `LanguageInstructionAnnotation` model supports human, template, LLM-generated, and retroactive annotations with paraphrases and subtask decomposition.
+
+#### Step 3: Train Locally
+
+```bash
+# Quick test (5K steps, ~2 hours on RTX 5090)
+training/vla/scripts/train-local-twinvla.sh -t open_laptop -s 5000
+
+# Full training (50K steps, ~20 hours)
+training/vla/scripts/train-local-twinvla.sh -t open_laptop -s 50000 --wandb-project twinvla-dev
+
+# LeRobot format from HuggingFace
+training/vla/scripts/train-local-twinvla.sh \
+    -t aloha_handover_box \
+    --dataset-format lerobot \
+    --lerobot-repo jellyho/aloha_handover_box
+
+# Preview configuration
+training/vla/scripts/train-local-twinvla.sh -t open_laptop --config-preview
+```
+
+#### Step 4: Evaluate in Simulation
+
+```bash
+# RoboTwin simulation (auto-detected for non-aloha tasks)
+training/vla/scripts/eval-local-twinvla.sh \
+    -c ./outputs/twinvla/checkpoint-10000 \
+    -t open_laptop
+
+# With domain randomization
+training/vla/scripts/eval-local-twinvla.sh \
+    -c ./outputs/twinvla/checkpoint-10000 \
+    -t open_laptop \
+    --task-config demo_randomized
+
+# Tabletop-Sim (auto-detected for aloha_ tasks)
+training/vla/scripts/eval-local-twinvla.sh \
+    -c jellyho/TwinVLA-aloha_handover_box \
+    -t aloha_handover_box
+
+# Try a pre-trained HuggingFace checkpoint
+training/vla/scripts/eval-local-twinvla.sh \
+    -c jellyho/aloha_dish_drainer \
+    -t aloha_dish_drainer
+```
+
+### Submit to OSMO (Multi-GPU Cloud)
 
 ```bash
 # Submit to OSMO
@@ -61,7 +137,7 @@ training/vla/scripts/submit-osmo-twinvla-training.sh \
     --config-preview
 ```
 
-### Train on Tabletop-Sim (LeRobot format)
+### Train on Tabletop-Sim via OSMO (LeRobot format)
 
 ```bash
 training/vla/scripts/submit-osmo-twinvla-training.sh \
@@ -70,16 +146,21 @@ training/vla/scripts/submit-osmo-twinvla-training.sh \
     --batch-size 8
 ```
 
-## VLM Backbone Options
+## 🖥️ GPU Requirements
 
-TwinVLA supports multiple VLM backbones via the `--model-type` flag:
+| Backbone | Params | `--model-type` value | Training VRAM (LoRA) | Inference VRAM |
+| --- | --- | --- | --- | --- |
+| SmolVLM2 | 256M | `SmolVLM2VLA` | ~16 GB | ~8 GB |
+| Eagle2-1B | 1B | `Eagle2_1BVLA` | ~24 GB | ~12 GB |
 
-| Backbone  | Params | `--model-type` value | VRAM (LoRA) |
-| --------- | ------ | -------------------- | ----------- |
-| SmolVLM2  | 256M   | `SmolVLM2VLA`        | ~16 GB      |
-| Eagle2-1B | 1B     | `Eagle2_1BVLA`       | ~24 GB      |
+| GPU | SmolVLM2 Training | Eagle2-1B Training | Inference + Sim |
+| --- | --- | --- | --- |
+| RTX 3090 (24 GB) | ✅ batch≤4 | ⚠️ batch=1 | ✅ |
+| RTX 4090 (24 GB) | ✅ batch≤4 | ⚠️ batch=1 | ✅ |
+| RTX 5090 (32 GB) | ✅ batch≤8 | ✅ batch≤4 | ✅ |
+| A100 (80 GB) | ✅ batch≤32 | ✅ batch≤16 | ✅ |
 
-## References
+## 📐 References
 
 - [TwinVLA: Data-Efficient Bimanual Manipulation with Twin Single-Arm VLAs](https://arxiv.org/abs/2511.05275) (ICLR 2026)
 - [RoboTwin 2.0: A Scalable Data Generator and Benchmark](https://arxiv.org/abs/2506.18088)
