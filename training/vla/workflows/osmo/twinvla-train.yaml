@@ -1,0 +1,106 @@
+workflow:
+  name: twinvla-training
+  timeout:
+    exec_timeout: 23h
+  resources:
+    default:
+      gpu: "{{ num_gpus }}"
+      cpu: 16
+      memory: 96Gi
+      storage: 200Gi
+  tasks:
+    - name: twinvla-train
+      image: "{{ image }}"
+      command:
+        - /bin/bash
+        - /tmp/entry.sh
+      credentials:
+        huggingface:
+          HF_TOKEN: hf_token
+      environment:
+        NVIDIA_DRIVER_CAPABILITIES: "all"
+        DATASET_PATH: "{{ dataset_path }}"
+        DATASET_FORMAT: "{{ dataset_format }}"
+        TASK_NAME: "{{ task_name }}"
+        MODEL_TYPE: "{{ model_type }}"
+        JOB_NAME: "{{ job_name }}"
+        OUTPUT_DIR: "{{ output_dir }}"
+        NUM_GPUS: "{{ num_gpus }}"
+        BATCH_SIZE: "{{ batch_size }}"
+        LEARNING_RATE: "{{ learning_rate }}"
+        MAX_STEPS: "{{ max_steps }}"
+        SAVE_STEPS: "{{ save_steps }}"
+        WANDB_PROJECT: "{{ wandb_project }}"
+        EXPERIMENT_NAME: "{{ experiment_name }}"
+        REGISTER_CHECKPOINT: "{{ register_checkpoint }}"
+        AZURE_SUBSCRIPTION_ID: "{{ azure_subscription_id }}"
+        AZURE_RESOURCE_GROUP: "{{ azure_resource_group }}"
+        AZUREML_WORKSPACE_NAME: "{{ azure_workspace_name }}"
+        AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
+      files:
+        - path: /tmp/entry.sh
+          contents: |
+            #!/bin/bash
+            set -euo pipefail
+
+            echo "=== TwinVLA Bimanual VLA Training ==="
+            echo "Dataset: ${DATASET_PATH}"
+            echo "Format: ${DATASET_FORMAT}"
+            echo "Task: ${TASK_NAME}"
+            echo "Model: ${MODEL_TYPE}"
+            echo "GPUs: ${NUM_GPUS}"
+            echo "Batch size: ${BATCH_SIZE}"
+
+            # Install TwinVLA
+            TWINVLA_DIR="/workspace/TwinVLA"
+            if [[ ! -d "${TWINVLA_DIR}" ]]; then
+              echo "Cloning TwinVLA..."
+              git clone --depth 1 https://github.com/jellyho/TwinVLA.git "${TWINVLA_DIR}"
+              pip install -r "${TWINVLA_DIR}/requirements.txt"
+              pip install -e "${TWINVLA_DIR}"
+              pip install "lerobot==0.4.0"
+              pip install "numpy<2.0.0"
+            fi
+
+            # Download RLDS dataset from HuggingFace if needed
+            if [[ "${DATASET_FORMAT}" == "rlds" ]] && [[ "${DATASET_PATH}" == *"/"* ]]; then
+              LOCAL_DATA="/workspace/data/${TASK_NAME}"
+              if [[ ! -d "${LOCAL_DATA}" ]]; then
+                echo "Downloading dataset from ${DATASET_PATH}..."
+                huggingface-cli download "${DATASET_PATH}" --repo-type dataset --local-dir "${LOCAL_DATA}"
+              fi
+              DATA_ROOT="${LOCAL_DATA}"
+            else
+              DATA_ROOT="${DATASET_PATH}"
+            fi
+
+            cd "${TWINVLA_DIR}"
+
+            # Build training command
+            TRAIN_CMD=(
+              accelerate launch
+              --num_processes "${NUM_GPUS}"
+              scripts/train.py
+              --model_type "${MODEL_TYPE}"
+              --output_dir "${OUTPUT_DIR}"
+              --batch_size "${BATCH_SIZE}"
+              --learning_rate "${LEARNING_RATE}"
+              --max_steps "${MAX_STEPS}"
+              --save_steps "${SAVE_STEPS}"
+            )
+
+            if [[ "${DATASET_FORMAT}" == "lerobot" ]]; then
+              TRAIN_CMD+=(--data_type lerobot --data_root_dir "${DATA_ROOT}")
+            else
+              TRAIN_CMD+=(--data_type rlds --data_root_dir "${DATA_ROOT}" --data_mix "${TASK_NAME}")
+            fi
+
+            if [[ -n "${WANDB_PROJECT:-}" ]]; then
+              TRAIN_CMD+=(--wandb_project "${WANDB_PROJECT}")
+            fi
+
+            echo "Running: ${TRAIN_CMD[*]}"
+            "${TRAIN_CMD[@]}"
+
+            echo "=== Training complete ==="
+            echo "Checkpoints: ${OUTPUT_DIR}"
