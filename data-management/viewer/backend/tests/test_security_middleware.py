@@ -263,6 +263,68 @@ class TestDetectionSecurity:
             assert "Traceback" not in detail
             assert "File " not in detail
 
+    def test_detect_import_error_returns_503(self, security_client):
+        """ImportError during detection returns 503 with install hint."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.api.main import app
+        from src.api.services.dataset_service import get_dataset_service
+        from src.api.services.detection_service import get_detection_service
+
+        mock_episode = MagicMock()
+        mock_episode.meta.length = 5
+
+        mock_ds = AsyncMock()
+        mock_ds.get_episode = AsyncMock(return_value=mock_episode)
+        mock_ds.get_frame_image = AsyncMock(return_value=None)
+
+        mock_det = MagicMock()
+        mock_det.detect_episode = AsyncMock(side_effect=ImportError("No module named 'ultralytics'"))
+
+        app.dependency_overrides[get_dataset_service] = lambda: mock_ds
+        app.dependency_overrides[get_detection_service] = lambda: mock_det
+        try:
+            resp = security_client.post(
+                "/api/datasets/test-ds/episodes/0/detect",
+                json={"model": "yolo11n", "confidence": 0.25},
+            )
+            assert resp.status_code == 503
+            assert "YOLO" in resp.json()["detail"]
+        finally:
+            app.dependency_overrides.pop(get_dataset_service, None)
+            app.dependency_overrides.pop(get_detection_service, None)
+
+    def test_detect_generic_exception_returns_500(self, security_client):
+        """Generic exception during detection returns 500."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.api.main import app
+        from src.api.services.dataset_service import get_dataset_service
+        from src.api.services.detection_service import get_detection_service
+
+        mock_episode = MagicMock()
+        mock_episode.meta.length = 5
+
+        mock_ds = AsyncMock()
+        mock_ds.get_episode = AsyncMock(return_value=mock_episode)
+        mock_ds.get_frame_image = AsyncMock(return_value=None)
+
+        mock_det = MagicMock()
+        mock_det.detect_episode = AsyncMock(side_effect=RuntimeError("GPU out of memory"))
+
+        app.dependency_overrides[get_dataset_service] = lambda: mock_ds
+        app.dependency_overrides[get_detection_service] = lambda: mock_det
+        try:
+            resp = security_client.post(
+                "/api/datasets/test-ds/episodes/0/detect",
+                json={"model": "yolo11n", "confidence": 0.25},
+            )
+            assert resp.status_code == 500
+            assert resp.json()["detail"] == "Detection failed"
+        finally:
+            app.dependency_overrides.pop(get_dataset_service, None)
+            app.dependency_overrides.pop(get_detection_service, None)
+
 
 # ============================================================================
 # Middleware Unit Tests
@@ -449,3 +511,135 @@ class TestContentSizeLimitMiddleware:
         mw = ContentSizeLimitMiddleware(dummy_app)
         await mw({"type": "websocket"}, None, None)
         assert calls == ["websocket"]
+
+    @pytest.mark.asyncio
+    async def test_invalid_content_length_passes_through(self):
+        """Non-numeric Content-Length is ignored and the request proceeds."""
+        from src.api.middleware import ContentSizeLimitMiddleware
+
+        app_called = []
+
+        async def dummy_app(scope, receive, send):
+            app_called.append(True)
+
+        mw = ContentSizeLimitMiddleware(dummy_app, max_content_length=100)
+
+        async def mock_receive():
+            return {"type": "http.request", "body": b"ok"}
+
+        scope = {"type": "http", "headers": [(b"content-length", b"not-a-number")]}
+        await mw(scope, mock_receive, lambda m: None)
+        assert app_called
+
+
+# ============================================================================
+# Exception Handler Coverage
+# ============================================================================
+
+
+class TestValidationExceptionHandler:
+    """Verify custom 422 handler strips internal paths."""
+
+    def test_invalid_path_param_returns_422(self, security_client):
+        """Sending invalid types triggers RequestValidationError handler."""
+        resp = security_client.get("/api/datasets/valid/episodes/not-a-number/detections")
+        assert resp.status_code == 422
+        data = resp.json()
+        assert "detail" in data
+        assert isinstance(data["detail"], list)
+        for error in data["detail"]:
+            assert "loc" in error
+            assert "msg" in error
+            assert "type" in error
+
+    def test_unhandled_exception_returns_500(self, tmp_path):
+        """Force an unhandled exception to exercise the 500 handler."""
+        from unittest.mock import MagicMock
+
+        import src.api.config as config_mod
+        import src.api.services.annotation_service as ann_mod
+        import src.api.services.dataset_service as ds_mod
+
+        os.environ["HMI_DATA_PATH"] = str(tmp_path)
+        config_mod._app_config = None
+        ds_mod._dataset_service = None
+        ann_mod._annotation_service = None
+
+        from src.api.main import app
+        from src.api.services.detection_service import get_detection_service
+
+        mock_det = MagicMock()
+        mock_det.get_cached = MagicMock(side_effect=RuntimeError("unexpected crash"))
+
+        app.dependency_overrides[get_detection_service] = lambda: mock_det
+        try:
+            with TestClient(app, raise_server_exceptions=False) as c:
+                resp = c.get("/api/datasets/test/episodes/0/detections")
+                assert resp.status_code == 500
+                assert resp.json()["detail"] == "Internal server error"
+        finally:
+            app.dependency_overrides.pop(get_detection_service, None)
+            config_mod._app_config = None
+            ds_mod._dataset_service = None
+            ann_mod._annotation_service = None
+
+
+class TestHealthCheckBranches:
+    """Cover the remaining health check branches."""
+
+    def test_health_storage_no_base_path(self, tmp_path, monkeypatch):
+        """Service without base_path attribute returns healthy storage."""
+        from unittest.mock import MagicMock
+
+        import src.api.config as config_mod
+        import src.api.services.annotation_service as ann_mod
+        import src.api.services.dataset_service as ds_mod
+
+        os.environ["HMI_DATA_PATH"] = str(tmp_path)
+        config_mod._app_config = None
+        ann_mod._annotation_service = None
+
+        mock_service = MagicMock(spec=[])
+        ds_mod._dataset_service = mock_service
+
+        from src.api.main import app
+
+        with TestClient(app) as c:
+            resp = c.get("/health")
+            data = resp.json()
+            assert data["checks"]["api"] == "healthy"
+            assert data["checks"]["storage"] == "healthy"
+            assert data["status"] == "healthy"
+
+        config_mod._app_config = None
+        ds_mod._dataset_service = None
+        ann_mod._annotation_service = None
+
+    def test_health_storage_exception(self, tmp_path, monkeypatch):
+        """Exercise the except branch in health check when get_dataset_service raises."""
+        import src.api.config as config_mod
+        import src.api.services.annotation_service as ann_mod
+        import src.api.services.dataset_service as ds_mod
+
+        os.environ["HMI_DATA_PATH"] = str(tmp_path)
+        config_mod._app_config = None
+        ds_mod._dataset_service = None
+        ann_mod._annotation_service = None
+
+        from src.api.main import app
+
+        def raise_error():
+            raise RuntimeError("service init failed")
+
+        monkeypatch.setattr(ds_mod, "get_dataset_service", raise_error)
+
+        with TestClient(app) as c:
+            resp = c.get("/health")
+            data = resp.json()
+            assert data["checks"]["storage"] == "unhealthy"
+            assert data["status"] == "degraded"
+            assert resp.status_code == 503
+
+        config_mod._app_config = None
+        ds_mod._dataset_service = None
+        ann_mod._annotation_service = None
