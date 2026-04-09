@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.7.2](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.1...v0.7.2) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the dataviewer-dependencies group in /data-management/viewer with 13 updates ([#405](https://github.com/microsoft/physical-ai-toolchain/issues/405)) ([fb7b4a4](https://github.com/microsoft/physical-ai-toolchain/commit/fb7b4a4f0af826ab94c155e22921d55e94af469b))
+
 ## [0.7.1](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.0...v0.7.1) (2026-04-09)
 
 
