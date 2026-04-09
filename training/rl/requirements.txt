@@ -90,7 +90,7 @@ colorama==0.4.6
     # via azure-ai-ml
 contourpy==1.3.3
     # via matplotlib
-cryptography==46.0.6
+cryptography==46.0.7
     # via
     #   azure-identity
     #   azure-storage-blob
