@@ -267,9 +267,9 @@ class TestDetectionSecurity:
         """ImportError during detection returns 503 with install hint."""
         from unittest.mock import AsyncMock, MagicMock
 
+        import src.api.services.dataset_service as ds_mod
+        import src.api.services.detection_service as det_mod
         from src.api.main import app
-        from src.api.services.dataset_service import get_dataset_service
-        from src.api.services.detection_service import get_detection_service
 
         mock_episode = MagicMock()
         mock_episode.meta.length = 5
@@ -281,8 +281,8 @@ class TestDetectionSecurity:
         mock_det = MagicMock()
         mock_det.detect_episode = AsyncMock(side_effect=ImportError("No module named 'ultralytics'"))
 
-        app.dependency_overrides[get_dataset_service] = lambda: mock_ds
-        app.dependency_overrides[get_detection_service] = lambda: mock_det
+        app.dependency_overrides[ds_mod.get_dataset_service] = lambda: mock_ds
+        app.dependency_overrides[det_mod.get_detection_service] = lambda: mock_det
         try:
             resp = security_client.post(
                 "/api/datasets/test-ds/episodes/0/detect",
@@ -291,16 +291,16 @@ class TestDetectionSecurity:
             assert resp.status_code == 503
             assert "YOLO" in resp.json()["detail"]
         finally:
-            app.dependency_overrides.pop(get_dataset_service, None)
-            app.dependency_overrides.pop(get_detection_service, None)
+            app.dependency_overrides.pop(ds_mod.get_dataset_service, None)
+            app.dependency_overrides.pop(det_mod.get_detection_service, None)
 
     def test_detect_generic_exception_returns_500(self, security_client):
         """Generic exception during detection returns 500."""
         from unittest.mock import AsyncMock, MagicMock
 
+        import src.api.services.dataset_service as ds_mod
+        import src.api.services.detection_service as det_mod
         from src.api.main import app
-        from src.api.services.dataset_service import get_dataset_service
-        from src.api.services.detection_service import get_detection_service
 
         mock_episode = MagicMock()
         mock_episode.meta.length = 5
@@ -312,8 +312,8 @@ class TestDetectionSecurity:
         mock_det = MagicMock()
         mock_det.detect_episode = AsyncMock(side_effect=RuntimeError("GPU out of memory"))
 
-        app.dependency_overrides[get_dataset_service] = lambda: mock_ds
-        app.dependency_overrides[get_detection_service] = lambda: mock_det
+        app.dependency_overrides[ds_mod.get_dataset_service] = lambda: mock_ds
+        app.dependency_overrides[det_mod.get_detection_service] = lambda: mock_det
         try:
             resp = security_client.post(
                 "/api/datasets/test-ds/episodes/0/detect",
@@ -322,8 +322,8 @@ class TestDetectionSecurity:
             assert resp.status_code == 500
             assert resp.json()["detail"] == "Detection failed"
         finally:
-            app.dependency_overrides.pop(get_dataset_service, None)
-            app.dependency_overrides.pop(get_detection_service, None)
+            app.dependency_overrides.pop(ds_mod.get_dataset_service, None)
+            app.dependency_overrides.pop(det_mod.get_detection_service, None)
 
 
 # ============================================================================
@@ -565,20 +565,20 @@ class TestValidationExceptionHandler:
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None
 
+        import src.api.services.detection_service as det_mod
         from src.api.main import app
-        from src.api.services.detection_service import get_detection_service
 
         mock_det = MagicMock()
         mock_det.get_cached = MagicMock(side_effect=RuntimeError("unexpected crash"))
 
-        app.dependency_overrides[get_detection_service] = lambda: mock_det
+        app.dependency_overrides[det_mod.get_detection_service] = lambda: mock_det
         try:
             with TestClient(app, raise_server_exceptions=False) as c:
                 resp = c.get("/api/datasets/test/episodes/0/detections")
                 assert resp.status_code == 500
                 assert resp.json()["detail"] == "Internal server error"
         finally:
-            app.dependency_overrides.pop(get_detection_service, None)
+            app.dependency_overrides.pop(det_mod.get_detection_service, None)
             config_mod._app_config = None
             ds_mod._dataset_service = None
             ann_mod._annotation_service = None
