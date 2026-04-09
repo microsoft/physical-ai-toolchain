@@ -89,6 +89,12 @@ run "verify_defaults" {
     error_message = "AML compute cluster should NOT be created by default"
   }
 
+  // AML diagnostic logs NOT enabled by default
+  assert {
+    condition     = length(azurerm_monitor_diagnostic_setting.ml_workspace_logs) == 0
+    error_message = "AML diagnostic setting should NOT be created by default"
+  }
+
   // OSMO identity enabled by default
   assert {
     condition     = length(azurerm_user_assigned_identity.osmo) == 1

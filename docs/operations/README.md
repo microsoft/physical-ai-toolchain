@@ -23,7 +23,6 @@ Centralized hub for operational documentation covering monitoring, troubleshooti
 | [Troubleshooting](troubleshooting.md)                                     | Symptom-based resolution for common deployment, GPU, and workflow errors |
 | [Security Guide](security-guide.md)                                       | Security configuration inventory and deployment checklist                |
 | [GPU Configuration](../reference/gpu-configuration.md)                    | Driver selection, MIG strategy, and GPU Operator configuration           |
-| [AzureML Validation Job Debugging](./azureml-validation-job-debugging.md) | Debug AzureML extension and InstanceType validation failures             |
 | [Deployment Validation](../contributing/deployment-validation.md)         | Post-deployment verification steps                                       |
 | [Cost Considerations](../contributing/cost-considerations.md)             | Azure resource cost guidance                                             |
 

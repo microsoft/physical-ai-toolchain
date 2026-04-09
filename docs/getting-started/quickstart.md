@@ -179,7 +179,6 @@ See [Cost Considerations](../contributing/cost-considerations.md) for detailed p
 
 | Resource                                                                                          | Description                               |
 |---------------------------------------------------------------------------------------------------|-------------------------------------------|
-| [LeRobot Inference](../inference/lerobot-inference.md)                                            | Run inference with trained LeRobot models |
 | [MLflow Integration](../training/mlflow-integration.md)                                           | Track experiments with MLflow             |
 | [Deployment Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md) | Full deployment reference and options     |
 | [Contributing Guide](../contributing/README.md)                                                   | Development workflow and code standards   |

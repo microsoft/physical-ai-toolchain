@@ -275,7 +275,6 @@ Convert all template expressions to Jinja syntax. For variable substitution, use
 ## Additional Resources
 
 - [GPU Configuration](../reference/gpu-configuration.md)
-- [AzureML Validation Job Debugging](./azureml-validation-job-debugging.md)
 - [Security Guide](security-guide.md)
 - [Deployment Validation](../contributing/deployment-validation.md)
 - [NVIDIA CUDA Compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/)

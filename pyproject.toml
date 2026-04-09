@@ -1,6 +1,6 @@
 [project]
 name = "physical-ai-toolchain"
-version = "0.5.0"
+version = "0.7.1"
 description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,12 +14,12 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.151.9",
-    "numpy==2.4.3",
-    "ruff==0.15.4",
-    "pytest==9.0.2",
+    "hypothesis==6.151.11",
+    "numpy==2.4.4",
+    "ruff==0.15.9",
+    "pytest==9.0.3",
     "pytest-mock==3.15.1",
-    "pytest-cov==7.0.0",
+    "pytest-cov==7.1.0",
     "pydantic==2.12.5",
     "ipykernel==7.2.0",
     "ipywidgets==8.1.8",
@@ -28,6 +28,7 @@ dev = [
     "azureml-mlflow==1.62.0.post2",
     "azure-ai-ml==1.32.0",
 ]
+fuzz = ["atheris>=3.0"]
 
 [tool.uv]
 package = false
@@ -36,6 +37,7 @@ constraint-dependencies = ["pygments==2.20.0"]
 [tool.pytest.ini_options]
 testpaths = ["tests", "training/tests", "data-management/tools/tests"]
 pythonpath = [".", "data-management/tools"]
+python_files = ["test_*.py", "fuzz_harness.py"]
 addopts = [
     "-ra",
     "-m",
@@ -45,6 +47,7 @@ addopts = [
     "--cov=training",
     "--cov-report=term-missing",
     "--cov-report=xml",
+    "--junitxml=logs/pytest-results.xml",
 ]
 markers = [
     "e2e: marks tests that submit real GPU training jobs (deselect: -m 'not e2e')",
@@ -108,4 +111,4 @@ exclude_lines = [
 ]
 
 [tool.coverage.xml]
-output = "coverage.xml"
+output = "logs/coverage.xml"

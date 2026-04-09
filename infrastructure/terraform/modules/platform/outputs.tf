@@ -157,6 +157,24 @@ output "storage_account_access" {
   sensitive = true
 }
 
+output "data_lake_storage_account" {
+  description = "Data lake storage account for domain data. Null when data lake is disabled"
+  value = var.should_create_data_lake_storage ? {
+    id   = azurerm_storage_account.data_lake[0].id
+    name = azurerm_storage_account.data_lake[0].name
+  } : null
+}
+
+output "data_lake_storage_account_access" {
+  description = "Data lake storage account access credentials. Null when data lake is disabled"
+  value = var.should_create_data_lake_storage ? {
+    primary_blob_endpoint = azurerm_storage_account.data_lake[0].primary_blob_endpoint
+    primary_dfs_endpoint  = azurerm_storage_account.data_lake[0].primary_dfs_endpoint
+    primary_access_key    = azurerm_storage_account.data_lake[0].primary_access_key
+  } : null
+  sensitive = true
+}
+
 /*
  * AzureML Outputs
  */
