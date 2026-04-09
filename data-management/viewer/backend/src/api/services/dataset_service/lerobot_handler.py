@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TrajectoryPoint
+from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TaskInfo, TrajectoryPoint
 from .base import build_trajectory
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,7 @@ class LeRobotFormatHandler:
 
         try:
             lr_info = loader.get_dataset_info()
+            task_map = loader.load_tasks()
 
             features: dict[str, FeatureSchema] = {}
             for name, feat in lr_info.features.items():
@@ -106,13 +107,18 @@ class LeRobotFormatHandler:
                     shape=feat.get("shape", []),
                 )
 
+            tasks = [
+                TaskInfo(task_index=idx, description=desc)
+                for idx, desc in sorted(task_map.items())
+            ]
+
             return DatasetInfo(
                 id=dataset_id,
                 name=f"{dataset_id} ({lr_info.robot_type})",
                 total_episodes=lr_info.total_episodes,
                 fps=lr_info.fps,
                 features=features,
-                tasks=[],
+                tasks=tasks,
             )
         except Exception as e:
             logger.warning(
@@ -170,6 +176,8 @@ class LeRobotFormatHandler:
                     if feat.dtype == "video" and feat_name not in video_urls:
                         video_urls[feat_name] = f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{feat_name}"
 
+            video_start_time = loader.get_video_start_time(episode_idx)
+
             return EpisodeData(
                 meta=EpisodeMeta(
                     index=episode_idx,
@@ -178,6 +186,7 @@ class LeRobotFormatHandler:
                     has_annotations=False,  # Set by caller
                 ),
                 video_urls=video_urls,
+                video_start_time=video_start_time,
                 cameras=list(video_urls.keys()),
                 trajectory_data=trajectory_data,
             )

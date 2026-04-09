@@ -116,7 +116,13 @@ export function computeEffectiveFps(
   videoDuration: number,
   datasetFps: number,
 ): number {
-  return videoDuration > 0 && totalFrames > 0 ? totalFrames / videoDuration : datasetFps
+  if (videoDuration <= 0 || totalFrames <= 0) return datasetFps
+  const computedFps = totalFrames / videoDuration
+  // When the video contains multiple episodes (concatenated), the computed
+  // fps will be far too low. Use datasetFps whenever the video is clearly
+  // longer than this episode.
+  if (computedFps < datasetFps * 0.5) return datasetFps
+  return computedFps
 }
 
 /**

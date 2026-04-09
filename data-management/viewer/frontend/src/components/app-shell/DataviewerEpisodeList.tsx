@@ -1,7 +1,8 @@
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 
 import { LabelFilter } from '@/components/annotation-panel'
 import { useEpisodes } from '@/hooks/use-datasets'
+import { useDatasetStore } from '@/stores/dataset-store'
 import { useLabelStore } from '@/stores/label-store'
 import type { EpisodeMeta } from '@/types'
 
@@ -10,11 +11,13 @@ const EpisodeListItem = memo(function EpisodeListItem({
   isSelected,
   onSelect,
   labels,
+  taskDescription,
 }: {
   episode: EpisodeMeta
   isSelected: boolean
   onSelect: (index: number) => void
   labels: string[]
+  taskDescription?: string
 }) {
   const handleClick = useCallback(() => {
     onSelect(episode.index)
@@ -28,7 +31,7 @@ const EpisodeListItem = memo(function EpisodeListItem({
       >
         <div className="font-medium">Episode {episode.index}</div>
         <div className="text-sm text-muted-foreground">
-          {episode.length} frames • Task {episode.taskIndex}
+          {episode.length} frames • {taskDescription ?? `Task ${episode.taskIndex}`}
           {episode.hasAnnotations && <span className="ml-2 text-green-600">✓ Annotated</span>}
         </div>
         {labels.length > 0 && (
@@ -62,6 +65,15 @@ export function DataviewerEpisodeList({
   const { data: episodes, isLoading, error } = useEpisodes(datasetId, { limit: 100 })
   const episodeLabels = useLabelStore((state) => state.episodeLabels)
   const filterLabels = useLabelStore((state) => state.filterLabels)
+  const currentDataset = useDatasetStore((state) => state.currentDataset)
+
+  const taskMap = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const t of currentDataset?.tasks ?? []) {
+      map.set(t.taskIndex, t.description)
+    }
+    return map
+  }, [currentDataset?.tasks])
 
   if (isLoading) {
     return <div className="p-4 text-muted-foreground">Loading episodes...</div>
@@ -78,9 +90,9 @@ export function DataviewerEpisodeList({
   const filteredEpisodes =
     filterLabels.length > 0
       ? episodes.filter((episode: EpisodeMeta) => {
-          const episodeLabelValues = episodeLabels[episode.index] || []
-          return filterLabels.some((filterLabel) => episodeLabelValues.includes(filterLabel))
-        })
+        const episodeLabelValues = episodeLabels[episode.index] || []
+        return filterLabels.some((filterLabel) => episodeLabelValues.includes(filterLabel))
+      })
       : episodes
 
   return (
@@ -105,6 +117,7 @@ export function DataviewerEpisodeList({
             isSelected={selectedIndex === episode.index}
             onSelect={onSelectEpisode}
             labels={episodeLabels[episode.index] || []}
+            taskDescription={taskMap.get(episode.taskIndex)}
           />
         ))}
       </ul>

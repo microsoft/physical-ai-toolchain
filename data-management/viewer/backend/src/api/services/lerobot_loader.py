@@ -179,12 +179,55 @@ class LeRobotLoader:
         """
         return self._load_info()
 
+    def load_tasks(self) -> dict[int, str]:
+        """Load task descriptions from meta/tasks.parquet.
+
+        Handles two common formats:
+        - Column-based: ``task_index`` + ``task`` columns
+        - Pandas index: ``task_index`` column + ``__index_level_0__`` as description
+
+        Returns:
+            Dict mapping task_index -> task description string.
+            Empty dict if tasks.parquet is missing or unreadable.
+        """
+        tasks_path = self.base_path / "meta" / "tasks.parquet"
+        if not tasks_path.exists():
+            return {}
+
+        try:
+            table = pq.read_table(tasks_path)
+            col_names = table.column_names
+            if "task_index" not in col_names:
+                return {}
+
+            result: dict[int, str] = {}
+            for i in range(table.num_rows):
+                task_idx = int(table.column("task_index")[i].as_py())
+
+                if "task" in col_names:
+                    description = str(table.column("task")[i].as_py())
+                elif "__index_level_0__" in col_names:
+                    raw = table.column("__index_level_0__")[i].as_py()
+                    description = raw.decode("utf-8") if isinstance(raw, bytes) else str(raw)
+                else:
+                    description = f"Task {task_idx}"
+
+                result[task_idx] = description
+
+            return result
+        except Exception:
+            logger.warning("Failed to load tasks.parquet from %s", tasks_path)
+            return {}
+
     def _find_episode_location(self, episode_index: int) -> tuple[int, int]:
         """
         Find the chunk and file indices for an episode.
 
-        In LeRobot format, episodes are usually stored one per chunk/file,
-        where chunk_index == episode_index and file_index == 0.
+        LeRobot v3 packs up to ``chunks_size`` episodes per chunk directory:
+          chunk_index = episode_index // chunks_size
+          file_index  = episode_index
+
+        Falls back to a full parquet scan when the computed path does not exist.
 
         Returns:
             Tuple of (chunk_index, file_index).
@@ -194,9 +237,9 @@ class LeRobotLoader:
 
         info = self._load_info()
 
-        # Standard layout: one episode per chunk
-        chunk_idx = episode_index
-        file_idx = 0
+        # v3 layout: multiple episodes per chunk, file_index == episode_index
+        chunk_idx = episode_index // info.chunks_size
+        file_idx = episode_index
 
         # Verify the parquet file exists
         data_path = self._format_path(info.data_path, chunk_idx, file_idx)
@@ -473,6 +516,10 @@ class LeRobotLoader:
         """
         Get the video file path for an episode and camera.
 
+        LeRobot v3 may store one video per episode or one concatenated video
+        per chunk.  When the per-episode file is missing, fall back to the
+        chunk-level file (file-000).
+
         Args:
             episode_index: Episode index.
             camera_key: Camera feature key (e.g., 'observation.images.color').
@@ -488,6 +535,14 @@ class LeRobotLoader:
 
         if video_full_path.exists():
             return video_full_path
+
+        # Fallback: concatenated per-chunk video at file-000
+        if file_idx != 0:
+            fallback_path = self._format_path(info.video_path, chunk_idx, 0, camera_key)
+            fallback_full = self.base_path / fallback_path
+            if fallback_full.exists():
+                return fallback_full
+
         return None
 
     def get_cameras(self) -> list[str]:
@@ -503,6 +558,46 @@ class LeRobotLoader:
             if feature_info.get("dtype") == "video":
                 cameras.append(feature_name)
         return cameras
+
+    def is_concatenated_video(self, episode_index: int) -> bool:
+        """Check if the video for an episode is a concatenated chunk file.
+
+        Returns True when the per-episode video file is absent and the
+        loader falls back to the chunk-level ``file-000`` video.
+        """
+        info = self._load_info()
+        chunk_idx, file_idx = self._find_episode_location(episode_index)
+
+        if file_idx == 0:
+            return False
+
+        cameras = self.get_cameras()
+        if not cameras:
+            return False
+
+        per_episode_path = self._format_path(info.video_path, chunk_idx, file_idx, cameras[0])
+        return not (self.base_path / per_episode_path).exists()
+
+    def get_video_start_time(self, episode_index: int) -> float:
+        """Compute the video start-time offset for an episode.
+
+        When each episode has its own video file the offset is ``0.0``.
+        When episodes share a concatenated per-chunk video the offset is
+        the cumulative duration of all preceding episodes in the same chunk.
+        """
+        if not self.is_concatenated_video(episode_index):
+            return 0.0
+
+        info = self._load_info()
+        eps_meta = self.list_episodes_with_meta()
+        chunk_start = (episode_index // info.chunks_size) * info.chunks_size
+
+        cumulative_frames = 0
+        for idx in range(chunk_start, episode_index):
+            meta = eps_meta.get(idx)
+            cumulative_frames += meta["length"] if meta else 0
+
+        return cumulative_frames / info.fps
 
 
 def is_lerobot_dataset(path: str | Path) -> bool:

@@ -27,6 +27,7 @@ interface UseAnnotationWorkspaceVideoSyncOptions {
   autoLoop: boolean
   shouldLoopPlaybackRange: boolean
   datasetFps: number
+  videoStartTime: number
   insertedFrames: Map<number, FrameInsertion>
   removedFrames: Set<number>
   videoSrc: string | null
@@ -49,6 +50,7 @@ export function useAnnotationWorkspaceVideoSync({
   autoLoop,
   shouldLoopPlaybackRange,
   datasetFps,
+  videoStartTime,
   insertedFrames,
   removedFrames,
   videoSrc,
@@ -80,6 +82,12 @@ export function useAnnotationWorkspaceVideoSync({
   playbackSpeedRef.current = playbackSpeed
 
   const fps = computeEffectiveFps(totalFrames, videoDuration, datasetFps)
+
+  // Frame ↔ video-time helpers accounting for concatenated-video offset
+  const frameToVideoTime = useCallback(
+    (frame: number) => videoStartTime + frame / fps,
+    [fps, videoStartTime],
+  )
 
   const ensureVideoPlaybackAtTime = useCallback(
     (video: HTMLVideoElement, targetTime: number) => {
@@ -114,7 +122,7 @@ export function useAnnotationWorkspaceVideoSync({
       }
 
       const targetOriginalFrame = getOriginalIndex(nextFrame, insertedFrames, removedFrames)
-      const targetTime = (targetOriginalFrame ?? nextFrame) / fps
+      const targetTime = frameToVideoTime(targetOriginalFrame ?? nextFrame)
 
       if (Math.abs(video.currentTime - targetTime) > 0.5 / fps) {
         video.currentTime = targetTime
@@ -129,6 +137,7 @@ export function useAnnotationWorkspaceVideoSync({
     [
       ensureVideoPlaybackAtTime,
       fps,
+      frameToVideoTime,
       insertedFrames,
       isPlaying,
       onSetCurrentFrame,
@@ -146,12 +155,12 @@ export function useAnnotationWorkspaceVideoSync({
         }
 
         const targetOriginalFrame = getOriginalIndex(nextFrame, insertedFrames, removedFrames)
-        const targetTime = (targetOriginalFrame ?? nextFrame) / fps
+        const targetTime = frameToVideoTime(targetOriginalFrame ?? nextFrame)
 
         ensureVideoPlaybackAtTime(video, targetTime)
       })
     },
-    [ensureVideoPlaybackAtTime, fps, insertedFrames, removedFrames],
+    [ensureVideoPlaybackAtTime, frameToVideoTime, insertedFrames, removedFrames],
   )
 
   useEffect(() => {
@@ -174,7 +183,7 @@ export function useAnnotationWorkspaceVideoSync({
         totalFrames,
         originalFrameIndexRef.current,
         fps,
-        video.currentTime,
+        video.currentTime - videoStartTime,
         playbackRangeStart,
         playbackRangeEnd,
       )
@@ -193,10 +202,10 @@ export function useAnnotationWorkspaceVideoSync({
       switch (action.kind) {
         case 'restart':
           onSetFrameWithinPlaybackRange(playbackRangeStart)
-          ensureVideoPlaybackAtTime(video, playbackRangeStart / fps)
+          ensureVideoPlaybackAtTime(video, frameToVideoTime(playbackRangeStart))
           break
         case 'seek-and-play':
-          ensureVideoPlaybackAtTime(video, action.seekTo)
+          ensureVideoPlaybackAtTime(video, videoStartTime + action.seekTo)
           break
         case 'play':
           ensureVideoPlaybackAtTime(video, video.currentTime)
@@ -210,6 +219,7 @@ export function useAnnotationWorkspaceVideoSync({
       autoLoop,
       ensureVideoPlaybackAtTime,
       fps,
+      frameToVideoTime,
       isPlaying,
       onRecordEvent,
       onSetFrameWithinPlaybackRange,
@@ -217,6 +227,7 @@ export function useAnnotationWorkspaceVideoSync({
       playbackRangeStart,
       shouldLoopPlaybackRange,
       totalFrames,
+      videoStartTime,
     ],
   )
 
@@ -232,7 +243,14 @@ export function useAnnotationWorkspaceVideoSync({
         duration: Number(video.duration.toFixed(3)),
         isPlaying,
         shouldAutoPlayOnMetadataLoad: shouldAutoPlayOnMetadataLoadRef.current,
+        videoStartTime,
       })
+
+      // Seek to the correct offset for concatenated videos
+      if (videoStartTime > 0) {
+        const targetFrame = currentFrameRef.current
+        video.currentTime = videoStartTime + targetFrame / (datasetFps || 20)
+      }
 
       if (isPlaying) {
         skipNextPlaybackSyncRef.current = true
@@ -245,7 +263,7 @@ export function useAnnotationWorkspaceVideoSync({
         onTogglePlayback()
       }
     },
-    [isPlaying, onRecordEvent, onTogglePlayback],
+    [datasetFps, isPlaying, onRecordEvent, onTogglePlayback, videoStartTime],
   )
 
   useEffect(() => {
@@ -280,6 +298,9 @@ export function useAnnotationWorkspaceVideoSync({
     let lastFrame = -1
     let lastTimestamp: number | null = null
     let virtualTime = currentFrameRef.current / fps
+
+    const videoTimeToFrameLocal = (time: number) => Math.floor((time - videoStartTime) * fps)
+
     let lastAdvancingVideoTime = -1
     let lastAdvancingVideoTimeAt = Date.now()
 
@@ -289,7 +310,7 @@ export function useAnnotationWorkspaceVideoSync({
       const video = videoRef.current
 
       if (video) {
-        const nextFrame = Math.floor(video.currentTime * fps)
+        const nextFrame = videoTimeToFrameLocal(video.currentTime)
         const resolved = resolvePlaybackTick(
           nextFrame,
           totalFrames,
@@ -331,7 +352,7 @@ export function useAnnotationWorkspaceVideoSync({
             autoLoop,
             shouldLoopPlaybackRange,
           })
-          ensureVideoPlaybackAtTime(video, resolved.frame / fps)
+          ensureVideoPlaybackAtTime(video, videoStartTime + resolved.frame / fps)
         }
 
         if (resolved.frame !== lastFrame) {
@@ -344,7 +365,7 @@ export function useAnnotationWorkspaceVideoSync({
             onTogglePlayback()
           }
 
-          video.currentTime = resolved.frame / fps
+          video.currentTime = videoStartTime + resolved.frame / fps
           video.pause()
           return
         }
@@ -368,7 +389,7 @@ export function useAnnotationWorkspaceVideoSync({
             })
           }
 
-          video.currentTime = resolved.frame / fps
+          video.currentTime = videoStartTime + resolved.frame / fps
         }
       } else if (!videoSrc) {
         // Frame-only playback using a virtual time clock
@@ -432,6 +453,7 @@ export function useAnnotationWorkspaceVideoSync({
     shouldLoopPlaybackRange,
     totalFrames,
     videoSrc,
+    videoStartTime,
   ])
 
   useEffect(() => {
@@ -448,11 +470,11 @@ export function useAnnotationWorkspaceVideoSync({
       return
     }
 
-    const targetTime = (originalFrameIndex ?? currentFrame) / fps
+    const targetTime = frameToVideoTime(originalFrameIndex ?? currentFrame)
     if (Math.abs(video.currentTime - targetTime) > 0.5 / fps) {
       video.currentTime = targetTime
     }
-  }, [currentFrame, fps, isPlaying, originalFrameIndex])
+  }, [currentFrame, fps, frameToVideoTime, isPlaying, originalFrameIndex])
 
   const handleVideoEnded = useCallback(() => {
     onRecordEvent('playback', 'video-ended', {
@@ -467,7 +489,7 @@ export function useAnnotationWorkspaceVideoSync({
       onSetFrameWithinPlaybackRange(playbackRangeStart)
 
       if (video) {
-        ensureVideoPlaybackAtTime(video, playbackRangeStart / fps)
+        ensureVideoPlaybackAtTime(video, frameToVideoTime(playbackRangeStart))
       }
 
       return
@@ -482,6 +504,7 @@ export function useAnnotationWorkspaceVideoSync({
     autoLoop,
     ensureVideoPlaybackAtTime,
     fps,
+    frameToVideoTime,
     isPlaying,
     onRecordEvent,
     onSetFrameWithinPlaybackRange,

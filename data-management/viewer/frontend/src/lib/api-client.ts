@@ -131,7 +131,8 @@ export async function fetchDatasets(): Promise<DatasetInfo[]> {
   const response = await fetch(`${API_BASE}/datasets`, {
     headers: await requestHeaders(),
   })
-  return handleResponse<DatasetInfo[]>(response)
+  const data = await handleResponse<unknown>(response)
+  return transformKeys<DatasetInfo[]>(data)
 }
 
 /**
@@ -141,7 +142,8 @@ export async function fetchDataset(datasetId: string): Promise<DatasetInfo> {
   const response = await fetch(`${API_BASE}/datasets/${datasetId}`, {
     headers: await requestHeaders(),
   })
-  return handleResponse<DatasetInfo>(response)
+  const data = await handleResponse<unknown>(response)
+  return transformKeys<DatasetInfo>(data)
 }
 
 /**
@@ -199,8 +201,19 @@ export async function fetchEpisode(datasetId: string, episodeIndex: number): Pro
   const response = await fetch(`${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}`, {
     headers: await requestHeaders(),
   })
-  const data = await handleResponse<unknown>(response)
-  return transformKeys<EpisodeData>(data)
+  const raw = (await handleResponse<Record<string, unknown>>(response)) as Record<string, unknown>
+
+  // Preserve original video_urls keys (camera names contain underscores that
+  // must not be camelCased) before applying the recursive key transform.
+  const originalVideoUrls = raw.video_urls as Record<string, string> | undefined
+
+  const episode = transformKeys<EpisodeData>(raw)
+
+  if (originalVideoUrls) {
+    episode.videoUrls = originalVideoUrls
+  }
+
+  return episode
 }
 
 // ============================================================================

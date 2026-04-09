@@ -91,6 +91,7 @@ export function useAnnotationWorkspaceMediaController({
     autoLoop,
     shouldLoopPlaybackRange,
     datasetFps,
+    videoStartTime: currentEpisode?.videoStartTime ?? 0,
     insertedFrames,
     removedFrames,
     videoSrc: mediaSources.videoSrc,

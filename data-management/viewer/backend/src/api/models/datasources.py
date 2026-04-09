@@ -123,6 +123,10 @@ class EpisodeData(BaseModel):
 
     meta: EpisodeMeta
     video_urls: dict[str, str] = Field(default_factory=dict, description="Video URLs by camera name")
+    video_start_time: float = Field(
+        default=0.0,
+        description="Video time offset for this episode within a concatenated video",
+    )
     cameras: list[str] = Field(default_factory=list, description="Available camera names")
     trajectory_data: list[TrajectoryPoint] = Field(default_factory=list, description="Trajectory data points")
 

@@ -1,5 +1,6 @@
 import { Loader2, Pause, Play, Repeat, RotateCcw, SkipBack, SkipForward } from 'lucide-react'
 import {
+  type ReactNode,
   type RefObject,
   type SyntheticEvent,
   useCallback,
@@ -42,6 +43,7 @@ interface AnnotationWorkspacePlaybackCardProps {
   onSetFrameWithinPlaybackRange: (frame: number) => number
   playbackRangeHighlight: { left: string; width: string } | null
   playbackRangeLabel: string | null
+  multiCameraGrid?: ReactNode
 }
 
 export function AnnotationWorkspacePlaybackCard({
@@ -72,6 +74,7 @@ export function AnnotationWorkspacePlaybackCard({
   onSetFrameWithinPlaybackRange,
   playbackRangeHighlight,
   playbackRangeLabel,
+  multiCameraGrid,
 }: AnnotationWorkspacePlaybackCardProps) {
   // Extract episode base path from frameImageUrl to detect episode switches
   const episodeBase = useMemo(() => {
@@ -118,75 +121,81 @@ export function AnnotationWorkspacePlaybackCard({
     <Card className={compact ? 'mx-auto h-full min-h-0 w-full max-w-[44rem]' : 'flex-shrink-0'}>
       <CardContent className={compact ? 'flex h-full min-h-0 flex-col p-3' : 'p-4'}>
         <ViewerDisplayControls />
-        <div
-          data-testid={compact ? 'trajectory-compact-media-frame' : undefined}
-          className={
-            compact
-              ? 'relative mx-auto mt-2 flex aspect-video max-h-[18rem] min-h-0 w-full max-w-[40rem] items-center justify-center overflow-hidden rounded-lg bg-black'
-              : 'relative mt-2 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black'
-          }
-        >
-          <canvas ref={canvasRef} className="hidden" />
+        {multiCameraGrid ? (
+          <div className="mt-2">
+            {multiCameraGrid}
+          </div>
+        ) : (
+          <div
+            data-testid={compact ? 'trajectory-compact-media-frame' : undefined}
+            className={
+              compact
+                ? 'relative mx-auto mt-2 flex aspect-video max-h-[18rem] min-h-0 w-full max-w-[40rem] items-center justify-center overflow-hidden rounded-lg bg-black'
+                : 'relative mt-2 flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black'
+            }
+          >
+            <canvas ref={canvasRef} className="hidden" />
 
-          {videoSrc ? (
-            <video
-              ref={videoRef}
-              src={videoSrc}
-              onEnded={onVideoEnded}
-              onLoadedMetadata={handleVideoLoadedMetadata}
-              muted
-              playsInline
-              preload="auto"
-              className="max-h-full max-w-full object-contain"
-              style={displayFilter ? { filter: displayFilter } : undefined}
-            />
-          ) : isInsertedFrame && interpolatedImageUrl ? (
-            <img
-              src={interpolatedImageUrl}
-              alt={`Interpolated frame ${currentFrame}`}
-              className="max-h-full max-w-full object-contain"
-              style={displayFilter ? { filter: displayFilter } : undefined}
-            />
-          ) : frameImageUrl ? (
-            <img
-              src={frameImageUrl}
-              alt={`Frame ${currentFrame}`}
-              className="max-h-full max-w-full object-contain"
-              style={displayFilter ? { filter: displayFilter } : undefined}
-              onLoad={() => setImageLoaded(true)}
-            />
-          ) : (
-            <span className="text-white">
-              Frame {currentFrame + 1} of {totalFrames}
-            </span>
-          )}
+            {videoSrc ? (
+              <video
+                ref={videoRef}
+                src={videoSrc}
+                onEnded={onVideoEnded}
+                onLoadedMetadata={handleVideoLoadedMetadata}
+                muted
+                playsInline
+                preload="auto"
+                className="max-h-full max-w-full object-contain"
+                style={displayFilter ? { filter: displayFilter } : undefined}
+              />
+            ) : isInsertedFrame && interpolatedImageUrl ? (
+              <img
+                src={interpolatedImageUrl}
+                alt={`Interpolated frame ${currentFrame}`}
+                className="max-h-full max-w-full object-contain"
+                style={displayFilter ? { filter: displayFilter } : undefined}
+              />
+            ) : frameImageUrl ? (
+              <img
+                src={frameImageUrl}
+                alt={`Frame ${currentFrame}`}
+                className="max-h-full max-w-full object-contain"
+                style={displayFilter ? { filter: displayFilter } : undefined}
+                onLoad={() => setImageLoaded(true)}
+              />
+            ) : (
+              <span className="text-white">
+                Frame {currentFrame + 1} of {totalFrames}
+              </span>
+            )}
 
-          {isInsertedFrame && (
-            <div className="absolute left-2 top-2 rounded bg-blue-500/80 px-2 py-1 text-xs text-white">
-              Interpolated Frame
-            </div>
-          )}
+            {isInsertedFrame && (
+              <div className="absolute left-2 top-2 rounded bg-blue-500/80 px-2 py-1 text-xs text-white">
+                Interpolated Frame
+              </div>
+            )}
 
-          {resizeOutput && (
-            <div className="absolute right-2 top-2 rounded bg-green-600/80 px-2 py-1 text-xs text-white">
-              Output: {resizeOutput.width} × {resizeOutput.height}
-            </div>
-          )}
+            {resizeOutput && (
+              <div className="absolute right-2 top-2 rounded bg-green-600/80 px-2 py-1 text-xs text-white">
+                Output: {resizeOutput.width} × {resizeOutput.height}
+              </div>
+            )}
 
-          {videoSrc && !videoLoaded && showVideoLoading && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/30">
-              <Loader2 className="h-8 w-8 animate-spin text-white" />
-              <p className="mt-2 text-sm text-white">Loading video…</p>
-            </div>
-          )}
+            {videoSrc && !videoLoaded && showVideoLoading && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/30">
+                <Loader2 className="h-8 w-8 animate-spin text-white" />
+                <p className="mt-2 text-sm text-white">Loading video…</p>
+              </div>
+            )}
 
-          {!videoSrc && frameImageUrl && !imageLoaded && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/30">
-              <Loader2 className="h-8 w-8 animate-spin text-white" />
-              <p className="mt-2 text-sm text-white">Loading episode…</p>
-            </div>
-          )}
-        </div>
+            {!videoSrc && frameImageUrl && !imageLoaded && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/30">
+                <Loader2 className="h-8 w-8 animate-spin text-white" />
+                <p className="mt-2 text-sm text-white">Loading episode…</p>
+              </div>
+            )}
+          </div>
+        )}
 
         <div data-keep-playback-selection="true">
           <PlaybackControlStrip
@@ -196,31 +205,31 @@ export function AnnotationWorkspacePlaybackCard({
             controls={
               compact
                 ? renderCompactControls({
-                    isPlaying,
-                    onTogglePlayback,
-                    onStepFrame,
-                    playbackSpeed,
-                    onSetPlaybackSpeed,
-                    autoPlay,
-                    onSetAutoPlay,
-                    autoLoop,
-                    onSetAutoLoop,
-                    playbackRangeStart,
-                    onSetFrameWithinPlaybackRange,
-                  })
+                  isPlaying,
+                  onTogglePlayback,
+                  onStepFrame,
+                  playbackSpeed,
+                  onSetPlaybackSpeed,
+                  autoPlay,
+                  onSetAutoPlay,
+                  autoLoop,
+                  onSetAutoLoop,
+                  playbackRangeStart,
+                  onSetFrameWithinPlaybackRange,
+                })
                 : renderDefaultControls({
-                    isPlaying,
-                    onTogglePlayback,
-                    onStepFrame,
-                    playbackSpeed,
-                    onSetPlaybackSpeed,
-                    autoPlay,
-                    onSetAutoPlay,
-                    autoLoop,
-                    onSetAutoLoop,
-                    playbackRangeStart,
-                    onSetFrameWithinPlaybackRange,
-                  })
+                  isPlaying,
+                  onTogglePlayback,
+                  onStepFrame,
+                  playbackSpeed,
+                  onSetPlaybackSpeed,
+                  autoPlay,
+                  onSetAutoPlay,
+                  autoLoop,
+                  onSetAutoLoop,
+                  playbackRangeStart,
+                  onSetFrameWithinPlaybackRange,
+                })
             }
             slider={
               <div className="space-y-1">

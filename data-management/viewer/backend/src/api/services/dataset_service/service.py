@@ -19,6 +19,7 @@ from ...models.datasources import (
     EpisodeData,
     EpisodeMeta,
     FeatureSchema,
+    TaskInfo,
     TrajectoryPoint,
 )
 from ...storage import LocalStorageAdapter, StorageAdapter
@@ -250,13 +251,25 @@ class DatasetService:
                 shape=feat.get("shape", []),
             )
 
+        tasks: list[TaskInfo] = []
+        meta_path = await self._ensure_blob_meta_synced(dataset_id)
+        if meta_path is not None and LEROBOT_AVAILABLE:
+            from ..lerobot_loader import LeRobotLoader
+
+            loader = LeRobotLoader(meta_path)
+            task_map = loader.load_tasks()
+            tasks = [
+                TaskInfo(task_index=idx, description=desc)
+                for idx, desc in sorted(task_map.items())
+            ]
+
         dataset_info = DatasetInfo(
             id=dataset_id,
             name=f"{dataset_id} ({info.get('robot_type', 'unknown')})" if info.get("robot_type") else dataset_id,
             total_episodes=info.get("total_episodes", 0),
             fps=float(info.get("fps", 30.0)),
             features=features,
-            tasks=[],
+            tasks=tasks,
         )
         self._datasets[dataset_id] = dataset_info
         self._blob_dataset_ids.add(dataset_id)

@@ -1,10 +1,13 @@
-import { LabelPanel } from '@/components/annotation-panel'
+import { useCallback, useMemo, useState } from 'react'
+
+import { LabelPanel, LanguageInstructionWidget } from '@/components/annotation-panel'
 import { AnnotationWorkspaceDiagnosticsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceDiagnosticsPanel'
 import { AnnotationWorkspaceEditToolsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceEditToolsPanel'
 import { AnnotationWorkspacePlaybackCard } from '@/components/annotation-workspace/AnnotationWorkspacePlaybackCard'
 import { AnnotationWorkspaceSubtaskListCard } from '@/components/annotation-workspace/AnnotationWorkspaceSubtaskListCard'
 import { AnnotationWorkspaceTopBar } from '@/components/annotation-workspace/AnnotationWorkspaceTopBar'
 import { AnnotationWorkspaceTrajectoryTab } from '@/components/annotation-workspace/AnnotationWorkspaceTrajectoryTab'
+import { MultiCameraGrid } from '@/components/annotation-workspace/MultiCameraGrid'
 import { ExportDialog } from '@/components/export'
 import { DetectionPanel } from '@/components/object-detection'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
@@ -18,12 +21,71 @@ interface AnnotationWorkspaceContentProps {
 export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContentProps) {
   const currentDataset = shell.currentDataset
   const currentEpisode = shell.currentEpisode
+  const [selectedCamera, setSelectedCamera] = useState<string | null>(null)
+
+  const hasMultipleCameras = (shell.allCameras?.length ?? 0) > 1
+
+  const cameraViews = useMemo(
+    () =>
+      (shell.allCameras ?? []).map((name) => ({
+        name,
+        videoUrl: shell.allCameraVideoUrls?.[name] ?? '',
+      })),
+    [shell.allCameras, shell.allCameraVideoUrls],
+  )
+
+  const handleSelectCamera = useCallback((camera: string) => {
+    setSelectedCamera(camera)
+  }, [])
 
   if (!currentDataset || !currentEpisode) {
     return null
   }
 
-  const trajectoryPlaybackCard = (
+  const trajectoryPlaybackCard = hasMultipleCameras ? (
+    <AnnotationWorkspacePlaybackCard
+      compact
+      canvasRef={shell.canvasRef}
+      videoRef={shell.videoRef}
+      videoSrc={shell.videoSrc}
+      onVideoEnded={shell.handleVideoEnded}
+      onLoadedMetadata={shell.handleLoadedMetadata}
+      displayFilter={shell.displayFilter}
+      isInsertedFrame={shell.isInsertedFrame}
+      interpolatedImageUrl={shell.interpolatedImageUrl}
+      currentFrame={shell.currentFrame}
+      totalFrames={shell.totalFrames}
+      resizeOutput={shell.globalTransform?.resize ?? null}
+      frameImageUrl={shell.frameImageUrl}
+      isPlaying={shell.isPlaying}
+      onTogglePlayback={shell.togglePlayback}
+      onStepFrame={shell.playback.stepFrame}
+      playbackSpeed={shell.playbackSpeed}
+      onSetPlaybackSpeed={shell.setPlaybackSpeed}
+      autoPlay={shell.autoPlay}
+      onSetAutoPlay={shell.setAutoPlay}
+      autoLoop={shell.autoLoop}
+      onSetAutoLoop={shell.setAutoLoop}
+      playbackRangeStart={shell.playback.playbackRangeStart}
+      playbackRangeEnd={shell.playback.playbackRangeEnd}
+      onSetFrameWithinPlaybackRange={shell.playback.setFrameWithinPlaybackRange}
+      playbackRangeHighlight={shell.playback.playbackRangeHighlight}
+      playbackRangeLabel={shell.playback.playbackRangeLabel}
+      multiCameraGrid={
+        <MultiCameraGrid
+          cameras={cameraViews}
+          primaryCamera={shell.allCameras?.[0] ?? ''}
+          primaryVideoRef={shell.videoRef}
+          primaryVideoSrc={shell.videoSrc}
+          onVideoEnded={shell.handleVideoEnded}
+          onLoadedMetadata={shell.handleLoadedMetadata}
+          displayFilter={shell.displayFilter}
+          selectedCamera={selectedCamera}
+          onSelectCamera={handleSelectCamera}
+        />
+      }
+    />
+  ) : (
     <AnnotationWorkspacePlaybackCard
       compact
       canvasRef={shell.canvasRef}
@@ -68,6 +130,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
   )
 
   const trajectoryLabelPanel = <LabelPanel episodeIndex={currentEpisode.meta.index} />
+  const trajectoryLanguageInstructionPanel = <LanguageInstructionWidget />
   const trajectoryEditToolsPanel = (
     <AnnotationWorkspaceEditToolsPanel
       onClearTransforms={shell.clearTransforms}
@@ -101,6 +164,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           playbackCard={trajectoryPlaybackCard}
           subtaskListCard={trajectorySubtaskListCard}
           labelPanel={trajectoryLabelPanel}
+          languageInstructionPanel={trajectoryLanguageInstructionPanel}
           editToolsPanel={trajectoryEditToolsPanel}
           selectedRange={shell.playback.selectedRange}
           selectedSubtaskId={shell.playback.selectedSubtaskId}

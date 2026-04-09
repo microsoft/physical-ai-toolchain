@@ -58,6 +58,15 @@ export function useAnnotationWorkspaceMediaSources({
     return videoKeys.length > 0 ? videoKeys[0] : null
   }, [currentEpisode?.cameras, currentEpisode?.videoUrls])
 
+  const allCameraVideoUrls = useMemo(() => {
+    if (!currentEpisode?.videoUrls) return {}
+    return currentEpisode.videoUrls
+  }, [currentEpisode?.videoUrls])
+
+  const allCameras = useMemo(() => {
+    return currentEpisode?.cameras ?? Object.keys(currentEpisode?.videoUrls ?? {})
+  }, [currentEpisode?.cameras, currentEpisode?.videoUrls])
+
   const videoSrc = useMemo(() => {
     if (!currentEpisode?.videoUrls || !cameraName) {
       return null
@@ -180,6 +189,8 @@ export function useAnnotationWorkspaceMediaSources({
   return {
     canvasRef,
     cameraName,
+    allCameras,
+    allCameraVideoUrls,
     displayFilter,
     frameImageUrl,
     interpolatedImageUrl,

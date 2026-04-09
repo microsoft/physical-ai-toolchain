@@ -108,6 +108,8 @@ export interface EpisodeData {
   meta: EpisodeMeta
   /** Video URLs by camera name */
   videoUrls: Record<string, string>
+  /** Video time offset in seconds for this episode within a concatenated video */
+  videoStartTime?: number
   /** Available camera names */
   cameras: string[]
   /** Trajectory data points */
