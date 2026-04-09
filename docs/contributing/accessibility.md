@@ -55,7 +55,7 @@ NO_COLOR=1 ./infrastructure/setup/01-deploy-robotics-charts.sh
 
 ### Implementation Pattern
 
-Shared color functions in `shared/lib/common.sh` check `NO_COLOR` before emitting escape sequences:
+Shared color functions in `scripts/lib/common.sh` check `NO_COLOR` before emitting escape sequences:
 
 ```bash
 if [[ -z "${NO_COLOR+x}" ]]; then

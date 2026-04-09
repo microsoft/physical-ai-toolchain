@@ -1,0 +1,5 @@
+# ShellCheck configuration
+# Severity: warning (excludes info and style per warnings_strict policy)
+shell=bash
+severity=warning
+external-sources=true

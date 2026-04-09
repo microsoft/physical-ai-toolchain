@@ -76,7 +76,7 @@ jobs:
           if ('${{ inputs.changed-files-only }}' -eq 'true') {
             $params['ChangedFilesOnly'] = $true
           }
-          shared/ci/linting/Invoke-TerraformDocsCheck.ps1 @params
+          scripts/linting/Invoke-TerraformDocsCheck.ps1 @params
 
       - name: Upload terraform-docs check results
         if: always()

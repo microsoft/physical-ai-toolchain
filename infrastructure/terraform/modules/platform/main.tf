@@ -25,6 +25,7 @@ locals {
     key_vault         = "privatelink.vaultcore.azure.net"
     storage_blob      = "privatelink.blob.core.windows.net"
     storage_file      = "privatelink.file.core.windows.net"
+    storage_dfs       = "privatelink.dfs.core.windows.net"
     acr               = "privatelink.azurecr.io"
     azureml_api       = "privatelink.api.azureml.ms"
     azureml_notebooks = "privatelink.notebooks.azure.net"
