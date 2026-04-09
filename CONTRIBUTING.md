@@ -151,6 +151,23 @@ npm run test:tf        # Terraform module tests (no Azure credentials required)
 
 For Terraform and shell script validation, see the [Prerequisites](docs/contributing/prerequisites.md#build-and-validation-requirements) guide.
 
+### Warning Policy
+
+All CI linters enforce warnings-as-errors. PRs that introduce new warnings will not merge.
+
+| Linter               | Enforcement       | Configuration                                 |
+|----------------------|-------------------|-----------------------------------------------|
+| Markdown (lint:md)   | Errors block      | .markdownlint-cli2.jsonc                      |
+| PowerShell (lint:ps) | Errors + warnings | scripts/linting/Invoke-PSScriptAnalyzer.ps1 |
+| YAML (lint:yaml)     | Errors + warnings | .yamllint.yml                                 |
+| Terraform (lint:tf)  | Errors block      | .tflint.hcl                                   |
+| Go (lint:go)         | Errors block      | .golangci.yml                                 |
+| ShellCheck (lint:sh) | Warnings + errors | .shellcheckrc                                 |
+| Python (lint:py)     | Errors block      | pyproject.toml [tool.ruff]                    |
+| Link check           | Errors block      | .markdownlint-cli2.jsonc                      |
+
+To suppress a specific warning locally, use the linter's inline suppression syntax. Do not change CI configuration to suppress warnings globally without team discussion.
+
 ## Updating External Components
 
 Reused externally-maintained components (Helm charts, container images, Terraform providers, Python packages, GitHub Actions) require periodic updates for security patches and compatibility. Dependabot automates updates for Python, Terraform, and GitHub Actions ecosystems. Helm charts and container images require manual updates.

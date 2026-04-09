@@ -178,6 +178,12 @@ variable "should_enable_osmo_identity" {
  * Storage Variables
  */
 
+variable "should_create_data_lake_storage" {
+  type        = bool
+  description = "Whether to create a dedicated ADLS Gen2 storage account with hierarchical namespace for domain data (datasets, model checkpoints)"
+  default     = false
+}
+
 variable "should_enable_storage_shared_access_key" {
   type        = bool
   description = "Whether to enable Shared Key (SAS token) authorization for the storage account. When false, all requests must use Azure AD authentication"

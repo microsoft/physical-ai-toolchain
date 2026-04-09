@@ -42,6 +42,7 @@ Contributions can include:
 | [Accessibility](accessibility.md)                         | Accessibility scope, documentation and CLI output guidelines     |
 | [Updating External Components](component-updates.md)      | Process for updating reused externally-maintained components     |
 | [Documentation Maintenance](documentation-maintenance.md) | Update triggers, ownership, review criteria, freshness policy    |
+| [Fuzzing and Property-Based Testing](fuzzing.md)          | Fuzz targets, property tests, Hypothesis and fast-check patterns |
 | [Roadmap](ROADMAP.md)                                     | 12-month project roadmap, priorities, and success metrics        |
 
 ### Quick Reference
@@ -83,7 +84,7 @@ Search existing resources before asking questions:
 * Search [GitHub Issues](https://github.com/microsoft/physical-ai-toolchain/issues) for similar questions or problems
 * Check [GitHub Discussions](https://github.com/microsoft/physical-ai-toolchain/discussions) for community Q&A
 * Review [docs/](https://github.com/microsoft/physical-ai-toolchain/tree/main/docs) for troubleshooting guides
-* See [azureml-validation-job-debugging.md](../operations/azureml-validation-job-debugging.md) for common deployment and workflow issues
+* See [azureml-validation-job-debugging.md](../evaluation/azureml-validation-job-debugging.md) for common deployment and workflow issues
 
 If you cannot find an answer:
 

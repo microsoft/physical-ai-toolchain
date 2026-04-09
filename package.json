@@ -1,6 +1,6 @@
 {
   "name": "physical-ai-toolchain",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "engines": {
     "node": ">=24"
@@ -12,12 +12,14 @@
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "lint:md:fix": "markdownlint-cli2 \"**/*.md\" --fix",
     "lint:ps": "pwsh -File scripts/linting/Invoke-PSScriptAnalyzer.ps1",
+    "lint:py": "uvx ruff check .",
     "lint:links": "pwsh -File scripts/linting/Invoke-LinkLanguageCheck.ps1",
     "lint:go": "pwsh -File scripts/linting/Invoke-GoLint.ps1",
+    "lint:sh": "pwsh -File scripts/linting/Invoke-ShellCheck.ps1",
     "lint:yaml": "pwsh -File scripts/linting/Invoke-YamlLint.ps1",
     "lint:tf": "pwsh -File scripts/linting/Invoke-TFLint.ps1",
     "lint:tf:validate": "pwsh -File scripts/linting/Invoke-TerraformValidation.ps1",
-    "lint:all": "npm run lint:md && npm run lint:ps && npm run lint:links && npm run lint:yaml && npm run lint:tf && npm run lint:go",
+    "lint:all": "npm run lint:md && npm run lint:ps && npm run lint:links && npm run lint:yaml && npm run lint:tf && npm run lint:go && npm run lint:sh && npm run lint:py",
     "format:tables": "markdown-table-formatter \"**/*.md\"",
     "test:ps": "pwsh -File ./scripts/tests/Invoke-PesterTests.ps1",
     "test:tf": "pwsh -File scripts/linting/Invoke-TerraformTest.ps1",

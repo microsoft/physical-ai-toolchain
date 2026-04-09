@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.6.1](https://github.com/microsoft/physical-ai-toolchain/compare/v0.6.0...v0.6.1) (2026-04-08)
+
+
+### 📦 Build System
+
+* **build:** upgrade to Node 24 and bump npm devDependencies ([#414](https://github.com/microsoft/physical-ai-toolchain/issues/414)) ([e46ddcd](https://github.com/microsoft/physical-ai-toolchain/commit/e46ddcd8408de65166a2b0ab4e972cfa10556577))
+
 ## [0.6.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.5.0...v0.6.0) (2026-04-08)
 
 

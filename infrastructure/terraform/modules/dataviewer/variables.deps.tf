@@ -55,3 +55,12 @@ variable "storage_account" {
   })
   description = "Storage account from platform module"
 }
+
+variable "data_lake_storage_account" {
+  type = object({
+    id   = string
+    name = string
+  })
+  description = "Data lake storage account from platform module. Null when data lake is disabled"
+  default     = null
+}

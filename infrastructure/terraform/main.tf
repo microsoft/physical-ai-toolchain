@@ -95,6 +95,7 @@ module "platform" {
   should_add_current_user_key_vault_admin = var.should_add_current_user_key_vault_admin
   should_add_current_user_storage_blob    = var.should_add_current_user_storage_blob
   should_enable_purge_protection          = var.should_enable_purge_protection
+  should_create_data_lake_storage         = var.should_create_data_lake_storage
 
   // Storage lifecycle management
   should_enable_raw_bags_lifecycle_policy           = var.should_enable_raw_bags_lifecycle_policy
