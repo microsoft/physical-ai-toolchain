@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.7.3](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.2...v0.7.3) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the training-dependencies group in /training/rl with 7 updates ([#408](https://github.com/microsoft/physical-ai-toolchain/issues/408)) ([7d980eb](https://github.com/microsoft/physical-ai-toolchain/commit/7d980eb52fe7dedd0e42a6e8da1a72c4760a943e))
+
 ## [0.7.2](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.1...v0.7.2) (2026-04-09)
 
 
