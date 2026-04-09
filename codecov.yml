@@ -3,7 +3,9 @@
 # Flags:
 #   go — Go tests covering infrastructure/terraform/e2e/
 #   pester — PowerShell tests covering scripts/
-#   pytest — Python tests covering src/
+#   pytest — Python tests covering training/
+#   pytest-dataviewer — Dataviewer backend tests covering data-management/viewer/backend/src/
+#   pytest-fuzz — Python fuzz regression tests covering tests/, backend, and training
 #   terraform — Terraform tests covering infrastructure/terraform/
 #   vitest — Vitest tests covering data-management/viewer/frontend/src/
 
@@ -40,15 +42,53 @@ coverage:
           - pytest-dataviewer
         target: auto
         threshold: 1%
+      terraform:
+        flags:
+          - terraform
+        target: auto
+        threshold: 1%
       vitest:
         flags:
           - vitest
+        target: auto
+        threshold: 1%
+      pytest-fuzz:
+        flags:
+          - pytest-fuzz
         target: auto
         threshold: 1%
     patch:
       default:
         target: auto
         threshold: 5%
+      go:
+        flags:
+          - go
+        informational: true
+      pester:
+        flags:
+          - pester
+        informational: true
+      pytest:
+        flags:
+          - pytest
+        informational: true
+      pytest-dataviewer:
+        flags:
+          - pytest-dataviewer
+        informational: true
+      terraform:
+        flags:
+          - terraform
+        informational: true
+      vitest:
+        flags:
+          - vitest
+        informational: true
+      pytest-fuzz:
+        flags:
+          - pytest-fuzz
+        informational: true
 
 flags:
   go:
@@ -61,7 +101,7 @@ flags:
     carryforward: true
   pytest:
     paths:
-      - src/
+      - training/
     carryforward: true
   pytest-dataviewer:
     paths:
@@ -74,6 +114,12 @@ flags:
   vitest:
     paths:
       - data-management/viewer/frontend/src/
+    carryforward: true
+  pytest-fuzz:
+    paths:
+      - tests/
+      - data-management/viewer/backend/src/
+      - training/
     carryforward: true
 
 parsers:

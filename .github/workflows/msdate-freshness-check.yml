@@ -58,7 +58,7 @@ jobs:
           if ($env:CHANGED_FILES_ONLY -eq 'true') {
             $params['ChangedFilesOnly'] = $true
           }
-          & shared/ci/linting/Invoke-MsDateFreshnessCheck.ps1 @params
+          & scripts/linting/Invoke-MsDateFreshnessCheck.ps1 @params
         continue-on-error: ${{ inputs.soft-fail }}
 
       - name: Upload freshness check results

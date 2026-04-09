@@ -103,6 +103,7 @@ jobs:
       security-events: write  # Required for SARIF upload to Security tab
     with:
       upload-sarif: true
+      exclude-paths: 'scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**'
 
   # PowerShell Pester test execution
   pester-tests:
@@ -126,6 +127,15 @@ jobs:
       contents: read
       id-token: write
 
+  # Docusaurus documentation site tests and build verification
+  docusaurus-tests:
+    name: Docusaurus Tests
+    uses: ./.github/workflows/docusaurus-tests.yml
+    with:
+      soft-fail: false
+    permissions:
+      contents: read
+
   # Python pytest test execution
   pytest-tests:
     name: Pytest Tests
@@ -140,6 +150,16 @@ jobs:
   dataviewer-backend-pytests:
     name: Dataviewer Backend Pytest
     uses: ./.github/workflows/dataviewer-backend-pytests.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
+  # Fuzz regression via deterministic corpus-based tests
+  fuzz-regression-tests:
+    name: Fuzz Regression Tests
+    uses: ./.github/workflows/fuzz-regression-tests.yml
     with:
       code-coverage: true
     permissions:
@@ -167,7 +187,7 @@ jobs:
     name: Terraform Validation
     uses: ./.github/workflows/terraform-validation.yml
     with:
-      soft-fail: true
+      soft-fail: false
       changed-files-only: true
     permissions:
       contents: read
@@ -189,6 +209,16 @@ jobs:
     name: Go Lint
     uses: ./.github/workflows/go-lint.yml
     with:
+      soft-fail: false
+      changed-files-only: true
+    permissions:
+      contents: read
+
+  # Terraform documentation freshness check
+  terraform-docs-check:
+    name: Terraform Docs Check
+    uses: ./.github/workflows/terraform-docs-check.yml
+    with:
       soft-fail: true
       changed-files-only: true
     permissions:
@@ -205,6 +235,16 @@ jobs:
     permissions:
       contents: read
       id-token: write
+
+  # ShellCheck linting for shell scripts
+  shellcheck:
+    name: ShellCheck
+    uses: ./.github/workflows/shellcheck.yml
+    with:
+      soft-fail: false
+      changed-files-only: true
+    permissions:
+      contents: read
 
   # CodeQL security analysis
   codeql-analysis:

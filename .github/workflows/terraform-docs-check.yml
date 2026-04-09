@@ -1,0 +1,87 @@
+name: Terraform Docs Check
+
+on:
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Whether to continue on terraform-docs drift detection'
+        required: false
+        type: boolean
+        default: false
+      changed-files-only:
+        description: 'Only check directories with changed Terraform files'
+        required: false
+        type: boolean
+        default: false
+      terraform-docs-version:
+        description: 'terraform-docs version to install'
+        required: false
+        type: string
+        default: 'v0.21.0'
+      terraform-docs-sha256:
+        description: 'SHA256 checksum of terraform-docs linux-amd64 tarball'
+        required: false
+        type: string
+        default: '2fdd81b8d21ff1498cd559af0dcc5d155835f84600db06d3923e217124fc735a'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  terraform-docs-check:
+    name: Terraform Docs Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: ${{ inputs.changed-files-only && '0' || '1' }}
+
+      - name: Create logs directory
+        run: New-Item -ItemType Directory -Force -Path logs | Out-Null
+
+      - name: Setup Node.js and install dependencies
+        uses: ./.github/actions/setup-node-deps
+
+      - name: Install terraform-docs
+        run: |
+          $version = '${{ inputs.terraform-docs-version }}'
+          $expectedSha = '${{ inputs.terraform-docs-sha256 }}'
+          $tarball = 'terraform-docs.tar.gz'
+          $url = "https://github.com/terraform-docs/terraform-docs/releases/download/${version}/terraform-docs-${version}-linux-amd64.tar.gz"
+
+          Invoke-WebRequest -Uri $url -OutFile $tarball
+
+          $actualSha = (Get-FileHash -Path $tarball -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha -ne $expectedSha) {
+            throw "SHA256 mismatch for terraform-docs ${version}: expected '${expectedSha}', got '${actualSha}'"
+          }
+          Write-Output "SHA256 verified: ${actualSha}"
+
+          tar -xzf $tarball
+          sudo mv terraform-docs /usr/local/bin/
+          terraform-docs --version
+
+      - name: Run terraform-docs check
+        continue-on-error: ${{ inputs.soft-fail }}
+        run: |
+          $params = @{}
+          if ('${{ inputs.changed-files-only }}' -eq 'true') {
+            $params['ChangedFilesOnly'] = $true
+          }
+          scripts/linting/Invoke-TerraformDocsCheck.ps1 @params
+
+      - name: Upload terraform-docs check results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: terraform-docs-check-results
+          path: logs/terraform-docs-check-results.json
+          retention-days: 30

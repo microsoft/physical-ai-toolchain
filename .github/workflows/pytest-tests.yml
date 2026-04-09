@@ -44,14 +44,14 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: pytest-coverage-xml
-          path: coverage.xml
+          path: logs/coverage.xml
           retention-days: 30
 
       - name: Upload coverage to Codecov
         if: ${{ inputs.code-coverage && always() }}
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
-          files: coverage.xml
+          files: logs/coverage.xml
           use_oidc: true
           fail_ci_if_error: false
           verbose: true

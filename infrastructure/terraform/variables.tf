@@ -72,6 +72,12 @@ variable "should_enable_purge_protection" {
  * Storage Lifecycle Management
  */
 
+variable "should_create_data_lake_storage" {
+  type        = bool
+  description = "Whether to create a dedicated ADLS Gen2 storage account with hierarchical namespace for domain data (datasets, model checkpoints)"
+  default     = false
+}
+
 variable "should_enable_raw_bags_lifecycle_policy" {
   type        = bool
   description = "Whether to enable lifecycle policy for raw ROS bags (auto-delete after retention period)"
@@ -282,7 +288,7 @@ variable "nat_gateway_zones" {
   type        = list(string)
   description = "Availability zones for NAT Gateway and its public IP. Set to [\"1\"] in regions with AZ support. Leave empty for regions without AZ support (e.g. westus)"
   default     = ["1"]
-  
+
   validation {
     condition     = alltrue([for z in var.nat_gateway_zones : contains(["1", "2", "3"], z)])
     error_message = "Each zone must be \"1\", \"2\", or \"3\""
@@ -477,6 +483,12 @@ variable "should_deploy_dce" {
 /*
  * AzureML Compute Configuration - Optional
  */
+
+variable "should_enable_aml_diagnostic_logs" {
+  type        = bool
+  description = "Whether to enable AML workspace diagnostic logs in Log Analytics"
+  default     = false
+}
 
 variable "should_deploy_aml_compute" {
   type        = bool

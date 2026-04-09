@@ -95,6 +95,7 @@ module "platform" {
   should_add_current_user_key_vault_admin = var.should_add_current_user_key_vault_admin
   should_add_current_user_storage_blob    = var.should_add_current_user_storage_blob
   should_enable_purge_protection          = var.should_enable_purge_protection
+  should_create_data_lake_storage         = var.should_create_data_lake_storage
 
   // Storage lifecycle management
   should_enable_raw_bags_lifecycle_policy           = var.should_enable_raw_bags_lifecycle_policy
@@ -134,8 +135,9 @@ module "platform" {
   should_deploy_dce               = var.should_deploy_dce
 
   // AzureML compute
-  should_deploy_aml_compute = var.should_deploy_aml_compute
-  aml_compute_config        = var.aml_compute_config
+  should_enable_aml_diagnostic_logs = var.should_enable_aml_diagnostic_logs
+  should_deploy_aml_compute         = var.should_deploy_aml_compute
+  aml_compute_config                = var.aml_compute_config
 
   // DNS zone flags
   should_include_aks_dns_zone = var.should_include_aks_dns_zone

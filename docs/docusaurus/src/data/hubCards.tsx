@@ -18,7 +18,7 @@ export const iconCards: IconCardProps[] = [
     icon: <CloudIcon />,
     supertitle: 'Infrastructure',
     title: 'Deploy Infrastructure',
-    href: '/deploy/',
+    href: '/infrastructure/',
     description: 'Provision AKS clusters, networking, storage, and identity with Terraform.',
   },
   {
@@ -56,7 +56,7 @@ export const boxCards: BoxCardProps[] = [
     title: 'Architecture Guide',
     links: [
       { label: 'System architecture', href: '/contributing/architecture' },
-      { label: 'Network topology', href: '/deploy/infrastructure-reference' },
+      { label: 'Network topology', href: '/infrastructure/infrastructure-reference' },
       { label: 'Lifecycle domains', href: '/contributing/architecture#domain-overview' },
     ],
     icon: '/img/icons/clipboard-task.svg',
@@ -74,8 +74,8 @@ export const boxCards: BoxCardProps[] = [
     title: 'Security',
     links: [
       { label: 'Security review checklist', href: '/contributing/security-review' },
-      { label: 'Private cluster access', href: '/deploy/vpn' },
-      { label: 'Identity and credentials', href: '/deploy/infrastructure#osmo-workload-identity' },
+      { label: 'Private cluster access', href: '/infrastructure/vpn' },
+      { label: 'Identity and credentials', href: '/infrastructure/infrastructure-deployment#osmo-workload-identity' },
     ],
     icon: '/img/icons/shield-lock.svg',
   },

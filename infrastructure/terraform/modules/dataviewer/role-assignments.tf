@@ -27,3 +27,16 @@ resource "azurerm_role_assignment" "dataviewer_storage_blob" {
   principal_id                     = azurerm_user_assigned_identity.dataviewer.principal_id
   skip_service_principal_aad_check = true
 }
+
+// ============================================================
+// Data Lake Storage Role Assignments
+// ============================================================
+
+resource "azurerm_role_assignment" "dataviewer_data_lake_blob" {
+  count = var.data_lake_storage_account != null ? 1 : 0
+
+  scope                            = var.data_lake_storage_account.id
+  role_definition_name             = "Storage Blob Data Contributor"
+  principal_id                     = azurerm_user_assigned_identity.dataviewer.principal_id
+  skip_service_principal_aad_check = true
+}
