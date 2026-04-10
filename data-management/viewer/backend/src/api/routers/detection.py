@@ -9,17 +9,15 @@ import logging
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from ..csrf import require_csrf_token
 from ..models.detection import DetectionRequest, EpisodeDetectionSummary
+from ..rate_limiter import limiter
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.detection_service import DetectionService, get_detection_service
 from ..validation import SAFE_DATASET_ID_PATTERN, path_int_param, path_string_param
 
 router = APIRouter()
-limiter = Limiter(key_func=get_remote_address)
 logger = logging.getLogger(__name__)
 
 

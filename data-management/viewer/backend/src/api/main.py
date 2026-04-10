@@ -11,13 +11,13 @@ from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from .auth import require_auth
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token
 from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
+from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels
 from .routes import ai_analysis
 
@@ -86,8 +86,6 @@ app = FastAPI(
     },
 )
 
-# Rate limiter shared state
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
