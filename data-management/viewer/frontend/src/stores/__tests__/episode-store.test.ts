@@ -1,8 +1,14 @@
+import { renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { EpisodeData, EpisodeMeta } from '@/types'
 
-import { useEpisodeStore } from '../episode-store'
+import {
+  useCurrentEpisodeIndex,
+  useEpisodeNavigation,
+  useEpisodeStore,
+  usePlaybackControls,
+} from '../episode-store'
 
 const mockEpisodes: EpisodeMeta[] = [
   { index: 0, length: 120, taskIndex: 0, task: 'pick', hasAnnotations: false },
@@ -163,6 +169,88 @@ describe('useEpisodeStore', () => {
       expect(state.currentEpisode).toBeNull()
       expect(state.currentIndex).toBe(-1)
       expect(state.isPlaying).toBe(false)
+    })
+  })
+
+  describe('setLoading', () => {
+    it('sets loading to true', () => {
+      useEpisodeStore.getState().setLoading(true)
+      expect(useEpisodeStore.getState().isLoading).toBe(true)
+    })
+
+    it('sets loading to false', () => {
+      useEpisodeStore.getState().setLoading(true)
+      useEpisodeStore.getState().setLoading(false)
+      expect(useEpisodeStore.getState().isLoading).toBe(false)
+    })
+  })
+})
+
+describe('episode-store selector hooks', () => {
+  beforeEach(() => {
+    useEpisodeStore.getState().reset()
+  })
+
+  describe('useCurrentEpisodeIndex', () => {
+    it('returns -1 when no episode is selected', () => {
+      const { result } = renderHook(() => useCurrentEpisodeIndex())
+      expect(result.current).toBe(-1)
+    })
+
+    it('returns current index after setting episode', () => {
+      useEpisodeStore.getState().setEpisodes(mockEpisodes)
+      useEpisodeStore.getState().setCurrentEpisode(mockEpisodeData)
+
+      const { result } = renderHook(() => useCurrentEpisodeIndex())
+      expect(result.current).toBe(1)
+    })
+  })
+
+  describe('useEpisodeNavigation', () => {
+    it('disables navigation with no episodes', () => {
+      const { result } = renderHook(() => useEpisodeNavigation())
+      expect(result.current.canGoNext).toBe(false)
+      expect(result.current.canGoPrevious).toBe(false)
+    })
+
+    it('enables next when not at last episode', () => {
+      useEpisodeStore.getState().setEpisodes(mockEpisodes)
+      useEpisodeStore.getState().navigateToEpisode(0)
+
+      const { result } = renderHook(() => useEpisodeNavigation())
+      expect(result.current.canGoNext).toBe(true)
+      expect(result.current.canGoPrevious).toBe(false)
+    })
+
+    it('enables previous when not at first episode', () => {
+      useEpisodeStore.getState().setEpisodes(mockEpisodes)
+      useEpisodeStore.getState().navigateToEpisode(2)
+
+      const { result } = renderHook(() => useEpisodeNavigation())
+      expect(result.current.canGoNext).toBe(false)
+      expect(result.current.canGoPrevious).toBe(true)
+    })
+
+    it('provides navigation functions', () => {
+      const { result } = renderHook(() => useEpisodeNavigation())
+      expect(result.current.nextEpisode).toBeTypeOf('function')
+      expect(result.current.previousEpisode).toBeTypeOf('function')
+    })
+  })
+
+  describe('usePlaybackControls', () => {
+    it('returns default playback state', () => {
+      const { result } = renderHook(() => usePlaybackControls())
+      expect(result.current.currentFrame).toBe(0)
+      expect(result.current.isPlaying).toBe(false)
+      expect(result.current.playbackSpeed).toBe(1.0)
+    })
+
+    it('provides playback control functions', () => {
+      const { result } = renderHook(() => usePlaybackControls())
+      expect(result.current.setCurrentFrame).toBeTypeOf('function')
+      expect(result.current.togglePlayback).toBeTypeOf('function')
+      expect(result.current.setPlaybackSpeed).toBeTypeOf('function')
     })
   })
 })

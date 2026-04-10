@@ -1,8 +1,16 @@
+import { renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { Anomaly, EpisodeAnnotation } from '@/types'
 
-import { useAnnotationStore } from '../annotation-store'
+import {
+  useAnnotationDirtyState,
+  useAnnotationStore,
+  useAnomalyState,
+  useDataQualityState,
+  useTaskCompletenessState,
+  useTrajectoryQualityState,
+} from '../annotation-store'
 
 const mockAnnotation: EpisodeAnnotation = {
   annotatorId: 'user-1',
@@ -228,6 +236,101 @@ describe('useAnnotationStore', () => {
       const state = useAnnotationStore.getState()
       expect(state.error).toBe('Save failed')
       expect(state.isSaving).toBe(false)
+    })
+  })
+})
+
+describe('annotation-store selector hooks', () => {
+  beforeEach(() => {
+    useAnnotationStore.getState().clear()
+  })
+
+  describe('useAnnotationDirtyState', () => {
+    it('returns isDirty and isSaving from store', () => {
+      const { result } = renderHook(() => useAnnotationDirtyState())
+      expect(result.current.isDirty).toBe(false)
+      expect(result.current.isSaving).toBe(false)
+    })
+
+    it('reflects dirty state after mutation', () => {
+      useAnnotationStore.getState().loadAnnotation(mockAnnotation)
+      useAnnotationStore.getState().updateTaskCompleteness({ rating: 'failure' })
+
+      const { result } = renderHook(() => useAnnotationDirtyState())
+      expect(result.current.isDirty).toBe(true)
+    })
+
+    it('reflects saving state', () => {
+      useAnnotationStore.getState().setSaving(true)
+
+      const { result } = renderHook(() => useAnnotationDirtyState())
+      expect(result.current.isSaving).toBe(true)
+    })
+  })
+
+  describe('useTaskCompletenessState', () => {
+    it('returns undefined when no annotation loaded', () => {
+      const { result } = renderHook(() => useTaskCompletenessState())
+      expect(result.current.taskCompleteness).toBeUndefined()
+      expect(result.current.updateTaskCompleteness).toBeTypeOf('function')
+    })
+
+    it('returns current task completeness', () => {
+      useAnnotationStore.getState().loadAnnotation(mockAnnotation)
+
+      const { result } = renderHook(() => useTaskCompletenessState())
+      expect(result.current.taskCompleteness?.rating).toBe('success')
+      expect(result.current.taskCompleteness?.confidence).toBe(4)
+    })
+  })
+
+  describe('useTrajectoryQualityState', () => {
+    it('returns undefined when no annotation loaded', () => {
+      const { result } = renderHook(() => useTrajectoryQualityState())
+      expect(result.current.trajectoryQuality).toBeUndefined()
+      expect(result.current.updateTrajectoryQuality).toBeTypeOf('function')
+    })
+
+    it('returns current trajectory quality', () => {
+      useAnnotationStore.getState().loadAnnotation(mockAnnotation)
+
+      const { result } = renderHook(() => useTrajectoryQualityState())
+      expect(result.current.trajectoryQuality?.metrics?.smoothness).toBe(4)
+    })
+  })
+
+  describe('useDataQualityState', () => {
+    it('returns undefined when no annotation loaded', () => {
+      const { result } = renderHook(() => useDataQualityState())
+      expect(result.current.dataQuality).toBeUndefined()
+      expect(result.current.updateDataQuality).toBeTypeOf('function')
+    })
+
+    it('returns current data quality', () => {
+      useAnnotationStore.getState().loadAnnotation(mockAnnotation)
+
+      const { result } = renderHook(() => useDataQualityState())
+      expect(result.current.dataQuality?.overallQuality).toBe('good')
+    })
+  })
+
+  describe('useAnomalyState', () => {
+    it('returns empty anomalies when no annotation loaded', () => {
+      const { result } = renderHook(() => useAnomalyState())
+      expect(result.current.anomalies).toEqual([])
+      expect(result.current.addAnomaly).toBeTypeOf('function')
+      expect(result.current.updateAnomaly).toBeTypeOf('function')
+      expect(result.current.removeAnomaly).toBeTypeOf('function')
+      expect(result.current.toggleAnomalyVerified).toBeTypeOf('function')
+    })
+
+    it('returns anomalies from loaded annotation', () => {
+      useAnnotationStore.getState().loadAnnotation(mockAnnotation)
+      useAnnotationStore.getState().addAnomaly(mockAnomaly)
+
+      const { result } = renderHook(() => useAnomalyState())
+      expect(result.current.anomalies).toHaveLength(1)
+      expect(result.current.anomalies[0].id).toBe('anom-1')
     })
   })
 })

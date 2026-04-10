@@ -4,6 +4,7 @@
 
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
+import { useShallow } from 'zustand/react/shallow'
 
 import type {
   Anomaly,
@@ -12,6 +13,8 @@ import type {
   TaskCompletenessAnnotation,
   TrajectoryQualityAnnotation,
 } from '@/types'
+
+const EMPTY_ANOMALIES: Anomaly[] = []
 
 interface AnnotationState {
   /** Current annotation being edited */
@@ -360,34 +363,44 @@ export const useAnnotationStore = create<AnnotationStore>()(
 
 // Selector hooks for common patterns
 export const useAnnotationDirtyState = () =>
-  useAnnotationStore((state) => ({
-    isDirty: state.isDirty,
-    isSaving: state.isSaving,
-  }))
+  useAnnotationStore(
+    useShallow((state) => ({
+      isDirty: state.isDirty,
+      isSaving: state.isSaving,
+    })),
+  )
 
 export const useTaskCompletenessState = () =>
-  useAnnotationStore((state) => ({
-    taskCompleteness: state.currentAnnotation?.taskCompleteness,
-    updateTaskCompleteness: state.updateTaskCompleteness,
-  }))
+  useAnnotationStore(
+    useShallow((state) => ({
+      taskCompleteness: state.currentAnnotation?.taskCompleteness,
+      updateTaskCompleteness: state.updateTaskCompleteness,
+    })),
+  )
 
 export const useTrajectoryQualityState = () =>
-  useAnnotationStore((state) => ({
-    trajectoryQuality: state.currentAnnotation?.trajectoryQuality,
-    updateTrajectoryQuality: state.updateTrajectoryQuality,
-  }))
+  useAnnotationStore(
+    useShallow((state) => ({
+      trajectoryQuality: state.currentAnnotation?.trajectoryQuality,
+      updateTrajectoryQuality: state.updateTrajectoryQuality,
+    })),
+  )
 
 export const useDataQualityState = () =>
-  useAnnotationStore((state) => ({
-    dataQuality: state.currentAnnotation?.dataQuality,
-    updateDataQuality: state.updateDataQuality,
-  }))
+  useAnnotationStore(
+    useShallow((state) => ({
+      dataQuality: state.currentAnnotation?.dataQuality,
+      updateDataQuality: state.updateDataQuality,
+    })),
+  )
 
 export const useAnomalyState = () =>
-  useAnnotationStore((state) => ({
-    anomalies: state.currentAnnotation?.anomalies.anomalies ?? [],
-    addAnomaly: state.addAnomaly,
-    updateAnomaly: state.updateAnomaly,
-    removeAnomaly: state.removeAnomaly,
-    toggleAnomalyVerified: state.toggleAnomalyVerified,
-  }))
+  useAnnotationStore(
+    useShallow((state) => ({
+      anomalies: state.currentAnnotation?.anomalies.anomalies ?? EMPTY_ANOMALIES,
+      addAnomaly: state.addAnomaly,
+      updateAnomaly: state.updateAnomaly,
+      removeAnomaly: state.removeAnomaly,
+      toggleAnomalyVerified: state.toggleAnomalyVerified,
+    })),
+  )

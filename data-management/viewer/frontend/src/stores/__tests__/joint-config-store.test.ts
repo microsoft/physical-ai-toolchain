@@ -109,4 +109,12 @@ describe('joint-config-store', () => {
     expect(useJointConfigStore.getState().config.datasetId).toBe('_local')
     expect(useJointConfigStore.getState().isLoaded).toBe(false)
   })
+
+  it('initDefaults is a no-op when already loaded', () => {
+    useJointConfigStore.getState().setConfig(defaultConfig)
+    expect(useJointConfigStore.getState().isLoaded).toBe(true)
+
+    useJointConfigStore.getState().initDefaults('different-dataset')
+    expect(useJointConfigStore.getState().config.datasetId).toBe('test-dataset')
+  })
 })
