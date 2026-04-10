@@ -54,9 +54,16 @@ run_python() {
 
 if ! command -v uv &>/dev/null; then
   echo "Installing uv package manager..."
-  if curl -LsSf https://astral.sh/uv/0.10.9/install.sh | sh 2>/dev/null; then
-    export PATH="${HOME}/.local/bin:${PATH}"
-  fi
+  UV_VERSION="0.10.9"
+  UV_SHA256="20d79708222611fa540b5c9ed84f352bcd3937740e51aacc0f8b15b271c57594"
+  curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/uv.tar.gz
+  echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
+  tar -xzf /tmp/uv.tar.gz -C /tmp
+  mkdir -p "${HOME}/.local/bin"
+  install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uv "${HOME}/.local/bin/uv"
+  install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uvx "${HOME}/.local/bin/uvx"
+  rm -rf /tmp/uv.tar.gz /tmp/uv-x86_64-unknown-linux-gnu
+  export PATH="${HOME}/.local/bin:${PATH}"
 fi
 
 configure_uv

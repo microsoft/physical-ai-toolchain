@@ -46,8 +46,19 @@ section "UV Package Manager Setup"
 
 if ! command -v uv &>/dev/null; then
   info "Installing uv package manager..."
-  curl -LsSf https://astral.sh/uv/0.10.9/install.sh | sh
-  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  UV_VERSION="0.10.9"
+  UV_ARCH=$(uname -m)
+  case "${UV_ARCH}" in
+    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="20d79708222611fa540b5c9ed84f352bcd3937740e51aacc0f8b15b271c57594" ;;
+    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="cc0c5a8573e7d6d78aecb954e0a62b5c0d18217bb81f1e19363b428c57a9962a" ;;
+    *) error "Unsupported architecture for uv: ${UV_ARCH}"; exit 1 ;;
+  esac
+  curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TRIPLE}.tar.gz" -o /tmp/uv.tar.gz
+  echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
+  tar -xzf /tmp/uv.tar.gz -C /tmp
+  sudo install -m 0755 "/tmp/uv-${UV_TRIPLE}/uv" /usr/local/bin/uv
+  sudo install -m 0755 "/tmp/uv-${UV_TRIPLE}/uvx" /usr/local/bin/uvx
+  rm -rf /tmp/uv.tar.gz "/tmp/uv-${UV_TRIPLE}"
 fi
 
 info "Using uv: $(uv --version)"
@@ -61,8 +72,8 @@ TERRAFORM_DOCS_VERSION="0.21.0"
 
 ARCH=$(uname -m)
 case "${ARCH}" in
-  x86_64)  ARCH="amd64" ;;
-  aarch64|arm64) ARCH="arm64" ;;
+  x86_64)  ARCH="amd64"; TERRAFORM_DOCS_SHA256="2fdd81b8d21ff1498cd559af0dcc5d155835f84600db06d3923e217124fc735a" ;;
+  aarch64|arm64) ARCH="arm64"; TERRAFORM_DOCS_SHA256="35b2e6846268841484e6eea7d00d7dfe2c94b4725e52cfe19aa6c26a86c32edc" ;;
   *) error "Unsupported architecture: ${ARCH}"; exit 1 ;;
 esac
 
@@ -72,6 +83,7 @@ else
   info "Installing terraform-docs v${TERRAFORM_DOCS_VERSION}..."
   curl -sSLo /tmp/terraform-docs.tar.gz \
     "https://github.com/terraform-docs/terraform-docs/releases/download/v${TERRAFORM_DOCS_VERSION}/terraform-docs-v${TERRAFORM_DOCS_VERSION}-$(uname -s | tr '[:upper:]' '[:lower:]')-${ARCH}.tar.gz"
+  echo "${TERRAFORM_DOCS_SHA256}  /tmp/terraform-docs.tar.gz" | sha256sum -c --quiet -
   tar -xzf /tmp/terraform-docs.tar.gz -C /tmp terraform-docs
   sudo mv /tmp/terraform-docs /usr/local/bin/terraform-docs
   sudo chmod +x /usr/local/bin/terraform-docs
