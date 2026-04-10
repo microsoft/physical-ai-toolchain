@@ -15,6 +15,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.7.4](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.3...v0.7.4) (2026-04-10)
+
+
+### 🔧 Miscellaneous
+
+* **deps:** bump cryptography from 46.0.6 to 46.0.7 in /training/rl ([#422](https://github.com/microsoft/physical-ai-toolchain/issues/422)) ([f220042](https://github.com/microsoft/physical-ai-toolchain/commit/f2200429daaac64fc850a18bf0b62ec09ff4c930))
+
+## [0.7.3](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.2...v0.7.3) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the training-dependencies group in /training/rl with 7 updates ([#408](https://github.com/microsoft/physical-ai-toolchain/issues/408)) ([7d980eb](https://github.com/microsoft/physical-ai-toolchain/commit/7d980eb52fe7dedd0e42a6e8da1a72c4760a943e))
+
+## [0.7.2](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.1...v0.7.2) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the dataviewer-dependencies group in /data-management/viewer with 13 updates ([#405](https://github.com/microsoft/physical-ai-toolchain/issues/405)) ([fb7b4a4](https://github.com/microsoft/physical-ai-toolchain/commit/fb7b4a4f0af826ab94c155e22921d55e94af469b))
+
 ## [0.7.1](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.0...v0.7.1) (2026-04-09)
 
 
