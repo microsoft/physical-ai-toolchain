@@ -368,7 +368,7 @@ if [[ "$ACSA_SHOULD_APPLY_INGEST_POLICY" == "true" ]]; then
   kubectl apply -f "$render_dir/acsa-ingest-policy.yaml"
 fi
 
-kubectl -n "$EDGE_NAMESPACE" wait --for=condition=Bound "pvc/$ACSA_PVC_NAME" --timeout=180s
+kubectl -n "$EDGE_NAMESPACE" wait --for=jsonpath='{.status.phase}'=Bound "pvc/$ACSA_PVC_NAME" --timeout=180s
 
 if kubectl -n "$EDGE_NAMESPACE" get "edgevolumes/$ACSA_PVC_NAME" >/dev/null 2>&1; then
   kubectl -n "$EDGE_NAMESPACE" wait --for=jsonpath='{.status.state}'=deployed "edgevolumes/$ACSA_PVC_NAME" --timeout=180s
