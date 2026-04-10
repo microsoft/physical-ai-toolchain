@@ -289,6 +289,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Resource Group" "$resource_group"
   print_kv "Workspace" "$workspace_name"
   print_kv "Compute" "${compute:-<not set>}"
+  print_kv "Instance Type" "$instance_type"
   print_kv "Environment" "${environment_name}:${environment_version}"
   exit 0
 fi
@@ -321,6 +322,7 @@ az_args=(
 )
 
 [[ -n "$compute" ]] && az_args+=(--set "compute=$compute")
+[[ -n "$instance_type" ]] && az_args+=(--set "resources.instance_type=$instance_type")
 [[ -n "$display_name" ]] && az_args+=(--set "display_name=$display_name")
 
 # Input values
@@ -423,5 +425,6 @@ print_kv "Policy Type" "$policy_type"
 print_kv "Eval Episodes" "$eval_episodes"
 print_kv "MLflow" "$mlflow_enable"
 print_kv "Compute" "${compute:-<not set>}"
+print_kv "Instance Type" "$instance_type"
 print_kv "Environment" "${environment_name}:${environment_version}"
 print_kv "Workspace" "$workspace_name"

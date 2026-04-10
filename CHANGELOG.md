@@ -15,6 +15,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.7.4](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.3...v0.7.4) (2026-04-10)
+
+
+### 🔧 Miscellaneous
+
+* **deps:** bump cryptography from 46.0.6 to 46.0.7 in /training/rl ([#422](https://github.com/microsoft/physical-ai-toolchain/issues/422)) ([f220042](https://github.com/microsoft/physical-ai-toolchain/commit/f2200429daaac64fc850a18bf0b62ec09ff4c930))
+
+## [0.7.3](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.2...v0.7.3) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the training-dependencies group in /training/rl with 7 updates ([#408](https://github.com/microsoft/physical-ai-toolchain/issues/408)) ([7d980eb](https://github.com/microsoft/physical-ai-toolchain/commit/7d980eb52fe7dedd0e42a6e8da1a72c4760a943e))
+
+## [0.7.2](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.1...v0.7.2) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the dataviewer-dependencies group in /data-management/viewer with 13 updates ([#405](https://github.com/microsoft/physical-ai-toolchain/issues/405)) ([fb7b4a4](https://github.com/microsoft/physical-ai-toolchain/commit/fb7b4a4f0af826ab94c155e22921d55e94af469b))
+
+## [0.7.1](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.0...v0.7.1) (2026-04-09)
+
+
+### 🔒 Security
+
+* **deps:** bump the docusaurus-dependencies group in /docs/docusaurus with 14 updates ([#404](https://github.com/microsoft/physical-ai-toolchain/issues/404)) ([ada7211](https://github.com/microsoft/physical-ai-toolchain/commit/ada721127ef0eb1cdfb5b3de6b74323ea9569cff))
+
+## [0.7.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.6.1...v0.7.0) (2026-04-09)
+
+
+### ✨ Features
+
+* **build:** add hve-core release pipeline with dependency SBOM and signing artifacts ([#420](https://github.com/microsoft/physical-ai-toolchain/issues/420)) ([2ff839a](https://github.com/microsoft/physical-ai-toolchain/commit/2ff839a7583d0129a060316ecd3ef2fbcd9ef26d))
+* **build:** enforce strict warnings across all linters ([#392](https://github.com/microsoft/physical-ai-toolchain/issues/392)) ([b75e217](https://github.com/microsoft/physical-ai-toolchain/commit/b75e21735ed655a1c9e027193c9b5939e2eb1c18))
+* **evaluation:** add fuzz testing infrastructure and property-based tests ([#416](https://github.com/microsoft/physical-ai-toolchain/issues/416)) ([d97d42c](https://github.com/microsoft/physical-ai-toolchain/commit/d97d42cea662e825c1dd92bdbb1aa8bdb3521bc6))
+* **infrastructure:** add optional ADLS Gen2 data lake storage account ([#398](https://github.com/microsoft/physical-ai-toolchain/issues/398)) ([3bb9012](https://github.com/microsoft/physical-ai-toolchain/commit/3bb9012be9d5004404064d7b0e9a1fda783c4981))
+* **settings:** add HVE Core extension to workspace and devcontainer recommendations ([#226](https://github.com/microsoft/physical-ai-toolchain/issues/226)) ([f0735d8](https://github.com/microsoft/physical-ai-toolchain/commit/f0735d8e25a4a42dee9448351d6059609f10aef8))
+
+
+### 🐛 Bug Fixes
+
+* **docs:** fix broken links, harden Docusaurus config, and integrate CI workflow ([#430](https://github.com/microsoft/physical-ai-toolchain/issues/430)) ([ea99997](https://github.com/microsoft/physical-ai-toolchain/commit/ea9999735c8e20bb1420a540be2beb4ec48d7cbc))
+* **scripts:** join shellcheck version output before -match to populate $Matches ([#432](https://github.com/microsoft/physical-ai-toolchain/issues/432)) ([8768e76](https://github.com/microsoft/physical-ai-toolchain/commit/8768e7635db46f772e38531a0535b1f7bcf117aa))
+* **scripts:** map unmapped ShellCheck severity levels and harden version parsing ([#434](https://github.com/microsoft/physical-ai-toolchain/issues/434)) ([1e95a17](https://github.com/microsoft/physical-ai-toolchain/commit/1e95a17f7d03b8e4db752ee8758a95842918e5c0))
+* **scripts:** resolve ShellCheck SC2034 and enable source-path resolution ([#443](https://github.com/microsoft/physical-ai-toolchain/issues/443)) ([04438ea](https://github.com/microsoft/physical-ai-toolchain/commit/04438ea5aee4c1cdd5e0ba74e12241935bb02387))
+
+
+### 🔧 Miscellaneous
+
+* **deps-dev:** bump basic-ftp from 5.2.0 to 5.2.1 ([#429](https://github.com/microsoft/physical-ai-toolchain/issues/429)) ([438660a](https://github.com/microsoft/physical-ai-toolchain/commit/438660acf1dd30f56c5ac81986daad9b1585f83d))
+* **deps:** bump cryptography from 46.0.6 to 46.0.7 ([#425](https://github.com/microsoft/physical-ai-toolchain/issues/425)) ([2366647](https://github.com/microsoft/physical-ai-toolchain/commit/236664758681e6682cfa854c63619be3344058fb))
+
 ## [0.6.1](https://github.com/microsoft/physical-ai-toolchain/compare/v0.6.0...v0.6.1) (2026-04-08)
 
 
