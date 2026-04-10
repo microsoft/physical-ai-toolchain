@@ -113,6 +113,10 @@ should_enable_microsoft_defender        = true
 // Storage Lifecycle Management
 // Configure automatic deletion and tiering policies for blob storage
 
+// Data Lake Storage (ADLS Gen2): Optional dedicated storage account with hierarchical namespace
+// for domain data (datasets, model checkpoints). When enabled, lifecycle policies move to the data lake account.
+// should_create_data_lake_storage = false
+
 // Raw ROS bags: Auto-delete after 30 days (configurable)
 should_enable_raw_bags_lifecycle_policy = true
 raw_bags_retention_days                 = 30  # Set to -1 to disable auto-delete

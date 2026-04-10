@@ -282,7 +282,6 @@ Log messages like `"Failed to extract or log metrics at step X"` indicate transi
 ## Related Documentation
 
 * [Training Guide](README.md)
-* [Inference Guide](../inference/README.md)
 * [Workflow Templates](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/README.md)
 
 ---

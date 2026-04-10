@@ -1,0 +1,11 @@
+# ShellCheck configuration
+# Severity: warning (excludes info and style per warnings_strict policy)
+shell=bash
+severity=warning
+external-sources=true
+
+# Search paths for resolving sourced files
+# SCRIPTDIR: resolve relative to each script's directory ($SCRIPT_DIR patterns)
+# Repo root (.): resolve $REPO_ROOT-based source paths
+source-path=SCRIPTDIR
+source-path=.

@@ -46,8 +46,6 @@ Standalone guides available now. These cover common tasks and will move into the
 
 | Guide                                                                              | Description                                                                                                         |
 |------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| [AzureML Validation Job Debugging](operations/azureml-validation-job-debugging.md) | Diagnosing and resolving AzureML validation job failures on AKS, including pod scheduling and resource quota issues |
-| [LeRobot Inference](inference/lerobot-inference.md)                                | Running LeRobot inference workloads with pre-trained policies on Azure infrastructure                               |
 | [MLflow Integration](training/mlflow-integration.md)                               | Configuring MLflow experiment tracking for SKRL training agents with automatic metric logging to Azure ML           |
 | [Security Guide](operations/security-guide.md)                                     | Security configuration inventory, deployment responsibilities, and hardening checklist for robotics workloads       |
 

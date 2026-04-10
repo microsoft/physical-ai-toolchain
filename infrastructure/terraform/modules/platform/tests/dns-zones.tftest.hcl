@@ -23,7 +23,7 @@ run "setup" {
   }
 }
 
-// PE on + AKS zone on + AMPLS on = 6 base + 1 AKS + 4 monitor = 11
+// PE on + AKS zone on + AMPLS on = 7 base + 1 AKS + 4 monitor = 12
 run "all_dns_zones" {
   command = plan
 
@@ -40,12 +40,12 @@ run "all_dns_zones" {
   }
 
   assert {
-    condition     = length(azurerm_private_dns_zone.core) == 11
-    error_message = "Expected 11 DNS zones (6 base + 1 AKS + 4 monitor)"
+    condition     = length(azurerm_private_dns_zone.core) == 12
+    error_message = "Expected 12 DNS zones (7 base + 1 AKS + 4 monitor)"
   }
 }
 
-// PE on + AKS zone off + AMPLS on = 6 base + 4 monitor = 10
+// PE on + AKS zone off + AMPLS on = 7 base + 4 monitor = 11
 run "no_aks_zone" {
   command = plan
 
@@ -62,12 +62,12 @@ run "no_aks_zone" {
   }
 
   assert {
-    condition     = length(azurerm_private_dns_zone.core) == 10
-    error_message = "Expected 10 DNS zones (6 base + 4 monitor, no AKS)"
+    condition     = length(azurerm_private_dns_zone.core) == 11
+    error_message = "Expected 11 DNS zones (7 base + 4 monitor, no AKS)"
   }
 }
 
-// PE on + AKS zone on + AMPLS off = 6 base + 1 AKS = 7
+// PE on + AKS zone on + AMPLS off = 7 base + 1 AKS = 8
 run "no_ampls_zones" {
   command = plan
 
@@ -84,12 +84,12 @@ run "no_ampls_zones" {
   }
 
   assert {
-    condition     = length(azurerm_private_dns_zone.core) == 7
-    error_message = "Expected 7 DNS zones (6 base + 1 AKS, no AMPLS)"
+    condition     = length(azurerm_private_dns_zone.core) == 8
+    error_message = "Expected 8 DNS zones (7 base + 1 AKS, no AMPLS)"
   }
 }
 
-// PE on + AKS zone off + AMPLS off = 6 base only
+// PE on + AKS zone off + AMPLS off = 7 base only
 run "base_zones_only" {
   command = plan
 
@@ -106,8 +106,8 @@ run "base_zones_only" {
   }
 
   assert {
-    condition     = length(azurerm_private_dns_zone.core) == 6
-    error_message = "Expected 6 base DNS zones"
+    condition     = length(azurerm_private_dns_zone.core) == 7
+    error_message = "Expected 7 base DNS zones"
   }
 }
 

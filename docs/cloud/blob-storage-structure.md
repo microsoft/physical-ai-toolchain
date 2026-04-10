@@ -1,19 +1,33 @@
-# Azure Blob Storage Folder Structure
+# Azure Storage Architecture
 
-Standardized folder structure for robotics data stored in Azure Blob Storage, including raw ROS bags, converted datasets, validation reports, and model checkpoints.
+Storage architecture for robotics data across two Azure Storage accounts: an ML workspace storage account for AzureML system data, and an optional ADLS Gen2 data lake for domain data (datasets, model checkpoints).
+
+## Storage Accounts
+
+| Account                  | Naming Pattern                                | Type                       | Purpose                                      | Terraform Variable                |
+|--------------------------|-----------------------------------------------|----------------------------|----------------------------------------------|-----------------------------------|
+| ML Workspace Storage     | `st{prefix}{env}{instance}`                   | Standard Blob (StorageV2)  | AzureML system data (logs, snapshots, files)  | Always created                    |
+| Data Lake Storage (Gen2) | `stdl{prefix}{env}{instance}`                 | ADLS Gen2 (HNS enabled)   | Domain data (datasets, model checkpoints)    | `should_create_data_lake_storage` |
+
+The data lake uses hierarchical namespace (HNS), which provides atomic directory renames required by checkpoint libraries and POSIX-style ACLs for fine-grained access control.
 
 ## Container and Folder Organization
 
-**Default Container:** `ml-workspace`
+### ML Workspace Storage
 
-### Folder Structure
+**Container:** `ml-workspace`
 
-| Folder Prefix  | Purpose                             | Lifecycle Policy            | Example Path                                          |
-|----------------|-------------------------------------|-----------------------------|-------------------------------------------------------|
-| `raw/`         | Raw ROS bag files from edge devices | Auto-delete after 30 days   | `raw/robot-01/2026-03-05/episode-001.mcap`            |
-| `converted/`   | LeRobot datasets in v0.3.x format   | Tier to cool after 90 days  | `converted/pick-place-v1/meta/info.json`              |
-| `reports/`     | Validation reports and metrics      | Cool (30d) → Archive (180d) | `reports/pick-place-v1/2026-03-05/eval_results.json`  |
-| `checkpoints/` | Model checkpoints                   | Retained indefinitely (Hot) | `checkpoints/act-policy/20260305_143022_step_1000.pt` |
+Used internally by AzureML for run metadata, code snapshots, and workspace file shares. Not intended for user data.
+
+### Data Lake Storage
+
+| Container    | Subfolder            | Purpose                             | Lifecycle Policy            |
+|--------------|----------------------|-------------------------------------|-----------------------------|
+| `datasets`   | `raw/`               | Raw ROS bag files from edge devices | Auto-delete after 30 days   |
+| `datasets`   | `converted/`         | LeRobot datasets in v0.3.x format   | Tier to cool after 90 days  |
+| `models`     | `base-models/`       | Pre-trained foundation model weights | Retained indefinitely (Hot) |
+| `models`     | `checkpoints/`       | Training checkpoint outputs         | Retained indefinitely (Hot) |
+| `evaluation` | `reports/`           | Validation reports and metrics      | Cool (30d) → Archive (180d) |
 
 ## Naming Conventions
 
@@ -45,8 +59,11 @@ Standardized folder structure for robotics data stored in Azure Blob Storage, in
 
 ## Path Patterns
 
+All domain data paths below are relative to the data lake storage account.
+
 ### Raw ROS Bags
 
+**Container:** `datasets`
 **Pattern:** `raw/{device-id}/{YYYY-MM-DD}/{filename}.mcap`
 
 **Examples:**
@@ -59,6 +76,7 @@ raw/mobile-manipulator-03/2026-03-01/navigation-001.mcap
 
 ### Converted LeRobot Datasets
 
+**Container:** `datasets`
 **Pattern:** `converted/{dataset-id}/meta/info.json`
 
 **Structure:**
@@ -87,6 +105,7 @@ converted/pick-place-v1/videos/observation.image/chunk-000/episode_0000.mp4
 
 ### Validation Reports
 
+**Container:** `evaluation`
 **Pattern:** `reports/{dataset-id}/{YYYY-MM-DD}/{filename}.json`
 
 **Examples:**
@@ -99,6 +118,7 @@ reports/navigation-v2/2026-03-04/mse_results.json
 
 ### Model Checkpoints
 
+**Container:** `models`
 **Pattern:** `checkpoints/{model-name}/{timestamp}_step_{N}.{ext}`
 
 **Examples:**
@@ -111,23 +131,22 @@ checkpoints/velocity-anymal/20260301_120000.onnx
 
 ## Lifecycle Management Policies
 
-Lifecycle policies automatically manage blob storage costs by tiering and deleting data based on age.
+Lifecycle policies on the data lake storage account automatically manage storage costs by tiering and deleting data based on age.
 
 ### Policy Details
 
-| Folder Prefix  | Action          | Timing                | Configurable                              |
-|----------------|-----------------|-----------------------|-------------------------------------------|
-| `raw/`         | Delete          | After 30 days         | Yes (`raw_bags_retention_days`)           |
-| `converted/`   | Tier to Cool    | After 90 days         | Yes (`converted_datasets_cool_tier_days`) |
-| `reports/`     | Tier to Cool    | After 30 days         | Yes (`reports_cool_tier_days`)            |
-| `reports/`     | Tier to Archive | After 180 days        | Yes (`reports_archive_tier_days`)         |
-| `checkpoints/` | None            | Retained indefinitely | N/A                                       |
+| Folder Prefix  | Container    | Action          | Timing                | Configurable                              |
+|----------------|--------------|-----------------|---------------------- |-------------------------------------------|
+| `raw/`         | `datasets`   | Delete          | After 30 days         | Yes (`raw_bags_retention_days`)           |
+| `converted/`   | `datasets`   | Tier to Cool    | After 90 days         | Yes (`converted_datasets_cool_tier_days`) |
+| `reports/`     | `evaluation` | Tier to Cool    | After 30 days         | Yes (`reports_cool_tier_days`)            |
+| `reports/`     | `evaluation` | Tier to Archive | After 180 days        | Yes (`reports_archive_tier_days`)         |
 
 ### Configuration
 
-Lifecycle policies are defined in Terraform variables:
+Lifecycle policies are configured in the root Terraform deployment:
 
-**File:** `deploy/001-iac/terraform.tfvars`
+**Example File:** `infrastructure/terraform/terraform.tfvars.example`
 
 ```hcl
 should_enable_raw_bags_lifecycle_policy          = true
@@ -242,7 +261,7 @@ No migration needed.
 
 **Azure Portal:**
 
-1. Navigate to Storage Account (e.g., `st<resource-prefix><environment><instance>`)
+1. Navigate to Data Lake Storage Account (e.g., `stdl<resource-prefix><environment><instance>`)
 2. Settings → Lifecycle management
 3. Verify rules: `delete-raw-bags`, `tier-converted-datasets-to-cool`, `tier-reports-to-cool-then-archive`
 
@@ -250,7 +269,7 @@ No migration needed.
 
 ```bash
 az storage account management-policy show \
-  --account-name st<resource-prefix><environment><instance> \
+  --account-name stdl<resource-prefix><environment><instance> \
   --resource-group rg-<resource-prefix>-<environment>-<instance>
 ```
 
@@ -290,6 +309,7 @@ az storage account management-policy show \
 
 ## References
 
+- [Azure Data Lake Storage Gen2](https://learn.microsoft.com/azure/storage/blobs/data-lake-storage-introduction)
 - [Azure Blob Storage Lifecycle Management](https://learn.microsoft.com/azure/storage/blobs/lifecycle-management-overview)
 - [Terraform azurerm_storage_management_policy](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_management_policy)
 - [LeRobot Dataset Format v0.3.x](https://github.com/huggingface/lerobot/tree/main/src/lerobot/datasets)

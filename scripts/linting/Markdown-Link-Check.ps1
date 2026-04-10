@@ -194,6 +194,7 @@ function Invoke-MarkdownLinkCheckCore {
             Write-Output "Checking $relative"
 
             $xmlFile = [System.IO.Path]::GetTempFileName() + '.xml'
+            $exitCode = 1
             try {
                 $commandArgs = $baseArguments + @($relative, '--reporters', 'default,junit', '--junit-output', $xmlFile)
                 $output = & $cli @commandArgs 2>&1
