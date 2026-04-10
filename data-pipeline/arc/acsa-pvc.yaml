@@ -1,0 +1,13 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${ACSA_PVC_NAME}
+  namespace: ${EDGE_NAMESPACE}
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: ${ACSA_PVC_SIZE}
+  storageClassName: ${ACSA_STORAGE_CLASS}
