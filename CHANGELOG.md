@@ -15,6 +15,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.7.5](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.4...v0.7.5) (2026-04-11)
+
+
+### 🔧 Miscellaneous
+
+* **deps:** bump cryptography from 46.0.6 to 46.0.7 in /data-management/viewer ([#424](https://github.com/microsoft/physical-ai-toolchain/issues/424)) ([5fb6d58](https://github.com/microsoft/physical-ai-toolchain/commit/5fb6d58d4b733de7def36087b9efc94afc11d739))
+* **deps:** bump cryptography from 46.0.6 to 46.0.7 in /data-management/viewer/backend ([#423](https://github.com/microsoft/physical-ai-toolchain/issues/423)) ([b516ad5](https://github.com/microsoft/physical-ai-toolchain/commit/b516ad52a765634eac67b1e92ae9638343c33024))
+
+
+### 🔒 Security
+
+* **deps-dev:** bump picomatch from 2.3.1 to 2.3.2 in /docs/docusaurus ([#455](https://github.com/microsoft/physical-ai-toolchain/issues/455)) ([66f86ca](https://github.com/microsoft/physical-ai-toolchain/commit/66f86cac49089de0678c108310a83e7765651864))
+
 ## [0.7.4](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.3...v0.7.4) (2026-04-10)
 
 
