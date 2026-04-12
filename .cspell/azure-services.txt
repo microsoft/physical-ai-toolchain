@@ -31,11 +31,15 @@ arcbox
 arcgis
 arck
 arcsight
+arccontainerstorage
 armttk
 azacsnap
 azapi
 azcmagent
 azcopy
+certmanagement
+connectedk8s
+containerstorage
 azdo
 azmk
 azmon
@@ -68,5 +72,8 @@ servicebus
 sharepoint
 snet
 southeastasia
+storageaccountendpoint
 wasbs
 westus
+edgevolume
+edgevolumes
