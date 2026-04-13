@@ -135,7 +135,7 @@ gitpython==3.1.46
     # via
     #   mlflow-skinny
     #   rsl-rl-lib
-google-auth==2.49.1
+google-auth==2.49.2
     # via databricks-sdk
 graphene==3.4.3
     # via mlflow
@@ -145,7 +145,7 @@ graphql-core==3.2.8
     #   graphql-relay
 graphql-relay==3.2.0
     # via graphene
-greenlet==3.3.2
+greenlet==3.4.0
     # via sqlalchemy
 grpcio==1.80.0
     # via tensorboard
@@ -220,7 +220,7 @@ mlflow-tracing==3.11.1
     # via mlflow
 mpmath==1.4.1
     # via sympy
-msal==1.35.1
+msal==1.36.0
     # via
     #   azure-identity
     #   msal-extensions
@@ -303,7 +303,7 @@ onnx-ir==0.2.0
     # via onnxscript
 onnxscript==0.6.2
     # via rsl-rl-lib
-opentelemetry-api==1.40.0
+opentelemetry-api==1.41.0
     # via
     #   azure-core-tracing-opentelemetry
     #   azure-monitor-opentelemetry-exporter
@@ -322,7 +322,7 @@ opentelemetry-api==1.40.0
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-opentelemetry-instrumentation==0.61b0
+opentelemetry-instrumentation==0.62b0
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-dbapi
@@ -334,42 +334,42 @@ opentelemetry-instrumentation==0.61b0
     #   opentelemetry-instrumentation-urllib
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
-opentelemetry-instrumentation-asgi==0.61b0
+opentelemetry-instrumentation-asgi==0.62b0
     # via opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-dbapi==0.61b0
+opentelemetry-instrumentation-dbapi==0.62b0
     # via opentelemetry-instrumentation-psycopg2
-opentelemetry-instrumentation-django==0.61b0
+opentelemetry-instrumentation-django==0.62b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-fastapi==0.61b0
+opentelemetry-instrumentation-fastapi==0.62b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-flask==0.61b0
+opentelemetry-instrumentation-flask==0.62b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-psycopg2==0.61b0
+opentelemetry-instrumentation-psycopg2==0.62b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-requests==0.61b0
+opentelemetry-instrumentation-requests==0.62b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib==0.61b0
+opentelemetry-instrumentation-urllib==0.62b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib3==0.61b0
+opentelemetry-instrumentation-urllib3==0.62b0
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-wsgi==0.61b0
+opentelemetry-instrumentation-wsgi==0.62b0
     # via
     #   opentelemetry-instrumentation-django
     #   opentelemetry-instrumentation-flask
-opentelemetry-proto==1.40.0
+opentelemetry-proto==1.41.0
     # via
     #   mlflow-skinny
     #   mlflow-tracing
 opentelemetry-resource-detector-azure==0.1.5
     # via azure-monitor-opentelemetry
-opentelemetry-sdk==1.40.0
+opentelemetry-sdk==1.41.0
     # via
     #   azure-monitor-opentelemetry
     #   azure-monitor-opentelemetry-exporter
     #   mlflow-skinny
     #   mlflow-tracing
     #   opentelemetry-resource-detector-azure
-opentelemetry-semantic-conventions==0.61b0
+opentelemetry-semantic-conventions==0.62b0
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-asgi
@@ -382,7 +382,7 @@ opentelemetry-semantic-conventions==0.61b0
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
-opentelemetry-util-http==0.61b0
+opentelemetry-util-http==0.62b0
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-django
@@ -513,7 +513,7 @@ six==1.17.0
     # via python-dateutil
 skops==0.13.0
     # via mlflow
-skrl==1.4.3
+skrl==2.0.0
     # via robotics-training-rl (training/rl/pyproject.toml)
 smmap==5.0.3
     # via gitdb
@@ -535,7 +535,7 @@ tensorboard==2.20.0
     # via skrl
 tensorboard-data-server==0.7.2
     # via tensorboard
-tensordict==0.11.0
+tensordict==0.12.1
     # via
     #   robotics-training-rl (training/rl/pyproject.toml)
     #   rsl-rl-lib
