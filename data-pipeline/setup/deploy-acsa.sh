@@ -96,7 +96,9 @@ start_arc_proxy() {
 
 cleanup_proxy() {
   if [[ -n "${proxy_pid:-}" ]] && kill -0 "$proxy_pid" >/dev/null 2>&1; then
+    pkill -P "$proxy_pid" >/dev/null 2>&1 || true
     kill "$proxy_pid" >/dev/null 2>&1 || true
+    wait "$proxy_pid" 2>/dev/null || true
   fi
 
   if [[ -n "${proxy_kubeconfig:-}" && -f "$proxy_kubeconfig" ]]; then
