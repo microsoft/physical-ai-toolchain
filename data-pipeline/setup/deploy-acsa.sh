@@ -231,7 +231,9 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "PVC" "$ACSA_PVC_NAME ($ACSA_PVC_SIZE, $ACSA_STORAGE_CLASS)"
   print_kv "Subvolume" "$SUBVOLUME_NAME:$SUBVOLUME_PATH"
   print_kv "Blob Container" "$BLOB_CONTAINER_NAME"
-  print_kv "Apply Ingest Policy" "$ACSA_SHOULD_APPLY_INGEST_POLICY"
+  print_kv "Ingest" "$ACSA_INGEST_ORDER (${ACSA_INGEST_MIN_DELAY_SEC}s)"
+  print_kv "Eviction" "$ACSA_EVICTION_ORDER (${ACSA_EVICTION_MIN_DELAY_SEC}s)"
+  print_kv "On Delete" "$ACSA_ON_DELETE"
   info "Config preview mode - exiting without changes"
   exit 0
 fi
@@ -351,22 +353,16 @@ export STORAGE_ACCOUNT_NAME="$storage_account_name"
 export BLOB_CONTAINER_NAME
 export SUBVOLUME_NAME
 export SUBVOLUME_PATH
-export ACSA_INGEST_POLICY
-export ACSA_INGEST_POLICY_NAME
 export ACSA_INGEST_ORDER
 export ACSA_INGEST_MIN_DELAY_SEC
 export ACSA_EVICTION_ORDER
 export ACSA_EVICTION_MIN_DELAY_SEC
+export ACSA_ON_DELETE
 
 envsubst < "$ARC_DIR/acsa-pvc.yaml" > "$render_dir/acsa-pvc.yaml"
-envsubst < "$ARC_DIR/acsa-edge-subvolume.yaml" > "$render_dir/acsa-edge-subvolume.yaml"
+envsubst < "$ARC_DIR/acsa-ingest-subvolume.yaml" > "$render_dir/acsa-ingest-subvolume.yaml"
 kubectl apply -f "$render_dir/acsa-pvc.yaml"
-kubectl apply -f "$render_dir/acsa-edge-subvolume.yaml"
-
-if [[ "$ACSA_SHOULD_APPLY_INGEST_POLICY" == "true" ]]; then
-  envsubst < "$ARC_DIR/acsa-ingest-policy.yaml" > "$render_dir/acsa-ingest-policy.yaml"
-  kubectl apply -f "$render_dir/acsa-ingest-policy.yaml"
-fi
+kubectl apply -f "$render_dir/acsa-ingest-subvolume.yaml"
 
 kubectl -n "$EDGE_NAMESPACE" wait --for=jsonpath='{.status.phase}'=Bound "pvc/$ACSA_PVC_NAME" --timeout=180s
 
@@ -389,6 +385,8 @@ print_kv "Storage Account" "$storage_account_name"
 print_kv "Blob Container" "$BLOB_CONTAINER_NAME"
 print_kv "PVC" "$ACSA_PVC_NAME"
 print_kv "Subvolume" "$SUBVOLUME_NAME"
-print_kv "Ingest Policy" "$([[ "$ACSA_SHOULD_APPLY_INGEST_POLICY" == "true" ]] && echo "$ACSA_INGEST_POLICY_NAME" || echo "default")"
+print_kv "Ingest" "$ACSA_INGEST_ORDER (${ACSA_INGEST_MIN_DELAY_SEC}s)"
+print_kv "Eviction" "$ACSA_EVICTION_ORDER (${ACSA_EVICTION_MIN_DELAY_SEC}s)"
+print_kv "On Delete" "$ACSA_ON_DELETE"
 
 info "ACSA deployment complete"
