@@ -74,6 +74,19 @@ resource "azurerm_postgresql_flexible_server" "main" {
 }
 
 // ============================================================
+// PostgreSQL Firewall Rules (public access without private endpoints)
+// ============================================================
+
+resource "azurerm_postgresql_flexible_server_firewall_rule" "aks_egress" {
+  count = var.should_deploy_postgresql && var.should_enable_public_network_access && !local.pe_enabled && var.should_enable_nat_gateway ? 1 : 0
+
+  name             = "aks-nat-gateway-egress"
+  server_id        = azurerm_postgresql_flexible_server.main[0].id
+  start_ip_address = azurerm_public_ip.nat_gateway[0].ip_address
+  end_ip_address   = azurerm_public_ip.nat_gateway[0].ip_address
+}
+
+// ============================================================
 // PostgreSQL Private Endpoint
 // ============================================================
 
