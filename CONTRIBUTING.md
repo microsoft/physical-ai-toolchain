@@ -155,16 +155,16 @@ For Terraform and shell script validation, see the [Prerequisites](docs/contribu
 
 All CI linters enforce warnings-as-errors. PRs that introduce new warnings will not merge.
 
-| Linter               | Enforcement       | Configuration                                 |
-|----------------------|-------------------|-----------------------------------------------|
-| Markdown (lint:md)   | Errors block      | .markdownlint-cli2.jsonc                      |
+| Linter               | Enforcement       | Configuration                               |
+|----------------------|-------------------|---------------------------------------------|
+| Markdown (lint:md)   | Errors block      | .markdownlint-cli2.jsonc                    |
 | PowerShell (lint:ps) | Errors + warnings | scripts/linting/Invoke-PSScriptAnalyzer.ps1 |
-| YAML (lint:yaml)     | Errors + warnings | .yamllint.yml                                 |
-| Terraform (lint:tf)  | Errors block      | .tflint.hcl                                   |
-| Go (lint:go)         | Errors block      | .golangci.yml                                 |
-| ShellCheck (lint:sh) | Warnings + errors | .shellcheckrc                                 |
-| Python (lint:py)     | Errors block      | pyproject.toml [tool.ruff]                    |
-| Link check           | Errors block      | .markdownlint-cli2.jsonc                      |
+| YAML (lint:yaml)     | Errors + warnings | .yamllint.yml                               |
+| Terraform (lint:tf)  | Errors block      | .tflint.hcl                                 |
+| Go (lint:go)         | Errors block      | .golangci.yml                               |
+| ShellCheck (lint:sh) | Warnings + errors | .shellcheckrc                               |
+| Python (lint:py)     | Errors block      | pyproject.toml [tool.ruff]                  |
+| Link check           | Errors block      | .markdownlint-cli2.jsonc                    |
 
 To suppress a specific warning locally, use the linter's inline suppression syntax. Do not change CI configuration to suppress warnings globally without team discussion.
 

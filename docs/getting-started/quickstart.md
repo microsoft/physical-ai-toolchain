@@ -1,7 +1,7 @@
 ---
 sidebar_position: 2
 title: "Quickstart: Clone to First Training Job"
-description: Deploy infrastructure and submit your first robotics training job in 8 steps
+description: Deploy infrastructure and submit your first robotics training job in 9 steps
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-22
 ms.topic: tutorial
@@ -19,12 +19,12 @@ Deploy the full Azure NVIDIA Robotics stack and submit a training job in ~1.5-2 
 
 ## Prerequisites
 
-| Requirement             | Details                                          |
-|-------------------------|--------------------------------------------------|
-| Azure subscription      | Contributor + User Access Administrator roles    |
-| GPU quota               | `Standard_NC24ads_A100_v4` in target region      |
-| NVIDIA NGC account      | Sign up at <https://ngc.nvidia.com/> for API key |
-| Development environment | Devcontainer (recommended) or local tools        |
+| Requirement             | Details                                                                                             |
+|-------------------------|-----------------------------------------------------------------------------------------------------|
+| Azure subscription      | Contributor + User Access Administrator roles                                                       |
+| GPU quota               | `Standard_NV36ads_A10_v5` (A10 Spot, default) or `Standard_NC40ads_H100_v5` (H100) in target region |
+| NVIDIA NGC account      | Sign up at <https://ngc.nvidia.com/> for API key                                                    |
+| Development environment | Devcontainer (recommended) or local tools                                                           |
 
 See [Prerequisites](../contributing/prerequisites.md) for installation commands and version requirements.
 
@@ -67,22 +67,46 @@ cd infrastructure/terraform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Edit `terraform.tfvars` with these values:
+Edit `terraform.tfvars` with your values:
 
 ```hcl
-project_name = "robotics"
-environment  = "dev"
-location     = "eastus"
-gpu_vm_size  = "Standard_NC24ads_A100_v4"
+environment     = "dev"
+location        = "westus3"
+resource_prefix = "yourprefix"
+instance        = "001"
 
-enable_azure_ml    = true
-enable_osmo        = true
-enable_vpn_gateway = false
-enable_private_dns = false
+// Full-public networking (simplest path)
+should_enable_private_endpoint    = false
+should_enable_private_aks_cluster = false
+
+// Single GPU pool (Spot A10)
+node_pools = {
+  gpu = {
+    vm_size                    = "Standard_NV36ads_A10_v5"
+    subnet_address_prefixes    = ["10.0.7.0/24"]
+    node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
+    gpu_driver                 = "Install"
+    priority                   = "Spot"
+    should_enable_auto_scaling = true
+    min_count                  = 1
+    max_count                  = 1
+    zones                      = []
+    eviction_policy            = "Delete"
+  }
+}
+
+// OSMO Backend Services
+should_deploy_postgresql = true
+should_deploy_redis      = true
 ```
 
+> [!WARNING]
+> `resource_prefix` must be lowercase, alphanumeric, and short (6-8 characters recommended). It feeds into Key Vault (`kv{prefix}{env}{instance}`) and Storage Account names that have 24-character limits and must be globally unique.
+
+<!-- markdownlint-disable-next-line MD028 -->
+
 > [!TIP]
-> For private networking, set `enable_vpn_gateway = true` and `enable_private_dns = true`. See the [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/terraform/README.md) for details.
+> For private networking, set `should_enable_private_endpoint = true` and `should_enable_private_aks_cluster = true`, then deploy the VPN from `infrastructure/terraform/vpn/` before running any `kubectl` commands. See the [Infrastructure Guide](../infrastructure/README.md) for details.
 
 ## Step 4: Deploy Infrastructure
 
@@ -104,19 +128,32 @@ Connect to the AKS cluster:
 
 ```bash
 az aks get-credentials \
-  --resource-group "$(terraform output -raw resource_group_name)" \
-  --name "$(terraform output -raw aks_cluster_name)"
+  --resource-group "$(terraform output -json resource_group | jq -r '.name')" \
+  --name "$(terraform output -json aks_cluster | jq -r '.name')"
 ```
 
-## Step 5: Configure AKS Cluster
+## Step 5: Set NGC API Key
+
+Export your NVIDIA NGC API key for OSMO backend deployment. Obtain a key from <https://ngc.nvidia.com/>.
+
+```bash
+export NGC_API_KEY="<your-ngc-api-key>"
+```
+
+## Step 6: Configure AKS Cluster
 
 Deploy GPU Operator, KAI Scheduler, and the AzureML extension. From the repository root:
 
 ```bash
 cd infrastructure/setup
+bash 01-deploy-robotics-charts.sh --config-preview
 bash 01-deploy-robotics-charts.sh
+bash 02-deploy-azureml-extension.sh --config-preview
 bash 02-deploy-azureml-extension.sh
 ```
+
+> [!TIP]
+> All setup scripts support `--config-preview` to print configuration and exit without changes. Run it before each real deployment to verify values.
 
 Verify GPU operator pods:
 
@@ -124,12 +161,14 @@ Verify GPU operator pods:
 kubectl get pods -n gpu-operator
 ```
 
-## Step 6: Deploy OSMO Components
+## Step 7: Deploy OSMO Components
 
 Deploy the OSMO control plane and backend using Access Keys authentication.
 
 ```bash
+bash 03-deploy-osmo-control-plane.sh --config-preview
 bash 03-deploy-osmo-control-plane.sh
+bash 04-deploy-osmo-backend.sh --use-access-keys --config-preview
 bash 04-deploy-osmo-backend.sh --use-access-keys
 ```
 
@@ -139,32 +178,39 @@ Verify OSMO pods:
 kubectl get pods -n osmo-control-plane
 ```
 
-## Step 7: Submit First Training Job
+## Step 8: Submit First Training Job
 
-Navigate to the scripts directory and submit a training job. From the repository root:
+Submit a training job from the repository root:
 
 ```bash
-cd scripts
-bash submit-osmo-training.sh
+bash training/rl/scripts/submit-osmo-training.sh
 ```
 
 Scripts auto-detect configuration from Terraform outputs. Override values with CLI arguments or environment variables as needed. See [Scripts Reference](../reference/scripts.md) for all submission options.
 
-## Step 8: Verify Results
+## Step 9: Verify Results
 
 Confirm the training job is running:
 
 ```bash
-kubectl get pods -n osmo-control-plane --watch
+kubectl get pods -n osmo-workflows --watch
 ```
 
 Check OSMO training status through the OSMO web UI or query pod logs:
 
 ```bash
-kubectl logs -n osmo-control-plane -l app=osmo-training --tail=50
+kubectl logs -n osmo-workflows -l app=osmo-training --tail=50
 ```
 
 ## Cleanup
+
+Remove OSMO Helm releases before destroying infrastructure to avoid orphaned resources:
+
+```bash
+cd infrastructure/setup
+helm uninstall backend-operator -n osmo-operator --ignore-not-found
+helm uninstall osmo-service osmo-router osmo-web-ui -n osmo-control-plane --ignore-not-found
+```
 
 Destroy all infrastructure when finished to stop incurring costs. From the repository root:
 
@@ -177,8 +223,8 @@ See [Cost Considerations](../contributing/cost-considerations.md) for detailed p
 
 ## Next Steps
 
-| Resource                                                                                          | Description                               |
-|---------------------------------------------------------------------------------------------------|-------------------------------------------|
-| [MLflow Integration](../training/mlflow-integration.md)                                           | Track experiments with MLflow             |
-| [Deployment Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md) | Full deployment reference and options     |
-| [Contributing Guide](../contributing/README.md)                                                   | Development workflow and code standards   |
+| Resource                                                | Description                             |
+|---------------------------------------------------------|-----------------------------------------|
+| [MLflow Integration](../training/mlflow-integration.md) | Track experiments with MLflow           |
+| [Infrastructure Guide](../infrastructure/README.md)     | Full deployment reference and options   |
+| [Contributing Guide](../contributing/README.md)         | Development workflow and code standards |
