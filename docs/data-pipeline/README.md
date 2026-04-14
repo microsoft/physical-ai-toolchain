@@ -20,6 +20,7 @@ Robot-to-cloud data capture pipeline for recording, compressing, and uploading r
 
 | Guide                                                                    | Description                                                                                       |
 |--------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| [ACSA Setup for ROS 2 Bag Sync](acsa-setup.md)                           | Deploy Azure Container Storage for Arc to sync ROS 2 bag files from edge clusters to Blob Storage |
 | [Chunking and Compression Configuration](chunking-compression-config.md) | Configure bag chunking thresholds and zstd compression for ROS 2 edge recording on Jetson devices |
 
 ## 🏗️ Architecture
