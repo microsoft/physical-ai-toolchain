@@ -281,7 +281,7 @@ if [[ "$use_acr" == "true" ]]; then
   login_acr "$acr_name"
 else
   helm repo list -o json | jq -e '.[] | select(.name == "osmo")' >/dev/null 2>&1 || \
-    helm repo add osmo https://helm.ngc.nvidia.com/nvidia/osmo >/dev/null
+    helm repo add osmo "$HELM_REPO_OSMO" >/dev/null
   helm repo update >/dev/null
 fi
 
@@ -315,6 +315,10 @@ fi
 
 if [[ "$use_acr" == "true" ]]; then
   helm upgrade -i osmo-operator "oci://${acr_login_server}/helm/backend-operator" "${helm_args[@]}" --wait --timeout "$TIMEOUT_DEPLOY"
+elif [[ -n "${OSMO_CHART_SHA256:-}" ]]; then
+  local osmo_tgz
+  osmo_tgz=$(pull_and_verify_chart "osmo/backend-operator" "$chart_version" "$OSMO_CHART_SHA256" "$(mktemp -d)")
+  helm upgrade -i osmo-operator "$osmo_tgz" "${helm_args[@]}" --wait --timeout "$TIMEOUT_DEPLOY"
 else
   helm upgrade -i osmo-operator osmo/backend-operator "${helm_args[@]}" --wait --timeout "$TIMEOUT_DEPLOY"
 fi

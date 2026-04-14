@@ -134,8 +134,12 @@ apt_get update
 repair_dpkg_state
 
 ## Install Node.js 22 LTS
+NODESOURCE_GPG_SHA256="b42e0321dabdc24e892115da705cf061167eac12a317f23d329862d0aa0a271d"
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor --batch --yes -o /etc/apt/keyrings/nodesource.gpg
+curl -fsSL -o /tmp/nodesource-repo.gpg.key https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+echo "${NODESOURCE_GPG_SHA256}  /tmp/nodesource-repo.gpg.key" | sha256sum -c --quiet -
+sudo gpg --dearmor --batch --yes -o /etc/apt/keyrings/nodesource.gpg < /tmp/nodesource-repo.gpg.key
+rm -f /tmp/nodesource-repo.gpg.key
 sudo chmod go+r /etc/apt/keyrings/nodesource.gpg
 sudo tee /etc/apt/sources.list.d/nodesource.sources >/dev/null <<'EOF'
 Types: deb
@@ -148,13 +152,22 @@ EOF
 apt_get update
 apt_get install -y --no-install-recommends nodejs
 
-curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR="/usr/local/bin" sh
+UV_VERSION="0.10.9"
+UV_INSTALLER_SHA256="7fc46e39cb97290b57169c0c813a17970585ac519139f19006453c99b5f2f45f"
+curl -fsSL -o /tmp/uv-install.sh "https://astral.sh/uv/${UV_VERSION}/install.sh"
+echo "${UV_INSTALLER_SHA256}  /tmp/uv-install.sh" | sha256sum -c --quiet -
+sudo env UV_INSTALL_DIR="/usr/local/bin" sh /tmp/uv-install.sh
+rm -f /tmp/uv-install.sh
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv installation failed or is not on PATH" >&2
   exit 1
 fi
+MICROSOFT_GPG_SHA256="2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6"
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo gpg --dearmor --batch --yes -o /etc/apt/keyrings/microsoft.gpg
+curl -fsSL -o /tmp/microsoft.asc https://packages.microsoft.com/keys/microsoft.asc
+echo "${MICROSOFT_GPG_SHA256}  /tmp/microsoft.asc" | sha256sum -c --quiet -
+sudo gpg --dearmor --batch --yes -o /etc/apt/keyrings/microsoft.gpg < /tmp/microsoft.asc
+rm -f /tmp/microsoft.asc
 sudo chmod go+r /etc/apt/keyrings/microsoft.gpg
 sudo tee /etc/apt/sources.list.d/azure-cli.sources >/dev/null <<EOF
 Types: deb
@@ -172,6 +185,7 @@ install_admin_azure_cli_extension "ml"
 . /etc/os-release
 DISTRO=$ID
 VERSION=$VERSION_ID
+# URL is dynamic (distro/version-dependent); trust relies on the GPG-signed repository.
 curl -sSL -O "https://packages.microsoft.com/config/${DISTRO}/${VERSION}/packages-microsoft-prod.deb"
 dpkg_install packages-microsoft-prod.deb
 rm packages-microsoft-prod.deb
@@ -180,6 +194,7 @@ apt_get install -y azcopy
 
 ## Install CUDA
 VERSION_NO_DOT="${VERSION//./}"
+# URL is dynamic (distro/version-dependent); trust relies on the GPG-signed repository.
 wget "https://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}${VERSION_NO_DOT}/x86_64/cuda-keyring_1.1-1_all.deb" && dpkg_install cuda-keyring_1.1-1_all.deb
 apt_get update
 apt_get install -y cuda-toolkit-12-6
@@ -188,7 +203,12 @@ apt_get install -y cuda-toolkit-12-6
 sudo usermod -aG docker "$ADMIN_USER"
 
 ## Install NVidia Container Toolkit
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor --batch --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+NVIDIA_CTK_GPG_SHA256="c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9"
+curl -fsSL -o /tmp/nvidia-ctk.gpg.key https://nvidia.github.io/libnvidia-container/gpgkey
+echo "${NVIDIA_CTK_GPG_SHA256}  /tmp/nvidia-ctk.gpg.key" | sha256sum -c --quiet -
+sudo gpg --dearmor --batch --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg < /tmp/nvidia-ctk.gpg.key
+rm -f /tmp/nvidia-ctk.gpg.key
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 apt_get update
 apt_get install -y nvidia-container-toolkit
 sudo nvidia-ctk runtime configure --runtime=docker
@@ -196,10 +216,14 @@ sudo systemctl restart docker
 
 
 # Install VSCode insiders
+VSCODE_GPG_SHA256="2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d93941e3c6"
 echo "code code/add-microsoft-repo boolean true" | sudo debconf-set-selections
-apt_get install -y wget gpg &&
-wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor --batch --yes > microsoft.gpg &&
-sudo install -D -o root -g root -m 644 microsoft.gpg /usr/share/keyrings/microsoft.gpg &&
+apt_get install -y wget gpg
+curl -fsSL -o /tmp/vscode-microsoft.asc https://packages.microsoft.com/keys/microsoft.asc
+echo "${VSCODE_GPG_SHA256}  /tmp/vscode-microsoft.asc" | sha256sum -c --quiet -
+gpg --dearmor --batch --yes < /tmp/vscode-microsoft.asc > microsoft.gpg
+rm -f /tmp/vscode-microsoft.asc
+sudo install -D -o root -g root -m 644 microsoft.gpg /usr/share/keyrings/microsoft.gpg
 rm -f microsoft.gpg
 
 sudo tee /etc/apt/sources.list.d/vscode.sources > /dev/null <<EOF
