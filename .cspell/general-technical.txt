@@ -953,6 +953,7 @@ pipelines
 pitj
 pivottable
 pkgs
+pkill
 platform
 platformops
 platforms

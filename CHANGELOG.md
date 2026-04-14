@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.7.4](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.3...v0.7.4) (2026-04-10)
+
+
+### 🔧 Miscellaneous
+
+* **deps:** bump cryptography from 46.0.6 to 46.0.7 in /training/rl ([#422](https://github.com/microsoft/physical-ai-toolchain/issues/422)) ([f220042](https://github.com/microsoft/physical-ai-toolchain/commit/f2200429daaac64fc850a18bf0b62ec09ff4c930))
+
 ## [0.7.3](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.2...v0.7.3) (2026-04-09)
 
 

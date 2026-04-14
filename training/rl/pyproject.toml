@@ -15,7 +15,7 @@ dependencies = [
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "cryptography==46.0.6",
+    "cryptography==46.0.7",
     "pyjwt==2.12.1",
     "azureml-mlflow==1.62.0.post2",
     "rsl-rl-lib==5.0.1",
