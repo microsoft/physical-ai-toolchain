@@ -168,8 +168,6 @@ detect_service_url() {
 # from a devcontainer or codespace, users must port-forward instead.
 validate_service_url_reachable() {
   local url="${1:?service URL required}"
-  local host
-  host=$(echo "$url" | sed 's|https\?://||;s|/.*||;s|:.*||')
 
   if curl -sf --connect-timeout 5 "${url}/api/version" >/dev/null 2>&1; then
     return 0
