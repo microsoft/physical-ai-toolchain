@@ -1,0 +1,20 @@
+---
+apiVersion: arccontainerstorage.azure.net/v1
+kind: IngestSubvolume
+metadata:
+  name: ${SUBVOLUME_NAME}
+  namespace: ${EDGE_NAMESPACE}
+spec:
+  edgevolume: ${ACSA_PVC_NAME}
+  path: ${SUBVOLUME_PATH}
+  authentication:
+    authType: MANAGED_IDENTITY
+  storageAccountEndpoint: "https://${STORAGE_ACCOUNT_NAME}.blob.core.windows.net/"
+  containerName: ${BLOB_CONTAINER_NAME}
+  ingest:
+    order: ${ACSA_INGEST_ORDER}
+    minDelaySec: ${ACSA_INGEST_MIN_DELAY_SEC}
+  eviction:
+    order: ${ACSA_EVICTION_ORDER}
+    minDelaySec: ${ACSA_EVICTION_MIN_DELAY_SEC}
+  onDelete: ${ACSA_ON_DELETE}
