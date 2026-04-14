@@ -340,6 +340,7 @@ if [[ "$skip_service_config" == "false" ]]; then
 
   service_url=$(detect_service_url)
   if [[ -n "$service_url" ]]; then
+    validate_service_url_reachable "$service_url"
     [[ -f "$service_config_template" ]] || fatal "Service config template not found: $service_config_template"
     export SERVICE_BASE_URL="$service_url"
     envsubst < "$service_config_template" > "$CONFIG_DIR/out/service-config.json"

@@ -112,11 +112,21 @@ az account show &>/dev/null || fatal "Azure CLI not logged in; run 'az login'"
 # Gather Configuration
 #------------------------------------------------------------------------------
 
+# Resolve in-cluster URL (for Helm/pods) separately from CLI URL (for osmo commands).
+# When --service-url points to a port-forward (localhost), detect the real in-cluster URL.
+cluster_service_url=$(detect_service_url)
+
 if [[ -z "$service_url" ]]; then
   info "Auto-detecting OSMO service URL..."
-  service_url=$(detect_service_url)
+  service_url="${cluster_service_url}"
   [[ -z "$service_url" ]] && fatal "Could not detect service URL. Run 03-deploy-osmo-control-plane.sh first or provide --service-url"
+  validate_service_url_reachable "$service_url"
   info "Detected: $service_url"
+else
+  # --service-url provided (likely port-forward); use detected in-cluster URL for Helm
+  if [[ -z "$cluster_service_url" ]]; then
+    cluster_service_url="$service_url"
+  fi
 fi
 
 info "Reading terraform outputs from $tf_dir..."
@@ -296,7 +306,7 @@ helm_args=(
   --version "$chart_version"
   --namespace "$NS_OSMO_OPERATOR"
   --set-string "global.osmoImageTag=$image_version"
-  --set-string "global.serviceUrl=$service_url"
+  --set-string "global.serviceUrl=$cluster_service_url"
   --set-string "global.agentNamespace=$NS_OSMO_OPERATOR"
   --set-string "global.backendNamespace=$NS_OSMO_WORKFLOWS"
   --set-string "global.backendName=$backend_name"

@@ -75,9 +75,10 @@ location        = "westus3"
 resource_prefix = "yourprefix"
 instance        = "001"
 
-// Full-public networking (simplest path)
-should_enable_private_endpoint    = false
-should_enable_private_aks_cluster = false
+// Full-public networking (simplest path for inner developer loop)
+should_enable_private_endpoint      = false
+should_enable_private_aks_cluster   = false
+should_enable_public_network_access = true
 
 // Single GPU pool (Spot A10)
 node_pools = {
@@ -94,6 +95,11 @@ node_pools = {
     eviction_policy            = "Delete"
   }
 }
+
+// System node pool — enable autoscaling for OSMO workloads
+should_enable_system_node_pool_auto_scaling = true
+system_node_pool_min_count                  = 1
+system_node_pool_max_count                  = 3
 
 // OSMO Backend Services
 should_deploy_postgresql = true
@@ -168,14 +174,27 @@ Deploy the OSMO control plane and backend using Access Keys authentication.
 ```bash
 bash 03-deploy-osmo-control-plane.sh --config-preview
 bash 03-deploy-osmo-control-plane.sh
-bash 04-deploy-osmo-backend.sh --use-access-keys --config-preview
-bash 04-deploy-osmo-backend.sh --use-access-keys
+```
+
+> [!IMPORTANT]
+> When running from a **devcontainer or codespace**, the OSMO service URL is an internal load balancer IP only reachable from within the AKS VNet. Set up a port-forward before running the backend script:
+>
+> ```bash
+> kubectl port-forward svc/osmo-service -n osmo-control-plane 8080:80 &
+> ```
+>
+> Then pass `--service-url http://localhost:8080` to both scripts 03 and 04. The scripts detect unreachable URLs and print this guidance automatically.
+
+```bash
+bash 04-deploy-osmo-backend.sh --use-access-keys --service-url http://localhost:8080 --config-preview
+bash 04-deploy-osmo-backend.sh --use-access-keys --service-url http://localhost:8080
 ```
 
 Verify OSMO pods:
 
 ```bash
 kubectl get pods -n osmo-control-plane
+kubectl get pods -n osmo-operator
 ```
 
 ## Step 8: Submit First Training Job
@@ -208,8 +227,8 @@ Remove OSMO Helm releases before destroying infrastructure to avoid orphaned res
 
 ```bash
 cd infrastructure/setup
-helm uninstall backend-operator -n osmo-operator --ignore-not-found
-helm uninstall osmo-service osmo-router osmo-web-ui -n osmo-control-plane --ignore-not-found
+helm uninstall osmo-operator -n osmo-operator --ignore-not-found
+helm uninstall service router ui -n osmo-control-plane --ignore-not-found
 ```
 
 Destroy all infrastructure when finished to stop incurring costs. From the repository root:

@@ -163,6 +163,29 @@ detect_service_url() {
   echo "$url"
 }
 
+# Validate that the OSMO service URL is reachable from the current host.
+# Internal load balancer IPs are only accessible from within the VNet; when running
+# from a devcontainer or codespace, users must port-forward instead.
+validate_service_url_reachable() {
+  local url="${1:?service URL required}"
+  local host
+  host=$(echo "$url" | sed 's|https\?://||;s|/.*||;s|:.*||')
+
+  if curl -sf --connect-timeout 5 "${url}/api/version" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  warn "OSMO service URL $url is not reachable from this host"
+  warn "The auto-detected URL is an internal load balancer IP only accessible from within the AKS VNet."
+  echo >&2
+  warn "If running from a devcontainer or codespace, use kubectl port-forward:"
+  warn "  kubectl port-forward svc/osmo-service -n osmo-control-plane 8080:80 &"
+  warn "Then re-run this script with:"
+  warn "  --service-url http://localhost:8080"
+  echo >&2
+  fatal "Cannot reach OSMO service at $url"
+}
+
 detect_default_storage_class() {
   local storage_class
 
