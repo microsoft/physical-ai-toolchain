@@ -276,8 +276,7 @@ apply_secret_provider_class() {
   local include_redis_secret="${5:-true}"
 
   local manifest_dir
-  # BASH_SOURCE preserves the symlinked setup/lib path, so ../manifests resolves correctly.
-  manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/manifests"
+  manifest_dir="${REPO_ROOT:?REPO_ROOT must be set}/infrastructure/setup/manifests"
   local manifest_name="aks-secret-provider-class.yaml"
 
   [[ "$include_redis_secret" == "true" ]] && manifest_name="aks-secret-provider-class-external-redis.yaml"

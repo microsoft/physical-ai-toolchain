@@ -58,7 +58,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   zone                          = var.postgresql_config.zone
   backup_retention_days         = 7
   geo_redundant_backup_enabled  = false
-  public_network_access_enabled = false
+  public_network_access_enabled = var.should_enable_public_network_access
 
   dynamic "high_availability" {
     for_each = var.postgresql_config.should_enable_high_availability ? [1] : []
