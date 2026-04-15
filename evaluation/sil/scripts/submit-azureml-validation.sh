@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit Azure ML validation job using training/rl/ as the code directory
+# Submit Azure ML validation job using evaluation/ as the code directory
 # The .amlignore file controls which files are excluded from the code snapshot
 set -o errexit -o nounset
 
@@ -40,7 +40,7 @@ VALIDATION OPTIONS:
     --gui                         Disable headless mode
 
 AZURE CONTEXT:
-    --job-file PATH               Job YAML template (default: workflows/azureml/validate.yaml)
+    --job-file PATH               Job YAML template (default: evaluation/sil/workflows/azureml/validate.yaml)
     --compute TARGET              Compute target override
     --instance-type TYPE          Instance type (default: gpuspot)
     --experiment-name NAME        Experiment name override
@@ -109,7 +109,7 @@ subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
 
-job_file="$REPO_ROOT/workflows/azureml/validate.yaml"
+job_file="$REPO_ROOT/evaluation/sil/workflows/azureml/validate.yaml"
 compute="${AZUREML_COMPUTE:-$(get_compute_target)}"
 instance_type="gpuspot"
 experiment_name=""
@@ -166,9 +166,9 @@ if [[ -z "$model_name" ]]; then
   info "Auto-derived model name: $model_name"
 fi
 
-code_path="$REPO_ROOT"
-[[ -d "$code_path/training" ]] || fatal "Training source not found: $code_path/training"
-[[ -f "$code_path/training/.amlignore" ]] || warn "No .amlignore found; __pycache__ may be included in snapshot"
+code_path="$REPO_ROOT/evaluation"
+[[ -d "$code_path/sil" ]] || fatal "SIL evaluation source not found: $code_path/sil"
+[[ -f "$code_path/.amlignore" ]] || warn "No evaluation/.amlignore found; the AML snapshot may include unrelated files"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
@@ -268,8 +268,10 @@ cmd="$cmd --success-threshold \${{inputs.success_threshold}}"
 
 [[ "$headless" == "true" ]] && cmd="$cmd --headless"
 
+# AML snapshots evaluation/ as the code root, so recreate the top-level evaluation path
+# expected by the shell entrypoint and Python imports inside the job container.
 az_args+=(
-  --set "command=bash training/scripts/validate.sh $cmd"
+  --set "command=if [ ! -e evaluation ]; then ln -s . evaluation; fi && bash evaluation/sil/validate.sh $cmd"
   --set "inputs.task=${task:-auto}"
   --set "inputs.framework=${framework:-auto}"
   --set "inputs.success_threshold=${threshold:--1.0}"
