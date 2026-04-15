@@ -25,7 +25,7 @@ uv venv --python 3.11
 source .venv/bin/activate
 
 # Install dependencies (include 'azure' extra for blob storage support)
-uv pip install -e ".[dev,analysis,export,azure]"
+uv pip install -e ".[dev,export,azure]"
 ```
 
 ### Frontend Setup
