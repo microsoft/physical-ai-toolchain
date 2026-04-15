@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Operations Hub
 description: Centralized guide for operating, monitoring, and troubleshooting the robotics reference architecture on Azure and NVIDIA infrastructure
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-09
+ms.date: 2026-04-15
 ms.topic: overview
 keywords:
   - operations

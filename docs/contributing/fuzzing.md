@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Fuzzing and Property-Based Testing
 description: Running fuzz targets and property-based tests for Python and TypeScript code
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-18
+ms.date: 2026-04-15
 ms.topic: how-to
 keywords:
   - fuzzing
