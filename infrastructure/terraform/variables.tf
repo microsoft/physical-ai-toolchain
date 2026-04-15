@@ -288,6 +288,16 @@ variable "nat_gateway_zones" {
   type        = list(string)
   description = "Availability zones for NAT Gateway and its public IP. Set to [\"1\"] in regions with AZ support. Leave empty for regions without AZ support (e.g. westus)"
   default     = ["1"]
+
+  validation {
+    condition     = alltrue([for z in var.nat_gateway_zones : contains(["1", "2", "3"], z)])
+    error_message = "Each zone must be \"1\", \"2\", or \"3\""
+  }
+
+  validation {
+    condition     = length(var.nat_gateway_zones) == length(distinct(var.nat_gateway_zones))
+    error_message = "nat_gateway_zones must not contain duplicates"
+  }
 }
 
 variable "should_create_vm_subnet" {
