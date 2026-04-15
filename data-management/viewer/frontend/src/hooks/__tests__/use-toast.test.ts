@@ -10,6 +10,7 @@ describe('useToast', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('starts with an empty toast list', () => {
