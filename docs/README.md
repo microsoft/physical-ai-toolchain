@@ -44,10 +44,10 @@ Documentation spans the full lifecycle — from provisioning Azure infrastructur
 
 Standalone guides available now. These cover common tasks and will move into their respective topic sections as the documentation structure expands.
 
-| Guide                                                                              | Description                                                                                                         |
-|------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| [MLflow Integration](training/mlflow-integration.md)                               | Configuring MLflow experiment tracking for SKRL training agents with automatic metric logging to Azure ML           |
-| [Security Guide](operations/security-guide.md)                                     | Security configuration inventory, deployment responsibilities, and hardening checklist for robotics workloads       |
+| Guide                                                | Description                                                                                                   |
+|------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| [MLflow Integration](training/mlflow-integration.md) | Configuring MLflow experiment tracking for SKRL training agents with automatic metric logging to Azure ML     |
+| [Security Guide](operations/security-guide.md)       | Security configuration inventory, deployment responsibilities, and hardening checklist for robotics workloads |
 
 ## 🚀 Next Steps
 

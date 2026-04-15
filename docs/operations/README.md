@@ -18,13 +18,13 @@ Centralized hub for operational documentation covering monitoring, troubleshooti
 
 ## 📖 Operations Guides
 
-| Guide                                                                     | Description                                                              |
-|---------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| [Troubleshooting](troubleshooting.md)                                     | Symptom-based resolution for common deployment, GPU, and workflow errors |
-| [Security Guide](security-guide.md)                                       | Security configuration inventory and deployment checklist                |
-| [GPU Configuration](../reference/gpu-configuration.md)                    | Driver selection, MIG strategy, and GPU Operator configuration           |
-| [Deployment Validation](../contributing/deployment-validation.md)         | Post-deployment verification steps                                       |
-| [Cost Considerations](../contributing/cost-considerations.md)             | Azure resource cost guidance                                             |
+| Guide                                                             | Description                                                              |
+|-------------------------------------------------------------------|--------------------------------------------------------------------------|
+| [Troubleshooting](troubleshooting.md)                             | Symptom-based resolution for common deployment, GPU, and workflow errors |
+| [Security Guide](security-guide.md)                               | Security configuration inventory and deployment checklist                |
+| [GPU Configuration](../reference/gpu-configuration.md)            | Driver selection, MIG strategy, and GPU Operator configuration           |
+| [Deployment Validation](../contributing/deployment-validation.md) | Post-deployment verification steps                                       |
+| [Cost Considerations](../contributing/cost-considerations.md)     | Azure resource cost guidance                                             |
 
 ## 📋 Operational Overview
 

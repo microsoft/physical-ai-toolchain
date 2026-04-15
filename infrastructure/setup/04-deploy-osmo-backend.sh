@@ -112,11 +112,21 @@ az account show &>/dev/null || fatal "Azure CLI not logged in; run 'az login'"
 # Gather Configuration
 #------------------------------------------------------------------------------
 
+# Resolve in-cluster URL (for Helm/pods) separately from CLI URL (for osmo commands).
+# When --service-url points to a port-forward (localhost), detect the real in-cluster URL.
+cluster_service_url=$(detect_service_url)
+
 if [[ -z "$service_url" ]]; then
   info "Auto-detecting OSMO service URL..."
-  service_url=$(detect_service_url)
+  service_url="${cluster_service_url}"
   [[ -z "$service_url" ]] && fatal "Could not detect service URL. Run 03-deploy-osmo-control-plane.sh first or provide --service-url"
+  validate_service_url_reachable "$service_url"
   info "Detected: $service_url"
+else
+  # --service-url provided (likely port-forward); use detected in-cluster URL for Helm
+  if [[ -z "$cluster_service_url" ]]; then
+    cluster_service_url="$service_url"
+  fi
 fi
 
 info "Reading terraform outputs from $tf_dir..."
@@ -229,15 +239,16 @@ kubectl get secret "$account_secret" -n "$NS_OSMO_OPERATOR" &>/dev/null && token
 
 if [[ "$regenerate_token" == "true" || "$token_exists" == "false" ]]; then
   token_name="backend-token-$(date -u +%Y%m%d%H%M%S)"
-  info "Generating OSMO service token $token_name..."
+  info "Generating OSMO service token $token_name (expires $expiry_date)..."
 
-  token_json=$(osmo token set "$token_name" \
-    --expires-at "$expiry_date" \
-    --description "Backend Operator Token" \
-    --roles osmo-backend -t json)
+  # Create service access token via OSMO API (works with auth.enabled=false via x-osmo-user header)
+  OSMO_SERVICE_TOKEN=$(curl -sf -X POST \
+    "${service_url}/api/auth/access_token/service/${token_name}?expires_at=${expiry_date}&roles=osmo-backend" \
+    -H "x-osmo-user: admin")
 
-  OSMO_SERVICE_TOKEN=$(echo "$token_json" | jq -r '.token // empty')
-  [[ -z "$OSMO_SERVICE_TOKEN" ]] && fatal "Failed to obtain service token"
+  # Strip surrounding quotes from JSON string response
+  OSMO_SERVICE_TOKEN="${OSMO_SERVICE_TOKEN//\"/}"
+  [[ -z "$OSMO_SERVICE_TOKEN" ]] && fatal "Failed to obtain service token from ${service_url}"
   export OSMO_SERVICE_TOKEN
 
   kubectl create secret generic "$account_secret" \
@@ -277,6 +288,10 @@ fi
 #------------------------------------------------------------------------------
 section "Deploy Backend Operator"
 
+# Backend operator connects to the agent service (which has both auth and WebSocket endpoints)
+agent_service_url="http://osmo-agent.${NS_OSMO_CONTROL_PLANE}.svc.cluster.local"
+info "Agent service URL: $agent_service_url"
+
 if [[ "$use_acr" == "true" ]]; then
   login_acr "$acr_name"
 else
@@ -296,7 +311,7 @@ helm_args=(
   --version "$chart_version"
   --namespace "$NS_OSMO_OPERATOR"
   --set-string "global.osmoImageTag=$image_version"
-  --set-string "global.serviceUrl=$service_url"
+  --set-string "global.serviceUrl=$agent_service_url"
   --set-string "global.agentNamespace=$NS_OSMO_OPERATOR"
   --set-string "global.backendNamespace=$NS_OSMO_WORKFLOWS"
   --set-string "global.backendName=$backend_name"

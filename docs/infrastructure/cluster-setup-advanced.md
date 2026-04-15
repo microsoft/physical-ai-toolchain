@@ -27,12 +27,12 @@ When connected to VPN, OSMO services are accessible via the internal load balanc
 
 | Service      | URL                   |
 |--------------|-----------------------|
-| UI Dashboard | `http://10.0.5.7`     |
-| API Service  | `http://10.0.5.7/api` |
+| UI Dashboard | `http://10.0.5.6`     |
+| API Service  | `http://10.0.5.6/api` |
 
 ```bash
 # Login to OSMO via internal load balancer
-osmo login http://10.0.5.7 --method=dev --username=testuser
+osmo login http://10.0.5.6 --method=dev --username=testuser
 
 # Verify connection
 osmo info
@@ -40,7 +40,22 @@ osmo backend list
 ```
 
 > [!NOTE]
-> The internal load balancer IP (`10.0.5.7`) is assigned by the AzureML nginx ingress controller. Verify the actual IP with: `kubectl get svc -n azureml azureml-nginx-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}'`
+> The internal load balancer IP is assigned by the AzureML nginx ingress controller. Verify the actual IP with:
+>
+> ```bash
+> kubectl get svc azureml-ingress-nginx-internal-lb -n azureml \
+>   -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+> ```
+
+<!-- markdownlint-disable-next-line MD028 -->
+
+> [!IMPORTANT]
+> The OSMO `SERVICE` config `service_base_url` controls both workflow pod routing (osmo-ctrl sidecar) and UI workflow links. For full functionality:
+>
+> - **With VPN:** Set `service_base_url` to the internal LB IP (e.g., `http://10.0.5.6`). Workflow execution and UI log viewing both work.
+> - **Without VPN:** Set `service_base_url` to the in-cluster ingress FQDN (`http://azureml-ingress-nginx-controller.azureml.svc.cluster.local`). Workflow execution works, but the UI cannot display logs or events (the browser cannot resolve the FQDN). Use `osmo workflow logs <id>` instead.
+>
+> See [Troubleshooting](../operations/troubleshooting.md#osmo-workflow-completes-task-but-workflow-status-stays-running-or-fails) for details.
 
 ### Via Port-Forward (Public Cluster without VPN)
 

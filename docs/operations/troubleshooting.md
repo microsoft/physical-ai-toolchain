@@ -272,6 +272,65 @@ Convert all template expressions to Jinja syntax. For variable substitution, use
 2. Verify node taints and tolerations match the pod spec.
 3. Check namespace resource quotas: `kubectl get resourcequota -n osmo-workflows`.
 
+### OSMO workflow completes task but workflow status stays RUNNING or fails
+
+**Cause:** The `service_base_url` field in the OSMO `SERVICE` config is empty or points to a service that does not route `/api/logger` paths. The osmo-ctrl sidecar in workflow pods uses this URL to connect via WebSocket to the logger service and to refresh auth tokens. When misconfigured, the sidecar logs `websocket: bad handshake` or connection refused errors, preventing the workflow from reporting completion.
+
+**Resolution:**
+
+1. Inspect the osmo-ctrl sidecar arguments on a workflow pod:
+
+   ```bash
+   kubectl get pod <pod> -n osmo-workflows -o json | \
+     python3 -c "import sys,json; [print(a) for c in json.load(sys.stdin)['spec']['containers'] if c['name']=='osmo-ctrl' for a in c.get('args',[])]"
+   ```
+
+2. If `-host` is empty (`""`), the `service_base_url` in the SERVICE config is not set:
+
+   ```bash
+   osmo config show SERVICE | grep service_base_url
+   ```
+
+3. Set `service_base_url` to the AzureML ingress controller ClusterIP FQDN:
+
+   ```bash
+   osmo config show SERVICE | python3 -c "
+   import sys, json
+   c = json.load(sys.stdin)
+   c['service_base_url'] = 'http://azureml-ingress-nginx-controller.azureml.svc.cluster.local'
+   json.dump(c, sys.stdout, indent=2)" > /tmp/service-config.json
+   osmo config update SERVICE --file /tmp/service-config.json --description "Set service base URL"
+   ```
+
+4. Cancel and resubmit the workflow. New pods pick up the updated `service_base_url`.
+
+> [!WARNING]
+> Do not set `service_base_url` to `osmo-router`. The router only handles `/api/router/` paths. The ingress controller routes all API paths (`/api/logger`, `/api/agent`, `/api/auth`, `/api`) to the correct backend services.
+
+### OSMO UI shows "server IP address could not be found" for workflow logs
+
+**Cause:** The `service_base_url` is set to an in-cluster FQDN (e.g., `azureml-ingress-nginx-controller.azureml.svc.cluster.local`) that the browser cannot resolve. The OSMO UI constructs workflow overview URLs from this value.
+
+**Resolution:**
+
+Connect via VPN and set `service_base_url` to the internal load balancer IP, which is reachable from both in-cluster pods and the VPN-connected browser:
+
+```bash
+# Find the internal LB IP
+kubectl get svc azureml-ingress-nginx-internal-lb -n azureml \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+
+# Update service_base_url to the internal LB IP
+osmo config show SERVICE | python3 -c "
+import sys, json
+c = json.load(sys.stdin)
+c['service_base_url'] = 'http://10.0.5.6'  # replace with actual IP
+json.dump(c, sys.stdout, indent=2)" > /tmp/service-config.json
+osmo config update SERVICE --file /tmp/service-config.json --description "Set service base URL to internal LB"
+```
+
+Without VPN, use the CLI to view workflow logs: `osmo workflow logs <workflow-id>`.
+
 ## Additional Resources
 
 - [GPU Configuration](../reference/gpu-configuration.md)
