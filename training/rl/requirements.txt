@@ -199,7 +199,7 @@ markupsafe==3.0.3
     #   jinja2
     #   mako
     #   werkzeug
-marshmallow==4.3.0
+marshmallow==3.25.1
     # via
     #   robotics-training-rl (training/rl/pyproject.toml)
     #   azure-ai-ml
@@ -232,7 +232,7 @@ msrest==0.7.1
     #   azureml-mlflow
 networkx==3.6.1
     # via torch
-numpy==2.4.4
+numpy==1.26.4
     # via
     #   robotics-training-rl (training/rl/pyproject.toml)
     #   contourpy
@@ -443,7 +443,7 @@ pydantic==2.13.0
     #   fastapi
     #   mlflow-skinny
     #   mlflow-tracing
-pydantic-core==2.46.0
+pydantic-core==2.41.5
     # via pydantic
 pydash==8.0.6
     # via azure-ai-ml

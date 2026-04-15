@@ -276,23 +276,27 @@ validate_version_pair() {
 
 osmo_login_and_setup() {
   local service_url="${1:?service URL required}"
-  local username="${2:-guest}"
-  local roles="${3:-osmo-backend}"
-  local lookup_output=""
-  local lookup_status=0
+  local admin_password="${2:?admin password required}"
+  local username="${3:-}"
+  local roles="${4:-osmo-backend}"
 
   info "Logging into OSMO at ${service_url}..."
-  osmo login "${service_url}/" --method dev --username "$username"
-  info "Ensuring dev user '$username' exists with $roles role..."
-  lookup_output=$(osmo user get "$username" 2>&1) || lookup_status=$?
+  osmo login "${service_url}/" --method token --token-file <(printf '%s' "$admin_password")
 
-  if [[ "$lookup_status" -eq 0 ]]; then
-    osmo user update "$username" --add-roles "$roles" >/dev/null || warn "Unable to update OSMO dev user roles; continuing"
-  elif [[ "$lookup_output" == *"404"* || "$lookup_output" == *"not found"* ]]; then
-    osmo user create "$username" --roles "$roles" >/dev/null || warn "OSMO user management endpoint unavailable; skipping dev user setup"
-  else
-    printf '%s\n' "$lookup_output" >&2
-    warn "Unable to query OSMO dev user '$username'; skipping dev user setup"
+  if [[ -n "$username" ]]; then
+    info "Ensuring service account '$username' exists with $roles role..."
+    local lookup_output=""
+    local lookup_status=0
+    lookup_output=$(osmo user get "$username" 2>&1) || lookup_status=$?
+
+    if [[ "$lookup_status" -eq 0 ]]; then
+      osmo user update "$username" --add-roles "$roles" >/dev/null || warn "Unable to update user roles; continuing"
+    elif [[ "$lookup_output" == *"404"* || "$lookup_output" == *"not found"* ]]; then
+      osmo user create "$username" --roles "$roles" >/dev/null || warn "User management endpoint unavailable; skipping user setup"
+    else
+      printf '%s\n' "$lookup_output" >&2
+      warn "Unable to query user '$username'; skipping user setup"
+    fi
   fi
 }
 

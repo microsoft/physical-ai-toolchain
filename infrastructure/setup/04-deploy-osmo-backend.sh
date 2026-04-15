@@ -182,6 +182,7 @@ workflow_template="$CONFIG_DIR/${WORKFLOW_TEMPLATE}"
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Service URL" "$service_url"
+  print_kv "Service Base URL" "$cluster_service_url"
   print_kv "Backend Name" "$backend_name"
   print_kv "Chart Version" "$chart_version"
   print_kv "Image Version" "$image_version"
@@ -224,7 +225,26 @@ mkdir -p "$CONFIG_DIR/out"
 # OSMO Login
 #------------------------------------------------------------------------------
 section "OSMO Login"
-osmo_login_and_setup "$service_url"
+
+admin_secret_name="osmo-default-admin"
+admin_password=$(kubectl get secret "$admin_secret_name" \
+  -n "$NS_OSMO_CONTROL_PLANE" \
+  -o jsonpath='{.data.password}' | base64 -d) || \
+  fatal "Admin secret $admin_secret_name not found in $NS_OSMO_CONTROL_PLANE. Run 03-deploy-osmo-control-plane.sh first."
+
+osmo_login_and_setup "$service_url" "$admin_password"
+
+# Verify SERVICE config service_base_url is set — may be empty if script 03
+# ran from a devcontainer and the config update was skipped or failed.
+# Workflow pod sidecars use this value as their -host argument; empty causes
+# websocket connection failures (ws://:80/...).
+current_base_url=$(osmo config show SERVICE 2>/dev/null | jq -r '.service_base_url // empty' || true)
+if [[ -z "$current_base_url" ]]; then
+  warn "SERVICE config service_base_url is empty — workflow sidecars cannot reach the control plane"
+  info "Setting service_base_url to in-cluster URL: $cluster_service_url"
+  printf '{"service_base_url": "%s"}' "$cluster_service_url" | \
+    osmo config update SERVICE --file /dev/stdin --description "Set service base URL for workflow sidecar connectivity"
+fi
 
 #------------------------------------------------------------------------------
 # Prepare Namespaces and Service Token
@@ -238,8 +258,11 @@ token_exists=false
 kubectl get secret "$account_secret" -n "$NS_OSMO_OPERATOR" &>/dev/null && token_exists=true
 
 if [[ "$regenerate_token" == "true" || "$token_exists" == "false" ]]; then
+  info "Ensuring backend-operator service account..."
+  osmo_login_and_setup "$service_url" "$admin_password" "backend-operator" "osmo-backend"
+
   token_name="backend-token-$(date -u +%Y%m%d%H%M%S)"
-  info "Generating OSMO service token $token_name (expires $expiry_date)..."
+  info "Generating OSMO service token $token_name..."
 
   # Create service access token via OSMO API (works with auth.enabled=false via x-osmo-user header)
   OSMO_SERVICE_TOKEN=$(curl -sf -X POST \
@@ -532,6 +555,7 @@ fi
 section "Deployment Summary"
 print_kv "Backend Name" "$backend_name"
 print_kv "Service URL" "$service_url"
+print_kv "Service Base URL" "$cluster_service_url"
 print_kv "Chart Version" "$chart_version"
 print_kv "Image Version" "$image_version"
 print_kv "Storage Account" "$storage_name"
