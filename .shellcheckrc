@@ -3,3 +3,9 @@
 shell=bash
 severity=warning
 external-sources=true
+
+# Search paths for resolving sourced files
+# SCRIPTDIR: resolve relative to each script's directory ($SCRIPT_DIR patterns)
+# Repo root (.): resolve $REPO_ROOT-based source paths
+source-path=SCRIPTDIR
+source-path=.
