@@ -97,7 +97,7 @@ class SkrlAgent(Protocol):
     """Protocol defining the interface expected from SKRL agents for metric extraction."""
 
     tracking_data: dict[str, Any]
-    _update: Callable[[int, int], Any]
+    update: Callable
 
 
 @runtime_checkable
@@ -190,11 +190,11 @@ def create_mlflow_logging_wrapper(
         collect_gpu_metrics,
     )
 
-    original_update = agent._update
+    original_update = agent.update
 
-    def mlflow_logging_update(timestep: int, timesteps: int) -> Any:
-        """Call original _update and log metrics to MLflow."""
-        result = original_update(timestep, timesteps)
+    def mlflow_logging_update(*, timestep: int, timesteps: int) -> Any:
+        """Call original update and log metrics to MLflow."""
+        result = original_update(timestep=timestep, timesteps=timesteps)
 
         try:
             training_metrics = _extract_metrics_from_agent(agent, metric_filter)

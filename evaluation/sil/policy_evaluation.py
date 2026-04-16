@@ -178,7 +178,7 @@ def _load_skrl(
 
     # Load checkpoint into the runner's agent
     runner.agent.load(checkpoint_path)
-    runner.agent.set_running_mode("eval")
+    runner.agent.enable_training_mode(enabled=False, apply_to_models=True)
 
     _LOGGER.info("SKRL agent loaded and set to eval mode")
     return runner.agent
@@ -267,7 +267,10 @@ def evaluate(env: Any, agent: Any, num_episodes: int, framework: str) -> Metrics
 
     while metrics.count < num_episodes:
         with torch.inference_mode():
-            actions = agent.act(obs, timestep=step, timesteps=0)[0] if framework == "skrl" else agent.act_inference(obs)
+            if framework == "skrl":
+                actions = agent.act(obs, None, timestep=step, timesteps=0)[0]
+            else:
+                actions = agent.act_inference(obs)
 
         obs, rewards, terminated, truncated, info = env.step(actions)
         ep_rewards += rewards.squeeze()
