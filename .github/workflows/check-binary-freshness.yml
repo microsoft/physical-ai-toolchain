@@ -107,8 +107,7 @@ jobs:
 
               $latestTag = gh api "repos/$($tool.Repo)/releases/latest" --jq '.tag_name' 2>$null
               if (-not $latestTag) {
-                  Write-Warning "Could not fetch latest release for $($tool.Repo)"
-                  continue
+                  throw "Could not fetch latest release for $($tool.Repo) — freshness check cannot produce reliable results"
               }
 
               $latestVersion = $latestTag.TrimStart('v')
