@@ -34,6 +34,33 @@ require_tools() {
   [[ ${#missing[@]} -eq 0 ]] || fatal "Missing required tools: ${missing[*]}"
 }
 
+# Activate local OSMO development CLI wrapper
+activate_local_osmo() {
+  local repo_root
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  OSMO_DEV_CLI="${repo_root}/infrastructure/setup/optional/osmo-dev.sh"
+
+  if [[ ! -x "$OSMO_DEV_CLI" ]]; then
+    fatal "osmo-dev.sh not found at $OSMO_DEV_CLI"
+  fi
+
+  info "Using local OSMO CLI: $OSMO_DEV_CLI"
+
+  # shellcheck disable=SC2329  # exported via export -f for child shells
+  osmo() { "$OSMO_DEV_CLI" "$@"; }
+  export OSMO_DEV_CLI
+  export -f osmo
+}
+
+# Ensure Azure CLI extension is installed
+require_az_extension() {
+  local ext="${1:?extension name required}"
+  if ! az extension show --name "$ext" &>/dev/null; then
+    info "Installing Azure CLI extension '$ext'..."
+    az extension add --name "$ext" --yes || fatal "Failed to install Azure CLI extension '$ext'"
+  fi
+}
+
 # Pull a Helm chart and optionally verify its SHA256 hash.
 # Usage: pull_and_verify_chart <chart_ref> <version> <expected_sha256> <output_dir>
 #   chart_ref     — repo/chart name or oci:// URI
