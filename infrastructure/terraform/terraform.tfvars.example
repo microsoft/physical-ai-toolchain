@@ -92,7 +92,7 @@ node_pools = {
 // and its Public IP. To preserve existing zonal behavior, set nat_gateway_zones to your current
 // zone (e.g. ["1"]) explicitly before applying. Run `terraform plan` to confirm no unintended
 // NAT/Public IP recreation.
-nat_gateway_zones = []
+nat_gateway_zones = ["1"]
 
 // OSMO Backend Services
 should_deploy_postgresql = true
@@ -106,6 +106,10 @@ should_deploy_redis      = true
 should_enable_private_endpoint    = true
 should_enable_private_aks_cluster = true
 
+// Public network access: Controls public access to Azure ML, Storage, Key Vault, ACR,
+// Redis, PostgreSQL, and observability resources. When true, also creates a PostgreSQL
+// firewall rule to allow Azure services (required for AKS-to-PostgreSQL connectivity
+// without private endpoints).
 should_enable_public_network_access     = true
 should_add_current_user_key_vault_admin = true
 should_enable_microsoft_defender        = true

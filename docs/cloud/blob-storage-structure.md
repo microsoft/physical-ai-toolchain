@@ -4,10 +4,10 @@ Storage architecture for robotics data across two Azure Storage accounts: an ML 
 
 ## Storage Accounts
 
-| Account                  | Naming Pattern                                | Type                       | Purpose                                      | Terraform Variable                |
-|--------------------------|-----------------------------------------------|----------------------------|----------------------------------------------|-----------------------------------|
-| ML Workspace Storage     | `st{prefix}{env}{instance}`                   | Standard Blob (StorageV2)  | AzureML system data (logs, snapshots, files)  | Always created                    |
-| Data Lake Storage (Gen2) | `stdl{prefix}{env}{instance}`                 | ADLS Gen2 (HNS enabled)   | Domain data (datasets, model checkpoints)    | `should_create_data_lake_storage` |
+| Account                  | Naming Pattern                | Type                      | Purpose                                      | Terraform Variable                |
+|--------------------------|-------------------------------|---------------------------|----------------------------------------------|-----------------------------------|
+| ML Workspace Storage     | `st{prefix}{env}{instance}`   | Standard Blob (StorageV2) | AzureML system data (logs, snapshots, files) | Always created                    |
+| Data Lake Storage (Gen2) | `stdl{prefix}{env}{instance}` | ADLS Gen2 (HNS enabled)   | Domain data (datasets, model checkpoints)    | `should_create_data_lake_storage` |
 
 The data lake uses hierarchical namespace (HNS), which provides atomic directory renames required by checkpoint libraries and POSIX-style ACLs for fine-grained access control.
 
@@ -21,13 +21,13 @@ Used internally by AzureML for run metadata, code snapshots, and workspace file 
 
 ### Data Lake Storage
 
-| Container    | Subfolder            | Purpose                             | Lifecycle Policy            |
-|--------------|----------------------|-------------------------------------|-----------------------------|
-| `datasets`   | `raw/`               | Raw ROS bag files from edge devices | Auto-delete after 30 days   |
-| `datasets`   | `converted/`         | LeRobot datasets in v0.3.x format   | Tier to cool after 90 days  |
-| `models`     | `base-models/`       | Pre-trained foundation model weights | Retained indefinitely (Hot) |
-| `models`     | `checkpoints/`       | Training checkpoint outputs         | Retained indefinitely (Hot) |
-| `evaluation` | `reports/`           | Validation reports and metrics      | Cool (30d) → Archive (180d) |
+| Container    | Subfolder      | Purpose                              | Lifecycle Policy            |
+|--------------|----------------|--------------------------------------|-----------------------------|
+| `datasets`   | `raw/`         | Raw ROS bag files from edge devices  | Auto-delete after 30 days   |
+| `datasets`   | `converted/`   | LeRobot datasets in v0.3.x format    | Tier to cool after 90 days  |
+| `models`     | `base-models/` | Pre-trained foundation model weights | Retained indefinitely (Hot) |
+| `models`     | `checkpoints/` | Training checkpoint outputs          | Retained indefinitely (Hot) |
+| `evaluation` | `reports/`     | Validation reports and metrics       | Cool (30d) → Archive (180d) |
 
 ## Naming Conventions
 
@@ -135,12 +135,12 @@ Lifecycle policies on the data lake storage account automatically manage storage
 
 ### Policy Details
 
-| Folder Prefix  | Container    | Action          | Timing                | Configurable                              |
-|----------------|--------------|-----------------|---------------------- |-------------------------------------------|
-| `raw/`         | `datasets`   | Delete          | After 30 days         | Yes (`raw_bags_retention_days`)           |
-| `converted/`   | `datasets`   | Tier to Cool    | After 90 days         | Yes (`converted_datasets_cool_tier_days`) |
-| `reports/`     | `evaluation` | Tier to Cool    | After 30 days         | Yes (`reports_cool_tier_days`)            |
-| `reports/`     | `evaluation` | Tier to Archive | After 180 days        | Yes (`reports_archive_tier_days`)         |
+| Folder Prefix | Container    | Action          | Timing         | Configurable                              |
+|---------------|--------------|-----------------|----------------|-------------------------------------------|
+| `raw/`        | `datasets`   | Delete          | After 30 days  | Yes (`raw_bags_retention_days`)           |
+| `converted/`  | `datasets`   | Tier to Cool    | After 90 days  | Yes (`converted_datasets_cool_tier_days`) |
+| `reports/`    | `evaluation` | Tier to Cool    | After 30 days  | Yes (`reports_cool_tier_days`)            |
+| `reports/`    | `evaluation` | Tier to Archive | After 180 days | Yes (`reports_archive_tier_days`)         |
 
 ### Configuration
 

@@ -953,6 +953,7 @@ pipelines
 pitj
 pivottable
 pkgs
+pkill
 platform
 platformops
 platforms
@@ -1088,6 +1089,7 @@ redhat
 redirections
 redisenterprise
 redtiger
+redoc
 reengineer
 reengineered
 reengineering
@@ -1216,6 +1218,7 @@ slas
 sles
 sloc
 slos
+slowapi
 slsa
 smartctl
 smes
