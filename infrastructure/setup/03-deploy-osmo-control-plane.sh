@@ -339,13 +339,15 @@ if [[ "$skip_service_config" == "false" ]]; then
   kubectl wait --for=condition=available deployment/osmo-service -n "$NS_OSMO_CONTROL_PLANE" --timeout=120s
 
   service_url=$(detect_service_url)
-  if [[ -n "$service_url" ]]; then
+  ingress_base_url=$(detect_ingress_base_url "$NS_AZUREML")
+  if [[ -n "$service_url" && -n "$ingress_base_url" ]]; then
+    validate_service_url_reachable "$service_url"
     [[ -f "$service_config_template" ]] || fatal "Service config template not found: $service_config_template"
-    export SERVICE_BASE_URL="$service_url"
+    export SERVICE_BASE_URL="$ingress_base_url"
     envsubst < "$service_config_template" > "$CONFIG_DIR/out/service-config.json"
     osmo_login_and_setup "$service_url"
-    info "Applying service configuration (service_base_url: $service_url)..."
-    osmo config update SERVICE --file "$CONFIG_DIR/out/service-config.json" --description "Set service base URL for UI"
+    info "Applying service configuration (service_base_url: $ingress_base_url)..."
+    osmo config update SERVICE --file "$CONFIG_DIR/out/service-config.json" --description "Set service base URL to ingress controller FQDN"
   else
     warn "Could not determine service base URL - OSMO UI may show errors"
   fi

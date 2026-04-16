@@ -4,7 +4,7 @@ slug: /documentation
 title: Documentation
 description: Index of all documentation for the Physical AI Toolchain
 author: Edge AI Team
-ms.date: 2026-02-22
+ms.date: 2026-04-15
 ms.topic: overview
 keywords:
   - documentation
@@ -22,7 +22,7 @@ Documentation spans the full lifecycle — from provisioning Azure infrastructur
 | Role                   | Start here                                                                                                        |
 |------------------------|-------------------------------------------------------------------------------------------------------------------|
 | First-time deployer    | Getting Started (coming soon), then [Deploy](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy) |
-| ML / Robotics engineer | Training (coming soon) and Inference (coming soon)                                                                |
+| ML / Robotics engineer | [Training](training/lerobot-training.md) and Inference (coming soon)                                                                |
 | Platform operator      | [Operations](operations/README.md) and [Security Guide](operations/security-guide.md)                             |
 | Contributor            | [Contributing](contributing/README.md)                                                                            |
 
@@ -44,10 +44,10 @@ Documentation spans the full lifecycle — from provisioning Azure infrastructur
 
 Standalone guides available now. These cover common tasks and will move into their respective topic sections as the documentation structure expands.
 
-| Guide                                                                              | Description                                                                                                         |
-|------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| [MLflow Integration](training/mlflow-integration.md)                               | Configuring MLflow experiment tracking for SKRL training agents with automatic metric logging to Azure ML           |
-| [Security Guide](operations/security-guide.md)                                     | Security configuration inventory, deployment responsibilities, and hardening checklist for robotics workloads       |
+| Guide                                                | Description                                                                                                   |
+|------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| [MLflow Integration](training/mlflow-integration.md) | Configuring MLflow experiment tracking for SKRL training agents with automatic metric logging to Azure ML     |
+| [Security Guide](operations/security-guide.md)       | Security configuration inventory, deployment responsibilities, and hardening checklist for robotics workloads |
 
 ## 🚀 Next Steps
 

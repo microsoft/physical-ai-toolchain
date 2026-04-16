@@ -1,6 +1,6 @@
 global:
-  osmoImageTag: "<osmo-image-tag>"
-  serviceUrl: "https://<your-domain>"
+  osmoImageTag: "6.0.0"
+  serviceUrl: "http://osmo-agent.osmo-control-plane.svc.cluster.local"
   agentNamespace: "osmo-operator"
   backendNamespace: "osmo-workflows"
   backendName: "default"

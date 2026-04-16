@@ -106,6 +106,10 @@ should_deploy_redis      = true
 should_enable_private_endpoint    = true
 should_enable_private_aks_cluster = true
 
+// Public network access: Controls public access to Azure ML, Storage, Key Vault, ACR,
+// Redis, PostgreSQL, and observability resources. When true, also creates a PostgreSQL
+// firewall rule to allow Azure services (required for AKS-to-PostgreSQL connectivity
+// without private endpoints).
 should_enable_public_network_access     = true
 should_add_current_user_key_vault_admin = true
 should_enable_microsoft_defender        = true
