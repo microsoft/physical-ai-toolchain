@@ -142,7 +142,7 @@ detect_osmo_identity() {
   echo "$client_id"
 }
 
-# Detect OSMO service URL from cluster
+# Detect OSMO service URL from cluster (for CLI and external access)
 detect_service_url() {
   local url=""
   # Try internal load balancer first
@@ -161,6 +161,36 @@ detect_service_url() {
     fi
   fi
   echo "$url"
+}
+
+# Detect in-cluster ingress FQDN for service_base_url (used by osmo-ctrl sidecars in workflow pods)
+detect_ingress_base_url() {
+  local ns="${1:-azureml}"
+  local svc="azureml-ingress-nginx-controller"
+  if kubectl get svc "$svc" -n "$ns" &>/dev/null; then
+    echo "http://${svc}.${ns}.svc.cluster.local"
+  fi
+}
+
+# Validate that the OSMO service URL is reachable from the current host.
+# Internal load balancer IPs are only accessible from within the VNet; when running
+# from a devcontainer or codespace, users must port-forward instead.
+validate_service_url_reachable() {
+  local url="${1:?service URL required}"
+
+  if curl -sf --connect-timeout 5 "${url}/api/version" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  warn "OSMO service URL $url is not reachable from this host"
+  warn "The auto-detected URL is an internal load balancer IP only accessible from within the AKS VNet."
+  echo >&2
+  warn "If running from a devcontainer or codespace, use kubectl port-forward:"
+  warn "  kubectl port-forward svc/osmo-service -n osmo-control-plane 8080:80 &"
+  warn "Then re-run this script with:"
+  warn "  --service-url http://localhost:8080"
+  echo >&2
+  fatal "Cannot reach OSMO service at $url"
 }
 
 detect_default_storage_class() {
@@ -276,8 +306,9 @@ apply_secret_provider_class() {
   local include_redis_secret="${5:-true}"
 
   local manifest_dir
-  # BASH_SOURCE preserves the symlinked setup/lib path, so ../manifests resolves correctly.
-  manifest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/manifests"
+  local _repo_root
+  _repo_root="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd))"
+  manifest_dir="${_repo_root}/infrastructure/setup/manifests"
   local manifest_name="aks-secret-provider-class.yaml"
 
   [[ "$include_redis_secret" == "true" ]] && manifest_name="aks-secret-provider-class-external-redis.yaml"
