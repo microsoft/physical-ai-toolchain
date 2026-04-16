@@ -251,26 +251,21 @@ ingress_manifest="$SCRIPT_DIR/manifests/internal-lb-ingress.yaml"
 [[ -f "$ingress_manifest" ]] && kubectl apply -f "$ingress_manifest"
 
 #------------------------------------------------------------------------------
-# Configure Admin Secret
+# Read Admin Password from Key Vault
 #------------------------------------------------------------------------------
-section "Configure Admin Secret"
+section "Read Admin Password"
 
-admin_secret_name="osmo-default-admin"
-admin_secret_exists=false
-kubectl get secret "$admin_secret_name" -n "$NS_OSMO_CONTROL_PLANE" &>/dev/null && admin_secret_exists=true
+admin_password=$(az keyvault secret show --vault-name "$keyvault" \
+  --name "osmo-admin-password" --query value -o tsv 2>/dev/null) || \
+  fatal "OSMO admin password not found in Key Vault '$keyvault'. Run 'terraform apply' first."
+info "Admin password retrieved from Key Vault"
 
-if [[ "$admin_secret_exists" == "true" ]]; then
-  info "Admin secret $admin_secret_name already exists; reusing"
-  admin_password=$(kubectl get secret "$admin_secret_name" \
-    -n "$NS_OSMO_CONTROL_PLANE" \
-    -o jsonpath='{.data.password}' | base64 -d)
-else
-  info "Generating admin password and creating secret..."
-  admin_password=$(openssl rand -base64 32 | tr -d '\n')
-  admin_password="${admin_password:0:43}"
-  kubectl create secret generic "$admin_secret_name" \
+# In non-identity mode CSI is unavailable; create the K8s secret from KV value.
+# Uses --from-file with process substitution to avoid exposing the password in process args.
+if [[ -z "$osmo_identity_client_id" ]]; then
+  kubectl create secret generic osmo-default-admin \
     --namespace="$NS_OSMO_CONTROL_PLANE" \
-    --from-literal=password="$admin_password" \
+    --from-file=password=<(printf '%s' "$admin_password") \
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
@@ -373,20 +368,28 @@ if [[ "$skip_service_config" == "false" ]]; then
     [[ -z "$cluster_service_url" ]] && cluster_service_url="$service_url"
   fi
   if [[ -n "$service_url" ]]; then
-    validate_service_url_reachable "$service_url"
-    [[ -f "$service_config_template" ]] || fatal "Service config template not found: $service_config_template"
-    # SERVICE config service_base_url must use the in-cluster URL (ingress LB IP)
-    # so workflow pod sidecars can reach the control plane via the ingress routes.
-    # The user-provided --service-url (e.g. localhost port-forward) is only for CLI access.
-    export SERVICE_BASE_URL="${cluster_service_url:-$service_url}"
-    envsubst < "$service_config_template" > "$CONFIG_DIR/out/service-config.json"
-    osmo_login_and_setup "$service_url" "$admin_password"
-    info "Applying service configuration (service_base_url: $SERVICE_BASE_URL)..."
-    osmo config update SERVICE --file "$CONFIG_DIR/out/service-config.json" --description "Set service base URL for UI"
+    if ! curl -sf --connect-timeout 5 "${service_url}/api/version" >/dev/null 2>&1; then
+      warn "OSMO service URL $service_url is not reachable from this host"
+      warn "SERVICE config will be set by 04-deploy-osmo-backend.sh instead"
+      warn "When running script 04, use: --service-url http://localhost:8080"
+      warn "(after: kubectl port-forward svc/osmo-service -n osmo-control-plane 8080:80 &)"
+    else
+      [[ -f "$service_config_template" ]] || fatal "Service config template not found: $service_config_template"
+      # SERVICE config service_base_url must use the in-cluster URL (ingress LB IP)
+      # so workflow pod sidecars can reach the control plane via the ingress routes.
+      # The user-provided --service-url (e.g. localhost port-forward) is only for CLI access.
+      export SERVICE_BASE_URL="${cluster_service_url:-$service_url}"
+      envsubst < "$service_config_template" > "$CONFIG_DIR/out/service-config.json"
+      osmo_login_and_setup "$service_url" "$admin_password"
+      info "Applying service configuration (service_base_url: $SERVICE_BASE_URL)..."
+      osmo config update SERVICE --file "$CONFIG_DIR/out/service-config.json" --description "Set service base URL for UI"
+    fi
   else
     warn "Could not determine service base URL - OSMO UI may show errors"
   fi
 fi
+
+unset admin_password
 
 #------------------------------------------------------------------------------
 # Summary

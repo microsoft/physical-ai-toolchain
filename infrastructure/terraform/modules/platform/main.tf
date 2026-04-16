@@ -19,6 +19,7 @@ data "azurerm_client_config" "current" {}
 locals {
   resource_name_suffix = "${var.resource_prefix}-${var.environment}-${var.instance}"
   pe_enabled           = var.should_enable_private_endpoint
+  should_deploy_osmo   = var.should_deploy_postgresql
 
   // Base DNS zones required for all services (without AKS or monitor zones)
   base_dns_zones = {

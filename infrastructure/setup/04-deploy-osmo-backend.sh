@@ -164,14 +164,20 @@ if [[ -n "$custom_expiry" ]]; then
     expiry_date=$(date -u -j -f "%Y-%m-%d" "$custom_expiry" +%F 2>/dev/null) || \
     fatal "--expires-at must be YYYY-MM-DD format"
 else
-  expiry_date=$(date -u -d "+1 year" +%F 2>/dev/null) || \
-    expiry_date=$(date -u -v+1y +%F 2>/dev/null) || \
+  expiry_date=$(date -u -d "+90 days" +%F 2>/dev/null) || \
+    expiry_date=$(date -u -v+90d +%F 2>/dev/null) || \
     fatal "Unable to compute token expiry date"
 fi
 
-# Storage access key (only when using access-keys mode)
+# Storage connection string (only when using access-keys mode)
+# OSMO's StaticDataCredential passes access_key to BlobServiceClient.from_connection_string(),
+# which requires a full connection string — not a raw access key.
 account_key=""
-[[ "$use_access_keys" == "true" ]] && account_key=$(az storage account keys list -g "$rg" -n "$storage_name" --query '[0].value' -o tsv)
+if [[ "$use_access_keys" == "true" ]]; then
+  raw_key=$(az storage account keys list -g "$rg" -n "$storage_name" --query '[0].value' -o tsv)
+  account_key="DefaultEndpointsProtocol=https;AccountName=${storage_name};AccountKey=${raw_key};EndpointSuffix=core.windows.net"
+  unset raw_key
+fi
 
 auth_mode="workload-identity"
 [[ "$use_access_keys" == "true" ]] && auth_mode="access-keys"
@@ -262,25 +268,29 @@ if [[ "$regenerate_token" == "true" || "$token_exists" == "false" ]]; then
   osmo_login_and_setup "$service_url" "$admin_password" "backend-operator" "osmo-backend"
 
   token_name="backend-token-$(date -u +%Y%m%d%H%M%S)"
-  info "Generating OSMO service token $token_name..."
+  info "Generating OSMO service token $token_name (expires $expiry_date)..."
 
-  # Create service access token via OSMO API (works with auth.enabled=false via x-osmo-user header)
-  OSMO_SERVICE_TOKEN=$(curl -sf -X POST \
-    "${service_url}/api/auth/access_token/service/${token_name}?expires_at=${expiry_date}&roles=osmo-backend" \
-    -H "x-osmo-user: admin")
-
-  # Strip surrounding quotes from JSON string response
-  OSMO_SERVICE_TOKEN="${OSMO_SERVICE_TOKEN//\"/}"
-  [[ -z "$OSMO_SERVICE_TOKEN" ]] && fatal "Failed to obtain service token from ${service_url}"
+  token_json=$(osmo token set "$token_name" \
+    --user backend-operator \
+    --expires-at "$expiry_date" \
+    --description "Backend Operator - $(date -u +%F)" \
+    --roles osmo-backend \
+    -t json 2>/dev/null) || fatal "Failed to create service token via OSMO CLI"
+  OSMO_SERVICE_TOKEN=$(printf '%s' "$token_json" | jq -r '.token // empty')
+  [[ -z "$OSMO_SERVICE_TOKEN" ]] && fatal "Service token response missing 'token' field"
   export OSMO_SERVICE_TOKEN
 
   kubectl create secret generic "$account_secret" \
     --namespace="$NS_OSMO_OPERATOR" \
-    --from-literal=token="$OSMO_SERVICE_TOKEN" \
+    --from-file=token=<(printf '%s' "$OSMO_SERVICE_TOKEN") \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+  unset OSMO_SERVICE_TOKEN
 else
   info "Token secret $account_secret already exists"
 fi
+
+unset admin_password
 
 #------------------------------------------------------------------------------
 # Configure Storage Container
