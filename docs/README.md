@@ -22,7 +22,7 @@ Documentation spans the full lifecycle — from provisioning Azure infrastructur
 | Role                   | Start here                                                                                                        |
 |------------------------|-------------------------------------------------------------------------------------------------------------------|
 | First-time deployer    | Getting Started (coming soon), then [Deploy](https://github.com/microsoft/physical-ai-toolchain/tree/main/deploy) |
-| ML / Robotics engineer | Training (coming soon) and Inference (coming soon)                                                                |
+| ML / Robotics engineer | [Training](training/lerobot-training.md) and Inference (coming soon)                                                                |
 | Platform operator      | [Operations](operations/README.md) and [Security Guide](operations/security-guide.md)                             |
 | Contributor            | [Contributing](contributing/README.md)                                                                            |
 

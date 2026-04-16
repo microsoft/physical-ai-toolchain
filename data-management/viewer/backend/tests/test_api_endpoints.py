@@ -16,7 +16,10 @@ class TestHealthEndpoint:
     def test_health(self, client):
         resp = client.get("/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "healthy"}
+        data = resp.json()
+        assert data["status"] == "healthy"
+        assert data["checks"]["api"] == "healthy"
+        assert data["checks"]["storage"] == "healthy"
 
 
 class TestListDatasets:
