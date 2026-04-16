@@ -66,7 +66,11 @@ pull_and_verify_chart() {
   echo "$tgz"
 }
 
-# [[ -f "$tf_dir/terraform.tfstate" ]] || fatal "terraform.tfstate not found in $tf_dir"
+# Read terraform outputs from state file
+read_terraform_outputs() {
+  local tf_dir="${1:?terraform directory required}"
+  [[ -d "$tf_dir" ]] || fatal "Terraform directory not found: $tf_dir"
+  [[ -f "$tf_dir/terraform.tfstate" ]] || fatal "terraform.tfstate not found in $tf_dir"
   (cd "$tf_dir" && terraform output -json) || fatal "Unable to read terraform outputs"
 }
 

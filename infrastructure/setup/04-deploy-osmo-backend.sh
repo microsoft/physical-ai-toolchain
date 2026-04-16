@@ -316,7 +316,6 @@ fi
 if [[ "$use_acr" == "true" ]]; then
   helm upgrade -i osmo-operator "oci://${acr_login_server}/helm/backend-operator" "${helm_args[@]}" --wait --timeout "$TIMEOUT_DEPLOY"
 elif [[ -n "${OSMO_CHART_SHA256:-}" ]]; then
-  local osmo_tgz
   osmo_tgz=$(pull_and_verify_chart "osmo/backend-operator" "$chart_version" "$OSMO_CHART_SHA256" "$(mktemp -d)")
   helm upgrade -i osmo-operator "$osmo_tgz" "${helm_args[@]}" --wait --timeout "$TIMEOUT_DEPLOY"
 else

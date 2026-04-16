@@ -122,9 +122,8 @@ if [[ "$skip_gpu" == "false" ]]; then
   helm repo add nvidia "$HELM_REPO_GPU_OPERATOR" >/dev/null 2>&1 || true
   helm repo update >/dev/null 2>&1
 
-  local gpu_chart_args=( nvidia/gpu-operator --version "${gpu_version#v}" )
+  gpu_chart_args=( nvidia/gpu-operator --version "${gpu_version#v}" )
   if [[ -n "${GPU_OPERATOR_CHART_SHA256:-}" ]]; then
-    local gpu_tgz
     gpu_tgz=$(pull_and_verify_chart "nvidia/gpu-operator" "${gpu_version#v}" "$GPU_OPERATOR_CHART_SHA256" "$(mktemp -d)")
     gpu_chart_args=( "$gpu_tgz" )
   fi
@@ -172,9 +171,8 @@ fi
 if [[ "$skip_kai" == "false" ]]; then
   section "Install KAI Scheduler $kai_version"
 
-  local kai_chart_args=( oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler --version "$kai_version" )
+  kai_chart_args=( oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler --version "$kai_version" )
   if [[ -n "${KAI_SCHEDULER_CHART_SHA256:-}" ]]; then
-    local kai_tgz
     kai_tgz=$(pull_and_verify_chart "oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler" "$kai_version" "$KAI_SCHEDULER_CHART_SHA256" "$(mktemp -d)")
     kai_chart_args=( "$kai_tgz" )
   fi
