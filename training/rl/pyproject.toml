@@ -4,12 +4,12 @@ version = "0.1.0"
 description = "RL training workflow runtime dependencies"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "numpy>=1.26.0,<2.0.0",
+    "numpy==1.26.4",
     "azure-core==1.39.0",
     "azure-storage-blob==12.28.0",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.32.0",
-    "marshmallow==3.25.1",
+    "marshmallow==3.26.2",
     "mlflow==3.11.1",
     "packaging==26.1",
     "psutil==7.2.2",
