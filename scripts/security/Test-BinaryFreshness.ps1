@@ -292,12 +292,13 @@ function Get-HelmRepoLatestVersion {
     param(
         [Parameter(Mandatory)][string]$RepoName,
         [Parameter(Mandatory)][string]$RepoUrl,
-        [Parameter(Mandatory)][string]$Chart
+        [Parameter(Mandatory)][string]$Chart,
+        [scriptblock]$HelmInvoker = { param($HelmArgs) & helm @HelmArgs }
     )
 
-    helm repo add $RepoName $RepoUrl --force-update *> $null
-    helm repo update $RepoName *> $null
-    $json = helm search repo $Chart --versions -o json 2>$null
+    & $HelmInvoker @('repo', 'add', $RepoName, $RepoUrl, '--force-update') *> $null
+    & $HelmInvoker @('repo', 'update', $RepoName) *> $null
+    $json = & $HelmInvoker @('search', 'repo', $Chart, '--versions', '-o', 'json') 2>$null
     if (-not $json) { return $null }
     $parsed = $json | ConvertFrom-Json
     if (-not $parsed -or $parsed.Count -eq 0) { return $null }
@@ -307,10 +308,11 @@ function Get-HelmRepoLatestVersion {
 function Get-HelmOciLatestVersion {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$Chart
+        [Parameter(Mandatory)][string]$Chart,
+        [scriptblock]$HelmInvoker = { param($HelmArgs) & helm @HelmArgs }
     )
 
-    $output = helm show chart $Chart 2>$null
+    $output = & $HelmInvoker @('show', 'chart', $Chart) 2>$null
     if (-not $output) { return $null }
     $line = $output | Where-Object { $_ -match '^version:' } | Select-Object -First 1
     if (-not $line) { return $null }
@@ -320,6 +322,110 @@ function Get-HelmOciLatestVersion {
 # ============================================================
 # Main orchestration
 # ============================================================
+
+function Get-BinaryCheckDefinitions {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DevDeps,
+        [Parameter(Mandatory)][string]$Thinlinc,
+        [Parameter(Mandatory)][string]$Devcontainer
+    )
+
+    return @(
+        @{
+            Name     = 'NodeSource GPG Key'
+            Url      = 'https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key'
+            Expected = (Get-ShellVariable -Path $DevDeps -Name 'NODESOURCE_GPG_SHA256')
+            File     = $DevDeps
+        }
+        @{
+            Name     = "uv Installer (v$(Get-ShellVariable -Path $DevDeps -Name 'UV_VERSION'))"
+            Url      = "https://astral.sh/uv/$(Get-ShellVariable -Path $DevDeps -Name 'UV_VERSION')/install.sh"
+            Expected = (Get-ShellVariable -Path $DevDeps -Name 'UV_INSTALLER_SHA256')
+            File     = $DevDeps
+        }
+        @{
+            Name     = 'Microsoft GPG Key'
+            Url      = 'https://packages.microsoft.com/keys/microsoft.asc'
+            Expected = (Get-ShellVariable -Path $DevDeps -Name 'MICROSOFT_GPG_SHA256')
+            File     = $DevDeps
+        }
+        @{
+            Name     = 'NVIDIA Container Toolkit GPG Key'
+            Url      = 'https://nvidia.github.io/libnvidia-container/gpgkey'
+            Expected = (Get-ShellVariable -Path $DevDeps -Name 'NVIDIA_CTK_GPG_SHA256')
+            File     = $DevDeps
+        }
+        @{
+            Name     = "ThinLinc Server (v$(Get-ShellVariable -Path $Thinlinc -Name 'TL_VERSION'))"
+            Url      = "https://www.cendio.com/downloads/server/tl-$(Get-ShellVariable -Path $Thinlinc -Name 'TL_VERSION')-server.zip"
+            Expected = (Get-ShellVariable -Path $Thinlinc -Name 'TL_SHA256')
+            File     = $Thinlinc
+        }
+        @{
+            Name     = "TFLint ($(Get-JsonVariable -Path $Devcontainer -Name 'TFLINT_VERSION'))"
+            Url      = "https://github.com/terraform-linters/tflint/releases/download/$(Get-JsonVariable -Path $Devcontainer -Name 'TFLINT_VERSION')/tflint_linux_amd64.zip"
+            Expected = (Get-JsonVariable -Path $Devcontainer -Name 'TFLINT_SHA256')
+            File     = $Devcontainer
+        }
+        @{
+            Name     = "OSMO Installer ($(Get-JsonVariable -Path $Devcontainer -Name 'OSMO_VERSION'))"
+            Url      = "https://raw.githubusercontent.com/NVIDIA/OSMO/refs/tags/$(Get-JsonVariable -Path $Devcontainer -Name 'OSMO_VERSION')/install.sh"
+            Expected = (Get-JsonVariable -Path $Devcontainer -Name 'OSMO_INSTALLER_SHA256')
+            File     = $Devcontainer
+        }
+        @{
+            Name     = "NGC CLI ($(Get-JsonVariable -Path $Devcontainer -Name 'NGC_CLI_VERSION'))"
+            Url      = "https://api.ngc.nvidia.com/v2/resources/nvidia/ngc-apps/ngc_cli/versions/$(Get-JsonVariable -Path $Devcontainer -Name 'NGC_CLI_VERSION')/files/ngccli_linux.zip"
+            Expected = (Get-JsonVariable -Path $Devcontainer -Name 'NGC_CLI_SHA256')
+            File     = $Devcontainer
+        }
+    )
+}
+
+function ConvertTo-HashCheckSarifResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$File
+    )
+
+    switch ($Result.Status) {
+        'Match' { return $null }
+        'DownloadFailed' {
+            return (New-SarifResult -RuleId 'binary-freshness/download-failure' `
+                    -Message $Result.Message -File $File -Level 'error')
+        }
+        'Mismatch' {
+            return (New-SarifResult -RuleId 'binary-freshness/hash-mismatch' `
+                    -Message $Result.Message -File $File -Level 'warning')
+        }
+    }
+    return $null
+}
+
+function ConvertTo-HelmCheckSarifResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Check,
+        [Parameter(Mandatory)][string]$File
+    )
+
+    if (-not $Check.Latest) {
+        $msg = "Failed to query $($Check.Name) chart version from $($Check.Source) after retries."
+        return (New-SarifResult -RuleId 'binary-freshness/lookup-failure' `
+                -Message $msg -File $File -Level 'warning')
+    }
+
+    $cmp = Test-HelmVersionCurrent -Pinned $Check.Pinned -Latest $Check.Latest
+    if (-not $cmp.IsCurrent) {
+        $msg = "$($Check.Name) pinned at $($cmp.Pinned) but latest is $($cmp.Latest). Run scripts/update-chart-hashes.sh to update pinned hashes."
+        return (New-SarifResult -RuleId 'binary-freshness/version-drift' `
+                -Message $msg -File $File -Level 'warning')
+    }
+
+    return $null
+}
 
 function Invoke-BinaryFreshnessCheck {
     [CmdletBinding()]
@@ -343,77 +449,22 @@ function Invoke-BinaryFreshnessCheck {
         Write-Host ''
         Write-Host '=== Binary Hash Freshness Check ==='
 
-        $binaryChecks = @(
-            @{
-                Name     = 'NodeSource GPG Key'
-                Url      = 'https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key'
-                Expected = (Get-ShellVariable -Path $devDeps -Name 'NODESOURCE_GPG_SHA256')
-                File     = $devDeps
-            }
-            @{
-                Name     = "uv Installer (v$(Get-ShellVariable -Path $devDeps -Name 'UV_VERSION'))"
-                Url      = "https://astral.sh/uv/$(Get-ShellVariable -Path $devDeps -Name 'UV_VERSION')/install.sh"
-                Expected = (Get-ShellVariable -Path $devDeps -Name 'UV_INSTALLER_SHA256')
-                File     = $devDeps
-            }
-            @{
-                Name     = 'Microsoft GPG Key'
-                Url      = 'https://packages.microsoft.com/keys/microsoft.asc'
-                Expected = (Get-ShellVariable -Path $devDeps -Name 'MICROSOFT_GPG_SHA256')
-                File     = $devDeps
-            }
-            @{
-                Name     = 'NVIDIA Container Toolkit GPG Key'
-                Url      = 'https://nvidia.github.io/libnvidia-container/gpgkey'
-                Expected = (Get-ShellVariable -Path $devDeps -Name 'NVIDIA_CTK_GPG_SHA256')
-                File     = $devDeps
-            }
-            @{
-                Name     = "ThinLinc Server (v$(Get-ShellVariable -Path $thinlinc -Name 'TL_VERSION'))"
-                Url      = "https://www.cendio.com/downloads/server/tl-$(Get-ShellVariable -Path $thinlinc -Name 'TL_VERSION')-server.zip"
-                Expected = (Get-ShellVariable -Path $thinlinc -Name 'TL_SHA256')
-                File     = $thinlinc
-            }
-            @{
-                Name     = "TFLint ($(Get-JsonVariable -Path $devcontainer -Name 'TFLINT_VERSION'))"
-                Url      = "https://github.com/terraform-linters/tflint/releases/download/$(Get-JsonVariable -Path $devcontainer -Name 'TFLINT_VERSION')/tflint_linux_amd64.zip"
-                Expected = (Get-JsonVariable -Path $devcontainer -Name 'TFLINT_SHA256')
-                File     = $devcontainer
-            }
-            @{
-                Name     = "OSMO Installer ($(Get-JsonVariable -Path $devcontainer -Name 'OSMO_VERSION'))"
-                Url      = "https://raw.githubusercontent.com/NVIDIA/OSMO/refs/tags/$(Get-JsonVariable -Path $devcontainer -Name 'OSMO_VERSION')/install.sh"
-                Expected = (Get-JsonVariable -Path $devcontainer -Name 'OSMO_INSTALLER_SHA256')
-                File     = $devcontainer
-            }
-            @{
-                Name     = "NGC CLI ($(Get-JsonVariable -Path $devcontainer -Name 'NGC_CLI_VERSION'))"
-                Url      = "https://api.ngc.nvidia.com/v2/resources/nvidia/ngc-apps/ngc_cli/versions/$(Get-JsonVariable -Path $devcontainer -Name 'NGC_CLI_VERSION')/files/ngccli_linux.zip"
-                Expected = (Get-JsonVariable -Path $devcontainer -Name 'NGC_CLI_SHA256')
-                File     = $devcontainer
-            }
-        )
+        $binaryChecks = Get-BinaryCheckDefinitions -DevDeps $devDeps -Thinlinc $thinlinc -Devcontainer $devcontainer
 
         foreach ($check in $binaryChecks) {
             Write-Host "Checking $($check.Name)..."
             $result = Invoke-HashCheck -Name $check.Name -Url $check.Url -Expected ($check.Expected ?? '') -File $check.File
 
             switch ($result.Status) {
-                'Match' {
-                    Write-Host "  [OK] $($check.Name) hash matches"
-                }
-                'DownloadFailed' {
-                    Write-Host "::error file=$($check.File)::$($result.Message)"
-                    $mismatch++
-                    $sarifResults.Add((New-SarifResult -RuleId 'binary-freshness/download-failure' `
-                        -Message $result.Message -File $check.File -Level 'error'))
-                }
-                'Mismatch' {
-                    Write-Host "::warning file=$($check.File)::$($result.Message)"
-                    $mismatch++
-                    $sarifResults.Add((New-SarifResult -RuleId 'binary-freshness/hash-mismatch' `
-                        -Message $result.Message -File $check.File -Level 'warning'))
-                }
+                'Match'          { Write-Host "  [OK] $($check.Name) hash matches" }
+                'DownloadFailed' { Write-Host "::error file=$($check.File)::$($result.Message)" }
+                'Mismatch'       { Write-Host "::warning file=$($check.File)::$($result.Message)" }
+            }
+
+            $sarif = ConvertTo-HashCheckSarifResult -Result $result -File $check.File
+            if ($sarif) {
+                $sarifResults.Add($sarif)
+                $mismatch++
             }
         }
 
@@ -450,25 +501,23 @@ function Invoke-BinaryFreshnessCheck {
 
         foreach ($check in $helmChecks) {
             if (-not $check.Latest) {
-                $msg = "Failed to query $($check.Name) chart version from $($check.Source) after retries."
-                Write-Host "::warning::$msg"
-                $mismatch++
-                $sarifResults.Add((New-SarifResult -RuleId 'binary-freshness/lookup-failure' `
-                    -Message $msg -File $defaultsConf -Level 'warning'))
-                continue
-            }
-
-            $cmp = Test-HelmVersionCurrent -Pinned $check.Pinned -Latest $check.Latest
-            Write-Host "Checking $($check.Name) (pinned: $($cmp.Pinned), latest: $($cmp.Latest))..."
-            if (-not $cmp.IsCurrent) {
-                $msg = "$($check.Name) pinned at $($cmp.Pinned) but latest is $($cmp.Latest). Run scripts/update-chart-hashes.sh to update pinned hashes."
-                Write-Host "::warning file=${defaultsConf}::$msg"
-                $mismatch++
-                $sarifResults.Add((New-SarifResult -RuleId 'binary-freshness/version-drift' `
-                    -Message $msg -File $defaultsConf -Level 'warning'))
+                Write-Host "::warning::Failed to query $($check.Name) chart version from $($check.Source) after retries."
             }
             else {
-                Write-Host "  [OK] $($check.Name) version is current"
+                $cmp = Test-HelmVersionCurrent -Pinned $check.Pinned -Latest $check.Latest
+                Write-Host "Checking $($check.Name) (pinned: $($cmp.Pinned), latest: $($cmp.Latest))..."
+                if (-not $cmp.IsCurrent) {
+                    Write-Host "::warning file=${defaultsConf}::$($check.Name) pinned at $($cmp.Pinned) but latest is $($cmp.Latest). Run scripts/update-chart-hashes.sh to update pinned hashes."
+                }
+                else {
+                    Write-Host "  [OK] $($check.Name) version is current"
+                }
+            }
+
+            $sarif = ConvertTo-HelmCheckSarifResult -Check $check -File $defaultsConf
+            if ($sarif) {
+                $sarifResults.Add($sarif)
+                $mismatch++
             }
         }
 
