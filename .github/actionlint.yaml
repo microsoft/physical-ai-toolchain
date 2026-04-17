@@ -2,3 +2,5 @@ self-hosted-runner:
   labels: []
 config-variables:
   - RELEASE_APP_ID
+  - gh_aw_model_agent_copilot
+  - gh_aw_model_detection_copilot
