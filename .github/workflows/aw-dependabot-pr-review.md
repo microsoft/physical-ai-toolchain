@@ -3,7 +3,9 @@ name: AW Dependabot PR Review
 description: Advisory agentic review of Dependabot dependency update PRs for physical-ai-toolchain
 engine: copilot
 timeout-minutes: 15
-if: github.event.pull_request.draft == false
+if: >
+  github.event.pull_request.draft == false &&
+  github.event.pull_request.user.login == 'dependabot[bot]'
 on:
   pull_request:
     types: [opened, synchronize, reopened]
