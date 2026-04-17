@@ -512,7 +512,7 @@ function Resolve-RepoRoot {
         $root = git rev-parse --show-toplevel 2>$null
         if ($LASTEXITCODE -eq 0 -and $root) { return $root.Trim() }
     }
-    catch { }
+    catch { Write-Verbose "git rev-parse failed: $_" }
 
     return (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 }
@@ -529,7 +529,7 @@ function Resolve-Repository {
             return ($url -replace '.*github\.com[:/]', '' -replace '\.git$', '').Trim()
         }
     }
-    catch { }
+    catch { Write-Verbose "git remote get-url failed: $_" }
 
     return 'unknown/unknown'
 }

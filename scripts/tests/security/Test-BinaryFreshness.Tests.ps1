@@ -154,6 +154,7 @@ Describe 'Invoke-HashCheck' -Tag 'Unit' {
     It 'Returns Match when expected hash equals computed hash' {
         Mock Invoke-WebRequest -MockWith {
             param($Uri, $OutFile)
+            $null = $Uri
             [System.IO.File]::WriteAllBytes($OutFile, $script:FakeBytes)
         }
         $result = Invoke-HashCheck -Name 'test' -Url 'https://example/test' `
@@ -164,6 +165,7 @@ Describe 'Invoke-HashCheck' -Tag 'Unit' {
     It 'Returns Mismatch when expected hash differs' {
         Mock Invoke-WebRequest -MockWith {
             param($Uri, $OutFile)
+            $null = $Uri
             [System.IO.File]::WriteAllBytes($OutFile, $script:FakeBytes)
         }
         $result = Invoke-HashCheck -Name 'test' -Url 'https://example/test' `
@@ -183,6 +185,7 @@ Describe 'Invoke-HashCheck' -Tag 'Unit' {
     It 'Is case-insensitive on the expected hash' {
         Mock Invoke-WebRequest -MockWith {
             param($Uri, $OutFile)
+            $null = $Uri
             [System.IO.File]::WriteAllBytes($OutFile, $script:FakeBytes)
         }
         $upper = $script:KnownHash.ToUpperInvariant()
@@ -205,5 +208,49 @@ Describe 'Invoke-WithRetry' -Tag 'Unit' {
     It 'Returns null when every attempt yields empty output' {
         $result = Invoke-WithRetry -MaxAttempts 2 -Action { '' }
         $result | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Resolve-RepoRoot' -Tag 'Unit' {
+    It 'Returns the resolved -Hint path when provided' {
+        (Resolve-RepoRoot -Hint $script:FixturesRoot) | Should -Be (Resolve-Path $script:FixturesRoot).Path
+    }
+
+    It 'Falls back to a non-empty path when no hint is provided' {
+        Resolve-RepoRoot | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Resolve-Repository' -Tag 'Unit' {
+    BeforeEach {
+        $script:OrigRepo = $env:GITHUB_REPOSITORY
+        Remove-Item Env:GITHUB_REPOSITORY -ErrorAction SilentlyContinue
+    }
+    AfterEach {
+        if ($script:OrigRepo) {
+            $env:GITHUB_REPOSITORY = $script:OrigRepo
+        } else {
+            Remove-Item Env:GITHUB_REPOSITORY -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'Prefers $env:GITHUB_REPOSITORY when set' {
+        $env:GITHUB_REPOSITORY = 'owner/repo'
+        Resolve-Repository -RepoRoot $script:FixturesRoot | Should -Be 'owner/repo'
+    }
+
+    It 'Parses https github remote URLs' {
+        Mock git { 'https://github.com/octocat/robotics.git' }
+        Resolve-Repository -RepoRoot $script:FixturesRoot | Should -Be 'octocat/robotics'
+    }
+
+    It 'Parses ssh github remote URLs' {
+        Mock git { 'git@github.com:octocat/robotics.git' }
+        Resolve-Repository -RepoRoot $script:FixturesRoot | Should -Be 'octocat/robotics'
+    }
+
+    It 'Returns unknown/unknown when no source is available' {
+        Mock git { $null }
+        Resolve-Repository -RepoRoot $script:FixturesRoot | Should -Be 'unknown/unknown'
     }
 }
