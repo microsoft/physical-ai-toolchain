@@ -375,7 +375,7 @@ Describe 'Get-HelmRepoLatestVersion' -Tag 'Unit' {
     }
 
     It 'Returns null when search produces no output' {
-        $invoker = { param($HelmArgs); $null = $HelmArgs }
+        $invoker = { }
         Get-HelmRepoLatestVersion -RepoName 'test' -RepoUrl 'https://example.com' -Chart 'test/chart' -HelmInvoker $invoker | Should -BeNullOrEmpty
     }
 
@@ -393,22 +393,18 @@ Describe 'Get-HelmRepoLatestVersion' -Tag 'Unit' {
 Describe 'Get-HelmOciLatestVersion' -Tag 'Unit' {
     It 'Parses version from helm show chart output' {
         $invoker = {
-            param($HelmArgs)
-            $null = $HelmArgs
             @('apiVersion: v2', 'name: test-chart', 'version: 4.5.6', 'description: test')
         }
         Get-HelmOciLatestVersion -Chart 'oci://registry/chart' -HelmInvoker $invoker | Should -Be '4.5.6'
     }
 
     It 'Returns null when helm produces no output' {
-        $invoker = { param($HelmArgs); $null = $HelmArgs }
+        $invoker = { }
         Get-HelmOciLatestVersion -Chart 'oci://registry/chart' -HelmInvoker $invoker | Should -BeNullOrEmpty
     }
 
     It 'Returns null when output contains no version line' {
         $invoker = {
-            param($HelmArgs)
-            $null = $HelmArgs
             @('apiVersion: v2', 'name: test-chart', 'description: test')
         }
         Get-HelmOciLatestVersion -Chart 'oci://registry/chart' -HelmInvoker $invoker | Should -BeNullOrEmpty
