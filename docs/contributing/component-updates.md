@@ -55,10 +55,24 @@ Dependabot opens PRs weekly on Monday for covered ecosystems. Configuration live
 | terraform      | `/infrastructure/terraform/dns` | None                    | Weekly, Monday |
 | github-actions | `/`                             | `github-actions`        | Weekly, Monday |
 
-PR flow: Dependabot opens PR → CI runs (dependency-review, pinning-scan, CodeQL, linters) → maintainer reviews changelog and test results → merge.
+PR flow: Dependabot opens PR → CI runs (dependency-review, pinning-scan, CodeQL, linters) → advisory reviewer agent posts a GHSA/OSV-enriched risk summary → maintainer reviews changelog and test results → merge.
 
 > [!NOTE]
 > Dependabot does not cover Helm charts, container images, or 2 additional Terraform directories (`vpn/`, `automation/`). These require manual updates.
+
+### Advisory Reviewer Agent
+
+An agentic workflow at [.github/workflows/aw-dependabot-pr-review.md](../../.github/workflows/aw-dependabot-pr-review.md) triggers on every Dependabot PR and posts a single review with the verdict `APPROVE` or `COMMENT`. It never emits `REQUEST_CHANGES` and never blocks a merge.
+
+The reviewer enriches each update with:
+
+* GHSA, OSV, and NVD advisory lookups for referenced CVE/GHSA IDs
+* Release-notes highlights pulled from the ecosystem registry (npm, PyPI, Go proxy, Terraform registry, Docker Hub)
+* Surface-specific risk flags (Isaac Sim numpy ABI pin, `azurerm` major bumps, CUDA-adjacent Docker base images, unpinned Action tags)
+
+The review body prepends a `⚠️ Maintainer review recommended` banner when any high-risk signal fires. Up to five inline comments are anchored to the changed manifest or lockfile lines. The workflow skips drafts and any PR that touches `.github/workflows/**`. The persona is defined in [.github/agents/dependabot-pr-reviewer.agent.md](../../.github/agents/dependabot-pr-reviewer.agent.md).
+
+Maintainers remain the source of truth — the reviewer is advisory context, not automated policy.
 
 ## Manual Update Process
 
