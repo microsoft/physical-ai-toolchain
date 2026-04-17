@@ -172,10 +172,10 @@ fi
 # Storage connection string (only when using access-keys mode)
 # OSMO's StaticDataCredential passes access_key to BlobServiceClient.from_connection_string(),
 # which requires a full connection string — not a raw access key.
-account_key=""
+storage_connection_string=""
 if [[ "$use_access_keys" == "true" ]]; then
   raw_key=$(az storage account keys list -g "$rg" -n "$storage_name" --query '[0].value' -o tsv)
-  account_key="DefaultEndpointsProtocol=https;AccountName=${storage_name};AccountKey=${raw_key};EndpointSuffix=core.windows.net"
+  storage_connection_string="DefaultEndpointsProtocol=https;AccountName=${storage_name};AccountKey=${raw_key};EndpointSuffix=core.windows.net"
   unset raw_key
 fi
 
@@ -394,7 +394,7 @@ export BACKEND_DESCRIPTION="$backend_description"
 export K8S_NAMESPACE="$NS_OSMO_WORKFLOWS"
 export CONTROL_PLANE_NAMESPACE="$NS_OSMO_CONTROL_PLANE"
 export STORAGE_ACCESS_KEY_ID="osmo-control-plane-storage"
-export STORAGE_ACCESS_KEY="$account_key"
+export STORAGE_ACCESS_KEY="$storage_connection_string"
 export WORKFLOW_BASE_URL="$workflow_base_url"
 export WORKFLOW_DATA_ENDPOINT="${azure_container}/workflows/data"
 export WORKFLOW_LOG_ENDPOINT="${azure_container}/workflows/logs"

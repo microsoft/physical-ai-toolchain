@@ -244,10 +244,11 @@ variable "should_enable_redis_high_availability" {
  */
 
 variable "osmo_config" {
-  description = "OSMO configuration including workload identity settings"
+  description = "OSMO configuration including workload identity and secret settings"
   type = object({
     should_enable_identity   = bool
     should_federate_identity = bool
+    should_create_secret     = bool
     control_plane_namespace  = string
     operator_namespace       = string
     workflows_namespace      = string
@@ -255,6 +256,7 @@ variable "osmo_config" {
   default = {
     should_enable_identity   = true
     should_federate_identity = true
+    should_create_secret     = true
     control_plane_namespace  = "osmo-control-plane"
     operator_namespace       = "osmo-operator"
     workflows_namespace      = "osmo-workflows"

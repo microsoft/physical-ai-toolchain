@@ -60,7 +60,7 @@ resource "azurerm_user_assigned_identity" "osmo" {
 // ============================================================
 
 resource "random_password" "osmo_admin" {
-  count = local.should_deploy_osmo ? 1 : 0
+  count = var.should_create_osmo_secret ? 1 : 0
 
   length      = 43
   special     = false
@@ -70,7 +70,7 @@ resource "random_password" "osmo_admin" {
 }
 
 resource "azapi_resource" "osmo_admin_password" {
-  count = local.should_deploy_osmo ? 1 : 0
+  count = var.should_create_osmo_secret ? 1 : 0
 
   type      = "Microsoft.KeyVault/vaults/secrets@2025-05-01"
   name      = "osmo-admin-password"

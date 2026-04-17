@@ -268,7 +268,7 @@ def evaluate(env: Any, agent: Any, num_episodes: int, framework: str) -> Metrics
     while metrics.count < num_episodes:
         with torch.inference_mode():
             if framework == "skrl":
-                actions = agent.act(obs, None, timestep=step, timesteps=0)[0]
+                actions = agent.act(obs, inference=None, timestep=step, timesteps=0)[0]
             else:
                 actions = agent.act_inference(obs)
 
