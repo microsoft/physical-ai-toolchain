@@ -1,5 +1,5 @@
 ---
-name: Dependabot PR Review
+name: AW Dependabot PR Review
 description: Advisory agentic review of Dependabot dependency update PRs for physical-ai-toolchain
 engine: copilot
 timeout-minutes: 15
