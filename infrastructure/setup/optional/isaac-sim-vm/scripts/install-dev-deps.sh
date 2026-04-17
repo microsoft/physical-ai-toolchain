@@ -153,11 +153,13 @@ apt_get update
 apt_get install -y --no-install-recommends nodejs
 
 UV_VERSION="0.10.9"
-UV_INSTALLER_SHA256="7fc46e39cb97290b57169c0c813a17970585ac519139f19006453c99b5f2f45f"
-curl -fsSL -o /tmp/uv-install.sh "https://astral.sh/uv/${UV_VERSION}/install.sh"
-echo "${UV_INSTALLER_SHA256}  /tmp/uv-install.sh" | sha256sum -c --quiet -
-sudo env UV_INSTALL_DIR="/usr/local/bin" sh /tmp/uv-install.sh
-rm -f /tmp/uv-install.sh
+UV_SHA256="20d79708222611fa540b5c9ed84f352bcd3937740e51aacc0f8b15b271c57594"
+curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/uv.tar.gz
+echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
+tar -xzf /tmp/uv.tar.gz -C /tmp
+sudo install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uv /usr/local/bin/uv
+sudo install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uvx /usr/local/bin/uvx
+rm -rf /tmp/uv.tar.gz /tmp/uv-x86_64-unknown-linux-gnu
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv installation failed or is not on PATH" >&2
   exit 1
