@@ -34,8 +34,7 @@ require_tools() {
   [[ ${#missing[@]} -eq 0 ]] || fatal "Missing required tools: ${missing[*]}"
 }
 
-# Override the osmo command with the local osmo-dev.sh Bazel wrapper.
-# Requires OSMO_SOURCE_DIR in .env.local or environment (see optional/osmo-dev.sh --help).
+# Activate local OSMO development CLI wrapper
 activate_local_osmo() {
   local repo_root
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -60,6 +59,38 @@ require_az_extension() {
     info "Installing Azure CLI extension '$ext'..."
     az extension add --name "$ext" --yes || fatal "Failed to install Azure CLI extension '$ext'"
   fi
+}
+
+# Pull a Helm chart and optionally verify its SHA256 hash.
+# Usage: pull_and_verify_chart <chart_ref> <version> <expected_sha256> <output_dir>
+#   chart_ref     — repo/chart name or oci:// URI
+#   version       — chart version (without leading 'v')
+#   expected_sha256 — expected SHA256 digest; empty string skips verification
+#   output_dir    — directory to store the downloaded .tgz
+# Prints the path to the downloaded .tgz on stdout.
+pull_and_verify_chart() {
+  local chart_ref="$1" version="$2" expected_sha="$3" output_dir="$4"
+  mkdir -p "$output_dir"
+
+  helm pull "$chart_ref" --version "$version" --destination "$output_dir" || \
+    fatal "helm pull failed for $chart_ref $version"
+
+  local tgz
+  tgz=$(find "$output_dir" -maxdepth 1 -name '*.tgz' -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)
+  [[ -n "$tgz" ]] || fatal "No .tgz found in $output_dir after helm pull"
+
+  if [[ -n "$expected_sha" ]]; then
+    local actual_sha
+    actual_sha=$(sha256sum "$tgz" | awk '{print $1}')
+    if [[ "$actual_sha" != "$expected_sha" ]]; then
+      fatal "SHA256 mismatch for $tgz: expected=$expected_sha actual=$actual_sha. Run scripts/update-chart-hashes.sh to update pinned hashes."
+    fi
+    info "Chart hash verified: $tgz ($actual_sha)"
+  else
+    warn "No expected hash provided for $chart_ref $version — skipping verification. Run scripts/update-chart-hashes.sh to generate and pin a hash."
+  fi
+
+  echo "$tgz"
 }
 
 # Read terraform outputs from state file

@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi==0.135.3",
     "uvicorn[standard]==0.44.0",
-    "pydantic==2.13.0",
+    "pydantic==2.13.1",
     "python-multipart==0.0.26",
     "python-dotenv==1.2.2",
     "aiofiles==25.1.0",
@@ -32,7 +32,7 @@ azure = [
     "azure-identity==1.25.3",
 ]
 huggingface = [
-    "huggingface-hub==1.10.1",
+    "huggingface-hub==1.10.2",
 ]
 hdf5 = [
     "h5py==3.16.0",

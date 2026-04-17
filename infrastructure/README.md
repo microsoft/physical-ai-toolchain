@@ -29,7 +29,6 @@ infrastructure/
 │   ├── 03-deploy-osmo-control-plane.sh# OSMO control plane
 │   ├── 04-deploy-osmo-backend.sh      # OSMO backend services
 │   ├── defaults.conf                  # Central version and namespace config
-│   ├── defaults.ps1                   # PowerShell defaults
 │   ├── README.md                      # Setup quick start
 │   ├── lib/                           # Shared shell libraries
 │   ├── cleanup/                       # Component removal scripts
