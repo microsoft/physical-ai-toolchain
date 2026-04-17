@@ -4,3 +4,13 @@ config-variables:
   - RELEASE_APP_ID
   - gh_aw_model_agent_copilot
   - gh_aw_model_detection_copilot
+
+# Path-specific configurations for generated lock files.
+# Lock files are produced by `gh aw compile` and contain shell scripts
+# that trigger shellcheck info/style diagnostics outside our control.
+paths:
+  .github/workflows/*.lock.yml:
+    ignore:
+      - "shellcheck reported issue in this script: SC2015:.+"
+      - "shellcheck reported issue in this script: SC2086:.+"
+      - "shellcheck reported issue in this script: SC2129:.+"
