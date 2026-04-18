@@ -39,6 +39,9 @@
     "markdown-table-formatter": "1.7.0",
     "markdownlint-cli2": "0.22.0"
   },
+  "overrides": {
+    "smol-toml": ">=1.6.1"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/microsoft/physical-ai-toolchain.git"
