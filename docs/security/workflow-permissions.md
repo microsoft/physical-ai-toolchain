@@ -62,3 +62,9 @@ The release-publishing path uses additional hardening beyond minimum permissions
 - [Threat Model](threat-model.md)
 
 <!-- markdownlint-configure-file { "MD024": false } -->
+
+<!-- markdownlint-disable MD036 -->
+*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
+then carefully refined by our team of discerning human reviewers.*
+<!-- markdownlint-enable MD036 -->
+
