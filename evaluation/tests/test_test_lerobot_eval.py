@@ -205,9 +205,7 @@ class TestRunInferenceTest:
         args = _make_args(dataset_dir=str(tmp_path), num_steps=2, output=None)
         _mod.run_inference_test(args)
 
-    def test_warns_on_degenerate_outputs(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
-    ) -> None:
+    def test_warns_on_degenerate_outputs(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys) -> None:
         mocks = _setup_run_inference_test(monkeypatch, tmp_path)
         # Force NaN + Inf + zero-variance predictions.
         bad = torch.full((1, 6), float("nan"))
@@ -230,9 +228,7 @@ class TestRunInferenceTest:
 
 class TestMain:
     def test_missing_dataset_exits(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        monkeypatch.setattr(
-            sys, "argv", ["test-lerobot-eval", "--dataset-dir", str(tmp_path / "missing")]
-        )
+        monkeypatch.setattr(sys, "argv", ["test-lerobot-eval", "--dataset-dir", str(tmp_path / "missing")])
         with pytest.raises(SystemExit) as exc_info:
             _mod.main()
         assert exc_info.value.code == 1
@@ -245,8 +241,6 @@ class TestMain:
             called["args"] = args
 
         monkeypatch.setattr(_mod, "run_inference_test", fake_run)
-        monkeypatch.setattr(
-            sys, "argv", ["test-lerobot-eval", "--dataset-dir", str(tmp_path), "--num-steps", "1"]
-        )
+        monkeypatch.setattr(sys, "argv", ["test-lerobot-eval", "--dataset-dir", str(tmp_path), "--num-steps", "1"])
         _mod.main()
         assert called["args"].dataset_dir == str(tmp_path)

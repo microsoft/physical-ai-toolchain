@@ -44,6 +44,7 @@ _spec.loader.exec_module(_mod)
 
 # ---------------- helpers ----------------
 
+
 def _make_args(**overrides) -> SimpleNamespace:
     defaults = dict(
         policy_path="/tmp/policy",
@@ -169,6 +170,7 @@ def _setup_run_evaluation(
 
 # ---------------- TestResolveDevice ----------------
 
+
 class TestResolveDevice:
     def test_cuda_when_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
@@ -195,6 +197,7 @@ class TestResolveDevice:
 
 # ---------------- TestFindDataFile ----------------
 
+
 class TestFindDataFile:
     def test_first_candidate(self, tmp_path: Path) -> None:
         d = tmp_path / "data" / "chunk-000"
@@ -215,6 +218,7 @@ class TestFindDataFile:
 
 
 # ---------------- TestFindVideoFile ----------------
+
 
 class TestFindVideoFile:
     def test_first_candidate(self, tmp_path: Path) -> None:
@@ -237,6 +241,7 @@ class TestFindVideoFile:
 
 # ---------------- TestLoadVideoFrames ----------------
 
+
 class TestLoadVideoFrames:
     def test_decodes_frames(self, monkeypatch: pytest.MonkeyPatch) -> None:
         frames = [np.zeros((4, 4, 3), dtype=np.uint8), np.ones((4, 4, 3), dtype=np.uint8)]
@@ -248,10 +253,9 @@ class TestLoadVideoFrames:
 
 # ---------------- TestDownloadAmlModel ----------------
 
+
 class TestDownloadAmlModel:
-    def test_finds_safetensors_in_subdir(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mock_azure_ml
-    ) -> None:
+    def test_finds_safetensors_in_subdir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mock_azure_ml) -> None:
         download_root = tmp_path / "tmp" / "aml-model-download"
         sub = download_root / "my-model" / "pretrained_model"
         sub.mkdir(parents=True)
@@ -270,9 +274,7 @@ class TestDownloadAmlModel:
         assert result == Path("tmp/aml-model-download/my-model/pretrained_model")
         client.models.download.assert_called_once()
 
-    def test_finds_bin_files(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mock_azure_ml
-    ) -> None:
+    def test_finds_bin_files(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mock_azure_ml) -> None:
         download_root = tmp_path / "tmp" / "aml-model-download"
         sub = download_root / "m" / "checkpoint"
         sub.mkdir(parents=True)
@@ -305,6 +307,7 @@ class TestDownloadAmlModel:
 
 # ---------------- TestLoadNormalizerStats ----------------
 
+
 class TestLoadNormalizerStats:
     def test_no_files_returns_early(self, tmp_path: Path) -> None:
         policy = MagicMock()
@@ -326,12 +329,14 @@ class TestLoadNormalizerStats:
         mean_t = torch.ones(6)
         std_t = torch.full((6,), 2.0)
         bad_short = torch.zeros(1)
-        st.load_file = MagicMock(return_value={
-            "observation.state.mean": mean_t,
-            "observation.state.std": std_t,
-            "observation.state.median": bad_short,  # not in {mean,std,min,max}
-            "noseparator": bad_short,  # rsplit gives 1 part
-        })
+        st.load_file = MagicMock(
+            return_value={
+                "observation.state.mean": mean_t,
+                "observation.state.std": std_t,
+                "observation.state.median": bad_short,  # not in {mean,std,min,max}
+                "noseparator": bad_short,  # rsplit gives 1 part
+            }
+        )
         policy = MagicMock()
         policy.state_dict.return_value = {
             "normalize_inputs.buffer_observation_state.mean": torch.zeros(6),
@@ -342,9 +347,7 @@ class TestLoadNormalizerStats:
         kwargs = policy.load_state_dict.call_args
         assert kwargs.kwargs.get("strict") is False or kwargs.args[1:] == (False,)
 
-    def test_no_matching_buffers_skips_load(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_matching_buffers_skips_load(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / "preprocessor.safetensors").write_bytes(b"")
         st = sys.modules["safetensors.torch"]
         st.load_file = MagicMock(return_value={"observation.state.mean": torch.ones(6)})
@@ -357,10 +360,9 @@ class TestLoadNormalizerStats:
 
 # ---------------- TestRunEvaluation ----------------
 
+
 class TestRunEvaluation:
-    def test_happy_path_writes_results(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_happy_path_writes_results(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _setup_run_evaluation(monkeypatch, tmp_path, n_frames=5)
         out = tmp_path / "out"
         args = _make_args(dataset_dir=str(tmp_path), output_dir=str(out), episodes=1)
@@ -369,9 +371,7 @@ class TestRunEvaluation:
         assert (out / "ep000_predictions.npz").exists()
         assert (out / "plots" / "ep000_action_deltas.png").exists()
 
-    def test_strips_config_fields(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_strips_config_fields(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _setup_run_evaluation(monkeypatch, tmp_path, n_frames=5)
         policy_dir = tmp_path / "policy"
         policy_dir.mkdir()
@@ -387,9 +387,7 @@ class TestRunEvaluation:
         assert "use_peft" not in new_cfg
         assert new_cfg["keep"] == 1
 
-    def test_config_without_strip_fields_unchanged(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_config_without_strip_fields_unchanged(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _setup_run_evaluation(monkeypatch, tmp_path, n_frames=5)
         policy_dir = tmp_path / "policy"
         policy_dir.mkdir()
@@ -436,52 +434,36 @@ class TestRunEvaluation:
         policy = MagicMock()
         policy.parameters.return_value = [torch.zeros(1)]
         policy.to.return_value = policy
-        sys.modules["lerobot.policies.act.modeling_act"].ACTPolicy = SimpleNamespace(
-            from_pretrained=lambda _p: policy
-        )
+        sys.modules["lerobot.policies.act.modeling_act"].ACTPolicy = SimpleNamespace(from_pretrained=lambda _p: policy)
         monkeypatch.setattr(_mod, "_load_normalizer_stats", lambda *_a, **_k: None)
         args = _make_args(dataset_dir=str(tmp_path), output_dir=str(tmp_path / "out"))
         _mod.run_evaluation(args)
 
-    def test_episodes_jsonl_total(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        _setup_run_evaluation(
-            monkeypatch, tmp_path, n_frames=4, write_episodes_jsonl=True
-        )
-        args = _make_args(
-            dataset_dir=str(tmp_path), output_dir=str(tmp_path / "out"), episodes=10
-        )
+    def test_episodes_jsonl_total(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        _setup_run_evaluation(monkeypatch, tmp_path, n_frames=4, write_episodes_jsonl=True)
+        args = _make_args(dataset_dir=str(tmp_path), output_dir=str(tmp_path / "out"), episodes=10)
         _mod.run_evaluation(args)
         assert (tmp_path / "out" / "eval_results.json").exists()
 
-    def test_n_dims_one_branch(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_n_dims_one_branch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _setup_run_evaluation(monkeypatch, tmp_path, n_frames=4, n_dims=1)
         args = _make_args(dataset_dir=str(tmp_path), output_dir=str(tmp_path / "out"))
         _mod.run_evaluation(args)
         assert (tmp_path / "out" / "eval_results.json").exists()
 
-    def test_many_dims_small_labelsize(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_many_dims_small_labelsize(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _setup_run_evaluation(monkeypatch, tmp_path, n_frames=4, n_dims=10)
         args = _make_args(dataset_dir=str(tmp_path), output_dir=str(tmp_path / "out"))
         _mod.run_evaluation(args)
         assert (tmp_path / "out" / "eval_results.json").exists()
 
-    def test_step_print_at_end(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_step_print_at_end(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         # n_frames=5 → num_steps=4 → step iterates 0..3, both branches of `step<3 or last` fire.
         _setup_run_evaluation(monkeypatch, tmp_path, n_frames=5)
         args = _make_args(dataset_dir=str(tmp_path), output_dir=str(tmp_path / "out"))
         _mod.run_evaluation(args)
 
-    def test_aml_branch_invokes_download(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_aml_branch_invokes_download(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _setup_run_evaluation(monkeypatch, tmp_path, n_frames=4)
         called = {}
 
@@ -504,19 +486,14 @@ class TestRunEvaluation:
 
 # ---------------- TestMain ----------------
 
+
 class TestMain:
-    def test_no_policy_source_errors(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        monkeypatch.setattr(
-            sys, "argv", ["run-local-lerobot-eval", "--dataset-dir", str(tmp_path)]
-        )
+    def test_no_policy_source_errors(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        monkeypatch.setattr(sys, "argv", ["run-local-lerobot-eval", "--dataset-dir", str(tmp_path)])
         with pytest.raises(SystemExit):
             _mod.main()
 
-    def test_missing_dataset_exits(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_missing_dataset_exits(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setattr(
             sys,
             "argv",
@@ -532,9 +509,7 @@ class TestMain:
             _mod.main()
         assert exc.value.code == 1
 
-    def test_invokes_run_evaluation_policy_path(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_invokes_run_evaluation_policy_path(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         called = {}
         monkeypatch.setattr(_mod, "run_evaluation", lambda a: called.setdefault("a", a))
         monkeypatch.setattr(
@@ -551,9 +526,7 @@ class TestMain:
         _mod.main()
         assert called["a"].policy_path == "/x"
 
-    def test_invokes_run_evaluation_aml(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_invokes_run_evaluation_aml(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         called = {}
         monkeypatch.setattr(_mod, "run_evaluation", lambda a: called.setdefault("a", a))
         monkeypatch.setattr(
