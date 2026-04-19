@@ -10,8 +10,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from sil.policy_runner import InferenceMetrics, PolicyRunner, _resolve_device
-from sil.robot_types import NUM_JOINTS, JointPositionCommand, RobotObservation
+from sil.policy_runner import InferenceMetrics, PolicyRunner, _resolve_device  # noqa: E402
+from sil.robot_types import NUM_JOINTS, JointPositionCommand, RobotObservation  # noqa: E402
 
 
 class TestResolveDevice:

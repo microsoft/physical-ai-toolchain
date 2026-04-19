@@ -11,8 +11,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from sil import policy_evaluation
-from sil.policy_evaluation import (
+from sil import policy_evaluation  # noqa: E402
+from sil.policy_evaluation import (  # noqa: E402
     Metrics,
     ModelMetadata,
     _build_parser,

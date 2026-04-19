@@ -191,7 +191,7 @@ class TestUploadToMlflow:
         monkeypatch.setenv("VIDEO_LENGTH", "200")
         monkeypatch.setenv("INFERENCE_FORMAT", "both")
 
-        mock_mlflow, mock_utils, _ = self._inject_mock_modules(monkeypatch)
+        _, mock_utils, _ = self._inject_mock_modules(monkeypatch)
         mock_storage = MagicMock()
         mock_utils.bootstrap_azure_ml.return_value.storage = mock_storage
 
@@ -297,7 +297,7 @@ class TestUploadToMlflow:
         monkeypatch.setenv("VIDEO_LENGTH", "200")
         monkeypatch.setenv("INFERENCE_FORMAT", "both")
 
-        mock_mlflow, mock_utils, _ = self._inject_mock_modules(monkeypatch)
+        _, mock_utils, _ = self._inject_mock_modules(monkeypatch)
         mock_storage = MagicMock()
         mock_utils.bootstrap_azure_ml.return_value.storage = mock_storage
 
