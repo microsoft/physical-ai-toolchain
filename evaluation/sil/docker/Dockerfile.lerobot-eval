@@ -5,7 +5,26 @@ RUN apt-get update -qq && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-lerobot-infer.txt .
-RUN pip install --no-cache-dir "uv==0.10.9" && \
+# Install uv (pinned by hash for OSSF Scorecard Pinned-Dependencies; covers all uv 0.10.9 wheels)
+RUN pip install --no-cache-dir --require-hashes "uv==0.10.9" \
+    --hash=sha256:0649f83fa0f44f18627c00b2a9a60e5c3486a34799b2c874f2b3945b76048a67 \
+    --hash=sha256:880dd4cffe4bd184e8871ddf4c7d3c3b042e1f16d2682310644aa8d61eaea3e6 \
+    --hash=sha256:a7a784254380552398a6baf4149faf5b31a4003275f685c28421cf8197178a08 \
+    --hash=sha256:5ea0e8598fa012cfa4480ecad4d112bc70f514157c3cc1555a7611c7b6b1ab0a \
+    --hash=sha256:2d6b5367e9bf87eca51c0f2ecda26a1ff931e41409977b4f0a420de2f3e617cf \
+    --hash=sha256:bd04e34db27f9a1d5a0871980edc9f910bb11afbc4abca8234d5a363cbe63c04 \
+    --hash=sha256:547deb57311fc64e4a6b8336228fca4cb4dcbeabdc6e85f14f7804dcd0bc8cd2 \
+    --hash=sha256:e0091b6d0b666640d7407a433860184f77667077b73564e86d49c2a851f073a8 \
+    --hash=sha256:81b2286e6fd869e3507971f39d14829c03e2e31caa8ecc6347b0ffacabb95a5b \
+    --hash=sha256:7c9d6deb30edbc22123be75479f99fb476613eaf38a8034c0e98bba24a344179 \
+    --hash=sha256:24b1ce6d626e06c4582946b6af07b08a032fcccd81fe54c3db3ed2d1c63a97dc \
+    --hash=sha256:fa3401780273d96a2960dbeab58452ce1b387ad8c5da25be6221c0188519e21d \
+    --hash=sha256:8f94a31832d2b4c565312ea17a71b8dd2f971e5aa570c5b796a27b2c9fcdb163 \
+    --hash=sha256:842c39c19d9072f1ad53c71bb4ecd1c9caa311d5de9d19e09a636274a6c95e2e \
+    --hash=sha256:ed44047c602449916ba18a8596715ef7edbbd00859f3db9eac010dc62a0edd30 \
+    --hash=sha256:af79552276d8bd622048ab2d67ec22120a6af64d83963c46b1482218c27b571f \
+    --hash=sha256:47e18a0521d76293d4f60d129f520b18bddf1976b4a47b50f0fcb04fb6a9d40f \
+    --hash=sha256:31e76ae92e70fec47c3efab0c8094035ad7a578454482415b496fa39fc4d685c && \
     uv pip install -r requirements-lerobot-infer.txt --system
 
 # Pre-download ResNet18 backbone weights (required by ACT policy, no internet at runtime)
