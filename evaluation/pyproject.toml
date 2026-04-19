@@ -31,3 +31,55 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.3",
+    "pytest-mock==3.15.1",
+    "pytest-cov==7.1.0",
+    "hypothesis==6.151.13",
+    "matplotlib==3.10.8",
+    "numpy==2.2.6",
+    "torch==2.10.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=sil",
+    "--cov=metrics",
+    "--cov-report=term-missing",
+    "--cov-report=xml:logs/coverage.xml",
+    "--junitxml=logs/pytest-results.xml",
+]
+markers = [
+    "e2e: marks tests requiring Isaac Sim or GPU hardware (deselect: -m 'not e2e')",
+]
+
+[tool.coverage.run]
+source = ["sil", "metrics"]
+branch = true
+omit = [
+    "**/conftest.py",
+    "**/__init__.py",
+    "sil/monitor_checkpoints.py",
+    "sil/play.py",
+    "sil/play_policy.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.coverage.xml]
+output = "logs/coverage.xml"

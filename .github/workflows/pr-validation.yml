@@ -156,6 +156,16 @@ jobs:
       contents: read
       id-token: write
 
+  # Evaluation domain pytest execution
+  evaluation-pytests:
+    name: Evaluation Pytest
+    uses: ./.github/workflows/evaluation-pytests.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Fuzz regression via deterministic corpus-based tests
   fuzz-regression-tests:
     name: Fuzz Regression Tests

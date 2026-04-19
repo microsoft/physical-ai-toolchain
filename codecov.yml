@@ -5,6 +5,7 @@
 #   pester — PowerShell tests covering scripts/
 #   pytest — Python tests covering training/
 #   pytest-dataviewer — Dataviewer backend tests covering data-management/viewer/backend/src/
+#   pytest-evaluation — Evaluation tests covering evaluation/
 #   pytest-fuzz — Python fuzz regression tests covering tests/, backend, and training
 #   terraform — Terraform tests covering infrastructure/terraform/
 #   vitest — Vitest tests covering data-management/viewer/frontend/src/
@@ -57,6 +58,11 @@ coverage:
           - pytest-fuzz
         target: auto
         threshold: 1%
+      pytest-evaluation:
+        flags:
+          - pytest-evaluation
+        target: auto
+        threshold: 1%
     patch:
       default:
         target: auto
@@ -89,6 +95,10 @@ coverage:
         flags:
           - pytest-fuzz
         informational: true
+      pytest-evaluation:
+        flags:
+          - pytest-evaluation
+        informational: true
 
 flags:
   go:
@@ -120,6 +130,10 @@ flags:
       - tests/
       - data-management/viewer/backend/src/
       - training/
+    carryforward: true
+  pytest-evaluation:
+    paths:
+      - evaluation/
     carryforward: true
 
 parsers:

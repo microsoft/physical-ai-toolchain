@@ -7,7 +7,7 @@ the same bootstrap_azure_ml utility as training.
 import json
 import os
 import traceback
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -286,7 +286,7 @@ def main() -> None:
     blob_container = os.environ.get("BLOB_CONTAINER", "")
     onnx_success = os.environ["ONNX_SUCCESS"] == "1"
     jit_success = os.environ["JIT_SUCCESS"] == "1"
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
     onnx_metrics, jit_metrics = load_metrics(metrics_dir)
 
