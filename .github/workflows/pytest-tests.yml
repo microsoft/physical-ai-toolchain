@@ -37,7 +37,12 @@ jobs:
         run: uv sync --group dev
 
       - name: Run pytest
-        run: uv run pytest -v
+        run: >-
+          uv run pytest -v
+          --cov=training
+          --cov=data-management/tools
+          --cov-report=term-missing
+          --cov-report=xml
 
       - name: Upload coverage.xml artifact
         if: always()

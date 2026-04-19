@@ -44,9 +44,6 @@ addopts = [
     "not e2e",
     "--strict-markers",
     "--strict-config",
-    "--cov=training",
-    "--cov-report=term-missing",
-    "--cov-report=xml",
     "--junitxml=logs/pytest-results.xml",
 ]
 markers = [
