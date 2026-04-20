@@ -122,10 +122,15 @@ if [[ "$skip_gpu" == "false" ]]; then
   helm repo add nvidia "$HELM_REPO_GPU_OPERATOR" >/dev/null 2>&1 || true
   helm repo update >/dev/null 2>&1
 
-  helm upgrade --install gpu-operator nvidia/gpu-operator \
+  gpu_chart_args=( nvidia/gpu-operator --version "${gpu_version#v}" )
+  if [[ -n "${GPU_OPERATOR_CHART_SHA256:-}" ]]; then
+    gpu_tgz=$(pull_and_verify_chart "nvidia/gpu-operator" "${gpu_version#v}" "$GPU_OPERATOR_CHART_SHA256" "$(mktemp -d)")
+    gpu_chart_args=( "$gpu_tgz" )
+  fi
+
+  helm upgrade --install gpu-operator "${gpu_chart_args[@]}" \
     --namespace "$NS_GPU_OPERATOR" \
     --create-namespace \
-    --version "${gpu_version#v}" \
     --disable-openapi-validation \
     -f "$gpu_values" \
     --wait --timeout "$TIMEOUT_DEPLOY"
@@ -166,10 +171,15 @@ fi
 if [[ "$skip_kai" == "false" ]]; then
   section "Install KAI Scheduler $kai_version"
 
-  helm upgrade --install kai-scheduler oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler \
+  kai_chart_args=( oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler --version "$kai_version" )
+  if [[ -n "${KAI_SCHEDULER_CHART_SHA256:-}" ]]; then
+    kai_tgz=$(pull_and_verify_chart "oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler" "$kai_version" "$KAI_SCHEDULER_CHART_SHA256" "$(mktemp -d)")
+    kai_chart_args=( "$kai_tgz" )
+  fi
+
+  helm upgrade --install kai-scheduler "${kai_chart_args[@]}" \
     --namespace "$NS_KAI_SCHEDULER" \
     --create-namespace \
-    --version "$kai_version" \
     -f "$kai_values" \
     --wait --timeout "$TIMEOUT_DEPLOY"
 

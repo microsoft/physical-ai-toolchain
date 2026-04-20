@@ -47,6 +47,7 @@ MAX_STEPS="${MAX_STEPS:-500}"
 VIDEO_LENGTH="${VIDEO_LENGTH:-200}"
 INFERENCE_FORMAT="${INFERENCE_FORMAT:-both}"
 CHECKPOINT_URI="${CHECKPOINT_URI:-}"
+CHECKPOINT_SHA256="${CHECKPOINT_SHA256:-}"
 EXPORT_DIR=""
 
 usage() {
@@ -60,11 +61,12 @@ Options:
   --video-length      Video recording length in steps (default: 200)
   --inference-format  Inference format: onnx, jit, or both (default: both)
   --checkpoint-uri    URI to checkpoint (.pt file)
+  --checkpoint-sha256  Expected SHA256 hash for checkpoint verification
   --headless          Run in headless mode
   -h, --help          Show this help message
 
 Environment Variables:
-  TASK, NUM_ENVS, MAX_STEPS, VIDEO_LENGTH, INFERENCE_FORMAT, CHECKPOINT_URI
+  TASK, NUM_ENVS, MAX_STEPS, VIDEO_LENGTH, INFERENCE_FORMAT, CHECKPOINT_URI, CHECKPOINT_SHA256
   PYTHON               Python command (default: python)
 EOF
   exit 0
@@ -95,6 +97,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --checkpoint-uri|--checkpoint_uri)
       CHECKPOINT_URI="$2"
+      shift 2
+      ;;
+    --checkpoint-sha256|--checkpoint_sha256)
+      CHECKPOINT_SHA256="$2"
       shift 2
       ;;
     --headless)
@@ -233,6 +239,18 @@ if [[ -z "${CHECKPOINT_FILE}" ]]; then
   exit 1
 fi
 echo "Found checkpoint: ${CHECKPOINT_FILE}"
+
+if [[ -n "${CHECKPOINT_SHA256}" ]]; then
+  echo "Verifying checkpoint SHA256..."
+  actual_sha256=$(sha256sum "${CHECKPOINT_FILE}" | awk '{print $1}')
+  if [[ "${actual_sha256}" != "${CHECKPOINT_SHA256}" ]]; then
+    echo "Error: Checkpoint SHA256 mismatch" >&2
+    echo "  Expected: ${CHECKPOINT_SHA256}" >&2
+    echo "  Actual:   ${actual_sha256}" >&2
+    exit 1
+  fi
+  echo "Checkpoint SHA256 verified: ${actual_sha256}"
+fi
 
 EXPORT_DIR="${CHECKPOINT_DIR}/exported"
 mkdir -p "${EXPORT_DIR}"
