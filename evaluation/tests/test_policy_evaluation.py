@@ -391,7 +391,7 @@ class TestLoadSkrl:
         runner_mod.Runner.assert_called_once_with(env, {"a": 1})
         runner_instance = runner_mod.Runner.return_value
         runner_instance.agent.load.assert_called_once_with("/tmp/ckpt.pt")
-        runner_instance.agent.set_running_mode.assert_called_once_with("eval")
+        runner_instance.agent.enable_training_mode.assert_called_once_with(enabled=False, apply_to_models=True)
         assert agent is runner_instance.agent
 
     def test_dict_cfg_used_directly(self) -> None:
