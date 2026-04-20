@@ -35,7 +35,7 @@ function AlertTitle({
   className,
   ref,
   ...props
-}: React.HTMLAttributes<HTMLHeadingElement> & { ref?: React.Ref<HTMLParagraphElement> }) {
+}: React.HTMLAttributes<HTMLHeadingElement> & { ref?: React.Ref<HTMLHeadingElement> }) {
   return (
     // eslint-disable-next-line jsx-a11y/heading-has-content
     <h5

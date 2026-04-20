@@ -109,7 +109,6 @@ const CommandShortcut = ({ className, ...props }: React.HTMLAttributes<HTMLSpanE
     {...props}
   />
 )
-CommandShortcut.displayName = 'CommandShortcut'
 
 export {
   Command,
