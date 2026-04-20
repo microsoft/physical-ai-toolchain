@@ -15,7 +15,7 @@ dependencies = [
     "scikit-learn==1.8.0",
     "pandas==3.0.2",
     "pyarrow==23.0.1",
-    "Pillow==12.1.1",
+    "Pillow==12.2.0",
     "opencv-python-headless==4.13.0.92",
 ]
 
@@ -40,12 +40,12 @@ hdf5 = [
 export = [
     "h5py==3.16.0",
     "numpy==2.4.4",
-    "Pillow==12.1.1",
+    "Pillow==12.2.0",
 ]
 yolo = [
     "ultralytics==8.4.39",
     "numpy==2.4.4",
-    "Pillow==12.1.1",
+    "Pillow==12.2.0",
 ]
 all = [
     "datasetanalysistool[dev,azure,huggingface,hdf5,export]",
