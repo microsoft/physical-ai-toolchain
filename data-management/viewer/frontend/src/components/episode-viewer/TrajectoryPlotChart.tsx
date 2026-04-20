@@ -58,7 +58,7 @@ function TrajectoryTooltipPortal({
   return createPortal(
     <div
       ref={tooltipRef}
-      className="pointer-events-none fixed z-50 rounded-md border bg-popover p-2.5 text-sm shadow-md"
+      className="bg-popover pointer-events-none fixed z-50 rounded-md border p-2.5 text-sm shadow-md"
       style={{ left: mousePosition.x + TOOLTIP_OFFSET, top: mousePosition.y + TOOLTIP_OFFSET }}
     >
       <p className="mb-1 font-medium">{label}</p>
@@ -90,7 +90,7 @@ interface TrajectoryPlotChartProps {
   onSelectionPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void
   onCreateSubtaskFromRange?: (range: [number, number]) => void
   onDismissContextMenu: () => void
-  selectionSurfaceRef: React.RefObject<HTMLDivElement>
+  selectionSurfaceRef: React.RefObject<HTMLDivElement | null>
 }
 
 export function TrajectoryPlotChart({

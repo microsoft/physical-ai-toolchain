@@ -16,8 +16,8 @@ import { ViewerDisplayControls } from '@/components/viewer-display'
 
 interface AnnotationWorkspacePlaybackCardProps {
   compact?: boolean
-  canvasRef: RefObject<HTMLCanvasElement>
-  videoRef: RefObject<HTMLVideoElement>
+  canvasRef: RefObject<HTMLCanvasElement | null>
+  videoRef: RefObject<HTMLVideoElement | null>
   videoSrc: string | null
   onVideoEnded: () => void
   onLoadedMetadata: (event: SyntheticEvent<HTMLVideoElement>) => void
