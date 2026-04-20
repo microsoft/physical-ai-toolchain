@@ -31,6 +31,7 @@ OPTIONS:
     --force-mek             Replace existing MEK (data loss warning)
     --mek-config-file PATH  Use existing MEK config file
     --skip-service-config   Skip service_base_url configuration
+    --service-url URL       OSMO control plane URL (default: auto-detect)
     --skip-preflight        Skip preflight version checks
     --use-local-osmo        Use local osmo-dev CLI instead of production osmo
     --config-preview        Print configuration and exit
@@ -55,6 +56,7 @@ skip_mek=false
 force_mek=false
 mek_config_file=""
 skip_service_config=false
+service_url=""
 skip_preflight=false
 use_local_osmo=false
 config_preview=false
@@ -76,6 +78,7 @@ while [[ $# -gt 0 ]]; do
     --force-mek)           force_mek=true; shift ;;
     --mek-config-file)     mek_config_file="$2"; shift 2 ;;
     --skip-service-config) skip_service_config=true; shift ;;
+    --service-url)         service_url="$2"; shift 2 ;;
     --skip-preflight)      skip_preflight=true; shift ;;
     --use-local-osmo)      use_local_osmo=true; shift ;;
     --config-preview)      config_preview=true; shift ;;
@@ -127,6 +130,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Redis" "$([[ $use_incluster_redis == true ]] && echo 'in-cluster' || echo "$redis_hostname:$redis_port")"
   print_kv "ACR" "$([[ $use_acr == true ]] && echo "$acr_login_server" || echo 'nvcr.io')"
   print_kv "Auth Mode" "$([[ -n $osmo_identity_client_id ]] && echo 'workload-identity' || echo 'kubectl-secrets')"
+  print_kv "OSMO Auth" "defaultAdmin (token-based)"
   exit 0
 fi
 
@@ -245,6 +249,25 @@ ingress_manifest="$SCRIPT_DIR/manifests/internal-lb-ingress.yaml"
 [[ -f "$ingress_manifest" ]] && kubectl apply -f "$ingress_manifest"
 
 #------------------------------------------------------------------------------
+# Read Admin Password from Key Vault
+#------------------------------------------------------------------------------
+section "Read Admin Password"
+
+admin_password=$(az keyvault secret show --vault-name "$keyvault" \
+  --name "osmo-admin-password" --query value -o tsv 2>/dev/null) || \
+  fatal "OSMO admin password not found in Key Vault '$keyvault'. Run 'terraform apply' first."
+info "Admin password retrieved from Key Vault"
+
+# In non-identity mode CSI is unavailable; create the K8s secret from KV value.
+# Uses --from-file with process substitution to avoid exposing the password in process args.
+if [[ -z "$osmo_identity_client_id" ]]; then
+  kubectl create secret generic osmo-default-admin \
+    --namespace="$NS_OSMO_CONTROL_PLANE" \
+    --from-file=password=<(printf '%s' "$admin_password") \
+    --dry-run=client -o yaml | kubectl apply -f -
+fi
+
+#------------------------------------------------------------------------------
 # Configure NGC Authentication (pre-release images)
 #------------------------------------------------------------------------------
 
@@ -336,20 +359,35 @@ if [[ "$skip_service_config" == "false" ]]; then
   section "Configure OSMO Service"
   kubectl wait --for=condition=available deployment/osmo-service -n "$NS_OSMO_CONTROL_PLANE" --timeout=120s
 
-  service_url=$(detect_service_url)
-  ingress_base_url=$(detect_ingress_base_url "$NS_AZUREML")
-  if [[ -n "$service_url" && -n "$ingress_base_url" ]]; then
-    validate_service_url_reachable "$service_url"
-    [[ -f "$service_config_template" ]] || fatal "Service config template not found: $service_config_template"
-    export SERVICE_BASE_URL="$ingress_base_url"
-    envsubst < "$service_config_template" > "$CONFIG_DIR/out/service-config.json"
-    osmo_login_and_setup "$service_url"
-    info "Applying service configuration (service_base_url: $ingress_base_url)..."
-    osmo config update SERVICE --file "$CONFIG_DIR/out/service-config.json" --description "Set service base URL to ingress controller FQDN"
+  cluster_service_url=$(detect_service_url)
+  if [[ -z "$service_url" ]]; then
+    service_url="${cluster_service_url}"
+  else
+    [[ -z "$cluster_service_url" ]] && cluster_service_url="$service_url"
+  fi
+  if [[ -n "$service_url" ]]; then
+    if ! curl -sf --connect-timeout 5 "${service_url}/api/version" >/dev/null 2>&1; then
+      warn "OSMO service URL $service_url is not reachable from this host"
+      warn "SERVICE config will be set by 04-deploy-osmo-backend.sh instead"
+      warn "When running script 04, use: --service-url http://localhost:8080"
+      warn "(after: kubectl port-forward svc/osmo-service -n osmo-control-plane 8080:80 &)"
+    else
+      [[ -f "$service_config_template" ]] || fatal "Service config template not found: $service_config_template"
+      # SERVICE config service_base_url must use the in-cluster URL (ingress LB IP)
+      # so workflow pod sidecars can reach the control plane via the ingress routes.
+      # The user-provided --service-url (e.g. localhost port-forward) is only for CLI access.
+      export SERVICE_BASE_URL="${cluster_service_url:-$service_url}"
+      envsubst < "$service_config_template" > "$CONFIG_DIR/out/service-config.json"
+      osmo_login_and_setup "$service_url" "$admin_password"
+      info "Applying service configuration (service_base_url: $SERVICE_BASE_URL)..."
+      osmo config update SERVICE --file "$CONFIG_DIR/out/service-config.json" --description "Set service base URL for UI"
+    fi
   else
     warn "Could not determine service base URL - OSMO UI may show errors"
   fi
 fi
+
+unset admin_password
 
 #------------------------------------------------------------------------------
 # Summary

@@ -86,23 +86,17 @@ else
   run_python -m pip install --upgrade "numpy>=1.26.0,<2.0.0" --quiet
 fi
 
-runtime_manifest="${TRAINING_DIR}/pyproject.toml"
-runtime_requirements="$(mktemp)"
-cleanup() {
-  rm -f "${runtime_requirements}"
-}
-trap cleanup EXIT
+runtime_requirements="${TRAINING_DIR}/requirements.txt"
 
 if command -v uv &>/dev/null; then
-  echo "uv detected, compiling and installing training manifest dependencies..."
-  uv pip compile "${runtime_manifest}" -o "${runtime_requirements}"
+  echo "uv detected, installing training manifest dependencies..."
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --requirement "${runtime_requirements}"
+    uv pip install --no-cache-dir --no-deps --requirement "${runtime_requirements}"
   else
-    uv pip install --no-cache-dir --system --requirement "${runtime_requirements}"
+    uv pip install --no-cache-dir --no-deps --system --requirement "${runtime_requirements}"
   fi
 else
-  echo "Error: uv is required to compile workflow manifest dependencies" >&2
+  echo "Error: uv is required to install workflow manifest dependencies" >&2
   exit 1
 fi
 

@@ -1,7 +1,7 @@
 # Global configuration shared across UI services
 global:
   osmoImageLocation: nvcr.io/nvidia/osmo
-  osmoImageTag: 6.0.0
+  osmoImageTag: 6.2
 
 # UI service configurations
 services:

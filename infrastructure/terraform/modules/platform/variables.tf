@@ -107,6 +107,16 @@ variable "should_enable_purge_protection" {
 }
 
 /*
+ * OSMO Variables - Secret
+ */
+
+variable "should_create_osmo_secret" {
+  type        = bool
+  description = "Whether to create the OSMO admin password and store it in Key Vault"
+  default     = false
+}
+
+/*
  * OSMO Variables - PostgreSQL
  */
 

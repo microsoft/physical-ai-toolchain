@@ -1,5 +1,5 @@
 global:
-  osmoImageTag: "6.0.0"
+  osmoImageTag: "6.2"
   serviceUrl: "http://osmo-agent.osmo-control-plane.svc.cluster.local"
   agentNamespace: "osmo-operator"
   backendNamespace: "osmo-workflows"
