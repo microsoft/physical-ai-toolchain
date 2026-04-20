@@ -24,10 +24,10 @@ const EpisodeListItem = memo(function EpisodeListItem({
     <li>
       <button
         onClick={handleClick}
-        className={`w-full px-4 py-3 text-left transition-colors hover:bg-accent ${isSelected ? 'bg-accent' : ''}`}
+        className={`hover:bg-accent w-full px-4 py-3 text-left transition-colors ${isSelected ? 'bg-accent' : ''}`}
       >
         <div className="font-medium">Episode {episode.index}</div>
-        <div className="text-sm text-muted-foreground">
+        <div className="text-muted-foreground text-sm">
           {episode.length} frames • Task {episode.taskIndex}
           {episode.hasAnnotations && <span className="ml-2 text-green-600">✓ Annotated</span>}
         </div>
@@ -36,7 +36,7 @@ const EpisodeListItem = memo(function EpisodeListItem({
             {labels.map((label) => (
               <span
                 key={label}
-                className="inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0 text-[10px] font-medium text-primary"
+                className="bg-primary/10 text-primary inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-medium"
               >
                 {label}
               </span>
@@ -64,7 +64,7 @@ export function DataviewerEpisodeList({
   const filterLabels = useLabelStore((state) => state.filterLabels)
 
   if (isLoading) {
-    return <div className="p-4 text-muted-foreground">Loading episodes...</div>
+    return <div className="text-muted-foreground p-4">Loading episodes...</div>
   }
 
   if (error) {
@@ -72,7 +72,7 @@ export function DataviewerEpisodeList({
   }
 
   if (!episodes || episodes.length === 0) {
-    return <div className="p-4 text-muted-foreground">No episodes found</div>
+    return <div className="text-muted-foreground p-4">No episodes found</div>
   }
 
   const filteredEpisodes =
@@ -92,7 +92,7 @@ export function DataviewerEpisodeList({
         <div className="min-w-0 flex-1">
           <LabelFilter compact />
         </div>
-        <div className="shrink-0 pt-0.5 text-xs font-medium text-muted-foreground">
+        <div className="text-muted-foreground shrink-0 pt-0.5 text-xs font-medium">
           {filteredEpisodes.length}
           {filterLabels.length > 0 ? ` / ${episodes.length}` : ''} Episodes
         </div>
