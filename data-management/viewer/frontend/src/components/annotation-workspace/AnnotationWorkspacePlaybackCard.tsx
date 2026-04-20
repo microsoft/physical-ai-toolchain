@@ -115,7 +115,7 @@ export function AnnotationWorkspacePlaybackCard({
     }
   }, [episodeBase, videoSrc])
   return (
-    <Card className={compact ? 'mx-auto h-full min-h-0 w-full max-w-[44rem]' : 'flex-shrink-0'}>
+    <Card className={compact ? 'mx-auto h-full min-h-0 w-full max-w-[44rem]' : 'shrink-0'}>
       <CardContent className={compact ? 'flex h-full min-h-0 flex-col p-3' : 'p-4'}>
         <ViewerDisplayControls />
         <div
@@ -162,13 +162,13 @@ export function AnnotationWorkspacePlaybackCard({
           )}
 
           {isInsertedFrame && (
-            <div className="absolute left-2 top-2 rounded bg-blue-500/80 px-2 py-1 text-xs text-white">
+            <div className="absolute top-2 left-2 rounded-sm bg-blue-500/80 px-2 py-1 text-xs text-white">
               Interpolated Frame
             </div>
           )}
 
           {resizeOutput && (
-            <div className="absolute right-2 top-2 rounded bg-green-600/80 px-2 py-1 text-xs text-white">
+            <div className="absolute top-2 right-2 rounded-sm bg-green-600/80 px-2 py-1 text-xs text-white">
               Output: {resizeOutput.width} × {resizeOutput.height}
             </div>
           )}
@@ -226,9 +226,9 @@ export function AnnotationWorkspacePlaybackCard({
               <div className="space-y-1">
                 <div className="relative">
                   {playbackRangeHighlight && (
-                    <div className="pointer-events-none absolute inset-y-1 left-0 right-0 rounded bg-muted/60">
+                    <div className="bg-muted/60 pointer-events-none absolute inset-y-1 right-0 left-0 rounded-sm">
                       <div
-                        className="absolute inset-y-0 rounded bg-primary/20"
+                        className="bg-primary/20 absolute inset-y-0 rounded-sm"
                         style={playbackRangeHighlight}
                       />
                     </div>
@@ -245,7 +245,7 @@ export function AnnotationWorkspacePlaybackCard({
                   />
                 </div>
                 {playbackRangeLabel && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-muted-foreground text-xs">
                     {playbackRangeLabel}: frames {playbackRangeStart} to {playbackRangeEnd}
                   </p>
                 )}

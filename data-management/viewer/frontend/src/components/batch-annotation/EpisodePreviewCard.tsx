@@ -109,7 +109,7 @@ export const EpisodePreviewCard = memo(function EpisodePreviewCard({
     <Card
       className={cn(
         'relative cursor-pointer transition-all hover:shadow-md',
-        isSelected && 'ring-2 ring-primary',
+        isSelected && 'ring-primary ring-2',
         hasAnnotation && 'border-green-200',
       )}
       onClick={handleClick}
@@ -119,7 +119,7 @@ export const EpisodePreviewCard = memo(function EpisodePreviewCard({
       {/* Selection checkbox overlay */}
       <div
         className={cn(
-          'absolute left-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded border-2 transition-colors',
+          'absolute top-2 left-2 z-10 flex h-5 w-5 items-center justify-center rounded-sm border-2 transition-colors',
           isSelected
             ? 'border-primary bg-primary text-primary-foreground'
             : 'border-muted-foreground/50 bg-background/80',
@@ -130,7 +130,7 @@ export const EpisodePreviewCard = memo(function EpisodePreviewCard({
 
       {/* Annotation status badge */}
       {hasAnnotation && (
-        <div className="absolute right-2 top-2 z-10">
+        <div className="absolute top-2 right-2 z-10">
           <span
             className={cn(
               'rounded-full px-1.5 py-0.5 text-xs font-medium',
@@ -147,11 +147,11 @@ export const EpisodePreviewCard = memo(function EpisodePreviewCard({
       )}
 
       {/* Thumbnail */}
-      <div className="relative aspect-video overflow-hidden rounded-t-lg bg-muted">
+      <div className="bg-muted relative aspect-video overflow-hidden rounded-t-lg">
         {thumbnailUrl ? (
           <img src={thumbnailUrl} alt={`Episode ${index}`} className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+          <div className="text-muted-foreground flex h-full w-full items-center justify-center">
             <Play className="h-8 w-8" />
           </div>
         )}
@@ -171,12 +171,12 @@ export const EpisodePreviewCard = memo(function EpisodePreviewCard({
         {/* Episode info */}
         <div className="mb-2 flex items-center justify-between">
           <span className="text-sm font-medium">Episode {index}</span>
-          <span className="text-xs text-muted-foreground">{episode.length} frames</span>
+          <span className="text-muted-foreground text-xs">{episode.length} frames</span>
         </div>
 
         {/* Task name if available */}
         {episode.task && (
-          <p className="mb-2 truncate text-xs text-muted-foreground">{episode.task}</p>
+          <p className="text-muted-foreground mb-2 truncate text-xs">{episode.task}</p>
         )}
 
         {/* Quick rating buttons */}

@@ -85,10 +85,10 @@ export function SubtaskTimelineTrack({
   return (
     <div className={cn('flex flex-col gap-1', className)} data-keep-playback-selection="true">
       {/* Segment track */}
-      <div className="relative h-6 rounded bg-muted/50">
+      <div className="bg-muted/50 relative h-6 rounded-sm">
         {draftRange && (
           <div
-            className="absolute bottom-0 top-0 rounded border border-dashed border-primary/70 bg-primary/10"
+            className="border-primary/70 bg-primary/10 absolute top-0 bottom-0 rounded-sm border border-dashed"
             style={{
               left: `${frameToPercent(draftRange[0])}%`,
               width: `${Math.max(frameToPercent(draftRange[1] - draftRange[0]), 0.5)}%`,
@@ -117,8 +117,8 @@ export function SubtaskTimelineTrack({
             <button
               key={segment.id}
               className={cn(
-                'absolute bottom-1 top-1 cursor-pointer rounded-sm transition-opacity hover:opacity-80',
-                isSelected && 'ring-2 ring-primary ring-offset-1 ring-offset-background',
+                'absolute top-1 bottom-1 cursor-pointer rounded-xs transition-opacity hover:opacity-80',
+                isSelected && 'ring-primary ring-offset-background ring-2 ring-offset-1',
               )}
               style={{
                 left: `${left}%`,
@@ -141,12 +141,12 @@ export function SubtaskTimelineTrack({
             <button
               key={segment.id}
               className={cn(
-                'flex items-center gap-1 rounded px-1.5 py-0.5 transition-opacity hover:opacity-80',
+                'flex items-center gap-1 rounded-sm px-1.5 py-0.5 transition-opacity hover:opacity-80',
                 segment.id === selectedSegmentId && 'bg-primary/10 text-primary',
               )}
               onClick={() => handleSegmentClick(segment)}
             >
-              <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: segment.color }} />
+              <div className="h-3 w-3 rounded-xs" style={{ backgroundColor: segment.color }} />
               <span className="text-muted-foreground">{segment.label}</span>
             </button>
           ))}
@@ -155,7 +155,7 @@ export function SubtaskTimelineTrack({
 
       {/* Validation errors */}
       {validationErrors.length > 0 && (
-        <div className="text-xs text-destructive">
+        <div className="text-destructive text-xs">
           {validationErrors.map((error) => (
             <div key={error}>⚠ {error}</div>
           ))}

@@ -81,7 +81,7 @@ export function RatingDistribution({
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg">{title}</CardTitle>
-          <span className="text-sm text-muted-foreground">{total.toLocaleString()} total</span>
+          <span className="text-muted-foreground text-sm">{total.toLocaleString()} total</span>
         </div>
       </CardHeader>
       <CardContent>
@@ -101,9 +101,9 @@ export function RatingDistribution({
                     const data = payload[0].payload
                     const percent = total > 0 ? Math.round((data.count / total) * 100) : 0
                     return (
-                      <div className="rounded-lg border bg-background px-3 py-2 shadow-sm">
+                      <div className="bg-background rounded-lg border px-3 py-2 shadow-xs">
                         <p className="font-medium">{data.label}</p>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-muted-foreground text-sm">
                           {data.count.toLocaleString()} episodes ({percent}%)
                         </p>
                       </div>
@@ -129,7 +129,7 @@ export function RatingDistribution({
           {data.map((d) => (
             <div key={d.rating} className="flex items-center gap-1.5 text-xs">
               <div
-                className="h-3 w-3 rounded-sm"
+                className="h-3 w-3 rounded-xs"
                 style={{
                   backgroundColor: colors[parseInt(d.rating, 10) as keyof typeof colors],
                 }}

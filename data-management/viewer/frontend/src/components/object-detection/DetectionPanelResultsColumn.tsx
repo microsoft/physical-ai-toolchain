@@ -58,14 +58,14 @@ export function DetectionPanelResultsColumn({
 }: DetectionPanelResultsColumnProps) {
   return (
     <div className="flex flex-col gap-4 lg:col-span-2">
-      <Card className="flex-shrink-0">
+      <Card className="shrink-0">
         <CardContent className="p-4">
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Scan className="h-5 w-5 text-primary" />
+              <Scan className="text-primary h-5 w-5" />
               <div>
                 <h3 className="font-medium">YOLO11 Object Detection</h3>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   Detect objects in all frames of this episode
                 </p>
               </div>
@@ -98,7 +98,7 @@ export function DetectionPanelResultsColumn({
 
           {isRunning && (
             <div className="space-y-2">
-              <div className="flex justify-between text-xs text-muted-foreground">
+              <div className="text-muted-foreground flex justify-between text-xs">
                 <span>Processing {totalFrames} frames...</span>
                 <span>{Math.round(progress)}%</span>
               </div>
@@ -107,26 +107,26 @@ export function DetectionPanelResultsColumn({
           )}
 
           {error && (
-            <div className="rounded bg-destructive/10 p-3 text-sm text-destructive">
+            <div className="bg-destructive/10 text-destructive rounded-sm p-3 text-sm">
               <strong>Error:</strong> {error.message}
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Card className="flex-shrink-0">
+      <Card className="shrink-0">
         <CardContent className="p-4">
           {!data && !isRunning ? (
-            <div className="flex aspect-video items-center justify-center rounded-lg bg-muted">
-              <div className="text-center text-muted-foreground">
+            <div className="bg-muted flex aspect-video items-center justify-center rounded-lg">
+              <div className="text-muted-foreground text-center">
                 <Scan className="mx-auto mb-4 h-16 w-16 opacity-30" />
                 <p className="mb-2 text-lg">No detection results</p>
                 <p className="text-sm">Click "Run Detection" to analyze all frames with YOLO11</p>
               </div>
             </div>
           ) : isRunning && !data ? (
-            <div className="flex aspect-video items-center justify-center rounded-lg bg-muted">
-              <div className="text-center text-muted-foreground">
+            <div className="bg-muted flex aspect-video items-center justify-center rounded-lg">
+              <div className="text-muted-foreground text-center">
                 <Loader2 className="mx-auto mb-4 h-16 w-16 animate-spin opacity-50" />
                 <p className="mb-2 text-lg">Processing frames...</p>
                 <p className="text-sm">This may take a moment for episodes with many frames</p>
@@ -183,12 +183,12 @@ export function DetectionPanelResultsColumn({
       </Card>
 
       {data && (
-        <Card className="flex-shrink-0">
+        <Card className="shrink-0">
           <CardHeader className="px-4 py-3">
             <CardTitle className="text-sm">Detection Timeline</CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-0">
-            <p className="mb-3 text-sm text-muted-foreground">
+            <p className="text-muted-foreground mb-3 text-sm">
               Frame {currentFrame} - {currentDetections.length} detection
               {currentDetections.length !== 1 ? 's' : ''}
             </p>
@@ -203,7 +203,7 @@ export function DetectionPanelResultsColumn({
       )}
 
       {data && filteredData && (
-        <Card className="flex-shrink-0">
+        <Card className="shrink-0">
           <CardHeader className="px-4 py-3">
             <CardTitle className="flex items-center gap-2 text-sm">
               <BarChart3 className="h-4 w-4" />

@@ -55,12 +55,12 @@ export function SubtaskList({
     return (
       <div
         className={cn(
-          'rounded-lg border border-dashed p-4 text-sm text-muted-foreground',
+          'text-muted-foreground rounded-lg border border-dashed p-4 text-sm',
           className,
         )}
         data-keep-playback-selection="true"
       >
-        <div className="flex items-center gap-2 font-medium text-foreground">
+        <div className="text-foreground flex items-center gap-2 font-medium">
           <ListChecks className="h-4 w-4" />
           Subtasks
         </div>
@@ -81,11 +81,11 @@ export function SubtaskList({
         </div>
       </div>
       {draftRange && (
-        <div className="mb-3 rounded-md border border-primary/40 bg-primary/5 p-3">
+        <div className="border-primary/40 bg-primary/5 mb-3 rounded-md border p-3">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <div className="text-sm font-medium text-primary">Draft Selection</div>
-              <p className="text-xs text-muted-foreground">
+              <div className="text-primary text-sm font-medium">Draft Selection</div>
+              <p className="text-muted-foreground text-xs">
                 Frames {draftRange[0]} to {draftRange[1]}
               </p>
             </div>
@@ -100,8 +100,8 @@ export function SubtaskList({
             </div>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <div className="rounded border bg-background p-2">
-              <div className="mb-1 text-xs font-medium text-muted-foreground">Start</div>
+            <div className="bg-background rounded-sm border p-2">
+              <div className="text-muted-foreground mb-1 text-xs font-medium">Start</div>
               <div className="flex items-center gap-2">
                 <Button size="sm" variant="outline" onClick={() => nudgeDraftBoundary('start', -1)}>
                   -1
@@ -119,8 +119,8 @@ export function SubtaskList({
                 </Button>
               </div>
             </div>
-            <div className="rounded border bg-background p-2">
-              <div className="mb-1 text-xs font-medium text-muted-foreground">End</div>
+            <div className="bg-background rounded-sm border p-2">
+              <div className="text-muted-foreground mb-1 text-xs font-medium">End</div>
               <div className="flex items-center gap-2">
                 <Button size="sm" variant="outline" onClick={() => nudgeDraftBoundary('end', -1)}>
                   -1
@@ -163,19 +163,19 @@ export function SubtaskList({
                   }}
                 >
                   <span
-                    className="mt-1 h-3 w-3 shrink-0 rounded-sm"
+                    className="mt-1 h-3 w-3 shrink-0 rounded-xs"
                     style={{ backgroundColor: segment.color }}
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium">{segment.label}</span>
                       {isSelected && (
-                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                        <span className="bg-primary/10 text-primary rounded-sm px-1.5 py-0.5 text-[10px] font-medium">
                           Active
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-muted-foreground text-xs">
                       Frames {segment.frameRange[0]} to {segment.frameRange[1]}
                     </p>
                   </div>
@@ -204,7 +204,7 @@ export function SubtaskList({
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
+                    className="text-destructive hover:text-destructive h-7 w-7"
                     onClick={() => {
                       removeSubtask(segment.id)
                       if (isSelected) {
