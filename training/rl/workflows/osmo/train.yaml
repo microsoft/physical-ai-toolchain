@@ -72,12 +72,12 @@ workflow:
               --mode "${MODE}"
               --task "${TASK:-}"
               --num_envs "${NUM_ENVS:-}"
-              --max_iterations "${MAX_ITERATIONS:-}"
               --checkpoint-uri "${CHECKPOINT_URI:-}"
               --checkpoint-mode "${CHECKPOINT_MODE:-from-scratch}"
               --register-checkpoint "${REGISTER_CHECKPOINT:-}"
               --headless
             )
+            [[ -n "${MAX_ITERATIONS:-}" ]] && train_args+=(--max_iterations "${MAX_ITERATIONS}")
 
             bash "${TRAINING_ROOT}/scripts/train.sh" "${train_args[@]}"
 
