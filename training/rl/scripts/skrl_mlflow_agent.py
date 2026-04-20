@@ -1,7 +1,7 @@
 """SKRL MLflow integration utilities.
 
 This module provides utility functions for integrating SKRL agent training with
-MLflow metric logging via monkey-patching agent._update methods.
+MLflow metric logging via monkey-patching agent.update methods.
 
 Available Metrics
 -----------------
@@ -42,7 +42,7 @@ Collected via psutil and pynvml with system/ prefix:
 
 Metric Logging
 --------------
-Metrics are logged to MLflow after each agent._update() call, which is when SKRL
+Metrics are logged to MLflow after each agent.update() call, which is when SKRL
 agents populate their tracking_data dict. This occurs after collecting rollouts
 (e.g., every 16 environment steps for default PPO config), ensuring metrics
 reflect actual training updates rather than environment interactions.
@@ -68,8 +68,8 @@ wrapper_func = create_mlflow_logging_wrapper(
     collect_gpu_metrics=True,
 )
 
-# Monkey-patch the agent's _update method
-runner.agent._update = wrapper_func
+# Monkey-patch the agent's update method
+runner.agent.update = wrapper_func
 
 # Now when runner.run() executes, metrics will be logged to MLflow
 runner.run()
@@ -97,7 +97,7 @@ class SkrlAgent(Protocol):
     """Protocol defining the interface expected from SKRL agents for metric extraction."""
 
     tracking_data: dict[str, Any]
-    _update: Callable[[int, int], Any]
+    update: Callable
 
 
 @runtime_checkable
@@ -153,10 +153,10 @@ def create_mlflow_logging_wrapper(
     mlflow_module: MLflowModule,
     metric_filter: set[str] | None = None,
     collect_gpu_metrics: bool = True,
-) -> Callable[[int, int], Any]:
-    """Create closure that wraps agent._update with MLflow logging.
+) -> Callable[..., Any]:
+    """Create closure that wraps agent.update with MLflow logging.
 
-    Returns a function that calls the original agent._update method then
+    Returns a function that calls the original agent.update method then
     extracts and logs metrics to MLflow.
 
     Args:
@@ -166,14 +166,14 @@ def create_mlflow_logging_wrapper(
         collect_gpu_metrics: Enable GPU metrics collection (default: True).
 
     Returns:
-        Closure function suitable for monkey-patching agent._update.
+        Closure function suitable for monkey-patching agent.update.
 
     Raises:
         AttributeError: If agent lacks tracking_data attribute.
 
     Example:
         >>> wrapper = create_mlflow_logging_wrapper(runner.agent, mlflow)
-        >>> runner.agent._update = wrapper
+        >>> runner.agent.update = wrapper
     """
     if not _has_tracking_data(agent):
         raise AttributeError(
@@ -190,11 +190,11 @@ def create_mlflow_logging_wrapper(
         collect_gpu_metrics,
     )
 
-    original_update = agent._update
+    original_update = agent.update
 
-    def mlflow_logging_update(timestep: int, timesteps: int) -> Any:
-        """Call original _update and log metrics to MLflow."""
-        result = original_update(timestep, timesteps)
+    def mlflow_logging_update(*, timestep: int, timesteps: int) -> Any:
+        """Call original update and log metrics to MLflow."""
+        result = original_update(timestep=timestep, timesteps=timesteps)
 
         try:
             training_metrics = _extract_metrics_from_agent(agent, metric_filter)

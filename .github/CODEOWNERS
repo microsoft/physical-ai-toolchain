@@ -17,7 +17,7 @@
 /src/                       @microsoft/edge-ai-core-dev
 
 # Dataviewer application
-/src/dataviewer/            @microsoft/edge-ai-core-dev
+/data-management/viewer/    @microsoft/edge-ai-core-dev
 
 # Infrastructure as code
 /deploy/                    @microsoft/edge-ai-core-dev
