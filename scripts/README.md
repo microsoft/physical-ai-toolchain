@@ -21,11 +21,12 @@ CI/CD automation scripts for linting, validation, security scanning, and shared 
 
 ```text
 scripts/
-├── lib/                 Shared utility modules
-├── linting/             PowerShell linting and validation scripts
-├── security/            Security scanning and dependency pinning scripts
-├── tests/               Pester test organization
-├── Update-TerraformDocs.ps1
+├── lib/                      Shared utility modules
+├── linting/                  PowerShell linting and validation scripts
+├── security/                 Security scanning and dependency pinning scripts
+├── tests/                    Pester test organization
+├── update-chart-hashes.sh    Refresh pinned Helm chart versions and SHA-256 hashes
+├── Update-TerraformDocs.ps1  Regenerate Terraform module documentation
 └── README.md
 ```
 
@@ -65,11 +66,39 @@ PowerShell scripts for validating code quality and documentation.
 
 Security scanning and dependency management scripts.
 
-| Script                       | Purpose                                |
-|------------------------------|----------------------------------------|
-| `Test-DependencyPinning.ps1` | Validate dependency pinning compliance |
-| `Test-SHAStaleness.ps1`      | Check for outdated SHA pins            |
-| `zap-to-sarif.py`            | Convert ZAP results to SARIF format    |
+| Script                         | Purpose                                                                                    |
+|--------------------------------|--------------------------------------------------------------------------------------------|
+| `security/Test-DependencyPinning.ps1` | Validate dependency pinning compliance                                                     |
+| `security/Test-SHAStaleness.ps1`      | Check for outdated SHA pins                                                                |
+| `security/Test-BinaryFreshness.ps1`   | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab |
+| `security/zap-to-sarif.py`            | Convert ZAP results to SARIF format                                                        |
+| `update-chart-hashes.sh`              | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
+
+The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the values pinned in `.devcontainer/install-dev-deps.sh` and `.devcontainer/devcontainer.json`, and queries upstream Helm repositories for chart version drift. Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script.
+
+### 🔗 Where Pins Live
+
+Pins are split across two files by structural necessity, not duplication. Each file owns a different class of artifact:
+
+| Artifact class               | Canonical location                                | Why it lives there                                                                                        |
+|------------------------------|---------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Helm chart versions + SHAs   | `infrastructure/setup/defaults.conf`              | Sourced by runtime shell deploy scripts (`infrastructure/setup/*.sh`); bash-overridable via `.env.local`. |
+| Dev container binaries (OSMO CLI, NGC CLI) + SHAs | `.devcontainer/devcontainer.json` | Consumed during Docker image build, before any shell can source bash variables.                           |
+
+All other references to these pins are read-only consumers:
+
+| Consumer                                | Role                                                                                     |
+|-----------------------------------------|------------------------------------------------------------------------------------------|
+| `scripts/update-chart-hashes.sh`        | Writes chart versions + SHAs back into `defaults.conf` via `sed`; no other file touched. |
+| `scripts/security/Test-BinaryFreshness.ps1` | Reads both canonical files (`Get-ShellVariable`, `Get-JsonVariable`) to compare against upstream. |
+| `docs/contributing/component-updates.md`    | Documents `defaults.conf` as authoritative for chart pins.                           |
+| `.env.local.example`                        | User-override stubs only — does not redefine defaults.              |
+
+### 🔄 Updating Chart Pins
+
+Run `scripts/update-chart-hashes.sh` locally after bumping any pinned Helm chart version. The script runs `helm pull` for each chart, computes the SHA-256, and rewrites the matching `VAR="${VAR:-...}"` line in `infrastructure/setup/defaults.conf` so the runtime default stays in sync with the upstream digest. Commit the resulting `defaults.conf` diff alongside the chart-version bump.
+
+Binary pins in `.devcontainer/devcontainer.json` are updated by hand when the weekly freshness check flags drift; the validator's SARIF output links to the exact file and pin to change.
 
 ## 🧪 Tests
 

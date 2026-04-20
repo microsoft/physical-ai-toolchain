@@ -1225,6 +1225,7 @@ smes
 smita
 SMPTE
 smptebars
+smol
 smtp
 snat
 snmp
@@ -1247,6 +1248,7 @@ sql
 sqlcmd
 srgb
 srns
+srcroot
 srtp
 ssas
 ssdl

@@ -10,7 +10,7 @@ dependencies = [
     "azure-identity==1.25.2",
     "azure-ai-ml==1.31.0",
     "marshmallow==4.2.3",
-    "mlflow==3.11.0rc1",
+    "mlflow==3.11.1",
     "packaging==25.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",

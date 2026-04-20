@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ANSWERS_FILE="${SCRIPT_DIR}/thinlinc-answers.hconf"
 TL_VERSION="${TL_VERSION:-4.20.0}"
+TL_SHA256="9dd537fb3b95018888affbd4431672308c433e7f5611143e060462190ed768d3"
 DEFAULT_ZIP_NAME="tl-${TL_VERSION}-server.zip"
 THINLINC_ZIP="${1:-${DEFAULT_ZIP_NAME}}"
 THINLINC_DOWNLOAD_URL="${TL_DOWNLOAD_URL:-https://www.cendio.com/downloads/server/${DEFAULT_ZIP_NAME}}"
@@ -36,6 +37,7 @@ if [[ ! -f "${THINLINC_ZIP}" ]]; then
       echo "Neither wget nor curl is available to download ${THINLINC_DOWNLOAD_URL}"
       exit 1
     fi
+    echo "${TL_SHA256}  ${THINLINC_ZIP}" | sha256sum -c --quiet -
   else
     echo "ThinLinc server ZIP not found: ${THINLINC_ZIP}"
     echo "Pass the ZIP path as first argument, e.g.:"
