@@ -2,16 +2,19 @@
 #
 # Flag → Workflow → cwd → coverage scope
 # ----------------------------------------------------------------------------
-# pytest             | pytest-tests.yml               | repo root                      | --cov=training --cov=data-management/tools --cov=data-pipeline/capture --cov=evaluation --cov=fleet-deployment/inference
-# pytest-dataviewer  | dataviewer-backend-pytests.yml | data-management/viewer/backend | --cov=src
-# pytest-fuzz        | fuzz-regression-tests.yml      | repo root                      | --cov=tests --cov=data-management/viewer/backend/src --cov=training
-# vitest             | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | vitest --coverage
-# go                 | go-tests.yml                   | infrastructure/terraform/e2e   | go test -cover
-# terraform          | terraform-tests.yml            | infrastructure/terraform       | terraform test
-# pester             | pester-tests.yml               | repo root                      | Invoke-Pester -CodeCoverage
+# pytest-training      | pytest-training.yml            | repo root                      | --cov=training
+# pytest-dm-tools      | pytest-dm-tools.yml            | repo root                      | --cov=data-management/tools
+# pytest-data-pipeline | pytest-data-pipeline.yml       | repo root                      | --cov=data-pipeline/capture
+# pytest-inference     | pytest-inference.yml           | repo root                      | --cov=fleet-deployment/inference
+# pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend | --cov=src
+# pytest-fuzz          | fuzz-regression-tests.yml      | repo root                      | --cov=tests --cov=data-management/viewer/backend/src --cov=training
+# vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | vitest --coverage
+# go                   | go-tests.yml                   | infrastructure/terraform/e2e   | go test -cover
+# terraform            | terraform-tests.yml            | infrastructure/terraform       | terraform test
+# pester               | pester-tests.yml               | repo root                      | Invoke-Pester -CodeCoverage
 #
 # Flag overlaps (intentional):
-#   pytest-fuzz overlaps pytest (training/) and pytest-dataviewer (viewer/backend/src/).
+#   pytest-fuzz overlaps pytest-training (training/) and pytest-dataviewer (viewer/backend/src/).
 #   go ⊂ terraform (infrastructure/terraform/e2e/ ⊂ infrastructure/terraform/);
 #     deduplicated at the component layer (infrastructure-terraform vs infrastructure-go-e2e).
 
@@ -38,9 +41,24 @@ coverage:
           - pester
         target: auto
         threshold: 1%
-      pytest:
+      pytest-training:
         flags:
-          - pytest
+          - pytest-training
+        target: auto
+        threshold: 1%
+      pytest-dm-tools:
+        flags:
+          - pytest-dm-tools
+        target: auto
+        threshold: 1%
+      pytest-data-pipeline:
+        flags:
+          - pytest-data-pipeline
+        target: auto
+        threshold: 1%
+      pytest-inference:
+        flags:
+          - pytest-inference
         target: auto
         threshold: 1%
       pytest-dataviewer:
@@ -75,9 +93,21 @@ coverage:
         flags:
           - pester
         informational: true
-      pytest:
+      pytest-training:
         flags:
-          - pytest
+          - pytest-training
+        informational: true
+      pytest-dm-tools:
+        flags:
+          - pytest-dm-tools
+        informational: true
+      pytest-data-pipeline:
+        flags:
+          - pytest-data-pipeline
+        informational: true
+      pytest-inference:
+        flags:
+          - pytest-inference
         informational: true
       pytest-dataviewer:
         flags:
@@ -97,12 +127,20 @@ coverage:
         informational: true
 
 flags:
-  pytest:
+  pytest-training:
     paths:
       - training/
+    carryforward: true
+  pytest-dm-tools:
+    paths:
       - data-management/tools/
+    carryforward: true
+  pytest-data-pipeline:
+    paths:
       - data-pipeline/capture/
-      - evaluation/
+    carryforward: true
+  pytest-inference:
+    paths:
       - fleet-deployment/inference/
     carryforward: true
   pytest-dataviewer:
