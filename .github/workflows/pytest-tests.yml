@@ -41,8 +41,11 @@ jobs:
           uv run pytest -v
           --cov=training
           --cov=data-management/tools
+          --cov=data-pipeline/capture
+          --cov=evaluation
+          --cov=fleet-deployment/inference
           --cov-report=term-missing
-          --cov-report=xml
+          --cov-report=xml:logs/coverage.xml
 
       - name: Upload coverage.xml artifact
         if: always()

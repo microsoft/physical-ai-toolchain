@@ -2,7 +2,7 @@
 #
 # Flag → Workflow → cwd → coverage scope
 # ----------------------------------------------------------------------------
-# pytest             | pytest-tests.yml               | repo root                      | --cov=training --cov=data-management/tools
+# pytest             | pytest-tests.yml               | repo root                      | --cov=training --cov=data-management/tools --cov=data-pipeline/capture --cov=evaluation --cov=fleet-deployment/inference
 # pytest-dataviewer  | dataviewer-backend-pytests.yml | data-management/viewer/backend | --cov=src
 # pytest-fuzz        | fuzz-regression-tests.yml      | repo root                      | --cov=tests --cov=data-management/viewer/backend/src --cov=training
 # vitest             | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | vitest --coverage
@@ -101,6 +101,9 @@ flags:
     paths:
       - training/
       - data-management/tools/
+      - data-pipeline/capture/
+      - evaluation/
+      - fleet-deployment/inference/
     carryforward: true
   pytest-dataviewer:
     paths:
@@ -142,6 +145,7 @@ component_management:
     - component_id: training
       name: Training
       paths:
+        - training/*.py
         - training/rl/**
         - training/il/**
         - training/vla/**
@@ -152,8 +156,16 @@ component_management:
       name: Evaluation
       paths:
         - evaluation/sil/**
-        - evaluation/hil/**
         - evaluation/metrics/**
+    - component_id: data-pipeline-capture
+      name: Data Pipeline / Capture
+      paths:
+        - data-pipeline/capture/**
+        - "!data-pipeline/capture/tests/**"
+    - component_id: fleet-deployment-inference
+      name: Fleet Deployment / Inference
+      paths:
+        - fleet-deployment/inference/**
     - component_id: dataviewer-backend
       name: Dataviewer Backend
       paths:
@@ -222,10 +234,6 @@ component_management:
       paths:
         - tests/fuzz_harness.py
         - tests/fuzz-corpus/**
-    - component_id: common-libs
-      name: Common Libraries
-      paths:
-        - src/common/**
 
 parsers:
   jacoco:
@@ -241,18 +249,21 @@ ignore:
   - "training/tests/**"
   - "data-management/viewer/backend/tests/**"
   - "data-management/tools/tests/**"
+  - "data-pipeline/capture/tests/**"
+  - "evaluation/tests/**"
   - "scripts/tests/**"
+  - "scripts/security/zap-to-sarif.py"
   - "tests/common/**"
   - "tests/e2e/**"
   - "tests/inference/**"
   - "tests/training/**"
   - "**/__pycache__/**"
+  - "**/.venv/**"
   - "**/node_modules/**"
   - "**/*.test.ts"
   - "**/*.test.tsx"
   - "external/**"
   - "docs/**"
-  - "deploy/**"
   - "workflows/**"
   - "config/**"
   - "logs/**"
