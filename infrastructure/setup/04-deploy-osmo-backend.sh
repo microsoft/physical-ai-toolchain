@@ -164,14 +164,20 @@ if [[ -n "$custom_expiry" ]]; then
     expiry_date=$(date -u -j -f "%Y-%m-%d" "$custom_expiry" +%F 2>/dev/null) || \
     fatal "--expires-at must be YYYY-MM-DD format"
 else
-  expiry_date=$(date -u -d "+1 year" +%F 2>/dev/null) || \
-    expiry_date=$(date -u -v+1y +%F 2>/dev/null) || \
+  expiry_date=$(date -u -d "+90 days" +%F 2>/dev/null) || \
+    expiry_date=$(date -u -v+90d +%F 2>/dev/null) || \
     fatal "Unable to compute token expiry date"
 fi
 
-# Storage access key (only when using access-keys mode)
-account_key=""
-[[ "$use_access_keys" == "true" ]] && account_key=$(az storage account keys list -g "$rg" -n "$storage_name" --query '[0].value' -o tsv)
+# Storage connection string (only when using access-keys mode)
+# OSMO's StaticDataCredential passes access_key to BlobServiceClient.from_connection_string(),
+# which requires a full connection string — not a raw access key.
+storage_connection_string=""
+if [[ "$use_access_keys" == "true" ]]; then
+  raw_key=$(az storage account keys list -g "$rg" -n "$storage_name" --query '[0].value' -o tsv)
+  storage_connection_string="DefaultEndpointsProtocol=https;AccountName=${storage_name};AccountKey=${raw_key};EndpointSuffix=core.windows.net"
+  unset raw_key
+fi
 
 auth_mode="workload-identity"
 [[ "$use_access_keys" == "true" ]] && auth_mode="access-keys"
@@ -182,6 +188,7 @@ workflow_template="$CONFIG_DIR/${WORKFLOW_TEMPLATE}"
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Service URL" "$service_url"
+  print_kv "Service Base URL" "$cluster_service_url"
   print_kv "Backend Name" "$backend_name"
   print_kv "Chart Version" "$chart_version"
   print_kv "Image Version" "$image_version"
@@ -224,7 +231,26 @@ mkdir -p "$CONFIG_DIR/out"
 # OSMO Login
 #------------------------------------------------------------------------------
 section "OSMO Login"
-osmo_login_and_setup "$service_url"
+
+admin_secret_name="osmo-default-admin"
+admin_password=$(kubectl get secret "$admin_secret_name" \
+  -n "$NS_OSMO_CONTROL_PLANE" \
+  -o jsonpath='{.data.password}' | base64 -d) || \
+  fatal "Admin secret $admin_secret_name not found in $NS_OSMO_CONTROL_PLANE. Run 03-deploy-osmo-control-plane.sh first."
+
+osmo_login_and_setup "$service_url" "$admin_password"
+
+# Verify SERVICE config service_base_url is set — may be empty if script 03
+# ran from a devcontainer and the config update was skipped or failed.
+# Workflow pod sidecars use this value as their -host argument; empty causes
+# websocket connection failures (ws://:80/...).
+current_base_url=$(osmo config show SERVICE 2>/dev/null | jq -r '.service_base_url // empty' || true)
+if [[ -z "$current_base_url" ]]; then
+  warn "SERVICE config service_base_url is empty — workflow sidecars cannot reach the control plane"
+  info "Setting service_base_url to in-cluster URL: $cluster_service_url"
+  printf '{"service_base_url": "%s"}' "$cluster_service_url" | \
+    osmo config update SERVICE --file /dev/stdin --description "Set service base URL for workflow sidecar connectivity"
+fi
 
 #------------------------------------------------------------------------------
 # Prepare Namespaces and Service Token
@@ -238,26 +264,33 @@ token_exists=false
 kubectl get secret "$account_secret" -n "$NS_OSMO_OPERATOR" &>/dev/null && token_exists=true
 
 if [[ "$regenerate_token" == "true" || "$token_exists" == "false" ]]; then
+  info "Ensuring backend-operator service account..."
+  osmo_login_and_setup "$service_url" "$admin_password" "backend-operator" "osmo-backend"
+
   token_name="backend-token-$(date -u +%Y%m%d%H%M%S)"
   info "Generating OSMO service token $token_name (expires $expiry_date)..."
 
-  # Create service access token via OSMO API (works with auth.enabled=false via x-osmo-user header)
-  OSMO_SERVICE_TOKEN=$(curl -sf -X POST \
-    "${service_url}/api/auth/access_token/service/${token_name}?expires_at=${expiry_date}&roles=osmo-backend" \
-    -H "x-osmo-user: admin")
-
-  # Strip surrounding quotes from JSON string response
-  OSMO_SERVICE_TOKEN="${OSMO_SERVICE_TOKEN//\"/}"
-  [[ -z "$OSMO_SERVICE_TOKEN" ]] && fatal "Failed to obtain service token from ${service_url}"
+  token_json=$(osmo token set "$token_name" \
+    --user backend-operator \
+    --expires-at "$expiry_date" \
+    --description "Backend Operator - $(date -u +%F)" \
+    --roles osmo-backend \
+    -t json 2>/dev/null) || fatal "Failed to create service token via OSMO CLI"
+  OSMO_SERVICE_TOKEN=$(printf '%s' "$token_json" | jq -r '.token // empty')
+  [[ -z "$OSMO_SERVICE_TOKEN" ]] && fatal "Service token response missing 'token' field"
   export OSMO_SERVICE_TOKEN
 
   kubectl create secret generic "$account_secret" \
     --namespace="$NS_OSMO_OPERATOR" \
-    --from-literal=token="$OSMO_SERVICE_TOKEN" \
+    --from-file=token=<(printf '%s' "$OSMO_SERVICE_TOKEN") \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+  unset OSMO_SERVICE_TOKEN
 else
   info "Token secret $account_secret already exists"
 fi
+
+unset admin_password
 
 #------------------------------------------------------------------------------
 # Configure Storage Container
@@ -364,7 +397,7 @@ export BACKEND_DESCRIPTION="$backend_description"
 export K8S_NAMESPACE="$NS_OSMO_WORKFLOWS"
 export CONTROL_PLANE_NAMESPACE="$NS_OSMO_CONTROL_PLANE"
 export STORAGE_ACCESS_KEY_ID="osmo-control-plane-storage"
-export STORAGE_ACCESS_KEY="$account_key"
+export STORAGE_ACCESS_KEY="$storage_connection_string"
 export WORKFLOW_BASE_URL="$workflow_base_url"
 export WORKFLOW_DATA_ENDPOINT="${azure_container}/workflows/data"
 export WORKFLOW_LOG_ENDPOINT="${azure_container}/workflows/logs"
@@ -535,6 +568,7 @@ fi
 section "Deployment Summary"
 print_kv "Backend Name" "$backend_name"
 print_kv "Service URL" "$service_url"
+print_kv "Service Base URL" "$cluster_service_url"
 print_kv "Chart Version" "$chart_version"
 print_kv "Image Version" "$image_version"
 print_kv "Storage Account" "$storage_name"

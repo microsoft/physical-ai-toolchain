@@ -1,7 +1,7 @@
 # Global configuration shared across all OSMO services
 global:
   osmoImageLocation: nvcr.io/nvidia/osmo
-  osmoImageTag: 6.0.0
+  osmoImageTag: 6.2
   serviceAccountName: osmo-control-plane
 
   logs:
@@ -14,6 +14,15 @@ services:
   # Configuration file service settings
   configFile:
     enabled: true
+
+  # Admin user bootstrapped at startup (Tier 2 auth)
+  # Password stored in K8s secret; doubles as access token for CLI login.
+  # To enable IdP (Tier 3), keep defaultAdmin for bootstrapping alongside sidecar config below.
+  defaultAdmin:
+    enabled: true
+    username: "admin"
+    passwordSecretName: osmo-default-admin
+    passwordSecretKey: password
 
   # PostgreSQL database configuration
   postgres:
@@ -40,10 +49,6 @@ services:
     scaling:
       minReplicas: 1
       maxReplicas: 3
-
-    # Authentication configuration
-    auth:
-      enabled: false
 
     # Ingress configuration
     ingress:
@@ -115,6 +120,19 @@ sidecars:
   # Global Envoy proxy configuration
   envoy:
     enabled: false
+    # Tier 3 (IdP): set enabled: true and configure jwt.providers:
+    # jwt:
+    #   providers:
+    #     - issuer: "https://sts.windows.net/<tenant-id>/"
+    #       audience: "<client-id>"
+    #       jwks_uri: "https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys"
+    #       user_claim: unique_name
+    #       cluster: idp
+    #     - issuer: osmo
+    #       audience: osmo
+    #       jwks_uri: http://localhost:8000/api/auth/keys
+    #       user_claim: unique_name
+    #       cluster: service
 
     # OSMO auth service configuration
     osmoauth:
@@ -126,10 +144,17 @@ sidecars:
   # OAuth2 Proxy configuration (requires OIDC setup)
   oauth2Proxy:
     enabled: false
+    # Tier 3 (IdP): set enabled: true and configure:
+    # provider: oidc
+    # oidcIssuerUrl: "https://login.microsoftonline.com/<tenant-id>/v2.0"
+    # clientId: "<client-id>"
+    # useKubernetesSecrets: true
+    # secretName: oauth2-proxy-secrets
 
-  # Authorization sidecar (disabled until authz-sidecar image binds to 0.0.0.0)
+  # Authorization sidecar
   authz:
     enabled: false
+    # Tier 3 (IdP): set enabled: true for RBAC enforcement
 
   # OpenTelemetry configuration (optional)
   otel:
@@ -138,7 +163,3 @@ sidecars:
   # Rate limiting configuration (optional)
   rateLimit:
     enabled: false
-    # Uncomment and configure if using rate limiting
-    # redis:
-    #   serviceName: <your-redis-host>
-    #   port: 6379
