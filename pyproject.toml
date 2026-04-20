@@ -35,7 +35,7 @@ package = false
 constraint-dependencies = ["pygments==2.20.0"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "training/tests", "data-management/tools/tests"]
+testpaths = ["tests", "training/tests", "data-management/tools/tests", "fleet-deployment/inference/tests"]
 pythonpath = [".", "data-management/tools"]
 python_files = ["test_*.py", "fuzz_harness.py"]
 addopts = [
