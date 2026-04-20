@@ -60,7 +60,7 @@ export function ProgressOverview({
             </div>
             <div>
               <p className="text-2xl font-semibold">{annotatedEpisodes.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">Completed</p>
+              <p className="text-muted-foreground text-xs">Completed</p>
             </div>
           </div>
 
@@ -70,7 +70,7 @@ export function ProgressOverview({
             </div>
             <div>
               <p className="text-2xl font-semibold">{pendingEpisodes.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">Pending</p>
+              <p className="text-muted-foreground text-xs">Pending</p>
             </div>
           </div>
 
@@ -80,7 +80,7 @@ export function ProgressOverview({
             </div>
             <div>
               <p className="text-2xl font-semibold">{totalEpisodes.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">Total Episodes</p>
+              <p className="text-muted-foreground text-xs">Total Episodes</p>
             </div>
           </div>
 
@@ -90,17 +90,17 @@ export function ProgressOverview({
             </div>
             <div>
               <p className="text-2xl font-semibold">{episodesPerHour}</p>
-              <p className="text-xs text-muted-foreground">Episodes/Hour</p>
+              <p className="text-muted-foreground text-xs">Episodes/Hour</p>
             </div>
           </div>
         </div>
 
         {/* Time estimate */}
         {estimatedHoursRemaining > 0 && (
-          <div className="rounded-lg bg-muted/50 p-3">
-            <p className="text-sm text-muted-foreground">
+          <div className="bg-muted/50 rounded-lg p-3">
+            <p className="text-muted-foreground text-sm">
               Estimated time remaining:{' '}
-              <span className="font-medium text-foreground">
+              <span className="text-foreground font-medium">
                 {estimatedHoursRemaining} hour{estimatedHoursRemaining !== 1 ? 's' : ''}
               </span>
             </p>

@@ -47,7 +47,7 @@ export function AnnotationWorkspaceTrajectoryTab({
       >
         <div
           data-testid="trajectory-playback-group-panel"
-          className="order-1 min-h-[320px] overflow-y-auto rounded-xl border bg-card p-3 shadow-sm lg:col-span-2"
+          className="bg-card order-1 min-h-[320px] overflow-y-auto rounded-xl border p-3 shadow-xs lg:col-span-2"
         >
           <div className="space-y-3">
             {playbackCard}
@@ -86,11 +86,11 @@ export function AnnotationWorkspaceTrajectoryTab({
               onSelectionStart={onSelectionStart}
               onSelectionComplete={onSelectionComplete}
             />
-            <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="bg-muted/20 rounded-lg border p-3">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div>
                   <h4 className="text-sm font-medium">Subtask Timeline</h4>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-muted-foreground text-xs">
                     Compare subtask ranges directly against trajectory changes on the same frame
                     timeline.
                   </p>

@@ -68,7 +68,7 @@ export const TrajectoryPlot = memo(function TrajectoryPlot({
 
   if (!state.currentEpisode) {
     return (
-      <div className={cn('flex items-center justify-center rounded-lg bg-muted', className)}>
+      <div className={cn('bg-muted flex items-center justify-center rounded-lg', className)}>
         <p className="text-muted-foreground">No episode selected</p>
       </div>
     )
@@ -76,7 +76,7 @@ export const TrajectoryPlot = memo(function TrajectoryPlot({
 
   if (state.chartData.length === 0) {
     return (
-      <div className={cn('flex items-center justify-center rounded-lg bg-muted', className)}>
+      <div className={cn('bg-muted flex items-center justify-center rounded-lg', className)}>
         <p className="text-muted-foreground">No trajectory data available</p>
       </div>
     )

@@ -112,7 +112,7 @@ export function formatShortcut(shortcut: KeyboardShortcut): string {
   }
 
   // Format special keys
-  let keyDisplay = shortcut.key
+  let keyDisplay: string
   switch (shortcut.key.toLowerCase()) {
     case ' ':
       keyDisplay = 'Space'

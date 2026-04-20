@@ -30,7 +30,7 @@ export function FormSection({
         </div>
       )}
       {children}
-      {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+      {description ? <p className="text-muted-foreground text-xs">{description}</p> : null}
     </div>
   )
 }
