@@ -71,8 +71,8 @@ export function TrajectoryPlotControls({
           onClick={() => onSetShowVelocity(false)}
           className={
             !showVelocity
-              ? 'rounded bg-primary px-2 py-1 text-xs text-primary-foreground'
-              : 'rounded bg-muted px-2 py-1 text-xs text-muted-foreground'
+              ? 'bg-primary text-primary-foreground rounded-sm px-2 py-1 text-xs'
+              : 'bg-muted text-muted-foreground rounded-sm px-2 py-1 text-xs'
           }
         >
           Position
@@ -81,8 +81,8 @@ export function TrajectoryPlotControls({
           onClick={() => onSetShowVelocity(true)}
           className={
             showVelocity
-              ? 'rounded bg-primary px-2 py-1 text-xs text-primary-foreground'
-              : 'rounded bg-muted px-2 py-1 text-xs text-muted-foreground'
+              ? 'bg-primary text-primary-foreground rounded-sm px-2 py-1 text-xs'
+              : 'bg-muted text-muted-foreground rounded-sm px-2 py-1 text-xs'
           }
         >
           Velocity
@@ -95,10 +95,10 @@ export function TrajectoryPlotControls({
           onClick={onToggleNormalization}
           className={
             isNormalizationDisabled
-              ? 'cursor-not-allowed rounded border border-transparent bg-muted px-2 py-1 text-xs text-muted-foreground/60 transition-colors'
+              ? 'bg-muted text-muted-foreground/60 cursor-not-allowed rounded-sm border border-transparent px-2 py-1 text-xs transition-colors'
               : showNormalized
-                ? 'rounded border border-primary bg-primary px-2 py-1 text-xs text-primary-foreground transition-colors'
-                : 'rounded border border-transparent bg-muted px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-border'
+                ? 'border-primary bg-primary text-primary-foreground rounded-sm border px-2 py-1 text-xs transition-colors'
+                : 'bg-muted text-muted-foreground hover:border-border rounded-sm border border-transparent px-2 py-1 text-xs transition-colors'
           }
         >
           Normalize

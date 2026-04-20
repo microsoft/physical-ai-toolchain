@@ -56,6 +56,36 @@ resource "azurerm_user_assigned_identity" "osmo" {
 }
 
 // ============================================================
+// OSMO Admin Password
+// ============================================================
+
+resource "random_password" "osmo_admin" {
+  count = var.should_create_osmo_secret ? 1 : 0
+
+  length      = 43
+  special     = false
+  min_lower   = 4
+  min_upper   = 4
+  min_numeric = 4
+}
+
+resource "azapi_resource" "osmo_admin_password" {
+  count = var.should_create_osmo_secret ? 1 : 0
+
+  type      = "Microsoft.KeyVault/vaults/secrets@2025-05-01"
+  name      = "osmo-admin-password"
+  parent_id = azurerm_key_vault.main.id
+
+  body = {
+    properties = {
+      value = random_password.osmo_admin[0].result
+    }
+  }
+
+  depends_on = [azurerm_role_assignment.user_kv_officer]
+}
+
+// ============================================================
 // Key Vault Private Endpoint
 // ============================================================
 

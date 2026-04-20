@@ -71,7 +71,7 @@ export function AnnotatorLeaderboard({
       </CardHeader>
       <CardContent>
         {sortedAnnotators.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
+          <p className="text-muted-foreground py-6 text-center text-sm">
             No annotator activity yet
           </p>
         ) : (
@@ -89,7 +89,7 @@ export function AnnotatorLeaderboard({
                   {index < 3 ? (
                     RANK_ICONS[index]
                   ) : (
-                    <span className="text-sm font-medium text-muted-foreground">#{index + 1}</span>
+                    <span className="text-muted-foreground text-sm font-medium">#{index + 1}</span>
                   )}
                 </div>
 
@@ -110,7 +110,7 @@ export function AnnotatorLeaderboard({
                       </Badge>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="text-muted-foreground flex items-center gap-3 text-xs">
                     <span>{annotator.episodes_annotated} episodes</span>
                     <span className="flex items-center gap-0.5">
                       <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
@@ -120,7 +120,7 @@ export function AnnotatorLeaderboard({
                 </div>
 
                 {/* Last active */}
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <div className="text-muted-foreground flex items-center gap-1 text-xs">
                   <Clock className="h-3 w-3" />
                   <span className="hidden sm:inline">
                     {formatLastActive(annotator.last_active)}

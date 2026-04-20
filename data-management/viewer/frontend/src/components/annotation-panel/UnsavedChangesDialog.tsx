@@ -49,7 +49,7 @@ export function UnsavedChangesDialog({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             You have unsaved changes to the current annotation. What would you like to do?
           </p>
 

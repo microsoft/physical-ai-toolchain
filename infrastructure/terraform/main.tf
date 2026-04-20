@@ -107,8 +107,9 @@ module "platform" {
   reports_archive_tier_days                         = var.reports_archive_tier_days
 
   // OSMO services
-  should_deploy_postgresql = var.should_deploy_postgresql
-  should_deploy_redis      = var.should_deploy_redis
+  should_create_osmo_secret = var.osmo_config.should_create_secret
+  should_deploy_postgresql  = var.should_deploy_postgresql
+  should_deploy_redis       = var.should_deploy_redis
   postgresql_config = {
     location                        = coalesce(var.postgresql_location, var.location)
     sku_name                        = var.postgresql_sku_name

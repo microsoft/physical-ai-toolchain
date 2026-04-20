@@ -528,7 +528,7 @@ def _apply_mlflow_logging(runner: Any, mlflow: Any | None) -> None:
         mlflow_module=mlflow,
         metric_filter=None,
     )
-    runner.agent._update = wrapper_func
+    runner.agent.update = wrapper_func
 
 
 @dataclass

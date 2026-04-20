@@ -91,7 +91,7 @@ export function TrajectoryQualityWidget() {
           <CardTitle className="text-sm">Trajectory Quality</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">No episode selected</p>
+          <p className="text-muted-foreground text-sm">No episode selected</p>
         </CardContent>
       </Card>
     )
@@ -115,7 +115,7 @@ export function TrajectoryQualityWidget() {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">Overall (1-5)</span>
-            <span className="text-xs text-muted-foreground">Press 1-5</span>
+            <span className="text-muted-foreground text-xs">Press 1-5</span>
           </div>
           <StarRating
             value={trajectoryQuality?.overallScore ?? 0}

@@ -32,7 +32,7 @@ jobs:
 
       - name: Build and start dataviewer
         shell: bash
-        working-directory: src/dataviewer
+        working-directory: data-management/viewer
         env:
           HMI_LOCAL_DATA_PATH: ./data/test-dataset
         run: docker compose up -d --build --wait
@@ -85,7 +85,7 @@ jobs:
       - name: Stop dataviewer containers
         if: always()
         shell: bash
-        working-directory: src/dataviewer
+        working-directory: data-management/viewer
         run: docker compose down
 
       - name: Add job summary
