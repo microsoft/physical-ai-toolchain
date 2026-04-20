@@ -6,6 +6,7 @@
       "description": "Dataset storage using access keys",
       "mode": "read-write",
       "default_credential": {
+        "endpoint": "azure://${STORAGE_ACCOUNT_NAME}",
         "access_key_id": "${STORAGE_ACCESS_KEY_ID}",
         "access_key": "${STORAGE_ACCESS_KEY}"
       }
