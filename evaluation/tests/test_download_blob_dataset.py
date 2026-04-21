@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import shutil
+import importlib.util
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -11,14 +11,6 @@ import pytest
 
 _EVAL_ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT_PATH = _EVAL_ROOT / "sil" / "scripts" / "download_blob_dataset.py"
-
-
-def _exec_script(local_data_root: Path, config_path: Path) -> None:
-    """Execute the script with ``/workspace/data`` and ``/tmp/dataset_path.env`` redirected."""
-    source = _SCRIPT_PATH.read_text()
-    source = source.replace('"/workspace/data"', repr(str(local_data_root)))
-    source = source.replace('"/tmp/dataset_path.env"', repr(str(config_path)))
-    exec(compile(source, str(_SCRIPT_PATH), "exec"), {"__name__": "__main__"})
 
 
 class TestDownloadBlobDataset:
@@ -60,12 +52,13 @@ class TestDownloadBlobDataset:
         self.data_root = tmp_path / "workspace_data"
         self.config_path = tmp_path / "dataset_path.env"
         self.local_root = self.data_root / "myprefix"
-        shutil.rmtree(self.data_root, ignore_errors=True)
-        yield
-        shutil.rmtree(self.data_root, ignore_errors=True)
+        monkeypatch.setenv("DATA_ROOT", str(self.data_root))
+        monkeypatch.setenv("DATASET_CONFIG_PATH", str(self.config_path))
 
     def _run(self) -> None:
-        _exec_script(self.data_root, self.config_path)
+        spec = importlib.util.spec_from_file_location("download_blob_dataset", _SCRIPT_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
 
     def test_default_container_used(self) -> None:
         self._run()
