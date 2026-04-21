@@ -264,3 +264,54 @@ jobs:
       contents: read
       security-events: write
       actions: read
+
+  # Aggregator status check required by branch protection.
+  # Reports success only when every upstream PR validation job succeeded or was skipped.
+  pr-validation-summary:
+    name: pr-validation-summary
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    needs:
+      - spell-check
+      - markdown-lint
+      - table-format
+      - frontmatter-validation
+      - msdate-freshness
+      - psscriptanalyzer
+      - yaml-lint
+      - link-lang-check
+      - markdown-link-check
+      - dependency-review
+      - dependency-pinning
+      - pester-tests
+      - dataviewer-frontend-tests
+      - docusaurus-tests
+      - pytest-tests
+      - dataviewer-backend-pytests
+      - evaluation-pytests
+      - fuzz-regression-tests
+      - python-lint
+      - terraform-lint
+      - terraform-validation
+      - terraform-tests
+      - go-lint
+      - terraform-docs-check
+      - go-tests
+      - shellcheck
+      - codeql-analysis
+    permissions:
+      contents: read
+    steps:
+      - name: Verify all upstream jobs succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          echo "Upstream job results:"
+          echo "$NEEDS_JSON"
+          failed=$(echo "$NEEDS_JSON" | jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key')
+          if [ -n "$failed" ]; then
+            echo "::error::One or more upstream PR validation jobs did not succeed:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All upstream PR validation jobs succeeded or were skipped."
