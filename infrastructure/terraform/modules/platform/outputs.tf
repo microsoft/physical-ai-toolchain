@@ -239,6 +239,11 @@ output "postgresql_secret_name" {
   value       = try(azapi_resource.postgresql_password[0].name, null)
 }
 
+output "osmo_admin_secret_name" {
+  description = "Key Vault secret name containing OSMO admin password"
+  value       = try(azapi_resource.osmo_admin_password[0].name, null)
+}
+
 output "redis" {
   description = "Azure Managed Redis for OSMO (if deployed)."
   value = try({

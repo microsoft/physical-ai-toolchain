@@ -80,8 +80,8 @@ function AnomalyItem({ anomaly }: { anomaly: DetectedAnomaly }) {
             {anomaly.severity}
           </Badge>
         </div>
-        <p className="truncate text-xs text-muted-foreground">{anomaly.description}</p>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-muted-foreground truncate text-xs">{anomaly.description}</p>
+        <p className="text-muted-foreground text-xs">
           Frames {anomaly.frame_start} - {anomaly.frame_end}
         </p>
       </div>
@@ -173,7 +173,7 @@ export function SuggestionCard({
             AI Suggestion
           </CardTitle>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">{confidencePercent}% confidence</span>
+            <span className="text-muted-foreground text-xs">{confidencePercent}% confidence</span>
             <Progress value={confidencePercent} className="h-1.5 w-16" />
           </div>
         </div>
@@ -285,7 +285,7 @@ export function SuggestionCard({
 
         {/* Reasoning */}
         <Separator className="my-2" />
-        <div className="flex items-start gap-2 text-xs text-muted-foreground">
+        <div className="text-muted-foreground flex items-start gap-2 text-xs">
           <Info className="mt-0.5 h-3 w-3 shrink-0" />
           <p>{suggestion.reasoning}</p>
         </div>

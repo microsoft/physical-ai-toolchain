@@ -17,7 +17,7 @@ export function LabelFilter({ compact = false }: { compact?: boolean }) {
 
   return (
     <div className={compact ? 'space-y-1' : 'space-y-1 border-b px-2 py-2'}>
-      <div className="text-xs font-medium text-muted-foreground">Filter by label</div>
+      <div className="text-muted-foreground text-xs font-medium">Filter by label</div>
       <div className="flex flex-wrap gap-1">
         {availableLabels.map((label) => {
           const isActive = filterLabels.includes(label)
@@ -25,12 +25,12 @@ export function LabelFilter({ compact = false }: { compact?: boolean }) {
             <button
               key={label}
               onClick={() => toggleFilterLabel(label)}
-              className="focus:outline-none"
+              className="focus:outline-hidden"
             >
               <Badge
                 variant={isActive ? 'default' : 'outline'}
-                className={`h-5 cursor-pointer select-none px-1.5 py-0 text-[10px] ${
-                  isActive ? 'shadow-sm' : 'opacity-60 hover:opacity-100'
+                className={`h-5 cursor-pointer px-1.5 py-0 text-[10px] select-none ${
+                  isActive ? 'shadow-xs' : 'opacity-60 hover:opacity-100'
                 }`}
               >
                 {label}

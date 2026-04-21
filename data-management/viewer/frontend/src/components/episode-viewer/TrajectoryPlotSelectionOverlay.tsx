@@ -19,14 +19,14 @@ export function TrajectoryPlotSelectionOverlay({
     <div data-keep-playback-selection="true" className="pointer-events-none absolute inset-0 z-10">
       {selectionHighlight && (
         <div
-          className="absolute bottom-2 top-2 rounded-md border border-primary/60 bg-primary/10"
+          className="border-primary/60 bg-primary/10 absolute top-2 bottom-2 rounded-md border"
           style={selectionHighlight}
         />
       )}
       {contextMenuPosition && selectedRange && (
         <div
           data-keep-playback-selection="true"
-          className="pointer-events-auto absolute z-20 rounded-md border bg-popover p-1 shadow-md"
+          className="bg-popover pointer-events-auto absolute z-20 rounded-md border p-1 shadow-md"
           style={{ left: contextMenuPosition.x, top: contextMenuPosition.y }}
           onContextMenu={(event) => event.preventDefault()}
           onPointerDown={(event) => event.stopPropagation()}

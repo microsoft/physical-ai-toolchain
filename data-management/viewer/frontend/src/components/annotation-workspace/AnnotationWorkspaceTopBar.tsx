@@ -35,7 +35,7 @@ export function AnnotationWorkspaceTopBar({
     >
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 xl:contents">
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="text-lg font-semibold leading-none">Episode {episodeIndex}</h2>
+          <h2 className="text-lg leading-none font-semibold">Episode {episodeIndex}</h2>
         </div>
         <div
           className="flex min-w-0 flex-col gap-1 xl:row-span-2 xl:items-end xl:justify-self-end"
@@ -74,7 +74,7 @@ export function AnnotationWorkspaceTopBar({
           </div>
           <div className="min-h-[1rem] xl:text-right" data-testid="workspace-save-status-slot">
             {saveStatusMessage && (
-              <p data-testid="workspace-save-status" className="text-xs text-muted-foreground">
+              <p data-testid="workspace-save-status" className="text-muted-foreground text-xs">
                 {saveStatusMessage}
               </p>
             )}

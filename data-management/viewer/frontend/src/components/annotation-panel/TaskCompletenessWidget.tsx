@@ -84,7 +84,7 @@ export function TaskCompletenessWidget() {
           <CardTitle className="text-sm">Task Completeness</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">No episode selected</p>
+          <p className="text-muted-foreground text-sm">No episode selected</p>
         </CardContent>
       </Card>
     )
@@ -98,7 +98,7 @@ export function TaskCompletenessWidget() {
           {taskCompleteness?.rating && (
             <span
               className={cn(
-                'rounded px-2 py-0.5 text-xs font-medium',
+                'rounded-sm px-2 py-0.5 text-xs font-medium',
                 taskCompleteness.rating === 'success' && 'bg-green-100 text-green-700',
                 taskCompleteness.rating === 'partial' && 'bg-yellow-100 text-yellow-700',
                 taskCompleteness.rating === 'failure' && 'bg-red-100 text-red-700',
@@ -122,7 +122,7 @@ export function TaskCompletenessWidget() {
               className="relative"
             >
               {option.label}
-              <span className="absolute -right-1 -top-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">
+              <span className="bg-muted text-muted-foreground absolute -top-1 -right-1 rounded-sm px-1 text-[10px]">
                 {option.key}
               </span>
             </Button>
@@ -139,9 +139,9 @@ export function TaskCompletenessWidget() {
             onChange={(e) =>
               updateTaskCompleteness({ confidence: parseInt(e.target.value) as 1 | 2 | 3 | 4 | 5 })
             }
-            className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-muted"
+            className="bg-muted h-2 w-full cursor-pointer appearance-none rounded-lg"
           />
-          <div className="flex justify-between text-xs text-muted-foreground">
+          <div className="text-muted-foreground flex justify-between text-xs">
             <span>Low</span>
             <span>High</span>
           </div>
@@ -162,7 +162,7 @@ export function TaskCompletenessWidget() {
                     completionPercentage: parseInt(e.target.value),
                   })
                 }
-                className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-muted"
+                className="bg-muted h-2 w-full cursor-pointer appearance-none rounded-lg"
               />
             </FormSection>
 

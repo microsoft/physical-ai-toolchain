@@ -56,7 +56,7 @@ export function SubtaskSegmentSlider({
 
   return (
     <Slider
-      className={cn('absolute bottom-1 top-1 touch-none select-none', className)}
+      className={cn('absolute top-1 bottom-1 touch-none select-none', className)}
       style={{
         left: 0,
         right: 0,
@@ -68,11 +68,11 @@ export function SubtaskSegmentSlider({
       step={1}
       minStepsBetweenThumbs={1}
     >
-      <SliderTrack className="h-full w-full rounded-sm bg-transparent">
+      <SliderTrack className="h-full w-full rounded-xs bg-transparent">
         <SliderRange
           className={cn(
-            'absolute h-full cursor-pointer rounded-sm transition-opacity hover:opacity-90',
-            isActive && 'ring-2 ring-primary ring-offset-1 ring-offset-background',
+            'absolute h-full cursor-pointer rounded-xs transition-opacity hover:opacity-90',
+            isActive && 'ring-primary ring-offset-background ring-2 ring-offset-1',
           )}
           style={{ backgroundColor: segment.color }}
           onClick={onClick}
@@ -82,8 +82,8 @@ export function SubtaskSegmentSlider({
       {/* Start thumb */}
       <SliderThumb
         className={cn(
-          'h-4 w-2 rounded-sm border-2 shadow-sm',
-          'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+          'h-4 w-2 rounded-xs border-2 shadow-xs',
+          'focus:ring-ring focus:ring-2 focus:ring-offset-2 focus:outline-hidden',
           'cursor-ew-resize transition-transform hover:scale-110',
         )}
         style={{ borderColor: segment.color }}
@@ -93,8 +93,8 @@ export function SubtaskSegmentSlider({
       {/* End thumb */}
       <SliderThumb
         className={cn(
-          'h-4 w-2 rounded-sm border-2 shadow-sm',
-          'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+          'h-4 w-2 rounded-xs border-2 shadow-xs',
+          'focus:ring-ring focus:ring-2 focus:ring-offset-2 focus:outline-hidden',
           'cursor-ew-resize transition-transform hover:scale-110',
         )}
         style={{ borderColor: segment.color }}

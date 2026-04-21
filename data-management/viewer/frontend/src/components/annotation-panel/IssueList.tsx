@@ -31,7 +31,7 @@ interface IssueListProps {
  */
 export function IssueList({ issues, onRemove, onSeek }: IssueListProps) {
   if (issues.length === 0) {
-    return <p className="py-4 text-center text-sm text-muted-foreground">No issues reported</p>
+    return <p className="text-muted-foreground py-4 text-center text-sm">No issues reported</p>
   }
 
   const severityIcons = {
@@ -64,7 +64,7 @@ export function IssueList({ issues, onRemove, onSeek }: IssueListProps) {
               </span>
               <span
                 className={cn(
-                  'rounded px-1.5 text-xs',
+                  'rounded-sm px-1.5 text-xs',
                   issue.severity === 'critical' && 'bg-red-200 text-red-800',
                   issue.severity === 'major' && 'bg-orange-200 text-orange-800',
                   issue.severity === 'minor' && 'bg-yellow-200 text-yellow-800',
@@ -74,12 +74,12 @@ export function IssueList({ issues, onRemove, onSeek }: IssueListProps) {
               </span>
             </div>
             {issue.notes && (
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">{issue.notes}</p>
+              <p className="text-muted-foreground mt-0.5 truncate text-xs">{issue.notes}</p>
             )}
             {issue.affectedFrames && (
               <button
                 onClick={() => onSeek?.(issue.affectedFrames![0])}
-                className="mt-0.5 text-xs text-primary hover:underline"
+                className="text-primary mt-0.5 text-xs hover:underline"
               >
                 Frames {issue.affectedFrames[0]}-{issue.affectedFrames[1]}
               </button>

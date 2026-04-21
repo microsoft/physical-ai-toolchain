@@ -99,7 +99,7 @@ export function OfflineIndicator({ className }: OfflineIndicatorProps) {
 
           {/* Last sync result */}
           {lastSyncResult && (
-            <div className="space-y-1 text-xs text-muted-foreground">
+            <div className="text-muted-foreground space-y-1 text-xs">
               <p>
                 Last sync: {lastSyncResult.syncedCount} synced
                 {lastSyncResult.failedCount > 0 && (
@@ -111,7 +111,7 @@ export function OfflineIndicator({ className }: OfflineIndicatorProps) {
               {lastSyncResult.errors.length > 0 && (
                 <div
                   className={cn(
-                    'max-h-20 overflow-auto rounded border p-2',
+                    'max-h-20 overflow-auto rounded-sm border p-2',
                     getSemanticToneClasses('surface', 'danger'),
                     'text-xs',
                   )}
@@ -148,7 +148,7 @@ export function OfflineIndicator({ className }: OfflineIndicatorProps) {
 
           {/* Offline mode info */}
           {!isOnline && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-muted-foreground text-xs">
               Changes are saved locally and will sync when you're back online.
             </p>
           )}

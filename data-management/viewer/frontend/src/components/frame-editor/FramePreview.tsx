@@ -135,15 +135,15 @@ export function FramePreview({
 
   return (
     <div className={cn('flex flex-col gap-2', className)}>
-      <div className="relative flex min-h-[100px] items-center justify-center overflow-hidden rounded-lg bg-muted">
+      <div className="bg-muted relative flex min-h-[100px] items-center justify-center overflow-hidden rounded-lg">
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="animate-pulse text-muted-foreground">Loading...</div>
+            <div className="text-muted-foreground animate-pulse">Loading...</div>
           </div>
         )}
 
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center text-destructive">
+          <div className="text-destructive absolute inset-0 flex items-center justify-center">
             {error}
           </div>
         )}
@@ -156,7 +156,7 @@ export function FramePreview({
       </div>
 
       {showDimensions && dimensions && (
-        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+        <div className="text-muted-foreground flex flex-wrap gap-2 text-xs">
           <span>
             Original: {dimensions.original.width} × {dimensions.original.height}
           </span>
