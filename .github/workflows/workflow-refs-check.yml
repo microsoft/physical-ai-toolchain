@@ -18,23 +18,44 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate local workflow references resolve
+      - name: Validate local workflow and composite action references resolve
+        shell: pwsh
         run: |
-          set -euo pipefail
-          missing=0
-          for f in .github/workflows/*.yml .github/workflows/*.yaml; do
-            [ -f "$f" ] || continue
-            while read -r ref; do
-              target="${ref#./}"
-              if [ ! -f "$target" ]; then
-                echo "::error file=$f::Referenced workflow not found: $target"
-                missing=$((missing + 1))
-              fi
-            done < <(grep -oE '\./\.github/workflows/[A-Za-z0-9._-]+\.ya?ml' "$f" | sort -u)
-          done
+          $ErrorActionPreference = 'Stop'
+          $missing = 0
+          $workflowPattern = '\./\.github/workflows/[A-Za-z0-9._-]+\.ya?ml'
+          $actionPattern = '\./\.github/actions/[A-Za-z0-9._/-]+'
 
-          if [ "$missing" -gt 0 ]; then
-            echo "Found $missing missing workflow reference(s)."
+          $files = Get-ChildItem -Path '.github/workflows' -File |
+            Where-Object { $_.Extension -in '.yml', '.yaml' }
+          foreach ($f in $files) {
+            $content = Get-Content -Raw -LiteralPath $f.FullName
+            $relFile = [System.IO.Path]::GetRelativePath($PWD.Path, $f.FullName) -replace '\\', '/'
+
+            $workflowRefs = [regex]::Matches($content, $workflowPattern) |
+              ForEach-Object { $_.Value } | Sort-Object -Unique
+            foreach ($ref in $workflowRefs) {
+              $target = $ref -replace '^\./', ''
+              if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+                Write-Host "::error file=$relFile::Referenced workflow not found: $target"
+                $missing++
+              }
+            }
+
+            $actionRefs = [regex]::Matches($content, $actionPattern) |
+              ForEach-Object { $_.Value } | Sort-Object -Unique
+            foreach ($ref in $actionRefs) {
+              $target = $ref -replace '^\./', ''
+              if (-not ((Test-Path -LiteralPath "$target/action.yml" -PathType Leaf) -or
+                        (Test-Path -LiteralPath "$target/action.yaml" -PathType Leaf))) {
+                Write-Host "::error file=$relFile::Referenced composite action not found: $target"
+                $missing++
+              }
+            }
+          }
+
+          if ($missing -gt 0) {
+            Write-Host "Found $missing missing reference(s)."
             exit 1
-          fi
-          echo "All local workflow references resolve."
+          }
+          Write-Host 'All local workflow and composite action references resolve.'
