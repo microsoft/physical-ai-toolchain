@@ -102,7 +102,7 @@ export function SpeedControl({ speed, onSpeedChange, compact = false }: SpeedCon
               Set
             </Button>
           </div>
-          <p className="text-[0.65rem] text-muted-foreground">
+          <p className="text-muted-foreground text-[0.65rem]">
             {MIN_SPEED}x – {MAX_SPEED}x
           </p>
         </div>

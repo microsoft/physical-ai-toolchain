@@ -1,0 +1,62 @@
+name: Evaluation Pytest Tests
+
+on:
+  workflow_call:
+    inputs:
+      code-coverage:
+        description: 'Enable Codecov coverage upload'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: Evaluation Pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: evaluation
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Install dependencies
+        run: uv sync --only-group dev
+
+      - name: Run pytest
+        run: uv run --only-group dev pytest -v
+
+      - name: Upload coverage.xml artifact
+        if: ${{ inputs.code-coverage && !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evaluation-pytest-coverage-xml
+          path: evaluation/logs/coverage.xml
+          retention-days: 30
+
+      - name: Upload coverage to Codecov
+        if: ${{ inputs.code-coverage && !cancelled() }}
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        with:
+          files: evaluation/logs/coverage.xml
+          use_oidc: true
+          fail_ci_if_error: false
+          verbose: true
+          flags: pytest-evaluation
+          name: evaluation-pytest-coverage

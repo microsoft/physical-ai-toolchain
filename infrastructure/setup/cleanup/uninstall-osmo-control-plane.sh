@@ -186,30 +186,19 @@ if [[ "$purge_postgres" == "true" ]]; then
     if [[ -z "$pg_password" ]]; then
       warn "Could not retrieve PostgreSQL password, skipping..."
     else
-      warn "Dropping all OSMO tables from database '$db_name'..."
+      warn "Dropping all tables from database '$db_name' (public schema)..."
 
-      # OSMO tables in dependency order (children first, then parents)
-      osmo_tables=(
-        "collection" "dataset_tag" "dataset_version" "dataset"
-        "credential" "access_token" "profile" "config_history" "backend_tests"
-        "resource_platforms" "resources" "app_versions" "apps"
-        "task_io" "tasks" "groups" "workflow_tags" "workflows"
-        "pools" "pod_templates" "resource_validations" "backends" "roles" "configs" "ueks"
-      )
-
-      drop_sql="SET client_min_messages TO WARNING;"
-      for t in "${osmo_tables[@]}"; do
-        drop_sql+="DROP TABLE IF EXISTS $t CASCADE;"
-      done
-      drop_sql+="DROP TYPE IF EXISTS credential_type CASCADE;"
-      drop_sql+="DROP FUNCTION IF EXISTS jsonb_recursive_merge(jsonb, jsonb) CASCADE;"
+      # Drop the entire public schema and recreate it. This removes all tables,
+      # views, sequences, types, and functions owned by OSMO in one shot, avoiding
+      # a hand-maintained table list that drifts across OSMO releases.
+      drop_sql=$'SET client_min_messages TO WARNING;\nDROP SCHEMA IF EXISTS public CASCADE;\nCREATE SCHEMA public;\nGRANT ALL ON SCHEMA public TO PUBLIC;'
 
       if PGPASSWORD="$pg_password" psql \
           "host=$pg_fqdn port=5432 dbname=$db_name user=$pg_user sslmode=require" \
           -c "$drop_sql" 2>/dev/null; then
-        info "PostgreSQL tables dropped"
+        info "PostgreSQL public schema dropped and recreated"
       else
-        warn "Failed to drop PostgreSQL tables"
+        warn "Failed to drop PostgreSQL schema"
       fi
     fi
   fi

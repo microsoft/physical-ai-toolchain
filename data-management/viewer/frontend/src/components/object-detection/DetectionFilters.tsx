@@ -47,7 +47,7 @@ export function DetectionFilters({
       <div className="space-y-2">
         <div className="flex justify-between">
           <Label>Min Confidence</Label>
-          <span className="text-sm text-muted-foreground">
+          <span className="text-muted-foreground text-sm">
             {(filters.minConfidence * 100).toFixed(0)}%
           </span>
         </div>
@@ -58,9 +58,9 @@ export function DetectionFilters({
           step="0.05"
           value={filters.minConfidence}
           onChange={handleConfidenceChange}
-          className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-muted"
+          className="bg-muted h-2 w-full cursor-pointer appearance-none rounded-lg"
         />
-        <div className="flex justify-between text-xs text-muted-foreground">
+        <div className="text-muted-foreground flex justify-between text-xs">
           <span>0%</span>
           <span>50%</span>
           <span>100%</span>
@@ -92,7 +92,7 @@ export function DetectionFilters({
         </div>
         <div className="grid max-h-40 grid-cols-2 gap-2 overflow-y-auto rounded-md border p-2">
           {availableClasses.length === 0 ? (
-            <p className="col-span-2 py-2 text-center text-sm text-muted-foreground">
+            <p className="text-muted-foreground col-span-2 py-2 text-center text-sm">
               No classes detected yet
             </p>
           ) : (

@@ -58,7 +58,7 @@ export function AppContent() {
       />
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-64 flex-col overflow-hidden border-r bg-card">
+        <aside className="bg-card flex w-64 flex-col overflow-hidden border-r">
           <DataviewerEpisodeList
             datasetId={datasetId}
             onSelectEpisode={setSelectedEpisode}
@@ -66,7 +66,7 @@ export function AppContent() {
           />
         </aside>
 
-        <main className="flex-1 overflow-hidden bg-background">
+        <main className="bg-background flex-1 overflow-hidden">
           <DataviewerEpisodeViewer
             datasetId={datasetId}
             episodeIndex={selectedEpisode}

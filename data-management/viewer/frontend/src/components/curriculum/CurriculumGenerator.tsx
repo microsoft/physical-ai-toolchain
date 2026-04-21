@@ -141,7 +141,7 @@ export function CurriculumGenerator({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <GraduationCap className="h-6 w-6 text-primary" />
+          <GraduationCap className="text-primary h-6 w-6" />
           <h1 className="text-2xl font-bold">Curriculum Generator</h1>
         </div>
         <div className="flex items-center gap-2">

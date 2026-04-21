@@ -98,12 +98,12 @@ export function BatchActions({
           </div>
 
           {/* Selection count */}
-          <div className="text-sm text-muted-foreground">
+          <div className="text-muted-foreground text-sm">
             {selectedCount} of {totalCount} selected
           </div>
 
           {/* Separator */}
-          <div className="h-6 w-px bg-border" />
+          <div className="bg-border h-6 w-px" />
 
           {/* Quick rating actions */}
           <div className="flex items-center gap-2">
@@ -180,11 +180,11 @@ export function BatchActions({
             <div className="mb-1 flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
               <span className="text-sm">Processing batch...</span>
-              <span className="text-sm text-muted-foreground">{progress}%</span>
+              <span className="text-muted-foreground text-sm">{progress}%</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div className="bg-muted h-2 overflow-hidden rounded-full">
               <div
-                className="h-full bg-primary transition-all duration-300"
+                className="bg-primary h-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -197,7 +197,7 @@ export function BatchActions({
             <Card className="w-full max-w-md">
               <CardContent className="p-6">
                 <h3 className="mb-2 text-lg font-semibold">Confirm Batch Action</h3>
-                <p className="mb-4 text-muted-foreground">{showConfirm.label}?</p>
+                <p className="text-muted-foreground mb-4">{showConfirm.label}?</p>
                 <div className="flex gap-2">
                   <Button variant="outline" onClick={() => setShowConfirm(null)} className="flex-1">
                     <X className="mr-2 h-4 w-4" />

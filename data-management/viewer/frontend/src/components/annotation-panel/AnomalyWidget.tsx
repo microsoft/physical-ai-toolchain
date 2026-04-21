@@ -61,7 +61,7 @@ export function AnomalyWidget() {
           <CardTitle className="text-sm">Anomalies</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">No episode selected</p>
+          <p className="text-muted-foreground text-sm">No episode selected</p>
         </CardContent>
       </Card>
     )
@@ -73,7 +73,7 @@ export function AnomalyWidget() {
         <CardTitle className="flex items-center justify-between text-sm">
           Anomalies
           {anomalies.length > 0 && (
-            <span className="text-xs font-normal text-muted-foreground">
+            <span className="text-muted-foreground text-xs font-normal">
               {anomalies.length} total
             </span>
           )}
@@ -82,7 +82,7 @@ export function AnomalyWidget() {
       <CardContent className="space-y-4">
         {/* Statistics */}
         {anomalies.length > 0 && (
-          <div className="flex gap-4 text-xs text-muted-foreground">
+          <div className="text-muted-foreground flex gap-4 text-xs">
             {autoDetectedCount > 0 && (
               <span className="flex items-center gap-1">
                 <Zap className="h-3 w-3 text-blue-500" />

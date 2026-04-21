@@ -43,7 +43,7 @@ export function DetectionPanelSidebar({
       </Card>
 
       {data && currentDetections.length > 0 && (
-        <Card className="max-h-80 flex-shrink-0 overflow-auto">
+        <Card className="max-h-80 shrink-0 overflow-auto">
           <CardHeader className="px-4 py-3">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Eye className="h-4 w-4" />
@@ -55,7 +55,7 @@ export function DetectionPanelSidebar({
               {currentDetections.map((detection) => (
                 <div
                   key={`${detection.class_name}-${detection.confidence}-${detection.bbox.join('-')}`}
-                  className="flex items-center justify-between rounded bg-muted p-2 text-sm"
+                  className="bg-muted flex items-center justify-between rounded-sm p-2 text-sm"
                 >
                   <span className="font-medium">{detection.class_name}</span>
                   <span className="text-muted-foreground">
@@ -69,31 +69,31 @@ export function DetectionPanelSidebar({
       )}
 
       {data && (
-        <Card className="flex-shrink-0">
+        <Card className="shrink-0">
           <CardHeader className="px-4 py-3">
             <CardTitle className="text-sm">Summary</CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-0">
             <div className="grid grid-cols-2 gap-3 text-center">
-              <div className="rounded-lg bg-muted p-3">
+              <div className="bg-muted rounded-lg p-3">
                 <div className="text-xl font-bold text-blue-500">
                   {filteredData?.total_detections || 0}
                 </div>
-                <div className="text-xs text-muted-foreground">Total</div>
+                <div className="text-muted-foreground text-xs">Total</div>
               </div>
-              <div className="rounded-lg bg-muted p-3">
+              <div className="bg-muted rounded-lg p-3">
                 <div className="text-xl font-bold text-green-500">{availableClasses.length}</div>
-                <div className="text-xs text-muted-foreground">Classes</div>
+                <div className="text-muted-foreground text-xs">Classes</div>
               </div>
-              <div className="rounded-lg bg-muted p-3">
+              <div className="bg-muted rounded-lg p-3">
                 <div className="text-xl font-bold text-purple-500">{data.processed_frames}</div>
-                <div className="text-xs text-muted-foreground">Frames</div>
+                <div className="text-muted-foreground text-xs">Frames</div>
               </div>
-              <div className="rounded-lg bg-muted p-3">
+              <div className="bg-muted rounded-lg p-3">
                 <div className="text-xl font-bold text-orange-500">
                   {(filters.minConfidence * 100).toFixed(0)}%
                 </div>
-                <div className="text-xs text-muted-foreground">Min Conf</div>
+                <div className="text-muted-foreground text-xs">Min Conf</div>
               </div>
             </div>
           </CardContent>

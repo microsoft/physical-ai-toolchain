@@ -65,11 +65,11 @@ function SliderControl({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <Label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Label className="text-muted-foreground flex items-center gap-1.5 text-xs">
           {icon}
           {label}
         </Label>
-        <span className="w-12 text-right font-mono text-xs text-muted-foreground">
+        <span className="text-muted-foreground w-12 text-right font-mono text-xs">
           {formatValue(value)}
         </span>
       </div>
@@ -80,7 +80,7 @@ function SliderControl({
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-muted [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-primary [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:hover:scale-110"
+        className="bg-muted [&::-moz-range-thumb]:bg-primary [&::-webkit-slider-thumb]:bg-primary h-2 w-full cursor-pointer appearance-none rounded-lg [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:hover:scale-110"
       />
     </div>
   )
@@ -298,7 +298,7 @@ export function ColorAdjustmentControls({ cameraName, className }: ColorAdjustme
 
       {/* Current color info */}
       {(globalTransform?.colorAdjustment || globalTransform?.colorFilter) && (
-        <div className="rounded bg-muted p-2 text-xs text-muted-foreground">
+        <div className="bg-muted text-muted-foreground rounded-sm p-2 text-xs">
           <div className="mb-1 font-medium">Active Color Settings:</div>
           {globalTransform.colorAdjustment && (
             <div className="space-y-0.5">

@@ -127,11 +127,11 @@ export function ConflictResolution({
                   Your changes
                 </Badge>
               </div>
-              <div className="mb-2 flex items-center gap-1 text-xs text-muted-foreground">
+              <div className="text-muted-foreground mb-2 flex items-center gap-1 text-xs">
                 <Clock className="h-3 w-3" />
                 {formatDate(localVersion.updatedAt)}
               </div>
-              <ScrollArea className="h-32 rounded border bg-muted/50 p-2">
+              <ScrollArea className="bg-muted/50 h-32 rounded-sm border p-2">
                 <pre className="text-xs">{formatData(localVersion.data)}</pre>
               </ScrollArea>
             </div>
@@ -159,11 +159,11 @@ export function ConflictResolution({
                   {serverVersion.updatedBy || 'Unknown'}
                 </Badge>
               </div>
-              <div className="mb-2 flex items-center gap-1 text-xs text-muted-foreground">
+              <div className="text-muted-foreground mb-2 flex items-center gap-1 text-xs">
                 <Clock className="h-3 w-3" />
                 {formatDate(serverVersion.updatedAt)}
               </div>
-              <ScrollArea className="h-32 rounded border bg-muted/50 p-2">
+              <ScrollArea className="bg-muted/50 h-32 rounded-sm border p-2">
                 <pre className="text-xs">{formatData(serverVersion.data)}</pre>
               </ScrollArea>
             </div>
