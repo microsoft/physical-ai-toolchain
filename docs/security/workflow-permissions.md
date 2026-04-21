@@ -13,8 +13,6 @@ keywords:
   - token-permissions
 ---
 
-# Workflow Permissions
-
 ## 📋 Overview
 
 All GitHub Actions workflows in this repository follow the [OpenSSF Scorecard Token-Permissions](https://github.com/ossf/scorecard/blob/main/docs/checks.md#token-permissions) principle:
