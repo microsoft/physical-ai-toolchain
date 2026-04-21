@@ -9,7 +9,8 @@ from azure.storage.blob import ContainerClient
 account = os.environ["BLOB_STORAGE_ACCOUNT"]
 container = os.environ.get("BLOB_STORAGE_CONTAINER", "datasets")
 prefix = os.environ["BLOB_PREFIX"]
-local_root = Path("/workspace/data") / prefix.replace("/", "_")
+data_root = Path(os.environ.get("DATA_ROOT", "/workspace/data"))
+local_root = data_root / prefix.replace("/", "_")
 local_root.mkdir(parents=True, exist_ok=True)
 
 credential = DefaultAzureCredential()
@@ -28,7 +29,8 @@ for blob in blobs:
     with open(local_path, "wb") as f:
         f.write(client.download_blob(blob.name).readall())
 
-with open("/tmp/dataset_path.env", "w") as f:
+config_path = Path(os.environ.get("DATASET_CONFIG_PATH", "/tmp/dataset_path.env"))
+with config_path.open("w") as f:
     f.write(f"DATASET_DIR={local_root}\n")
 
 print(f"Dataset downloaded to: {local_root}")
