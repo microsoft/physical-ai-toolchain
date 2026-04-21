@@ -259,7 +259,7 @@ export function BatchGrid({
             <ChevronLeft className="mr-1 h-4 w-4" />
             Previous
           </Button>
-          <span className="text-sm text-muted-foreground">
+          <span className="text-muted-foreground text-sm">
             Page {currentPage + 1} of {totalPages}
           </span>
           <Button

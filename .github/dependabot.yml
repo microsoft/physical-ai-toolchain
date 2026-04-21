@@ -191,11 +191,14 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     groups:
-      dataviewer-frontend-dependencies:
+      dataviewer-frontend-patch-minor:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "npm"

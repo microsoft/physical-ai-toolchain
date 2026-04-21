@@ -173,7 +173,7 @@ vi.mock('@/components/object-detection', () => ({
 }))
 
 vi.mock('@/components/playback/PlaybackControlStrip', () => ({
-  PlaybackControlStrip: ({ controls }: { controls?: JSX.Element | null }) => (
+  PlaybackControlStrip: ({ controls }: { controls?: React.JSX.Element | null }) => (
     <div>
       <div>Playback Control Strip</div>
       {controls}

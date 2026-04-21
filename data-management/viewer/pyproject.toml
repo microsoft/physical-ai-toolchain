@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi==0.136.0",
     "uvicorn[standard]==0.44.0",
-    "pydantic==2.13.2",
+    "pydantic==2.13.3",
     "python-multipart==0.0.26",
     "python-dotenv==1.2.2",
     "aiofiles==25.1.0",
@@ -43,7 +43,7 @@ export = [
     "Pillow==12.2.0",
 ]
 yolo = [
-    "ultralytics==8.4.39",
+    "ultralytics==8.4.40",
     "numpy==2.4.4",
     "Pillow==12.2.0",
 ]

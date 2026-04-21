@@ -169,7 +169,7 @@ export function AddAnomalyDialog({ open, onClose, onAdd, currentFrame }: AddAnom
               >
                 <div className="flex flex-1 gap-1">
                   <div className="flex-1 space-y-1">
-                    <span className="text-xs text-muted-foreground">Start frame</span>
+                    <span className="text-muted-foreground text-xs">Start frame</span>
                     <Input
                       id="anomaly-frame-start"
                       type="number"
@@ -193,7 +193,7 @@ export function AddAnomalyDialog({ open, onClose, onAdd, currentFrame }: AddAnom
                 <span className="text-muted-foreground">to</span>
                 <div className="flex flex-1 gap-1">
                   <div className="flex-1 space-y-1">
-                    <span className="text-xs text-muted-foreground">End frame</span>
+                    <span className="text-muted-foreground text-xs">End frame</span>
                     <Input
                       id="anomaly-frame-end"
                       type="number"

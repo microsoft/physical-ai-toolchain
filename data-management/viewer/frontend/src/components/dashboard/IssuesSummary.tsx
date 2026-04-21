@@ -122,8 +122,8 @@ export function IssuesSummary({
         {/* Empty state */}
         {issues.length === 0 && anomalies.length === 0 && (
           <div className="flex flex-col items-center gap-2 py-6 text-center">
-            <AlertCircle className="h-8 w-8 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">No issues or anomalies detected yet</p>
+            <AlertCircle className="text-muted-foreground/50 h-8 w-8" />
+            <p className="text-muted-foreground text-sm">No issues or anomalies detected yet</p>
           </div>
         )}
       </CardContent>
