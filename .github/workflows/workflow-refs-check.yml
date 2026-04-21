@@ -1,0 +1,40 @@
+name: Workflow Refs Check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-refs-check:
+    name: Workflow Refs Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Validate local workflow references resolve
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+            [ -f "$f" ] || continue
+            while read -r ref; do
+              target="${ref#./}"
+              if [ ! -f "$target" ]; then
+                echo "::error file=$f::Referenced workflow not found: $target"
+                missing=$((missing + 1))
+              fi
+            done < <(grep -oE '\./\.github/workflows/[A-Za-z0-9._-]+\.ya?ml' "$f" | sort -u)
+          done
+
+          if [ "$missing" -gt 0 ]; then
+            echo "Found $missing missing workflow reference(s)."
+            exit 1
+          fi
+          echo "All local workflow references resolve."
