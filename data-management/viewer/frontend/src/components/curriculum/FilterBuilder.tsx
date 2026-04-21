@@ -125,7 +125,7 @@ export function FilterBuilder({ conditions, onChange, className }: FilterBuilder
     <div className={cn('space-y-3', className)}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-muted-foreground" />
+          <Filter className="text-muted-foreground h-4 w-4" />
           <span className="font-medium">Filter Conditions</span>
           <Badge variant="secondary">{conditions.length}</Badge>
         </div>
@@ -138,8 +138,8 @@ export function FilterBuilder({ conditions, onChange, className }: FilterBuilder
       {conditions.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-8">
-            <Filter className="mb-2 h-8 w-8 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">
+            <Filter className="text-muted-foreground/50 mb-2 h-8 w-8" />
+            <p className="text-muted-foreground text-sm">
               No filters applied. Add conditions to filter episodes.
             </p>
           </CardContent>

@@ -123,7 +123,7 @@ function DatasetSelector({
                       <span className="min-w-0">
                         <span className="block truncate font-medium">{displayId}</span>
                         {dataset.name !== dataset.id && (
-                          <span className="block truncate text-xs text-muted-foreground">
+                          <span className="text-muted-foreground block truncate text-xs">
                             {dataset.name}
                           </span>
                         )}
@@ -131,8 +131,8 @@ function DatasetSelector({
                       <Check
                         className={
                           isSelected
-                            ? 'ml-2 mt-0.5 h-4 w-4 shrink-0 opacity-100'
-                            : 'ml-2 mt-0.5 h-4 w-4 shrink-0 opacity-0'
+                            ? 'mt-0.5 ml-2 h-4 w-4 shrink-0 opacity-100'
+                            : 'mt-0.5 ml-2 h-4 w-4 shrink-0 opacity-0'
                         }
                       />
                     </CommandItem>
@@ -170,13 +170,13 @@ export function DataviewerShellHeader({
   isWarmingCache,
 }: DataviewerShellHeaderProps) {
   return (
-    <header className="border-b bg-card px-4 py-2.5">
+    <header className="bg-card border-b px-4 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-baseline gap-2">
-          <h1 className="truncate text-xl font-semibold leading-none">
+          <h1 className="truncate text-xl leading-none font-semibold">
             Robotic Training Data Analysis
           </h1>
-          <p className="hidden text-sm text-muted-foreground lg:block">
+          <p className="text-muted-foreground hidden text-sm lg:block">
             Episode annotation system for robot demonstration datasets
           </p>
         </div>
@@ -209,7 +209,7 @@ export function DataviewerShellHeader({
           )}
           {isWarmingCache && (
             <span
-              className="flex items-center gap-1 text-xs text-muted-foreground"
+              className="text-muted-foreground flex items-center gap-1 text-xs"
               title="Pre-loading episodes into cache"
             >
               <Loader2 className="h-3 w-3 animate-spin" />

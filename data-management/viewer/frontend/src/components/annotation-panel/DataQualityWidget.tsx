@@ -62,7 +62,7 @@ export function DataQualityWidget() {
           <CardTitle className="text-sm">Data Quality</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">No episode selected</p>
+          <p className="text-muted-foreground text-sm">No episode selected</p>
         </CardContent>
       </Card>
     )
@@ -78,7 +78,7 @@ export function DataQualityWidget() {
           {dataQuality?.overallQuality && (
             <span
               className={cn(
-                'rounded px-2 py-0.5 text-xs font-medium',
+                'rounded-sm px-2 py-0.5 text-xs font-medium',
                 ratingOptions.find((r) => r.value === dataQuality.overallQuality)?.color,
               )}
             >

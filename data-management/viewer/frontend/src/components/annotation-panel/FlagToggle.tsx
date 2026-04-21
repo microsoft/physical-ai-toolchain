@@ -35,7 +35,7 @@ export function FlagToggle({ label, active, onToggle, shortcut }: FlagToggleProp
       onClick={onToggle}
       className={cn(
         'relative rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
-        'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        'focus-visible:ring-primary focus:outline-hidden focus-visible:ring-2',
         active
           ? 'bg-red-100 text-red-700 hover:bg-red-200'
           : 'bg-muted text-muted-foreground hover:bg-muted/80',
@@ -43,7 +43,7 @@ export function FlagToggle({ label, active, onToggle, shortcut }: FlagToggleProp
     >
       {label}
       {shortcut && (
-        <span className="absolute -right-1 -top-1 rounded border bg-background px-1 text-[9px]">
+        <span className="bg-background absolute -top-1 -right-1 rounded-sm border px-1 text-[9px]">
           {shortcut}
         </span>
       )}

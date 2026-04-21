@@ -194,7 +194,7 @@ quote-style = "double"
 
 Detailed rules in `.github/instructions/dataviewer.instructions.md`.
 
-* Stack: Vite 6, React 18, TypeScript ~5.6, Tailwind CSS v3 + shadcn/ui, Zustand v5, TanStack Query v5
+* Stack: Vite 8, React 19, TypeScript ~6.0, Tailwind CSS v4 + shadcn/ui, Zustand v5, TanStack Query v5
 
 ### File Naming
 
@@ -211,7 +211,7 @@ Detailed rules in `.github/instructions/dataviewer.instructions.md`.
 
 * Named exports only (no `export default`)
 * `memo` for expensive renders
-* `forwardRef` for shadcn/ui primitives
+* `ref` as a prop for shadcn/ui primitives (React 19 ref-as-prop pattern)
 * Props interfaces defined in-file above the component
 
 ### TypeScript
@@ -229,7 +229,7 @@ Detailed rules in `.github/instructions/dataviewer.instructions.md`.
 
 ### Styling
 
-* Tailwind CSS v3 utility-first + `cn()` utility (`clsx` + `tailwind-merge`)
+* Tailwind CSS v4 utility-first + `cn()` utility (`clsx` + `tailwind-merge`)
 * CVA (class-variance-authority) for component variants
 * No CSS modules, no styled-components
 

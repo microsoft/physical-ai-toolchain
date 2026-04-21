@@ -87,7 +87,7 @@ export function DetectionCharts({ summary }: DetectionChartsProps) {
       <div>
         <h4 className="mb-2 text-sm font-medium">Class Distribution</h4>
         {classData.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">No detections to display</p>
+          <p className="text-muted-foreground py-4 text-center text-sm">No detections to display</p>
         ) : (
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
@@ -159,17 +159,17 @@ export function DetectionCharts({ summary }: DetectionChartsProps) {
 
       {/* Summary stats */}
       <div className="grid grid-cols-3 gap-4 text-center">
-        <div className="rounded-lg bg-muted p-3">
+        <div className="bg-muted rounded-lg p-3">
           <div className="text-2xl font-bold text-blue-500">{summary.total_detections}</div>
-          <div className="text-xs text-muted-foreground">Total Detections</div>
+          <div className="text-muted-foreground text-xs">Total Detections</div>
         </div>
-        <div className="rounded-lg bg-muted p-3">
+        <div className="bg-muted rounded-lg p-3">
           <div className="text-2xl font-bold text-green-500">{classData.length}</div>
-          <div className="text-xs text-muted-foreground">Unique Classes</div>
+          <div className="text-muted-foreground text-xs">Unique Classes</div>
         </div>
-        <div className="rounded-lg bg-muted p-3">
+        <div className="bg-muted rounded-lg p-3">
           <div className="text-2xl font-bold text-purple-500">{summary.processed_frames}</div>
-          <div className="text-xs text-muted-foreground">Frames Processed</div>
+          <div className="text-muted-foreground text-xs">Frames Processed</div>
         </div>
       </div>
 

@@ -41,7 +41,7 @@ export function PlaybackControls({
   const currentTime = currentFrame / fps
 
   return (
-    <div className="flex items-center gap-4 rounded-lg bg-muted p-2">
+    <div className="bg-muted flex items-center gap-4 rounded-lg p-2">
       {/* Frame navigation */}
       <div className="flex items-center gap-1">
         <Button variant="ghost" size="icon" onClick={() => setCurrentFrame(0)} title="Go to start">
@@ -88,7 +88,7 @@ export function PlaybackControls({
       </div>
 
       {/* Separator */}
-      <div className="h-6 w-px bg-border" />
+      <div className="bg-border h-6 w-px" />
 
       {/* Time display */}
       <div className="min-w-[100px] font-mono text-sm">
