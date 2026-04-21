@@ -359,7 +359,6 @@ jobs:
   # check in branch protection. Skipped jobs (gated out by changes) pass;
   # any failure or cancellation in a needed job fails the summary.
   pr-validation-summary:
-    name: PR Validation Summary
     if: always()
     runs-on: ubuntu-latest
     needs:
