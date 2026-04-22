@@ -34,8 +34,8 @@ identity:
 # All values below are placeholders and will be overridden by submit-azureml-validation.sh
 # This file serves as a structural template for the job definition.
 code: .
-environment: azureml:isaaclab-training-env:2.2.0
-compute: azureml:k8s-osmorobo-tst
+environment: azureml:isaaclab-training-env:latest
+compute: azureml:cpu-cluster
 
 # Inputs follow the same pattern as isaaclab-train.yaml
 # - Model inputs use type/path/mode structure
