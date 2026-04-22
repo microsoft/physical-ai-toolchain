@@ -1,0 +1,61 @@
+name: Workflow Refs Check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-refs-check:
+    name: Workflow Refs Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Validate local workflow and composite action references resolve
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $missing = 0
+          $workflowPattern = '\./\.github/workflows/[A-Za-z0-9._-]+\.ya?ml'
+          $actionPattern = '\./\.github/actions/[A-Za-z0-9._/-]+'
+
+          $files = Get-ChildItem -Path '.github/workflows' -File |
+            Where-Object { $_.Extension -in '.yml', '.yaml' }
+          foreach ($f in $files) {
+            $content = Get-Content -Raw -LiteralPath $f.FullName
+            $relFile = [System.IO.Path]::GetRelativePath($PWD.Path, $f.FullName) -replace '\\', '/'
+
+            $workflowRefs = [regex]::Matches($content, $workflowPattern) |
+              ForEach-Object { $_.Value } | Sort-Object -Unique
+            foreach ($ref in $workflowRefs) {
+              $target = $ref -replace '^\./', ''
+              if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+                Write-Host "::error file=$relFile::Referenced workflow not found: $target"
+                $missing++
+              }
+            }
+
+            $actionRefs = [regex]::Matches($content, $actionPattern) |
+              ForEach-Object { $_.Value } | Sort-Object -Unique
+            foreach ($ref in $actionRefs) {
+              $target = $ref -replace '^\./', ''
+              if (-not ((Test-Path -LiteralPath "$target/action.yml" -PathType Leaf) -or
+                        (Test-Path -LiteralPath "$target/action.yaml" -PathType Leaf))) {
+                Write-Host "::error file=$relFile::Referenced composite action not found: $target"
+                $missing++
+              }
+            }
+          }
+
+          if ($missing -gt 0) {
+            Write-Host "Found $missing missing reference(s)."
+            exit 1
+          }
+          Write-Host 'All local workflow and composite action references resolve.'

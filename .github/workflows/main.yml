@@ -97,10 +97,40 @@ jobs:
       contents: read
       id-token: write
 
-  # Python pytest test execution
-  pytest-tests:
-    name: Pytest Tests
-    uses: ./.github/workflows/pytest-tests.yml
+  # Pytest: training component
+  pytest-training:
+    name: Pytest Training
+    uses: ./.github/workflows/pytest-training.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
+  # Pytest: data-management/tools component
+  pytest-dm-tools:
+    name: Pytest DM Tools
+    uses: ./.github/workflows/pytest-dm-tools.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
+  # Pytest: data-pipeline component
+  pytest-data-pipeline:
+    name: Pytest Data Pipeline
+    uses: ./.github/workflows/pytest-data-pipeline.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
+  # Pytest: inference component
+  pytest-inference:
+    name: Pytest Inference
+    uses: ./.github/workflows/pytest-inference.yml
     with:
       code-coverage: true
     permissions:
@@ -232,7 +262,10 @@ jobs:
       - markdown-link-check
       - dependency-pinning
       - pester-tests
-      - pytest-tests
+      - pytest-training
+      - pytest-dm-tools
+      - pytest-data-pipeline
+      - pytest-inference
       - dataviewer-frontend-tests
       - dataviewer-backend-pytests
       - python-lint

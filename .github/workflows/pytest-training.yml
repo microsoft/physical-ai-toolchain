@@ -1,6 +1,7 @@
-name: Pytest Tests
+---
+name: Pytest Training
 
-on:
+'on':
   workflow_call:
     inputs:
       code-coverage:
@@ -13,20 +14,20 @@ permissions:
   contents: read
 
 jobs:
-  pytest:
-    name: Pytest
+  pytest-training:
+    name: Pytest Training
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: '3.11'
 
@@ -37,23 +38,27 @@ jobs:
         run: uv sync --group dev
 
       - name: Run pytest
-        run: uv run pytest -v
+        run: >-
+          uv run pytest training/tests -v
+          --cov=training
+          --cov-report=term-missing
+          --cov-report=xml:logs/coverage-training.xml
 
       - name: Upload coverage.xml artifact
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: pytest-coverage-xml
-          path: logs/coverage.xml
+          name: pytest-training-coverage-xml
+          path: logs/coverage-training.xml
           retention-days: 30
 
       - name: Upload coverage to Codecov
         if: ${{ inputs.code-coverage && always() }}
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2  # v6.0.0
         with:
-          files: logs/coverage.xml
+          files: logs/coverage-training.xml
           use_oidc: true
           fail_ci_if_error: false
           verbose: true
-          flags: pytest
-          name: pytest-coverage
+          flags: pytest-training
+          name: pytest-training-coverage
