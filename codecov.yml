@@ -7,6 +7,7 @@
 # pytest-data-pipeline | pytest-data-pipeline.yml       | repo root                      | --cov=data-pipeline/capture
 # pytest-inference     | pytest-inference.yml           | repo root                      | --cov=fleet-deployment/inference
 # pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend | --cov=src
+# pytest-evaluation    | evaluation-pytests.yml         | evaluation                     | --cov=.
 # pytest-fuzz          | fuzz-regression-tests.yml      | repo root                      | --cov=tests --cov=data-management/viewer/backend/src --cov=training
 # vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | vitest --coverage
 # go                   | go-tests.yml                   | infrastructure/terraform/e2e   | go test -cover
@@ -81,6 +82,11 @@ coverage:
           - vitest
         target: auto
         threshold: 1%
+      pytest-evaluation:
+        flags:
+          - pytest-evaluation
+        target: auto
+        threshold: 1%
     patch:
       default:
         target: auto
@@ -125,6 +131,10 @@ coverage:
         flags:
           - vitest
         informational: true
+      pytest-evaluation:
+        flags:
+          - pytest-evaluation
+        informational: true
 
 flags:
   pytest-training:
@@ -152,6 +162,10 @@ flags:
       - tests/
       - data-management/viewer/backend/src/
       - training/
+    carryforward: true
+  pytest-evaluation:
+    paths:
+      - evaluation/
     carryforward: true
   vitest:
     paths:

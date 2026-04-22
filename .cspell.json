@@ -6,6 +6,15 @@
 	"flagWords": [
 		"TODO"
 	],
+	"words": [
+		"envaccount",
+		"envcontainer",
+		"myacct",
+		"mycontainer",
+		"noseparator",
+		"preds",
+		"xticklabels"
+	],
 	"ignorePaths": [
 		"**/.github/chatmodes/**",
 		"**/node_modules/**",

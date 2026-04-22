@@ -16,7 +16,7 @@ client = MLClient(
 
 model_name = os.environ["AML_MODEL_NAME"]
 model_version = os.environ["AML_MODEL_VERSION"]
-download_dir = Path("/tmp/aml-model")
+download_dir = Path(os.environ.get("AML_DOWNLOAD_DIR", "/tmp/aml-model"))
 download_dir.mkdir(parents=True, exist_ok=True)
 
 print(f"Downloading {model_name}:{model_version}...")
@@ -31,7 +31,8 @@ for candidate in [model_path] + (list(model_path.iterdir()) if model_path.is_dir
         model_path = candidate
         break
 
-with open("/tmp/aml_model_path.env", "w") as f:
+config_path = Path(os.environ.get("AML_CONFIG_PATH", "/tmp/aml_model_path.env"))
+with config_path.open("w") as f:
     f.write(f"AML_MODEL_PATH={model_path}\n")
 
 print(f"Model downloaded to: {model_path}")
