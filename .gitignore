@@ -463,7 +463,8 @@ venv/
 .hypothesis/
 **/out/*
 .copilot-tracking/
-dependency-pinning-artifacts/
+dependency-pinning-artifacts/*
+!dependency-pinning-artifacts/README.md
 
 .DS_Store
 .beads/

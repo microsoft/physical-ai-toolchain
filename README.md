@@ -162,10 +162,17 @@ Prerequisites:
 - Azure CLI with an active subscription
 - NVIDIA GPU (local development) or Azure GPU VM
 
-Run the test suite:
+Run the test suite (the four component suites mirror the CI split):
 
 ```bash
-pytest tests/ -v
+# Run every component at once (uses testpaths from pyproject.toml)
+uv run pytest
+
+# Or run a single component
+uv run pytest training/tests -v
+uv run pytest data-management/tools/tests -v
+uv run pytest data-pipeline/capture/tests -v
+uv run pytest fleet-deployment/inference/tests -v
 ```
 
 See [prerequisites](docs/contributing/prerequisites.md) for the complete setup guide.

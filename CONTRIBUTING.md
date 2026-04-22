@@ -364,24 +364,42 @@ Reviewers verify regression tests are included. Compliance is tracked over time 
 
 ### Running Tests
 
-Once a `tests/` directory exists, run the full test suite:
+Tests are split into four component suites that mirror the CI workflows
+(`pytest-training`, `pytest-dm-tools`, `pytest-data-pipeline`, `pytest-inference`).
+Run a single component locally:
 
 ```bash
-pytest tests/
+# Training (training/tests)
+uv run pytest training/tests -v
+
+# Data management tools (data-management/tools/tests)
+uv run pytest data-management/tools/tests -v
+
+# Data pipeline capture (data-pipeline/capture/tests)
+uv run pytest data-pipeline/capture/tests -v
+
+# Fleet deployment inference (fleet-deployment/inference/tests)
+uv run pytest fleet-deployment/inference/tests -v
 ```
 
-Run tests within the devcontainer:
+Run every component in one invocation (uses the `testpaths` configured in
+`pyproject.toml`):
 
 ```bash
-uv run pytest tests/
+uv run pytest
 ```
 
-Run tests with coverage reporting:
+Run a component with coverage reporting, matching the CI invocation:
 
 ```bash
-coverage run -m pytest tests/
-coverage report -m
+uv run pytest training/tests -v \
+  --cov=training \
+  --cov-report=term-missing \
+  --cov-report=xml:logs/coverage-training.xml
 ```
+
+Substitute the component path and `--cov` target for the other three suites
+(`data-management/tools`, `data-pipeline/capture`, `fleet-deployment/inference`).
 
 ### Test Organization
 
@@ -402,10 +420,10 @@ Tests mirror the source directory structure under `tests/`:
 | `integration` | Requires external services         | Runs on main only             |
 | `gpu`         | Requires CUDA runtime              | Excluded from standard CI     |
 
-Skip categories selectively:
+Skip categories selectively (applies to any component suite):
 
 ```bash
-pytest tests/ -m "not slow and not gpu"
+uv run pytest training/tests -m "not slow and not gpu"
 ```
 
 ### Coverage Targets
@@ -422,7 +440,16 @@ These coverage levels are contribution targets for local test runs. CI enforceme
 
 ### Configuration
 
-Pytest and coverage are not yet centrally configured in `pyproject.toml`. When adding tests, follow standard pytest conventions (a `tests/` directory with shared fixtures as needed) and align with existing tests in this repository.
+Pytest is centrally configured in the root `pyproject.toml` under
+`[tool.pytest.ini_options]`. The `testpaths` entry enumerates the four
+component test directories (`tests`, `training/tests`,
+`data-management/tools/tests`, `fleet-deployment/inference/tests`) so
+`uv run pytest` with no arguments discovers every suite. Default
+options applied to every run include `-m "not e2e"`, `--strict-markers`,
+`--strict-config`, and a JUnit XML report written to
+`logs/pytest-results.xml`. When adding tests, place them under one
+of the configured component directories so they are picked up by both local
+runs and the matching CI workflow.
 
 ### Shell and Infrastructure Tests
 
