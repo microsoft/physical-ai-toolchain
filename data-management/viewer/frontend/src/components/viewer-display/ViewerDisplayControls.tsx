@@ -25,25 +25,25 @@ export function ViewerDisplayControls() {
   const { displayAdjustment, isActive, setAdjustment, resetAdjustments } = useViewerDisplay()
 
   return (
-    <div className="rounded-lg bg-muted/60 text-sm">
+    <div className="bg-muted/60 rounded-lg text-sm">
       {/* Toggle bar */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between rounded-lg px-3 py-1.5 transition-colors hover:bg-muted/90"
+        className="hover:bg-muted/90 flex w-full items-center justify-between rounded-lg px-3 py-1.5 transition-colors"
       >
-        <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <span className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
           <Eye className="h-3.5 w-3.5" />
           Display Settings
           {isActive && (
-            <span className="ml-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] text-primary">
+            <span className="bg-primary/15 text-primary ml-1 rounded-full px-1.5 py-0.5 text-[10px]">
               active
             </span>
           )}
         </span>
         <ChevronDown
           className={cn(
-            'h-3.5 w-3.5 text-muted-foreground transition-transform',
+            'text-muted-foreground h-3.5 w-3.5 transition-transform',
             expanded && 'rotate-180',
           )}
         />
@@ -51,7 +51,7 @@ export function ViewerDisplayControls() {
 
       {/* Expanded panel */}
       {expanded && (
-        <div className="space-y-2 px-3 pb-3 pt-1">
+        <div className="space-y-2 px-3 pt-1 pb-3">
           <CompactSlider
             label="Brightness"
             value={displayAdjustment.brightness}
@@ -119,7 +119,7 @@ interface CompactSliderProps {
 function CompactSlider({ label, value, onChange, min, max, step, format }: CompactSliderProps) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-xs text-muted-foreground">{label}</span>
+      <span className="text-muted-foreground w-16 shrink-0 text-xs">{label}</span>
       <input
         type="range"
         min={min}
@@ -127,9 +127,9 @@ function CompactSlider({ label, value, onChange, min, max, step, format }: Compa
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="h-1.5 flex-1 cursor-pointer appearance-none rounded-lg bg-muted [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-primary [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
+        className="bg-muted [&::-moz-range-thumb]:bg-primary [&::-webkit-slider-thumb]:bg-primary h-1.5 flex-1 cursor-pointer appearance-none rounded-lg [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full"
       />
-      <span className="w-10 text-right font-mono text-xs text-muted-foreground">
+      <span className="text-muted-foreground w-10 text-right font-mono text-xs">
         {format(value)}
       </span>
     </div>

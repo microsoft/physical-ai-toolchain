@@ -130,7 +130,7 @@ export function AISuggestionPanel({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
             <AlertCircle className="h-4 w-4" />
             <span>No trajectory data available for analysis</span>
           </div>
@@ -215,7 +215,7 @@ export function AISuggestionPanel({
           </div>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             Click "Analyze" to get AI suggestions for this episode.
           </p>
         </CardContent>

@@ -72,7 +72,7 @@ export function StarRating({
             onKeyDown={(e) => handleKeyDown(e, rating)}
             disabled={readOnly}
             className={cn(
-              'rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+              'focus-visible:ring-primary rounded-sm focus:outline-hidden focus-visible:ring-2',
               !readOnly && 'cursor-pointer transition-transform hover:scale-110',
             )}
             role="radio"

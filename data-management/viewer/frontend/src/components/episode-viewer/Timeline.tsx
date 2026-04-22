@@ -219,8 +219,8 @@ export function Timeline({ className }: TimelineProps) {
 
   if (!currentEpisode) {
     return (
-      <div className={cn('flex items-center justify-center rounded-lg bg-muted', className)}>
-        <p className="text-sm text-muted-foreground">No episode selected</p>
+      <div className={cn('bg-muted flex items-center justify-center rounded-lg', className)}>
+        <p className="text-muted-foreground text-sm">No episode selected</p>
       </div>
     )
   }
@@ -230,7 +230,7 @@ export function Timeline({ className }: TimelineProps) {
       {/* Timeline bar */}
       <div
         ref={timelineRef}
-        className="relative h-8 cursor-pointer rounded bg-muted"
+        className="bg-muted relative h-8 cursor-pointer rounded-sm"
         role="slider"
         tabIndex={0}
         aria-valuenow={currentFrame}
@@ -248,7 +248,7 @@ export function Timeline({ className }: TimelineProps) {
         {removedFrameRanges.map(([start, end]) => (
           <div
             key={`removed-${start}-${end}`}
-            className="absolute bottom-0 top-0 border-l border-r border-red-500/40 bg-red-500/20"
+            className="absolute top-0 bottom-0 border-r border-l border-red-500/40 bg-red-500/20"
             style={{
               left: `${frameToPercent(start)}%`,
               width: `${Math.max(frameToPercent(end - start + 1), 0.5)}%`,
@@ -267,7 +267,7 @@ export function Timeline({ className }: TimelineProps) {
             <div
               key={`issue-${issue.type}-${issue.severity}-${start}-${end}`}
               className={cn(
-                'absolute bottom-0 top-0 opacity-30',
+                'absolute top-0 bottom-0 opacity-30',
                 issue.severity === 'critical'
                   ? 'bg-red-500'
                   : issue.severity === 'major'
@@ -299,7 +299,7 @@ export function Timeline({ className }: TimelineProps) {
           return (
             <div
               key={`inserted-${afterIdx}`}
-              className="absolute bottom-0 top-0 w-2 border-l border-r border-dashed border-blue-400 bg-blue-500/30"
+              className="absolute top-0 bottom-0 w-2 border-r border-l border-dashed border-blue-400 bg-blue-500/30"
               style={{ left: `${frameToPercent(afterIdx + 1)}%` }}
               title={`Inserted frame (factor: ${insertion.interpolationFactor})`}
             />
@@ -330,16 +330,16 @@ export function Timeline({ className }: TimelineProps) {
 
         {/* Playhead */}
         <div
-          className="absolute bottom-0 top-0 z-10 w-0.5 bg-primary"
+          className="bg-primary absolute top-0 bottom-0 z-10 w-0.5"
           style={{ left: `${currentPercent}%` }}
         >
           {/* Playhead handle */}
-          <div className="absolute -top-1 left-1/2 h-3 w-3 -translate-x-1/2 rounded-full bg-primary" />
+          <div className="bg-primary absolute -top-1 left-1/2 h-3 w-3 -translate-x-1/2 rounded-full" />
         </div>
       </div>
 
       {/* Frame labels */}
-      <div className="flex justify-between text-xs text-muted-foreground">
+      <div className="text-muted-foreground flex justify-between text-xs">
         <span>0</span>
         <span>{Math.floor(totalFrames / 4)}</span>
         <span>{Math.floor(totalFrames / 2)}</span>
@@ -353,7 +353,7 @@ export function Timeline({ className }: TimelineProps) {
         removedFrames.size > 0 ||
         insertedFrames.size > 0 ||
         trajectoryAdjustments.size > 0) && (
-        <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+        <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
           {trajectoryAdjustments.size > 0 && (
             <div className="flex items-center gap-1">
               <div className="h-2 w-2 rounded-full bg-orange-500" />
@@ -362,13 +362,13 @@ export function Timeline({ className }: TimelineProps) {
           )}
           {removedFrames.size > 0 && (
             <div className="flex items-center gap-1">
-              <div className="h-2 w-3 rounded-sm border border-red-500/40 bg-red-500/20" />
+              <div className="h-2 w-3 rounded-xs border border-red-500/40 bg-red-500/20" />
               <span>{removedFrames.size} Removed</span>
             </div>
           )}
           {insertedFrames.size > 0 && (
             <div className="flex items-center gap-1">
-              <div className="h-2 w-3 rounded-sm border border-dashed border-blue-400 bg-blue-500/30" />
+              <div className="h-2 w-3 rounded-xs border border-dashed border-blue-400 bg-blue-500/30" />
               <span>{insertedFrames.size} Inserted</span>
             </div>
           )}
@@ -380,13 +380,13 @@ export function Timeline({ className }: TimelineProps) {
           )}
           {dataQualityIssues.filter((i) => i.severity === 'critical').length > 0 && (
             <div className="flex items-center gap-1">
-              <div className="h-2 w-3 rounded bg-red-500/30" />
+              <div className="h-2 w-3 rounded-sm bg-red-500/30" />
               <span>Critical Issues</span>
             </div>
           )}
           {dataQualityIssues.filter((i) => i.severity === 'major').length > 0 && (
             <div className="flex items-center gap-1">
-              <div className="h-2 w-3 rounded bg-orange-500/30" />
+              <div className="h-2 w-3 rounded-sm bg-orange-500/30" />
               <span>Major Issues</span>
             </div>
           )}

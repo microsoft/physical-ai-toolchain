@@ -51,7 +51,7 @@ export function ExportProgress({ progress, result, error }: ExportProgressProps)
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <Loader2 className="h-4 w-4 animate-spin" />
-        <span className="text-sm text-muted-foreground">
+        <span className="text-muted-foreground text-sm">
           {progress?.status ?? 'Preparing export...'}
         </span>
       </div>
@@ -59,7 +59,7 @@ export function ExportProgress({ progress, result, error }: ExportProgressProps)
       {progress && (
         <>
           <div className="space-y-1">
-            <div className="flex justify-between text-xs text-muted-foreground">
+            <div className="text-muted-foreground flex justify-between text-xs">
               <span>
                 Episode {progress.currentEpisode} of {progress.totalEpisodes}
               </span>
@@ -68,7 +68,7 @@ export function ExportProgress({ progress, result, error }: ExportProgressProps)
             <Progress value={progress.percentage} className="h-2" />
           </div>
 
-          <div className="text-xs text-muted-foreground">
+          <div className="text-muted-foreground text-xs">
             Frame {progress.currentFrame} of {progress.totalFrames}
           </div>
         </>

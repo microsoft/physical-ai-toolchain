@@ -97,7 +97,7 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
         <h3 className="text-sm font-medium">Episode Labels</h3>
       </div>
 
-      {errorMessage && <p className="text-xs text-destructive">{errorMessage}</p>}
+      {errorMessage && <p className="text-destructive text-xs">{errorMessage}</p>}
 
       {/* Label toggles */}
       <div className="flex flex-wrap gap-2">
@@ -110,14 +110,14 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
               className={cn(
                 'inline-flex items-center rounded-full border transition-all',
                 isSelected
-                  ? 'border-transparent bg-primary text-primary-foreground shadow-sm'
+                  ? 'bg-primary text-primary-foreground border-transparent shadow-xs'
                   : 'text-foreground hover:bg-accent',
               )}
             >
               <button
                 type="button"
                 onClick={() => void handleToggleLabel(label)}
-                className="inline-flex items-center gap-1 rounded-l-full px-2.5 py-0.5 text-xs font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className="focus-visible:ring-ring inline-flex items-center gap-1 rounded-l-full px-2.5 py-0.5 text-xs font-semibold focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2"
               >
                 {isSelected && <Check className="mr-1 h-3 w-3" />}
                 {label}
@@ -130,7 +130,7 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
                   title={`Delete label ${label}`}
                   disabled={removeOption.isPending}
                   className={cn(
-                    'mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                    'focus-visible:ring-ring mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2',
                     isSelected ? 'hover:bg-primary-foreground/15' : 'hover:bg-accent-foreground/10',
                   )}
                 >
@@ -142,7 +142,7 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
         })}
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-muted-foreground text-xs">
         Built-in labels stay available. Custom labels require confirmation before deletion.
       </p>
 
@@ -169,7 +169,7 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
 
       {/* Current labels summary */}
       {currentLabels.length > 0 && (
-        <div className="text-xs text-muted-foreground">Applied: {currentLabels.join(', ')}</div>
+        <div className="text-muted-foreground text-xs">Applied: {currentLabels.join(', ')}</div>
       )}
 
       <Dialog

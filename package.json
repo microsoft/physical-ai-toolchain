@@ -40,7 +40,7 @@
     "markdownlint-cli2": "0.22.0"
   },
   "overrides": {
-    "smol-toml": ">=1.6.1"
+    "smol-toml": "1.6.1"
   },
   "repository": {
     "type": "git",
