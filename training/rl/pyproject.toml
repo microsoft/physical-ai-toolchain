@@ -17,7 +17,6 @@ dependencies = [
     "pyperclip==1.11.0",
     "cryptography==46.0.7",
     "pyjwt==2.12.1",
-    "azureml-mlflow==1.62.0.post2",
     "rsl-rl-lib==5.0.1",
     "skrl==2.0.0",
     "tensordict==0.12.1",

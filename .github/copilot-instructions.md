@@ -47,7 +47,7 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 
 * Do not modify files in `external/`
 * Version: managed by release-please across `pyproject.toml` and `package.json`
-* Python: >=3.11, managed by `uv` (not pip); `hatchling` builds `training/rl` into wheel
+* Python: >=3.12, managed by `uv` (not pip); `hatchling` builds `training/rl` into wheel
 * Linting: `npm run lint:md` (markdownlint-cli2), `npm run spell-check` (cspell), `npm run lint:yaml` (yaml-lint)
 
 ## Terraform Conventions
@@ -104,7 +104,7 @@ Detailed template and structure in `.github/instructions/shell-scripts.instructi
 
 ## Python Conventions
 
-* Package management: `uv` (not pip); `hatchling` builds; Python >=3.11
+* Package management: `uv` (not pip); `hatchling` builds; Python >=3.12
 * Child configs extend root ruff config: `extend = "../../pyproject.toml"`
 * `from __future__ import annotations` required as the first import in every module
 
@@ -184,7 +184,7 @@ Always %-style formatting: `_LOGGER.warning("Invalid %s, using default (%d)", ar
 ### Ruff Configuration
 
 ```toml
-target-version = "py311"
+target-version = "py312"
 line-length = 120
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
 quote-style = "double"
