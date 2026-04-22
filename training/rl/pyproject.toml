@@ -2,7 +2,7 @@
 name = "robotics-training-rl"
 version = "0.1.0"
 description = "RL training workflow runtime dependencies"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.12"
 dependencies = [
     "numpy==1.26.4",
     "azure-core==1.39.0",

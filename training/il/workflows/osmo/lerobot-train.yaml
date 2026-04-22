@@ -96,14 +96,12 @@ workflow:
             export PYTHONPATH="${PAYLOAD_ROOT}:${PYTHONPATH:-}"
             echo "Training scripts unpacked to ${PAYLOAD_ROOT}"
 
-            # Install runtime dependencies from workflow manifest
-            LEROBOT_MANIFEST="${PAYLOAD_ROOT}/training/il/lerobot/pyproject.toml"
-            LEROBOT_REQUIREMENTS="/tmp/lerobot-runtime-requirements.txt"
-            if [[ ! -f "${LEROBOT_MANIFEST}" ]]; then
-              echo "ERROR: LeRobot workflow manifest not found at ${LEROBOT_MANIFEST}" >&2
+            # Install runtime dependencies from pre-compiled requirements
+            LEROBOT_REQUIREMENTS="${PAYLOAD_ROOT}/training/il/lerobot/requirements.txt"
+            if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
+              echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
               exit 1
             fi
-            uv pip compile "${LEROBOT_MANIFEST}" -o "${LEROBOT_REQUIREMENTS}"
             uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
 
             # Build training command arguments
