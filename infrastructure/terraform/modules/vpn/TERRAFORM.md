@@ -2,7 +2,7 @@
 title: VPN Gateway Module
 description: Deploys Azure VPN Gateway for Point-to-Site and Site-to-Site connectivity. Creates GatewaySubnet within the platform's virtual network.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-08
+ms.date: 2026-04-21
 ms.topic: reference
 ---
 

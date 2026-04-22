@@ -54,3 +54,25 @@ should_enable_microsoft_defender        = false
 // should_deploy_monitor_workspace = true
 // should_deploy_ampls             = false
 // should_deploy_dce               = false
+
+// =============================================================================
+// Conversion Pipeline (Optional)
+// =============================================================================
+// Cost-optimized for dev: LRS, public networking permitted, F2 capacity, brief
+// raw retention. Set should_deploy_conversion_pipeline = true to provision.
+// =============================================================================
+
+should_deploy_conversion_pipeline = false
+conversion_pipeline_config = {
+  storage_replication_type             = "LRS"
+  should_enable_public_network_access  = true
+  should_enable_shared_key             = false
+  should_enable_private_endpoint       = false
+  should_create_fabric_capacity        = true
+  should_create_fabric_workspace       = false
+  fabric_capacity_sku                  = "F2"
+  raw_retention_days                   = 7
+  converted_cool_days                  = 30
+  converted_archive_days               = 90
+  should_enable_event_grid_dead_letter = true
+}

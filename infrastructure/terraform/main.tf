@@ -209,3 +209,53 @@ module "sil" {
   // Feature flags
   should_enable_private_endpoint = var.should_enable_private_endpoint
 }
+
+// ============================================================
+// Conversion Pipeline Module - Raw -> Converted Ingest
+// ============================================================
+
+module "conversion_pipeline" {
+  source = "./modules/conversion-pipeline"
+  count  = var.should_deploy_conversion_pipeline ? 1 : 0
+
+  depends_on = [module.platform]
+
+  // Core variables
+  environment     = var.environment
+  resource_prefix = var.resource_prefix
+  instance        = var.instance
+  location        = var.location
+  resource_group  = local.resource_group
+
+  // Dependencies from platform module (typed objects)
+  virtual_network         = module.platform.virtual_network
+  subnets                 = module.platform.subnets
+  private_dns_zones       = module.platform.private_dns_zones
+  log_analytics_workspace = module.platform.log_analytics_workspace
+
+  // Storage shape
+  storage_replication_type            = var.conversion_pipeline_config.storage_replication_type
+  should_enable_shared_key            = var.conversion_pipeline_config.should_enable_shared_key
+  should_enable_public_network_access = var.conversion_pipeline_config.should_enable_public_network_access
+  allowed_ip_rules                    = var.conversion_pipeline_config.allowed_ip_rules
+  should_enable_private_endpoint      = var.conversion_pipeline_config.should_enable_private_endpoint
+  should_enable_diagnostic_settings   = var.conversion_pipeline_config.should_enable_diagnostic_settings
+
+  // Lifecycle
+  raw_retention_days     = var.conversion_pipeline_config.raw_retention_days
+  converted_cool_days    = var.conversion_pipeline_config.converted_cool_days
+  converted_archive_days = var.conversion_pipeline_config.converted_archive_days
+
+  // Event Grid
+  should_enable_event_grid_dead_letter = var.conversion_pipeline_config.should_enable_event_grid_dead_letter
+  raw_blob_suffix_filters              = var.conversion_pipeline_config.raw_blob_suffix_filters
+  conversion_subscriber_url            = var.conversion_pipeline_config.conversion_subscriber_url
+
+  // Fabric
+  should_create_fabric_capacity  = var.conversion_pipeline_config.should_create_fabric_capacity
+  should_create_fabric_workspace = var.conversion_pipeline_config.should_create_fabric_workspace
+  fabric_capacity_uuid           = var.conversion_pipeline_config.fabric_capacity_uuid
+  fabric_capacity_sku            = var.conversion_pipeline_config.fabric_capacity_sku
+  fabric_admin_members           = var.conversion_pipeline_config.fabric_admin_members
+  fabric_workspace_sp_object_id  = var.conversion_pipeline_config.fabric_workspace_sp_object_id
+}

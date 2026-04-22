@@ -192,6 +192,17 @@ jobs:
     permissions:
       contents: read
 
+  # Terraform security scanning via Checkov (soft-fail until matrix is fully addressed)
+  terraform-security:
+    name: Terraform Security
+    uses: ./.github/workflows/terraform-security.yml
+    with:
+      soft-fail: true
+      working-directory: infrastructure/terraform
+    permissions:
+      contents: read
+      security-events: write
+
   # Terraform test execution with Codecov Test Analytics
   terraform-tests:
     name: Terraform Tests
