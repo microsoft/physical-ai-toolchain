@@ -1,9 +1,20 @@
 """Hypothesis property-based tests for ROS 2 edge recording configuration models."""
 
+import sys
 import tempfile
+from pathlib import Path
 
 import pytest
-from common.config_models import (
+from hypothesis import assume, given
+from hypothesis import strategies as st
+from pydantic import ValidationError
+
+# data-pipeline contains a hyphen, making it an invalid Python package name.
+_CAPTURE_DIR = str(Path(__file__).resolve().parent.parent)
+if _CAPTURE_DIR not in sys.path:
+    sys.path.insert(0, _CAPTURE_DIR)
+
+from models.config_models import (
     DiskThresholds,
     GapDetectionConfig,
     GpioTriggerConfig,
@@ -12,9 +23,6 @@ from common.config_models import (
     TopicConfig,
     VrTriggerConfig,
 )
-from hypothesis import assume, given
-from hypothesis import strategies as st
-from pydantic import ValidationError
 
 
 @given(

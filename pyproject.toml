@@ -82,6 +82,7 @@ select = [
 "training/rl/scripts/rsl_rl/*.py" = ["E402"]
 "data-management/viewer/backend/tests/*.py" = ["E402"]
 "data-pipeline/capture/tests/test_config_models.py" = ["E402"]
+"data-pipeline/capture/tests/test_config_models_hypothesis.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["training"]

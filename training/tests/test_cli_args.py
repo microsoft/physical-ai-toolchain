@@ -6,7 +6,12 @@ import argparse
 from types import SimpleNamespace
 
 import pytest
-from common.cli_args import add_rsl_rl_args, update_rsl_rl_cfg
+
+from .conftest import load_training_module
+
+_CLI_ARGS = load_training_module("training_rl_cli_args", "training/rl/cli_args.py")
+add_rsl_rl_args = _CLI_ARGS.add_rsl_rl_args
+update_rsl_rl_cfg = _CLI_ARGS.update_rsl_rl_cfg
 
 
 class TestAddRslRlArgs:
