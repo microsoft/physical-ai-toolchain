@@ -1,0 +1,151 @@
+name: Terraform Plan Comment
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: 'Terraform root directory'
+        required: true
+        type: string
+      state-key:
+        description: 'Backend state key'
+        required: true
+        type: string
+      label:
+        description: 'Human-readable label for the PR comment'
+        required: true
+        type: string
+      tfvars-file:
+        description: 'Path to the .tfvars file (relative to working-directory)'
+        required: false
+        type: string
+        default: 'terraform.tfvars'
+    secrets:
+      ARM_CLIENT_ID:
+        required: true
+      ARM_SUBSCRIPTION_ID:
+        required: true
+      ARM_TENANT_ID:
+        required: true
+      BACKEND_RESOURCE_GROUP_NAME:
+        required: true
+      BACKEND_STORAGE_ACCOUNT_NAME:
+        required: true
+      BACKEND_CONTAINER_NAME:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  plan:
+    name: Plan & Comment
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ secrets.ARM_CLIENT_ID }}
+          tenant-id: ${{ secrets.ARM_TENANT_ID }}
+          subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_USE_OIDC: 'true'
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}" \
+            -backend-config="storage_account_name=${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}" \
+            -backend-config="container_name=${{ secrets.BACKEND_CONTAINER_NAME }}" \
+            -backend-config="key=${{ inputs.state-key }}" \
+            -backend-config="use_oidc=true"
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ inputs.working-directory }}
+        continue-on-error: true
+        env:
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_USE_OIDC: 'true'
+        run: |
+          tfvars_arg=""
+          if [[ -f "${{ inputs.tfvars-file }}" ]]; then
+            tfvars_arg="-var-file=${{ inputs.tfvars-file }}"
+          fi
+          terraform plan $tfvars_arg -input=false -no-color
+
+      - name: Comment on PR
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const label = '${{ inputs.label }}';
+            const outcome = '${{ steps.plan.outcome }}';
+            const planOutput = `${{ steps.plan.outputs.stdout || '' }}`;
+            const planError = `${{ steps.plan.outputs.stderr || '' }}`;
+            const icon = outcome === 'success' ? ':white_check_mark:' : ':x:';
+
+            const body = [
+              `### ${icon} Terraform Plan — ${label}`,
+              '',
+              '<details>',
+              `<summary>${outcome === 'success' ? 'Plan output' : 'Plan failed'}</summary>`,
+              '',
+              '```hcl',
+              planOutput || planError || 'No output captured',
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const marker = `Terraform Plan — ${label}`;
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Fail if plan errored
+        if: steps.plan.outcome == 'failure'
+        run: exit 1

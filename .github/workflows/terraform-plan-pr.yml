@@ -1,0 +1,142 @@
+name: Terraform Plan (PR)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'infrastructure/terraform/**'
+      - '!infrastructure/terraform/e2e/**'
+      - '!infrastructure/terraform/modules/**/tests/**'
+      - '!infrastructure/terraform/**/README.md'
+
+permissions:
+  contents: read
+
+jobs:
+  # ===================================================================
+  # Detect which directories changed
+  # ===================================================================
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      platform: ${{ steps.filter.outputs.platform }}
+      vpn: ${{ steps.filter.outputs.vpn }}
+      dns: ${{ steps.filter.outputs.dns }}
+      automation: ${{ steps.filter.outputs.automation }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check changed paths
+        id: filter
+        run: |
+          changed=$(git diff --name-only origin/main...HEAD)
+
+          check_path() {
+            local label=$1
+            local prefix=$2
+            if echo "$changed" | grep -q "^${prefix}"; then
+              echo "${label}=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "${label}=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          check_path "platform" "infrastructure/terraform/main.tf\|infrastructure/terraform/variables\|infrastructure/terraform/modules/\|infrastructure/terraform/versions.tf\|infrastructure/terraform/outputs.tf\|infrastructure/terraform/terraform.tfvars\|infrastructure/terraform/locals"
+          check_path "vpn" "infrastructure/terraform/vpn/"
+          check_path "dns" "infrastructure/terraform/dns/"
+          check_path "automation" "infrastructure/terraform/automation/"
+
+  # ===================================================================
+  # Plan per directory (only those with changes)
+  # ===================================================================
+  plan-platform:
+    name: Plan Platform
+    needs: detect-changes
+    if: needs.detect-changes.outputs.platform == 'true'
+    uses: ./.github/workflows/terraform-plan-comment.yml
+    with:
+      working-directory: infrastructure/terraform
+      state-key: platform.tfstate
+      label: Platform
+    secrets:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      BACKEND_RESOURCE_GROUP_NAME: ${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}
+      BACKEND_STORAGE_ACCOUNT_NAME: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+      BACKEND_CONTAINER_NAME: ${{ secrets.BACKEND_CONTAINER_NAME }}
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+  plan-vpn:
+    name: Plan VPN
+    needs: detect-changes
+    if: needs.detect-changes.outputs.vpn == 'true'
+    uses: ./.github/workflows/terraform-plan-comment.yml
+    with:
+      working-directory: infrastructure/terraform/vpn
+      state-key: vpn.tfstate
+      label: VPN
+    secrets:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      BACKEND_RESOURCE_GROUP_NAME: ${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}
+      BACKEND_STORAGE_ACCOUNT_NAME: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+      BACKEND_CONTAINER_NAME: ${{ secrets.BACKEND_CONTAINER_NAME }}
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+  plan-dns:
+    name: Plan DNS
+    needs: detect-changes
+    if: needs.detect-changes.outputs.dns == 'true'
+    uses: ./.github/workflows/terraform-plan-comment.yml
+    with:
+      working-directory: infrastructure/terraform/dns
+      state-key: dns.tfstate
+      label: DNS
+    secrets:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      BACKEND_RESOURCE_GROUP_NAME: ${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}
+      BACKEND_STORAGE_ACCOUNT_NAME: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+      BACKEND_CONTAINER_NAME: ${{ secrets.BACKEND_CONTAINER_NAME }}
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+  plan-automation:
+    name: Plan Automation
+    needs: detect-changes
+    if: needs.detect-changes.outputs.automation == 'true'
+    uses: ./.github/workflows/terraform-plan-comment.yml
+    with:
+      working-directory: infrastructure/terraform/automation
+      state-key: automation.tfstate
+      label: Automation
+    secrets:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      BACKEND_RESOURCE_GROUP_NAME: ${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}
+      BACKEND_STORAGE_ACCOUNT_NAME: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+      BACKEND_CONTAINER_NAME: ${{ secrets.BACKEND_CONTAINER_NAME }}
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write

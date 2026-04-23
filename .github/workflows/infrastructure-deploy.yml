@@ -1,0 +1,183 @@
+name: Infrastructure Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infrastructure/terraform/**'
+      - '!infrastructure/terraform/e2e/**'
+      - '!infrastructure/terraform/modules/**/tests/**'
+      - '!infrastructure/terraform/**/README.md'
+  workflow_dispatch:
+    inputs:
+      deploy-target:
+        description: 'Which deployment to run'
+        required: true
+        type: choice
+        options:
+          - platform
+          - vpn
+          - dns
+          - automation
+          - all
+
+permissions:
+  contents: read
+
+jobs:
+  # ===================================================================
+  # Detect which Terraform directories changed (push trigger only)
+  # ===================================================================
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+    outputs:
+      platform: ${{ steps.filter.outputs.platform }}
+      vpn: ${{ steps.filter.outputs.vpn }}
+      dns: ${{ steps.filter.outputs.dns }}
+      automation: ${{ steps.filter.outputs.automation }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Check changed paths
+        id: filter
+        run: |
+          changed=$(git diff --name-only HEAD~1 HEAD)
+
+          check_path() {
+            local label=$1
+            local prefix=$2
+            if echo "$changed" | grep -q "^${prefix}"; then
+              echo "${label}=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "${label}=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          check_path "platform" "infrastructure/terraform/main.tf\|infrastructure/terraform/variables\|infrastructure/terraform/modules/\|infrastructure/terraform/versions.tf\|infrastructure/terraform/outputs.tf\|infrastructure/terraform/terraform.tfvars\|infrastructure/terraform/locals"
+          check_path "vpn" "infrastructure/terraform/vpn/"
+          check_path "dns" "infrastructure/terraform/dns/"
+          check_path "automation" "infrastructure/terraform/automation/"
+
+  # ===================================================================
+  # Platform (main root)
+  # ===================================================================
+  deploy-platform:
+    name: Deploy Platform
+    needs: [detect-changes]
+    if: |
+      always() &&
+      (
+        (github.event_name == 'push' && needs.detect-changes.outputs.platform == 'true') ||
+        (github.event_name == 'workflow_dispatch' && (inputs.deploy-target == 'platform' || inputs.deploy-target == 'all'))
+      )
+    uses: ./.github/workflows/terraform-deploy.yml
+    with:
+      working-directory: infrastructure/terraform
+      environment: production
+      state-key: platform.tfstate
+    secrets:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      BACKEND_RESOURCE_GROUP_NAME: ${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}
+      BACKEND_STORAGE_ACCOUNT_NAME: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+      BACKEND_CONTAINER_NAME: ${{ secrets.BACKEND_CONTAINER_NAME }}
+    permissions:
+      contents: read
+      id-token: write
+
+  # ===================================================================
+  # VPN
+  # ===================================================================
+  deploy-vpn:
+    name: Deploy VPN
+    needs: [detect-changes, deploy-platform]
+    if: |
+      always() &&
+      (needs.deploy-platform.result == 'success' || needs.deploy-platform.result == 'skipped') &&
+      (
+        (github.event_name == 'push' && needs.detect-changes.outputs.vpn == 'true') ||
+        (github.event_name == 'workflow_dispatch' && (inputs.deploy-target == 'vpn' || inputs.deploy-target == 'all'))
+      )
+    uses: ./.github/workflows/terraform-deploy.yml
+    with:
+      working-directory: infrastructure/terraform/vpn
+      environment: production
+      state-key: vpn.tfstate
+    secrets:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      BACKEND_RESOURCE_GROUP_NAME: ${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}
+      BACKEND_STORAGE_ACCOUNT_NAME: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+      BACKEND_CONTAINER_NAME: ${{ secrets.BACKEND_CONTAINER_NAME }}
+    permissions:
+      contents: read
+      id-token: write
+
+  # ===================================================================
+  # DNS
+  # ===================================================================
+  deploy-dns:
+    name: Deploy DNS
+    needs: [detect-changes, deploy-platform]
+    if: |
+      always() &&
+      (needs.deploy-platform.result == 'success' || needs.deploy-platform.result == 'skipped') &&
+      (
+        (github.event_name == 'push' && needs.detect-changes.outputs.dns == 'true') ||
+        (github.event_name == 'workflow_dispatch' && (inputs.deploy-target == 'dns' || inputs.deploy-target == 'all'))
+      )
+    uses: ./.github/workflows/terraform-deploy.yml
+    with:
+      working-directory: infrastructure/terraform/dns
+      environment: production
+      state-key: dns.tfstate
+    secrets:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      BACKEND_RESOURCE_GROUP_NAME: ${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}
+      BACKEND_STORAGE_ACCOUNT_NAME: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+      BACKEND_CONTAINER_NAME: ${{ secrets.BACKEND_CONTAINER_NAME }}
+    permissions:
+      contents: read
+      id-token: write
+
+  # ===================================================================
+  # Automation
+  # ===================================================================
+  deploy-automation:
+    name: Deploy Automation
+    needs: [detect-changes, deploy-platform]
+    if: |
+      always() &&
+      (needs.deploy-platform.result == 'success' || needs.deploy-platform.result == 'skipped') &&
+      (
+        (github.event_name == 'push' && needs.detect-changes.outputs.automation == 'true') ||
+        (github.event_name == 'workflow_dispatch' && (inputs.deploy-target == 'automation' || inputs.deploy-target == 'all'))
+      )
+    uses: ./.github/workflows/terraform-deploy.yml
+    with:
+      working-directory: infrastructure/terraform/automation
+      environment: production
+      state-key: automation.tfstate
+    secrets:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      BACKEND_RESOURCE_GROUP_NAME: ${{ secrets.BACKEND_RESOURCE_GROUP_NAME }}
+      BACKEND_STORAGE_ACCOUNT_NAME: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+      BACKEND_CONTAINER_NAME: ${{ secrets.BACKEND_CONTAINER_NAME }}
+    permissions:
+      contents: read
+      id-token: write
