@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 
@@ -27,7 +27,7 @@ from src.api.storage import LocalStorageAdapter
 def _build_annotation(annotator_id: str = "alice", rating: QualityScore = QualityScore.FOUR) -> EpisodeAnnotation:
     return EpisodeAnnotation(
         annotator_id=annotator_id,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(UTC),
         task_completeness=TaskCompletenessAnnotation(
             rating=TaskCompletenessRating.SUCCESS,
             confidence=ConfidenceLevel.FOUR,
@@ -70,14 +70,26 @@ def service(tmp_path) -> AnnotationService:
 
 
 class TestAnnotationServiceConstruction:
-    def test_uses_provided_adapter(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_uses_provided_adapter(self, tmp_path):
+        """Provided adapter is used for persistence (verified via round-trip)."""
         adapter = LocalStorageAdapter(str(tmp_path))
         svc = AnnotationService(storage_adapter=adapter)
-        assert svc._storage is adapter
+        await svc.save_annotation("ds", 0, _build_annotation())
+        # The adapter passed in must contain the saved data.
+        loaded = await adapter.get_annotation("ds", 0)
+        assert loaded is not None
+        assert loaded.annotations[0].annotator_id == "alice"
 
-    def test_falls_back_to_local_adapter(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_falls_back_to_local_adapter(self, tmp_path):
+        """When only ``base_path`` is provided the service persists to the local filesystem."""
         svc = AnnotationService(base_path=str(tmp_path))
-        assert isinstance(svc._storage, LocalStorageAdapter)
+        await svc.save_annotation("ds", 0, _build_annotation())
+        # A fresh LocalStorageAdapter pointed at the same path can read the persisted file.
+        loaded = await LocalStorageAdapter(str(tmp_path)).get_annotation("ds", 0)
+        assert loaded is not None
+        assert loaded.annotations[0].annotator_id == "alice"
 
 
 class TestSaveAndGet:
