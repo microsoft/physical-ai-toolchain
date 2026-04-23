@@ -4,12 +4,12 @@ version = "0.1.0"
 description = "RL training workflow runtime dependencies"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy==1.26.4",
+    "numpy==2.4.4",
     "azure-core==1.39.0",
     "azure-storage-blob==12.28.0",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.32.0",
-    "marshmallow==3.26.2",
+    "marshmallow==4.3.0",
     "mlflow==3.11.1",
     "packaging==26.1",
     "psutil==7.2.2",
@@ -17,9 +17,9 @@ dependencies = [
     "pyperclip==1.11.0",
     "cryptography==46.0.7",
     "pyjwt==2.12.1",
-    "rsl-rl-lib==5.0.1",
+    "rsl-rl-lib==5.1.0",
     "skrl==2.0.0",
-    "tensordict==0.12.1",
+    "tensordict==0.12.2",
 ]
 
 [build-system]
