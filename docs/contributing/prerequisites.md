@@ -30,7 +30,7 @@ Install these tools before contributing:
 | kubectl        | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
 | Helm           | 3.16            | <https://helm.sh/docs/intro/install/>                                 |
 | Node.js/npm    | 20+ LTS         | <https://nodejs.org/>                                                 |
-| Python         | 3.11+           | <https://www.python.org/downloads/>                                   |
+| Python         | 3.12+           | <https://www.python.org/downloads/>                                   |
 | shellcheck     | 0.10+           | <https://www.shellcheck.net/>                                         |
 | uv             | latest          | <https://docs.astral.sh/uv/>                                          |
 | Go             | 1.24+           | <https://go.dev/dl/>                                                  |
@@ -125,7 +125,7 @@ helm version  # >= 3.16
 node --version  # >= 20
 
 # Python (for training scripts)
-python --version  # >= 3.11
+python --version  # >= 3.12
 
 # shellcheck (for shell script validation)
 shellcheck --version  # >= 0.10

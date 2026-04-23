@@ -3,7 +3,7 @@ name = "physical-ai-toolchain"
 version = "0.7.4"
 description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
 [build-system]
 requires = ["hatchling"]
@@ -59,7 +59,7 @@ max_examples = 50
 deadline = 500
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 120
 
 [tool.ruff.lint]

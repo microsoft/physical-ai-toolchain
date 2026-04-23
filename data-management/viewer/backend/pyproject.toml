@@ -2,7 +2,7 @@
 name = "lerobot-annotation-api"
 version = "0.1.0"
 description = "API for LeRobot episode annotation system"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.136.0",
     "uvicorn[standard]==0.44.0",

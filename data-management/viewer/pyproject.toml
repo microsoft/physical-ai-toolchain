@@ -2,7 +2,7 @@
 name = "datasetanalysistool"
 version = "0.1.0"
 description = "Web-based dataset analysis and annotation tool for robot demonstration datasets"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.136.0",
     "uvicorn[standard]==0.44.0",

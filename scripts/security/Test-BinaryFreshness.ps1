@@ -370,7 +370,7 @@ function Get-BinaryCheckDefinitions {
         }
         @{
             Name     = "OSMO Installer ($(Get-JsonVariable -Path $Devcontainer -Name 'OSMO_VERSION'))"
-            Url      = "https://raw.githubusercontent.com/NVIDIA/OSMO/refs/tags/$(Get-JsonVariable -Path $Devcontainer -Name 'OSMO_VERSION')/install.sh"
+            Url      = "https://github.com/NVIDIA/OSMO/releases/download/$(Get-JsonVariable -Path $Devcontainer -Name 'OSMO_VERSION')/osmo-client-installer-$(Get-JsonVariable -Path $Devcontainer -Name 'OSMO_VERSION')-linux-x86_64.sh"
             Expected = (Get-JsonVariable -Path $Devcontainer -Name 'OSMO_INSTALLER_SHA256')
             File     = $Devcontainer
         }
