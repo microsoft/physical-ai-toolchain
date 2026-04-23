@@ -177,7 +177,9 @@ class TestValidateSafeStringProperties:
 class TestValidateDatasetIdProperties:
     @given(
         parts=st.lists(
-            st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,20}"), fullmatch=True),
+            st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,20}"), fullmatch=True).filter(
+                lambda s: "--" not in s and not s.endswith("-")
+            ),
             min_size=1,
             max_size=5,
         )

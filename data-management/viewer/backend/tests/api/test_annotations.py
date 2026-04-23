@@ -4,7 +4,7 @@ Integration tests for annotation API endpoints.
 
 import os
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,7 +78,7 @@ def sample_annotation():
     """Create a sample annotation for testing."""
     return EpisodeAnnotation(
         annotator_id="test-user",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(UTC),
         task_completeness=TaskCompletenessAnnotation(
             rating=TaskCompletenessRating.SUCCESS,
             confidence=ConfidenceLevel.FOUR,

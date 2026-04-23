@@ -552,6 +552,12 @@ class TestHDF5VideoGeneration:
     @pytest.mark.asyncio
     async def test_hdf5_video_file_created_on_access(self, tmp_path):
         """Accessing video path generates and caches an mp4 file."""
+        import importlib.util
+        import shutil
+
+        if shutil.which("ffmpeg") is None and importlib.util.find_spec("cv2") is None:
+            pytest.skip("Requires ffmpeg or cv2 for video encoding")
+
         from src.api.services.dataset_service.hdf5_handler import HDF5FormatHandler
 
         ds_dir = tmp_path / "vid_dataset"
