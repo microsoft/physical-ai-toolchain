@@ -12,7 +12,6 @@ adrs
 agentic
 agentless
 agile
-anom
 alam
 alation
 alizaidi
@@ -27,6 +26,7 @@ amqp
 amsr
 angularjs
 annot
+anom
 anonymization
 anonymize
 anonymizing
@@ -145,8 +145,8 @@ canonicalize
 cantemo
 capex
 captcha
-cartpole
 carryforward
+cartpole
 cassandra
 catia
 cds
@@ -163,9 +163,9 @@ chargeback
 chatagent
 chatbot
 chatbots
+chatlog
 chatmode
 chatmodes
-chatlog
 cheatham
 checkbox
 checkboxes
@@ -331,8 +331,8 @@ dataset
 datasetanalysistool
 datasets
 datasize
-dataviewer
 dataverse
+dataviewer
 datefmt
 davinci
 dbcc
@@ -519,8 +519,8 @@ heredoc
 heredocs
 hexadecimal
 hids
-hil
 highlevel
+hil
 hipaa
 hive
 Holo
@@ -543,9 +543,9 @@ hyperscale
 hyperspecialized
 Hypervelocity
 hypervisor
+hypothesis
 iaas
 ibm
-hypothesis
 ibpms
 icmp
 iconmonstr
@@ -587,9 +587,9 @@ interceptable
 interconnectivity
 interdependencies
 interdomain
-interp
 interoperate
 interoperates
+interp
 interpretability
 interpretml
 interzone
@@ -742,7 +742,6 @@ mcse
 mdlint
 mdutils
 meks
-mjpeg
 Memberwise
 memprofile
 mergetool
@@ -772,6 +771,7 @@ misallocated
 misconfigure
 misconfiguring
 mitigations
+mjpeg
 mkdir
 mklink
 mlflow
@@ -792,8 +792,8 @@ mountpoint
 mqttbridgeconnector
 mqttbroker
 mqtts
-msdn
 msdate
+msdn
 msgraph
 msi
 msvideo
@@ -1010,8 +1010,8 @@ prepurchases
 pretrain
 pretrained
 pricewaterhousecoopers
-privatelink
 println
+privatelink
 profisee
 proliant
 proseware
@@ -1089,8 +1089,8 @@ redgate
 redhat
 redirections
 redisenterprise
-redtiger
 redoc
+redtiger
 reengineer
 reengineered
 reengineering
@@ -1107,8 +1107,8 @@ reimplemented
 reimplementing
 reintegrate
 reintegrating
-relabelling
 Rekor
+relabelling
 Remotable
 renumbered
 reoccur
@@ -1139,9 +1139,9 @@ roadmaps
 roadrunner
 rollout
 rollouts
+rootfs
 rosbag
 routable
-rootfs
 rpa
 rpc
 rpcs
@@ -1204,9 +1204,9 @@ siem
 sigalrm
 signalr
 signingkey
+signup
 sigstore
 sil
-signup
 Silverlight
 Simbolic
 simplement
@@ -1224,9 +1224,9 @@ slsa
 smartctl
 smes
 smita
+smol
 SMPTE
 smptebars
-smol
 smtp
 snat
 snmp
@@ -1247,9 +1247,9 @@ spns
 sprint
 sql
 sqlcmd
+srcroot
 srgb
 srns
-srcroot
 srtp
 ssas
 ssdl
@@ -1515,11 +1515,11 @@ winscp
 wireframe
 wireshark
 wmem
+wordlist
 workday
 workgroup
 workitem
 workitems
-wordlist
 workstream
 wsus
 wwwroot
@@ -1555,356 +1555,52 @@ zref
 zscaler
 
 # Academic & Technical Terms
-anonymization
-anonymize
-anonymizing
-autoencoders
-automl
-inferencing
-magnetostatics
-neuromorphic
-operationalization
-operationalize
-operationalized
-scikit
-homomorphic
-onnxruntime
-memprofile
-cpuprofile
-minmax
-modreqs
-modreq
-modopts
-flexbox
-rgba
-srgb
-backface
-wmem
-rmem
-datapoints
-chromadb
-timescaledb
 
 # Security & Compliance
-antimalware
-auditable
-auditability
-auditifnotexists
-gdpr
 gitsign
-hipaa
 keyless
-oidc
-OSSF
-passwordless
-siem
-sox
-Sarbanes
-Oxley
 x509
 
 # Cloud Platforms & Services (not covered by public dicts)
-amazonaws
-gcp
-googlecloud
-hybridcloud
-multicloud
-openshift
-redhat
 
 # Programming Languages & Frameworks (not covered by public dicts)
-angularjs
-dotnet
-golang
-javascript
-nodejs
-python
-reactjs
-typescript
-xamarin
 
 # Data & Analytics
-bigdata
-dataops
-etl
-elt
-lakehouse
-lakehouses
-mlops
-nosql
-olap
-oltp
-polybase
-realtime
-timeseries
 
 # Business & Enterprise
-chargeback
-crm
-epicor
-erp
-Exfiltration
-hrms
-scm
-workday
 
 # Networking & Infrastructure (not covered by public dicts)
-cidr
-cyclonedds
-dns
-iot
-loadbalancer
-nginx
-proxy
-ssl
-tls
-wan
-lan
 
 # Company Names & Brands
-adobe
-amazon
-apple
-cisco
-dell
-google
-hp
-ibm
-intel
-microsoft
-nvidia
-oracle
-salesforce
-sap
-vmware
-vpn
 
 # Product Names & Trademarks (not covered by public dicts)
-github
-gitlab
-vscode
-windows
-gruntwork
 
 # File Formats & Extensions
-csv
-docx
-json
-orc
-parquet
-pptx
-xlsx
-xml
-yaml
-yml
 
 # Abbreviations & Acronyms
-app
-cli
-cpu
-gpu
-sql
-tcp
-udp
-url
-uri
-uuid
-vm
-vpc
 
 # Technical Terms
-apis
-backend
-frontend
-middleware
-microservice
-microservices
-webhook
-webhooks
 
 # Proper Nouns & Company Names
-Katello
-Metaverse
-Upselling
 
 # Development & DevOps
-agile
 apikey
-cicd
-devops
-scrum
-kanban
-sprint
-backlog
-pipeline
-pipelines
-pwsh
-shellcheck
-nslookup
-journalctl
-vimdiff
-mergetool
-gitmessage
-pipefail
-esac
-keyid
-openpgp
-difftool
-trustexitcode
-keepbackup
-checkpointed
-parameterless
-notnull
-gettype
-lockfiles
-workitem
-workitems
-timespan
-todatetime
-toreal
-tolong
-todynamic
-utcnow
-torutek
-backpressure
-execdir
-seealso
-cref
-defaultinstancetype
-levelname
-asctime
-datefmt
-newsection
-oneline
-typeresou
-param
-typeparam
-colcon
-pathlib
-popen
-expanduser
-reqwest
-pyyaml
-rabbitmq
-mqttbroker
-mqttbridgeconnector
-mqtts
-dmqtt
-brokerlistener
-cloudevents
-datasize
-mult
-reqs
 
 # Video & Image Processing
-drawtext
-fontcolor
-fontsize
-lanczos
-lavfi
-libx
-palettegen
-paletteuse
-posterized
-SMPTE
-smptebars
-testsrc
 
 # Hardware & Platforms (not covered by public dicts)
-Jetson
-microcontroller
-microcontrollers
-Mbed
-openvino
-Portworx
-Zigbee
-Hudi
 
 # Software & CAD Tools
-autocad
-autodesk
-Coppelia
-Creo
-GMSH
-Modelica
-postman
-powershell
-tableau
-Serilog
-Silverlight
-DYNPROXY
-Proxyable
-Cropp
-Clarius
-Retryable
-Remotable
-Finalizer
-Unproxied
-Memberwise
-Distro
-SHAP
-Plotly
-Anthos
-Trino
-Simbolic
-JENNI
-Clis
-Extended
-interceptable
-Hypervelocity
-junitxml
-PSScriptAnalyzer
-chatagent
-docstrings
-issubset
-isort
-mymodule
-mypy
-sandboxed
 
 # Azure NVIDIA Robotics Reference Architecture
 amlarc
 amlignore
-anymal
-autolog
-azureml
-cartpole
-chkpt
-coscheduling
-cudnn
-DDPG
-erewbuffer
-flatdict
-gpuinstancetype
-gpuspot
-infotensor
-IPPO
-irewbuffer
-isaaclab
-isaacsim
-lenbuffer
-MAPPO
-meks
-nvcr
-nvml
-oauthtoken
-osmoauth
-pgadmin
-pyglet
-pylance
-PYTHONHASHSEED
-PYTHONPATH
-redisenterprise
-rewbuffer
-rslrl
-skrl
-timestep
-timesteps
 argjson
 autouse
 burstable
 capsys
 clusterpolicies
+coscheduling
 crds
 daemonset
 dbname
@@ -1915,6 +1611,7 @@ envsubst
 epch
 getpid
 gpupool
+gpuspot
 grdn
 imgmsg
 incluster
@@ -1994,8 +1691,10 @@ emanufacturing
 fastapi
 faststart
 fourcc
+kolmogorov
 midtone
 movflags
+mqtt
 nameidentifier
 persistable
 pydantic
@@ -2003,29 +1702,27 @@ radix
 rawvideo
 rvfc
 shadcn
+smirnov
 srcs
 tanstack
 tobytes
 ultrafast
-
-kolmogorov
-mqtt
-smirnov
 zustand
 
 # Cendio ThinLinc
 Cendio
-Linc
-ThinLinc
-tlwebaccess
-tlwebadm
-tlagent
-tlmaster
-thinlocal
-WEBADM
-WEBACCESS
-vsmagent
-vsmserver
 envaccount
 envcontainer
+Linc
 mycontainer
+prio
+ThinLinc
+thinlocal
+tlagent
+tlmaster
+tlwebaccess
+tlwebadm
+vsmagent
+vsmserver
+WEBACCESS
+WEBADM
