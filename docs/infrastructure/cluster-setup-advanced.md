@@ -157,11 +157,12 @@ kubectl describe sa osmo-service -n osmo-control-plane
 
 ## 🧩 Optional Scripts
 
-| Script                                    | Purpose                      |
-|-------------------------------------------|------------------------------|
-| `optional/deploy-volcano-scheduler.sh`    | Volcano (alternative to KAI) |
-| `optional/uninstall-volcano-scheduler.sh` | Uninstall Volcano scheduler  |
-| `optional/add-user-to-platform.sh`        | Add user to OSMO platform    |
+| Script                                    | Purpose                                                 |
+|-------------------------------------------|---------------------------------------------------------|
+| `optional/deploy-volcano-scheduler.sh`    | Volcano (alternative to KAI)                            |
+| `optional/uninstall-volcano-scheduler.sh` | Uninstall Volcano scheduler                             |
+| `optional/add-user-to-platform.sh`        | Add user to OSMO platform                               |
+| `optional/manage-node-pools.sh`           | Add, remove, or resize AKS node pools (see [Manage Node Pools](manage-node-pools.md)) |
 
 ## 🔗 Related
 
