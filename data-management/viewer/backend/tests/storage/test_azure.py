@@ -271,5 +271,296 @@ class TestAzureBlobStorageAdapter(TestCase):
             mock_cls.assert_called_once()
 
 
+class TestAzureBlobStorageAdapterErrorPaths(TestCase):
+    """Branch and error-path coverage for AzureBlobStorageAdapter."""
+
+    def setUp(self):
+        self.dataset_id = "test-dataset"
+
+    def _make_http_error(self, status_code: int = 500, error_code: str = "ServerError") -> Exception:
+        err = Exception("http error")
+        err.status_code = status_code
+        err.error_code = error_code
+        return err
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", False)
+    def test_init_raises_import_error_when_sdk_unavailable(self):
+        from src.api.storage.azure import AzureBlobStorageAdapter
+
+        with pytest.raises(ImportError, match="azure-storage-blob"):
+            AzureBlobStorageAdapter(
+                account_name="testaccount",
+                container_name="testcontainer",
+                sas_token="test-sas",
+            )
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.DefaultAzureCredential")
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_get_client_uses_managed_identity(self, mock_blob_service, mock_credential):
+        from src.api.storage.azure import AzureBlobStorageAdapter
+
+        adapter = AzureBlobStorageAdapter(
+            account_name="testaccount",
+            container_name="testcontainer",
+            use_managed_identity=True,
+        )
+        asyncio.run(adapter._get_client())
+        mock_credential.assert_called_once_with()
+        mock_blob_service.assert_called_once_with(
+            account_url="https://testaccount.blob.core.windows.net",
+            credential=mock_credential.return_value,
+        )
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_get_annotation_invalid_json_raises_storage_error(self, mock_blob_service):
+        from src.api.storage.azure import AzureBlobStorageAdapter, StorageError
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_blob = MagicMock()
+        mock_download = AsyncMock()
+        mock_download.readall = AsyncMock(return_value=b"{not json")
+        mock_blob.download_blob = AsyncMock(return_value=mock_download)
+        mock_container.get_blob_client.return_value = mock_blob
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(
+            account_name="a", container_name="c", sas_token="s",
+        )
+        adapter._client = mock_client
+
+        with pytest.raises(StorageError, match="Invalid JSON"):
+            asyncio.run(adapter.get_annotation(self.dataset_id, 0))
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_get_annotation_http_error_raises_storage_error(self, mock_blob_service):
+        from src.api.storage.azure import AzureBlobStorageAdapter, StorageError
+
+        _HttpError = type("HttpResponseError", (Exception,), {})
+        err = _HttpError("boom")
+        err.status_code = 503
+        err.error_code = "ServiceUnavailable"
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_blob = MagicMock()
+        mock_blob.download_blob = AsyncMock(side_effect=err)
+        mock_container.get_blob_client.return_value = mock_blob
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        adapter._client = mock_client
+
+        with patch("src.api.storage.azure.HttpResponseError", _HttpError):
+            with pytest.raises(StorageError, match="status=503"):
+                asyncio.run(adapter.get_annotation(self.dataset_id, 0))
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_get_annotation_unexpected_error_wraps_storage_error(self, mock_blob_service):
+        from src.api.storage.azure import AzureBlobStorageAdapter, StorageError
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_blob = MagicMock()
+        mock_blob.download_blob = AsyncMock(side_effect=RuntimeError("kaboom"))
+        mock_container.get_blob_client.return_value = mock_blob
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        adapter._client = mock_client
+
+        with pytest.raises(StorageError, match="Failed to read blob"):
+            asyncio.run(adapter.get_annotation(self.dataset_id, 0))
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.ContentSettings")
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_save_annotation_http_error_raises_storage_error(self, mock_blob_service, mock_content_settings):
+        from src.api.storage.azure import AzureBlobStorageAdapter, StorageError
+
+        _HttpError = type("HttpResponseError", (Exception,), {})
+        err = _HttpError("boom")
+        err.status_code = 409
+        err.error_code = "Conflict"
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_blob = MagicMock()
+        mock_blob.upload_blob = AsyncMock(side_effect=err)
+        mock_container.get_blob_client.return_value = mock_blob
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        adapter._client = mock_client
+        annotation = create_test_annotation(episode_index=1)
+
+        with patch("src.api.storage.azure.HttpResponseError", _HttpError):
+            with pytest.raises(StorageError, match="status=409"):
+                asyncio.run(adapter.save_annotation(self.dataset_id, 1, annotation))
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.ContentSettings")
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_save_annotation_unexpected_error_wraps_storage_error(self, mock_blob_service, mock_content_settings):
+        from src.api.storage.azure import AzureBlobStorageAdapter, StorageError
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_blob = MagicMock()
+        mock_blob.upload_blob = AsyncMock(side_effect=RuntimeError("disk full"))
+        mock_container.get_blob_client.return_value = mock_blob
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        adapter._client = mock_client
+        annotation = create_test_annotation(episode_index=1)
+
+        with pytest.raises(StorageError, match="Failed to save blob"):
+            asyncio.run(adapter.save_annotation(self.dataset_id, 1, annotation))
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_list_annotated_episodes_skips_invalid_filename(self, mock_blob_service):
+        from src.api.storage.azure import AzureBlobStorageAdapter
+
+        bad = MagicMock()
+        bad.name = "test-dataset/annotations/episodes/episode_NOTANUM.json"
+        good = MagicMock()
+        good.name = "test-dataset/annotations/episodes/episode_000007.json"
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+
+        async def mock_list_blobs(name_starts_with):
+            for blob in [bad, good]:
+                yield blob
+
+        mock_container.list_blobs = mock_list_blobs
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        adapter._client = mock_client
+
+        result = asyncio.run(adapter.list_annotated_episodes(self.dataset_id))
+        assert result == [7]
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_list_annotated_episodes_http_error_raises_storage_error(self, mock_blob_service):
+        from src.api.storage.azure import AzureBlobStorageAdapter, StorageError
+
+        _HttpError = type("HttpResponseError", (Exception,), {})
+        err = _HttpError("boom")
+        err.status_code = 500
+        err.error_code = "ServerError"
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+
+        async def mock_list_blobs(name_starts_with):
+            raise err
+            yield  # pragma: no cover
+
+        mock_container.list_blobs = mock_list_blobs
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        adapter._client = mock_client
+
+        with patch("src.api.storage.azure.HttpResponseError", _HttpError):
+            with pytest.raises(StorageError, match="status=500"):
+                asyncio.run(adapter.list_annotated_episodes(self.dataset_id))
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_list_annotated_episodes_unexpected_error_wraps_storage_error(self, mock_blob_service):
+        from src.api.storage.azure import AzureBlobStorageAdapter, StorageError
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+
+        async def mock_list_blobs(name_starts_with):
+            raise RuntimeError("network down")
+            yield  # pragma: no cover
+
+        mock_container.list_blobs = mock_list_blobs
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        adapter._client = mock_client
+
+        with pytest.raises(StorageError, match="Failed to list annotations"):
+            asyncio.run(adapter.list_annotated_episodes(self.dataset_id))
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_delete_annotation_http_error_raises_storage_error(self, mock_blob_service):
+        from src.api.storage.azure import AzureBlobStorageAdapter, StorageError
+
+        _HttpError = type("HttpResponseError", (Exception,), {})
+        err = _HttpError("boom")
+        err.status_code = 403
+        err.error_code = "Forbidden"
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_blob = MagicMock()
+        mock_blob.delete_blob = AsyncMock(side_effect=err)
+        mock_container.get_blob_client.return_value = mock_blob
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        adapter._client = mock_client
+
+        with patch("src.api.storage.azure.HttpResponseError", _HttpError):
+            with pytest.raises(StorageError, match="status=403"):
+                asyncio.run(adapter.delete_annotation(self.dataset_id, 0))
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_delete_annotation_unexpected_error_wraps_storage_error(self, mock_blob_service):
+        from src.api.storage.azure import AzureBlobStorageAdapter, StorageError
+
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_blob = MagicMock()
+        mock_blob.delete_blob = AsyncMock(side_effect=RuntimeError("kaboom"))
+        mock_container.get_blob_client.return_value = mock_blob
+        mock_client.get_container_client.return_value = mock_container
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        adapter._client = mock_client
+
+        with pytest.raises(StorageError, match="Failed to delete blob"):
+            asyncio.run(adapter.delete_annotation(self.dataset_id, 0))
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    def test_close_releases_client(self):
+        from src.api.storage.azure import AzureBlobStorageAdapter
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        mock_client = MagicMock()
+        mock_client.close = AsyncMock()
+        adapter._client = mock_client
+
+        asyncio.run(adapter.close())
+
+        mock_client.close.assert_called_once()
+        assert adapter._client is None
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    def test_close_when_client_never_created_is_noop(self):
+        from src.api.storage.azure import AzureBlobStorageAdapter
+
+        adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
+        # Should not raise even though _client is None
+        asyncio.run(adapter.close())
+        assert adapter._client is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
