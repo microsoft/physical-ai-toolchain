@@ -1,5 +1,6 @@
 """Unit tests for authentication and CSRF middleware."""
 
+import asyncio
 import os
 
 import pytest
@@ -205,8 +206,7 @@ class TestCsrfProtection:
 
 
 class TestApiKeyProvider:
-    @pytest.mark.asyncio
-    async def test_authenticate_valid_key(self):
+    def test_authenticate_valid_key(self):
         from unittest.mock import MagicMock
 
         from src.api.auth import ApiKeyProvider
@@ -214,12 +214,11 @@ class TestApiKeyProvider:
         provider = ApiKeyProvider("my-secret")
         request = MagicMock()
         request.headers = {"X-API-Key": "my-secret"}
-        result = await provider.authenticate(request)
+        result = asyncio.run(provider.authenticate(request))
         assert result is not None
         assert result["auth_method"] == "apikey"
 
-    @pytest.mark.asyncio
-    async def test_authenticate_wrong_key(self):
+    def test_authenticate_wrong_key(self):
         from unittest.mock import MagicMock
 
         from src.api.auth import ApiKeyProvider
@@ -227,11 +226,10 @@ class TestApiKeyProvider:
         provider = ApiKeyProvider("my-secret")
         request = MagicMock()
         request.headers = {"X-API-Key": "wrong"}
-        result = await provider.authenticate(request)
+        result = asyncio.run(provider.authenticate(request))
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_authenticate_missing_key(self):
+    def test_authenticate_missing_key(self):
         from unittest.mock import MagicMock
 
         from src.api.auth import ApiKeyProvider
@@ -239,7 +237,7 @@ class TestApiKeyProvider:
         provider = ApiKeyProvider("my-secret")
         request = MagicMock()
         request.headers = {}
-        result = await provider.authenticate(request)
+        result = asyncio.run(provider.authenticate(request))
         assert result is None
 
     def test_www_authenticate_header(self):
@@ -255,8 +253,7 @@ class TestApiKeyProvider:
 
 
 class TestEasyAuthProvider:
-    @pytest.mark.asyncio
-    async def test_authenticate_valid_principal(self):
+    def test_authenticate_valid_principal(self):
         import base64
         import json
         from unittest.mock import MagicMock
@@ -274,13 +271,12 @@ class TestEasyAuthProvider:
         encoded = base64.b64encode(json.dumps(claims).encode()).decode()
         request = MagicMock()
         request.headers = {"X-MS-CLIENT-PRINCIPAL": encoded}
-        result = await provider.authenticate(request)
+        result = asyncio.run(provider.authenticate(request))
         assert result is not None
         assert result["auth_method"] == "easy_auth"
         assert "Dataviewer.Admin" in result["roles"]
 
-    @pytest.mark.asyncio
-    async def test_authenticate_missing_header(self):
+    def test_authenticate_missing_header(self):
         from unittest.mock import MagicMock
 
         from src.api.auth import EasyAuthProvider
@@ -288,11 +284,10 @@ class TestEasyAuthProvider:
         provider = EasyAuthProvider()
         request = MagicMock()
         request.headers = {}
-        result = await provider.authenticate(request)
+        result = asyncio.run(provider.authenticate(request))
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_authenticate_invalid_base64(self):
+    def test_authenticate_invalid_base64(self):
         from unittest.mock import MagicMock
 
         from src.api.auth import EasyAuthProvider
@@ -300,7 +295,7 @@ class TestEasyAuthProvider:
         provider = EasyAuthProvider()
         request = MagicMock()
         request.headers = {"X-MS-CLIENT-PRINCIPAL": "not-valid-base64!!!"}
-        result = await provider.authenticate(request)
+        result = asyncio.run(provider.authenticate(request))
         assert result is None
 
     def test_www_authenticate_header(self):
