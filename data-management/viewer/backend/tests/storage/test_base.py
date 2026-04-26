@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from src.api.models.annotations import EpisodeAnnotationFile
@@ -34,19 +36,38 @@ class TestStorageAdapterContract:
         with pytest.raises(TypeError):
             StorageAdapter()  # type: ignore[abstract]
 
-    @pytest.mark.asyncio
-    async def test_close_default_is_noop(self):
+    def test_close_default_is_noop(self):
         adapter = _FakeAdapter()
-        assert await adapter.close() is None
+        assert asyncio.run(adapter.close()) is None
 
-    @pytest.mark.asyncio
-    async def test_get_annotations_batch_default_uses_get_annotation(self):
+    def test_get_annotations_batch_default_uses_get_annotation(self):
         adapter = _FakeAdapter()
         ann = create_test_annotation(0)
-        await adapter.save_annotation("ds", 0, ann)
-        result = await adapter.get_annotations_batch("ds", [0, 1])
+        asyncio.run(adapter.save_annotation("ds", 0, ann))
+        result = asyncio.run(adapter.get_annotations_batch("ds", [0, 1]))
         assert result[0] is ann
         assert result[1] is None
+
+    def test_abstract_method_bodies_return_none_via_super(self):
+        class _SuperAdapter(StorageAdapter):
+            async def get_annotation(self, dataset_id, episode_index):
+                return await super().get_annotation(dataset_id, episode_index)
+
+            async def save_annotation(self, dataset_id, episode_index, annotation):
+                return await super().save_annotation(dataset_id, episode_index, annotation)
+
+            async def list_annotated_episodes(self, dataset_id):
+                return await super().list_annotated_episodes(dataset_id)
+
+            async def delete_annotation(self, dataset_id, episode_index):
+                return await super().delete_annotation(dataset_id, episode_index)
+
+        adapter = _SuperAdapter()
+        ann = create_test_annotation(0)
+        assert asyncio.run(adapter.get_annotation("ds", 0)) is None
+        assert asyncio.run(adapter.save_annotation("ds", 0, ann)) is None
+        assert asyncio.run(adapter.list_annotated_episodes("ds")) is None
+        assert asyncio.run(adapter.delete_annotation("ds", 0)) is None
 
 
 class TestStorageError:
