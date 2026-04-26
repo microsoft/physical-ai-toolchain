@@ -24,25 +24,31 @@ class AnsiStrippingStream(io.TextIOBase):
     tqdm progress update appears as a distinct log line.
     """
 
-    def __init__(self, wrapped: io.TextIOBase) -> None:
+    
+        """Auto-generated docstring."""
         self._wrapped = wrapped
 
-    def write(self, s: str) -> int:
+    
+        """Auto-generated docstring."""
         cleaned = _ANSI_ESCAPE_PATTERN.sub("", s)
         cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
         return self._wrapped.write(cleaned)
 
-    def flush(self) -> None:
+    
+        """Auto-generated docstring."""
         self._wrapped.flush()
 
-    def fileno(self) -> int:
+    
+        """Auto-generated docstring."""
         return self._wrapped.fileno()
 
-    def isatty(self) -> bool:
+    
+        """Auto-generated docstring."""
         return False
 
     @property
-    def encoding(self) -> str:
+    
+        """Auto-generated docstring."""
         return getattr(self._wrapped, "encoding", "utf-8")
 
 
