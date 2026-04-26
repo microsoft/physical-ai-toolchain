@@ -45,6 +45,7 @@ Scopes MUST be one of the following:
 - `(deployment)` - Changes in fleet deployment directories
 - `(intelligence)` - Changes in fleet intelligence directories
 - `(scripts)` - Changes in automation scripts directories
+- `(security)` - Security supply-chain artifacts in `scripts/security/`, `security/`, and signing/admission infrastructure
 - `(docs)` - Changes in documentation directories
 - `(adrs)` - Changes in Architecture Decision Records directories
 - `(settings)` - Changes in configuration files (`.vscode/`, linter configs)
