@@ -1,5 +1,6 @@
 """Unit tests for detection service episode processing behavior."""
 
+import asyncio
 import types
 
 import pytest
@@ -11,8 +12,7 @@ from src.api.services.detection_service import DetectionService
 class TestDetectionEpisodeProcessing:
     """Tests for frame index handling in episode detection."""
 
-    @pytest.mark.asyncio
-    async def test_detect_episode_preserves_integer_frame_indices(self, monkeypatch):
+    def test_detect_episode_preserves_integer_frame_indices(self, monkeypatch):
         service = DetectionService()
         observed_indices: list[int] = []
 
@@ -35,12 +35,14 @@ class TestDetectionEpisodeProcessing:
 
         monkeypatch.setattr(DetectionService, "detect_frame", fake_detect_frame)
 
-        summary = await service.detect_episode(
-            dataset_id="dataset",
-            episode_idx=0,
-            request=DetectionRequest(frames=[1, 3]),
-            get_frame_image=get_frame_image,
-            total_frames=10,
+        summary = asyncio.run(
+            service.detect_episode(
+                dataset_id="dataset",
+                episode_idx=0,
+                request=DetectionRequest(frames=[1, 3]),
+                get_frame_image=get_frame_image,
+                total_frames=10,
+            )
         )
 
         assert observed_indices == [1, 1, 3, 3]
@@ -73,12 +75,12 @@ class TestDetectionEpisodeProcessing:
 # Synthetic-model tests for full coverage of detection_service branches.
 # ---------------------------------------------------------------------------
 
-import io  # noqa: E402
+import io
 
-from PIL import Image as _PILImage  # noqa: E402
+from PIL import Image as _PILImage
 
-from src.api.models.detection import EpisodeDetectionSummary  # noqa: E402
-from src.api.services import detection_service as ds_module  # noqa: E402
+from src.api.models.detection import EpisodeDetectionSummary
+from src.api.services import detection_service as ds_module
 
 
 def _png_bytes() -> bytes:
@@ -171,25 +173,22 @@ class TestCacheHelpers:
 
 
 class TestDetectFrame:
-    @pytest.mark.asyncio
-    async def test_no_results(self):
+    def test_no_results(self):
         s = DetectionService()
         s._model = _FakeYOLOModel([])
         s._model_name = "yolo11n"
-        out = await s.detect_frame(_png_bytes(), frame_idx=2)
+        out = asyncio.run(s.detect_frame(_png_bytes(), frame_idx=2))
         assert out.frame == 2
         assert out.detections == []
 
-    @pytest.mark.asyncio
-    async def test_no_boxes(self):
+    def test_no_boxes(self):
         s = DetectionService()
         s._model = _FakeYOLOModel([_FakeResult(boxes=None)])
         s._model_name = "yolo11n"
-        out = await s.detect_frame(_png_bytes(), frame_idx=0)
+        out = asyncio.run(s.detect_frame(_png_bytes(), frame_idx=0))
         assert out.detections == []
 
-    @pytest.mark.asyncio
-    async def test_with_boxes_and_unknown_class(self):
+    def test_with_boxes_and_unknown_class(self):
         s = DetectionService()
         boxes = _FakeBoxes(
             classes=[0, 999],
@@ -198,15 +197,14 @@ class TestDetectFrame:
         )
         s._model = _FakeYOLOModel([_FakeResult(boxes=boxes)])
         s._model_name = "yolo11n"
-        out = await s.detect_frame(_png_bytes(), frame_idx=0)
+        out = asyncio.run(s.detect_frame(_png_bytes(), frame_idx=0))
         names = [d.class_name for d in out.detections]
         assert names == ["person", "class_999"]
         assert out.detections[0].confidence == pytest.approx(0.9)
 
 
 class TestDetectEpisodeFull:
-    @pytest.mark.asyncio
-    async def test_full_path_with_skips_exception_and_detections(self):
+    def test_full_path_with_skips_exception_and_detections(self):
         s = DetectionService()
         boxes = _FakeBoxes(classes=[0], confs=[0.8], xyxy=[[0.0, 0.0, 1.0, 1.0]])
         s._model = _FakeYOLOModel([_FakeResult(boxes=boxes)])
@@ -219,12 +217,14 @@ class TestDetectEpisodeFull:
                 raise RuntimeError("explode")
             return _png_bytes()
 
-        summary = await s.detect_episode(
-            dataset_id="d",
-            episode_idx=0,
-            request=DetectionRequest(),
-            get_frame_image=get_frame_image,
-            total_frames=8,
+        summary = asyncio.run(
+            s.detect_episode(
+                dataset_id="d",
+                episode_idx=0,
+                request=DetectionRequest(),
+                get_frame_image=get_frame_image,
+                total_frames=8,
+            )
         )
         assert summary.total_frames == 8
         assert summary.processed_frames == 3
