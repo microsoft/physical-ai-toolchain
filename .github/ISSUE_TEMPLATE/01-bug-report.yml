@@ -63,7 +63,7 @@ body:
       description: Provide relevant environment details
       placeholder: |
         - OS: Ubuntu 22.04 / Windows 11
-        - Python version: 3.10.x / 3.11.x
+        - Python version: 3.10.x / 3.11.x / 3.12.x
         - Terraform version: 1.9.x
         - Azure CLI version: 2.x
         - Isaac Sim version: 4.5 / 5.0
