@@ -66,14 +66,6 @@ output "resource_group" {
   }
 }
 
-output "virtual_network" {
-  description = "Mock virtual network reference."
-  value = {
-    id   = local.vnet_id
-    name = local.vnet_name
-  }
-}
-
 output "subnets" {
   description = "Mock subnets object exposing the private endpoints subnet."
   value = {

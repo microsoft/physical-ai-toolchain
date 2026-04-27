@@ -4,14 +4,6 @@
  * Resources provided by the platform module as typed object dependencies.
  */
 
-variable "virtual_network" {
-  type = object({
-    id   = string
-    name = string
-  })
-  description = "Virtual network from the platform module"
-}
-
 variable "subnets" {
   type = object({
     private_endpoints = object({

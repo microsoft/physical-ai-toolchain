@@ -228,7 +228,6 @@ module "conversion_pipeline" {
   resource_group  = local.resource_group
 
   // Dependencies from platform module (typed objects)
-  virtual_network         = module.platform.virtual_network
   subnets                 = module.platform.subnets
   private_dns_zones       = module.platform.private_dns_zones
   log_analytics_workspace = module.platform.log_analytics_workspace

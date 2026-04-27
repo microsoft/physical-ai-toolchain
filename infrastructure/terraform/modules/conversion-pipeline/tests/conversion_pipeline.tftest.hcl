@@ -23,7 +23,6 @@ run "default_naming" {
     instance                = run.setup.instance
     location                = run.setup.location
     resource_group          = run.setup.resource_group
-    virtual_network         = run.setup.virtual_network
     subnets                 = run.setup.subnets
     private_dns_zones       = run.setup.private_dns_zones
     log_analytics_workspace = run.setup.log_analytics_workspace
@@ -58,7 +57,6 @@ run "containers_created" {
     instance                             = run.setup.instance
     location                             = run.setup.location
     resource_group                       = run.setup.resource_group
-    virtual_network                      = run.setup.virtual_network
     subnets                              = run.setup.subnets
     private_dns_zones                    = run.setup.private_dns_zones
     log_analytics_workspace              = run.setup.log_analytics_workspace
@@ -90,7 +88,6 @@ run "dlq_disabled_skips_container" {
     instance                             = run.setup.instance
     location                             = run.setup.location
     resource_group                       = run.setup.resource_group
-    virtual_network                      = run.setup.virtual_network
     subnets                              = run.setup.subnets
     private_dns_zones                    = run.setup.private_dns_zones
     log_analytics_workspace              = run.setup.log_analytics_workspace
@@ -116,7 +113,6 @@ run "lifecycle_defaults" {
     instance                = run.setup.instance
     location                = run.setup.location
     resource_group          = run.setup.resource_group
-    virtual_network         = run.setup.virtual_network
     subnets                 = run.setup.subnets
     private_dns_zones       = run.setup.private_dns_zones
     log_analytics_workspace = run.setup.log_analytics_workspace
@@ -146,7 +142,6 @@ run "event_grid_filters" {
     instance                = run.setup.instance
     location                = run.setup.location
     resource_group          = run.setup.resource_group
-    virtual_network         = run.setup.virtual_network
     subnets                 = run.setup.subnets
     private_dns_zones       = run.setup.private_dns_zones
     log_analytics_workspace = run.setup.log_analytics_workspace
@@ -177,7 +172,6 @@ run "private_endpoints_enabled" {
     instance                       = run.setup.instance
     location                       = run.setup.location
     resource_group                 = run.setup.resource_group
-    virtual_network                = run.setup.virtual_network
     subnets                        = run.setup.subnets
     private_dns_zones              = run.setup.private_dns_zones
     log_analytics_workspace        = run.setup.log_analytics_workspace
@@ -199,7 +193,6 @@ run "private_endpoints_disabled" {
     instance                       = run.setup.instance
     location                       = run.setup.location
     resource_group                 = run.setup.resource_group
-    virtual_network                = run.setup.virtual_network
     subnets                        = run.setup.subnets
     private_dns_zones              = run.setup.private_dns_zones
     log_analytics_workspace        = run.setup.log_analytics_workspace
@@ -225,7 +218,6 @@ run "fabric_capacity_created" {
     instance                      = run.setup.instance
     location                      = run.setup.location
     resource_group                = run.setup.resource_group
-    virtual_network               = run.setup.virtual_network
     subnets                       = run.setup.subnets
     private_dns_zones             = run.setup.private_dns_zones
     log_analytics_workspace       = run.setup.log_analytics_workspace
@@ -248,7 +240,6 @@ run "fabric_capacity_reused" {
     instance                       = run.setup.instance
     location                       = run.setup.location
     resource_group                 = run.setup.resource_group
-    virtual_network                = run.setup.virtual_network
     subnets                        = run.setup.subnets
     private_dns_zones              = run.setup.private_dns_zones
     log_analytics_workspace        = run.setup.log_analytics_workspace
@@ -276,7 +267,6 @@ run "invalid_sku_rejected" {
     instance                = run.setup.instance
     location                = run.setup.location
     resource_group          = run.setup.resource_group
-    virtual_network         = run.setup.virtual_network
     subnets                 = run.setup.subnets
     private_dns_zones       = run.setup.private_dns_zones
     log_analytics_workspace = run.setup.log_analytics_workspace
@@ -295,7 +285,6 @@ run "invalid_replication_rejected" {
     instance                 = run.setup.instance
     location                 = run.setup.location
     resource_group           = run.setup.resource_group
-    virtual_network          = run.setup.virtual_network
     subnets                  = run.setup.subnets
     private_dns_zones        = run.setup.private_dns_zones
     log_analytics_workspace  = run.setup.log_analytics_workspace
@@ -314,7 +303,6 @@ run "empty_suffix_filters_rejected" {
     instance                = run.setup.instance
     location                = run.setup.location
     resource_group          = run.setup.resource_group
-    virtual_network         = run.setup.virtual_network
     subnets                 = run.setup.subnets
     private_dns_zones       = run.setup.private_dns_zones
     log_analytics_workspace = run.setup.log_analytics_workspace

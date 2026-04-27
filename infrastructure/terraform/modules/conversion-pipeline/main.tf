@@ -98,4 +98,8 @@ resource "azurerm_storage_container" "event_grid_dlq" {
   name                  = "event-grid-dlq"
   storage_account_id    = azurerm_storage_account.this.id
   container_access_type = "private"
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
