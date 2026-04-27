@@ -49,6 +49,25 @@ jobs:
           go-version-file: infrastructure/terraform/e2e/go.mod
           cache-dependency-path: infrastructure/terraform/e2e/go.mod
 
+      - name: Install terraform-docs
+        run: |
+          $version = 'v0.21.0'
+          $expectedSha = '2fdd81b8d21ff1498cd559af0dcc5d155835f84600db06d3923e217124fc735a'
+          $tarball = 'terraform-docs.tar.gz'
+          $url = "https://github.com/terraform-docs/terraform-docs/releases/download/${version}/terraform-docs-${version}-linux-amd64.tar.gz"
+
+          Invoke-WebRequest -Uri $url -OutFile $tarball
+
+          $actualSha = (Get-FileHash -Path $tarball -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha -ne $expectedSha) {
+            throw "SHA256 mismatch for terraform-docs ${version}: expected '${expectedSha}', got '${actualSha}'"
+          }
+          Write-Output "SHA256 verified: ${actualSha}"
+
+          tar -xzf $tarball
+          sudo mv terraform-docs /usr/local/bin/
+          terraform-docs --version
+
       - name: Run Go tests
         id: go-tests
         continue-on-error: ${{ inputs.soft-fail }}
