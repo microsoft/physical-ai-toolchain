@@ -40,8 +40,8 @@ jobs:
         with:
           directory: ${{ inputs.working-directory }}
           framework: terraform
-          output_format: cli,sarif
-          output_file_path: console,logs/checkov.sarif
+          output_format: sarif
+          output_file_path: logs
           soft_fail: ${{ inputs.soft-fail }}
           download_external_modules: false
 
@@ -49,7 +49,7 @@ jobs:
         if: always()
         uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
         with:
-          sarif_file: logs/checkov.sarif
+          sarif_file: logs/results_sarif.sarif
           category: checkov
 
       - name: Upload Checkov SARIF artifact
@@ -57,5 +57,5 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: checkov-sarif
-          path: logs/checkov.sarif
+          path: logs/results_sarif.sarif
           retention-days: 30
