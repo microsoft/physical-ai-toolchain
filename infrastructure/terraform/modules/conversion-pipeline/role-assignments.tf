@@ -10,7 +10,7 @@
 resource "azurerm_role_assignment" "eventgrid_dlq_writer" {
   count = var.should_enable_event_grid_dead_letter ? 1 : 0
 
-  scope                = azurerm_storage_account.this.id
+  scope                = azurerm_storage_container.event_grid_dlq[0].id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_eventgrid_system_topic.blob.identity[0].principal_id
 }

@@ -57,8 +57,11 @@ resource "azurerm_eventgrid_system_topic_event_subscription" "raw_blob_created" 
     }
   }
 
-  dead_letter_identity {
-    type = "SystemAssigned"
+  dynamic "dead_letter_identity" {
+    for_each = var.should_enable_event_grid_dead_letter ? [1] : []
+    content {
+      type = "SystemAssigned"
+    }
   }
 
   delivery_identity {

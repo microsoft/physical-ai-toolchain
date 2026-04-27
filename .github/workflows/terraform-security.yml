@@ -33,8 +33,6 @@ jobs:
       - name: Create logs directory
         run: mkdir -p logs
 
-      # TODO(security): Pin bridgecrewio/checkov-action to a specific commit SHA
-      # via the dependency-pinning workflow before disabling soft-fail.
       - name: Run Checkov
         id: checkov
         uses: bridgecrewio/checkov-action@38a95e98d734de90a74687a8d986d6b06107f342 # v12.2898.0

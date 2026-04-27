@@ -43,7 +43,7 @@ should_deploy_redis      = true
 // PostgreSQL HA
 postgresql_sku_name = "GP_Standard_D2s_v3"
 postgresql_high_availability = {
-  enabled                   = true
+  should_enable             = true
   standby_availability_zone = "2"
 }
 

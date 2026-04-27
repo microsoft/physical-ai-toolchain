@@ -59,6 +59,9 @@ terraform init && terraform plan -var-file=terraform.tfvars
 terraform apply -var-file=terraform.tfvars
 ```
 
+> [!IMPORTANT]
+> The conversion-pipeline module (`should_deploy_conversion_pipeline = true`) uses the `microsoft/fabric` provider, which authenticates from environment variables. Export `FABRIC_TENANT_ID`, `FABRIC_CLIENT_ID`, and `FABRIC_CLIENT_SECRET` before running `terraform plan` / `apply`. The module also requires a [two-pass deployment](terraform/modules/conversion-pipeline/README.md#-two-pass-deployment) for the Fabric workspace.
+
 ### 3. Connect to the cluster
 
 ```bash
