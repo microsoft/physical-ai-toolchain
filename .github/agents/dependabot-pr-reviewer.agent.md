@@ -91,6 +91,44 @@ Render the review body as markdown in this order:
   * The PR diff touches `.github/workflows/**`.
   * The PR author is not `dependabot[bot]`.
 
+## Validation Execution
+
+When a high-risk trigger fires, execute the corresponding validation commands before finalizing the review. Report results inline so maintainers have concrete evidence rather than just advisory text.
+
+### Execution Rules
+
+* Run validation only for packages classified as high-risk by the surface rubric.
+* Execute the validation command(s) listed in the surface table's "Validation advice" column.
+* Cap total validation time at 5 minutes. If a command exceeds this, report the timeout and skip remaining checks.
+* Never run validation for low-risk patches or dev-only bumps.
+
+### Per-Surface Validation Commands
+
+| Surface | Trigger condition | Commands to run |
+| --- | --- | --- |
+| python-runtime (dataviewer) | ABI-sensitive package major bump (`pyarrow`, `numpy`, `scipy`, `opencv*`, `pandas`) | `cd data-management/viewer && uv sync --extra dev --extra all && uv run ruff check backend/src/` then `uv run pytest backend/tests/ --tb=short -q` |
+| python-runtime (evaluation) | ABI-sensitive package major bump | `cd evaluation && uv sync && uv run ruff check . && uv run pytest --tb=short -q` |
+| python-runtime (training) | ABI-sensitive package major bump | `cd training && uv sync && uv run ruff check . && uv run pytest --tb=short -q` |
+| dataviewer-frontend | Major bump of React, Vite, TypeScript, Tailwind, or peer-dep conflict | `cd data-management/viewer/frontend && npm ci && npm run validate` |
+| terraform-providers | `azurerm` major bump or breaking-change boundary | `cd infrastructure/terraform && terraform init -backend=false && terraform validate` |
+| gomod | Major version bump of direct dependency | `go mod verify && go vet ./... && go build ./...` |
+
+### Reporting Validation Results
+
+Include a `### Validation Results` block in the per-package section of the review body:
+
+* Show the command(s) executed.
+* Report pass/fail counts (for example `411 passed, 110 skipped, 1 failed`).
+* If all relevant tests pass, state: `✅ Automated validation passed — safe to merge based on lint and test results.`
+* If tests fail, list the failing test names and indicate whether failures are related to the dependency bump or pre-existing. Distinguish by checking if the same tests fail on the base branch.
+* If validation cannot run (missing tooling, timeout, environment limitation), state: `⚠️ Validation skipped: <reason>. Manual validation recommended.`
+
+### Verdict Adjustment
+
+* When a high-risk bump passes all validation checks, the verdict MAY be upgraded from `COMMENT` to `APPROVE` with rationale: "High-risk trigger fired but automated validation confirms compatibility."
+* When validation fails with bump-related errors, keep the verdict as `COMMENT` and include the failure details.
+* When validation is skipped or inconclusive, keep the verdict as `COMMENT` with the original advisory text.
+
 ## Forbidden Actions
 
 * No `git push`, no branch creation, no branch deletion.
