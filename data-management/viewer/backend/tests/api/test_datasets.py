@@ -54,12 +54,14 @@ def sample_dataset():
 
 
 @pytest.fixture
-async def registered_dataset(client, sample_dataset):
+def registered_dataset(client, sample_dataset):
     """Register a sample dataset before tests."""
+    import asyncio
+
     import src.api.services.dataset_service as ds_mod
 
     service = ds_mod.get_dataset_service()
-    await service.register_dataset(sample_dataset)
+    asyncio.run(service.register_dataset(sample_dataset))
     yield sample_dataset
     service._datasets.clear()
 
@@ -73,8 +75,7 @@ class TestDatasetEndpoints:
         assert response.status_code == 200
         assert response.json() == []
 
-    @pytest.mark.asyncio
-    async def test_list_datasets_with_data(self, client, registered_dataset):
+    def test_list_datasets_with_data(self, client, registered_dataset):
         """Test listing datasets returns registered datasets."""
         response = client.get("/api/datasets")
         assert response.status_code == 200
@@ -85,8 +86,7 @@ class TestDatasetEndpoints:
         assert datasets[0]["name"] == "Test Dataset"
         assert datasets[0]["total_episodes"] == 100
 
-    @pytest.mark.asyncio
-    async def test_get_dataset(self, client, registered_dataset):
+    def test_get_dataset(self, client, registered_dataset):
         """Test getting a specific dataset."""
         response = client.get("/api/datasets/test-dataset")
         assert response.status_code == 200
@@ -102,8 +102,7 @@ class TestDatasetEndpoints:
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
 
-    @pytest.mark.asyncio
-    async def test_list_episodes(self, client, registered_dataset):
+    def test_list_episodes(self, client, registered_dataset):
         """Test listing episodes for a dataset."""
         response = client.get("/api/datasets/test-dataset/episodes")
         assert response.status_code == 200
@@ -111,8 +110,7 @@ class TestDatasetEndpoints:
         episodes = response.json()
         assert len(episodes) <= 100  # Limited by default
 
-    @pytest.mark.asyncio
-    async def test_list_episodes_with_pagination(self, client, registered_dataset):
+    def test_list_episodes_with_pagination(self, client, registered_dataset):
         """Test episode listing with pagination."""
         response = client.get("/api/datasets/test-dataset/episodes?offset=10&limit=5")
         assert response.status_code == 200
@@ -126,8 +124,7 @@ class TestDatasetEndpoints:
         response = client.get("/api/datasets/nonexistent/episodes")
         assert response.status_code == 404
 
-    @pytest.mark.asyncio
-    async def test_get_episode(self, client, registered_dataset):
+    def test_get_episode(self, client, registered_dataset):
         """Test getting a specific episode."""
         response = client.get("/api/datasets/test-dataset/episodes/5")
         assert response.status_code == 200
@@ -140,8 +137,7 @@ class TestDatasetEndpoints:
         response = client.get("/api/datasets/nonexistent/episodes/0")
         assert response.status_code == 404
 
-    @pytest.mark.asyncio
-    async def test_get_episode_not_found(self, client, registered_dataset):
+    def test_get_episode_not_found(self, client, registered_dataset):
         """Test getting a non-existent episode returns 404."""
         response = client.get("/api/datasets/test-dataset/episodes/999")
         assert response.status_code == 404

@@ -2,6 +2,7 @@
 Integration tests for annotation API endpoints.
 """
 
+import asyncio
 import os
 import tempfile
 from datetime import UTC, datetime
@@ -63,12 +64,12 @@ def sample_dataset():
 
 
 @pytest.fixture
-async def registered_dataset(client, sample_dataset):
+def registered_dataset(client, sample_dataset):
     """Register a sample dataset before tests."""
     import src.api.services.dataset_service as ds_mod
 
     service = ds_mod.get_dataset_service()
-    await service.register_dataset(sample_dataset)
+    asyncio.run(service.register_dataset(sample_dataset))
     yield sample_dataset
     service._datasets.clear()
 
@@ -106,8 +107,7 @@ def sample_annotation():
 class TestAnnotationEndpoints:
     """Tests for annotation API endpoints."""
 
-    @pytest.mark.asyncio
-    async def test_get_annotations_empty(self, client, registered_dataset):
+    def test_get_annotations_empty(self, client, registered_dataset):
         """Test getting annotations when none exist."""
         response = client.get("/api/datasets/test-dataset/episodes/0/annotations")
         assert response.status_code == 200
@@ -122,8 +122,7 @@ class TestAnnotationEndpoints:
         response = client.get("/api/datasets/nonexistent/episodes/0/annotations")
         assert response.status_code == 404
 
-    @pytest.mark.asyncio
-    async def test_save_annotation(self, client, registered_dataset, sample_annotation):
+    def test_save_annotation(self, client, registered_dataset, sample_annotation):
         """Test saving an annotation."""
         response = client.put(
             "/api/datasets/test-dataset/episodes/5/annotations",
@@ -136,8 +135,7 @@ class TestAnnotationEndpoints:
         assert len(data["annotations"]) == 1
         assert data["annotations"][0]["annotator_id"] == "test-user"
 
-    @pytest.mark.asyncio
-    async def test_save_annotation_updates_existing(self, client, registered_dataset, sample_annotation):
+    def test_save_annotation_updates_existing(self, client, registered_dataset, sample_annotation):
         """Test that saving updates existing annotation from same user."""
         # Save initial annotation
         client.put(
@@ -157,8 +155,7 @@ class TestAnnotationEndpoints:
         assert len(data["annotations"]) == 1  # Still only one annotation
         assert data["annotations"][0]["notes"] == "Updated notes"
 
-    @pytest.mark.asyncio
-    async def test_save_annotation_multiple_annotators(self, client, registered_dataset, sample_annotation):
+    def test_save_annotation_multiple_annotators(self, client, registered_dataset, sample_annotation):
         """Test multiple annotators can annotate same episode."""
         # Save first annotation
         client.put(
@@ -185,8 +182,7 @@ class TestAnnotationEndpoints:
         )
         assert response.status_code == 404
 
-    @pytest.mark.asyncio
-    async def test_delete_annotations_all(self, client, registered_dataset, sample_annotation):
+    def test_delete_annotations_all(self, client, registered_dataset, sample_annotation):
         """Test deleting all annotations for an episode."""
         # Save annotation
         client.put(
@@ -203,8 +199,7 @@ class TestAnnotationEndpoints:
         get_response = client.get("/api/datasets/test-dataset/episodes/5/annotations")
         assert get_response.json()["annotations"] == []
 
-    @pytest.mark.asyncio
-    async def test_delete_annotations_specific_annotator(self, client, registered_dataset, sample_annotation):
+    def test_delete_annotations_specific_annotator(self, client, registered_dataset, sample_annotation):
         """Test deleting annotations from specific annotator."""
         # Save annotations from two users
         client.put(
@@ -231,8 +226,7 @@ class TestAnnotationEndpoints:
 class TestAnnotationSummaryEndpoint:
     """Tests for annotation summary endpoint."""
 
-    @pytest.mark.asyncio
-    async def test_get_summary_empty(self, client, registered_dataset):
+    def test_get_summary_empty(self, client, registered_dataset):
         """Test getting summary when no annotations exist."""
         response = client.get("/api/datasets/test-dataset/annotations/summary")
         assert response.status_code == 200
@@ -242,8 +236,7 @@ class TestAnnotationSummaryEndpoint:
         assert data["total_episodes"] == 100
         assert data["annotated_episodes"] == 0
 
-    @pytest.mark.asyncio
-    async def test_get_summary_with_annotations(self, client, registered_dataset, sample_annotation):
+    def test_get_summary_with_annotations(self, client, registered_dataset, sample_annotation):
         """Test summary aggregates annotation metrics."""
         # Save some annotations
         for idx in [0, 5, 10]:
@@ -268,8 +261,7 @@ class TestAnnotationSummaryEndpoint:
 class TestAutoAnalysisEndpoint:
     """Tests for auto-analysis endpoint."""
 
-    @pytest.mark.asyncio
-    async def test_trigger_auto_analysis(self, client, registered_dataset):
+    def test_trigger_auto_analysis(self, client, registered_dataset):
         """Test triggering auto-analysis."""
         response = client.post("/api/datasets/test-dataset/episodes/5/annotations/auto")
         assert response.status_code == 200
