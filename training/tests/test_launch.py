@@ -368,6 +368,7 @@ class TestMain:
 
     def test_azure_config_error_raises_system_exit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_dependencies(monkeypatch)
+        monkeypatch.setattr(_MOD, "AzureConfigError", _AzureConfigError)
 
         def _raise(args):
             raise _AzureConfigError("auth failure")
