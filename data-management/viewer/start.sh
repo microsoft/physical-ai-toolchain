@@ -144,7 +144,7 @@ start_backend() {
         log_info "Creating virtual environment..."
 
         if command -v uv &>/dev/null; then
-            (cd "${BACKEND_DIR}" && uv venv --python 3.11)
+            (cd "${BACKEND_DIR}" && uv venv --python 3.12)
             (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e ".[dev,analysis,export]")
         else
             log_error "uv not found. Please install uv or create venv manually."

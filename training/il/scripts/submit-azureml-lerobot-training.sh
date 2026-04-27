@@ -298,11 +298,15 @@ set -euo pipefail
 
 echo "=== LeRobot AzureML Training ==="
 
-# Install runtime dependencies from workflow manifest
+# Install runtime dependencies from pre-compiled requirements
 apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential > /dev/null 2>&1
 pip install --quiet uv
-uv pip compile training/lerobot/pyproject.toml -o /tmp/lerobot-runtime-requirements.txt
-uv pip install --system --requirement /tmp/lerobot-runtime-requirements.txt
+LEROBOT_REQUIREMENTS="training/il/lerobot/requirements.txt"
+if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
+  echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
+  exit 1
+fi
+uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
 
 # HuggingFace auth
 if [[ -n "${HF_TOKEN:-}" ]]; then

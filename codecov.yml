@@ -1,13 +1,23 @@
-# codecov.yml — Codecov configuration for unified coverage reporting
+# Codecov configuration for physical-ai-toolchain.
 #
-# Flags:
-#   go — Go tests covering infrastructure/terraform/e2e/
-#   pester — PowerShell tests covering scripts/
-#   pytest — Python tests covering training/
-#   pytest-dataviewer — Dataviewer backend tests covering data-management/viewer/backend/src/
-#   pytest-fuzz — Python fuzz regression tests covering tests/, backend, and training
-#   terraform — Terraform tests covering infrastructure/terraform/
-#   vitest — Vitest tests covering data-management/viewer/frontend/src/
+# Flag → Workflow → cwd → coverage scope
+# ----------------------------------------------------------------------------
+# pytest-training      | pytest-training.yml            | repo root                      | --cov=training
+# pytest-dm-tools      | pytest-dm-tools.yml            | repo root                      | --cov=data-management/tools
+# pytest-data-pipeline | pytest-data-pipeline.yml       | repo root                      | --cov=data-pipeline/capture
+# pytest-inference     | pytest-inference.yml           | repo root                      | --cov=fleet-deployment/inference
+# pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend | --cov=src
+# pytest-evaluation    | evaluation-pytests.yml         | evaluation                     | --cov=.
+# pytest-fuzz          | fuzz-regression-tests.yml      | repo root                      | --cov=tests --cov=data-management/viewer/backend/src --cov=training
+# vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | vitest --coverage
+# go                   | go-tests.yml                   | infrastructure/terraform/e2e   | go test -cover
+# terraform            | terraform-tests.yml            | infrastructure/terraform       | terraform test
+# pester               | pester-tests.yml               | repo root                      | Invoke-Pester -CodeCoverage
+#
+# Flag overlaps (intentional):
+#   pytest-fuzz overlaps pytest-training (training/) and pytest-dataviewer (viewer/backend/src/).
+#   go ⊂ terraform (infrastructure/terraform/e2e/ ⊂ infrastructure/terraform/);
+#     deduplicated at the component layer (infrastructure-terraform vs infrastructure-go-e2e).
 
 codecov:
   notify:
@@ -32,14 +42,34 @@ coverage:
           - pester
         target: auto
         threshold: 1%
-      pytest:
+      pytest-training:
         flags:
-          - pytest
+          - pytest-training
+        target: auto
+        threshold: 1%
+      pytest-dm-tools:
+        flags:
+          - pytest-dm-tools
+        target: auto
+        threshold: 1%
+      pytest-data-pipeline:
+        flags:
+          - pytest-data-pipeline
+        target: auto
+        threshold: 1%
+      pytest-inference:
+        flags:
+          - pytest-inference
         target: auto
         threshold: 1%
       pytest-dataviewer:
         flags:
           - pytest-dataviewer
+        target: auto
+        threshold: 1%
+      pytest-fuzz:
+        flags:
+          - pytest-fuzz
         target: auto
         threshold: 1%
       terraform:
@@ -52,9 +82,9 @@ coverage:
           - vitest
         target: auto
         threshold: 1%
-      pytest-fuzz:
+      pytest-evaluation:
         flags:
-          - pytest-fuzz
+          - pytest-evaluation
         target: auto
         threshold: 1%
     patch:
@@ -69,13 +99,29 @@ coverage:
         flags:
           - pester
         informational: true
-      pytest:
+      pytest-training:
         flags:
-          - pytest
+          - pytest-training
+        informational: true
+      pytest-dm-tools:
+        flags:
+          - pytest-dm-tools
+        informational: true
+      pytest-data-pipeline:
+        flags:
+          - pytest-data-pipeline
+        informational: true
+      pytest-inference:
+        flags:
+          - pytest-inference
         informational: true
       pytest-dataviewer:
         flags:
           - pytest-dataviewer
+        informational: true
+      pytest-fuzz:
+        flags:
+          - pytest-fuzz
         informational: true
       terraform:
         flags:
@@ -85,35 +131,31 @@ coverage:
         flags:
           - vitest
         informational: true
-      pytest-fuzz:
+      pytest-evaluation:
         flags:
-          - pytest-fuzz
+          - pytest-evaluation
         informational: true
 
 flags:
-  go:
-    paths:
-      - infrastructure/terraform/e2e/
-    carryforward: true
-  pester:
-    paths:
-      - scripts/
-    carryforward: true
-  pytest:
+  pytest-training:
     paths:
       - training/
+    carryforward: true
+  pytest-dm-tools:
+    paths:
+      - data-management/tools/
+    carryforward: true
+  pytest-data-pipeline:
+    paths:
+      - data-pipeline/capture/
+    carryforward: true
+  pytest-inference:
+    paths:
+      - fleet-deployment/inference/
     carryforward: true
   pytest-dataviewer:
     paths:
       - data-management/viewer/backend/src/
-    carryforward: true
-  terraform:
-    paths:
-      - infrastructure/terraform/
-    carryforward: true
-  vitest:
-    paths:
-      - data-management/viewer/frontend/src/
     carryforward: true
   pytest-fuzz:
     paths:
@@ -121,6 +163,129 @@ flags:
       - data-management/viewer/backend/src/
       - training/
     carryforward: true
+  pytest-evaluation:
+    paths:
+      - evaluation/
+    carryforward: true
+  vitest:
+    paths:
+      - data-management/viewer/frontend/src/
+    carryforward: true
+  go:
+    paths:
+      - infrastructure/terraform/e2e/
+    carryforward: true
+  terraform:
+    paths:
+      - infrastructure/terraform/
+    carryforward: true
+  pester:
+    paths:
+      - scripts/
+    carryforward: true
+
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        threshold: 1%
+      - type: patch
+        target: auto
+        threshold: 5%
+  individual_components:
+    - component_id: training
+      name: Training
+      paths:
+        - training/*.py
+        - training/rl/**
+        - training/il/**
+        - training/vla/**
+        - training/pipelines/**
+        - training/packaging/**
+        - training/utils/**
+    - component_id: evaluation
+      name: Evaluation
+      paths:
+        - evaluation/sil/**
+        - evaluation/metrics/**
+    - component_id: data-pipeline-capture
+      name: Data Pipeline / Capture
+      paths:
+        - data-pipeline/capture/**
+        - "!data-pipeline/capture/tests/**"
+    - component_id: fleet-deployment-inference
+      name: Fleet Deployment / Inference
+      paths:
+        - fleet-deployment/inference/**
+    - component_id: dataviewer-backend
+      name: Dataviewer Backend
+      paths:
+        - data-management/viewer/backend/src/**
+    - component_id: dataviewer-backend-routers
+      name: Dataviewer Backend / Routers
+      paths:
+        - data-management/viewer/backend/src/api/routers/**
+        - data-management/viewer/backend/src/api/routes/**
+    - component_id: dataviewer-backend-services
+      name: Dataviewer Backend / Services
+      paths:
+        - data-management/viewer/backend/src/api/services/**
+    - component_id: dataviewer-backend-storage
+      name: Dataviewer Backend / Storage
+      paths:
+        - data-management/viewer/backend/src/api/storage/**
+        - data-management/viewer/backend/src/api/models/**
+    - component_id: dataviewer-backend-security
+      name: Dataviewer Backend / Security
+      paths:
+        - data-management/viewer/backend/src/api/auth.py
+        - data-management/viewer/backend/src/api/csrf.py
+        - data-management/viewer/backend/src/api/validation.py
+        - data-management/viewer/backend/src/api/rate_limiter.py
+        - data-management/viewer/backend/src/api/middleware.py
+    - component_id: dataviewer-frontend
+      name: Dataviewer Frontend
+      paths:
+        - data-management/viewer/frontend/src/**
+    - component_id: dataviewer-frontend-components
+      name: Dataviewer Frontend / Components
+      paths:
+        - data-management/viewer/frontend/src/components/**
+    - component_id: dataviewer-frontend-lib
+      name: Dataviewer Frontend / Lib
+      paths:
+        - data-management/viewer/frontend/src/lib/**
+        - data-management/viewer/frontend/src/api/**
+        - data-management/viewer/frontend/src/types/**
+    - component_id: dataviewer-frontend-state
+      name: Dataviewer Frontend / State
+      paths:
+        - data-management/viewer/frontend/src/stores/**
+        - data-management/viewer/frontend/src/hooks/**
+    - component_id: data-management-tools
+      name: Data Management Tools
+      paths:
+        - data-management/tools/**
+        - "!data-management/tools/tests/**"
+    - component_id: infrastructure-terraform
+      name: Infrastructure / Terraform
+      paths:
+        - infrastructure/terraform/**/*.tf
+    - component_id: infrastructure-go-e2e
+      name: Infrastructure / Go E2E
+      paths:
+        - infrastructure/terraform/e2e/**/*.go
+    - component_id: scripts-pester
+      name: Scripts / Pester
+      paths:
+        - scripts/**/*.ps1
+        - scripts/**/*.psm1
+    - component_id: fuzz-suite
+      name: Fuzz Suite
+      paths:
+        - tests/fuzz_harness.py
+        - tests/fuzz-corpus/**
 
 parsers:
   jacoco:
@@ -133,10 +298,22 @@ comment:
   show_carryforward_flags: true
 
 ignore:
+  - "training/tests/**"
+  - "data-management/viewer/backend/tests/**"
+  - "data-management/tools/tests/**"
+  - "data-pipeline/capture/tests/**"
+  - "evaluation/tests/**"
+  - "scripts/tests/**"
+  - "scripts/security/zap-to-sarif.py"
+  - "tests/e2e/**"
+  - "fleet-deployment/inference/tests/**"
+  - "**/__pycache__/**"
+  - "**/.venv/**"
+  - "**/node_modules/**"
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "external/**"
   - "docs/**"
-  - "deploy/**"
   - "workflows/**"
   - "config/**"
-  - "external/**"
   - "logs/**"
-  - "tests/**"

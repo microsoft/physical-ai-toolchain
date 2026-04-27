@@ -3,7 +3,7 @@ name = "physical-ai-toolchain"
 version = "0.7.4"
 description = "Physical AI Toolchain for Isaac Lab training"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 
 [build-system]
 requires = ["hatchling"]
@@ -14,9 +14,9 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.152.1",
+    "hypothesis==6.152.3",
     "numpy==2.4.4",
-    "ruff==0.15.11",
+    "ruff==0.15.12",
     "pytest==9.0.3",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
@@ -24,7 +24,7 @@ dev = [
     "ipykernel==7.2.0",
     "ipywidgets==8.1.8",
     "tqdm==4.67.3",
-    "matplotlib==3.10.8",
+    "matplotlib==3.10.9",
     "azureml-mlflow==1.62.0.post2",
     "azure-ai-ml==1.32.0",
 ]
@@ -35,7 +35,7 @@ package = false
 constraint-dependencies = ["pygments==2.20.0"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "training/tests", "data-management/tools/tests"]
+testpaths = ["tests", "training/tests", "data-management/tools/tests", "fleet-deployment/inference/tests"]
 pythonpath = [".", "data-management/tools"]
 python_files = ["test_*.py", "fuzz_harness.py"]
 addopts = [
@@ -44,9 +44,6 @@ addopts = [
     "not e2e",
     "--strict-markers",
     "--strict-config",
-    "--cov=training",
-    "--cov-report=term-missing",
-    "--cov-report=xml",
     "--junitxml=logs/pytest-results.xml",
 ]
 markers = [
@@ -62,7 +59,7 @@ max_examples = 50
 deadline = 500
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 120
 
 [tool.ruff.lint]
@@ -85,6 +82,7 @@ select = [
 "training/rl/scripts/rsl_rl/*.py" = ["E402"]
 "data-management/viewer/backend/tests/*.py" = ["E402"]
 "data-pipeline/capture/tests/test_config_models.py" = ["E402"]
+"data-pipeline/capture/tests/test_config_models_hypothesis.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["training"]

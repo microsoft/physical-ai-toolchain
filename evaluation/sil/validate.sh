@@ -22,22 +22,25 @@ fi
 
 export PYTHONPATH="${SRC_DIR}:${PYTHONPATH:-}"
 
-runtime_manifest="${TRAINING_DIR}/pyproject.toml"
-runtime_requirements="$(mktemp)"
-cleanup() {
-  rm -f "${runtime_requirements}"
-}
-trap cleanup EXIT
+runtime_requirements="${SRC_DIR}/training/il/lerobot/requirements.txt"
+
+if [[ ! -f "${runtime_requirements}" ]]; then
+  echo "Error: LeRobot requirements not found at ${runtime_requirements}" >&2
+  exit 1
+fi
 
 if command -v uv &>/dev/null; then
-  uv pip compile "${runtime_manifest}" -o "${runtime_requirements}"
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --requirement "${runtime_requirements}"
+    uv pip install --no-cache-dir --requirement "${runtime_requirements}" || \
+      uv pip install --no-cache-dir --requirement "${runtime_requirements}" --index-strategy first-index \
+        --extra-index-url https://download.pytorch.org/whl/cu124
   else
-    uv pip install --no-cache-dir --system --requirement "${runtime_requirements}"
+    uv pip install --no-cache-dir --system --requirement "${runtime_requirements}" || \
+      uv pip install --no-cache-dir --system --requirement "${runtime_requirements}" --index-strategy first-index \
+        --extra-index-url https://download.pytorch.org/whl/cu124
   fi
 else
-  echo "Error: uv is required to compile workflow manifest dependencies" >&2
+  echo "Error: uv is required to install workflow dependencies" >&2
   exit 1
 fi
 

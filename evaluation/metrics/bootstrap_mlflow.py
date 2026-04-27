@@ -2,6 +2,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 import mlflow
 from azure.ai.ml import MLClient
@@ -29,7 +30,8 @@ if not experiment_name or experiment_name == "none":
     experiment_name = f"lerobot-{os.environ.get('POLICY_TYPE', 'act')}-inference"
 mlflow.set_experiment(experiment_name)
 
-with open("/tmp/mlflow_config.env", "w") as f:
+config_path = Path(os.environ.get("MLFLOW_CONFIG_PATH", "/tmp/mlflow_config.env"))
+with config_path.open("w") as f:
     f.write(f"MLFLOW_TRACKING_URI={tracking_uri}\n")
     f.write(f"MLFLOW_EXPERIMENT_NAME={experiment_name}\n")
 

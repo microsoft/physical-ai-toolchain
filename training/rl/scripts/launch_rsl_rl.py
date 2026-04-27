@@ -18,7 +18,6 @@ _LOGGER = logging.getLogger("isaaclab.launch_rsl_rl")
 _REQUIRED_MODULES = {
     "azure.identity": "azure-identity>=1.13.0",
     "azure.ai.ml": "azure-ai-ml",
-    "azureml.mlflow": "azureml-mlflow",
     "mlflow": "mlflow",
 }
 

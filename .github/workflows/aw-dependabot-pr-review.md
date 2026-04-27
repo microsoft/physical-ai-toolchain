@@ -45,7 +45,7 @@ runtimes:
     action-repo: actions/setup-node
     action-version: 53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
   python:
-    version: "3.11"
+    version: "3.12"
     action-repo: actions/setup-python
     action-version: a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
   uv:
@@ -54,7 +54,7 @@ runtimes:
   go:
     action-repo: actions/setup-go
     action-version: 4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-pre-agent-steps:
+steps:
   - name: Install jq for Dependabot body and JSON intel parsing
     shell: bash
     run: |
@@ -86,6 +86,17 @@ tools:
     - "jq . **/*.json"
     - "npm view *"
     - "uv tree"
+    # Validation commands for high-risk bumps
+    - "cd data-management/viewer && uv sync --extra dev --extra all && uv run ruff check backend/src/"
+    - "cd data-management/viewer && uv run pytest backend/tests/ --tb=short -q"
+    - "cd data-management/viewer/frontend && npm ci && npm run validate"
+    - "cd evaluation && uv sync && uv run ruff check . && uv run pytest --tb=short -q"
+    - "cd training && uv sync && uv run ruff check . && uv run pytest --tb=short -q"
+    - "cd infrastructure/terraform && terraform init -backend=false && terraform validate"
+    - "cd infrastructure/terraform && terraform fmt -check -recursive"
+    - "go vet ./..."
+    - "go build ./..."
+    - "go mod verify"
 safe-outputs:
   create-pull-request-review-comment:
     max: 5

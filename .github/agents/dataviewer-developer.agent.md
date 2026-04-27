@@ -202,7 +202,7 @@ Follow these codebase conventions:
 - New endpoints go in `routers/` (REST) or `routes/` (specialized)
 - Models in `models/`, services in `services/`
 - Register new routers in `main.py`
-- Use ruff for linting (line-length 120, target py311)
+- Use ruff for linting (line-length 120, target py312)
 
 **Frontend (React/TypeScript):**
 

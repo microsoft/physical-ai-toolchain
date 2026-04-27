@@ -24,6 +24,7 @@ Security documentation for the Physical AI Toolchain covering threat analysis, d
 | [Threat Model](threat-model.md)                                                         | STRIDE-based threat analysis and remediation roadmap             |
 | [Deployment Security Guide](../operations/security-guide.md)                            | Security configuration inventory and deployment responsibilities |
 | [Release Verification](release-verification.md)                                         | Verify release artifact provenance and SBOM attestations         |
+| [Workflow Permissions](workflow-permissions.md)                                         | GitHub Actions permission scopes and OSSF Scorecard exceptions   |
 | [SECURITY.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/SECURITY.md) | Vulnerability disclosure and reporting process                   |
 
 ## 🔒 Security Posture
@@ -47,12 +48,12 @@ The [security guide](../operations/security-guide.md) documents:
 
 Automated security and freshness checks that run on GitHub Actions schedules and publish findings to the Security tab.
 
-| Script                                                                                                                                     | Workflow                         | Purpose                                                                                      |
-|--------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|----------------------------------------------------------------------------------------------|
-| [`scripts/security/Test-BinaryFreshness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-BinaryFreshness.ps1)      | `check-binary-integrity.yml`   | Verify pinned binary SHA-256 hashes and detect Helm chart version drift (SARIF output) |
-| [`scripts/security/Test-DependencyPinning.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-DependencyPinning.ps1) | `dependency-pinning-scan.yml`  | Validate that GitHub Actions, Docker images, and package manifests pin exact versions  |
-| [`scripts/security/Test-SHAStaleness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-SHAStaleness.ps1)            | `sha-staleness-check.yml`      | Detect SHA pins that have drifted behind upstream release tags                         |
-| [`scripts/update-chart-hashes.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-chart-hashes.sh)                            | Run manually after chart bumps | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
+| Script                                                                                                                                                    | Workflow                       | Purpose                                                                                       |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------|-----------------------------------------------------------------------------------------------|
+| [`scripts/security/Test-BinaryFreshness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-BinaryFreshness.ps1)     | `check-binary-integrity.yml`   | Verify pinned binary SHA-256 hashes and detect Helm chart version drift (SARIF output)        |
+| [`scripts/security/Test-DependencyPinning.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-DependencyPinning.ps1) | `dependency-pinning-scan.yml`  | Validate that GitHub Actions, Docker images, and package manifests pin exact versions         |
+| [`scripts/security/Test-SHAStaleness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-SHAStaleness.ps1)           | `sha-staleness-check.yml`      | Detect SHA pins that have drifted behind upstream release tags                                |
+| [`scripts/update-chart-hashes.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-chart-hashes.sh)                           | Run manually after chart bumps | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
 
 Each PowerShell script supports a `-SarifFile` parameter for CI integration and a `-ConfigPreview` switch for local dry-run inspection. Run `scripts/update-chart-hashes.sh` locally whenever a pinned Helm chart version is updated so `defaults.conf` stays in sync.
 
