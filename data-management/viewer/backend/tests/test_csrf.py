@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi import HTTPException
 
@@ -42,32 +44,46 @@ class TestRequireCsrfToken:
     def _enable_csrf(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")
 
-    async def test_safe_method_passes_without_token(self) -> None:
-        await require_csrf_token(_csrf_request("GET"))
+    def test_safe_method_passes_without_token(self) -> None:
+        async def _run() -> None:
+            await require_csrf_token(_csrf_request("GET"))
+        asyncio.run(_run())
 
-    async def test_exempt_path_passes(self) -> None:
-        await require_csrf_token(_csrf_request("POST", path="/api/csrf-token"))
-        await require_csrf_token(_csrf_request("POST", path="/health"))
+    def test_exempt_path_passes(self) -> None:
+        async def _run() -> None:
+            await require_csrf_token(_csrf_request("POST", path="/api/csrf-token"))
+            await require_csrf_token(_csrf_request("POST", path="/health"))
+        asyncio.run(_run())
 
-    async def test_matching_tokens_pass(self) -> None:
-        token = generate_csrf_token()
-        await require_csrf_token(_csrf_request("POST", cookie=token, header=token))
+    def test_matching_tokens_pass(self) -> None:
+        async def _run() -> None:
+            token = generate_csrf_token()
+            await require_csrf_token(_csrf_request("POST", cookie=token, header=token))
+        asyncio.run(_run())
 
-    async def test_missing_cookie_rejected(self) -> None:
-        with pytest.raises(HTTPException) as exc_info:
-            await require_csrf_token(_csrf_request("POST", header="abc"))
-        assert exc_info.value.status_code == 403
+    def test_missing_cookie_rejected(self) -> None:
+        async def _run() -> None:
+            with pytest.raises(HTTPException) as exc_info:
+                await require_csrf_token(_csrf_request("POST", header="abc"))
+            assert exc_info.value.status_code == 403
+        asyncio.run(_run())
 
-    async def test_missing_header_rejected(self) -> None:
-        with pytest.raises(HTTPException) as exc_info:
-            await require_csrf_token(_csrf_request("POST", cookie="abc"))
-        assert exc_info.value.status_code == 403
+    def test_missing_header_rejected(self) -> None:
+        async def _run() -> None:
+            with pytest.raises(HTTPException) as exc_info:
+                await require_csrf_token(_csrf_request("POST", cookie="abc"))
+            assert exc_info.value.status_code == 403
+        asyncio.run(_run())
 
-    async def test_mismatched_tokens_rejected(self) -> None:
-        with pytest.raises(HTTPException) as exc_info:
-            await require_csrf_token(_csrf_request("PATCH", cookie="aaa", header="bbb"))
-        assert exc_info.value.status_code == 403
+    def test_mismatched_tokens_rejected(self) -> None:
+        async def _run() -> None:
+            with pytest.raises(HTTPException) as exc_info:
+                await require_csrf_token(_csrf_request("PATCH", cookie="aaa", header="bbb"))
+            assert exc_info.value.status_code == 403
+        asyncio.run(_run())
 
-    async def test_bypass_when_auth_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "TRUE")
-        await require_csrf_token(_csrf_request("DELETE"))
+    def test_bypass_when_auth_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def _run() -> None:
+            monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "TRUE")
+            await require_csrf_token(_csrf_request("DELETE"))
+        asyncio.run(_run())
