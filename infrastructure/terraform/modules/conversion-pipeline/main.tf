@@ -59,9 +59,9 @@ resource "azurerm_storage_account" "this" {
 
   // checkov:skip=CKV_AZURE_33: Queue service unavailable on hierarchical namespace accounts.
   // checkov:skip=CKV_AZURE_206: Replication tier parameterized per environment (LRS dev, ZRS staging, GRS prod).
-  // checkov:skip=CKV2_AZURE_1: Customer-managed key encryption tracked in follow-up WI-01.
-  // checkov:skip=CKV2_AZURE_18: Customer-managed key with Key Vault tracked in follow-up WI-01.
-  // checkov:skip=CKV2_AZURE_50: Immutability policy tracked in follow-up WI-01.
+  // checkov:skip=CKV2_AZURE_1: Customer-managed key encryption tracked in #41 (BYOK encryption configuration).
+  // checkov:skip=CKV2_AZURE_18: Customer-managed key with Key Vault tracked in #41 (BYOK encryption configuration).
+  // checkov:skip=CKV2_AZURE_50: Immutability policy on critical blob containers tracked in #578.
 
   lifecycle {
     prevent_destroy = true

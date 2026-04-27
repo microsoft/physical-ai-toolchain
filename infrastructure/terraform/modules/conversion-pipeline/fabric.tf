@@ -16,6 +16,9 @@
  * Fabric tenant admin setting "Service principals can use Fabric APIs".
  */
 
+// Fabric Capacity name must match ^[a-z][a-z0-9]{2,62}$ (lowercase letters and digits only —
+// no hyphens). The hyphenated `{abbreviation}-{prefix}-{environment}-{instance}` convention
+// cannot apply here, so `fc` joins `kv`, `st`, `acr` as a no-hyphen exception.
 resource "azurerm_fabric_capacity" "this" {
   count = var.should_create_fabric_capacity ? 1 : 0
 
@@ -37,4 +40,11 @@ resource "fabric_workspace" "this" {
   display_name = "fws-${local.resource_name_suffix}"
   description  = "Conversion pipeline workspace (${var.environment})"
   capacity_id  = var.fabric_capacity_uuid
+
+  lifecycle {
+    precondition {
+      condition     = var.fabric_capacity_uuid != null && length(var.fabric_capacity_uuid) > 0
+      error_message = "fabric_capacity_uuid must be set to the Fabric capacity GUID before creating fabric_workspace.this. See modules/conversion-pipeline/README.md \"Two-pass deployment\" for the apply sequence."
+    }
+  }
 }

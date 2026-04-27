@@ -1,7 +1,7 @@
 ---
 title: Conversion Pipeline Module
 description: Terraform module that provisions ADLS Gen2 storage, Event Grid, and Microsoft Fabric for the raw -> converted ingest pipeline
-author: Edge AI Team
+author: Microsoft Robotics-AI Team
 ms.date: 2026-04-21
 ms.topic: reference
 ---
@@ -116,11 +116,21 @@ flowchart LR
 
 ## 🔄 Two-pass deployment
 
-The `fabric_workspace.capacity_id` argument expects the Fabric capacity GUID, not the ARM resource ID. The `azurerm_fabric_capacity` resource does not surface the GUID, so workspace creation is split across two applies:
+The `fabric_workspace.capacity_id` argument expects the Fabric capacity GUID, not the ARM resource ID. The `azurerm_fabric_capacity` resource does not surface the GUID, so workspace creation is split across two applies. `fabric_workspace.this` carries a `lifecycle.precondition` that fails fast when `fabric_capacity_uuid` is unset, so a misconfigured second apply produces a clear error rather than an opaque provider failure.
 
 1. First apply: leave `should_create_fabric_workspace = false` (or `fabric_capacity_uuid = null`). The capacity is created.
 2. Look up the capacity GUID via the Fabric admin portal or the Fabric REST API (`GET https://api.fabric.microsoft.com/v1/capacities`).
 3. Second apply: set `fabric_capacity_uuid` to the discovered GUID and `should_create_fabric_workspace = true`. The workspace is created bound to the capacity.
 
 > [!NOTE]
-> Tracking issue: a follow-up will replace the manual lookup with a data source or `azapi_resource_action` once the GUID is exposed.
+> Tracking issue: a follow-up will replace the manual lookup with a wrapper script (`infrastructure/setup/05-fabric-capacity-bootstrap.sh`) or a Terraform data source / `azapi_resource_action` once the GUID is exposed.
+
+## 🔒 Known security deferrals
+
+Three Checkov controls are intentionally suppressed in this module pending tracked work. Each suppression is paired with an issue reference in `main.tf`.
+
+| Checkov ID       | Control                                          | Tracking issue                                                                |
+|------------------|--------------------------------------------------|-------------------------------------------------------------------------------|
+| `CKV2_AZURE_1`   | Customer-managed key encryption on storage       | [#41 — BYOK encryption configuration](https://github.com/microsoft/physical-ai-toolchain/issues/41)   |
+| `CKV2_AZURE_18`  | Customer-managed key with Key Vault              | [#41 — BYOK encryption configuration](https://github.com/microsoft/physical-ai-toolchain/issues/41)   |
+| `CKV2_AZURE_50`  | Immutability policy on critical blob containers  | [#578 — Immutability policy on critical blob containers](https://github.com/microsoft/physical-ai-toolchain/issues/578) |
