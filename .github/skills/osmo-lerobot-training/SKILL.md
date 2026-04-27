@@ -17,7 +17,7 @@ Read the skill file `.github/skills/osmo-lerobot-training/SKILL.md` for paramete
 | `az` CLI | Azure authentication and model registry |
 | `terraform` | Infrastructure output resolution |
 | `zip`, `base64` | Training payload packaging |
-| Python 3.11+ with `azure-ai-ml`, `mlflow` | Metric retrieval from Azure ML |
+| Python 3.12+ with `azure-ai-ml`, `mlflow` | Metric retrieval from Azure ML |
 
 Authentication must be configured before any OSMO or Azure ML operations:
 

@@ -66,12 +66,12 @@ PowerShell scripts for validating code quality and documentation.
 
 Security scanning and dependency management scripts.
 
-| Script                         | Purpose                                                                                    |
-|--------------------------------|--------------------------------------------------------------------------------------------|
-| `security/Test-DependencyPinning.ps1` | Validate dependency pinning compliance                                                     |
-| `security/Test-SHAStaleness.ps1`      | Check for outdated SHA pins                                                                |
-| `security/Test-BinaryFreshness.ps1`   | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab |
-| `security/zap-to-sarif.py`            | Convert ZAP results to SARIF format                                                        |
+| Script                                | Purpose                                                                                       |
+|---------------------------------------|-----------------------------------------------------------------------------------------------|
+| `security/Test-DependencyPinning.ps1` | Validate dependency pinning compliance                                                        |
+| `security/Test-SHAStaleness.ps1`      | Check for outdated SHA pins                                                                   |
+| `security/Test-BinaryFreshness.ps1`   | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab    |
+| `security/zap-to-sarif.py`            | Convert ZAP results to SARIF format                                                           |
 | `update-chart-hashes.sh`              | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
 
 The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the values pinned in `.devcontainer/install-dev-deps.sh` and `.devcontainer/devcontainer.json`, and queries upstream Helm repositories for chart version drift. Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script.
@@ -80,19 +80,19 @@ The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.
 
 Pins are split across two files by structural necessity, not duplication. Each file owns a different class of artifact:
 
-| Artifact class               | Canonical location                                | Why it lives there                                                                                        |
-|------------------------------|---------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| Helm chart versions + SHAs   | `infrastructure/setup/defaults.conf`              | Sourced by runtime shell deploy scripts (`infrastructure/setup/*.sh`); bash-overridable via `.env.local`. |
-| Dev container binaries (OSMO CLI, NGC CLI) + SHAs | `.devcontainer/devcontainer.json` | Consumed during Docker image build, before any shell can source bash variables.                           |
+| Artifact class                                    | Canonical location                   | Why it lives there                                                                                        |
+|---------------------------------------------------|--------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Helm chart versions + SHAs                        | `infrastructure/setup/defaults.conf` | Sourced by runtime shell deploy scripts (`infrastructure/setup/*.sh`); bash-overridable via `.env.local`. |
+| Dev container binaries (OSMO CLI, NGC CLI) + SHAs | `.devcontainer/devcontainer.json`    | Consumed during Docker image build, before any shell can source bash variables.                           |
 
 All other references to these pins are read-only consumers:
 
-| Consumer                                | Role                                                                                     |
-|-----------------------------------------|------------------------------------------------------------------------------------------|
-| `scripts/update-chart-hashes.sh`        | Writes chart versions + SHAs back into `defaults.conf` via `sed`; no other file touched. |
+| Consumer                                    | Role                                                                                              |
+|---------------------------------------------|---------------------------------------------------------------------------------------------------|
+| `scripts/update-chart-hashes.sh`            | Writes chart versions + SHAs back into `defaults.conf` via `sed`; no other file touched.          |
 | `scripts/security/Test-BinaryFreshness.ps1` | Reads both canonical files (`Get-ShellVariable`, `Get-JsonVariable`) to compare against upstream. |
-| `docs/contributing/component-updates.md`    | Documents `defaults.conf` as authoritative for chart pins.                           |
-| `.env.local.example`                        | User-override stubs only — does not redefine defaults.              |
+| `docs/contributing/component-updates.md`    | Documents `defaults.conf` as authoritative for chart pins.                                        |
+| `.env.local.example`                        | User-override stubs only — does not redefine defaults.                                            |
 
 ### 🔄 Updating Chart Pins
 

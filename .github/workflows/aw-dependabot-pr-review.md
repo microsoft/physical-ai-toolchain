@@ -45,7 +45,7 @@ runtimes:
     action-repo: actions/setup-node
     action-version: 53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
   python:
-    version: "3.11"
+    version: "3.12"
     action-repo: actions/setup-python
     action-version: a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
   uv:
