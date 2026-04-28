@@ -43,6 +43,7 @@ jobs:
           --cov=training
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-training.xml
+          --cov-fail-under=80
 
       - name: Upload coverage.xml artifact
         if: always()
