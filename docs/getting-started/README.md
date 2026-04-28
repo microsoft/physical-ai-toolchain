@@ -41,7 +41,7 @@ Deploy the Physical AI Toolchain and submit your first training job. This hub gu
 | Azure CLI | ≥2.65.0 |
 | kubectl   | ≥1.31   |
 | Helm      | ≥3.16   |
-| Python    | ≥3.11   |
+| Python    | ≥3.12   |
 
 Azure subscription with Contributor + User Access Administrator roles, GPU quota for `Standard_NC24ads_A100_v4`, and an NVIDIA NGC account are required. See [Prerequisites](../contributing/prerequisites.md) for full details.
 
