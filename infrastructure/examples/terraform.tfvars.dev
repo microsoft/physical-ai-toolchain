@@ -58,21 +58,17 @@ should_enable_microsoft_defender        = false
 // =============================================================================
 // Conversion Pipeline (Optional)
 // =============================================================================
-// Cost-optimized for dev: LRS, public networking permitted, F2 capacity, brief
-// raw retention. Set should_deploy_conversion_pipeline = true to provision.
+// Cost-optimized for dev: F2 capacity. The conversion pipeline reuses the
+// platform stdl... data-lake account, so should_create_data_lake_storage must
+// be true whenever should_deploy_conversion_pipeline is true (enforced by a
+// root-level precondition).
 // =============================================================================
 
 should_deploy_conversion_pipeline = false
+should_create_data_lake_storage   = true
 conversion_pipeline_config = {
-  storage_replication_type             = "LRS"
-  should_enable_public_network_access  = true
-  should_enable_shared_key             = false
-  should_enable_private_endpoint       = false
   should_create_fabric_capacity        = true
-  should_create_fabric_workspace       = false
+  should_create_fabric_workspace       = true
   fabric_capacity_sku                  = "F2"
-  raw_retention_days                   = 7
-  converted_cool_days                  = 30
-  converted_archive_days               = 90
   should_enable_event_grid_dead_letter = true
 }

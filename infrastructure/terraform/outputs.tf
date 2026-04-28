@@ -201,21 +201,6 @@ output "osmo_workload_identity" {
 // Conversion Pipeline Outputs (Optional)
 // ============================================================
 
-output "conversion_pipeline_storage_account" {
-  description = "Conversion pipeline storage account. Null when conversion pipeline is disabled."
-  value       = try(module.conversion_pipeline[0].storage_account, null)
-}
-
-output "conversion_pipeline_raw_container" {
-  description = "Conversion pipeline raw container. Null when conversion pipeline is disabled."
-  value       = try(module.conversion_pipeline[0].raw_container, null)
-}
-
-output "conversion_pipeline_converted_container" {
-  description = "Conversion pipeline converted container. Null when conversion pipeline is disabled."
-  value       = try(module.conversion_pipeline[0].converted_container, null)
-}
-
 output "conversion_pipeline_event_grid_topic" {
   description = "Conversion pipeline Event Grid system topic. Null when conversion pipeline is disabled."
   value       = try(module.conversion_pipeline[0].event_grid_topic, null)
@@ -224,6 +209,11 @@ output "conversion_pipeline_event_grid_topic" {
 output "conversion_pipeline_event_grid_subscription" {
   description = "Conversion pipeline Event Grid subscription. Null when conversion pipeline is disabled."
   value       = try(module.conversion_pipeline[0].event_grid_subscription, null)
+}
+
+output "conversion_pipeline_event_grid_dlq_container" {
+  description = "Conversion pipeline Event Grid dead-letter container. Null when DLQ is disabled or pipeline is disabled."
+  value       = try(module.conversion_pipeline[0].event_grid_dlq_container, null)
 }
 
 output "conversion_pipeline_fabric_workspace" {

@@ -2,7 +2,7 @@
 title: SiL Module (Software-in-the-Loop)
 description: Deploys AKS-specific infrastructure for robotics ML workloads with GPU node pools, AzureML integration, and observability.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-21
+ms.date: 2026-04-28
 ms.topic: reference
 ---
 

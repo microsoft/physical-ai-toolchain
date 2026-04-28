@@ -214,11 +214,29 @@ module "sil" {
 // Conversion Pipeline Module - Raw -> Converted Ingest
 // ============================================================
 
+// Precondition guard: the conversion pipeline reuses the platform-owned
+// data-lake account, so the platform must provision it. Module call blocks
+// do not support `lifecycle.precondition` directly, so the check lives on a
+// terraform_data resource that the module depends on.
+resource "terraform_data" "conversion_pipeline_precondition" {
+  count = var.should_deploy_conversion_pipeline ? 1 : 0
+
+  lifecycle {
+    precondition {
+      condition     = var.should_create_data_lake_storage
+      error_message = "should_deploy_conversion_pipeline = true requires should_create_data_lake_storage = true (the conversion pipeline reuses the platform stdl... account)."
+    }
+  }
+}
+
 module "conversion_pipeline" {
   source = "./modules/conversion-pipeline"
   count  = var.should_deploy_conversion_pipeline ? 1 : 0
 
-  depends_on = [module.platform]
+  depends_on = [
+    module.platform,
+    terraform_data.conversion_pipeline_precondition,
+  ]
 
   // Core variables
   environment     = var.environment
@@ -228,22 +246,8 @@ module "conversion_pipeline" {
   resource_group  = local.resource_group
 
   // Dependencies from platform module (typed objects)
-  subnets                 = module.platform.subnets
-  private_dns_zones       = module.platform.private_dns_zones
-  log_analytics_workspace = module.platform.log_analytics_workspace
-
-  // Storage shape
-  storage_replication_type            = var.conversion_pipeline_config.storage_replication_type
-  should_enable_shared_key            = var.conversion_pipeline_config.should_enable_shared_key
-  should_enable_public_network_access = var.conversion_pipeline_config.should_enable_public_network_access
-  allowed_ip_rules                    = var.conversion_pipeline_config.allowed_ip_rules
-  should_enable_private_endpoint      = var.conversion_pipeline_config.should_enable_private_endpoint
-  should_enable_diagnostic_settings   = var.conversion_pipeline_config.should_enable_diagnostic_settings
-
-  // Lifecycle
-  raw_retention_days     = var.conversion_pipeline_config.raw_retention_days
-  converted_cool_days    = var.conversion_pipeline_config.converted_cool_days
-  converted_archive_days = var.conversion_pipeline_config.converted_archive_days
+  data_lake_storage_account = module.platform.data_lake_storage_account
+  datasets_container        = module.platform.datasets_container
 
   // Event Grid
   should_enable_event_grid_dead_letter = var.conversion_pipeline_config.should_enable_event_grid_dead_letter
@@ -253,7 +257,6 @@ module "conversion_pipeline" {
   // Fabric
   should_create_fabric_capacity  = var.conversion_pipeline_config.should_create_fabric_capacity
   should_create_fabric_workspace = var.conversion_pipeline_config.should_create_fabric_workspace
-  fabric_capacity_uuid           = var.conversion_pipeline_config.fabric_capacity_uuid
   fabric_capacity_sku            = var.conversion_pipeline_config.fabric_capacity_sku
   fabric_admin_members           = var.conversion_pipeline_config.fabric_admin_members
   fabric_workspace_sp_object_id  = var.conversion_pipeline_config.fabric_workspace_sp_object_id

@@ -62,21 +62,17 @@ should_enable_purge_protection          = false
 // =============================================================================
 // Conversion Pipeline (Optional)
 // =============================================================================
-// Pre-production posture: ZRS, private endpoints required, F8 capacity.
-// Set should_deploy_conversion_pipeline = true to provision.
+// Pre-production posture: F8 capacity. The conversion pipeline reuses the
+// platform stdl... data-lake account, so should_create_data_lake_storage must
+// be true whenever should_deploy_conversion_pipeline is true (enforced by a
+// root-level precondition).
 // =============================================================================
 
 should_deploy_conversion_pipeline = false
+should_create_data_lake_storage   = true
 conversion_pipeline_config = {
-  storage_replication_type             = "ZRS"
-  should_enable_public_network_access  = false
-  should_enable_shared_key             = false
-  should_enable_private_endpoint       = true
   should_create_fabric_capacity        = true
-  should_create_fabric_workspace       = false
+  should_create_fabric_workspace       = true
   fabric_capacity_sku                  = "F8"
-  raw_retention_days                   = 30
-  converted_cool_days                  = 30
-  converted_archive_days               = 90
   should_enable_event_grid_dead_letter = true
 }

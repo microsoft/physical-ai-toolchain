@@ -22,7 +22,7 @@ terraform {
     }
     fabric = {
       source  = "microsoft/fabric"
-      version = "~> 1.0"
+      version = ">= 1.3.0"
     }
   }
   required_version = ">= 1.9.8, < 2.0"
@@ -35,9 +35,3 @@ provider "azurerm" {
 }
 
 provider "azapi" {}
-
-// Microsoft Fabric provider authenticates via FABRIC_TENANT_ID, FABRIC_CLIENT_ID,
-// FABRIC_CLIENT_SECRET environment variables. The service principal must be in
-// a security group allow-listed under the Fabric tenant admin setting
-// "Service principals can use Fabric APIs".
-provider "fabric" {}

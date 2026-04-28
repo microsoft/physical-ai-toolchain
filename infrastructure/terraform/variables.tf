@@ -536,9 +536,11 @@ variable "should_include_aks_dns_zone" {
  * The conversion pipeline module is opt-in. When should_deploy_conversion_pipeline
  * is false (default), no conversion-pipeline resources are created and the
  * conversion_pipeline_config object's fields go unused. When true, the module
- * provisions the dedicated ADLS Gen2 storage, Event Grid topic + subscription,
- * Microsoft Fabric capacity + workspace, private endpoints, lifecycle policies,
- * and RBAC.
+ * provisions an Event Grid system topic + subscription on the platform-owned
+ * data-lake account, an in-account dead-letter container, the Microsoft Fabric
+ * capacity + workspace, and Fabric SP RBAC. Durable storage (raw -> converted)
+ * lives on the platform module's data-lake account; should_create_data_lake_storage
+ * must be true (enforced by a precondition on the conversion-pipeline module).
  */
 
 variable "should_deploy_conversion_pipeline" {
@@ -549,21 +551,11 @@ variable "should_deploy_conversion_pipeline" {
 
 variable "conversion_pipeline_config" {
   type = object({
-    storage_replication_type             = optional(string, "ZRS")
-    should_enable_public_network_access  = optional(bool, false)
-    should_enable_shared_key             = optional(bool, false)
-    should_enable_private_endpoint       = optional(bool, true)
-    should_enable_diagnostic_settings    = optional(bool, true)
-    allowed_ip_rules                     = optional(list(string), [])
-    raw_retention_days                   = optional(number, 30)
-    converted_cool_days                  = optional(number, 30)
-    converted_archive_days               = optional(number, 90)
     should_enable_event_grid_dead_letter = optional(bool, true)
     raw_blob_suffix_filters              = optional(list(string), [".bag", ".bag.zst", ".mcap"])
     conversion_subscriber_url            = optional(string, null)
     should_create_fabric_capacity        = optional(bool, true)
     should_create_fabric_workspace       = optional(bool, true)
-    fabric_capacity_uuid                 = optional(string, null)
     fabric_capacity_sku                  = optional(string, "F2")
     fabric_admin_members                 = optional(list(string), [])
     fabric_workspace_sp_object_id        = optional(string, null)

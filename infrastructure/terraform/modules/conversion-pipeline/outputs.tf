@@ -5,34 +5,8 @@
  * pipeline from issues #32, #34, #72) via the variables.deps.tf pattern.
  */
 
-output "storage_account" {
-  description = "Conversion-pipeline storage account"
-  value = {
-    id                    = azurerm_storage_account.this.id
-    name                  = azurerm_storage_account.this.name
-    primary_blob_endpoint = azurerm_storage_account.this.primary_blob_endpoint
-    primary_dfs_endpoint  = azurerm_storage_account.this.primary_dfs_endpoint
-  }
-}
-
-output "raw_container" {
-  description = "Raw blob container"
-  value = {
-    id   = azurerm_storage_container.raw.id
-    name = azurerm_storage_container.raw.name
-  }
-}
-
-output "converted_container" {
-  description = "Converted blob container"
-  value = {
-    id   = azurerm_storage_container.converted.id
-    name = azurerm_storage_container.converted.name
-  }
-}
-
 output "event_grid_topic" {
-  description = "Event Grid system topic on the conversion storage account"
+  description = "Event Grid system topic on the platform data-lake account"
   value = {
     id                    = azurerm_eventgrid_system_topic.blob.id
     name                  = azurerm_eventgrid_system_topic.blob.name
@@ -48,8 +22,16 @@ output "event_grid_subscription" {
   }
 }
 
+output "event_grid_dlq_container" {
+  description = "Event Grid dead-letter container on the platform data-lake account. Null when DLQ is disabled"
+  value = try({
+    id   = azurerm_storage_container.event_grid_dlq[0].id
+    name = azurerm_storage_container.event_grid_dlq[0].name
+  }, null)
+}
+
 output "fabric_workspace" {
-  description = "Microsoft Fabric workspace bound to the conversion capacity. Null when workspace creation is deferred (see README two-pass deployment)"
+  description = "Microsoft Fabric workspace bound to the conversion capacity"
   value = try({
     id           = fabric_workspace.this[0].id
     display_name = fabric_workspace.this[0].display_name

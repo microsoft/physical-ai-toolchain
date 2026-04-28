@@ -4,34 +4,18 @@
  * Resources provided by the platform module as typed object dependencies.
  */
 
-variable "subnets" {
+variable "data_lake_storage_account" {
   type = object({
-    private_endpoints = object({
-      id   = string
-      name = string
-    })
+    id   = string
+    name = string
   })
-  description = "Subnets from the platform module. Only the private endpoints subnet is consumed"
+  description = "Platform-owned ADLS Gen2 data-lake account (stdl...) used as the durable raw -> converted store"
 }
 
-variable "private_dns_zones" {
+variable "datasets_container" {
   type = object({
-    storage_blob = object({
-      id   = string
-      name = string
-    })
-    storage_dfs = object({
-      id   = string
-      name = string
-    })
+    id   = string
+    name = string
   })
-  description = "Private DNS zones from the platform module. storage_blob and storage_dfs are required when private endpoints are enabled"
-}
-
-variable "log_analytics_workspace" {
-  type = object({
-    id           = string
-    workspace_id = string
-  })
-  description = "Log Analytics workspace from the platform module. Used by diagnostic settings"
+  description = "Datasets container on the platform-owned data-lake account. Used to scope Fabric SP ACL grants to raw/ and converted/ folders"
 }
