@@ -38,6 +38,21 @@ import pyarrow.parquet as pq
 import torch
 
 
+def _safe_throughput(inf_times: "np.ndarray | list[float]") -> float:
+    """Return mean inverse latency in Hz, or 0.0 when latency is zero or invalid.
+
+    Avoids ``RuntimeWarning: divide by zero`` when test fixtures or
+    degenerate runs produce all-zero inference times.
+    """
+    arr = np.asarray(inf_times, dtype=float)
+    if arr.size == 0:
+        return 0.0
+    mean_latency = float(np.mean(arr))
+    if not np.isfinite(mean_latency) or mean_latency <= 0.0:
+        return 0.0
+    return 1.0 / mean_latency
+
+
 def resolve_device(requested: str) -> str:
     if requested == "cuda" and torch.cuda.is_available():
         return "cuda"
@@ -296,7 +311,7 @@ def run_evaluation(args: argparse.Namespace) -> None:
         mae = float(np.mean(np.abs(pred - gt)))
         per_dim_mae = np.mean(np.abs(pred - gt), axis=0)
         avg_inf_ms = float(np.mean(inf_times) * 1000)
-        throughput = float(1.0 / np.mean(inf_times))
+        throughput = _safe_throughput(inf_times)
 
         print(f"  Steps: {len(pred)}, MSE: {mse:.6f}, MAE: {mae:.6f}")
         print(f"  Avg inference: {avg_inf_ms:.1f}ms, Throughput: {throughput:.1f} Hz")
