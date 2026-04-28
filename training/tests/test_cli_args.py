@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,6 +14,7 @@ from .conftest import load_training_module
 _CLI_ARGS = load_training_module("training_rl_cli_args", "training/rl/cli_args.py")
 add_rsl_rl_args = _CLI_ARGS.add_rsl_rl_args
 update_rsl_rl_cfg = _CLI_ARGS.update_rsl_rl_cfg
+parse_rsl_rl_cfg = _CLI_ARGS.parse_rsl_rl_cfg
 
 
 class TestAddRslRlArgs:
@@ -189,3 +192,56 @@ class TestUpdateRslRlCfg:
         assert result.logger == "tensorboard"
         assert result.wandb_project is None
         assert result.neptune_project is None
+
+
+class TestParseRslRlCfg:
+    """Tests for parse_rsl_rl_cfg registry loading and CLI override flow."""
+
+    @staticmethod
+    def _make_args(**overrides: object) -> SimpleNamespace:
+        defaults: dict[str, object] = {
+            "seed": None,
+            "resume": None,
+            "load_run": None,
+            "checkpoint": None,
+            "run_name": None,
+            "logger": None,
+            "log_project_name": None,
+        }
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    @staticmethod
+    def _make_cfg() -> SimpleNamespace:
+        return SimpleNamespace(
+            seed=0,
+            resume=False,
+            load_run="",
+            load_checkpoint="",
+            run_name="",
+            logger="tensorboard",
+            wandb_project=None,
+            neptune_project=None,
+        )
+
+    def test_loads_from_registry_and_applies_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """parse_rsl_rl_cfg loads cfg via registry and applies CLI overrides."""
+        cfg = self._make_cfg()
+        load_cfg = MagicMock(return_value=cfg)
+        parse_cfg_module = MagicMock()
+        parse_cfg_module.load_cfg_from_registry = load_cfg
+        utils_module = MagicMock()
+        utils_module.parse_cfg = parse_cfg_module
+        isaaclab_tasks_module = MagicMock()
+        isaaclab_tasks_module.utils = utils_module
+
+        monkeypatch.setitem(sys.modules, "isaaclab_tasks", isaaclab_tasks_module)
+        monkeypatch.setitem(sys.modules, "isaaclab_tasks.utils", utils_module)
+        monkeypatch.setitem(sys.modules, "isaaclab_tasks.utils.parse_cfg", parse_cfg_module)
+
+        result = parse_rsl_rl_cfg("MyTask-v0", self._make_args(resume=True, run_name="exp1"))
+
+        load_cfg.assert_called_once_with("MyTask-v0", "rsl_rl_cfg_entry_point")
+        assert result is cfg
+        assert result.resume is True
+        assert result.run_name == "exp1"
