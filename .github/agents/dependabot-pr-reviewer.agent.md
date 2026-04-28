@@ -91,43 +91,104 @@ Render the review body as markdown in this order:
   * The PR diff touches `.github/workflows/**`.
   * The PR author is not `dependabot[bot]`.
 
-## Validation Execution
+## Validation Signal
 
-When a high-risk trigger fires, execute the corresponding validation commands before finalizing the review. Report results inline so maintainers have concrete evidence rather than just advisory text.
+The agent runs via `pull_request_target` and may execute BEFORE the
+`PR Validation` orchestrator has completed. Treat the deterministic CI
+conclusion as the canonical validation signal when it is available, and as
+`pending` otherwise. Do not invoke `uv`, `pytest`, `npm ci`, `terraform`,
+or `go` from the bash tool — those binaries live on the host runner and
+are not visible inside the AWF firewall sandbox.
 
-### Execution Rules
+The orchestrator's overall conclusion is injected into the prompt as
+`PR_VALIDATION_CONCLUSION` (one of `pending`, `in_progress:<status>`,
+`success`, `failure`, `cancelled`, `neutral`, `skipped`, `timed_out`,
+`action_required`, or `unknown`). Map the touched surfaces to the
+per-job check runs below and read each conclusion via the `github` MCP
+`pull_requests` toolset (or `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`).
 
-* Run validation only for packages classified as high-risk by the surface rubric.
-* Execute the validation command(s) listed in the surface table's "Validation advice" column.
-* Cap total validation time at 5 minutes. If a command exceeds this, report the timeout and skip remaining checks.
-* Never run validation for low-risk patches or dev-only bumps.
+### Surface to Check Run Map
 
-### Per-Surface Validation Commands
+| Surface | Authoritative check runs |
+| --- | --- |
+| dataviewer-frontend | `Dataviewer Frontend Tests` |
+| python-runtime (dataviewer) | `Dataviewer Backend Pytest`, `Pytest Data Management Tools`, `Python Lint` |
+| python-runtime (evaluation) | `Evaluation Pytest Tests`, `Pytest Inference`, `Python Lint` |
+| python-runtime (training) | `Pytest Training`, `Python Lint` |
+| training-rl-abi | `Pytest Training` (hosted CI cannot exercise Isaac Sim GPU paths) |
+| terraform-providers | `Terraform Validation`, `Terraform Lint`, `Terraform Tests` |
+| terraform-modules | `Terraform Tests`, `Terraform Validation` |
+| gomod | `Go Tests`, `Go Lint` |
+| docker | `Binary Integrity Check`, `Binary Dependency Freshness` |
+| github-actions | `Workflow Permissions Scan`, `SHA Staleness Check`, `Dependency Pinning Scan` |
 
-| Surface | Trigger condition | Commands to run |
-| --- | --- | --- |
-| python-runtime (dataviewer) | ABI-sensitive package major bump (`pyarrow`, `numpy`, `scipy`, `opencv*`, `pandas`) | `cd data-management/viewer && uv sync --extra dev --extra all && uv run ruff check backend/src/` then `uv run pytest backend/tests/ --tb=short -q` |
-| python-runtime (evaluation) | ABI-sensitive package major bump | `cd evaluation && uv sync && uv run ruff check . && uv run pytest --tb=short -q` |
-| python-runtime (training) | ABI-sensitive package major bump | `cd training && uv sync && uv run ruff check . && uv run pytest --tb=short -q` |
-| dataviewer-frontend | Major bump of React, Vite, TypeScript, Tailwind, or peer-dep conflict | `cd data-management/viewer/frontend && npm ci && npm run validate` |
-| terraform-providers | `azurerm` major bump or breaking-change boundary | `cd infrastructure/terraform && terraform init -backend=false && terraform validate` |
-| gomod | Major version bump of direct dependency | `go mod verify && go vet ./... && go build ./...` |
+### Static Impact Reasoning
 
-### Reporting Validation Results
+Complement the CI signal with manifest-level reasoning the sandbox CAN do
+safely using `cat`, `grep`, `jq`, `npm view`, and `web-fetch`. These checks
+must run regardless of CI conclusion:
 
-Include a `### Validation Results` block in the per-package section of the review body:
+* **Isaac Sim ABI guard (training-rl-abi).** When the diff touches
+  `training/rl/requirements.txt` or `training/rl/pyproject.toml`, read
+  `training/rl/scripts/train.sh` and confirm the pin
+  `numpy>=1.26.0,<2.0.0` is still satisfied by the resolved version in
+  `training/rl/requirements.txt`. A `numpy` 2.x bump MUST be flagged as
+  high-risk regardless of advisory severity or CI conclusion. Cite both file
+  paths in the comment.
+* **Torch / tensordict / onnxruntime-gpu.** A major bump invalidates GPU
+  smoke testing; flag as high-risk and note that hosted CI cannot validate
+  Isaac Sim behavior.
+* **Dataviewer frontend peer-dep conflicts.** Run
+  `npm view <pkg>@<new-version> peerDependencies` and compare against the
+  pinned `react`, `vite`, `typescript`, and `tailwindcss` versions in
+  `data-management/viewer/frontend/package.json`. Quote any peer-dep range
+  the new version breaches.
+* **Terraform provider majors.** Read the upstream provider changelog via
+  `web-fetch` (registry.terraform.io or the provider repo `CHANGELOG.md`)
+  and quote any breaking input/output rename relevant to the modules under
+  `infrastructure/terraform/`.
+* **Go module direct majors.** Quote the affected `go.mod` `module` line(s)
+  from the diff and note whether replace/retract directives changed.
 
-* Show the command(s) executed.
-* Report pass/fail counts (for example `411 passed, 110 skipped, 1 failed`).
-* If all relevant tests pass, state: `✅ Automated validation passed — safe to merge based on lint and test results.`
-* If tests fail, list the failing test names and indicate whether failures are related to the dependency bump or pre-existing. Distinguish by checking if the same tests fail on the base branch.
-* If validation cannot run (missing tooling, timeout, environment limitation), state: `⚠️ Validation skipped: <reason>. Manual validation recommended.`
+### Reporting
+
+Include a `### Validation Signal` block in the per-package section of the
+review body with three parts:
+
+1. **Deterministic CI:** quote the orchestrator conclusion as
+   `PR Validation: <conclusion>` followed by a bullet list of the relevant
+   per-surface check runs from the map above with name, conclusion, and
+   `html_url`. When `conclusion != success`, list the failing job names
+   first.
+2. **Static impact reasoning:** one or two sentences citing the static
+   checks above. Always include the Isaac Sim ABI line when
+   `training/rl/requirements.txt` is in the diff, even on minor bumps.
+3. **Banner:** if any high-risk trigger fired (advisory severity, ABI guard
+   violation, peer-dep conflict, breaking-changelog quote), prepend
+   `⚠️ Maintainer review recommended` to the top of the review body once.
+
+If the orchestrator conclusion is unavailable or still in progress
+(`pending`, `in_progress:*`, or `unknown`; PR resolution failed; or the
+check-runs API returns empty), state:
+`⚠️ Deterministic CI conclusion not yet available; verdict is advisory only.`
+and keep the verdict at `COMMENT`.
 
 ### Verdict Adjustment
 
-* When a high-risk bump passes all validation checks, the verdict MAY be upgraded from `COMMENT` to `APPROVE` with rationale: "High-risk trigger fired but automated validation confirms compatibility."
-* When validation fails with bump-related errors, keep the verdict as `COMMENT` and include the failure details.
-* When validation is skipped or inconclusive, keep the verdict as `COMMENT` with the original advisory text.
+* `PR_VALIDATION_CONCLUSION == success` AND every relevant per-surface check
+  is `success` AND no static check raises a concern → verdict MAY upgrade
+  from `COMMENT` to `APPROVE`. Rationale must reference the orchestrator
+  conclusion plus the green per-surface checks by name.
+* `PR_VALIDATION_CONCLUSION` is `failure`, `cancelled`, or `timed_out` →
+  verdict stays at `COMMENT`. Body MUST quote each failing per-surface
+  check name plus its `html_url`. Do NOT skip enrichment — maintainers rely
+  on the advisory output to triage which package in a grouped PR caused
+  the failure.
+* `PR_VALIDATION_CONCLUSION` is `neutral`, `skipped`, `action_required`,
+  `pending`, `in_progress:*`, or `unknown` → verdict stays at `COMMENT`;
+  body explains the inconclusive or pending state.
+* The Isaac Sim ABI guard is sticky: a `numpy` 2.x bump keeps the verdict
+  at `COMMENT` and forces the high-risk banner regardless of CI conclusion.
 
 ## Forbidden Actions
 

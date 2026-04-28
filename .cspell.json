@@ -38,7 +38,9 @@
 		"**/.terraform/**",
 		"**/.terraform.lock.hcl",
 		"**/scripts/tests/Fixtures/**",
-		"**/TERRAFORM.md"
+		"**/TERRAFORM.md",
+		"CHANGELOG.md",
+		"**/CHANGELOG.md"
 	],
 	"dictionaryDefinitions": [
 		{

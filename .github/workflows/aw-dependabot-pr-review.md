@@ -4,30 +4,21 @@ description: Advisory agentic review of Dependabot dependency update PRs for phy
 engine: copilot
 timeout-minutes: 15
 if: >
-  github.event.pull_request.draft == false &&
-  github.event.pull_request.user.login == 'dependabot[bot]'
+  github.event.pull_request != null &&
+  startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+  github.event.pull_request.user.login == 'dependabot[bot]' &&
+  !github.event.pull_request.draft
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
-    paths:
-      - "**/package.json"
-      - "**/package-lock.json"
-      - "**/pnpm-lock.yaml"
-      - "**/pyproject.toml"
-      - "**/uv.lock"
-      - "**/requirements*.txt"
-      - "**/go.mod"
-      - "**/go.sum"
-      - "**/*.tf"
-      - "**/*.tfvars"
-      - "**/Dockerfile*"
-      - "!.github/workflows/**"
+    branches:
+      - main
   bots: ["dependabot[bot]"]
-  reaction: eyes
-  status-comment: true
+  roles: [admin, maintainer, write]
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 network:
   allowed:
     - defaults
@@ -73,6 +64,56 @@ steps:
     uses: terraform-linters/setup-tflint@b480b8fcdaa6f2c577f8e4fa799e89e756bb7c93 # v6.2.2
     with:
       tflint_version: latest
+  - name: Resolve Dependabot PR context and fetch PR Validation status
+    id: resolve-pr
+    uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
+    with:
+      script: |
+        const pr = context.payload.pull_request;
+        if (!pr) {
+          core.setFailed('pull_request payload missing');
+          return;
+        }
+        if (pr.user.login !== 'dependabot[bot]') {
+          core.exportVariable('PR_DEPENDABOT_SKIP_REASON', 'not-dependabot');
+          return;
+        }
+        if (pr.draft) {
+          core.exportVariable('PR_DEPENDABOT_SKIP_REASON', 'draft');
+          return;
+        }
+        core.exportVariable('PR_NUMBER', String(pr.number));
+        core.exportVariable('PR_TITLE', pr.title);
+        core.exportVariable('PR_HEAD_REF', pr.head.ref);
+        core.exportVariable('PR_BASE_REF', pr.base.ref);
+        core.exportVariable('PR_AUTHOR', pr.user.login);
+        core.exportVariable('PR_HEAD_SHA', pr.head.sha);
+
+        // Look up the most recent PR Validation workflow run for this head SHA.
+        // It may still be in progress when pull_request_target fires.
+        let conclusion = 'pending';
+        let runUrl = '';
+        try {
+          const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            head_sha: pr.head.sha,
+            event: 'pull_request',
+            per_page: 30,
+          });
+          const validation = (data.workflow_runs || []).find(r => r.name === 'PR Validation');
+          if (validation) {
+            runUrl = validation.html_url || '';
+            conclusion = validation.status === 'completed'
+              ? (validation.conclusion || 'unknown')
+              : `in_progress:${validation.status}`;
+          }
+        } catch (err) {
+          core.warning(`Failed to look up PR Validation run: ${err.message}`);
+        }
+        core.exportVariable('PR_VALIDATION_CONCLUSION', conclusion);
+        core.exportVariable('PR_VALIDATION_RUN_URL', runUrl);
+        core.info(`Resolved PR #${pr.number} (${pr.title}); PR Validation conclusion: ${conclusion}`);
 tools:
   github:
     toolsets: [context, repos, pull_requests]
@@ -82,21 +123,11 @@ tools:
     - "cat **/*.toml"
     - "cat **/go.mod"
     - "cat **/*.tf"
+    - "cat training/rl/requirements.txt"
+    - "cat training/rl/scripts/train.sh"
     - "grep -R --line-number * -- :!node_modules :!.venv :!external"
     - "jq . **/*.json"
     - "npm view *"
-    - "uv tree"
-    # Validation commands for high-risk bumps
-    - "cd data-management/viewer && uv sync --extra dev --extra all && uv run ruff check backend/src/"
-    - "cd data-management/viewer && uv run pytest backend/tests/ --tb=short -q"
-    - "cd data-management/viewer/frontend && npm ci && npm run validate"
-    - "cd evaluation && uv sync && uv run ruff check . && uv run pytest --tb=short -q"
-    - "cd training && uv sync && uv run ruff check . && uv run pytest --tb=short -q"
-    - "cd infrastructure/terraform && terraform init -backend=false && terraform validate"
-    - "cd infrastructure/terraform && terraform fmt -check -recursive"
-    - "go vet ./..."
-    - "go build ./..."
-    - "go mod verify"
 safe-outputs:
   create-pull-request-review-comment:
     max: 5
@@ -113,7 +144,26 @@ imports:
 
 # Dependabot PR Review
 
-Advisory-only review of Dependabot-authored pull requests in microsoft/physical-ai-toolchain. The agent classifies risk, enriches findings with GHSA/OSV/NVD intel and release notes, and posts a single review plus targeted inline comments. It never blocks merges.
+Advisory-only review of Dependabot-authored pull requests in microsoft/physical-ai-toolchain. The agent classifies risk, enriches findings with GHSA/OSV/NVD intel and release notes, anchors validation on the deterministic `PR Validation` orchestrator that triggered this run, and posts a single review plus targeted inline comments. It never blocks merges.
+
+## Trigger Posture
+
+This workflow runs via `pull_request_target` on Dependabot PRs targeting `main` (head branch matching `dependabot/**`).
+It executes in the base-repository context so safe-output handlers receive a real `github.event.pull_request` payload
+and can post inline review comments and a single submitted review. The `PR Validation` orchestrator runs in parallel —
+its conclusion is queried at runtime by the resolver step and may be `pending` if the orchestrator has not finished yet.
+The agent must never attempt to run validation tooling (`uv`, `pytest`, `npm ci`, `terraform`, `go`) from the bash tool
+because those binaries are not visible inside the AWF firewall sandbox.
+
+The resolver step exports these environment variables for the agent to read:
+
+* `PR_NUMBER` — the Dependabot PR number under review
+* `PR_TITLE`, `PR_HEAD_REF`, `PR_BASE_REF`, `PR_AUTHOR`, `PR_HEAD_SHA`
+* `PR_VALIDATION_CONCLUSION` — `pending`, `in_progress:<status>`, `success`, `failure`, `cancelled`, `neutral`, `skipped`, `timed_out`, `action_required`, or `unknown`
+* `PR_VALIDATION_RUN_URL` — direct link to the `PR Validation` run, or empty when no run exists yet
+* `PR_DEPENDABOT_SKIP_REASON` (optional) — set when the resolver determined the trigger should be skipped (`not-dependabot`, `draft`)
+
+When `PR_DEPENDABOT_SKIP_REASON` is set, emit a `noop` with the reason as the rationale and stop.
 
 ## Posture
 
@@ -125,8 +175,7 @@ Advisory-only review of Dependabot-authored pull requests in microsoft/physical-
 
 Skip the review and emit a `noop` when any of the following hold:
 
-* Pull request author is not `dependabot[bot]`.
-* Pull request is a draft (`github.event.pull_request.draft == true`).
+* `PR_DEPENDABOT_SKIP_REASON` is set by the resolver step (PR could not be resolved, author is not `dependabot[bot]`, or PR is a draft).
 * Diff touches `.github/workflows/**` — workflow changes are reviewed by `dependency-review`, `workflow-permissions-scan`, and `sha-staleness-check` instead.
 * Diff contains no recognized dependency manifest change.
 
@@ -136,9 +185,13 @@ The full reviewer persona, risk rubric, ecosystem-specific checks, and enrichmen
 
 ## Step-by-Step
 
-1. **Parse.** Read the pull request title, body, and file diff. Extract package name, ecosystem, old/new versions, `GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}` and `CVE-\d{4}-\d{4,7}` identifiers from the Dependabot body.
-2. **Enrich.** Query GHSA (preferred), fall back to OSV (`api.osv.dev`) and NVD (`services.nvd.nist.gov`) for severity, affected ranges, and fixed versions. Fetch release notes or changelog via the relevant package registry (npm, PyPI, Go module proxy, Terraform registry).
-3. **Classify.** Apply the persona's per-surface rubric. Flag ABI-sensitive pins (for example `numpy >=1.26.0,<2.0.0` in Isaac Sim training), pre-1.0 bumps, major version jumps, and missing upstream advisories.
-4. **Review.** Post up to five inline `create-pull-request-review-comment` entries for specific risks, up to two `add-comment` status updates on the triggering PR, and exactly one `submit-pull-request-review` with `APPROVE` or `COMMENT`. When nothing actionable is found, emit `noop`.
+1. **Resolve context.** Read `PR_NUMBER`, `PR_HEAD_SHA`, `PR_VALIDATION_CONCLUSION`, and `PR_VALIDATION_RUN_URL` from the environment. If `PR_DEPENDABOT_SKIP_REASON` is set, emit `noop` and stop.
+2. **Read CI signal.** Use the `github` MCP `pull_requests` toolset (or `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`) on `PR_HEAD_SHA` to enumerate per-surface check-run conclusions. Map them through the surface table in the persona.
+3. **Parse.** Read the pull request title, body, and file diff. Extract package name, ecosystem, old/new versions, `GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}` and `CVE-\d{4}-\d{4,7}` identifiers from the Dependabot body.
+4. **Enrich.** Query GHSA (preferred), fall back to OSV (`api.osv.dev`) and NVD (`services.nvd.nist.gov`) for severity, affected ranges, and fixed versions. Fetch release notes or changelog via the relevant package registry (npm, PyPI, Go module proxy, Terraform registry).
+5. **Classify.** Apply the persona's per-surface rubric. Flag ABI-sensitive pins (for example `numpy >=1.26.0,<2.0.0` in Isaac Sim training), pre-1.0 bumps, major version jumps, and missing upstream advisories.
+6. **Review.** Post up to five inline `create-pull-request-review-comment` entries for specific risks, up to two `add-comment` status updates on the triggering PR, and exactly one `submit-pull-request-review` with `APPROVE` or `COMMENT`.
+   When `PR_VALIDATION_CONCLUSION` is anything other than `success`, the verdict MUST be `COMMENT` and the body MUST quote the failing per-surface check-run names plus their `html_url`.
+   Never skip enrichment on red CI — maintainers rely on advisory output to triage which package in a grouped PR caused the failure.
 
 Keep comments factual and concise. Cite the advisory identifier, affected versions, and the Dependabot PR URL.
