@@ -57,17 +57,17 @@ azure-storage-blob==12.28.0
     #   robotics-training-rl (pyproject.toml)
     #   azure-ai-ml
     #   azure-storage-file-datalake
-azure-storage-file-datalake==12.22.0
+azure-storage-file-datalake==12.23.0
     # via azure-ai-ml
 azure-storage-file-share==12.24.0
     # via azure-ai-ml
 blinker==1.9.0
     # via flask
-cachetools==6.2.6
+cachetools==7.0.6
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-certifi==2026.2.25
+certifi==2026.4.22
     # via
     #   msrest
     #   requests
@@ -75,7 +75,7 @@ cffi==2.0.0
     # via cryptography
 charset-normalizer==3.4.7
     # via requests
-click==8.3.2
+click==8.3.3
     # via
     #   flask
     #   mlflow-skinny
@@ -89,7 +89,7 @@ colorama==0.4.6
     # via azure-ai-ml
 contourpy==1.3.3
     # via matplotlib
-cryptography==46.0.7
+cryptography==47.0.0
     # via
     #   robotics-training-rl (pyproject.toml)
     #   azure-identity
@@ -101,23 +101,23 @@ cryptography==46.0.7
     #   pyjwt
 cuda-bindings==13.2.0
     # via torch
-cuda-pathfinder==1.5.3
+cuda-pathfinder==1.5.4
     # via cuda-bindings
-cuda-toolkit==13.0.2
+cuda-toolkit==13.2.1
     # via torch
 cycler==0.12.1
     # via matplotlib
-databricks-sdk==0.102.0
+databricks-sdk==0.105.0
     # via
     #   mlflow-skinny
     #   mlflow-tracing
 docker==7.1.0
     # via mlflow
-farama-notifications==0.0.4
+farama-notifications==0.0.6
     # via gymnasium
-fastapi==0.135.3
+fastapi==0.136.1
     # via mlflow-skinny
-filelock==3.28.0
+filelock==3.29.0
     # via torch
 flask==3.1.3
     # via
@@ -135,7 +135,7 @@ fsspec==2026.3.0
     # via torch
 gitdb==4.0.12
     # via gitpython
-gitpython==3.1.46
+gitpython==3.1.48
     # via
     #   mlflow-skinny
     #   rsl-rl-lib
@@ -149,24 +149,24 @@ graphql-core==3.2.8
     #   graphql-relay
 graphql-relay==3.2.0
     # via graphene
-greenlet==3.4.0
+greenlet==3.5.0
     # via sqlalchemy
 grpcio==1.80.0
     # via tensorboard
-gunicorn==23.0.0
+gunicorn==25.3.0
     # via mlflow
-gymnasium==1.2.3
+gymnasium==1.3.0
     # via skrl
 h11==0.16.0
     # via uvicorn
-huey==2.6.0
+huey==3.0.0
     # via mlflow
-idna==3.11
+idna==3.13
     # via
     #   anyio
     #   requests
     #   yarl
-importlib-metadata==8.7.1
+importlib-metadata==9.0.0
     # via
     #   mlflow-skinny
     #   opentelemetry-api
@@ -202,11 +202,11 @@ markupsafe==3.0.3
     #   jinja2
     #   mako
     #   werkzeug
-marshmallow==3.26.2
+marshmallow==4.3.0
     # via
     #   robotics-training-rl (pyproject.toml)
     #   azure-ai-ml
-matplotlib==3.10.8
+matplotlib==3.10.9
     # via mlflow
 ml-dtypes==0.5.4
     # via
@@ -219,7 +219,7 @@ mlflow-skinny==3.11.1
     # via mlflow
 mlflow-tracing==3.11.1
     # via mlflow
-mpmath==1.3.0
+mpmath==1.4.1
     # via sympy
 msal==1.36.0
     # via
@@ -235,7 +235,7 @@ multidict==6.7.1
     #   yarl
 networkx==3.6.1
     # via torch
-numpy==1.26.4
+numpy==2.4.4
     # via
     #   robotics-training-rl (pyproject.toml)
     #   contourpy
@@ -254,46 +254,46 @@ numpy==1.26.4
     #   tensorboard
     #   tensordict
     #   torchvision
-nvidia-cublas==13.1.0.3
+nvidia-cublas==13.4.0.1
     # via
     #   cuda-toolkit
     #   nvidia-cudnn-cu13
     #   nvidia-cusolver
-nvidia-cuda-cupti==13.0.85
+nvidia-cuda-cupti==13.2.75
     # via cuda-toolkit
-nvidia-cuda-nvrtc==13.0.88
+nvidia-cuda-nvrtc==13.2.78
     # via cuda-toolkit
-nvidia-cuda-runtime==13.0.96
+nvidia-cuda-runtime==13.2.75
     # via cuda-toolkit
-nvidia-cudnn-cu13==9.19.0.56
+nvidia-cudnn-cu13==9.21.1.3
     # via torch
-nvidia-cufft==12.0.0.61
+nvidia-cufft==12.2.0.46
     # via cuda-toolkit
-nvidia-cufile==1.15.1.6
+nvidia-cufile==1.17.1.22
     # via cuda-toolkit
-nvidia-curand==10.4.0.35
+nvidia-curand==10.4.2.55
     # via cuda-toolkit
-nvidia-cusolver==12.0.4.66
+nvidia-cusolver==12.2.0.1
     # via cuda-toolkit
-nvidia-cusparse==12.6.3.3
+nvidia-cusparse==12.7.10.1
     # via
     #   cuda-toolkit
     #   nvidia-cusolver
-nvidia-cusparselt-cu13==0.8.0
+nvidia-cusparselt-cu13==0.9.0
     # via torch
 nvidia-ml-py==13.595.45
     # via pynvml
-nvidia-nccl-cu13==2.28.9
+nvidia-nccl-cu13==2.30.4
     # via torch
-nvidia-nvjitlink==13.0.88
+nvidia-nvjitlink==13.2.78
     # via
     #   cuda-toolkit
     #   nvidia-cufft
     #   nvidia-cusolver
     #   nvidia-cusparse
-nvidia-nvshmem-cu13==3.4.5
+nvidia-nvshmem-cu13==3.6.5
     # via torch
-nvidia-nvtx==13.0.85
+nvidia-nvtx==13.2.75
     # via cuda-toolkit
 oauthlib==3.3.1
     # via requests-oauthlib
@@ -302,11 +302,11 @@ onnx==1.21.0
     #   onnx-ir
     #   onnxscript
     #   rsl-rl-lib
-onnx-ir==0.2.0
+onnx-ir==0.2.1
     # via onnxscript
-onnxscript==0.6.2
+onnxscript==0.7.0
     # via rsl-rl-lib
-opentelemetry-api==1.40.0
+opentelemetry-api==1.41.1
     # via
     #   azure-core-tracing-opentelemetry
     #   azure-monitor-opentelemetry-exporter
@@ -326,7 +326,7 @@ opentelemetry-api==1.40.0
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-opentelemetry-instrumentation==0.61b0
+opentelemetry-instrumentation==0.62b1
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-dbapi
@@ -339,44 +339,44 @@ opentelemetry-instrumentation==0.61b0
     #   opentelemetry-instrumentation-urllib
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
-opentelemetry-instrumentation-asgi==0.61b0
+opentelemetry-instrumentation-asgi==0.62b1
     # via opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-dbapi==0.61b0
+opentelemetry-instrumentation-dbapi==0.62b1
     # via opentelemetry-instrumentation-psycopg2
-opentelemetry-instrumentation-django==0.61b0
+opentelemetry-instrumentation-django==0.62b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-fastapi==0.61b0
+opentelemetry-instrumentation-fastapi==0.62b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-flask==0.61b0
+opentelemetry-instrumentation-flask==0.62b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-logging==0.61b0
+opentelemetry-instrumentation-logging==0.62b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-psycopg2==0.61b0
+opentelemetry-instrumentation-psycopg2==0.62b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-requests==0.61b0
+opentelemetry-instrumentation-requests==0.62b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib==0.61b0
+opentelemetry-instrumentation-urllib==0.62b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib3==0.61b0
+opentelemetry-instrumentation-urllib3==0.62b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-wsgi==0.61b0
+opentelemetry-instrumentation-wsgi==0.62b1
     # via
     #   opentelemetry-instrumentation-django
     #   opentelemetry-instrumentation-flask
-opentelemetry-proto==1.41.0
+opentelemetry-proto==1.41.1
     # via
     #   mlflow-skinny
     #   mlflow-tracing
 opentelemetry-resource-detector-azure==0.1.5
     # via azure-monitor-opentelemetry
-opentelemetry-sdk==1.40.0
+opentelemetry-sdk==1.41.1
     # via
     #   azure-monitor-opentelemetry
     #   azure-monitor-opentelemetry-exporter
     #   mlflow-skinny
     #   mlflow-tracing
     #   opentelemetry-resource-detector-azure
-opentelemetry-semantic-conventions==0.61b0
+opentelemetry-semantic-conventions==0.62b1
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-asgi
@@ -389,7 +389,7 @@ opentelemetry-semantic-conventions==0.61b0
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
-opentelemetry-util-http==0.61b0
+opentelemetry-util-http==0.62b1
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-django
@@ -401,7 +401,7 @@ opentelemetry-util-http==0.61b0
     #   opentelemetry-instrumentation-wsgi
 orjson==3.11.8
     # via tensordict
-packaging==26.1
+packaging==26.2
     # via
     #   robotics-training-rl (pyproject.toml)
     #   gunicorn
@@ -416,7 +416,7 @@ packaging==26.1
     #   skrl
     #   tensorboard
     #   tensordict
-pandas==2.3.3
+pandas==3.0.2
     # via mlflow
 pillow==12.2.0
     # via
@@ -429,7 +429,7 @@ propcache==0.4.1
     # via
     #   aiohttp
     #   yarl
-protobuf==6.33.6
+protobuf==7.34.1
     # via
     #   databricks-sdk
     #   mlflow-skinny
@@ -441,7 +441,7 @@ psutil==7.2.2
     # via
     #   robotics-training-rl (pyproject.toml)
     #   azure-monitor-opentelemetry-exporter
-pyarrow==22.0.0
+pyarrow==24.0.0
     # via mlflow
 pyasn1==0.6.3
     # via pyasn1-modules
@@ -449,12 +449,12 @@ pyasn1-modules==0.4.2
     # via google-auth
 pycparser==3.0
     # via cffi
-pydantic==2.13.1
+pydantic==2.13.3
     # via
     #   fastapi
     #   mlflow-skinny
     #   mlflow-tracing
-pydantic-core==2.46.1
+pydantic-core==2.46.3
     # via pydantic
 pydash==8.0.6
     # via azure-ai-ml
@@ -477,7 +477,7 @@ python-dateutil==2.9.0.post0
     #   strictyaml
 python-dotenv==1.2.2
     # via mlflow-skinny
-pytz==2025.2
+pytz==2026.1.post1
     # via pandas
 pyvers==0.2.2
     # via tensordict
@@ -504,7 +504,7 @@ rpds-py==0.30.0
     # via
     #   jsonschema
     #   referencing
-rsl-rl-lib==5.0.1
+rsl-rl-lib==5.2.0
     # via robotics-training-rl (pyproject.toml)
 scikit-learn==1.8.0
     # via
@@ -515,13 +515,13 @@ scipy==1.17.1
     #   mlflow
     #   scikit-learn
     #   skops
-setuptools==81.0.0
+setuptools==82.0.1
     # via
     #   tensorboard
     #   torch
 six==1.17.0
     # via python-dateutil
-skops==0.13.0
+skops==0.14.0
     # via mlflow
 skrl==2.0.0
     # via robotics-training-rl (pyproject.toml)
@@ -545,7 +545,7 @@ tensorboard==2.20.0
     # via skrl
 tensorboard-data-server==0.7.2
     # via tensorboard
-tensordict==0.12.1
+tensordict==0.12.2
     # via
     #   robotics-training-rl (pyproject.toml)
     #   rsl-rl-lib
@@ -598,13 +598,13 @@ typing-inspection==0.4.2
     # via
     #   fastapi
     #   pydantic
-tzdata==2026.1
+tzdata==2026.2
     # via pandas
 urllib3==2.6.3
     # via
     #   docker
     #   requests
-uvicorn==0.44.0
+uvicorn==0.46.0
     # via mlflow-skinny
 wcwidth==0.6.0
     # via prettytable
@@ -613,7 +613,7 @@ werkzeug==3.1.8
     #   flask
     #   flask-cors
     #   tensorboard
-wrapt==1.17.3
+wrapt==2.1.2
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-dbapi
