@@ -11,7 +11,7 @@ on:
     workflows: ["PR Validation"]
     types: [completed]
     branches:
-      - main
+      - "dependabot/**"
 permissions:
   contents: read
   pull-requests: read
