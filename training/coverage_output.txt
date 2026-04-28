@@ -1,0 +1,51 @@
+======================== test session starts =========================
+platform win32 -- Python 3.11.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\wberry\src\azure-nvidia-robotics-reference-architecture
+configfile: pyproject.toml
+plugins: anyio-4.13.0, hypothesis-6.151.9, cov-7.0.0, mock-3.15.1, schemathesis-4.15.2
+collected 93 items
+
+tests\test_skrl_training.py ................................... [ 37%]
+..........................................................      [100%]
+
+- generated xml file: C:\Users\wberry\src\azure-nvidia-robotics-reference-architecture\training\logs\pytest-results.xml -
+=========================== tests coverage ===========================
+__________ coverage: platform win32, python 3.11.13-final-0 __________
+
+Name                                     Stmts   Miss  Cover   Missing
+----------------------------------------------------------------------
+__init__.py                                  0      0   100%
+rl\scripts\__init__.py                       0      0   100%
+rl\scripts\skrl_mlflow_agent.py             49     34    31%   117, 136-148, 178-223
+rl\scripts\skrl_training.py                475     65    86%   788-818, 879-904, 921-924, 937-940, 952-978, 1047-1062
+rl\simulation_shutdown.py                   46     36    22%   19-21, 26-36, 41-55, 60-74
+stream.py                                   27     11    59%   28, 31-33, 36, 39, 42, 46, 55-57
+tests\__init__.py                            0      0   100%
+tests\conftest.py                           17      1    94%   24
+tests\test_cli_args.py                     146    146     0%   3-247
+tests\test_context.py                      301    301     0%   1-566
+tests\test_context_hypothesis.py           111    111     0%   3-188
+tests\test_env.py                           27     27     0%   3-61
+tests\test_launch.py                       262    262     0%   1-387
+tests\test_launch_rsl_rl.py                235    235     0%   3-338
+tests\test_lerobot_bootstrap.py            112    112     0%   3-164
+tests\test_lerobot_checkpoints.py          178    178     0%   3-236
+tests\test_lerobot_download_dataset.py     255    255     0%   3-458
+tests\test_lerobot_train.py                257    257     0%   3-355
+tests\test_metrics.py                      132    132     0%   3-215
+tests\test_metrics_hypothesis.py            91     91     0%   3-154
+tests\test_rl_launch.py                    230    230     0%   3-332
+tests\test_simulation_shutdown.py           84     84     0%   3-147
+tests\test_skrl_mlflow_agent.py             84     84     0%   3-135
+tests\test_skrl_training.py                607      6    99%   356, 501-503, 879, 1166
+tests\test_smoke_test_azure.py             231    231     0%   1-354
+tests\test_stream_hypothesis.py             83     83     0%   3-155
+tests\test_train_rsl_rl.py                 574    574     0%   3-904
+tests\utils\__init__.py                      0      0   100%
+utils\__init__.py                            4      0   100%
+utils\context.py                           112     83    26%   69-79, 95-127, 156-161, 196-197, 223-246, 263-273, 329-370
+utils\env.py                                11      4    64%   24-27
+utils\metrics.py                           121    100    17%   26, 39, 52, 65, 76, 91-98, 112-118, 132-149, 166-175, 235-240, 250-260, 274-282, 298-312, 328-349, 363-375
+----------------------------------------------------------------------
+TOTAL                                     4862   3733    23%
+=================== 93 passed in 74.03s (0:01:14) ====================
