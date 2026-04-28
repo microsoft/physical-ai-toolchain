@@ -148,7 +148,12 @@ Advisory-only review of Dependabot-authored pull requests in microsoft/physical-
 
 ## Trigger Posture
 
-This workflow runs via `pull_request_target` on Dependabot PRs targeting `main` (head branch matching `dependabot/**`). It executes in the base-repository context so safe-output handlers receive a real `github.event.pull_request` payload and can post inline review comments and a single submitted review. The `PR Validation` orchestrator runs in parallel — its conclusion is queried at runtime by the resolver step and may be `pending` if the orchestrator has not finished yet. The agent must never attempt to run validation tooling (`uv`, `pytest`, `npm ci`, `terraform`, `go`) from the bash tool because those binaries are not visible inside the AWF firewall sandbox.
+This workflow runs via `pull_request_target` on Dependabot PRs targeting `main` (head branch matching `dependabot/**`).
+It executes in the base-repository context so safe-output handlers receive a real `github.event.pull_request` payload
+and can post inline review comments and a single submitted review. The `PR Validation` orchestrator runs in parallel —
+its conclusion is queried at runtime by the resolver step and may be `pending` if the orchestrator has not finished yet.
+The agent must never attempt to run validation tooling (`uv`, `pytest`, `npm ci`, `terraform`, `go`) from the bash tool
+because those binaries are not visible inside the AWF firewall sandbox.
 
 The resolver step exports these environment variables for the agent to read:
 
