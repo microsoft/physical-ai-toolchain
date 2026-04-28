@@ -37,13 +37,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
-      # TODO: Re-enable --cov-fail-under=80 once fleet-deployment/inference reaches 80% (currently 57%).
       - name: Run pytest
         run: >-
           uv run pytest fleet-deployment/inference/tests -v
           --cov=fleet-deployment/inference
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-inference.xml
+          --cov-fail-under=80
 
       - name: Upload coverage.xml artifact
         if: always()
