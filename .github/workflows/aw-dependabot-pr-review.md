@@ -4,14 +4,15 @@ description: Advisory agentic review of Dependabot dependency update PRs for phy
 engine: copilot
 timeout-minutes: 15
 if: >
-  github.event.workflow_run.event == 'pull_request' &&
-  github.event.workflow_run.conclusion != null
+  github.event.pull_request != null &&
+  startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+  github.event.pull_request.user.login == 'dependabot[bot]' &&
+  !github.event.pull_request.draft
 on:
-  workflow_run:
-    workflows: ["PR Validation"]
-    types: [completed]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
     branches:
-      - "dependabot/**"
+      - main
   bots: ["dependabot[bot]"]
   roles: [admin, maintainer, write]
 permissions:
@@ -63,40 +64,16 @@ steps:
     uses: terraform-linters/setup-tflint@b480b8fcdaa6f2c577f8e4fa799e89e756bb7c93 # v6.2.2
     with:
       tflint_version: latest
-  - name: Resolve Dependabot PR context from triggering workflow_run
+  - name: Resolve Dependabot PR context and fetch PR Validation status
     id: resolve-pr
     uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
     with:
       script: |
-        const wr = context.payload.workflow_run;
-        if (!wr) {
-          core.setFailed('workflow_run payload missing');
+        const pr = context.payload.pull_request;
+        if (!pr) {
+          core.setFailed('pull_request payload missing');
           return;
         }
-        core.exportVariable('PR_VALIDATION_CONCLUSION', wr.conclusion || 'unknown');
-        core.exportVariable('PR_VALIDATION_RUN_URL', wr.html_url || '');
-        core.exportVariable('PR_HEAD_SHA', wr.head_sha || '');
-
-        const prs = wr.pull_requests || [];
-        let prNumber = prs.length ? prs[0].number : null;
-        if (!prNumber && wr.head_branch) {
-          // workflow_run may not populate pull_requests for forks; resolve via search.
-          const { data: search } = await github.rest.search.issuesAndPullRequests({
-            q: `repo:${context.repo.owner}/${context.repo.repo} is:pr head:${wr.head_branch} state:open`,
-            per_page: 1,
-          });
-          if (search.items.length) prNumber = search.items[0].number;
-        }
-        if (!prNumber) {
-          core.warning('Could not resolve a PR for this workflow_run; emitting noop.');
-          core.exportVariable('PR_DEPENDABOT_SKIP_REASON', 'no-pr-resolved');
-          return;
-        }
-        const { data: pr } = await github.rest.pulls.get({
-          owner: context.repo.owner,
-          repo: context.repo.repo,
-          pull_number: prNumber,
-        });
         if (pr.user.login !== 'dependabot[bot]') {
           core.exportVariable('PR_DEPENDABOT_SKIP_REASON', 'not-dependabot');
           return;
@@ -110,7 +87,33 @@ steps:
         core.exportVariable('PR_HEAD_REF', pr.head.ref);
         core.exportVariable('PR_BASE_REF', pr.base.ref);
         core.exportVariable('PR_AUTHOR', pr.user.login);
-        core.info(`Resolved PR #${pr.number} (${pr.title}); PR Validation conclusion: ${wr.conclusion}`);
+        core.exportVariable('PR_HEAD_SHA', pr.head.sha);
+
+        // Look up the most recent PR Validation workflow run for this head SHA.
+        // It may still be in progress when pull_request_target fires.
+        let conclusion = 'pending';
+        let runUrl = '';
+        try {
+          const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            head_sha: pr.head.sha,
+            event: 'pull_request',
+            per_page: 30,
+          });
+          const validation = (data.workflow_runs || []).find(r => r.name === 'PR Validation');
+          if (validation) {
+            runUrl = validation.html_url || '';
+            conclusion = validation.status === 'completed'
+              ? (validation.conclusion || 'unknown')
+              : `in_progress:${validation.status}`;
+          }
+        } catch (err) {
+          core.warning(`Failed to look up PR Validation run: ${err.message}`);
+        }
+        core.exportVariable('PR_VALIDATION_CONCLUSION', conclusion);
+        core.exportVariable('PR_VALIDATION_RUN_URL', runUrl);
+        core.info(`Resolved PR #${pr.number} (${pr.title}); PR Validation conclusion: ${conclusion}`);
 tools:
   github:
     toolsets: [context, repos, pull_requests]
@@ -145,15 +148,15 @@ Advisory-only review of Dependabot-authored pull requests in microsoft/physical-
 
 ## Trigger Posture
 
-This workflow runs via `workflow_run` after the `PR Validation` orchestrator completes on a PR targeting `main`. The deterministic CI conclusion is the canonical validation signal — read it from the `PR_VALIDATION_CONCLUSION` environment variable injected by the resolver step. The agent must never attempt to run validation tooling (`uv`, `pytest`, `npm ci`, `terraform`, `go`) from the bash tool because those binaries are not visible inside the AWF firewall sandbox.
+This workflow runs via `pull_request_target` on Dependabot PRs targeting `main` (head branch matching `dependabot/**`). It executes in the base-repository context so safe-output handlers receive a real `github.event.pull_request` payload and can post inline review comments and a single submitted review. The `PR Validation` orchestrator runs in parallel — its conclusion is queried at runtime by the resolver step and may be `pending` if the orchestrator has not finished yet. The agent must never attempt to run validation tooling (`uv`, `pytest`, `npm ci`, `terraform`, `go`) from the bash tool because those binaries are not visible inside the AWF firewall sandbox.
 
 The resolver step exports these environment variables for the agent to read:
 
 * `PR_NUMBER` — the Dependabot PR number under review
 * `PR_TITLE`, `PR_HEAD_REF`, `PR_BASE_REF`, `PR_AUTHOR`, `PR_HEAD_SHA`
-* `PR_VALIDATION_CONCLUSION` — `success`, `failure`, `cancelled`, `neutral`, `skipped`, `timed_out`, or `action_required`
-* `PR_VALIDATION_RUN_URL` — direct link to the `PR Validation` run
-* `PR_DEPENDABOT_SKIP_REASON` (optional) — set when the resolver determined the trigger should be skipped (`no-pr-resolved`, `not-dependabot`, `draft`)
+* `PR_VALIDATION_CONCLUSION` — `pending`, `in_progress:<status>`, `success`, `failure`, `cancelled`, `neutral`, `skipped`, `timed_out`, `action_required`, or `unknown`
+* `PR_VALIDATION_RUN_URL` — direct link to the `PR Validation` run, or empty when no run exists yet
+* `PR_DEPENDABOT_SKIP_REASON` (optional) — set when the resolver determined the trigger should be skipped (`not-dependabot`, `draft`)
 
 When `PR_DEPENDABOT_SKIP_REASON` is set, emit a `noop` with the reason as the rationale and stop.
 
