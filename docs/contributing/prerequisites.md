@@ -187,6 +187,10 @@ npm run lint:go
 
 # Test Go modules (required for Go changes)
 npm run test:go
+
+# Contract tests (validates Terraform outputs against Go struct — requires terraform-docs)
+# Run after adding/removing/renaming Terraform outputs
+./infrastructure/terraform/e2e/run-contract-tests.sh
 ```
 
 **Documentation:**

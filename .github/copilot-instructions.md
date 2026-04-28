@@ -397,7 +397,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | File Type | Validation Commands |
 | --- | --- |
 | `*.md` | `npm run lint:md`, `npm run spell-check`, `npm run format:tables` |
-| `*.tf`, `*.tfvars` | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan` |
+| `*.tf`, `*.tfvars` | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan`, `npm run test:go` (output contract) |
 | `*.tftest.hcl` | `npm run test:tf`, `cd infrastructure/terraform/modules/<name> && terraform test` or `cd infrastructure/terraform && terraform test` |
 | `*.go` | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`), `./infrastructure/terraform/e2e/run-contract-tests.sh` (Terraform output contract, requires `terraform-docs`) |
 | `*.sh` | `shellcheck <file>` |

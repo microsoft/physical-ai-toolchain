@@ -47,6 +47,18 @@ func ValidateOutputContract(t *testing.T, declared, required []string) {
 	t.Logf("Declared outputs: %v", declared)
 	t.Logf("Required outputs: %v", required)
 
+	missing := findMissingOutputs(declared, required)
+
+	if len(missing) > 0 {
+		t.Errorf("Missing %d required outputs: %v", len(missing), missing)
+		t.Errorf("Declare these in infrastructure/terraform/outputs.tf or remove from InfraOutputs struct")
+	}
+	require.Empty(t, missing, "output contract validation failed")
+}
+
+// findMissingOutputs returns the required keys that are absent from the
+// declared set. Pure helper exposed for failure-path testing.
+func findMissingOutputs(declared, required []string) []string {
 	declaredSet := make(map[string]struct{}, len(declared))
 	for _, d := range declared {
 		declaredSet[d] = struct{}{}
@@ -58,12 +70,7 @@ func ValidateOutputContract(t *testing.T, declared, required []string) {
 			missing = append(missing, r)
 		}
 	}
-
-	if len(missing) > 0 {
-		t.Errorf("Missing %d required outputs: %v", len(missing), missing)
-		t.Errorf("Declare these in infrastructure/terraform/outputs.tf or remove from InfraOutputs struct")
-	}
-	require.Empty(t, missing, "output contract validation failed")
+	return missing
 }
 
 // ValidateTerraformContract is the convenience wrapper root modules should
