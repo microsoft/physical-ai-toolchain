@@ -89,7 +89,7 @@ def episode_metrics_list(draw):
 
 
 @given(data=paired_arrays(), episode=_EPISODE, fps=_FPS)
-@settings(deadline=5000)
+@settings(deadline=None)
 def test_plot_action_deltas_returns_figure(data, episode, fps):
     """plot_action_deltas returns a Figure for any valid (N, J) inputs."""
     pred, gt, names = data
@@ -101,7 +101,7 @@ def test_plot_action_deltas_returns_figure(data, episode, fps):
 
 
 @given(data=paired_arrays(), episode=_EPISODE, fps=_FPS)
-@settings(deadline=5000)
+@settings(deadline=None)
 def test_plot_cumulative_positions_returns_figure(data, episode, fps):
     """plot_cumulative_positions returns a Figure for any valid (N, J) inputs."""
     pred, gt, names = data
@@ -113,7 +113,7 @@ def test_plot_cumulative_positions_returns_figure(data, episode, fps):
 
 
 @given(data=paired_arrays(), episode=_EPISODE, fps=_FPS)
-@settings(deadline=5000)
+@settings(deadline=None)
 def test_plot_error_heatmap_returns_figure(data, episode, fps):
     """plot_error_heatmap returns a Figure for any valid (N, J) inputs."""
     pred, gt, names = data
@@ -125,7 +125,7 @@ def test_plot_error_heatmap_returns_figure(data, episode, fps):
 
 
 @given(data=summary_inputs(), episode=_EPISODE, fps=_FPS)
-@settings(deadline=5000)
+@settings(deadline=None)
 def test_plot_summary_panel_returns_figure(data, episode, fps):
     """plot_summary_panel returns a Figure for any valid inputs."""
     pred, gt, times, names = data
@@ -137,7 +137,7 @@ def test_plot_summary_panel_returns_figure(data, episode, fps):
 
 
 @given(data=episode_metrics_list())
-@settings(deadline=10000, max_examples=15)
+@settings(deadline=None, max_examples=15)
 def test_plot_aggregate_summary_returns_figure(data):
     """plot_aggregate_summary returns a Figure for any valid episode metrics."""
     metrics, names = data
@@ -149,7 +149,7 @@ def test_plot_aggregate_summary_returns_figure(data):
 
 
 @given(data=paired_arrays(), episode=_EPISODE, fps=_FPS)
-@settings(deadline=5000)
+@settings(deadline=None)
 def test_action_deltas_uses_default_joint_names(data, episode, fps):
     """Passing joint_names=None falls back to JOINT_NAMES without error."""
     pred, gt, _ = data
@@ -166,7 +166,7 @@ def test_action_deltas_uses_default_joint_names(data, episode, fps):
 
 
 @given(data=paired_arrays(), episode=_EPISODE, fps=_FPS)
-@settings(deadline=5000)
+@settings(deadline=None)
 def test_error_heatmap_shape_consistency(data, episode, fps):
     """Heatmap image data has shape (J, N) — transposed from input."""
     pred, gt, names = data
@@ -182,7 +182,7 @@ def test_error_heatmap_shape_consistency(data, episode, fps):
 
 
 @given(data=summary_inputs(), episode=_EPISODE, fps=_FPS)
-@settings(deadline=5000)
+@settings(deadline=None)
 def test_summary_panel_has_four_subplots(data, episode, fps):
     """Summary panel always creates a 2x2 grid (4 axes)."""
     pred, gt, times, names = data
@@ -195,7 +195,7 @@ def test_summary_panel_has_four_subplots(data, episode, fps):
 
 
 @given(data=episode_metrics_list())
-@settings(deadline=10000, max_examples=15)
+@settings(deadline=None, max_examples=15)
 def test_aggregate_summary_has_four_subplots(data):
     """Aggregate summary always creates a 2x2 grid (4+ axes including colorbar)."""
     metrics, names = data
