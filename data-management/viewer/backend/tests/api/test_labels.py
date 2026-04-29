@@ -12,13 +12,6 @@ from fastapi.testclient import TestClient
 
 import src.api.routers.labels as labels_mod
 from src.api.main import app
-from src.api.routers.labels import (
-    BlobLabelStorage,
-    DatasetLabelsFile,
-    LocalLabelStorage,
-    _create_label_storage,
-    _get_label_storage,
-)
 
 
 @pytest.fixture
@@ -188,8 +181,8 @@ def test_delete_label_option_rejects_empty(client):
 def test_local_storage_save_then_load_roundtrip():
     """LocalLabelStorage persists and reloads a labels file."""
     with tempfile.TemporaryDirectory() as tmp:
-        storage = LocalLabelStorage(tmp)
-        original = DatasetLabelsFile(
+        storage = labels_mod.LocalLabelStorage(tmp)
+        original = labels_mod.DatasetLabelsFile(
             dataset_id="ds",
             available_labels=["A", "B"],
             episodes={"1": ["A"]},
@@ -206,7 +199,7 @@ def test_local_storage_save_then_load_roundtrip():
 def test_local_storage_load_missing_returns_defaults():
     """LocalLabelStorage.load returns defaults when no file exists."""
     with tempfile.TemporaryDirectory() as tmp:
-        storage = LocalLabelStorage(tmp)
+        storage = labels_mod.LocalLabelStorage(tmp)
         loaded = asyncio.run(storage.load("missing"))
         assert loaded.dataset_id == "missing"
         assert loaded.available_labels == ["SUCCESS", "FAILURE", "PARTIAL"]
@@ -217,7 +210,7 @@ def test_blob_label_storage_logs_sanitized_dataset_id(monkeypatch):
     """Invalid blob content should log a sanitized dataset identifier."""
     logged: list[tuple[object, ...]] = []
     provider = SimpleNamespace(_read_blob_bytes=AsyncMock(return_value=b"not-json"))
-    storage = BlobLabelStorage(provider)
+    storage = labels_mod.BlobLabelStorage(provider)
 
     monkeypatch.setattr(
         "src.api.routers.labels.logger.warning",
@@ -226,7 +219,7 @@ def test_blob_label_storage_logs_sanitized_dataset_id(monkeypatch):
 
     result = asyncio.run(storage.load("dataset\r\nname"))
 
-    assert isinstance(result, DatasetLabelsFile)
+    assert isinstance(result, labels_mod.DatasetLabelsFile)
     assert result.available_labels == ["SUCCESS", "FAILURE", "PARTIAL"]
     assert logged == [("Invalid labels blob for %s, returning defaults", "datasetname")]
 
@@ -234,7 +227,7 @@ def test_blob_label_storage_logs_sanitized_dataset_id(monkeypatch):
 def test_blob_label_storage_load_missing_returns_defaults():
     """BlobLabelStorage.load returns defaults when blob is absent."""
     provider = SimpleNamespace(_read_blob_bytes=AsyncMock(return_value=None))
-    storage = BlobLabelStorage(provider)
+    storage = labels_mod.BlobLabelStorage(provider)
 
     result = asyncio.run(storage.load("ds"))
     assert result.dataset_id == "ds"
@@ -253,8 +246,8 @@ def test_blob_label_storage_save_uploads_json():
         _get_client=AsyncMock(return_value=client),
         container_name="datasets",
     )
-    storage = BlobLabelStorage(provider)
-    labels_file = DatasetLabelsFile(dataset_id="ds")
+    storage = labels_mod.BlobLabelStorage(provider)
+    labels_file = labels_mod.DatasetLabelsFile(dataset_id="ds")
 
     asyncio.run(storage.save("ds", labels_file))
 
@@ -270,7 +263,7 @@ def test_blob_label_storage_save_failure_raises_500(monkeypatch):
         _get_client=AsyncMock(side_effect=RuntimeError("boom")),
         container_name="datasets",
     )
-    storage = BlobLabelStorage(provider)
+    storage = labels_mod.BlobLabelStorage(provider)
 
     monkeypatch.setattr(
         "src.api.routers.labels.logger.error",
@@ -278,7 +271,7 @@ def test_blob_label_storage_save_failure_raises_500(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(storage.save("ds\r\nx", DatasetLabelsFile(dataset_id="ds")))
+        asyncio.run(storage.save("ds\r\nx", labels_mod.DatasetLabelsFile(dataset_id="ds")))
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to save labels"
@@ -292,21 +285,21 @@ def test_blob_label_storage_save_failure_raises_500(monkeypatch):
 
 def test_create_label_storage_returns_local_when_no_provider():
     """Default backend yields LocalLabelStorage."""
-    storage = _create_label_storage("local", None)
-    assert isinstance(storage, LocalLabelStorage)
+    storage = labels_mod._create_label_storage("local", None)
+    assert isinstance(storage, labels_mod.LocalLabelStorage)
 
 
 def test_create_label_storage_returns_blob_for_azure():
     """azure backend with a provider yields BlobLabelStorage."""
     provider = SimpleNamespace()
-    storage = _create_label_storage("azure", provider)
-    assert isinstance(storage, BlobLabelStorage)
+    storage = labels_mod._create_label_storage("azure", provider)
+    assert isinstance(storage, labels_mod.BlobLabelStorage)
 
 
 def test_create_label_storage_falls_back_when_azure_without_provider():
     """azure backend without provider falls back to LocalLabelStorage."""
-    storage = _create_label_storage("azure", None)
-    assert isinstance(storage, LocalLabelStorage)
+    storage = labels_mod._create_label_storage("azure", None)
+    assert isinstance(storage, labels_mod.LocalLabelStorage)
 
 
 def test_get_label_storage_singleton(monkeypatch):
@@ -318,9 +311,9 @@ def test_get_label_storage_singleton(monkeypatch):
         lambda: fake_config,
     )
 
-    first = _get_label_storage()
-    second = _get_label_storage()
+    first = labels_mod._get_label_storage()
+    second = labels_mod._get_label_storage()
     assert first is second
-    assert isinstance(first, LocalLabelStorage)
+    assert isinstance(first, labels_mod.LocalLabelStorage)
 
     monkeypatch.setattr(labels_mod, "_label_storage", None)

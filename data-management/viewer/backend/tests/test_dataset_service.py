@@ -269,8 +269,6 @@ class TestEpisodeCacheIntegration:
 
     def test_prefetch_populates_adjacent_episodes(self, service):
         async def _run() -> None:
-            import asyncio
-
             # Discover dataset metadata first so prefetch knows total_episodes
             await service.get_dataset(DATASET_ID)
             await service.get_episode(DATASET_ID, 3)

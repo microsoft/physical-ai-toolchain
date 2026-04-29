@@ -10,7 +10,7 @@ from src.api.middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddle
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro) if False else asyncio.run(coro)
+    return asyncio.run(coro)
 
 
 async def _ok_app(scope, receive, send):

@@ -38,7 +38,8 @@ class TestStorageAdapterContract:
 
     def test_close_default_is_noop(self):
         adapter = _FakeAdapter()
-        assert asyncio.run(adapter.close()) is None
+        result = asyncio.run(adapter.close())
+        assert result is None
 
     def test_get_annotations_batch_default_uses_get_annotation(self):
         adapter = _FakeAdapter()
