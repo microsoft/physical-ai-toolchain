@@ -112,6 +112,7 @@ vi.mock('@/components/annotation-panel', () => ({
       </button>
     </div>
   ),
+  LanguageInstructionWidget: () => <div>Language Instructions</div>,
 }))
 
 vi.mock('@/components/episode-viewer', () => ({
