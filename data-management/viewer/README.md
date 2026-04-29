@@ -9,7 +9,7 @@ A full-stack application for analyzing and annotating robotic training data from
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - Node.js 18+
 - npm
 
@@ -21,7 +21,7 @@ A full-stack application for analyzing and annotating robotic training data from
 cd backend
 
 # Create virtual environment (using uv)
-uv venv --python 3.11
+uv venv --python 3.12
 source .venv/bin/activate
 
 # Install dependencies (include 'azure' extra for blob storage support)

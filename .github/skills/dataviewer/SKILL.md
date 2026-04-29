@@ -11,7 +11,7 @@ Launch and interact with the Dataset Analysis Tool — a full-stack application 
 
 | Platform | Requirement |
 |----------|-------------|
-| All | Python 3.11+, Node.js 18+, npm, `uv` |
+| All | Python 3.12+, Node.js 18+, npm, `uv` |
 
 The backend virtual environment and frontend `node_modules` are auto-created on first launch by `start.sh`.
 
@@ -373,7 +373,7 @@ The React app has these key areas for Playwright interaction:
 
 | Issue | Solution |
 |-------|----------|
-| Backend fails to start | Check `backend/.venv` exists; run `cd backend && uv venv --python 3.11 && source .venv/bin/activate && uv pip install -e ".[dev,analysis,export]"` |
+| Backend fails to start | Check `backend/.venv` exists; run `cd backend && uv venv --python 3.12 && source .venv/bin/activate && uv pip install -e ".[dev,analysis,export]"` |
 | Frontend shows "Loading..." indefinitely | Verify backend is healthy: `curl http://localhost:8000/health` |
 | No datasets visible | Check `HMI_DATA_PATH` in `backend/.env` points to a directory with dataset subdirectories |
 | Port conflict | Set `BACKEND_PORT` or `FRONTEND_PORT` environment variables |
