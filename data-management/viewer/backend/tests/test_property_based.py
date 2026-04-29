@@ -188,6 +188,7 @@ def test_valid_nested_ids_accepted(parts: list[str]) -> None:
     result = _validate_dataset_id(dataset_id)
     assert result == dataset_id
 
+
 @given(
     parts=st.lists(
         st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,10}"), fullmatch=True),
@@ -203,6 +204,7 @@ def test_deep_nesting_rejected(parts: list[str]) -> None:
         return
     raise AssertionError("Expected ValueError for deep nesting")
 
+
 @given(value=st.text(min_size=1, max_size=100))
 def test_dataset_id_slash_always_rejected(value: str) -> None:
     for char in ("/", "\\"):
@@ -212,6 +214,7 @@ def test_dataset_id_slash_always_rejected(value: str) -> None:
             pass
         else:
             raise AssertionError(f"Expected ValueError for {char!r}")
+
 
 @given(
     prefix=st.from_regex(re.compile(r"[a-zA-Z0-9]{1,10}"), fullmatch=True),
