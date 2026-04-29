@@ -8,12 +8,12 @@ import {
   useState,
 } from 'react'
 
+import { CameraSelector } from '@/components/episode-viewer'
 import { PlaybackControlStrip } from '@/components/playback/PlaybackControlStrip'
 import { SpeedControl } from '@/components/playback/SpeedControl'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ViewerDisplayControls } from '@/components/viewer-display'
-import { CameraSelector } from '@/components/episode-viewer'
 
 interface AnnotationWorkspacePlaybackCardProps {
   compact?: boolean

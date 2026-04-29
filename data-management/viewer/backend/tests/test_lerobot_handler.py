@@ -149,16 +149,18 @@ class TestFfmpegExtraction:
     """Test ffmpeg-based frame extraction."""
 
     FAKE_JPEG = b"\xff\xd8\xff\xe0fake-jpeg-data"
+    FFMPEG_PATH = "/usr/bin/ffmpeg"
 
     def test_successful_extraction(self, monkeypatch):
         """Verify _extract_frame_ffmpeg returns stdout bytes on success."""
-        import shutil
         import subprocess as sp
 
-        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(
+            LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH)
+        )
 
         def mock_run(cmd, *, capture_output=False, timeout=None):
-            assert cmd[0] == "ffmpeg"
+            assert cmd[0] == self.FFMPEG_PATH
             assert "-ss" in cmd
             return sp.CompletedProcess(cmd, returncode=0, stdout=self.FAKE_JPEG, stderr=b"")
 
@@ -168,17 +170,18 @@ class TestFfmpegExtraction:
         assert result == self.FAKE_JPEG
 
     def test_returns_none_when_ffmpeg_missing(self, monkeypatch):
-        import shutil
-
-        monkeypatch.setattr(shutil, "which", lambda cmd: None)
+        monkeypatch.setattr(
+            LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: None)
+        )
         result = LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 0, 30.0)
         assert result is None
 
     def test_returns_none_on_nonzero_exit(self, monkeypatch):
-        import shutil
         import subprocess as sp
 
-        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(
+            LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH)
+        )
         monkeypatch.setattr(
             sp,
             "run",
@@ -190,10 +193,11 @@ class TestFfmpegExtraction:
 
     def test_seek_time_calculation(self, monkeypatch):
         """Verify frame_idx / fps produces correct -ss argument."""
-        import shutil
         import subprocess as sp
 
-        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(
+            LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH)
+        )
 
         captured_cmd = []
 
