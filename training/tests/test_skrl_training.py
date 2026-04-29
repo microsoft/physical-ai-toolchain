@@ -11,7 +11,7 @@ import argparse
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -580,7 +580,7 @@ class TestConfigureJaxBackend:
     def test_torch_skipped(self) -> None:
         skrl = MagicMock()
         _MOD._configure_jax_backend("torch", skrl)
-        assert not skrl.config.jax.backend or True  # no assignment
+        assert True  # no assignment
 
     def test_jax_backend(self) -> None:
         skrl = MagicMock()
@@ -601,14 +601,18 @@ class TestConfigureJaxBackend:
 class TestDumpConfigFiles:
     def test_dumps_yaml_only_when_pickle_missing(self, tmp_path: Path) -> None:
         yaml = MagicMock()
-        _MOD._dump_config_files(tmp_path, env_cfg={"e": 1}, agent_dict={"a": 1}, dump_yaml_func=yaml, dump_pickle_func=None)
+        _MOD._dump_config_files(
+            tmp_path, env_cfg={"e": 1}, agent_dict={"a": 1}, dump_yaml_func=yaml, dump_pickle_func=None
+        )
         assert yaml.call_count == 2
         assert (tmp_path / "params").exists()
 
     def test_dumps_yaml_and_pickle(self, tmp_path: Path) -> None:
         yaml = MagicMock()
         pickle = MagicMock()
-        _MOD._dump_config_files(tmp_path, env_cfg={"e": 1}, agent_dict={"a": 1}, dump_yaml_func=yaml, dump_pickle_func=pickle)
+        _MOD._dump_config_files(
+            tmp_path, env_cfg={"e": 1}, agent_dict={"a": 1}, dump_yaml_func=yaml, dump_pickle_func=pickle
+        )
         assert yaml.call_count == 2
         assert pickle.call_count == 2
 
@@ -864,8 +868,9 @@ class TestMlflowRunContext:
         mlflow.start_run.side_effect = RuntimeError("nope")
         env_cfg = SimpleNamespace(scene=None, num_envs=1)
 
-        with pytest.raises(RuntimeError, match="nope"):
-            with _MOD.mlflow_run_context(
+        with (
+            pytest.raises(RuntimeError, match="nope"),
+            _MOD.mlflow_run_context(
                 mlflow,
                 context=None,
                 args=_make_mlflow_args(),
@@ -875,8 +880,9 @@ class TestMlflowRunContext:
                 resume_path=None,
                 random_seed=1,
                 rollouts=3,
-            ):
-                pass
+            ),
+        ):
+            pass
 
     def test_attaches_optional_tags(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MLFLOW_RUN_ID", raising=False)
@@ -1018,14 +1024,18 @@ class TestBuildRunDescriptor:
 class TestPrepareCliArguments:
     def test_video_enables_cameras(self) -> None:
         parser = _MOD._build_parser(MagicMock())
-        args = argparse.Namespace(task="Isaac-Lift", num_envs=None, max_iterations=None, headless=False, checkpoint=None)
-        cli_args, unparsed = _MOD._prepare_cli_arguments(parser, args, ["--video"])
+        args = argparse.Namespace(
+            task="Isaac-Lift", num_envs=None, max_iterations=None, headless=False, checkpoint=None
+        )
+        cli_args, _unparsed = _MOD._prepare_cli_arguments(parser, args, ["--video"])
         assert cli_args.video is True
         assert cli_args.enable_cameras is True
 
     def test_passes_through_hydra_overrides(self) -> None:
         parser = _MOD._build_parser(MagicMock())
-        args = argparse.Namespace(task="Isaac-Lift", num_envs=None, max_iterations=None, headless=False, checkpoint=None)
+        args = argparse.Namespace(
+            task="Isaac-Lift", num_envs=None, max_iterations=None, headless=False, checkpoint=None
+        )
         _, unparsed = _MOD._prepare_cli_arguments(parser, args, ["env.foo=bar"])
         assert "env.foo=bar" in unparsed
 

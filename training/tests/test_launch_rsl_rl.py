@@ -7,7 +7,6 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from conftest import load_training_module
 
 
@@ -30,9 +29,7 @@ _fake_utils.AzureMLContext = _AzureMLContext
 _fake_utils.bootstrap_azure_ml = _bootstrap_azure_ml
 sys.modules.setdefault("training.utils", _fake_utils)
 
-_MOD = load_training_module(
-    "training_rl_scripts_launch_rsl_rl", "training/rl/scripts/launch_rsl_rl.py"
-)
+_MOD = load_training_module("training_rl_scripts_launch_rsl_rl", "training/rl/scripts/launch_rsl_rl.py")
 
 
 class TestOptionalParsers:
@@ -66,19 +63,30 @@ class TestParseArgs:
         assert remaining == []
 
     def test_full_args(self):
-        args, remaining = _MOD._parse_args([
-            "--mode", "smoke-test",
-            "--task", "Walk",
-            "--num_envs", "8",
-            "--max_iterations", "100",
-            "--headless",
-            "--experiment-name", "exp",
-            "--disable-mlflow",
-            "--checkpoint-uri", "azureml://ckpt",
-            "--checkpoint-mode", "warm-start",
-            "--register-checkpoint", "model",
-            "extra", "--hydra-arg",
-        ])
+        args, remaining = _MOD._parse_args(
+            [
+                "--mode",
+                "smoke-test",
+                "--task",
+                "Walk",
+                "--num_envs",
+                "8",
+                "--max_iterations",
+                "100",
+                "--headless",
+                "--experiment-name",
+                "exp",
+                "--disable-mlflow",
+                "--checkpoint-uri",
+                "azureml://ckpt",
+                "--checkpoint-mode",
+                "warm-start",
+                "--register-checkpoint",
+                "model",
+                "extra",
+                "--hydra-arg",
+            ]
+        )
         assert args.mode == "smoke-test"
         assert args.task == "Walk"
         assert args.num_envs == 8
@@ -113,16 +121,13 @@ class TestMaterializedCheckpoint:
 
     def test_mlflow_missing(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "mlflow", None)
-        with pytest.raises(SystemExit) as exc:
-            with _MOD._materialized_checkpoint("azureml://ckpt"):
-                pass
+        with pytest.raises(SystemExit) as exc, _MOD._materialized_checkpoint("azureml://ckpt"):
+            pass
         assert "mlflow is required" in str(exc.value)
 
     def test_download_success(self, monkeypatch, tmp_path):
         fake_mlflow = ModuleType("mlflow")
-        fake_mlflow.artifacts = SimpleNamespace(
-            download_artifacts=MagicMock(return_value=str(tmp_path / "ckpt"))
-        )
+        fake_mlflow.artifacts = SimpleNamespace(download_artifacts=MagicMock(return_value=str(tmp_path / "ckpt")))
         monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
 
         rmtree_mock = MagicMock()
@@ -135,17 +140,14 @@ class TestMaterializedCheckpoint:
 
     def test_download_failure_cleans_up(self, monkeypatch, tmp_path):
         fake_mlflow = ModuleType("mlflow")
-        fake_mlflow.artifacts = SimpleNamespace(
-            download_artifacts=MagicMock(side_effect=RuntimeError("boom"))
-        )
+        fake_mlflow.artifacts = SimpleNamespace(download_artifacts=MagicMock(side_effect=RuntimeError("boom")))
         monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
         rmtree_mock = MagicMock()
         monkeypatch.setattr(_MOD.shutil, "rmtree", rmtree_mock)
         monkeypatch.setattr(_MOD.tempfile, "mkdtemp", lambda prefix=None: str(tmp_path / "dl"))
 
-        with pytest.raises(SystemExit) as exc:
-            with _MOD._materialized_checkpoint("azureml://ckpt"):
-                pass
+        with pytest.raises(SystemExit) as exc, _MOD._materialized_checkpoint("azureml://ckpt"):
+            pass
         assert "Failed to download checkpoint" in str(exc.value)
         rmtree_mock.assert_called_once()
 
@@ -220,9 +222,7 @@ class TestRunTraining:
             return SimpleNamespace(returncode=0)
 
         monkeypatch.setattr(_MOD.subprocess, "run", fake_run)
-        args = SimpleNamespace(
-            task=None, num_envs=None, max_iterations=None, headless=False, checkpoint=None
-        )
+        args = SimpleNamespace(task=None, num_envs=None, max_iterations=None, headless=False, checkpoint=None)
         _MOD._run_training(args=args, hydra_args=[])
         cmd = captured["cmd"]
         assert "--task" not in cmd
@@ -231,12 +231,11 @@ class TestRunTraining:
 
     def test_failure_raises(self, monkeypatch):
         monkeypatch.setattr(
-            _MOD.subprocess, "run",
+            _MOD.subprocess,
+            "run",
             lambda cmd, check=False: SimpleNamespace(returncode=2),
         )
-        args = SimpleNamespace(
-            task=None, num_envs=None, max_iterations=None, headless=False, checkpoint=None
-        )
+        args = SimpleNamespace(task=None, num_envs=None, max_iterations=None, headless=False, checkpoint=None)
         with pytest.raises(SystemExit) as exc:
             _MOD._run_training(args=args, hydra_args=[])
         assert "exit code 2" in str(exc.value)
