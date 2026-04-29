@@ -38,6 +38,9 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
       totalFrames={shell.totalFrames}
       resizeOutput={shell.globalTransform?.resize ?? null}
       frameImageUrl={shell.frameImageUrl}
+      cameras={shell.cameras}
+      selectedCamera={shell.cameraName}
+      onSelectCamera={shell.setCameraName}
       isPlaying={shell.isPlaying}
       onTogglePlayback={shell.togglePlayback}
       onStepFrame={shell.playback.stepFrame}

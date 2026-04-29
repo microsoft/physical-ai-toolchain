@@ -48,15 +48,25 @@ export function useAnnotationWorkspaceMediaSources({
     ],
   )
 
-  const cameraName = useMemo(() => {
-    const cameras = currentEpisode?.cameras ?? []
-    if (cameras.length > 0) {
-      return cameras[0]
+  const cameras = useMemo(() => {
+    const fromEpisode = currentEpisode?.cameras ?? []
+    if (fromEpisode.length > 0) {
+      return fromEpisode
     }
-
-    const videoKeys = Object.keys(currentEpisode?.videoUrls ?? {})
-    return videoKeys.length > 0 ? videoKeys[0] : null
+    return Object.keys(currentEpisode?.videoUrls ?? {})
   }, [currentEpisode?.cameras, currentEpisode?.videoUrls])
+
+  const [cameraName, setCameraName] = useState<string | null>(null)
+
+  // Reset selected camera when the camera list changes (e.g., new episode/dataset).
+  // Preserves selection if the same camera is still available.
+  useEffect(() => {
+    if (cameras.length === 0) {
+      setCameraName(null)
+      return
+    }
+    setCameraName((prev) => (prev && cameras.includes(prev) ? prev : cameras[0]))
+  }, [cameras])
 
   const videoSrc = useMemo(() => {
     if (!currentEpisode?.videoUrls || !cameraName) {
@@ -179,7 +189,9 @@ export function useAnnotationWorkspaceMediaSources({
 
   return {
     canvasRef,
+    cameras,
     cameraName,
+    setCameraName,
     displayFilter,
     frameImageUrl,
     interpolatedImageUrl,

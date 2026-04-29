@@ -45,7 +45,7 @@ export function useAnnotationWorkspaceShell({
   const seekVideoFrameRef = useRef(
     (frame: number, _range: [number, number] | null, _constrainToRange = true) => frame,
   )
-  const resumePlaybackRef = useRef((_: number) => {})
+  const resumePlaybackRef = useRef((_: number) => { })
 
   const currentDataset = useDatasetStore((state) => state.currentDataset)
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
@@ -310,5 +310,8 @@ export function useAnnotationWorkspaceShell({
     videoRef: media.videoRef,
     videoSrc: media.videoSrc,
     canvasRef: media.canvasRef,
+    cameras: media.cameras,
+    cameraName: media.cameraName,
+    setCameraName: media.setCameraName,
   }
 }
