@@ -151,11 +151,7 @@ class BlobLabelStorage:
             container = client.get_container_client(self._provider.container_name)
             blob_client = container.get_blob_client(self._blob_path(dataset_id))
             content = json.dumps(labels_file.model_dump(), indent=2).encode("utf-8")
-            content_settings = (
-                ContentSettings(content_type="application/json")
-                if ContentSettings is not None
-                else None
-            )
+            content_settings = ContentSettings(content_type="application/json") if ContentSettings is not None else None
             await blob_client.upload_blob(
                 content,
                 overwrite=True,
