@@ -71,9 +71,7 @@ class TestPrepareForShutdown:
 
         shutdown_module.prepare_for_shutdown(timeout=1)
 
-    def test_disable_handler_swallows_exceptions(
-        self, shutdown_module, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_disable_handler_swallows_exceptions(self, shutdown_module, monkeypatch: pytest.MonkeyPatch) -> None:
         broken = ModuleType("isaaclab.sim")
 
         class _Boom:
@@ -123,9 +121,7 @@ class TestWatchdog:
         assert kill_calls == [(42, 9)]
         assert exit_calls == [0]
 
-    def test_child_branch_handles_parent_already_gone(
-        self, shutdown_module, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_child_branch_handles_parent_already_gone(self, shutdown_module, monkeypatch: pytest.MonkeyPatch) -> None:
         exit_calls: list[int] = []
 
         monkeypatch.setattr(shutdown_module.os, "fork", lambda: 0, raising=False)

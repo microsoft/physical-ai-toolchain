@@ -7,7 +7,6 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from conftest import load_training_module
 
 
@@ -63,19 +62,30 @@ class TestParseArgs:
         assert remaining == []
 
     def test_full_args(self):
-        args, remaining = _MOD._parse_args([
-            "--mode", "smoke-test",
-            "--task", "Walk",
-            "--num_envs", "8",
-            "--max_iterations", "100",
-            "--headless",
-            "--experiment-name", "exp",
-            "--disable-mlflow",
-            "--checkpoint-uri", "azureml://ckpt",
-            "--checkpoint-mode", "warm-start",
-            "--register-checkpoint", "model",
-            "extra", "--hydra-arg",
-        ])
+        args, remaining = _MOD._parse_args(
+            [
+                "--mode",
+                "smoke-test",
+                "--task",
+                "Walk",
+                "--num_envs",
+                "8",
+                "--max_iterations",
+                "100",
+                "--headless",
+                "--experiment-name",
+                "exp",
+                "--disable-mlflow",
+                "--checkpoint-uri",
+                "azureml://ckpt",
+                "--checkpoint-mode",
+                "warm-start",
+                "--register-checkpoint",
+                "model",
+                "extra",
+                "--hydra-arg",
+            ]
+        )
         assert args.mode == "smoke-test"
         assert args.task == "Walk"
         assert args.num_envs == 8
@@ -102,15 +112,18 @@ class TestEnsureDependencies:
 
 
 class TestNormalizeCheckpointMode:
-    @pytest.mark.parametrize("value,expected", [
-        (None, "from-scratch"),
-        ("", "from-scratch"),
-        ("fresh", "from-scratch"),
-        ("from-scratch", "from-scratch"),
-        ("warm-start", "warm-start"),
-        ("WARM-START", "warm-start"),
-        ("resume", "resume"),
-    ])
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (None, "from-scratch"),
+            ("", "from-scratch"),
+            ("fresh", "from-scratch"),
+            ("from-scratch", "from-scratch"),
+            ("warm-start", "warm-start"),
+            ("WARM-START", "warm-start"),
+            ("resume", "resume"),
+        ],
+    )
     def test_valid(self, value, expected):
         assert _MOD._normalize_checkpoint_mode(value) == expected
 
@@ -129,16 +142,13 @@ class TestMaterializedCheckpoint:
 
     def test_mlflow_missing(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "mlflow", None)
-        with pytest.raises(SystemExit) as exc:
-            with _MOD._materialized_checkpoint("azureml://ckpt"):
-                pass
+        with pytest.raises(SystemExit) as exc, _MOD._materialized_checkpoint("azureml://ckpt"):
+            pass
         assert "mlflow is required" in str(exc.value)
 
     def test_download_success(self, monkeypatch, tmp_path):
         fake_mlflow = ModuleType("mlflow")
-        fake_artifacts = SimpleNamespace(
-            download_artifacts=MagicMock(return_value=str(tmp_path / "ckpt"))
-        )
+        fake_artifacts = SimpleNamespace(download_artifacts=MagicMock(return_value=str(tmp_path / "ckpt")))
         fake_mlflow.artifacts = fake_artifacts
         monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
 
@@ -152,17 +162,14 @@ class TestMaterializedCheckpoint:
 
     def test_download_failure_cleans_up(self, monkeypatch, tmp_path):
         fake_mlflow = ModuleType("mlflow")
-        fake_mlflow.artifacts = SimpleNamespace(
-            download_artifacts=MagicMock(side_effect=RuntimeError("boom"))
-        )
+        fake_mlflow.artifacts = SimpleNamespace(download_artifacts=MagicMock(side_effect=RuntimeError("boom")))
         monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
         rmtree_mock = MagicMock()
         monkeypatch.setattr(_MOD.shutil, "rmtree", rmtree_mock)
         monkeypatch.setattr(_MOD.tempfile, "mkdtemp", lambda prefix=None: str(tmp_path / "dl"))
 
-        with pytest.raises(SystemExit) as exc:
-            with _MOD._materialized_checkpoint("azureml://ckpt"):
-                pass
+        with pytest.raises(SystemExit) as exc, _MOD._materialized_checkpoint("azureml://ckpt"):
+            pass
         assert "Failed to download checkpoint" in str(exc.value)
         rmtree_mock.assert_called_once()
 

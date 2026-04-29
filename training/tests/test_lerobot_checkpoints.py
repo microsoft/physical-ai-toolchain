@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from conftest import load_training_module
 
 _MOD = load_training_module(
@@ -192,6 +190,7 @@ class TestRegisterFinalCheckpoint:
         ck2.mkdir(parents=True)
         # Make ck2 newer
         import os
+
         os.utime(ck2.parent, (2000, 2000))
         os.utime(ck1.parent, (1000, 1000))
         assert _MOD.register_final_checkpoint() == _MOD.EXIT_SUCCESS

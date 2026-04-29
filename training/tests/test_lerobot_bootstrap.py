@@ -7,7 +7,6 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from conftest import load_training_module
 
 _MOD = load_training_module(

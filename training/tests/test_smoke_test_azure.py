@@ -5,7 +5,6 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from conftest import load_training_module
 
 
@@ -104,18 +103,14 @@ class TestCheckIdentityEnvVar:
         _MOD._check_identity_env_var("AZURE_CLIENT_ID", "client_id", info)
         assert info == {"client_id": "abc"}
 
-    def test_token_file_missing_path_warns(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_token_file_missing_path_warns(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         missing = tmp_path / "nope.txt"
         monkeypatch.setenv("AZURE_FEDERATED_TOKEN_FILE", str(missing))
         info: dict[str, str] = {}
         _MOD._check_identity_env_var("AZURE_FEDERATED_TOKEN_FILE", "token_file", info)
         assert info["token_file"] == str(missing)
 
-    def test_token_file_existing_path(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_token_file_existing_path(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         existing = tmp_path / "tok.txt"
         existing.write_text("x")
         monkeypatch.setenv("AZURE_FEDERATED_TOKEN_FILE", str(existing))
@@ -133,9 +128,7 @@ class TestValidateWorkloadIdentity:
     def test_all_unset_returns_empty(self) -> None:
         assert _MOD._validate_workload_identity() == {}
 
-    def test_all_set_with_existing_token_file(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_all_set_with_existing_token_file(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         token = tmp_path / "tok"
         token.write_text("x")
         monkeypatch.setenv("AZURE_CLIENT_ID", "cid")
@@ -146,9 +139,7 @@ class TestValidateWorkloadIdentity:
         assert info["tenant_id"] == "tid"
         assert info["token_file"] == str(token)
 
-    def test_token_file_missing_branch(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path
-    ) -> None:
+    def test_token_file_missing_branch(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         monkeypatch.setenv("AZURE_FEDERATED_TOKEN_FILE", str(tmp_path / "missing"))
         info = _MOD._validate_workload_identity()
         assert "token_file" in info
@@ -160,9 +151,7 @@ class TestCredentialAcquisition:
         cred.get_token.return_value = SimpleNamespace(token="x")
         cred_cls = MagicMock(return_value=cred)
         fake_identity = SimpleNamespace(DefaultAzureCredential=cred_cls)
-        monkeypatch.setattr(
-            _MOD.importlib, "import_module", lambda name: fake_identity
-        )
+        monkeypatch.setattr(_MOD.importlib, "import_module", lambda name: fake_identity)
         assert _MOD._test_credential_acquisition() is True
         cred.get_token.assert_called_once()
 
@@ -276,9 +265,7 @@ class TestStartRun:
         mlflow = MagicMock()
         mlflow.start_run.return_value = _RunCtx("run-xyz")
         monkeypatch.setattr(_MOD, "_load_mlflow", lambda: mlflow)
-        ctx = _AzureMLContext(
-            workspace_name="ws", storage=_AzureStorageContext("ckpts")
-        )
+        ctx = _AzureMLContext(workspace_name="ws", storage=_AzureStorageContext("ckpts"))
         args = _MOD._parse_args([])
         run_id = _MOD._start_run(ctx, args, {"u": "v"}, {"client_id": "cid"})
         assert run_id == "run-xyz"
@@ -304,19 +291,14 @@ class TestMain:
     def _patch_common(self, monkeypatch: pytest.MonkeyPatch, **overrides) -> MagicMock:
         client = MagicMock()
         client.jobs.list.return_value = iter([])
-        storage = overrides.get(
-            "storage", MagicMock(container_name="ckpts")
-        )
+        storage = overrides.get("storage", MagicMock(container_name="ckpts"))
         if storage is not None and not hasattr(storage, "upload_checkpoint"):
             storage.upload_checkpoint = MagicMock(return_value="blob")
-        ctx = _AzureMLContext(
-            workspace_name="ws", client=client, storage=storage
-        )
+        ctx = _AzureMLContext(workspace_name="ws", client=client, storage=storage)
+        monkeypatch.setattr(_MOD, "bootstrap_azure_ml", lambda **_: ctx)
         monkeypatch.setattr(
-            _MOD, "bootstrap_azure_ml", lambda **_: ctx
-        )
-        monkeypatch.setattr(
-            _MOD, "_test_credential_acquisition",
+            _MOD,
+            "_test_credential_acquisition",
             overrides.get("cred_ok", lambda: True),
         )
         monkeypatch.setattr(_MOD, "_start_run", lambda *a, **k: "run-1")
@@ -342,9 +324,7 @@ class TestMain:
         with pytest.raises(SystemExit, match="credentials"):
             _MOD.main([])
 
-    def test_bootstrap_config_error_exits(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_bootstrap_config_error_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def boom(**_: object) -> _AzureMLContext:
             raise _MOD.AzureConfigError("bad config")
 

@@ -6,7 +6,6 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from conftest import load_training_module
 
 
@@ -147,9 +146,8 @@ class TestMaterializedCheckpoint:
 
     def test_mlflow_missing_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setitem(sys.modules, "mlflow", None)
-        with pytest.raises(SystemExit) as exc_info:
-            with _MOD._materialized_checkpoint("azureml://artifact"):
-                pass
+        with pytest.raises(SystemExit) as exc_info, _MOD._materialized_checkpoint("azureml://artifact"):
+            pass
         assert "mlflow is required" in str(exc_info.value)
 
     def test_success_downloads_and_cleans_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,9 +165,7 @@ class TestMaterializedCheckpoint:
             assert path == "/tmp/skrl-ckpt-xyz/checkpoint.pt"
 
         mkdtemp_mock.assert_called_once_with(prefix="skrl-ckpt-")
-        download_mock.assert_called_once_with(
-            artifact_uri="azureml://artifact", dst_path="/tmp/skrl-ckpt-xyz"
-        )
+        download_mock.assert_called_once_with(artifact_uri="azureml://artifact", dst_path="/tmp/skrl-ckpt-xyz")
         rmtree_mock.assert_called_with("/tmp/skrl-ckpt-xyz", ignore_errors=True)
 
     def test_download_failure_cleans_up_and_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -182,9 +178,8 @@ class TestMaterializedCheckpoint:
         rmtree_mock = MagicMock()
         monkeypatch.setattr(_MOD.shutil, "rmtree", rmtree_mock)
 
-        with pytest.raises(SystemExit) as exc_info:
-            with _MOD._materialized_checkpoint("azureml://artifact"):
-                pass
+        with pytest.raises(SystemExit) as exc_info, _MOD._materialized_checkpoint("azureml://artifact"):
+            pass
         assert "Failed to download checkpoint from azureml://artifact" in str(exc_info.value)
         rmtree_mock.assert_called_with("/tmp/skrl-ckpt-fail", ignore_errors=True)
 
@@ -246,7 +241,9 @@ class TestRunTraining:
         real_import = builtins.__import__
 
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
-            if name == "training.rl.scripts" and "skrl_training" in (kwargs.get("fromlist") or args[2] if len(args) > 2 else ()):
+            if name == "training.rl.scripts" and "skrl_training" in (
+                kwargs.get("fromlist") or args[2] if len(args) > 2 else ()
+            ):
                 raise ImportError("forced")
             if name == "training.rl.scripts.skrl_training":
                 raise ImportError("forced")
@@ -280,17 +277,13 @@ class TestValidateMlflowFlags:
         _MOD._validate_mlflow_flags(args)
 
     def test_checkpoint_uri_with_disable_raises(self) -> None:
-        args = SimpleNamespace(
-            disable_mlflow=True, checkpoint_uri="azureml://x", register_checkpoint=None
-        )
+        args = SimpleNamespace(disable_mlflow=True, checkpoint_uri="azureml://x", register_checkpoint=None)
         with pytest.raises(SystemExit) as exc_info:
             _MOD._validate_mlflow_flags(args)
         assert "--checkpoint-uri requires MLflow" in str(exc_info.value)
 
     def test_register_checkpoint_with_disable_raises(self) -> None:
-        args = SimpleNamespace(
-            disable_mlflow=True, checkpoint_uri=None, register_checkpoint="model-name"
-        )
+        args = SimpleNamespace(disable_mlflow=True, checkpoint_uri=None, register_checkpoint="model-name")
         with pytest.raises(SystemExit) as exc_info:
             _MOD._validate_mlflow_flags(args)
         assert "--register-checkpoint requires MLflow" in str(exc_info.value)
@@ -320,9 +313,7 @@ class TestMain:
         _patch_dependencies(monkeypatch)
         train_mock = MagicMock()
         monkeypatch.setattr(_MOD, "_run_training", train_mock)
-        monkeypatch.setattr(
-            _MOD, "_initialize_mlflow_context", lambda args: (_AzureMLContext(), "exp")
-        )
+        monkeypatch.setattr(_MOD, "_initialize_mlflow_context", lambda args: (_AzureMLContext(), "exp"))
         monkeypatch.setattr(_MOD, "_materialized_checkpoint", _fake_ckpt)
         _MOD.main(["--task", "Walk"])
         train_mock.assert_called_once()

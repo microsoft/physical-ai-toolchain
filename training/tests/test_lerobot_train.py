@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
 from conftest import load_training_module
 
 _MOD = load_training_module(
@@ -116,7 +114,9 @@ class TestInitSystemCollector:
         handle = object()
         pynvml_mod.nvmlDeviceGetHandleByIndex = MagicMock(return_value=handle)
         pynvml_mod.nvmlDeviceGetUtilizationRates = MagicMock(return_value=SimpleNamespace(gpu=42))
-        pynvml_mod.nvmlDeviceGetMemoryInfo = MagicMock(return_value=SimpleNamespace(used=2 * 1024 * 1024, total=4 * 1024 * 1024))
+        pynvml_mod.nvmlDeviceGetMemoryInfo = MagicMock(
+            return_value=SimpleNamespace(used=2 * 1024 * 1024, total=4 * 1024 * 1024)
+        )
         pynvml_mod.nvmlDeviceGetPowerUsage = MagicMock(return_value=125000)
         monkeypatch.setitem(sys.modules, "pynvml", pynvml_mod)
         collector = _MOD._init_system_collector()
@@ -133,9 +133,19 @@ class TestInitSystemCollector:
 
 class TestBuildTrainParams:
     def test_defaults(self, monkeypatch):
-        for var in ("DATASET_REPO_ID", "POLICY_TYPE", "JOB_NAME", "POLICY_REPO_ID",
-                    "TRAINING_STEPS", "BATCH_SIZE", "LEARNING_RATE", "LR_WARMUP_STEPS",
-                    "SAVE_FREQ", "VAL_SPLIT", "SYSTEM_METRICS"):
+        for var in (
+            "DATASET_REPO_ID",
+            "POLICY_TYPE",
+            "JOB_NAME",
+            "POLICY_REPO_ID",
+            "TRAINING_STEPS",
+            "BATCH_SIZE",
+            "LEARNING_RATE",
+            "LR_WARMUP_STEPS",
+            "SAVE_FREQ",
+            "VAL_SPLIT",
+            "SYSTEM_METRICS",
+        ):
             monkeypatch.delenv(var, raising=False)
         params = _MOD._build_train_params()
         assert params["policy_type"] == "act"
@@ -312,21 +322,25 @@ class TestMain:
 
     def test_cli_args_skip_env_overrides(self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap):
         self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
-        monkeypatch.setattr(_MOD.sys, "argv", [
-            "train.py",
-            "--dataset.repo_id=cli/ds",
-            "--policy.type=diffusion",
-            "--output_dir=/x",
-            "--job_name=cli-job",
-            "--policy.device=cpu",
-            "--wandb.enable=true",
-            "--policy.repo_id=cli/repo",
-            "--steps=10",
-            "--batch_size=2",
-            "--policy.optimizer_lr=1e-3",
-            "--eval_freq=5",
-            "--save_freq=5",
-        ])
+        monkeypatch.setattr(
+            _MOD.sys,
+            "argv",
+            [
+                "train.py",
+                "--dataset.repo_id=cli/ds",
+                "--policy.type=diffusion",
+                "--output_dir=/x",
+                "--job_name=cli-job",
+                "--policy.device=cpu",
+                "--wandb.enable=true",
+                "--policy.repo_id=cli/repo",
+                "--steps=10",
+                "--batch_size=2",
+                "--policy.optimizer_lr=1e-3",
+                "--eval_freq=5",
+                "--save_freq=5",
+            ],
+        )
         monkeypatch.setenv("DATASET_REPO_ID", "env/ds")
         captured = {}
 
@@ -352,4 +366,4 @@ class TestMain:
 
         monkeypatch.setattr(_MOD, "run_training", fake_run)
         _MOD.main()
-        assert any("--policy.repo_id=hf-user/myjob" == c for c in captured["cmd"])
+        assert any(c == "--policy.repo_id=hf-user/myjob" for c in captured["cmd"])
