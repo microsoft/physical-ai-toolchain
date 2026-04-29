@@ -327,7 +327,9 @@ class TestAzureBlobStorageAdapterErrorPaths(TestCase):
         mock_client.get_container_client.return_value = mock_container
 
         adapter = AzureBlobStorageAdapter(
-            account_name="a", container_name="c", sas_token="s",
+            account_name="a",
+            container_name="c",
+            sas_token="s",
         )
         adapter._client = mock_client
 
@@ -354,9 +356,11 @@ class TestAzureBlobStorageAdapterErrorPaths(TestCase):
         adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
         adapter._client = mock_client
 
-        with patch("src.api.storage.azure.HttpResponseError", _HttpError):
-            with pytest.raises(StorageError, match="status=503"):
-                asyncio.run(adapter.get_annotation(self.dataset_id, 0))
+        with (
+            patch("src.api.storage.azure.HttpResponseError", _HttpError),
+            pytest.raises(StorageError, match="status=503"),
+        ):
+            asyncio.run(adapter.get_annotation(self.dataset_id, 0))
 
     @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
     @patch("src.api.storage.azure.BlobServiceClient")
@@ -398,9 +402,11 @@ class TestAzureBlobStorageAdapterErrorPaths(TestCase):
         adapter._client = mock_client
         annotation = create_test_annotation(episode_index=1)
 
-        with patch("src.api.storage.azure.HttpResponseError", _HttpError):
-            with pytest.raises(StorageError, match="status=409"):
-                asyncio.run(adapter.save_annotation(self.dataset_id, 1, annotation))
+        with (
+            patch("src.api.storage.azure.HttpResponseError", _HttpError),
+            pytest.raises(StorageError, match="status=409"),
+        ):
+            asyncio.run(adapter.save_annotation(self.dataset_id, 1, annotation))
 
     @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
     @patch("src.api.storage.azure.ContentSettings")
@@ -471,9 +477,11 @@ class TestAzureBlobStorageAdapterErrorPaths(TestCase):
         adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
         adapter._client = mock_client
 
-        with patch("src.api.storage.azure.HttpResponseError", _HttpError):
-            with pytest.raises(StorageError, match="status=500"):
-                asyncio.run(adapter.list_annotated_episodes(self.dataset_id))
+        with (
+            patch("src.api.storage.azure.HttpResponseError", _HttpError),
+            pytest.raises(StorageError, match="status=500"),
+        ):
+            asyncio.run(adapter.list_annotated_episodes(self.dataset_id))
 
     @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
     @patch("src.api.storage.azure.BlobServiceClient")
@@ -516,9 +524,11 @@ class TestAzureBlobStorageAdapterErrorPaths(TestCase):
         adapter = AzureBlobStorageAdapter(account_name="a", container_name="c", sas_token="s")
         adapter._client = mock_client
 
-        with patch("src.api.storage.azure.HttpResponseError", _HttpError):
-            with pytest.raises(StorageError, match="status=403"):
-                asyncio.run(adapter.delete_annotation(self.dataset_id, 0))
+        with (
+            patch("src.api.storage.azure.HttpResponseError", _HttpError),
+            pytest.raises(StorageError, match="status=403"),
+        ):
+            asyncio.run(adapter.delete_annotation(self.dataset_id, 0))
 
     @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
     @patch("src.api.storage.azure.BlobServiceClient")

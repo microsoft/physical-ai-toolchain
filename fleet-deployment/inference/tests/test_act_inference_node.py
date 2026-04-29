@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import sys
 import types
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Stub external ROS / cv / inference modules BEFORE importing the SUT.
@@ -221,12 +221,12 @@ class _JointPositionCommand:
     positions: np.ndarray
     is_delta: bool = False
 
-    def as_absolute(self, current: np.ndarray) -> "_JointPositionCommand":
+    def as_absolute(self, current: np.ndarray) -> _JointPositionCommand:
         return _JointPositionCommand(positions=current + self.positions, is_delta=False)
 
 
 class _PolicyRunner:
-    last_init_kwargs: dict = {}
+    last_init_kwargs: ClassVar[dict] = {}
 
     def __init__(self, device: str = "cuda") -> None:
         self.device = device
@@ -240,7 +240,7 @@ class _PolicyRunner:
         )
 
     @classmethod
-    def from_pretrained(cls, repo: str, device: str = "cuda") -> "_PolicyRunner":
+    def from_pretrained(cls, repo: str, device: str = "cuda") -> _PolicyRunner:
         cls.last_init_kwargs = {"repo": repo, "device": device}
         return cls(device=device)
 

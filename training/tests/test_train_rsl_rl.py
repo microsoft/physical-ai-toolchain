@@ -8,9 +8,10 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-import torch
 
-from conftest import load_training_module
+torch = pytest.importorskip("torch")
+
+from conftest import load_training_module  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Pre-load stubs: register all heavy/missing modules in sys.modules BEFORE
@@ -27,7 +28,7 @@ class _StubAppLauncher:
         parser.add_argument("--enable_cameras", action="store_true", default=False)
         parser.add_argument("--headless", action="store_true", default=False)
 
-    def __init__(self, args) -> None:  # noqa: D401
+    def __init__(self, args) -> None:
         self.app = SimpleNamespace()
         self.local_rank = 0
 
@@ -138,7 +139,7 @@ _register_stub(
     "isaaclab_tasks.utils.hydra",
     _build_stub_namespace(
         "isaaclab_tasks.utils.hydra",
-        hydra_task_config=lambda task, agent: (lambda fn: fn),
+        hydra_task_config=lambda task, agent: lambda fn: fn,
     ),
 )
 
@@ -325,7 +326,7 @@ class TestRslRl3xCompatWrapper:
 
     def test_step(self):
         wrapper, _ = self._make_wrapper()
-        obs, rew, dones, extras = wrapper.step(torch.zeros(2))
+        obs, _rew, _dones, extras = wrapper.step(torch.zeros(2))
         assert isinstance(obs, _MOD.TensorDict)
         assert extras == {}
 
@@ -383,9 +384,7 @@ class TestStartMlflowRun:
     def test_import_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "mlflow", None)
         ctx = SimpleNamespace(tracking_uri="x")
-        mod, active = _MOD._start_mlflow_run(
-            context=ctx, experiment_name="e", run_name="r", tags={}, params={}
-        )
+        mod, active = _MOD._start_mlflow_run(context=ctx, experiment_name="e", run_name="r", tags={}, params={})
         assert mod is None
         assert active is False
 
@@ -419,9 +418,7 @@ class TestStartMlflowRun:
         fake.set_tracking_uri = MagicMock(side_effect=RuntimeError("boom"))
         monkeypatch.setitem(sys.modules, "mlflow", fake)
         ctx = SimpleNamespace(tracking_uri="uri")
-        mod, active = _MOD._start_mlflow_run(
-            context=ctx, experiment_name="e", run_name="r", tags={}, params={}
-        )
+        mod, active = _MOD._start_mlflow_run(context=ctx, experiment_name="e", run_name="r", tags={}, params={})
         assert mod is None
         assert active is False
 
@@ -491,16 +488,12 @@ class TestSyncLogsToStorage:
 
 class TestRegisterFinalModel:
     def test_no_context(self):
-        assert _MOD._register_final_model(
-            context=None, model_path="/m", model_name="n", tags={}
-        ) is False
+        assert _MOD._register_final_model(context=None, model_path="/m", model_name="n", tags={}) is False
 
     def test_azure_import_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "azure.ai.ml.entities", None)
         ctx = SimpleNamespace(client=SimpleNamespace())
-        result = _MOD._register_final_model(
-            context=ctx, model_path="/m", model_name="n", tags={}
-        )
+        result = _MOD._register_final_model(context=ctx, model_path="/m", model_name="n", tags={})
         assert result is False
 
     def test_happy_path(self, monkeypatch):
@@ -521,9 +514,7 @@ class TestRegisterFinalModel:
         ctx = SimpleNamespace(
             client=SimpleNamespace(models=SimpleNamespace(create_or_update=MagicMock(side_effect=RuntimeError("x"))))
         )
-        assert _MOD._register_final_model(
-            context=ctx, model_path="/m", model_name="n", tags={}
-        ) is False
+        assert _MOD._register_final_model(context=ctx, model_path="/m", model_name="n", tags={}) is False
 
 
 class TestCreateEnhancedLog:
@@ -585,9 +576,7 @@ class TestCreateEnhancedLog:
     def test_collector_init_raises(self, monkeypatch):
         original = MagicMock(return_value=None)
         runner = self._runner()
-        monkeypatch.setattr(
-            _MOD, "SystemMetricsCollector", MagicMock(side_effect=RuntimeError("init fail"))
-        )
+        monkeypatch.setattr(_MOD, "SystemMetricsCollector", MagicMock(side_effect=RuntimeError("init fail")))
         enhanced = _MOD._create_enhanced_log(original, None, False, runner, collect_system_metrics=True)
         enhanced({"it": 0})
 
@@ -650,9 +639,7 @@ class TestCreateEnhancedSave:
         runner = SimpleNamespace(current_learning_iteration=10)
         mlflow = MagicMock()
         storage = SimpleNamespace(upload_checkpoint=MagicMock(return_value="blob/path"))
-        enhanced = _MOD._create_enhanced_save(
-            original, mlflow, True, storage, str(tmp_path), "model", runner
-        )
+        enhanced = _MOD._create_enhanced_save(original, mlflow, True, storage, str(tmp_path), "model", runner)
         enhanced(str(ckpt))
         mlflow.log_artifact.assert_called_once()
         storage.upload_checkpoint.assert_called_once()
@@ -674,9 +661,7 @@ class TestCreateEnhancedSave:
         original = MagicMock(return_value=None)
         runner = SimpleNamespace(current_learning_iteration=0)
         storage = SimpleNamespace(upload_checkpoint=MagicMock(side_effect=RuntimeError("boom")))
-        enhanced = _MOD._create_enhanced_save(
-            original, None, False, storage, str(tmp_path), "model", runner
-        )
+        enhanced = _MOD._create_enhanced_save(original, None, False, storage, str(tmp_path), "model", runner)
         # exception caught internally
         enhanced(str(ckpt))
 

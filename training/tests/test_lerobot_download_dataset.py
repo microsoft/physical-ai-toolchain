@@ -8,11 +8,12 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
 
-from conftest import load_training_module
+pa = pytest.importorskip("pyarrow")
+pq = pytest.importorskip("pyarrow.parquet")
+
+from conftest import load_training_module  # noqa: E402
 
 
 def _install_azure_stubs(monkeypatch, list_blobs_return=(), download_payload=b"data"):

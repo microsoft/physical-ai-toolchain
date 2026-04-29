@@ -168,9 +168,11 @@ class TestLocalStorageAdapter(TestCase):
         async def _raise(*_args, **_kwargs):
             raise OSError("disk full")
 
-        with patch("src.api.storage.local.aiofiles.os.makedirs", side_effect=_raise):
-            with pytest.raises(StorageError, match="Failed to create directory"):
-                asyncio.run(self.adapter.save_annotation(self.dataset_id, 0, annotation))
+        with (
+            patch("src.api.storage.local.aiofiles.os.makedirs", side_effect=_raise),
+            pytest.raises(StorageError, match="Failed to create directory"),
+        ):
+            asyncio.run(self.adapter.save_annotation(self.dataset_id, 0, annotation))
 
     def test_get_annotation_invalid_json_explicit(self):
         """Malformed JSON triggers the JSONDecodeError branch."""
@@ -187,9 +189,11 @@ class TestLocalStorageAdapter(TestCase):
         annotations_dir.mkdir(parents=True)
         (annotations_dir / "episode_000003.json").write_text("{}")
 
-        with patch("src.api.storage.local.aiofiles.open", side_effect=RuntimeError("boom")):
-            with pytest.raises(StorageError, match="Failed to read annotation file"):
-                asyncio.run(self.adapter.get_annotation(self.dataset_id, 3))
+        with (
+            patch("src.api.storage.local.aiofiles.open", side_effect=RuntimeError("boom")),
+            pytest.raises(StorageError, match="Failed to read annotation file"),
+        ):
+            asyncio.run(self.adapter.get_annotation(self.dataset_id, 3))
 
     def test_save_cleans_temp_file_on_replace_failure(self):
         """When os.replace fails, the temp file is cleaned and StorageError raised."""
@@ -202,9 +206,11 @@ class TestLocalStorageAdapter(TestCase):
                 raise OSError("replace failed")
             return await original_to_thread(func, *args, **kwargs)
 
-        with patch("src.api.storage.local.asyncio.to_thread", side_effect=fake_to_thread):
-            with pytest.raises(StorageError, match="Failed to save annotation file"):
-                asyncio.run(self.adapter.save_annotation(self.dataset_id, 4, annotation))
+        with (
+            patch("src.api.storage.local.asyncio.to_thread", side_effect=fake_to_thread),
+            pytest.raises(StorageError, match="Failed to save annotation file"),
+        ):
+            asyncio.run(self.adapter.save_annotation(self.dataset_id, 4, annotation))
 
         annotations_dir = Path(self.temp_dir) / self.dataset_id / "annotations" / "episodes"
         leftover = list(annotations_dir.glob("annotation_*.tmp"))
@@ -232,9 +238,11 @@ class TestLocalStorageAdapter(TestCase):
                 raise OSError("listdir failed")
             return await original_to_thread(func, *args, **kwargs)
 
-        with patch("src.api.storage.local.asyncio.to_thread", side_effect=fake_to_thread):
-            with pytest.raises(StorageError, match="Failed to list annotations"):
-                asyncio.run(self.adapter.list_annotated_episodes(self.dataset_id))
+        with (
+            patch("src.api.storage.local.asyncio.to_thread", side_effect=fake_to_thread),
+            pytest.raises(StorageError, match="Failed to list annotations"),
+        ):
+            asyncio.run(self.adapter.list_annotated_episodes(self.dataset_id))
 
     def test_delete_failure_wrapped(self):
         """Failures from aiofiles.os.remove are wrapped as StorageError."""
@@ -244,9 +252,11 @@ class TestLocalStorageAdapter(TestCase):
         async def _raise(*_args, **_kwargs):
             raise OSError("remove failed")
 
-        with patch("src.api.storage.local.aiofiles.os.remove", side_effect=_raise):
-            with pytest.raises(StorageError, match="Failed to delete annotation file"):
-                asyncio.run(self.adapter.delete_annotation(self.dataset_id, 8))
+        with (
+            patch("src.api.storage.local.aiofiles.os.remove", side_effect=_raise),
+            pytest.raises(StorageError, match="Failed to delete annotation file"),
+        ):
+            asyncio.run(self.adapter.delete_annotation(self.dataset_id, 8))
 
     def test_save_cleanup_skipped_when_temp_already_gone(self):
         """If temp file is already gone when cleanup runs, unlink is not called."""
@@ -264,9 +274,11 @@ class TestLocalStorageAdapter(TestCase):
                 return await original_to_thread(func, *args, **kwargs)
             return await original_to_thread(func, *args, **kwargs)
 
-        with patch("src.api.storage.local.asyncio.to_thread", side_effect=fake_to_thread):
-            with pytest.raises(StorageError, match="Failed to save annotation file"):
-                asyncio.run(self.adapter.save_annotation(self.dataset_id, 9, annotation))
+        with (
+            patch("src.api.storage.local.asyncio.to_thread", side_effect=fake_to_thread),
+            pytest.raises(StorageError, match="Failed to save annotation file"),
+        ):
+            asyncio.run(self.adapter.save_annotation(self.dataset_id, 9, annotation))
 
         assert unlink_called["count"] == 0
 
