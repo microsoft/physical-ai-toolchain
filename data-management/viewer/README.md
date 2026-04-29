@@ -42,8 +42,8 @@ Copy `backend/.env.example` to `backend/.env` and set values for your environmen
 ### Local File Storage (default)
 
 ```env
-HMI_STORAGE_BACKEND=local
-HMI_DATA_PATH=/path/to/your/datasets
+STORAGE_BACKEND=local
+DATA_DIR=/path/to/your/datasets
 ```
 
 ### Azure Blob Storage
@@ -54,7 +54,7 @@ which supports managed identity, workload identity, and Azure CLI credentials
 automatically — no SAS token required in AKS or Container Apps.
 
 ```env
-HMI_STORAGE_BACKEND=azure
+STORAGE_BACKEND=azure
 AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 AZURE_STORAGE_DATASET_CONTAINER=datasets
 AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
@@ -75,8 +75,8 @@ Expected blob structure:
 
 | Variable                             | Default         | Description                                                    |
 |--------------------------------------|-----------------|----------------------------------------------------------------|
-| `HMI_STORAGE_BACKEND`                | `local`         | Storage backend: `local` or `azure`                            |
-| `HMI_DATA_PATH`                      | `./data`        | Local dataset directory (local mode)                           |
+| `STORAGE_BACKEND`                    | `local`         | Storage backend: `local` or `azure`                            |
+| `DATA_DIR`                      | `./data`        | Local dataset directory (local mode)                           |
 | `AZURE_STORAGE_ACCOUNT_NAME`         | —               | Azure Storage account name (azure mode)                        |
 | `AZURE_STORAGE_DATASET_CONTAINER`    | —               | Blob container for dataset files                               |
 | `AZURE_STORAGE_ANNOTATION_CONTAINER` | —               | Blob container for annotations (defaults to dataset container) |
@@ -205,7 +205,7 @@ The application will be available at `http://localhost:5173`.
 HMI_LOCAL_DATA_PATH=/path/to/datasets docker compose up --build
 
 # Azure Blob Storage mode
-export HMI_STORAGE_BACKEND=azure
+export STORAGE_BACKEND=azure
 export AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 export AZURE_STORAGE_DATASET_CONTAINER=datasets
 export AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
@@ -217,7 +217,7 @@ docker compose up --build
 For AKS with workload identity or Container Apps with managed identity, set:
 
 ```env
-HMI_STORAGE_BACKEND=azure
+STORAGE_BACKEND=azure
 AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 AZURE_STORAGE_DATASET_CONTAINER=datasets
 BACKEND_HOST=0.0.0.0
