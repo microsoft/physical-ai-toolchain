@@ -46,7 +46,7 @@ def fake_azure_modules(monkeypatch):
 
     azure_ai_ml.MLClient = ml_client_cls
     azure_constants.AssetTypes = SimpleNamespace(CUSTOM_MODEL="custom_model")
-    model_cls = MagicMock(side_effect=lambda **kw: SimpleNamespace(**kw))
+    model_cls = MagicMock(side_effect=SimpleNamespace)
     azure_entities.Model = model_cls
     azure_identity.DefaultAzureCredential = credential_cls
 

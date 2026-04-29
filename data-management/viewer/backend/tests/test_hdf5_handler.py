@@ -271,7 +271,7 @@ class TestEncodeJpeg:
     """Cover the _encode_jpeg helper."""
 
     def test_returns_jpeg_bytes(self):
-        Image = pytest.importorskip("PIL.Image")  # noqa: F841
+        pytest.importorskip("PIL.Image")
         frame = np.zeros((8, 8, 3), dtype=np.uint8)
         data = hh._encode_jpeg(frame)
         assert isinstance(data, bytes)
@@ -282,7 +282,7 @@ class TestGenerateVideoCv2:
     """Cover the OpenCV video writer fallback path."""
 
     def test_cv2_success_writes_file(self, tmp_path):
-        cv2 = pytest.importorskip("cv2")  # noqa: F841
+        pytest.importorskip("cv2")
         images = np.zeros((4, 16, 16, 3), dtype=np.uint8)
         out = tmp_path / "out.mp4"
         ok = hh._generate_video_cv2(images, out, fps=10.0)

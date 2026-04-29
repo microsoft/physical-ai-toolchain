@@ -270,9 +270,7 @@ def test_load_images_skips_corrupt_dataset(tmp_path: Path) -> None:
         return real_asarray(data, dtype=dtype, **kwargs) if dtype is not None else real_asarray(data, **kwargs)
 
     fake_asarray.calls = 0
-    import src.api.services.hdf5_loader as hl
-
-    monkey_target = hl.np
+    monkey_target = mod.np
     orig = monkey_target.asarray
     try:
         monkey_target.asarray = fake_asarray
