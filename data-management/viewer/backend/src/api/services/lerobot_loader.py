@@ -179,12 +179,23 @@ class LeRobotLoader:
         """
         return self._load_info()
 
+    def _is_v2_layout(self, info: LeRobotDatasetInfo) -> bool:
+        """Return True if the dataset uses the v2.x one-episode-per-file layout.
+
+        Detected from the data_path template (which contains the
+        ``{episode_index}`` placeholder in v2.x) rather than codebase_version,
+        so locally repacked datasets work regardless of version string.
+        """
+        return "{episode_index" in info.data_path
+
     def _find_episode_location(self, episode_index: int) -> tuple[int, int]:
         """
         Find the chunk and file indices for an episode.
 
-        In LeRobot format, episodes are usually stored one per chunk/file,
-        where chunk_index == episode_index and file_index == 0.
+        v2.x layout: one parquet per episode named by ``episode_index``,
+        grouped into ``chunk-{episode_index // chunks_size:03d}`` directories.
+        v3 layout: many episodes per ``file-{file_index:03d}.parquet``; chunk
+        and file indices must be discovered by scanning.
 
         Returns:
             Tuple of (chunk_index, file_index).
@@ -194,12 +205,19 @@ class LeRobotLoader:
 
         info = self._load_info()
 
-        # Standard layout: one episode per chunk
+        if self._is_v2_layout(info):
+            chunks_size = max(info.chunks_size, 1)
+            chunk_idx = episode_index // chunks_size
+            file_idx = 0
+            self._episode_index_cache[episode_index] = (chunk_idx, file_idx)
+            return chunk_idx, file_idx
+
+        # v3 layout: assume one episode per chunk, then verify on disk
         chunk_idx = episode_index
         file_idx = 0
 
         # Verify the parquet file exists
-        data_path = self._format_path(info.data_path, chunk_idx, file_idx)
+        data_path = self._format_path(info.data_path, chunk_idx, file_idx, episode_index=episode_index)
         full_path = self.base_path / data_path
 
         if not full_path.exists():
@@ -229,9 +247,36 @@ class LeRobotLoader:
         self._episode_index_cache[episode_index] = (chunk_idx, file_idx)
         return chunk_idx, file_idx
 
-    def _format_path(self, template: str, chunk_index: int, file_index: int, video_key: str = "") -> str:
-        """Format a path template with indices."""
-        return template.format(chunk_index=chunk_index, file_index=file_index, video_key=video_key)
+    def _format_path(
+        self,
+        template: str,
+        chunk_index: int,
+        file_index: int,
+        video_key: str = "",
+        *,
+        episode_index: int | None = None,
+    ) -> str:
+        """Format a path template, supporting v2.x and v3 placeholders.
+
+        v3 templates use ``{chunk_index}`` and ``{file_index}``; v2.x templates
+        use ``{episode_chunk}`` and ``{episode_index}``. All known placeholders
+        are supplied so unused ones are ignored by ``str.format``.
+        """
+        info = self._info
+        chunks_size = max(info.chunks_size, 1) if info is not None else 1
+        if episode_index is None:
+            episode_chunk = chunk_index
+            ep_idx = 0
+        else:
+            episode_chunk = episode_index // chunks_size
+            ep_idx = episode_index
+        return template.format(
+            chunk_index=chunk_index,
+            file_index=file_index,
+            video_key=video_key,
+            episode_chunk=episode_chunk,
+            episode_index=ep_idx,
+        )
 
     def list_episodes(self) -> list[int]:
         """
@@ -261,9 +306,30 @@ class LeRobotLoader:
         info = self._load_info()
         cameras = [k for k, v in info.features.items() if v.get("dtype") == "video"]
         meta_episodes_dir = self.base_path / "meta" / "episodes"
+        meta_episodes_jsonl = self.base_path / "meta" / "episodes.jsonl"
         result: dict[int, dict[str, Any]] = {}
 
-        if meta_episodes_dir.exists():
+        # v2.x layout: meta/episodes.jsonl with one JSON object per line
+        if meta_episodes_jsonl.exists():
+            try:
+                with open(meta_episodes_jsonl) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        row = json.loads(line)
+                        idx = int(row.get("episode_index", len(result)))
+                        result[idx] = {
+                            "length": int(row.get("length", 0)),
+                            "task_index": int(row.get("task_index", 0)),
+                            "cameras": cameras,
+                            "fps": info.fps,
+                            "robot_type": info.robot_type,
+                        }
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to read %s: %s", meta_episodes_jsonl, e)
+
+        if not result and meta_episodes_dir.exists():
             for chunk_dir in sorted(meta_episodes_dir.iterdir()):
                 if not chunk_dir.is_dir() or not chunk_dir.name.startswith("chunk-"):
                     continue
@@ -317,7 +383,7 @@ class LeRobotLoader:
         chunk_idx, file_idx = self._find_episode_location(episode_index)
 
         # Load parquet data
-        data_path = self._format_path(info.data_path, chunk_idx, file_idx)
+        data_path = self._format_path(info.data_path, chunk_idx, file_idx, episode_index=episode_index)
         full_path = self.base_path / data_path
 
         try:
@@ -376,7 +442,9 @@ class LeRobotLoader:
             for feature_name, feature_info in info.features.items():
                 if feature_info.get("dtype") == "video":
                     video_key = feature_name
-                    video_rel_path = self._format_path(info.video_path, chunk_idx, file_idx, video_key)
+                    video_rel_path = self._format_path(
+                        info.video_path, chunk_idx, file_idx, video_key, episode_index=episode_index
+                    )
                     video_full_path = self.base_path / video_rel_path
                     if video_full_path.exists():
                         video_paths[video_key] = video_full_path
@@ -428,7 +496,7 @@ class LeRobotLoader:
         info = self._load_info()
         chunk_idx, file_idx = self._find_episode_location(episode_index)
 
-        data_path = self._format_path(info.data_path, chunk_idx, file_idx)
+        data_path = self._format_path(info.data_path, chunk_idx, file_idx, episode_index=episode_index)
         full_path = self.base_path / data_path
 
         try:
@@ -472,7 +540,9 @@ class LeRobotLoader:
         info = self._load_info()
         chunk_idx, file_idx = self._find_episode_location(episode_index)
 
-        video_rel_path = self._format_path(info.video_path, chunk_idx, file_idx, camera_key)
+        video_rel_path = self._format_path(
+            info.video_path, chunk_idx, file_idx, camera_key, episode_index=episode_index
+        )
         video_full_path = self.base_path / video_rel_path
 
         if video_full_path.exists():

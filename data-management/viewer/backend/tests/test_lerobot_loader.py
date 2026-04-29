@@ -206,3 +206,77 @@ class TestVideoAndCameras:
     def test_get_cameras(self, loader):
         cameras = loader.get_cameras()
         assert cameras == ["observation.images.il-camera"]
+
+
+class TestV2EpisodeLayout:
+    """Validate v2.x layout (episode-per-parquet, episodes.jsonl) handling."""
+
+    @pytest.fixture
+    def v2_dataset(self, tmp_path):
+        import json
+
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        root = tmp_path / "v2-dataset"
+        (root / "meta").mkdir(parents=True)
+        (root / "data" / "chunk-000").mkdir(parents=True)
+        (root / "videos" / "chunk-000" / "observation.images.front").mkdir(parents=True)
+
+        info = {
+            "codebase_version": "v2.1",
+            "robot_type": "so101_follower",
+            "total_episodes": 2,
+            "total_frames": 5,
+            "total_tasks": 1,
+            "total_chunks": 1,
+            "chunks_size": 1000,
+            "fps": 30,
+            "splits": {"train": "0:2"},
+            "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+            "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
+            "features": {
+                "observation.state": {"dtype": "float32", "shape": [6]},
+                "action": {"dtype": "float32", "shape": [6]},
+                "observation.images.front": {"dtype": "video", "shape": [480, 640, 3]},
+            },
+        }
+        (root / "meta" / "info.json").write_text(json.dumps(info))
+
+        with (root / "meta" / "episodes.jsonl").open("w") as f:
+            f.write(json.dumps({"episode_index": 0, "tasks": ["t"], "length": 3}) + "\n")
+            f.write(json.dumps({"episode_index": 1, "tasks": ["t"], "length": 2}) + "\n")
+
+        for ep_idx, length in [(0, 3), (1, 2)]:
+            table = pa.table(
+                {
+                    "frame_index": list(range(length)),
+                    "timestamp": [i / 30.0 for i in range(length)],
+                    "episode_index": [ep_idx] * length,
+                    "task_index": [0] * length,
+                    "observation.state": [[0.0] * 6 for _ in range(length)],
+                    "action": [[0.0] * 6 for _ in range(length)],
+                }
+            )
+            pq.write_table(table, root / "data" / "chunk-000" / f"episode_{ep_idx:06d}.parquet")
+            (root / "videos" / "chunk-000" / "observation.images.front" / f"episode_{ep_idx:06d}.mp4").write_bytes(b"")
+
+        return root
+
+    def test_episode_lengths_from_jsonl(self, v2_dataset):
+        loader = LeRobotLoader(v2_dataset)
+        meta = loader.list_episodes_with_meta()
+        assert meta[0]["length"] == 3
+        assert meta[1]["length"] == 2
+        assert meta[0]["cameras"] == ["observation.images.front"]
+
+    def test_load_episode_resolves_v2_paths(self, v2_dataset):
+        loader = LeRobotLoader(v2_dataset)
+        ep = loader.load_episode(1)
+        assert ep.length == 2
+        assert "observation.images.front" in ep.video_paths
+
+    def test_get_video_path_v2(self, v2_dataset):
+        loader = LeRobotLoader(v2_dataset)
+        path = loader.get_video_path(0, "observation.images.front")
+        assert path is not None and path.name == "episode_000000.mp4"
