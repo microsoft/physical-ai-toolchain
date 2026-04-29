@@ -18,6 +18,9 @@ function renderPlaybackCard(overrides: Record<string, unknown> = {}) {
     totalFrames: 100,
     resizeOutput: null,
     frameImageUrl: '/api/datasets/test/episodes/0/frames/0?camera=wrist',
+    cameras: ['wrist'],
+    selectedCamera: 'wrist',
+    onSelectCamera: vi.fn(),
     isPlaying: false,
     onTogglePlayback: vi.fn(),
     onStepFrame: vi.fn(),
@@ -91,6 +94,9 @@ describe('AnnotationWorkspacePlaybackCard', () => {
         totalFrames={100}
         resizeOutput={null}
         frameImageUrl="/api/datasets/test/episodes/0/frames/0?camera=wrist"
+        cameras={['wrist']}
+        selectedCamera="wrist"
+        onSelectCamera={vi.fn()}
         isPlaying={false}
         onTogglePlayback={vi.fn()}
         onStepFrame={vi.fn()}
@@ -128,6 +134,9 @@ describe('AnnotationWorkspacePlaybackCard', () => {
         totalFrames={80}
         resizeOutput={null}
         frameImageUrl="/api/datasets/test/episodes/1/frames/0?camera=wrist"
+        cameras={['wrist']}
+        selectedCamera="wrist"
+        onSelectCamera={vi.fn()}
         isPlaying={false}
         onTogglePlayback={vi.fn()}
         onStepFrame={vi.fn()}

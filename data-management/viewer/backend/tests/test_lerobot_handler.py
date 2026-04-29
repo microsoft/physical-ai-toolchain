@@ -155,9 +155,7 @@ class TestFfmpegExtraction:
         """Verify _extract_frame_ffmpeg returns stdout bytes on success."""
         import subprocess as sp
 
-        monkeypatch.setattr(
-            LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH)
-        )
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
 
         def mock_run(cmd, *, capture_output=False, timeout=None):
             assert cmd[0] == self.FFMPEG_PATH
@@ -170,18 +168,14 @@ class TestFfmpegExtraction:
         assert result == self.FAKE_JPEG
 
     def test_returns_none_when_ffmpeg_missing(self, monkeypatch):
-        monkeypatch.setattr(
-            LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: None)
-        )
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: None))
         result = LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 0, 30.0)
         assert result is None
 
     def test_returns_none_on_nonzero_exit(self, monkeypatch):
         import subprocess as sp
 
-        monkeypatch.setattr(
-            LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH)
-        )
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
         monkeypatch.setattr(
             sp,
             "run",
@@ -195,9 +189,7 @@ class TestFfmpegExtraction:
         """Verify frame_idx / fps produces correct -ss argument."""
         import subprocess as sp
 
-        monkeypatch.setattr(
-            LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH)
-        )
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
 
         captured_cmd = []
 
