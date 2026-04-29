@@ -112,9 +112,7 @@ class LeRobotFormatHandler:
                 total_episodes=lr_info.total_episodes,
                 fps=lr_info.fps,
                 features=features,
-                tasks=[
-                    TaskInfo(task_index=idx, description=desc) for idx, desc in sorted(loader.get_tasks().items())
-                ],
+                tasks=[TaskInfo(task_index=idx, description=desc) for idx, desc in sorted(loader.get_tasks().items())],
             )
         except Exception as e:
             logger.warning(
