@@ -226,9 +226,9 @@ class TestFfmpegExtraction:
 # handler's orchestration logic without filesystem fixtures.
 # ---------------------------------------------------------------------------
 
-import numpy as np  # noqa: E402
+import numpy as np
 
-from src.api.services.dataset_service import lerobot_handler as lh_module  # noqa: E402
+from src.api.services.dataset_service import lerobot_handler as lh_module
 
 
 class FakeLRInfo:
@@ -586,4 +586,3 @@ class TestGetCamerasGetVideoPathSynthetic:
         h = LeRobotFormatHandler()
         _inject(h, FakeLoader(raise_on={"get_video_path"}))
         assert h.get_video_path("ds", 0, "cam0") is None
-

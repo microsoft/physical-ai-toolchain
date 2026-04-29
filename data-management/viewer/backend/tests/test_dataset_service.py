@@ -45,6 +45,7 @@ class TestDatasetDiscovery:
             datasets = await service.list_datasets()
             ids = [d.id for d in datasets]
             assert DATASET_ID in ids
+
         asyncio.run(_run())
 
     def test_get_dataset_returns_info(self, service):
@@ -54,6 +55,7 @@ class TestDatasetDiscovery:
             assert ds.id == DATASET_ID
             assert ds.total_episodes == 64
             assert ds.fps == 30.0
+
         asyncio.run(_run())
 
     def test_get_dataset_features(self, service):
@@ -62,12 +64,14 @@ class TestDatasetDiscovery:
             assert "observation.state" in ds.features
             assert "action" in ds.features
             assert "observation.images.il-camera" in ds.features
+
         asyncio.run(_run())
 
     def test_get_nonexistent_dataset(self, service):
         async def _run() -> None:
             ds = await service.get_dataset("nonexistent_dataset")
             assert ds is None
+
         asyncio.run(_run())
 
     def test_dataset_is_lerobot(self, service):
@@ -89,6 +93,7 @@ class TestListEpisodes:
         async def _run() -> None:
             episodes = await service.list_episodes(DATASET_ID)
             assert len(episodes) == 64
+
         asyncio.run(_run())
 
     def test_pagination_offset(self, service):
@@ -96,6 +101,7 @@ class TestListEpisodes:
             episodes = await service.list_episodes(DATASET_ID, offset=60, limit=10)
             assert len(episodes) == 4
             assert episodes[0].index == 60
+
         asyncio.run(_run())
 
     def test_pagination_limit(self, service):
@@ -104,6 +110,7 @@ class TestListEpisodes:
             assert len(episodes) == 5
             assert episodes[0].index == 0
             assert episodes[4].index == 4
+
         asyncio.run(_run())
 
     def test_episode_meta_fields(self, service):
@@ -114,6 +121,7 @@ class TestListEpisodes:
             assert ep.length > 0
             assert ep.task_index == 0
             assert isinstance(ep.has_annotations, bool)
+
         asyncio.run(_run())
 
     def test_filter_has_annotations_false(self, service):
@@ -121,18 +129,21 @@ class TestListEpisodes:
             """With no annotations saved, all episodes should appear."""
             episodes = await service.list_episodes(DATASET_ID, has_annotations=False)
             assert len(episodes) == 64
+
         asyncio.run(_run())
 
     def test_filter_task_index(self, service):
         async def _run() -> None:
             episodes = await service.list_episodes(DATASET_ID, task_index=0)
             assert len(episodes) == 64
+
         asyncio.run(_run())
 
     def test_filter_task_index_no_match(self, service):
         async def _run() -> None:
             episodes = await service.list_episodes(DATASET_ID, task_index=99)
             assert len(episodes) == 0
+
         asyncio.run(_run())
 
 
@@ -145,12 +156,14 @@ class TestGetEpisode:
             assert ep is not None
             assert ep.meta.index == 0
             assert ep.meta.length > 0
+
         asyncio.run(_run())
 
     def test_episode_has_trajectory(self, service):
         async def _run() -> None:
             ep = await service.get_episode(DATASET_ID, 0)
             assert len(ep.trajectory_data) > 0
+
         asyncio.run(_run())
 
     def test_trajectory_point_fields(self, service):
@@ -163,6 +176,7 @@ class TestGetEpisode:
             assert len(pt.joint_velocities) == 16
             assert len(pt.end_effector_pose) == 6
             assert 0 <= pt.gripper_state <= 1
+
         asyncio.run(_run())
 
     def test_episode_has_video_urls(self, service):
@@ -170,12 +184,14 @@ class TestGetEpisode:
             ep = await service.get_episode(DATASET_ID, 0)
             assert "observation.images.il-camera" in ep.video_urls
             assert f"/api/datasets/{DATASET_ID}/episodes/0/video/" in ep.video_urls["observation.images.il-camera"]
+
         asyncio.run(_run())
 
     def test_trajectory_length_matches_meta(self, service):
         async def _run() -> None:
             ep = await service.get_episode(DATASET_ID, 10)
             assert ep.meta.length == len(ep.trajectory_data)
+
         asyncio.run(_run())
 
 
@@ -186,6 +202,7 @@ class TestTrajectory:
         async def _run() -> None:
             traj = await service.get_episode_trajectory(DATASET_ID, 0)
             assert len(traj) > 0
+
         asyncio.run(_run())
 
     def test_trajectory_timestamps_increase(self, service):
@@ -194,6 +211,7 @@ class TestTrajectory:
             timestamps = [pt.timestamp for pt in traj]
             for i in range(1, len(timestamps)):
                 assert timestamps[i] >= timestamps[i - 1]
+
         asyncio.run(_run())
 
 
@@ -204,6 +222,7 @@ class TestCameras:
         async def _run() -> None:
             cameras = await service.get_episode_cameras(DATASET_ID, 0)
             assert "observation.images.il-camera" in cameras
+
         asyncio.run(_run())
 
 
@@ -235,6 +254,7 @@ class TestEpisodeCacheIntegration:
             stats_after = service._episode_cache.stats()
 
             assert stats_after.hits == stats_before.hits + 1
+
         asyncio.run(_run())
 
     def test_invalidation_forces_reload(self, service):
@@ -244,6 +264,7 @@ class TestEpisodeCacheIntegration:
 
             service.invalidate_episode_cache(DATASET_ID, 0)
             assert service._episode_cache.get(DATASET_ID, 0) is None
+
         asyncio.run(_run())
 
     def test_prefetch_populates_adjacent_episodes(self, service):
@@ -260,6 +281,7 @@ class TestEpisodeCacheIntegration:
             for idx in [1, 2, 4, 5]:
                 cached = service._episode_cache.get(DATASET_ID, idx)
                 assert cached is not None, f"Episode {idx} should be prefetched"
+
         asyncio.run(_run())
 
     def test_trajectory_served_from_cache(self, service):
@@ -272,6 +294,7 @@ class TestEpisodeCacheIntegration:
 
             assert len(traj) > 0
             assert stats_after.hits == stats_before.hits + 1
+
         asyncio.run(_run())
 
 
@@ -295,6 +318,7 @@ class TestNestedDatasetDiscovery:
             ids = {d.id for d in datasets}
             assert "e2emanufacturing--session_a" in ids
             assert "e2emanufacturing--session_b" in ids
+
         asyncio.run(_run())
 
     def test_nested_datasets_have_group(self, tmp_path):
@@ -310,6 +334,7 @@ class TestNestedDatasetDiscovery:
             datasets = await service.list_datasets()
             ds = next(d for d in datasets if d.id == "my_project--recording_1")
             assert ds.group == "my_project"
+
         asyncio.run(_run())
 
     def test_nested_dataset_path_resolves(self, tmp_path):
@@ -326,6 +351,7 @@ class TestNestedDatasetDiscovery:
             ds = await service.get_dataset("group--ds1")
             assert ds is not None
             assert ds.total_episodes == 1
+
         asyncio.run(_run())
 
     def test_flat_datasets_have_no_group(self, tmp_path):
@@ -338,6 +364,7 @@ class TestNestedDatasetDiscovery:
             datasets = await service.list_datasets()
             ds = next(d for d in datasets if d.id == "flat_ds")
             assert ds.group is None
+
         asyncio.run(_run())
 
     def test_three_level_nested_datasets_discovered(self, tmp_path):
@@ -351,6 +378,7 @@ class TestNestedDatasetDiscovery:
             datasets = await service.list_datasets()
             ids = {d.id for d in datasets}
             assert "project--recordings--session_1" in ids
+
         asyncio.run(_run())
 
     def test_deep_nested_dataset_group_includes_all_parents(self, tmp_path):
@@ -364,6 +392,7 @@ class TestNestedDatasetDiscovery:
             datasets = await service.list_datasets()
             ds = next(d for d in datasets if d.id == "project--recordings--session_1")
             assert ds.group == "project--recordings"
+
         asyncio.run(_run())
 
     def test_deep_nested_dataset_path_resolves(self, tmp_path):
@@ -378,6 +407,7 @@ class TestNestedDatasetDiscovery:
             ds = await service.get_dataset("project--recordings--session_1")
             assert ds is not None
             assert ds.total_episodes == 1
+
         asyncio.run(_run())
 
     def test_six_level_nesting_rejected(self, tmp_path):
@@ -387,6 +417,7 @@ class TestNestedDatasetDiscovery:
 
             with pytest.raises(ValueError, match="too deep"):
                 _validate_dataset_id("a--b--c--d--e--f")
+
         asyncio.run(_run())
 
     def test_five_level_nesting_accepted(self, tmp_path):
@@ -396,6 +427,7 @@ class TestNestedDatasetDiscovery:
 
             result = _validate_dataset_id("a--b--c--d--e")
             assert result == "a--b--c--d--e"
+
         asyncio.run(_run())
 
 
@@ -411,6 +443,7 @@ class TestLocalAnnotationPathResolution:
             ann_dir = adapter._get_annotations_dir("project--recordings--session_1")
             expected = tmp_path / "project" / "recordings" / "session_1" / "annotations" / "episodes"
             assert ann_dir == expected
+
         asyncio.run(_run())
 
     def test_flat_annotation_path_unchanged(self, tmp_path):
@@ -422,6 +455,7 @@ class TestLocalAnnotationPathResolution:
             ann_dir = adapter._get_annotations_dir("flat_dataset")
             expected = tmp_path / "flat_dataset" / "annotations" / "episodes"
             assert ann_dir == expected
+
         asyncio.run(_run())
 
 
@@ -455,6 +489,7 @@ class TestLabelsPathResolution:
             path = _labels_path_for_base("project--recordings--session_1", str(tmp_path))
             expected = tmp_path / "project" / "recordings" / "session_1" / "meta" / "episode_labels.json"
             assert path == expected
+
         asyncio.run(_run())
 
     def test_flat_labels_path_unchanged(self, tmp_path):
@@ -465,6 +500,7 @@ class TestLabelsPathResolution:
             path = _labels_path_for_base("flat_dataset", str(tmp_path))
             expected = tmp_path / "flat_dataset" / "meta" / "episode_labels.json"
             assert path == expected
+
         asyncio.run(_run())
 
 
@@ -481,6 +517,7 @@ class TestBlobLabelStorage:
             result = await storage.load("nonexistent")
             assert result.dataset_id == "nonexistent"
             assert result.available_labels == ["SUCCESS", "FAILURE", "PARTIAL"]
+
         asyncio.run(_run())
 
 
@@ -493,6 +530,7 @@ class TestCombinedBlobScan:
             from src.api.storage.blob_dataset import BlobDatasetProvider
 
             assert hasattr(BlobDatasetProvider, "scan_all_dataset_ids")
+
         asyncio.run(_run())
 
 
@@ -533,6 +571,7 @@ class TestBlobSyncTempPrefixes:
             service = DatasetService(base_path=str(tmp_path), blob_provider=FakeBlobProvider())
             with pytest.raises(ValueError, match="Invalid dataset identifier"):
                 await service._ensure_blob_synced("../escape")
+
         asyncio.run(_run())
 
     def test_blob_meta_sync_prefix_excludes_path_separators(self, tmp_path, monkeypatch):
@@ -554,6 +593,7 @@ class TestBlobSyncTempPrefixes:
             service = DatasetService(base_path=str(tmp_path), blob_provider=FakeBlobProvider())
             with pytest.raises(ValueError, match="Invalid dataset identifier"):
                 await service._ensure_blob_meta_synced("..\\escape")
+
         asyncio.run(_run())
 
 
@@ -589,6 +629,7 @@ class TestHDF5VideoGeneration:
 
             assert episode is not None
             assert len(episode.video_urls) > 0
+
         asyncio.run(_run())
 
     def test_hdf5_video_file_created_on_access(self, tmp_path):
@@ -613,6 +654,7 @@ class TestHDF5VideoGeneration:
             assert video_path is not None
             assert Path(video_path).exists()
             assert Path(video_path).suffix == ".mp4"
+
         asyncio.run(_run())
 
     def test_hdf5_single_frame_uses_slice(self, tmp_path):
@@ -630,6 +672,7 @@ class TestHDF5VideoGeneration:
             frame_bytes = handler.get_frame_image("slice_dataset", 0, 2, "cam0")
             assert frame_bytes is not None
             assert len(frame_bytes) > 0
+
         asyncio.run(_run())
 
 
@@ -649,6 +692,7 @@ class TestBlobTempDirCleanup:
 
             assert not fake_dir.exists()
             assert "test_ds" not in service._blob_synced
+
         asyncio.run(_run())
 
     def test_evict_dataset_removes_meta_synced_temp_dir(self, tmp_path):
@@ -665,6 +709,7 @@ class TestBlobTempDirCleanup:
 
             assert not fake_dir.exists()
             assert "test_ds" not in service._blob_meta_synced
+
         asyncio.run(_run())
 
     def test_cleanup_all_temp_dirs(self, tmp_path):

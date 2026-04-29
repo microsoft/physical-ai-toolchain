@@ -412,9 +412,7 @@ class TestFindEpisodeLocationSynthetic:
         # Episode 1 lives in chunk-001, but default lookup tries chunk=ep
         # which means chunk-001/file-000 — write it there to exercise scan.
         # Use chunk 0 to host episode 1 to force scan past initial guess.
-        _write_episode_parquet(
-            tmp_path, episode_index=1, chunk_index=0, file_index=1, length=2
-        )
+        _write_episode_parquet(tmp_path, episode_index=1, chunk_index=0, file_index=1, length=2)
         loader = LeRobotLoader(str(tmp_path))
         data = loader.load_episode(1)
         assert data.episode_index == 1
@@ -453,9 +451,7 @@ class TestListEpisodesWithMetaSynthetic:
 
     def test_cache_reuse(self, tmp_path):
         _write_info(tmp_path, total_episodes=1)
-        _write_meta_episodes(
-            tmp_path, rows=[{"episode_index": 0, "length": 3, "task_index": 0}]
-        )
+        _write_meta_episodes(tmp_path, rows=[{"episode_index": 0, "length": 3, "task_index": 0}])
         loader = LeRobotLoader(str(tmp_path))
         first = loader.list_episodes_with_meta()
         second = loader.list_episodes_with_meta()
@@ -479,9 +475,7 @@ class TestLoadEpisodeSynthetic:
         features.pop("observation.state")
         features["qpos"] = {"dtype": "float32", "shape": [6]}
         _write_info(tmp_path, total_episodes=1, features=features)
-        _write_episode_parquet(
-            tmp_path, length=2, include_state=True, state_column="qpos"
-        )
+        _write_episode_parquet(tmp_path, length=2, include_state=True, state_column="qpos")
         loader = LeRobotLoader(str(tmp_path))
         data = loader.load_episode(0)
         assert data.joint_positions.shape == (2, 6)
@@ -553,9 +547,7 @@ class TestLoadEpisodeSynthetic:
 class TestGetEpisodeInfoSynthetic:
     def test_meta_path_success(self, tmp_path):
         _write_info(tmp_path, total_episodes=1)
-        _write_meta_episodes(
-            tmp_path, rows=[{"episode_index": 0, "length": 9, "task_index": 2}]
-        )
+        _write_meta_episodes(tmp_path, rows=[{"episode_index": 0, "length": 9, "task_index": 2}])
         loader = LeRobotLoader(str(tmp_path))
         info = loader.get_episode_info(0)
         assert info["length"] == 9
