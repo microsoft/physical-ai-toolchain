@@ -125,9 +125,7 @@ class TestCapabilities:
         assert body["hdf5_support"] is True
         assert body["lerobot_support"] is True
 
-    def test_capabilities_without_dataset_reports_zero_episodes(
-        self, client: TestClient, override_service
-    ) -> None:
+    def test_capabilities_without_dataset_reports_zero_episodes(self, client: TestClient, override_service) -> None:
         override_service.get_dataset = AsyncMock(return_value=None)
         resp = client.get("/api/datasets/missing/capabilities")
         assert resp.status_code == 200
@@ -157,9 +155,7 @@ class TestListEpisodes:
     def test_list_episodes_passes_filters(self, client: TestClient, override_service) -> None:
         override_service.get_dataset = AsyncMock(return_value=_make_dataset("ds-1"))
         override_service.list_episodes = AsyncMock(return_value=[])
-        resp = client.get(
-            "/api/datasets/ds-1/episodes?offset=2&limit=5&has_annotations=true&task_index=3"
-        )
+        resp = client.get("/api/datasets/ds-1/episodes?offset=2&limit=5&has_annotations=true&task_index=3")
         assert resp.status_code == 200
         kwargs = override_service.list_episodes.await_args.kwargs
         assert kwargs == {"offset": 2, "limit": 5, "has_annotations": True, "task_index": 3}
@@ -171,9 +167,7 @@ class TestListEpisodes:
 
 
 class TestGetEpisode:
-    def test_get_episode_returns_data_and_cache_header(
-        self, client: TestClient, override_service
-    ) -> None:
+    def test_get_episode_returns_data_and_cache_header(self, client: TestClient, override_service) -> None:
         override_service.get_dataset = AsyncMock(return_value=_make_dataset("ds-1"))
         override_service.get_episode = AsyncMock(return_value=_make_episode(0))
         resp = client.get("/api/datasets/ds-1/episodes/0")
@@ -261,9 +255,7 @@ class TestGetCameras:
 
 
 class TestGetVideo:
-    def test_video_file_response(
-        self, client: TestClient, override_service, tmp_path: Path
-    ) -> None:
+    def test_video_file_response(self, client: TestClient, override_service, tmp_path: Path) -> None:
         video = tmp_path / "ep0.mp4"
         video.write_bytes(b"\x00\x00\x00\x18ftypmp42")
         override_service.get_video_file_path = MagicMock(return_value=str(video))
@@ -273,9 +265,7 @@ class TestGetVideo:
         assert resp.headers["content-type"] == "video/mp4"
         assert "immutable" in resp.headers["cache-control"]
 
-    def test_video_unsafe_path_returns_400(
-        self, client: TestClient, override_service, tmp_path: Path
-    ) -> None:
+    def test_video_unsafe_path_returns_400(self, client: TestClient, override_service, tmp_path: Path) -> None:
         video = tmp_path / "ep0.mp4"
         video.write_bytes(b"x")
         override_service.get_video_file_path = MagicMock(return_value=str(video))
@@ -284,16 +274,12 @@ class TestGetVideo:
         assert resp.status_code == 400
         assert "traversal" in resp.json()["detail"].lower()
 
-    def test_video_missing_file_returns_404(
-        self, client: TestClient, override_service, tmp_path: Path
-    ) -> None:
+    def test_video_missing_file_returns_404(self, client: TestClient, override_service, tmp_path: Path) -> None:
         override_service.get_video_file_path = MagicMock(return_value=str(tmp_path / "nope.mp4"))
         resp = client.get("/api/datasets/ds-1/episodes/0/video/il-camera")
         assert resp.status_code == 404
 
-    def test_video_unknown_suffix_defaults_mp4(
-        self, client: TestClient, override_service, tmp_path: Path
-    ) -> None:
+    def test_video_unknown_suffix_defaults_mp4(self, client: TestClient, override_service, tmp_path: Path) -> None:
         video = tmp_path / "ep0.bin"
         video.write_bytes(b"x")
         override_service.get_video_file_path = MagicMock(return_value=str(video))
@@ -367,9 +353,7 @@ class TestGetVideo:
         resp = client.get("/api/datasets/ds-1/episodes/0/video/il-camera")
         assert resp.status_code == 404
 
-    def test_video_blob_stream_none_returns_outer_404(
-        self, client: TestClient, override_service
-    ) -> None:
+    def test_video_blob_stream_none_returns_outer_404(self, client: TestClient, override_service) -> None:
         override_service.get_video_file_path = MagicMock(return_value=None)
         override_service.has_blob_provider = MagicMock(return_value=True)
         override_service.get_blob_video_path = AsyncMock(return_value="blob/path/ep0.mp4")

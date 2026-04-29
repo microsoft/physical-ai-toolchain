@@ -150,9 +150,11 @@ class TestCreateBlobDatasetProvider:
         real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
 
         def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-            if name.endswith("storage.blob_dataset") or (
-                level > 0 and "blob_dataset" in (fromlist or ())
-            ) or name == "src.api.storage.blob_dataset":
+            if (
+                name.endswith("storage.blob_dataset")
+                or (level > 0 and "blob_dataset" in (fromlist or ()))
+                or name == "src.api.storage.blob_dataset"
+            ):
                 raise ImportError("simulated missing azure extras")
             if level > 0 and name == "storage.blob_dataset":
                 raise ImportError("simulated missing azure extras")

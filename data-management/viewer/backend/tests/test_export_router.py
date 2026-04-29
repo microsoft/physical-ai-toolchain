@@ -97,9 +97,7 @@ class TestExportEpisodes:
         assert resp.status_code == 400
         assert "valid path" in resp.json()["detail"]
 
-    def test_dataset_path_traversal_returns_400(
-        self, client: TestClient, override_service, tmp_path: Path
-    ) -> None:
+    def test_dataset_path_traversal_returns_400(self, client: TestClient, override_service, tmp_path: Path) -> None:
         outside = tmp_path / "escape"
         outside.mkdir()
         override_service._get_dataset_path = MagicMock(return_value=outside)
@@ -110,9 +108,7 @@ class TestExportEpisodes:
         assert resp.status_code == 400
         assert "traversal" in resp.json()["detail"].lower()
 
-    def test_dataset_path_missing_returns_400(
-        self, client: TestClient, override_service, dataset_layout
-    ) -> None:
+    def test_dataset_path_missing_returns_400(self, client: TestClient, override_service, dataset_layout) -> None:
         base, dataset_dir, _ = dataset_layout
         # Resolves under base but does not exist on disk.
         override_service._get_dataset_path = MagicMock(return_value=base / "nope")
@@ -143,7 +139,7 @@ class TestExportEpisodes:
         dataset_layout,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        base, _dataset, output_dir = dataset_layout
+        _base, _dataset, output_dir = dataset_layout
 
         original_mkdir = Path.mkdir
 
@@ -270,9 +266,7 @@ class TestExportEpisodesStream:
         )
         assert resp.status_code == 400
 
-    def test_output_path_traversal_returns_400(
-        self, client: TestClient, override_service, tmp_path: Path
-    ) -> None:
+    def test_output_path_traversal_returns_400(self, client: TestClient, override_service, tmp_path: Path) -> None:
         outside = tmp_path / "outside-stream-out"
         outside.mkdir()
         resp = client.post(
@@ -399,9 +393,7 @@ class TestPreviewExport:
         )
         assert resp.status_code == 404
 
-    def test_preview_aggregates_frames_and_removals(
-        self, client: TestClient, override_service
-    ) -> None:
+    def test_preview_aggregates_frames_and_removals(self, client: TestClient, override_service) -> None:
         ep0 = MagicMock()
         ep0.meta.length = 10
         ep1 = MagicMock()
@@ -425,9 +417,7 @@ class TestPreviewExport:
         assert data["outputFrames"] == 11
         assert data["estimatedSizeMb"] == pytest.approx(11 * 0.1)
 
-    def test_preview_skips_missing_episode(
-        self, client: TestClient, override_service
-    ) -> None:
+    def test_preview_skips_missing_episode(self, client: TestClient, override_service) -> None:
         override_service.get_episode = AsyncMock(return_value=None)
         resp = client.get(
             "/api/datasets/ds-1/export/preview",

@@ -91,9 +91,7 @@ class TestGetClient(TestCase):
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     @patch("src.api.storage.blob_dataset.AsyncDefaultAzureCredential")
     @patch("src.api.storage.blob_dataset.BlobServiceClient")
-    def test_get_client_uses_default_credential_without_sas(
-        self, mock_blob_service, mock_credential_cls
-    ):
+    def test_get_client_uses_default_credential_without_sas(self, mock_blob_service, mock_credential_cls):
         from src.api.storage.blob_dataset import BlobDatasetProvider
 
         provider = BlobDatasetProvider(account_name="testaccount", container_name="testcontainer")
@@ -268,9 +266,7 @@ class TestGetInfoJson(TestCase):
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     def test_get_info_json_returns_none_on_invalid_json(self):
         provider = _build_provider(MagicMock())
-        with patch.object(
-            type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"not-json")
-        ):
+        with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"not-json")):
             assert asyncio.run(provider.get_info_json("org--repo")) is None
 
 
@@ -365,9 +361,7 @@ class TestResolveVideoBlobPath(TestCase):
     def test_resolve_returns_first_existing_candidate(self):
         provider = _build_provider(MagicMock())
         with (
-            patch.object(
-                type(provider), "get_info_json", new=AsyncMock(return_value=None)
-            ),
+            patch.object(type(provider), "get_info_json", new=AsyncMock(return_value=None)),
             patch.object(
                 type(provider),
                 "get_blob_properties",
@@ -421,7 +415,7 @@ class TestStreamVideo(TestCase):
 class TestUploadVideo(TestCase):
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     @patch("src.api.storage.blob_dataset.BlobServiceClient")
-    def test_upload_video_success(self, mock_blob_service_cls, tmp_path: Path = None):
+    def test_upload_video_success(self, mock_blob_service_cls, tmp_path: Path | None = None):
         # tmp_path is provided by pytest fixture in pytest-style tests; fall back manually
         from tempfile import TemporaryDirectory
 
@@ -443,9 +437,7 @@ class TestUploadVideo(TestCase):
             result = asyncio.run(provider.upload_video("org--repo", "cam0", 7, local))
 
             assert result is True
-            mock_container.get_blob_client.assert_called_once_with(
-                "org/repo/meta/videos/cam0/episode_000007.mp4"
-            )
+            mock_container.get_blob_client.assert_called_once_with("org/repo/meta/videos/cam0/episode_000007.mp4")
             mock_blob.upload_blob.assert_awaited_once()
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
@@ -476,9 +468,7 @@ class TestSyncDatasetToLocal(TestCase):
 
         with (
             TemporaryDirectory() as td,
-            patch.object(
-                type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"data")
-            ) as read_mock,
+            patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"data")) as read_mock,
         ):
             local_dir = Path(td)
             result = asyncio.run(provider.sync_dataset_to_local("org--repo", local_dir))
@@ -539,9 +529,7 @@ class TestSyncMetaOnly(TestCase):
         provider = _build_provider(mock_client)
 
         with TemporaryDirectory() as td:
-            assert (
-                asyncio.run(provider.sync_meta_only_to_local("org--repo", Path(td))) is False
-            )
+            assert asyncio.run(provider.sync_meta_only_to_local("org--repo", Path(td))) is False
 
 
 class TestSyncHdf5Dataset(TestCase):
@@ -567,9 +555,7 @@ class TestSyncHdf5Dataset(TestCase):
 
         with (
             TemporaryDirectory() as td,
-            patch.object(
-                type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"json-bytes")
-            ),
+            patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"json-bytes")),
         ):
             local_dir = Path(td)
             result = asyncio.run(provider.sync_hdf5_dataset_to_local("team--proj", local_dir))
@@ -587,9 +573,7 @@ class TestSyncHdf5Dataset(TestCase):
         mock_client.get_container_client.side_effect = RuntimeError("boom")
         provider = _build_provider(mock_client)
         with TemporaryDirectory() as td:
-            assert (
-                asyncio.run(provider.sync_hdf5_dataset_to_local("team--proj", Path(td))) is False
-            )
+            assert asyncio.run(provider.sync_hdf5_dataset_to_local("team--proj", Path(td))) is False
 
 
 class TestSyncHdf5Episode(TestCase):
@@ -611,9 +595,7 @@ class TestSyncHdf5Episode(TestCase):
 
         with TemporaryDirectory() as td:
             local_dir = Path(td)
-            result = asyncio.run(
-                provider.sync_hdf5_episode_to_local("team--proj", local_dir, 3)
-            )
+            result = asyncio.run(provider.sync_hdf5_episode_to_local("team--proj", local_dir, 3))
             assert result is True
             assert (local_dir / "episode_000003.hdf5").read_bytes() == b"chunk1chunk2"
 
@@ -634,9 +616,7 @@ class TestSyncHdf5Episode(TestCase):
         with TemporaryDirectory() as td:
             local_dir = Path(td)
             (local_dir / "episode_000001.hdf5").write_bytes(b"existing")
-            result = asyncio.run(
-                provider.sync_hdf5_episode_to_local("team--proj", local_dir, 1)
-            )
+            result = asyncio.run(provider.sync_hdf5_episode_to_local("team--proj", local_dir, 1))
             assert result is True
             mock_blob.download_blob.assert_not_called()
 
@@ -651,12 +631,7 @@ class TestSyncHdf5Episode(TestCase):
         provider = _build_provider(mock_client)
 
         with TemporaryDirectory() as td:
-            assert (
-                asyncio.run(
-                    provider.sync_hdf5_episode_to_local("team--proj", Path(td), 9)
-                )
-                is False
-            )
+            assert asyncio.run(provider.sync_hdf5_episode_to_local("team--proj", Path(td), 9)) is False
 
 
 class TestHdf5Helpers(TestCase):
@@ -673,17 +648,13 @@ class TestHdf5Helpers(TestCase):
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     def test_get_hdf5_dataset_config_returns_none_when_missing(self):
         provider = _build_provider(MagicMock())
-        with patch.object(
-            type(provider), "_read_blob_bytes", new=AsyncMock(return_value=None)
-        ):
+        with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=None)):
             assert asyncio.run(provider.get_hdf5_dataset_config("team--proj")) is None
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     def test_get_hdf5_dataset_config_returns_none_on_invalid_json(self):
         provider = _build_provider(MagicMock())
-        with patch.object(
-            type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"not-json")
-        ):
+        with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=b"not-json")):
             assert asyncio.run(provider.get_hdf5_dataset_config("team--proj")) is None
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)

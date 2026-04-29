@@ -104,9 +104,7 @@ def override_services():
 # ----------------------------------------------------------------------------
 
 
-def test_get_annotations_dataset_not_found_returns_404(
-    client: TestClient, override_services
-) -> None:
+def test_get_annotations_dataset_not_found_returns_404(client: TestClient, override_services) -> None:
     dataset_service, _ = override_services
     dataset_service.get_dataset.return_value = None
 
@@ -116,9 +114,7 @@ def test_get_annotations_dataset_not_found_returns_404(
     assert "ds-1" in response.json()["detail"]
 
 
-def test_get_annotations_returns_empty_when_none_exist(
-    client: TestClient, override_services
-) -> None:
+def test_get_annotations_returns_empty_when_none_exist(client: TestClient, override_services) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset()
     annotation_service.get_annotation.return_value = None
@@ -132,9 +128,7 @@ def test_get_annotations_returns_empty_when_none_exist(
     assert body["annotations"] == []
 
 
-def test_get_annotations_returns_existing_file(
-    client: TestClient, override_services
-) -> None:
+def test_get_annotations_returns_existing_file(client: TestClient, override_services) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset()
     annotation_service.get_annotation.return_value = EpisodeAnnotationFile(
@@ -156,9 +150,7 @@ def test_get_annotations_returns_existing_file(
 # ----------------------------------------------------------------------------
 
 
-def test_save_annotations_dataset_not_found_returns_404(
-    client: TestClient, override_services
-) -> None:
+def test_save_annotations_dataset_not_found_returns_404(client: TestClient, override_services) -> None:
     dataset_service, _ = override_services
     dataset_service.get_dataset.return_value = None
     payload = _make_annotation().model_dump(mode="json")
@@ -168,9 +160,7 @@ def test_save_annotations_dataset_not_found_returns_404(
     assert response.status_code == 404
 
 
-def test_save_annotations_episode_out_of_range_returns_404(
-    client: TestClient, override_services
-) -> None:
+def test_save_annotations_episode_out_of_range_returns_404(client: TestClient, override_services) -> None:
     dataset_service, _ = override_services
     dataset_service.get_dataset.return_value = _make_dataset(total_episodes=5)
     payload = _make_annotation().model_dump(mode="json")
@@ -181,9 +171,7 @@ def test_save_annotations_episode_out_of_range_returns_404(
     assert "Episode 99" in response.json()["detail"]
 
 
-def test_save_annotations_success_invalidates_cache(
-    client: TestClient, override_services
-) -> None:
+def test_save_annotations_success_invalidates_cache(client: TestClient, override_services) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset(total_episodes=10)
     saved = EpisodeAnnotationFile(
@@ -207,9 +195,7 @@ def test_save_annotations_success_invalidates_cache(
 # ----------------------------------------------------------------------------
 
 
-def test_delete_annotations_dataset_not_found_returns_404(
-    client: TestClient, override_services
-) -> None:
+def test_delete_annotations_dataset_not_found_returns_404(client: TestClient, override_services) -> None:
     dataset_service, _ = override_services
     dataset_service.get_dataset.return_value = None
 
@@ -218,9 +204,7 @@ def test_delete_annotations_dataset_not_found_returns_404(
     assert response.status_code == 404
 
 
-def test_delete_annotations_with_annotator_id(
-    client: TestClient, override_services
-) -> None:
+def test_delete_annotations_with_annotator_id(client: TestClient, override_services) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset()
     annotation_service.delete_annotation.return_value = True
@@ -241,9 +225,7 @@ def test_delete_annotations_with_annotator_id(
 # ----------------------------------------------------------------------------
 
 
-def test_trigger_auto_analysis_dataset_not_found_returns_404(
-    client: TestClient, override_services
-) -> None:
+def test_trigger_auto_analysis_dataset_not_found_returns_404(client: TestClient, override_services) -> None:
     dataset_service, _ = override_services
     dataset_service.get_dataset.return_value = None
 
@@ -252,9 +234,7 @@ def test_trigger_auto_analysis_dataset_not_found_returns_404(
     assert response.status_code == 404
 
 
-def test_trigger_auto_analysis_episode_not_found_returns_404(
-    client: TestClient, override_services
-) -> None:
+def test_trigger_auto_analysis_episode_not_found_returns_404(client: TestClient, override_services) -> None:
     dataset_service, _ = override_services
     dataset_service.get_dataset.return_value = _make_dataset()
     dataset_service.get_episode.return_value = None
@@ -265,9 +245,7 @@ def test_trigger_auto_analysis_episode_not_found_returns_404(
     assert "Episode 0" in response.json()["detail"]
 
 
-def test_trigger_auto_analysis_success_returns_analysis(
-    client: TestClient, override_services
-) -> None:
+def test_trigger_auto_analysis_success_returns_analysis(client: TestClient, override_services) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset()
     dataset_service.get_episode.return_value = EpisodeData(
@@ -304,9 +282,7 @@ def test_trigger_auto_analysis_success_returns_analysis(
 # ----------------------------------------------------------------------------
 
 
-def test_get_annotation_summary_dataset_not_found_returns_404(
-    client: TestClient, override_services
-) -> None:
+def test_get_annotation_summary_dataset_not_found_returns_404(client: TestClient, override_services) -> None:
     dataset_service, _ = override_services
     dataset_service.get_dataset.return_value = None
 
@@ -315,9 +291,7 @@ def test_get_annotation_summary_dataset_not_found_returns_404(
     assert response.status_code == 404
 
 
-def test_get_annotation_summary_returns_payload(
-    client: TestClient, override_services
-) -> None:
+def test_get_annotation_summary_returns_payload(client: TestClient, override_services) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset(total_episodes=42)
     annotation_service.get_summary.return_value = AnnotationSummary(
