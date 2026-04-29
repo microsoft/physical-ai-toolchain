@@ -174,58 +174,57 @@ class TestValidateSafeStringProperties:
 # ===================================================================
 
 
-class TestValidateDatasetIdProperties:
-    @given(
-        parts=st.lists(
-            st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,20}"), fullmatch=True).filter(
-                lambda s: "--" not in s and not s.endswith("-")
-            ),
-            min_size=1,
-            max_size=5,
-        )
+@given(
+    parts=st.lists(
+        st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,20}"), fullmatch=True).filter(
+            lambda s: "--" not in s and not s.endswith("-")
+        ),
+        min_size=1,
+        max_size=5,
     )
-    def test_valid_nested_ids_accepted(self, parts: list[str]) -> None:
-        dataset_id = "--".join(parts)
-        result = _validate_dataset_id(dataset_id)
-        assert result == dataset_id
+)
+def test_valid_nested_ids_accepted(parts: list[str]) -> None:
+    dataset_id = "--".join(parts)
+    result = _validate_dataset_id(dataset_id)
+    assert result == dataset_id
 
-    @given(
-        parts=st.lists(
-            st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,10}"), fullmatch=True),
-            min_size=6,
-            max_size=10,
-        )
+@given(
+    parts=st.lists(
+        st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,10}"), fullmatch=True),
+        min_size=6,
+        max_size=10,
     )
-    def test_deep_nesting_rejected(self, parts: list[str]) -> None:
-        dataset_id = "--".join(parts)
+)
+def test_deep_nesting_rejected(parts: list[str]) -> None:
+    dataset_id = "--".join(parts)
+    try:
+        _validate_dataset_id(dataset_id)
+    except ValueError:
+        return
+    raise AssertionError("Expected ValueError for deep nesting")
+
+@given(value=st.text(min_size=1, max_size=100))
+def test_dataset_id_slash_always_rejected(value: str) -> None:
+    for char in ("/", "\\"):
+        try:
+            _validate_dataset_id(value + char)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"Expected ValueError for {char!r}")
+
+@given(
+    prefix=st.from_regex(re.compile(r"[a-zA-Z0-9]{1,10}"), fullmatch=True),
+)
+def test_dot_parts_rejected(prefix: str) -> None:
+    for dot_part in (".", ".."):
+        dataset_id = f"{prefix}--{dot_part}"
         try:
             _validate_dataset_id(dataset_id)
         except ValueError:
-            return
-        raise AssertionError("Expected ValueError for deep nesting")
-
-    @given(value=st.text(min_size=1, max_size=100))
-    def test_slash_always_rejected(self, value: str) -> None:
-        for char in ("/", "\\"):
-            try:
-                _validate_dataset_id(value + char)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError(f"Expected ValueError for {char!r}")
-
-    @given(
-        prefix=st.from_regex(re.compile(r"[a-zA-Z0-9]{1,10}"), fullmatch=True),
-    )
-    def test_dot_parts_rejected(self, prefix: str) -> None:
-        for dot_part in (".", ".."):
-            dataset_id = f"{prefix}--{dot_part}"
-            try:
-                _validate_dataset_id(dataset_id)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError(f"Expected ValueError for part={dot_part!r}")
+            pass
+        else:
+            raise AssertionError(f"Expected ValueError for part={dot_part!r}")
 
 
 # ===================================================================
