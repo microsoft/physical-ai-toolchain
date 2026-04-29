@@ -54,10 +54,7 @@ export function AnnotationWorkspaceTrajectoryTab({
           <div className="space-y-2">
             {playbackCard}
             <Card className="overflow-hidden">
-              <CardContent
-                data-testid="trajectory-graph-panel"
-                className="flex flex-col gap-2 p-3"
-              >
+              <CardContent data-testid="trajectory-graph-panel" className="flex flex-col gap-2 p-3">
                 {(selectedRange || selectedSubtaskId) && (
                   <div className="flex items-center justify-end">
                     <Button size="sm" variant="outline" onClick={onClearPlaybackSelection}>

@@ -103,7 +103,7 @@ export function LanguageInstructionWidget() {
           <CardTitle className="text-sm">Language Instruction</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">No episode selected</p>
+          <p className="text-muted-foreground text-sm">No episode selected</p>
         </CardContent>
       </Card>
     )
@@ -118,9 +118,7 @@ export function LanguageInstructionWidget() {
         <CardContent>
           {datasetTaskDescription ? (
             <>
-              <p className="mb-2 text-xs text-muted-foreground">
-                Dataset task description:
-              </p>
+              <p className="text-muted-foreground mb-2 text-xs">Dataset task description:</p>
               <p className="mb-3 text-sm font-medium">{datasetTaskDescription}</p>
               <Button
                 variant="outline"
@@ -139,7 +137,7 @@ export function LanguageInstructionWidget() {
             </>
           ) : (
             <>
-              <p className="mb-3 text-xs text-muted-foreground">
+              <p className="text-muted-foreground mb-3 text-xs">
                 Add a natural language task description for VLA training.
               </p>
               <Button
@@ -220,15 +218,13 @@ export function LanguageInstructionWidget() {
             {langInst.paraphrases.map((p, i) => (
               <div
                 key={i}
-                className={cn(
-                  'flex items-start gap-2 rounded-md border bg-muted/30 px-2 py-1.5',
-                )}
+                className={cn('bg-muted/30 flex items-start gap-2 rounded-md border px-2 py-1.5')}
               >
                 <span className="flex-1 text-xs">{p}</span>
                 <button
                   type="button"
                   onClick={() => handleRemoveParaphrase(i)}
-                  className="shrink-0 text-muted-foreground hover:text-destructive"
+                  className="text-muted-foreground hover:text-destructive shrink-0"
                   aria-label={`Remove paraphrase ${i + 1}`}
                 >
                   <Trash2 className="h-3 w-3" />
@@ -266,16 +262,14 @@ export function LanguageInstructionWidget() {
             {langInst.subtaskInstructions.map((s, i) => (
               <div
                 key={i}
-                className="flex items-start gap-2 rounded-md border bg-muted/30 px-2 py-1.5"
+                className="bg-muted/30 flex items-start gap-2 rounded-md border px-2 py-1.5"
               >
-                <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                  {i + 1}.
-                </span>
+                <span className="text-muted-foreground shrink-0 text-xs font-medium">{i + 1}.</span>
                 <span className="flex-1 text-xs">{s}</span>
                 <button
                   type="button"
                   onClick={() => handleRemoveSubtask(i)}
-                  className="shrink-0 text-muted-foreground hover:text-destructive"
+                  className="text-muted-foreground hover:text-destructive shrink-0"
                   aria-label={`Remove subtask ${i + 1}`}
                 >
                   <Trash2 className="h-3 w-3" />
@@ -311,7 +305,7 @@ export function LanguageInstructionWidget() {
         <Button
           variant="ghost"
           size="sm"
-          className="w-full text-xs text-destructive hover:text-destructive"
+          className="text-destructive hover:text-destructive w-full text-xs"
           onClick={clearLanguageInstruction}
         >
           <Trash2 className="mr-2 h-3 w-3" />
