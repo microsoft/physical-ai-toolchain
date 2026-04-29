@@ -210,31 +210,31 @@ export function AnnotationWorkspacePlaybackCard({
             controls={
               compact
                 ? renderCompactControls({
-                  isPlaying,
-                  onTogglePlayback,
-                  onStepFrame,
-                  playbackSpeed,
-                  onSetPlaybackSpeed,
-                  autoPlay,
-                  onSetAutoPlay,
-                  autoLoop,
-                  onSetAutoLoop,
-                  playbackRangeStart,
-                  onSetFrameWithinPlaybackRange,
-                })
+                    isPlaying,
+                    onTogglePlayback,
+                    onStepFrame,
+                    playbackSpeed,
+                    onSetPlaybackSpeed,
+                    autoPlay,
+                    onSetAutoPlay,
+                    autoLoop,
+                    onSetAutoLoop,
+                    playbackRangeStart,
+                    onSetFrameWithinPlaybackRange,
+                  })
                 : renderDefaultControls({
-                  isPlaying,
-                  onTogglePlayback,
-                  onStepFrame,
-                  playbackSpeed,
-                  onSetPlaybackSpeed,
-                  autoPlay,
-                  onSetAutoPlay,
-                  autoLoop,
-                  onSetAutoLoop,
-                  playbackRangeStart,
-                  onSetFrameWithinPlaybackRange,
-                })
+                    isPlaying,
+                    onTogglePlayback,
+                    onStepFrame,
+                    playbackSpeed,
+                    onSetPlaybackSpeed,
+                    autoPlay,
+                    onSetAutoPlay,
+                    autoLoop,
+                    onSetAutoLoop,
+                    playbackRangeStart,
+                    onSetFrameWithinPlaybackRange,
+                  })
             }
             slider={
               <div className="space-y-1">

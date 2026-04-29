@@ -56,17 +56,28 @@ export function useAnnotationWorkspaceMediaSources({
     return Object.keys(currentEpisode?.videoUrls ?? {})
   }, [currentEpisode?.cameras, currentEpisode?.videoUrls])
 
-  const [cameraName, setCameraName] = useState<string | null>(null)
+  // User-selected camera override; null means "follow the default (cameras[0])".
+  // Tracking the override (rather than the resolved camera) keeps the resolved
+  // cameraName synchronous on first render, avoiding a transient null that would
+  // briefly produce an empty videoSrc and disrupt autoplay sequencing.
+  const [cameraOverride, setCameraOverride] = useState<string | null>(null)
 
-  // Reset selected camera when the camera list changes (e.g., new episode/dataset).
-  // Preserves selection if the same camera is still available.
-  useEffect(() => {
+  const cameraName = useMemo(() => {
     if (cameras.length === 0) {
-      setCameraName(null)
-      return
+      return null
     }
-    setCameraName((prev) => (prev && cameras.includes(prev) ? prev : cameras[0]))
-  }, [cameras])
+    if (cameraOverride && cameras.includes(cameraOverride)) {
+      return cameraOverride
+    }
+    return cameras[0]
+  }, [cameras, cameraOverride])
+
+  // Drop a stale override when the camera list no longer contains it.
+  useEffect(() => {
+    if (cameraOverride && !cameras.includes(cameraOverride)) {
+      setCameraOverride(null)
+    }
+  }, [cameras, cameraOverride])
 
   const videoSrc = useMemo(() => {
     if (!currentEpisode?.videoUrls || !cameraName) {
@@ -191,7 +202,7 @@ export function useAnnotationWorkspaceMediaSources({
     canvasRef,
     cameras,
     cameraName,
-    setCameraName,
+    setCameraName: setCameraOverride,
     displayFilter,
     frameImageUrl,
     interpolatedImageUrl,
