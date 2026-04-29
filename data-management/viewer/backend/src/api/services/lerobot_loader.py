@@ -563,6 +563,44 @@ class LeRobotLoader:
                 cameras.append(feature_name)
         return cameras
 
+    def get_tasks(self) -> dict[int, str]:
+        """Load task descriptions keyed by task_index.
+
+        Supports v2.x (``meta/tasks.jsonl`` with ``{task_index, task}`` rows)
+        and v3 (``meta/tasks.parquet`` with ``task_index`` and ``task``
+        columns). Returns an empty dict when no task metadata is found.
+        """
+        tasks_jsonl = self.base_path / "meta" / "tasks.jsonl"
+        if tasks_jsonl.exists():
+            result: dict[int, str] = {}
+            try:
+                with open(tasks_jsonl) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        row = json.loads(line)
+                        idx = int(row.get("task_index", len(result)))
+                        result[idx] = str(row.get("task", ""))
+                return result
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to read %s: %s", tasks_jsonl, e)
+
+        tasks_parquet = self.base_path / "meta" / "tasks.parquet"
+        if tasks_parquet.exists():
+            try:
+                table = pq.read_table(tasks_parquet)
+                cols = table.column_names
+                if "task_index" in cols and "task" in cols:
+                    return {
+                        int(table.column("task_index")[i].as_py()): str(table.column("task")[i].as_py())
+                        for i in range(table.num_rows)
+                    }
+            except Exception as e:
+                logger.warning("Failed to read %s: %s", tasks_parquet, e)
+
+        return {}
+
 
 def is_lerobot_dataset(path: str | Path) -> bool:
     """

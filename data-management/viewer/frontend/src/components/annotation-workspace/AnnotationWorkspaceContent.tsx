@@ -1,4 +1,4 @@
-import { LabelPanel } from '@/components/annotation-panel'
+import { LabelPanel, LanguageInstructionWidget } from '@/components/annotation-panel'
 import { AnnotationWorkspaceDiagnosticsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceDiagnosticsPanel'
 import { AnnotationWorkspaceEditToolsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceEditToolsPanel'
 import { AnnotationWorkspacePlaybackCard } from '@/components/annotation-workspace/AnnotationWorkspacePlaybackCard'
@@ -71,6 +71,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
   )
 
   const trajectoryLabelPanel = <LabelPanel episodeIndex={currentEpisode.meta.index} />
+  const trajectoryLanguageInstructionPanel = <LanguageInstructionWidget />
   const trajectoryEditToolsPanel = (
     <AnnotationWorkspaceEditToolsPanel
       onClearTransforms={shell.clearTransforms}
@@ -104,6 +105,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           playbackCard={trajectoryPlaybackCard}
           subtaskListCard={trajectorySubtaskListCard}
           labelPanel={trajectoryLabelPanel}
+          languageInstructionPanel={trajectoryLanguageInstructionPanel}
           editToolsPanel={trajectoryEditToolsPanel}
           selectedRange={shell.playback.selectedRange}
           selectedSubtaskId={shell.playback.selectedSubtaskId}

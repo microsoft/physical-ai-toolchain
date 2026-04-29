@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TrajectoryPoint
+from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TaskInfo, TrajectoryPoint
 from .base import build_trajectory
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,9 @@ class LeRobotFormatHandler:
                 total_episodes=lr_info.total_episodes,
                 fps=lr_info.fps,
                 features=features,
-                tasks=[],
+                tasks=[
+                    TaskInfo(task_index=idx, description=desc) for idx, desc in sorted(loader.get_tasks().items())
+                ],
             )
         except Exception as e:
             logger.warning(
