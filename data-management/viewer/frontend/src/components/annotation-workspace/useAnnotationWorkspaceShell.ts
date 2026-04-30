@@ -310,5 +310,8 @@ export function useAnnotationWorkspaceShell({
     videoRef: media.videoRef,
     videoSrc: media.videoSrc,
     canvasRef: media.canvasRef,
+    cameras: media.cameras,
+    cameraName: media.cameraName,
+    setCameraName: media.setCameraName,
   }
 }

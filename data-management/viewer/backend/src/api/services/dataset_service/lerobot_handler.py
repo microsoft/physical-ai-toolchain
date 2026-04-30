@@ -13,7 +13,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TrajectoryPoint
+from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TaskInfo, TrajectoryPoint
 from .base import build_trajectory
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ class LeRobotFormatHandler:
                 total_episodes=lr_info.total_episodes,
                 fps=lr_info.fps,
                 features=features,
-                tasks=[],
+                tasks=[TaskInfo(task_index=idx, description=desc) for idx, desc in sorted(loader.get_tasks().items())],
             )
         except Exception as e:
             logger.warning(
@@ -242,16 +242,32 @@ class LeRobotFormatHandler:
         return self._extract_frame_cv2(str(video_path), frame_idx)
 
     @staticmethod
+    def _resolve_ffmpeg() -> str | None:
+        """Locate a usable ffmpeg binary.
+
+        Prefers the imageio-ffmpeg static binary (ships with libdav1d for AV1
+        and libx264; not affected by host libGL breakage) over a system ffmpeg
+        on PATH.
+        """
+        try:
+            import imageio_ffmpeg
+
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            return shutil.which("ffmpeg")
+
+    @staticmethod
     def _extract_frame_ffmpeg(video_path: str, frame_idx: int, fps: float) -> bytes | None:
         """Extract a single frame as JPEG using ffmpeg."""
-        if shutil.which("ffmpeg") is None:
+        ffmpeg = LeRobotFormatHandler._resolve_ffmpeg()
+        if ffmpeg is None:
             return None
 
         seek_time = frame_idx / fps
         try:
             proc = subprocess.run(
                 [
-                    "ffmpeg",
+                    ffmpeg,
                     "-ss",
                     f"{seek_time:.6f}",
                     "-i",
