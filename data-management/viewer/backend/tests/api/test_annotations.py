@@ -283,8 +283,7 @@ class TestAutoAnalysisEndpoint:
 class TestLanguageInstructionRoundTrip:
     """Persist and retrieve annotations carrying a language instruction payload."""
 
-    @pytest.mark.asyncio
-    async def test_save_and_load_language_instruction(self, client, registered_dataset, sample_annotation):
+    def test_save_and_load_language_instruction(self, client, registered_dataset, sample_annotation):
         sample_annotation.language_instruction = LanguageInstructionAnnotation(
             instruction="pick the red block",
             source=InstructionSource.HUMAN,
@@ -310,8 +309,7 @@ class TestLanguageInstructionRoundTrip:
         assert language["paraphrases"] == ["grab the red cube", "lift the red block"]
         assert language["subtask_instructions"] == ["approach", "grasp", "lift"]
 
-    @pytest.mark.asyncio
-    async def test_rejects_oversized_paraphrases_list(self, client, registered_dataset, sample_annotation):
+    def test_rejects_oversized_paraphrases_list(self, client, registered_dataset, sample_annotation):
         """Excessively long paraphrase lists must fail validation at the API."""
         oversized = ["paraphrase"] * 100
         sample_annotation.language_instruction = LanguageInstructionAnnotation(
@@ -328,8 +326,7 @@ class TestLanguageInstructionRoundTrip:
         )
         assert response.status_code == 422
 
-    @pytest.mark.asyncio
-    async def test_rejects_oversized_paraphrase_item(self, client, registered_dataset, sample_annotation):
+    def test_rejects_oversized_paraphrase_item(self, client, registered_dataset, sample_annotation):
         """Per-item length cap mirrors the primary instruction bound."""
         sample_annotation.language_instruction = LanguageInstructionAnnotation(
             instruction="pick",
