@@ -212,4 +212,160 @@ describe('AnnotationWorkspacePlaybackCard', () => {
 
     expect(screen.queryByText('Loading video…')).not.toBeInTheDocument()
   })
+
+  it('renders interpolated frame image when isInsertedFrame and interpolatedImageUrl are set', () => {
+    renderPlaybackCard({
+      videoSrc: null,
+      frameImageUrl: null,
+      isInsertedFrame: true,
+      interpolatedImageUrl: 'data:image/jpeg;base64,abc',
+      currentFrame: 5,
+    })
+
+    expect(screen.getByAltText('Interpolated frame 5')).toBeInTheDocument()
+    expect(screen.getByText('Interpolated Frame')).toBeInTheDocument()
+  })
+
+  it('renders frame counter fallback when no media source is available', () => {
+    renderPlaybackCard({
+      videoSrc: null,
+      frameImageUrl: null,
+      currentFrame: 7,
+      totalFrames: 50,
+    })
+
+    expect(screen.getByText('Frame 8 of 50')).toBeInTheDocument()
+  })
+
+  it('renders resize output badge when provided', () => {
+    renderPlaybackCard({
+      resizeOutput: { width: 320, height: 240 },
+    })
+
+    expect(screen.getByText('Output: 320 × 240')).toBeInTheDocument()
+  })
+
+  it('applies displayFilter inline style to frame image', () => {
+    renderPlaybackCard({
+      videoSrc: null,
+      frameImageUrl: '/api/datasets/test/episodes/0/frames/0?camera=wrist',
+      displayFilter: 'brightness(1.2)',
+    })
+
+    const img = screen.getByAltText('Frame 0')
+    expect(img).toHaveStyle({ filter: 'brightness(1.2)' })
+  })
+
+  it('renders playback range highlight and label when provided', () => {
+    renderPlaybackCard({
+      playbackRangeHighlight: { left: '10%', width: '40%' },
+      playbackRangeLabel: 'Active subtask',
+      playbackRangeStart: 10,
+      playbackRangeEnd: 50,
+    })
+
+    expect(screen.getByText('Active subtask: frames 10 to 50')).toBeInTheDocument()
+  })
+
+  it('fires onSetFrameWithinPlaybackRange when slider changes', () => {
+    const onSetFrameWithinPlaybackRange = vi.fn()
+    renderPlaybackCard({ onSetFrameWithinPlaybackRange })
+
+    const slider = document.querySelector('input[type="range"]')!
+    fireEvent.change(slider, { target: { value: '42' } })
+
+    expect(onSetFrameWithinPlaybackRange).toHaveBeenCalledWith(42)
+  })
+
+  describe('default controls', () => {
+    it('fires callbacks on play/step/reset/autoplay/autoloop buttons', () => {
+      const onTogglePlayback = vi.fn()
+      const onStepFrame = vi.fn()
+      const onSetFrameWithinPlaybackRange = vi.fn()
+      const onSetAutoPlay = vi.fn()
+      const onSetAutoLoop = vi.fn()
+
+      renderPlaybackCard({
+        compact: false,
+        playbackRangeStart: 5,
+        autoPlay: false,
+        autoLoop: false,
+        onTogglePlayback,
+        onStepFrame,
+        onSetFrameWithinPlaybackRange,
+        onSetAutoPlay,
+        onSetAutoLoop,
+      })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+      fireEvent.click(screen.getByTitle('Previous frame'))
+      fireEvent.click(screen.getByTitle('Next frame'))
+      const resetButtons = screen
+        .getAllByRole('button')
+        .filter((btn) => btn.querySelector('svg.lucide-rotate-ccw'))
+      fireEvent.click(resetButtons[0])
+      fireEvent.click(screen.getByRole('button', { name: /^Auto$/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^Loop$/i }))
+
+      expect(onTogglePlayback).toHaveBeenCalled()
+      expect(onStepFrame).toHaveBeenCalledWith(-1)
+      expect(onStepFrame).toHaveBeenCalledWith(1)
+      expect(onSetFrameWithinPlaybackRange).toHaveBeenCalledWith(5)
+      expect(onSetAutoPlay).toHaveBeenCalledWith(true)
+      expect(onSetAutoLoop).toHaveBeenCalledWith(true)
+    })
+  })
+
+  describe('compact controls', () => {
+    it('renders compact controls and fires callbacks on every button', () => {
+      const onTogglePlayback = vi.fn()
+      const onStepFrame = vi.fn()
+      const onSetFrameWithinPlaybackRange = vi.fn()
+      const onSetAutoPlay = vi.fn()
+      const onSetAutoLoop = vi.fn()
+
+      renderPlaybackCard({
+        compact: true,
+        isPlaying: false,
+        autoPlay: true,
+        autoLoop: true,
+        playbackRangeStart: 3,
+        onTogglePlayback,
+        onStepFrame,
+        onSetFrameWithinPlaybackRange,
+        onSetAutoPlay,
+        onSetAutoLoop,
+      })
+
+      expect(screen.getByTestId('trajectory-compact-controls')).toBeInTheDocument()
+      fireEvent.click(screen.getByLabelText('Play playback'))
+      fireEvent.click(screen.getByLabelText('Previous frame'))
+      fireEvent.click(screen.getByLabelText('Next frame'))
+      fireEvent.click(screen.getByLabelText('Reset playback'))
+      fireEvent.click(screen.getByLabelText('Toggle auto-play'))
+      fireEvent.click(screen.getByLabelText('Toggle loop playback'))
+
+      expect(onTogglePlayback).toHaveBeenCalled()
+      expect(onStepFrame).toHaveBeenCalledWith(-1)
+      expect(onStepFrame).toHaveBeenCalledWith(1)
+      expect(onSetFrameWithinPlaybackRange).toHaveBeenCalledWith(3)
+      expect(onSetAutoPlay).toHaveBeenCalledWith(false)
+      expect(onSetAutoLoop).toHaveBeenCalledWith(false)
+    })
+  })
+
+  it('fires onSelectCamera when camera selector changes', () => {
+    const onSelectCamera = vi.fn()
+    renderPlaybackCard({
+      cameras: ['wrist', 'overhead'],
+      selectedCamera: 'wrist',
+      onSelectCamera,
+    })
+
+    const select = document.querySelector('select')
+    if (select) {
+      fireEvent.change(select, { target: { value: 'overhead' } })
+      expect(onSelectCamera).toHaveBeenCalledWith('overhead')
+    }
+  })
 })

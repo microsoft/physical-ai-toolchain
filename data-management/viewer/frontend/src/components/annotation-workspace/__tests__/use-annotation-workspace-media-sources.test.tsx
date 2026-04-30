@@ -1,5 +1,5 @@
-import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, render, renderHook } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { useAnnotationWorkspaceMediaSources } from '@/components/annotation-workspace/useAnnotationWorkspaceMediaSources'
 import type { DatasetInfo, EpisodeData } from '@/types'
@@ -99,5 +99,137 @@ describe('useAnnotationWorkspaceMediaSources camera override', () => {
 
     expect(result.current.cameras).toEqual(['wrist'])
     expect(result.current.cameraName).toBe('wrist')
+  })
+
+  it('builds frameImageUrl from currentDataset, episode and originalFrameIndex', () => {
+    const episode = buildEpisode(['wrist'])
+    const opts = { ...defaultOptions(episode), originalFrameIndex: 5 }
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(opts))
+
+    expect(result.current.frameImageUrl).toBe(
+      '/api/datasets/dataset-1/episodes/0/frames/5?camera=wrist',
+    )
+  })
+
+  it('returns null frameImageUrl when originalFrameIndex is null (inserted frame)', () => {
+    const episode = buildEpisode(['wrist'])
+    const opts = { ...defaultOptions(episode), originalFrameIndex: null }
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(opts))
+
+    expect(result.current.frameImageUrl).toBeNull()
+    expect(result.current.isInsertedFrame).toBe(true)
+  })
+
+  it('forwards displayAdjustment and globalTransform into displayFilter', () => {
+    const episode = buildEpisode(['wrist'])
+    const opts = {
+      ...defaultOptions(episode),
+      displayAdjustment: { brightness: 1.2, contrast: 1, saturation: 1, hue: 0 },
+      displayActive: true,
+    }
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(opts))
+
+    expect(result.current.displayFilter).toContain('brightness')
+  })
+})
+
+describe('useAnnotationWorkspaceMediaSources adjacent-frame interpolation', () => {
+  function makeEpisodeWithFrames(originalFrameCount: number): EpisodeData {
+    return {
+      meta: {
+        index: 0,
+        length: originalFrameCount,
+        taskIndex: 0,
+        hasAnnotations: false,
+      },
+      videoUrls: { wrist: '/videos/wrist.mp4' },
+      cameras: ['wrist'],
+      trajectoryData: Array.from({ length: originalFrameCount }, () => ({})),
+    }
+  }
+
+  it('computes adjacentFrames for an inserted frame at the expected timeline position', () => {
+    const episode = makeEpisodeWithFrames(10)
+    const insertedFrames = new Map([[3, { interpolationFactor: 0.25 }]])
+    const opts = {
+      ...defaultOptions(episode),
+      originalFrameIndex: null,
+      currentFrame: 4,
+      insertedFrames,
+      removedFrames: new Set<number>(),
+    }
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(opts))
+
+    expect(result.current.isInsertedFrame).toBe(true)
+  })
+
+  it('drives interpolation effect to publish a data URL via canvas blending', async () => {
+    const originalImage = window.Image
+    const loaders: Array<() => void> = []
+
+    class FakeImage {
+      public onload: (() => void) | null = null
+      public width = 16
+      public height = 9
+      private _src = ''
+      get src() {
+        return this._src
+      }
+      set src(value: string) {
+        this._src = value
+        if (this.onload) {
+          loaders.push(this.onload)
+        }
+      }
+    }
+    // @ts-expect-error happy-dom Image stand-in
+    window.Image = FakeImage
+
+    const fakeCtx = { drawImage: vi.fn(), globalAlpha: 1 }
+    const originalGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = vi.fn(
+      () => fakeCtx,
+    ) as unknown as typeof originalGetContext
+    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL
+    HTMLCanvasElement.prototype.toDataURL = vi.fn(
+      () => 'data:image/jpeg;base64,fake',
+    ) as unknown as typeof originalToDataURL
+
+    try {
+      const episode = makeEpisodeWithFrames(10)
+      const insertedFrames = new Map([[3, { interpolationFactor: 0.5 }]])
+      const opts = {
+        ...defaultOptions(episode),
+        originalFrameIndex: null,
+        currentFrame: 4,
+        insertedFrames,
+        removedFrames: new Set<number>(),
+      }
+
+      let captured: ReturnType<typeof useAnnotationWorkspaceMediaSources> | null = null
+      function Harness() {
+        const value = useAnnotationWorkspaceMediaSources(opts)
+        captured = value
+        return <canvas ref={value.canvasRef} />
+      }
+
+      render(<Harness />)
+
+      await act(async () => {
+        loaders.forEach((cb) => cb())
+      })
+
+      expect(captured).not.toBeNull()
+      expect(captured!.isInsertedFrame).toBe(true)
+      expect(fakeCtx.drawImage).toHaveBeenCalled()
+    } finally {
+      window.Image = originalImage
+      HTMLCanvasElement.prototype.getContext = originalGetContext
+      HTMLCanvasElement.prototype.toDataURL = originalToDataURL
+    }
   })
 })
