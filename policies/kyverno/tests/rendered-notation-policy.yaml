@@ -1,0 +1,77 @@
+# Test-only rendered variant of fleet-deployment/.../kyverno-notation-policy.yaml
+# with Flux postBuild placeholders resolved to fixture values:
+#   ${ACR_LOGIN_SERVER}            -> acrtest.azurecr.io
+#   ${NOTATION_TRUST_IDENTITY}     -> x509.subject:CN=physical-ai-toolchain,O=Microsoft
+#   ${NOTATION_TRUST_CERT_CHAIN_PEM} -> placeholder PEM block
+# The Kyverno CLI does not run Flux substitutions; production deploys consume
+# the original templated policy. This rendered copy exercises the dual-rule
+# scope-guard contract only.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-images-notation
+spec:
+  background: true
+  failurePolicy: Fail
+  rules:
+    - name: require-signed-images-acr
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - osmo-workflows
+                - azureml
+                - dataviewer
+                - "fleet-*"
+      verifyImages:
+        - type: Notary
+          imageReferences:
+            - "acrtest.azurecr.io/*"
+          failureAction: Enforce
+          required: true
+          verifyDigest: true
+          mutateDigest: true
+          useCache: true
+          attestors:
+            - count: 1
+              entries:
+                - certificates:
+                    certChain: |-
+                      -----BEGIN CERTIFICATE-----
+                      MIIBpDCCAUugAwIBAgIUPLACEHOLDERFIXTUREONLYNOTREALWQ=
+                      -----END CERTIFICATE-----
+          attestations:
+            - type: application/vnd.cncf.notary.signature
+              conditions:
+                - all:
+                    - key: "{{ trustedIdentities }}"
+                      operator: AnyIn
+                      value:
+                        - "x509.subject:CN=physical-ai-toolchain,O=Microsoft"
+    - name: audit-all-other-images
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - type: Notary
+          imageReferences:
+            - "*"
+          skipImageReferences:
+            - "acrtest.azurecr.io/*"
+          failureAction: Audit
+          required: false
+          verifyDigest: false
+          mutateDigest: false
+          useCache: true
+          attestors:
+            - count: 1
+              entries:
+                - certificates:
+                    certChain: |-
+                      -----BEGIN CERTIFICATE-----
+                      MIIBpDCCAUugAwIBAgIUPLACEHOLDERFIXTUREONLYNOTREALWQ=
+                      -----END CERTIFICATE-----

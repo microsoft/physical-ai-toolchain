@@ -209,3 +209,109 @@ module "sil" {
   // Feature flags
   should_enable_private_endpoint = var.should_enable_private_endpoint
 }
+
+// ============================================================
+// Container Supply-Chain Security
+// ============================================================
+
+module "github_oidc" {
+  count  = var.signing_mode != "none" ? 1 : 0
+  source = "./modules/github-oidc"
+
+  environment     = var.environment
+  resource_prefix = var.resource_prefix
+  instance        = var.instance
+  location        = var.location
+  resource_group  = local.resource_group
+
+  github_owner = var.github_repository_owner
+  github_repo  = var.github_repository_name
+  federated_subjects = {
+    tags-publish = "repo:${var.github_repository_owner}/${var.github_repository_name}:ref:refs/tags/v*"
+  }
+
+  acr = module.platform.container_registry
+}
+
+module "notation_akv" {
+  count  = var.signing_mode == "notation" ? 1 : 0
+  source = "./modules/notation-akv"
+
+  environment     = var.environment
+  resource_prefix = var.resource_prefix
+  instance        = var.instance
+  location        = var.location
+  resource_group  = local.resource_group
+
+  should_deploy         = true
+  signer_subject_claims = ["system:serviceaccount:arc-runners:notation-signer"]
+
+  aks = {
+    id              = module.sil.aks_cluster.id
+    oidc_issuer_url = module.sil.aks_oidc_issuer_url
+  }
+  acr = {
+    id           = module.platform.container_registry.id
+    login_server = module.platform.container_registry.login_server
+  }
+  key_vault = {
+    id        = module.platform.key_vault.id
+    vault_uri = module.platform.key_vault.vault_uri
+  }
+  github_oidc = length(module.github_oidc) > 0 ? {
+    uami_id           = module.github_oidc[0].user_assigned_identity.id
+    uami_client_id    = module.github_oidc[0].client_id
+    uami_principal_id = module.github_oidc[0].principal_id
+  } : null
+}
+
+module "arc_runners" {
+  count  = var.signing_mode != "none" ? 1 : 0
+  source = "./modules/arc-runners"
+
+  environment     = var.environment
+  resource_prefix = var.resource_prefix
+  instance        = var.instance
+  location        = var.location
+  resource_group  = local.resource_group
+
+  github_config_url                = "https://github.com/${var.github_repository_owner}/${var.github_repository_name}"
+  github_app_id                    = var.github_app_id
+  github_app_installation_id       = var.github_app_installation_id
+  github_app_private_key_secret_id = var.github_app_private_key_secret_id
+  should_enable_sigstore_egress    = var.signing_mode == "sigstore"
+
+  aks = {
+    id                     = module.sil.aks_cluster.id
+    oidc_issuer_url        = module.sil.aks_oidc_issuer_url
+    host                   = module.sil.aks_kube_config.host
+    cluster_ca_certificate = module.sil.aks_kube_config.cluster_ca_certificate
+    kube_config_raw        = module.sil.aks_kube_config.kube_config_raw
+  }
+  acr = {
+    id           = module.platform.container_registry.id
+    login_server = module.platform.container_registry.login_server
+  }
+  key_vault = {
+    id        = module.platform.key_vault.id
+    vault_uri = module.platform.key_vault.vault_uri
+  }
+  github_oidc = length(module.github_oidc) > 0 ? {
+    uami_id           = module.github_oidc[0].user_assigned_identity.id
+    uami_client_id    = module.github_oidc[0].client_id
+    uami_principal_id = module.github_oidc[0].principal_id
+  } : null
+}
+
+module "sigstore_mirror" {
+  count  = (var.signing_mode == "sigstore" && var.should_deploy_sigstore_mirror) ? 1 : 0
+  source = "./modules/sigstore-mirror"
+
+  environment     = var.environment
+  resource_prefix = var.resource_prefix
+  instance        = var.instance
+  location        = var.location
+  resource_group  = local.resource_group
+
+  should_deploy = true
+}

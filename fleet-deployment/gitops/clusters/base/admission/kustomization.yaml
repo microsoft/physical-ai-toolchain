@@ -1,0 +1,13 @@
+# Base admission stack. Per-cluster overlays under
+# fleet-deployment/gitops/clusters/overlays/{dev,staging,production}/admission/
+# select the active signing policy (Sigstore for dev/staging, Notation for
+# production) by referencing the individual policy files directly. The two
+# policy YAMLs are intentionally excluded here so overlays remain the single
+# point of mode selection without duplicate-resource collisions.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - kyverno-helmrelease.yaml
+  - trusted-root-kustomization.yaml
+  - trusted-root-refresh-cronjob.yaml

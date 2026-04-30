@@ -61,3 +61,19 @@ output "node_pools" {
     }
   }
 }
+
+// ============================================================
+// AKS Kube Config Outputs
+// ============================================================
+
+output "aks_kube_config" {
+  description = "Sensitive AKS kubeconfig for in-cluster provider authentication."
+  sensitive   = true
+  value = {
+    host                   = azurerm_kubernetes_cluster.main.kube_config[0].host
+    cluster_ca_certificate = azurerm_kubernetes_cluster.main.kube_config[0].cluster_ca_certificate
+    client_certificate     = azurerm_kubernetes_cluster.main.kube_config[0].client_certificate
+    client_key             = azurerm_kubernetes_cluster.main.kube_config[0].client_key
+    kube_config_raw        = azurerm_kubernetes_cluster.main.kube_config_raw
+  }
+}

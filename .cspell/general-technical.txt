@@ -2034,3 +2034,18 @@ vsmserver
 envaccount
 envcontainer
 mycontainer
+
+# Container signing & supply chain
+airgapped
+cosign
+exploitability
+kyverno
+openvex
+vexctl
+fulcio
+helmrelease
+helmrepository
+bitnami
+acrtest
+MIIB
+clusterpolicy

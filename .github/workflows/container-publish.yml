@@ -1,0 +1,245 @@
+name: Container Publish (Cosign + Sigstore)
+
+# Reusable workflow that builds, pushes, and signs a container image with cosign keyless
+# (OIDC -> Fulcio -> Rekor). Generates and attaches SPDX, CycloneDX, SLSA provenance, and
+# optional OpenVEX attestations for the resulting image digest.
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        description: 'Repository name within the registry (e.g. physical-ai/dataviewer-backend).'
+        required: true
+        type: string
+      dockerfile_path:
+        description: 'Path to the Dockerfile to build.'
+        required: true
+        type: string
+      context_path:
+        description: 'Build context path.'
+        required: true
+        type: string
+      tag:
+        description: 'Image tag to publish.'
+        required: true
+        type: string
+      registry:
+        description: 'Fully qualified registry hostname (e.g. acrphysicalaiprod.azurecr.io).'
+        required: true
+        type: string
+      vex_predicate_path:
+        description: 'Optional path to an OpenVEX predicate JSON file. When empty, no VEX attestation is created.'
+        required: false
+        type: string
+        default: ''
+      build_args:
+        description: 'Newline-separated KEY=VALUE build arguments forwarded to docker buildx.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+    outputs:
+      image_digest:
+        description: 'Resolved image digest (sha256:...).'
+        value: ${{ jobs.publish.outputs.image_digest }}
+      image_ref:
+        description: 'Fully qualified image reference pinned to the digest.'
+        value: ${{ jobs.publish.outputs.image_ref }}
+
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    name: Build, push, sign, and attest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image_digest: ${{ steps.publish.outputs.digest }}
+      image_ref: ${{ steps.publish.outputs.ref }}
+    env:
+      COSIGN_EXPERIMENTAL: 'true'
+      EXPECTED_IDENTITY_REGEXP: '^https://github\.com/microsoft/physical-ai-toolchain/\.github/workflows/container-publish\.yml@refs/(heads/main|tags/v.+)$'
+      EXPECTED_OIDC_ISSUER: 'https://token.actions.githubusercontent.com'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      - name: Azure login (OIDC)
+        uses: Azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        env:
+          REGISTRY: ${{ inputs.registry }}
+        run: |
+          set -euo pipefail
+          registry_name="${REGISTRY%%.*}"
+          az acr login --name "${registry_name}"
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: ${{ inputs.context_path }}
+          file: ${{ inputs.dockerfile_path }}
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
+          build-args: ${{ inputs.build_args }}
+
+      - name: Resolve published digest and reference
+        id: publish
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DIGEST}" ]]; then
+            echo "::error::docker/build-push-action did not return a digest"
+            exit 1
+          fi
+          ref="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          echo "Published: ${ref}"
+
+      - name: Sign image (cosign keyless)
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE_REF}"
+
+      - name: Generate SPDX SBOM (syft)
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: |
+          set -euo pipefail
+          syft "${IMAGE_REF}" -o spdx-json > /tmp/sbom.spdx.json
+          syft "${IMAGE_REF}" -o cyclonedx-json > /tmp/sbom.cdx.json
+
+      - name: Attest SPDX SBOM
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: |
+          set -euo pipefail
+          cosign attest --yes --type spdxjson --predicate /tmp/sbom.spdx.json "${IMAGE_REF}"
+
+      - name: Attest CycloneDX SBOM
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: |
+          set -euo pipefail
+          cosign attest --yes --type cyclonedx --predicate /tmp/sbom.cdx.json "${IMAGE_REF}"
+
+      - name: Generate SLSA provenance predicate
+        id: slsa
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          REGISTRY: ${{ inputs.registry }}
+        run: |
+          set -euo pipefail
+          builder_id="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/container-publish.yml@${GITHUB_REF}"
+          invocation_id="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
+          cat > /tmp/slsa.json <<EOF
+          {
+            "buildDefinition": {
+              "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+              "externalParameters": {
+                "workflow": {
+                  "ref": "${GITHUB_REF}",
+                  "repository": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}",
+                  "path": ".github/workflows/container-publish.yml"
+                }
+              },
+              "internalParameters": {
+                "github": {
+                  "event_name": "${GITHUB_EVENT_NAME}",
+                  "repository_id": "${GITHUB_REPOSITORY_ID}",
+                  "repository_owner_id": "${GITHUB_REPOSITORY_OWNER_ID}"
+                }
+              },
+              "resolvedDependencies": [
+                {
+                  "uri": "git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}@${GITHUB_REF}",
+                  "digest": { "gitCommit": "${GITHUB_SHA}" }
+                }
+              ]
+            },
+            "runDetails": {
+              "builder": { "id": "${builder_id}" },
+              "metadata": { "invocationId": "${invocation_id}" }
+            }
+          }
+          EOF
+
+      - name: Attest SLSA provenance
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: |
+          set -euo pipefail
+          cosign attest --yes --type slsaprovenance --predicate /tmp/slsa.json "${IMAGE_REF}"
+
+      - name: Attest OpenVEX predicate
+        if: inputs.vex_predicate_path != ''
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+          VEX_PATH: ${{ inputs.vex_predicate_path }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f "${VEX_PATH}" ]]; then
+            echo "::error::VEX predicate not found at ${VEX_PATH}"
+            exit 1
+          fi
+          cosign attest --yes --type openvex --predicate "${VEX_PATH}" "${IMAGE_REF}"
+
+      - name: Verify signature against expected identity
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-identity-regexp "${EXPECTED_IDENTITY_REGEXP}" \
+            --certificate-oidc-issuer "${EXPECTED_OIDC_ISSUER}" \
+            "${IMAGE_REF}"
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ inputs.image_name }}-${{ inputs.tag }}
+          path: |
+            /tmp/sbom.spdx.json
+            /tmp/sbom.cdx.json
+            /tmp/slsa.json
+          retention-days: 90

@@ -1,0 +1,99 @@
+# Kyverno CLI test fixtures for the dual-rule scope-guard pattern.
+#
+# Run from repo root:
+#   kyverno test policies/kyverno/tests/
+#
+# These assertions validate the SCOPE-GUARD CONTRACT, not signature
+# verification. The CLI runner has no registry/Rekor connectivity, so real
+# cosign outcomes cannot be exercised offline. The fixtures instead prove:
+#
+#   * Rule 1 (require-signed-images-acr) applies ONLY to project ACR images
+#     -> third-party (non-ACR) images SKIP this rule entirely
+#   * Rule 2 (audit-all-other-images) excludes project ACR images
+#     -> ACR images SKIP this rule (no double-evaluation)
+#
+# Together these prove the user's blocking requirement: customer-deployed
+# third-party images are never required to carry a project-issued signature.
+#
+# Live signature verification is covered downstream by the
+# .github/workflows/container-build-verify.yml workflow against a real ACR.
+name: verify-images-sigstore-test
+# Uses the rendered (Flux-substituted) policy variant. The CLI does not run
+# Flux postBuild substitutions, so the placeholder ${ACR_LOGIN_SERVER} in the
+# production policy is materialised here to acrtest.azurecr.io. Production
+# admission consumes the original templated manifest under fleet-deployment/.
+policies:
+  - rendered-sigstore-policy.yaml
+  - rendered-notation-policy.yaml
+resources:
+  - resources.yaml
+results:
+  # Rule 1 attempts verification on every ACR-scoped image. With no live
+  # registry the result is non-pass; we assert the rule MATCHED (did not
+  # skip) by accepting fail.
+  - policy: verify-images-sigstore
+    rule: require-signed-images-acr
+    resources:
+      - signed-pod
+      - unsigned-acr-pod
+      - wrong-identity-pod
+      - missing-attestation-pod
+    kind: Pod
+    result: fail
+  # Scope-guard assertion: Rule 1 must NOT apply to third-party images.
+  - policy: verify-images-sigstore
+    rule: require-signed-images-acr
+    resources:
+      - third-party-unsigned-pod
+    kind: Pod
+    result: skip
+  # Scope-guard assertion: Rule 2 must NOT apply to project ACR images
+  # (skipImageReferences excludes them).
+  - policy: verify-images-sigstore
+    rule: audit-all-other-images
+    resources:
+      - signed-pod
+      - unsigned-acr-pod
+      - wrong-identity-pod
+      - missing-attestation-pod
+    kind: Pod
+    result: skip
+  # Rule 2 attempts verification on third-party images. Audit-only, never
+  # blocks admission. CLI cannot verify offline; non-pass is expected.
+  - policy: verify-images-sigstore
+    rule: audit-all-other-images
+    resources:
+      - third-party-unsigned-pod
+    kind: Pod
+    result: fail
+  # Notation rules mirror the sigstore scope-guard contract.
+  - policy: verify-images-notation
+    rule: require-signed-images-acr
+    resources:
+      - signed-pod
+      - unsigned-acr-pod
+      - wrong-identity-pod
+      - missing-attestation-pod
+    kind: Pod
+    result: fail
+  - policy: verify-images-notation
+    rule: require-signed-images-acr
+    resources:
+      - third-party-unsigned-pod
+    kind: Pod
+    result: skip
+  - policy: verify-images-notation
+    rule: audit-all-other-images
+    resources:
+      - signed-pod
+      - unsigned-acr-pod
+      - wrong-identity-pod
+      - missing-attestation-pod
+    kind: Pod
+    result: skip
+  - policy: verify-images-notation
+    rule: audit-all-other-images
+    resources:
+      - third-party-unsigned-pod
+    kind: Pod
+    result: fail

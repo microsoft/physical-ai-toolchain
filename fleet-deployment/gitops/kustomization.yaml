@@ -1,3 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-resources: []
+# Per-cluster overlays under clusters/overlays/{dev,staging,production}/ are
+# pulled by per-cluster Flux Kustomizations, not from this root.
+resources:
+  - ./sources
