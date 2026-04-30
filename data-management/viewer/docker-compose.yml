@@ -29,7 +29,7 @@ services:
       DATAVIEWER_AUTH_DISABLED: "${DATAVIEWER_AUTH_DISABLED:-true}"
     volumes:
       # Mount local dataset directory when using local storage backend
-      - "${HMI_LOCAL_DATA_PATH:-./datasets}:/data:ro"
+      - "${DATAVIEWER_HOST_DATA_DIR:-./datasets}:/data:ro"
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
       interval: 30s

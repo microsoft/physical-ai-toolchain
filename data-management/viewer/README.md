@@ -196,13 +196,42 @@ npm run dev
 
 The application will be available at `http://localhost:5173`.
 
+## Annotation Features
+
+The annotation workspace exposes per-episode controls grouped by panel. Persisted state is stored alongside the dataset and surfaced through the REST API.
+
+### Multi-camera viewing
+
+Datasets that record multiple camera streams (e.g. `observation.images.front`, `observation.images.wrist`) drive a camera selector in the annotation workspace header. The selector lists every camera advertised by the episode's `cameras` array, falling back to the keys of `videoUrls` when the array is empty.
+
+| Behavior | Detail |
+|----------|--------|
+| Default selection | First entry in `episode.cameras` (or `videoUrls`) |
+| Override | User selection persists for the current episode |
+| Stale fallback | When the selected camera is missing on episode change, selection resets to the new `cameras[0]` |
+| Frame extraction | The chosen camera drives both video playback and `/frames/{idx}` thumbnail requests |
+
+### Language instruction (VLA annotation)
+
+Each episode can carry a structured `LanguageInstructionAnnotation` for vision-language-action training. The widget appears in the annotation panel and writes through `PUT /api/datasets/{id}/episodes/{idx}/annotations`.
+
+| Field | Purpose |
+|-------|---------|
+| `instruction` | Primary natural-language task description (max 1000 characters) |
+| `source` | Provenance: `human`, `template`, `llm-generated`, or `retroactive` |
+| `language` | BCP-47 language tag, defaults to `en` |
+| `paraphrases` | Alternative phrasings for data augmentation (up to 50 entries, 1000 characters each) |
+| `subtask_instructions` | Ordered subtask decomposition for hierarchical conditioning (up to 100 entries, 1000 characters each) |
+
+When a dataset task description is available, the widget seeds the instruction with `source = template` via the "Use as Instruction" button. Otherwise, "Add Instruction" creates a blank instruction with `source = human`. The source can be changed at any time through the dropdown.
+
 ## Container Deployment
 
 ### Docker Compose (local)
 
 ```bash
 # Local storage mode (mount datasets directory)
-HMI_LOCAL_DATA_PATH=/path/to/datasets docker compose up --build
+DATAVIEWER_HOST_DATA_DIR=/path/to/datasets docker compose up --build
 
 # Azure Blob Storage mode
 export STORAGE_BACKEND=azure

@@ -16,6 +16,8 @@ from src.api.models.annotations import (
     DataQualityAnnotation,
     DataQualityLevel,
     EpisodeAnnotation,
+    InstructionSource,
+    LanguageInstructionAnnotation,
     QualityScore,
     TaskCompletenessAnnotation,
     TaskCompletenessRating,
@@ -284,6 +286,72 @@ class TestAutoAnalysisEndpoint:
         """Test auto-analysis for non-existent dataset."""
         response = client.post("/api/datasets/nonexistent/episodes/0/annotations/auto")
         assert response.status_code == 404
+
+
+class TestLanguageInstructionRoundTrip:
+    """Persist and retrieve annotations carrying a language instruction payload."""
+
+    @pytest.mark.asyncio
+    async def test_save_and_load_language_instruction(self, client, registered_dataset, sample_annotation):
+        sample_annotation.language_instruction = LanguageInstructionAnnotation(
+            instruction="pick the red block",
+            source=InstructionSource.HUMAN,
+            paraphrases=["grab the red cube", "lift the red block"],
+            subtask_instructions=["approach", "grasp", "lift"],
+        )
+
+        save = client.put(
+            "/api/datasets/test-dataset/episodes/3/annotations",
+            json=sample_annotation.model_dump(mode="json"),
+        )
+        assert save.status_code == 200
+
+        get = client.get("/api/datasets/test-dataset/episodes/3/annotations")
+        assert get.status_code == 200
+
+        annotations = get.json()["annotations"]
+        assert len(annotations) == 1
+        language = annotations[0]["language_instruction"]
+        assert language is not None
+        assert language["instruction"] == "pick the red block"
+        assert language["source"] == "human"
+        assert language["paraphrases"] == ["grab the red cube", "lift the red block"]
+        assert language["subtask_instructions"] == ["approach", "grasp", "lift"]
+
+    @pytest.mark.asyncio
+    async def test_rejects_oversized_paraphrases_list(self, client, registered_dataset, sample_annotation):
+        """Excessively long paraphrase lists must fail validation at the API."""
+        oversized = ["paraphrase"] * 100
+        sample_annotation.language_instruction = LanguageInstructionAnnotation(
+            instruction="pick",
+            source=InstructionSource.HUMAN,
+            paraphrases=["seed"],
+        )
+        payload = sample_annotation.model_dump(mode="json")
+        payload["language_instruction"]["paraphrases"] = oversized
+
+        response = client.put(
+            "/api/datasets/test-dataset/episodes/4/annotations",
+            json=payload,
+        )
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_rejects_oversized_paraphrase_item(self, client, registered_dataset, sample_annotation):
+        """Per-item length cap mirrors the primary instruction bound."""
+        sample_annotation.language_instruction = LanguageInstructionAnnotation(
+            instruction="pick",
+            source=InstructionSource.HUMAN,
+            paraphrases=["seed"],
+        )
+        payload = sample_annotation.model_dump(mode="json")
+        payload["language_instruction"]["paraphrases"] = ["x" * 1001]
+
+        response = client.put(
+            "/api/datasets/test-dataset/episodes/4/annotations",
+            json=payload,
+        )
+        assert response.status_code == 422
 
 
 if __name__ == "__main__":

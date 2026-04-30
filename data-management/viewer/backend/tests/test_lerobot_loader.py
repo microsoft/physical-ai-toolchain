@@ -280,3 +280,112 @@ class TestV2EpisodeLayout:
         loader = LeRobotLoader(v2_dataset)
         path = loader.get_video_path(0, "observation.images.front")
         assert path is not None and path.name == "episode_000000.mp4"
+
+    def test_get_tasks_jsonl(self, v2_dataset):
+        """v2.x stores task metadata as ``meta/tasks.jsonl``."""
+        import json
+
+        tasks_path = v2_dataset / "meta" / "tasks.jsonl"
+        with tasks_path.open("w") as f:
+            f.write(json.dumps({"task_index": 0, "task": "pick the block"}) + "\n")
+            f.write(json.dumps({"task_index": 1, "task": "place the block"}) + "\n")
+
+        loader = LeRobotLoader(v2_dataset)
+        tasks = loader.get_tasks()
+
+        assert tasks == {0: "pick the block", 1: "place the block"}
+
+    def test_get_tasks_jsonl_skips_blank_lines(self, v2_dataset):
+        """Blank lines in tasks.jsonl must not raise."""
+        import json
+
+        tasks_path = v2_dataset / "meta" / "tasks.jsonl"
+        with tasks_path.open("w") as f:
+            f.write("\n")
+            f.write(json.dumps({"task_index": 0, "task": "lift"}) + "\n")
+            f.write("\n")
+
+        loader = LeRobotLoader(v2_dataset)
+        assert loader.get_tasks() == {0: "lift"}
+
+    def test_get_tasks_jsonl_malformed_returns_empty(self, v2_dataset):
+        """Malformed jsonl falls back to an empty mapping rather than raising."""
+        tasks_path = v2_dataset / "meta" / "tasks.jsonl"
+        tasks_path.write_text("not-valid-json\n")
+
+        loader = LeRobotLoader(v2_dataset)
+        assert loader.get_tasks() == {}
+
+    def test_get_tasks_parquet(self, v2_dataset):
+        """v3 stores task metadata as ``meta/tasks.parquet``."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        # Remove the jsonl variant so the parquet branch is exercised.
+        jsonl_path = v2_dataset / "meta" / "tasks.jsonl"
+        if jsonl_path.exists():
+            jsonl_path.unlink()
+
+        table = pa.table(
+            {
+                "task_index": [0, 1, 2],
+                "task": ["align", "grasp", "release"],
+            }
+        )
+        pq.write_table(table, v2_dataset / "meta" / "tasks.parquet")
+
+        loader = LeRobotLoader(v2_dataset)
+        tasks = loader.get_tasks()
+
+        assert tasks == {0: "align", 1: "grasp", 2: "release"}
+
+    def test_get_tasks_returns_empty_when_missing(self, v2_dataset):
+        """No tasks metadata files means an empty dict, not an exception."""
+        for name in ("tasks.jsonl", "tasks.parquet"):
+            candidate = v2_dataset / "meta" / name
+            if candidate.exists():
+                candidate.unlink()
+
+        loader = LeRobotLoader(v2_dataset)
+        assert loader.get_tasks() == {}
+
+
+class TestV2LayoutDetection:
+    """Verify _is_v2_layout requires both v2.x placeholders."""
+
+    def _info(self, data_path: str):
+        from src.api.services.lerobot_loader import LeRobotDatasetInfo
+
+        return LeRobotDatasetInfo(
+            codebase_version="v2.1",
+            robot_type="r",
+            total_episodes=1,
+            total_frames=1,
+            total_tasks=1,
+            total_chunks=1,
+            chunks_size=1000,
+            fps=30.0,
+            splits={},
+            data_path=data_path,
+            video_path="",
+            features={},
+        )
+
+    def test_detects_v2_template(self, tmp_path):
+        loader = LeRobotLoader.__new__(LeRobotLoader)
+        loader.base_path = tmp_path
+        info = self._info("data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet")
+        assert loader._is_v2_layout(info) is True
+
+    def test_rejects_v3_template(self, tmp_path):
+        loader = LeRobotLoader.__new__(LeRobotLoader)
+        loader.base_path = tmp_path
+        info = self._info("data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet")
+        assert loader._is_v2_layout(info) is False
+
+    def test_rejects_partial_episode_index_only(self, tmp_path):
+        """A future v3 template that uses {episode_index} alone must not flip to v2."""
+        loader = LeRobotLoader.__new__(LeRobotLoader)
+        loader.base_path = tmp_path
+        info = self._info("data/chunk-{chunk_index:03d}/episode_{episode_index:06d}.parquet")
+        assert loader._is_v2_layout(info) is False

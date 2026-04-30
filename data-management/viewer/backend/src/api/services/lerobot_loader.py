@@ -182,11 +182,15 @@ class LeRobotLoader:
     def _is_v2_layout(self, info: LeRobotDatasetInfo) -> bool:
         """Return True if the dataset uses the v2.x one-episode-per-file layout.
 
-        Detected from the data_path template (which contains the
-        ``{episode_index}`` placeholder in v2.x) rather than codebase_version,
-        so locally repacked datasets work regardless of version string.
+        Detected from the data_path template rather than codebase_version, so
+        locally repacked datasets work regardless of version string. v2.x
+        templates use both ``{episode_chunk}`` and ``{episode_index}`` (e.g.
+        ``data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet``)
+        whereas v3 uses ``{chunk_index}`` and ``{file_index}``. Requiring both
+        placeholders guards against a future v3 template that happens to embed
+        ``{episode_index}`` in a non-episode-per-file context.
         """
-        return "{episode_index" in info.data_path
+        return "{episode_chunk" in info.data_path and "{episode_index" in info.data_path
 
     def _find_episode_location(self, episode_index: int) -> tuple[int, int]:
         """
@@ -596,7 +600,7 @@ class LeRobotLoader:
                         int(table.column("task_index")[i].as_py()): str(table.column("task")[i].as_py())
                         for i in range(table.num_rows)
                     }
-            except Exception as e:
+            except (OSError, pa.ArrowException) as e:
                 logger.warning("Failed to read %s: %s", tasks_parquet, e)
 
         return {}

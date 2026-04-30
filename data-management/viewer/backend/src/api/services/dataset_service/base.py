@@ -40,7 +40,12 @@ def build_trajectory(
     """
     num_joints = joint_positions.shape[1] if joint_positions.ndim > 1 else 6
 
-    if joint_velocities is None and joint_positions.ndim == 2 and length > 1:
+    if (
+        joint_velocities is None
+        and joint_positions.ndim == 2
+        and joint_positions.shape[0] > 1
+        and length > 1
+    ):
         # Backwards/forwards differences along the time axis. Guard against
         # zero or non-monotonic timestamps by clamping dt to a small positive
         # value.

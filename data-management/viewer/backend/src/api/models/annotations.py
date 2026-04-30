@@ -7,7 +7,7 @@ for task completeness, trajectory quality, data quality, and anomaly annotations
 
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 from pydantic import Field
 
@@ -225,8 +225,8 @@ class LanguageInstructionAnnotation(SanitizedModel):
     instruction: str = Field(min_length=1, max_length=1000)
     source: InstructionSource
     language: str = Field(default="en", max_length=10)
-    paraphrases: list[str] = Field(default_factory=list)
-    subtask_instructions: list[str] = Field(default_factory=list)
+    paraphrases: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=50)
+    subtask_instructions: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=100)
 
     model_config: ClassVar = {"use_enum_values": True}
 
