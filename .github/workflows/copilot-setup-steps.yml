@@ -1,0 +1,102 @@
+# Copilot Setup Steps
+# Provisions the toolchain and per-surface dependency closures for GitHub
+# Copilot cloud coding agent sessions. The single `copilot-setup-steps` job
+# is consumed by Copilot before each agent session; this workflow also runs
+# on self-changes and weekly to detect toolchain drift.
+#
+# Reference:
+# https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/customize-the-agent-environment
+---
+name: Copilot Setup Steps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  # Weekly drift check: surfaces broken action SHAs, yanked packages, or
+  # registry outages on a Monday morning instead of mid-Copilot-session.
+  schedule:
+    - cron: '17 9 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install apt packages (shellcheck, jq, ffmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck jq ffmpeg
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+
+      - name: Setup Node.js (frontend pin)
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version-file: data-management/viewer/frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            data-management/viewer/frontend/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version-file: infrastructure/terraform/e2e/go.mod
+          cache-dependency-path: infrastructure/terraform/e2e/go.mod
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85  # v4.0.0
+        with:
+          terraform_wrapper: false
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@b480b8fcdaa6f2c577f8e4fa799e89e756bb7c93  # v6.2.2
+
+      - name: Install PowerShell modules (Pester 5.7.1, powershell-yaml)
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
+          Install-Module -Name powershell-yaml -Force -SkipPublisherCheck -Scope CurrentUser
+
+      - name: Install root Node tooling (markdownlint, cspell, table-formatter, link-check)
+        run: npm ci
+
+      - name: Presync root Python dev group
+        run: uv sync --group dev
+
+      - name: Presync dataviewer backend Python (dev + analysis + hdf5 + export + auth)
+        working-directory: data-management/viewer/backend
+        run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+
+      - name: Presync evaluation Python dev group
+        working-directory: evaluation
+        run: uv sync --only-group dev
+
+      - name: Presync dataviewer frontend
+        working-directory: data-management/viewer/frontend
+        run: npm ci
+
+      - name: Presync Go modules (terraform e2e)
+        working-directory: infrastructure/terraform/e2e
+        run: go mod download
