@@ -43,7 +43,7 @@ jobs:
         run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Run pytest with coverage
-        run: uv run pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=80
+        run: uv run pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=90
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && always() }}

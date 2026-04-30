@@ -86,6 +86,11 @@ def episode_metrics_list(draw):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+# Hypothesis deadlines are disabled across this module: matplotlib/numerical
+# paths exhibit high latency variance on CI runners (Windows GHA in particular)
+# and regularly exceed the default 200ms deadline. Disabling removes a known
+# source of cross-platform flake; perf regressions are caught by dedicated
+# benchmarks, not Hypothesis timing.
 
 
 @given(data=paired_arrays(), episode=_EPISODE, fps=_FPS)

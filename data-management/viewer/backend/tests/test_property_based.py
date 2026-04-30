@@ -798,6 +798,9 @@ class TestTrajectoryAnalyzerIntegrationProperties:
     @given(data=_small_float_array)
     @settings(max_examples=60, deadline=None)
     def test_analyze_returns_valid_metric_types(self, data: tuple) -> None:
+        # deadline=None: numpy/trajectory analysis paths show high latency
+        # variance on CI runners and exceed the default 200ms deadline. Perf
+        # regressions are tracked by dedicated benchmarks, not Hypothesis timing.
         n, positions = data
         timestamps = np.cumsum(np.full(n, 0.033))
         analyzer = TrajectoryAnalyzer()
