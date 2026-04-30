@@ -147,13 +147,20 @@ describe('useAnnotationWorkspaceMediaSources adjacent-frame interpolation', () =
       },
       videoUrls: { wrist: '/videos/wrist.mp4' },
       cameras: ['wrist'],
-      trajectoryData: Array.from({ length: originalFrameCount }, () => ({})),
+      trajectoryData: Array.from({ length: originalFrameCount }, (_, frame) => ({
+        timestamp: frame / 30,
+        frame,
+        jointPositions: [],
+        jointVelocities: [],
+        endEffectorPose: [],
+        gripperState: 0,
+      })),
     }
   }
 
   it('computes adjacentFrames for an inserted frame at the expected timeline position', () => {
     const episode = makeEpisodeWithFrames(10)
-    const insertedFrames = new Map([[3, { interpolationFactor: 0.25 }]])
+    const insertedFrames = new Map([[3, { afterFrameIndex: 3, interpolationFactor: 0.25 }]])
     const opts = {
       ...defaultOptions(episode),
       originalFrameIndex: null,
@@ -201,7 +208,7 @@ describe('useAnnotationWorkspaceMediaSources adjacent-frame interpolation', () =
 
     try {
       const episode = makeEpisodeWithFrames(10)
-      const insertedFrames = new Map([[3, { interpolationFactor: 0.5 }]])
+      const insertedFrames = new Map([[3, { afterFrameIndex: 3, interpolationFactor: 0.5 }]])
       const opts = {
         ...defaultOptions(episode),
         originalFrameIndex: null,
