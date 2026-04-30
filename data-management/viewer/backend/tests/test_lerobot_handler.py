@@ -149,16 +149,16 @@ class TestFfmpegExtraction:
     """Test ffmpeg-based frame extraction."""
 
     FAKE_JPEG = b"\xff\xd8\xff\xe0fake-jpeg-data"
+    FFMPEG_PATH = "/usr/bin/ffmpeg"
 
     def test_successful_extraction(self, monkeypatch):
         """Verify _extract_frame_ffmpeg returns stdout bytes on success."""
-        import shutil
         import subprocess as sp
 
-        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
 
         def mock_run(cmd, *, capture_output=False, timeout=None):
-            assert cmd[0] == "ffmpeg"
+            assert cmd[0] == self.FFMPEG_PATH
             assert "-ss" in cmd
             return sp.CompletedProcess(cmd, returncode=0, stdout=self.FAKE_JPEG, stderr=b"")
 
@@ -168,17 +168,14 @@ class TestFfmpegExtraction:
         assert result == self.FAKE_JPEG
 
     def test_returns_none_when_ffmpeg_missing(self, monkeypatch):
-        import shutil
-
-        monkeypatch.setattr(shutil, "which", lambda cmd: None)
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: None))
         result = LeRobotFormatHandler._extract_frame_ffmpeg("/tmp/video.mp4", 0, 30.0)
         assert result is None
 
     def test_returns_none_on_nonzero_exit(self, monkeypatch):
-        import shutil
         import subprocess as sp
 
-        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
         monkeypatch.setattr(
             sp,
             "run",
@@ -190,10 +187,9 @@ class TestFfmpegExtraction:
 
     def test_seek_time_calculation(self, monkeypatch):
         """Verify frame_idx / fps produces correct -ss argument."""
-        import shutil
         import subprocess as sp
 
-        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
 
         captured_cmd = []
 
@@ -586,3 +582,54 @@ class TestGetCamerasGetVideoPathSynthetic:
         h = LeRobotFormatHandler()
         _inject(h, FakeLoader(raise_on={"get_video_path"}))
         assert h.get_video_path("ds", 0, "cam0") is None
+
+
+class TestResolveFfmpeg:
+    """Cover the actual imageio_ffmpeg \u2192 shutil.which fallback chain."""
+
+    IMAGEIO_BINARY = "/opt/imageio_ffmpeg/ffmpeg"
+    SYSTEM_BINARY = "/usr/bin/ffmpeg"
+
+    def test_prefers_imageio_ffmpeg(self, monkeypatch):
+        """When imageio-ffmpeg is importable, its binary path wins."""
+        import sys
+        import types
+
+        fake_module = types.ModuleType("imageio_ffmpeg")
+        fake_module.get_ffmpeg_exe = lambda: self.IMAGEIO_BINARY
+        monkeypatch.setitem(sys.modules, "imageio_ffmpeg", fake_module)
+
+        # shutil.which must not be consulted when imageio_ffmpeg succeeds.
+        import shutil
+
+        def fail_which(_name):  # pragma: no cover - guarded
+            raise AssertionError("shutil.which should not be called when imageio_ffmpeg is available")
+
+        monkeypatch.setattr(shutil, "which", fail_which)
+
+        assert LeRobotFormatHandler._resolve_ffmpeg() == self.IMAGEIO_BINARY
+
+    def test_falls_back_to_system_ffmpeg_when_imageio_missing(self, monkeypatch):
+        """Import errors trigger the shutil.which fallback path."""
+        import sys
+
+        # Force ImportError without removing any pre-existing import.
+        monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
+
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda name: self.SYSTEM_BINARY if name == "ffmpeg" else None)
+
+        assert LeRobotFormatHandler._resolve_ffmpeg() == self.SYSTEM_BINARY
+
+    def test_returns_none_when_no_binary_found(self, monkeypatch):
+        """No imageio binary and no system ffmpeg yields None."""
+        import sys
+
+        monkeypatch.setitem(sys.modules, "imageio_ffmpeg", None)
+
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+        assert LeRobotFormatHandler._resolve_ffmpeg() is None

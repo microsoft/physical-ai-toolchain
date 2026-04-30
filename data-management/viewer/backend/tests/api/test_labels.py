@@ -18,7 +18,7 @@ from src.api.main import app
 def client():
     """Create test client with isolated singletons and empty temp data path."""
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["HMI_DATA_PATH"] = tmp
+        os.environ["DATA_DIR"] = tmp
 
         import src.api.config as config_mod
         import src.api.services.annotation_service as ann_mod

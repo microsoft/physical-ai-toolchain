@@ -34,7 +34,7 @@ jobs:
         shell: bash
         working-directory: data-management/viewer
         env:
-          HMI_LOCAL_DATA_PATH: ./data/test-dataset
+          DATAVIEWER_HOST_DATA_DIR: ./data/test-dataset
         run: docker compose up -d --build --wait
 
       - name: Verify containers are healthy

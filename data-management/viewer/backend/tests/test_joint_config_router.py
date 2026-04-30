@@ -16,9 +16,9 @@ from src.api.routers import joint_config
 
 @pytest.fixture
 def client():
-    """TestClient with HMI_DATA_PATH pointing to an isolated temp directory."""
+    """TestClient with DATA_DIR pointing to an isolated temp directory."""
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["HMI_DATA_PATH"] = tmp
+        os.environ["DATA_DIR"] = tmp
 
         import src.api.config as config_mod
         import src.api.services.annotation_service as ann_mod
@@ -191,9 +191,9 @@ class TestModuleHelpers:
         assert joint_config._hardcoded_defaults().labels["0"] == "Right X"
 
     def test_get_base_path_default(self, monkeypatch):
-        monkeypatch.delenv("HMI_DATA_PATH", raising=False)
+        monkeypatch.delenv("DATA_DIR", raising=False)
         assert joint_config._get_base_path() == "./data"
 
     def test_get_base_path_from_env(self, monkeypatch):
-        monkeypatch.setenv("HMI_DATA_PATH", "/some/path")
+        monkeypatch.setenv("DATA_DIR", "/some/path")
         assert joint_config._get_base_path() == "/some/path"

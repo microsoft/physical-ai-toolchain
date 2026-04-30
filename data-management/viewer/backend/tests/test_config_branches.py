@@ -20,8 +20,8 @@ from src.api.config import (
 @pytest.fixture(autouse=True)
 def _clear_env(monkeypatch: pytest.MonkeyPatch):
     for var in (
-        "HMI_STORAGE_BACKEND",
-        "HMI_DATA_PATH",
+        "STORAGE_BACKEND",
+        "DATA_DIR",
         "AZURE_STORAGE_ACCOUNT_NAME",
         "AZURE_STORAGE_DATASET_CONTAINER",
         "AZURE_STORAGE_ANNOTATION_CONTAINER",

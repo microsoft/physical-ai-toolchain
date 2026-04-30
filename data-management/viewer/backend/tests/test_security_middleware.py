@@ -11,12 +11,12 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def security_client(tmp_path):
-    """Test client with a valid HMI_DATA_PATH for security tests."""
+    """Test client with a valid DATA_DIR for security tests."""
     import src.api.config as config_mod
     import src.api.services.annotation_service as ann_mod
     import src.api.services.dataset_service as ds_mod
 
-    os.environ["HMI_DATA_PATH"] = str(tmp_path)
+    os.environ["DATA_DIR"] = str(tmp_path)
     config_mod._app_config = None
     ds_mod._dataset_service = None
     ann_mod._annotation_service = None
@@ -193,7 +193,7 @@ class TestEnhancedHealthCheck:
         import src.api.services.dataset_service as ds_mod
 
         nonexistent = str(tmp_path / "does_not_exist")
-        os.environ["HMI_DATA_PATH"] = nonexistent
+        os.environ["DATA_DIR"] = nonexistent
         config_mod._app_config = None
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None
@@ -227,7 +227,7 @@ class TestDetectionSecurity:
         import src.api.services.dataset_service as ds_mod
         from src.api import auth as auth_mod
 
-        os.environ["HMI_DATA_PATH"] = str(tmp_path)
+        os.environ["DATA_DIR"] = str(tmp_path)
         os.environ.pop("DATAVIEWER_AUTH_DISABLED", None)
         os.environ["DATAVIEWER_AUTH_PROVIDER"] = "apikey"
         os.environ["DATAVIEWER_API_KEY"] = "test-key"
@@ -552,7 +552,7 @@ class TestValidationExceptionHandler:
         import src.api.services.annotation_service as ann_mod
         import src.api.services.dataset_service as ds_mod
 
-        os.environ["HMI_DATA_PATH"] = str(tmp_path)
+        os.environ["DATA_DIR"] = str(tmp_path)
         config_mod._app_config = None
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None
@@ -587,7 +587,7 @@ class TestHealthCheckBranches:
         import src.api.services.annotation_service as ann_mod
         import src.api.services.dataset_service as ds_mod
 
-        os.environ["HMI_DATA_PATH"] = str(tmp_path)
+        os.environ["DATA_DIR"] = str(tmp_path)
         config_mod._app_config = None
         ann_mod._annotation_service = None
 
@@ -613,7 +613,7 @@ class TestHealthCheckBranches:
         import src.api.services.annotation_service as ann_mod
         import src.api.services.dataset_service as ds_mod
 
-        os.environ["HMI_DATA_PATH"] = str(tmp_path)
+        os.environ["DATA_DIR"] = str(tmp_path)
         config_mod._app_config = None
         ds_mod._dataset_service = None
         ann_mod._annotation_service = None

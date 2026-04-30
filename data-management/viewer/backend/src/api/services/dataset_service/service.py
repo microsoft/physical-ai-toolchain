@@ -66,7 +66,7 @@ class DatasetService:
         episode_cache_max_mb: int = 100,
     ):
         if base_path is None:
-            base_path = os.environ.get("HMI_DATA_PATH", "./data")
+            base_path = os.environ.get("DATA_DIR", "./data")
         self.base_path = base_path
         self._datasets: dict[str, DatasetInfo] = {}
         if storage_adapter is not None:
@@ -799,7 +799,7 @@ def get_dataset_service() -> DatasetService:
     Get the global dataset service instance.
 
     On first call, reads application config and creates the appropriate
-    storage adapter and optional BlobDatasetProvider based on HMI_STORAGE_BACKEND.
+    storage adapter and optional BlobDatasetProvider based on STORAGE_BACKEND.
 
     Returns:
         DatasetService singleton.

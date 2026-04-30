@@ -25,8 +25,8 @@ def _reset_config_singleton():
 @pytest.fixture(autouse=True)
 def _clear_env(monkeypatch: pytest.MonkeyPatch):
     for var in (
-        "HMI_STORAGE_BACKEND",
-        "HMI_DATA_PATH",
+        "STORAGE_BACKEND",
+        "DATA_DIR",
         "AZURE_STORAGE_ACCOUNT_NAME",
         "AZURE_STORAGE_DATASET_CONTAINER",
         "AZURE_STORAGE_ANNOTATION_CONTAINER",
@@ -53,7 +53,7 @@ class TestLoadConfig:
         assert "http://localhost:5173" in cfg.cors_origins
 
     def test_storage_backend_lowercased(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("HMI_STORAGE_BACKEND", "AZURE")
+        monkeypatch.setenv("STORAGE_BACKEND", "AZURE")
         cfg = load_config()
         assert cfg.storage_backend == "azure"
 
@@ -72,7 +72,7 @@ class TestLoadConfig:
         assert cfg.episode_cache_max_mb == 0
 
     def test_azure_env_populated(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("HMI_STORAGE_BACKEND", "azure")
+        monkeypatch.setenv("STORAGE_BACKEND", "azure")
         monkeypatch.setenv("AZURE_STORAGE_ACCOUNT_NAME", "acct")
         monkeypatch.setenv("AZURE_STORAGE_DATASET_CONTAINER", "datasets")
         monkeypatch.setenv("AZURE_STORAGE_ANNOTATION_CONTAINER", "ann")

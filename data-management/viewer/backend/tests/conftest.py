@@ -71,15 +71,15 @@ def test_dataset_id():
 
 @pytest.fixture
 def client(test_dataset_path):
-    """Create a FastAPI test client with HMI_DATA_PATH pointing to the real dataset."""
-    os.environ["HMI_DATA_PATH"] = test_dataset_path
+    """Create a FastAPI test client with DATA_DIR pointing to the real dataset."""
+    os.environ["DATA_DIR"] = test_dataset_path
 
     import src.api.config as config_mod
     import src.api.services.annotation_service as ann_mod
     import src.api.services.dataset_service as ds_mod
 
     # Reset all singletons so each test gets a fresh service instance that
-    # re-reads the current HMI_DATA_PATH from the environment.
+    # re-reads the current DATA_DIR from the environment.
     config_mod._app_config = None
     ds_mod._dataset_service = None
     ann_mod._annotation_service = None
