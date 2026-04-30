@@ -1,0 +1,96 @@
+name: LeRobot Eval Image Publish
+
+# Builds, signs, and publishes the lerobot-eval container image whenever a tag
+# matching `lerobot-eval-v*` is pushed (or when manually dispatched). Delegates
+# to the reusable container-publish workflow (cosign keyless) or the notation
+# variant (AKV HSM) selected via the SIGNING_MODE repository variable.
+#
+# NOTE (DD-04): A Dockerfile for lerobot-eval does not yet exist in the repo.
+# Paths below assume `evaluation/sil/Dockerfile` will be authored in a follow-up
+# PR. Until that Dockerfile lands, tag-triggered runs of this workflow will
+# fail at the build step. The workflow is published now to keep signing parity
+# with dataviewer and to preserve the reference-architecture exemplar pair.
+
+on:
+  push:
+    tags:
+      - 'lerobot-eval-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to publish (e.g. lerobot-eval-v0.3.0).'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lerobot-eval-image-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-tag:
+    name: Resolve image tag
+    if: github.repository == 'microsoft/physical-ai-toolchain'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if [[ -z "$tag" ]]; then
+            echo "::error::Unable to resolve image tag"
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  publish-cosign:
+    name: Publish (cosign)
+    needs: resolve-tag
+    if: vars.SIGNING_MODE != 'notation'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      packages: write
+    uses: ./.github/workflows/container-publish.yml
+    with:
+      image_name: physical-ai/lerobot-eval
+      dockerfile_path: evaluation/sil/Dockerfile
+      context_path: evaluation/sil
+      tag: ${{ needs.resolve-tag.outputs.tag }}
+      registry: ${{ vars.ACR_REGISTRY_HOSTNAME }}
+      vex_predicate_path: security/vex/lerobot-eval.openvex.json
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  publish-notation:
+    name: Publish (notation)
+    needs: resolve-tag
+    if: vars.SIGNING_MODE == 'notation'
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    uses: ./.github/workflows/container-publish-notation.yml
+    with:
+      image_name: physical-ai/lerobot-eval
+      dockerfile_path: evaluation/sil/Dockerfile
+      context_path: evaluation/sil
+      tag: ${{ needs.resolve-tag.outputs.tag }}
+      registry: ${{ vars.ACR_REGISTRY_HOSTNAME }}
+      akv_key_id: ${{ vars.NOTATION_AKV_KEY_ID }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}

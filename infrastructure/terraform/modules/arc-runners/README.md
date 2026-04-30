@@ -12,9 +12,9 @@ When `should_enable_sigstore_egress = true` (default), the module also installs 
 
 ## 📖 Documentation
 
-| Document                                                                                                                          | Purpose                                                          |
-|-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
-| [TERRAFORM.md](TERRAFORM.md)                                                                                                      | Auto-generated input / output / resource reference.              |
-| [container-signing.md](../../../../docs/security/container-signing.md)                                                            | End-to-end container supply-chain reference architecture.        |
+| Document                                                               | Purpose                                                   |
+|------------------------------------------------------------------------|-----------------------------------------------------------|
+| [TERRAFORM.md](TERRAFORM.md)                                           | Auto-generated input / output / resource reference.       |
+| [container-signing.md](../../../../docs/security/container-signing.md) | End-to-end container supply-chain reference architecture. |
 
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.*

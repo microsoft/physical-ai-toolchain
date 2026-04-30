@@ -1,0 +1,137 @@
+# Hourly TUF refresh from the Sigstore public-good CDN.
+# Writes the refreshed `trusted_root.json` into the `sigstore-trusted-root`
+# ConfigMap consumed by both Kyverno verifyImages policies.
+#
+# Failure tolerance: a fetch failure logs and exits non-zero, but the
+# previous ConfigMap revision remains in place. Kyverno continues to
+# verify against the last-known-good root. OCI referrer ingestion (for
+# Defender for Containers) is enabled via the COSIGN_EXPERIMENTAL env.
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sigstore-trusted-root-refresh
+  namespace: kyverno
+  labels:
+    app.kubernetes.io/name: sigstore-trusted-root-refresh
+    app.kubernetes.io/part-of: container-signing-reference
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: sigstore-trusted-root-refresh
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          # Cosign distroless lacks a shell and kubectl; fetch with cosign
+          # in an init container, then apply the ConfigMap with kubectl.
+          initContainers:
+            - name: fetch-trusted-root
+              image: ghcr.io/sigstore/cosign/cosign:v2.4.1
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: TUF_ROOT
+                  value: /tmp/tuf
+                - name: SIGSTORE_TUF_MIRROR
+                  value: https://tuf-repo-cdn.sigstore.dev
+                - name: COSIGN_EXPERIMENTAL
+                  value: "1"
+              args:
+                - initialize
+                - --mirror=https://tuf-repo-cdn.sigstore.dev
+              volumeMounts:
+                - name: workspace
+                  mountPath: /tmp/tuf
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          containers:
+            - name: apply-configmap
+              image: bitnami/kubectl:1.31.3
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  set -eo pipefail
+                  if [ ! -s /workspace/trusted_root.json ]; then
+                    echo "trusted_root.json missing; existing ConfigMap retained" >&2
+                    exit 1
+                  fi
+                  kubectl create configmap sigstore-trusted-root \
+                    --namespace kyverno \
+                    --from-file=trusted_root.json=/workspace/trusted_root.json \
+                    --dry-run=client -o yaml | kubectl apply -f -
+              volumeMounts:
+                - name: workspace
+                  mountPath: /workspace
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: workspace
+              emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sigstore-trusted-root-refresh
+  namespace: kyverno
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sigstore-trusted-root-refresh
+  namespace: kyverno
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "update", "patch"]
+    resourceNames: ["sigstore-trusted-root"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sigstore-trusted-root-refresh
+  namespace: kyverno
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sigstore-trusted-root-refresh
+subjects:
+  - kind: ServiceAccount
+    name: sigstore-trusted-root-refresh
+    namespace: kyverno

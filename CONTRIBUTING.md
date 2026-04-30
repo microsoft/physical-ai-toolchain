@@ -275,6 +275,20 @@ GitHub Actions validates signatures for pushed version tags (`v*`).
 > [!IMPORTANT]
 > Maintainer GPG key distribution is not required for this repository because release tags are signed using keyless Sigstore identities.
 
+## Container Image Signing
+
+All container images produced by this repository's CI/CD pipelines are signed and carry SPDX, SLSA, CycloneDX, and OpenVEX attestations. Edge clusters enforce signatures via Kyverno admission policies before a workload can run.
+
+Two signing modes are supported: cosign keyless (default) and Notation + Azure Key Vault. Switch modes via the `signing_mode` Terraform variable. See [Container Image Signing](docs/security/container-signing.md) for the architecture, attestation contract, and admission posture.
+
+Verify any image locally before promoting it:
+
+```bash
+./scripts/security/verify-image.sh myacr.azurecr.io/<repo>@sha256:<digest>
+```
+
+Always verify by digest, never by tag. Pester tests under `scripts/tests/security/` cover the verification matrix; run them with `npm run test:ps`.
+
 ## Deprecation Policy
 
 External interfaces follow a formal deprecation lifecycle before removal. The policy covers shell script arguments, environment variables, Terraform variables and outputs, configuration schemas, and workflow templates.

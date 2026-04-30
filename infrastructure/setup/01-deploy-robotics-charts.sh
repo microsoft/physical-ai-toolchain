@@ -25,6 +25,7 @@ OPTIONS:
     --kai-version VERSION    KAI Scheduler version (default: $KAI_SCHEDULER_VERSION)
     --skip-gpu-operator      Skip GPU Operator installation
     --skip-kai-scheduler     Skip KAI Scheduler installation
+    --accept-public-rekor    Acknowledge that signed workloads will publish to https://rekor.sigstore.dev
     --config-preview         Print configuration and exit
 
 EXAMPLES:
@@ -42,17 +43,19 @@ kai_version="$KAI_SCHEDULER_VERSION"
 skip_gpu=false
 skip_kai=false
 config_preview=false
+accept_public_rekor=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -h|--help)            show_help; exit 0 ;;
-    -t|--tf-dir)          tf_dir="$2"; shift 2 ;;
-    --gpu-version)        gpu_version="$2"; gpu_version_explicit=true; shift 2 ;;
-    --kai-version)        kai_version="$2"; shift 2 ;;
-    --skip-gpu-operator)  skip_gpu=true; shift ;;
-    --skip-kai-scheduler) skip_kai=true; shift ;;
-    --config-preview)     config_preview=true; shift ;;
-    *)                    fatal "Unknown option: $1" ;;
+    -h|--help)             show_help; exit 0 ;;
+    -t|--tf-dir)           tf_dir="$2"; shift 2 ;;
+    --gpu-version)         gpu_version="$2"; gpu_version_explicit=true; shift 2 ;;
+    --kai-version)         kai_version="$2"; shift 2 ;;
+    --skip-gpu-operator)   skip_gpu=true; shift ;;
+    --skip-kai-scheduler)  skip_kai=true; shift ;;
+    --accept-public-rekor) accept_public_rekor=true; shift ;;
+    --config-preview)      config_preview=true; shift ;;
+    *)                     fatal "Unknown option: $1" ;;
   esac
 done
 
@@ -77,6 +80,36 @@ tf_output=$(read_terraform_outputs "$tf_dir")
 
 cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster name")
 rg=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
+signing_mode=$(tf_get "$tf_output" "signing_mode.value" "none")
+use_public_rekor=$(tf_get "$tf_output" "should_use_public_rekor.value" "false")
+
+# Public Rekor consent gate. Signed workloads deployed downstream of this script
+# (Kyverno, Flux, dataviewer) verify against https://rekor.sigstore.dev when
+# sigstore mode + public Rekor are selected. Operators must opt in per invocation.
+if [[ "$signing_mode" == "sigstore" && "$use_public_rekor" == "true" ]]; then
+  if [[ "$accept_public_rekor" == "false" ]]; then
+    section "Public Rekor Consent Required"
+    cat <<'BANNER'
+This cluster will admit container images whose signatures and attestations are
+published to the public Sigstore Rekor transparency log at
+https://rekor.sigstore.dev. Workflow refs (branch and tag names), image digests,
+and SBOM/SLSA/VEX predicate bodies become permanently public.
+
+See docs/security/rekor-disclosure.md for the full disclosure surface and
+docs/adrs/container-signing-public-rekor.md for the architectural decision.
+
+Pass --accept-public-rekor to skip this prompt in CI.
+BANNER
+    if [[ -t 0 ]]; then
+      read -r -p "Acknowledge public Rekor publication and continue? [y/N]: " reply
+      [[ "$reply" == "y" || "$reply" == "Y" ]] || fatal "Public Rekor consent not granted; aborting."
+    else
+      fatal "Public Rekor consent required; re-run with --accept-public-rekor."
+    fi
+  else
+    info "Public Rekor consent acknowledged via --accept-public-rekor"
+  fi
+fi
 
 if [[ "$skip_gpu" == "false" && "$gpu_version_explicit" == "false" ]]; then
   info "Resolving latest GPU Operator chart version from Helm repo..."
@@ -89,6 +122,9 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Resource Group" "$rg"
   print_kv "GPU Operator" "$([[ $skip_gpu == true ]] && echo 'Skipped' || echo "$gpu_version")"
   print_kv "KAI Scheduler" "$([[ $skip_kai == true ]] && echo 'Skipped' || echo "$kai_version")"
+  print_kv "Signing Mode" "$signing_mode"
+  print_kv "Public Rekor" "$use_public_rekor"
+  print_kv "Public Rekor Consent" "$accept_public_rekor"
   exit 0
 fi
 

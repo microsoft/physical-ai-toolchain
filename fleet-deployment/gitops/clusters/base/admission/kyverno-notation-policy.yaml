@@ -1,0 +1,103 @@
+# Kyverno ClusterPolicy: Notation v1 (Notary Project) signature verification.
+#
+# Scope guard (addresses user requirement):
+#   This project signs only the container images it produces. The two-rule
+#   pattern below mirrors the Sigstore policy:
+#
+#     Rule 1 (require-signed-images-acr) - Enforce
+#       Match:  ${ACR_LOGIN_SERVER}/* only
+#       Effect: blocks unsigned images from this project's ACR
+#
+#     Rule 2 (audit-all-other-images) - Audit
+#       Match:  *
+#       Exclude: ${ACR_LOGIN_SERVER}/*
+#       Effect: emits PolicyReport entries only; does not block admission
+#
+# The trust policy and AKV-rooted certificate chain are distributed via the
+# trusted-root Flux Kustomization (see trusted-root-kustomization.yaml). The
+# notation-akv-cert-chain ConfigMap is materialised by the trusted-root
+# CronJob; placeholder reference is resolved at admission time.
+#
+# ${ACR_LOGIN_SERVER} and ${NOTATION_TRUST_IDENTITY} are substituted by Flux
+# postBuild.substituteFrom using the workflow-config ConfigMap shipped per
+# cluster.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-images-notation
+  annotations:
+    policies.kyverno.io/title: Verify Notation v1 signatures on project images
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Enforces Notation v1 signatures (root of trust in Azure Key Vault HSM)
+      on images published from this project's ACR. All other images are
+      audited (not blocked) so that operators can deploy third-party
+      workloads without project-issued signatures.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  failurePolicy: Fail
+  # Namespace scoping is enforced per-rule via match.any[].resources.namespaces.
+  # A spec.webhookConfiguration.matchConditions block was removed because the
+  # Kyverno CLI test/apply runner panics on it (CLI does not exercise webhook
+  # config); admission-time scoping is fully covered by the per-rule match.
+  rules:
+    - name: require-signed-images-acr
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - osmo-workflows
+                - azureml
+                - dataviewer
+                - "fleet-*"
+      verifyImages:
+        - type: Notary
+          imageReferences:
+            - "${ACR_LOGIN_SERVER}/*"
+          failureAction: Enforce
+          required: true
+          verifyDigest: true
+          mutateDigest: true
+          useCache: true
+          attestors:
+            - count: 1
+              entries:
+                - certificates:
+                    certChain: |-
+                      ${NOTATION_TRUST_CERT_CHAIN_PEM}
+          attestations:
+            - type: application/vnd.cncf.notary.signature
+              conditions:
+                - all:
+                    - key: "{{ trustedIdentities }}"
+                      operator: AnyIn
+                      value:
+                        - "${NOTATION_TRUST_IDENTITY}"
+    - name: audit-all-other-images
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - type: Notary
+          imageReferences:
+            - "*"
+          skipImageReferences:
+            - "${ACR_LOGIN_SERVER}/*"
+          failureAction: Audit
+          required: false
+          verifyDigest: false
+          mutateDigest: false
+          useCache: true
+          attestors:
+            - count: 1
+              entries:
+                - certificates:
+                    certChain: |-
+                      ${NOTATION_TRUST_CERT_CHAIN_PEM}

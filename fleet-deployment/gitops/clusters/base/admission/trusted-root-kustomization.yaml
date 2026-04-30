@@ -1,0 +1,22 @@
+# Trusted-root distribution Kustomization.
+# Aggregates the Sigstore TUF refresh CronJob and (when notation mode is
+# selected via overlay) the Notation cert-chain Secret. The ConfigMap
+# `sigstore-trusted-root` is consumed by both Kyverno policies.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kyverno
+
+resources:
+  - trusted-root-refresh-cronjob.yaml
+
+configMapGenerator:
+  - name: sigstore-trusted-root
+    # Seeded empty; first successful CronJob run populates `trusted_root.json`.
+    # Kyverno tolerates an absent key during bootstrap because the verifyImages
+    # rule will fall through to the embedded Fulcio/Rekor defaults.
+    literals:
+      - placeholder=pending-first-refresh
+
+generatorOptions:
+  disableNameSuffixHash: true

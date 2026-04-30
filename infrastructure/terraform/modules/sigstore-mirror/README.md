@@ -12,9 +12,9 @@ The module provisions infrastructure only. A separate scheduled refresh job (cro
 
 ## 📖 Documentation
 
-| Document                              | Description                                                                  |
-|---------------------------------------|------------------------------------------------------------------------------|
-| [Terraform Reference](TERRAFORM.md)   | Auto-generated inputs, outputs, and resources reference                      |
-| [Container signing](../../../../docs/security/container-signing.md) | End-to-end signing reference architecture this module participates in        |
+| Document                                                            | Description                                                           |
+|---------------------------------------------------------------------|-----------------------------------------------------------------------|
+| [Terraform Reference](TERRAFORM.md)                                 | Auto-generated inputs, outputs, and resources reference               |
+| [Container signing](../../../../docs/security/container-signing.md) | End-to-end signing reference architecture this module participates in |
 
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.*

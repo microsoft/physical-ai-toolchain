@@ -1,0 +1,69 @@
+# Helm values for kyverno/kyverno upstream chart.
+#
+# Two profiles ship as separate value blocks at the bottom of the file. The
+# deploy script selects one via --set-string flags or by passing one of the
+# helm -f overrides under values/kyverno-overrides/.
+#
+# Profile selection:
+#   singleNode = true  -> 1 replica per controller, no PDB
+#   singleNode = false -> 3 replicas per controller, PDB minAvailable=1
+#
+# Image verification webhook MUST run with failurePolicy=Fail; the webhook
+# configuration is owned by the Kyverno ClusterPolicy resources (see
+# clusters/base/admission/kyverno-*-policy.yaml), not by the chart.
+
+# Match-conditions evaluation requires the v2 webhook config the chart enables
+# by default for >= v1.13. Pin to a known-good chart version in defaults.conf.
+
+admissionController:
+  replicas: 3
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  resources:
+    limits:
+      memory: 768Mi
+    requests:
+      cpu: 100m
+      memory: 384Mi
+
+backgroundController:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+cleanupController:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+reportsController:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# Image-verification cache TTL (seconds). Reduce to force re-verification
+# after trusted-root refresh; balance against Rekor/AKV call volume.
+features:
+  imageVerifyCacheEnabled: true
+  imageVerifyCacheTTLDuration: 60m
+  imageVerifyCacheMaxSize: 1000
+
+# Webhook timeout - cosign keyless verification can take 5-8s on cold cache.
+webhooksCleanup:
+  enabled: true
+config:
+  webhooks:
+    - timeoutSeconds: 30
+      failurePolicy: Fail
+
+# Notation plugin sidecar is provisioned by the trusted-root Kustomization;
+# Kyverno reaches it via the in-cluster service. No chart change required.
+
+# RBAC for reading the notation-akv-cert-chain ConfigMap created by the
+# trusted-root CronJob.
+rbac:
+  create: true

@@ -1,0 +1,157 @@
+name: Container Publish (Notation + AKV HSM)
+
+# Reusable workflow that builds, pushes, and signs a container image with notation v1
+# using the azure-kv plugin against an AKV Premium HSM key. Generates SPDX and CycloneDX
+# SBOMs and uploads them as workflow artifacts. SBOM-as-referrer signing is tracked as
+# follow-on work (see planning log).
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        description: 'Repository name within the registry (e.g. physical-ai/dataviewer-backend).'
+        required: true
+        type: string
+      dockerfile_path:
+        description: 'Path to the Dockerfile to build.'
+        required: true
+        type: string
+      context_path:
+        description: 'Build context path.'
+        required: true
+        type: string
+      tag:
+        description: 'Image tag to publish.'
+        required: true
+        type: string
+      registry:
+        description: 'Fully qualified registry hostname (e.g. acrphysicalaiprod.azurecr.io).'
+        required: true
+        type: string
+      akv_key_id:
+        description: 'Full Azure Key Vault key identifier (https://<vault>.vault.azure.net/keys/<name>/<version>).'
+        required: true
+        type: string
+      build_args:
+        description: 'Newline-separated KEY=VALUE build arguments forwarded to docker buildx.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+    outputs:
+      image_digest:
+        description: 'Resolved image digest (sha256:...).'
+        value: ${{ jobs.publish.outputs.image_digest }}
+      image_ref:
+        description: 'Fully qualified image reference pinned to the digest.'
+        value: ${{ jobs.publish.outputs.image_ref }}
+
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    name: Build, push, and notation-sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image_digest: ${{ steps.publish.outputs.digest }}
+      image_ref: ${{ steps.publish.outputs.ref }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      - name: Install notation
+        uses: notaryproject/notation-action/setup@b6fee73110795d6793253c673bd723f12bcf9bbb # v1.2.2
+
+      - name: Azure login (OIDC)
+        uses: Azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        env:
+          REGISTRY: ${{ inputs.registry }}
+        run: |
+          set -euo pipefail
+          registry_name="${REGISTRY%%.*}"
+          az acr login --name "${registry_name}"
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: ${{ inputs.context_path }}
+          file: ${{ inputs.dockerfile_path }}
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
+          build-args: ${{ inputs.build_args }}
+
+      - name: Resolve published digest and reference
+        id: publish
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DIGEST}" ]]; then
+            echo "::error::docker/build-push-action did not return a digest"
+            exit 1
+          fi
+          ref="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          echo "Published: ${ref}"
+
+      - name: Sign image with notation (azure-kv plugin)
+        uses: notaryproject/notation-action/sign@b6fee73110795d6793253c673bd723f12bcf9bbb # v1.2.2
+        with:
+          plugin_name: azure-kv
+          plugin_url: https://github.com/Azure/notation-azure-kv/releases/download/v1.2.0/notation-azure-kv_1.2.0_linux_amd64.tar.gz
+          plugin_checksum: 06bb5198af31ce11b08c4557ae4c2cbfb09878dfa6b637b7407ebbb1c97afe55
+          key_id: ${{ inputs.akv_key_id }}
+          target_artifact_reference: ${{ steps.publish.outputs.ref }}
+          signature_format: cose
+
+      - name: Generate SBOMs
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: |
+          set -euo pipefail
+          syft "${IMAGE_REF}" -o spdx-json > /tmp/sbom.spdx.json
+          syft "${IMAGE_REF}" -o cyclonedx-json > /tmp/sbom.cdx.json
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ inputs.image_name }}-${{ inputs.tag }}
+          path: |
+            /tmp/sbom.spdx.json
+            /tmp/sbom.cdx.json
+          retention-days: 90
