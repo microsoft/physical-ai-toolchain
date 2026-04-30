@@ -358,7 +358,17 @@ class TestGenerateVideoCv2:
     """Cover the OpenCV video writer fallback path."""
 
     def test_cv2_success_writes_file(self, tmp_path):
-        pytest.importorskip("cv2")
+        cv2 = pytest.importorskip("cv2")
+        # Probe whether the avc1 (H.264) codec is available in this OpenCV build.
+        # pip's opencv-python wheel on Windows ships without H.264 support and
+        # silently produces an empty file; skip rather than fail in that case.
+        probe = tmp_path / "probe.mp4"
+        fourcc = cv2.VideoWriter_fourcc(*"avc1")
+        writer = cv2.VideoWriter(str(probe), fourcc, 10.0, (16, 16))
+        writer.write(np.zeros((16, 16, 3), dtype=np.uint8))
+        writer.release()
+        if not (probe.exists() and probe.stat().st_size > 0):
+            pytest.skip("avc1 codec not available in this OpenCV build")
         images = np.zeros((4, 16, 16, 3), dtype=np.uint8)
         out = tmp_path / "out.mp4"
         ok = hh._generate_video_cv2(images, out, fps=10.0)

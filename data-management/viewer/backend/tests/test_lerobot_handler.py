@@ -283,6 +283,10 @@ class FakeLoader:
         self._maybe_raise("get_cameras")
         return ["observation.images.cam0"]
 
+    def get_tasks(self):
+        self._maybe_raise("get_tasks")
+        return {0: "pick", 1: "place"}
+
 
 def _inject(handler, loader, dataset_id="ds"):
     handler._loaders[dataset_id] = loader

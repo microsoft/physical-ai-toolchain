@@ -6,8 +6,13 @@ import numpy as np
 import pytest
 from PIL import Image
 
-# Skip all tests if ultralytics is not installed
-pytest.importorskip("ultralytics")
+# Skip all tests if ultralytics (or its torch dependency) is not importable.
+# Use a broad except to also handle partial/broken installs (e.g., a torch
+# namespace package missing __init__.py raises AttributeError, not ImportError).
+try:
+    import ultralytics  # noqa: F401
+except Exception as exc:  # pragma: no cover - environment-dependent
+    pytest.skip(f"ultralytics unavailable: {exc}", allow_module_level=True)
 
 
 class TestDetectionService:
