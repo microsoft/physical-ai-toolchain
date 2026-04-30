@@ -10,12 +10,11 @@ import { useJointConfigStore } from '@/stores/joint-config-store'
 const mockFetch = vi.fn()
 
 function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(data), {
     status,
     statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(data),
-  }
+    headers: { 'content-type': 'application/json' },
+  })
 }
 
 function mockMutationFetch(apiResponse: ReturnType<typeof jsonResponse>) {
