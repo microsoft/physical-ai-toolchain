@@ -60,7 +60,7 @@ resource "azurerm_container_app" "backend" {
         value = "8000"
       }
       env {
-        name  = "HMI_STORAGE_BACKEND"
+        name  = "STORAGE_BACKEND"
         value = "azure"
       }
       env {

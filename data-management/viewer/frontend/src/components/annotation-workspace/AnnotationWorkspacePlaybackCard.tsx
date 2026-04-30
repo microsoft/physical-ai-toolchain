@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react'
 
+import { CameraSelector } from '@/components/episode-viewer'
 import { PlaybackControlStrip } from '@/components/playback/PlaybackControlStrip'
 import { SpeedControl } from '@/components/playback/SpeedControl'
 import { Button } from '@/components/ui/button'
@@ -28,6 +29,9 @@ interface AnnotationWorkspacePlaybackCardProps {
   totalFrames: number
   resizeOutput: { width: number; height: number } | null
   frameImageUrl: string | null
+  cameras: string[]
+  selectedCamera: string | null
+  onSelectCamera: (camera: string) => void
   isPlaying: boolean
   onTogglePlayback: () => void
   onStepFrame: (delta: number) => void
@@ -58,6 +62,9 @@ export function AnnotationWorkspacePlaybackCard({
   totalFrames,
   resizeOutput,
   frameImageUrl,
+  cameras,
+  selectedCamera,
+  onSelectCamera,
   isPlaying,
   onTogglePlayback,
   onStepFrame,
@@ -117,7 +124,14 @@ export function AnnotationWorkspacePlaybackCard({
   return (
     <Card className={compact ? 'mx-auto h-full min-h-0 w-full max-w-[44rem]' : 'shrink-0'}>
       <CardContent className={compact ? 'flex h-full min-h-0 flex-col p-3' : 'p-4'}>
-        <ViewerDisplayControls />
+        <div className="flex items-center justify-between gap-2">
+          <CameraSelector
+            cameras={cameras}
+            selectedCamera={selectedCamera ?? ''}
+            onSelectCamera={onSelectCamera}
+          />
+          <ViewerDisplayControls />
+        </div>
         <div
           data-testid={compact ? 'trajectory-compact-media-frame' : undefined}
           className={
