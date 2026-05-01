@@ -10,7 +10,7 @@ from hypothesis import HealthCheck, settings
 @pytest.fixture(scope="session")
 def api_schema(test_dataset_path):
     """Load OpenAPI schema from the in-process ASGI app used in tests."""
-    os.environ["HMI_DATA_PATH"] = test_dataset_path
+    os.environ["DATA_DIR"] = test_dataset_path
 
     import src.api.config as config_mod
     import src.api.services.annotation_service as ann_mod

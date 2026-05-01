@@ -28,7 +28,7 @@ class AppConfig:
     """Active storage backend: 'local' or 'azure'."""
 
     data_path: str
-    """Local dataset directory (HMI_DATA_PATH). Used when storage_backend='local'."""
+    """Local dataset directory (DATA_DIR). Used when storage_backend='local'."""
 
     azure_account_name: str | None
     """Azure Storage account name. Required when storage_backend='azure'."""
@@ -73,8 +73,8 @@ def load_config(env_path: Path | None = None) -> AppConfig:
 
         load_dotenv(env_path)
 
-    storage_backend = os.environ.get("HMI_STORAGE_BACKEND", "local").lower()
-    data_path = os.environ.get("HMI_DATA_PATH", "./data")
+    storage_backend = os.environ.get("STORAGE_BACKEND", "local").lower()
+    data_path = os.environ.get("DATA_DIR", "./data")
 
     azure_account_name = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME") or None
     azure_dataset_container = os.environ.get("AZURE_STORAGE_DATASET_CONTAINER") or None
@@ -126,12 +126,12 @@ def create_annotation_storage(config: AppConfig):
 
     if config.storage_backend == "azure":
         if not config.azure_account_name:
-            raise ValueError("AZURE_STORAGE_ACCOUNT_NAME is required when HMI_STORAGE_BACKEND=azure")
+            raise ValueError("AZURE_STORAGE_ACCOUNT_NAME is required when STORAGE_BACKEND=azure")
         annotation_container = config.azure_annotation_container or config.azure_dataset_container
         if not annotation_container:
             raise ValueError(
                 "AZURE_STORAGE_ANNOTATION_CONTAINER or AZURE_STORAGE_DATASET_CONTAINER is required "
-                "when HMI_STORAGE_BACKEND=azure"
+                "when STORAGE_BACKEND=azure"
             )
 
         from .storage.azure import AzureBlobStorageAdapter

@@ -46,8 +46,8 @@ EXPOSE 8000
 # BACKEND_HOST=0.0.0.0 binds to all interfaces (required in containers)
 ENV BACKEND_HOST=0.0.0.0 \
     BACKEND_PORT=8000 \
-    HMI_STORAGE_BACKEND=local \
-    HMI_DATA_PATH=/data
+    STORAGE_BACKEND=local \
+    DATA_DIR=/data
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

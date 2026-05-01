@@ -30,7 +30,7 @@ cd data-management/viewer && ./start.sh
 With a custom dataset path:
 
 ```bash
-cd data-management/viewer && HMI_DATA_PATH=/path/to/datasets ./start.sh
+cd data-management/viewer && DATA_DIR=/path/to/datasets ./start.sh
 ```
 
 ### Step 2 — Open SimpleBrowser
@@ -99,47 +99,47 @@ cd data-management/viewer && ./start.sh
 Start with a custom dataset path:
 
 ```bash
-cd data-management/viewer && HMI_DATA_PATH=/path/to/datasets ./start.sh
+cd data-management/viewer && DATA_DIR=/path/to/datasets ./start.sh
 ```
 
 ## Parameters Reference
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `HMI_DATA_PATH` | `../../../datasets` (relative to `backend/`) | Directory containing dataset subdirectories |
+| `DATA_DIR` | `../../../datasets` (relative to `backend/`) | Directory containing dataset subdirectories |
 | `BACKEND_PORT` | `8000` | FastAPI backend port |
 | `FRONTEND_PORT` | `5173` | Vite frontend dev server port |
 | `HEALTH_TIMEOUT` | `30` | Seconds to wait for backend health check |
 
 ### Dataset Path Configuration
 
-The `HMI_DATA_PATH` environment variable controls which datasets are visible in the app. Each subdirectory under this path is treated as a separate `dataset_id`.
+The `DATA_DIR` environment variable controls which datasets are visible in the app. Each subdirectory under this path is treated as a separate `dataset_id`.
 
-**Methods to set `HMI_DATA_PATH`:**
+**Methods to set `DATA_DIR`:**
 
 1. **Environment variable override** (recommended for ad-hoc use):
 
     ```bash
-    HMI_DATA_PATH=/path/to/datasets ./start.sh
+    DATA_DIR=/path/to/datasets ./start.sh
     ```
 
 2. **Edit `backend/.env`** (persists across restarts):
 
     ```env
-    HMI_DATA_PATH=/path/to/datasets
+    DATA_DIR=/path/to/datasets
     ```
 
 3. **Export before launch** (session-scoped):
 
     ```bash
-    export HMI_DATA_PATH=/path/to/datasets
+    export DATA_DIR=/path/to/datasets
     cd data-management/viewer && ./start.sh
     ```
 
 When a dataset path is provided, update `backend/.env` so the value persists:
 
 1. Read the current `backend/.env` file.
-2. Replace the `HMI_DATA_PATH=` line with the new absolute path.
+2. Replace the `DATA_DIR=` line with the new absolute path.
 3. Start the app with `./start.sh`.
 
 ## Architecture
@@ -148,7 +148,7 @@ When a dataset path is provided, update `backend/.env` so the value persists:
 data-management/viewer/
 ├── start.sh              # Orchestrator: launches backend + frontend
 ├── backend/
-│   ├── .env              # HMI_DATA_PATH and test config
+│   ├── .env              # DATA_DIR and test config
 │   ├── pyproject.toml    # Python dependencies (uv)
 │   └── src/api/
 │       ├── main.py       # FastAPI app, CORS, router registration
@@ -221,6 +221,34 @@ data-management/viewer/
 ## Annotation Workflow
 
 Annotation combines API calls for efficiency with Playwright UI interaction for verification. Use the API for bulk operations and the UI for visual review and spot-checking.
+
+### Annotation surfaces
+
+The annotation panel exposes three structured surfaces in addition to free-form labels:
+
+| Surface | Storage | Notes |
+|---------|---------|-------|
+| Labels | `meta/episode_labels.json` | Free-form tag set with shared dataset-level options |
+| Episode annotation | `EpisodeAnnotation` JSON | Task completeness, trajectory quality, data quality, anomalies |
+| Language instruction | `EpisodeAnnotation.language_instruction` | Optional VLA payload (instruction, source, paraphrases, subtask decomposition) |
+
+### Multi-camera selection
+
+Datasets that record multiple camera streams expose a camera selector in the annotation workspace header. Default selection is `episode.cameras[0]` (or the first key of `videoUrls` when `cameras` is empty). User selections persist for the current episode; switching to an episode that no longer contains the selected camera resets selection back to `cameras[0]`. Both video playback and `/frames/{idx}` thumbnail extraction follow the active camera.
+
+### Language instruction (VLA annotation)
+
+The `LanguageInstructionWidget` writes a structured payload through `PUT /api/datasets/{id}/episodes/{idx}/annotations`:
+
+| Field | Purpose | Bounds |
+|-------|---------|--------|
+| `instruction` | Primary natural-language task description | 1–1000 chars |
+| `source` | Provenance: `human`, `template`, `llm-generated`, `retroactive` | enum |
+| `language` | BCP-47 language tag, defaults to `en` | up to 10 chars |
+| `paraphrases` | Alternative phrasings for data augmentation | up to 50 entries, 1000 chars each |
+| `subtask_instructions` | Ordered subtask decomposition for hierarchical conditioning | up to 100 entries, 1000 chars each |
+
+When a dataset task description is available the widget seeds the instruction with `source = template`; otherwise it creates a blank instruction with `source = human`. The source dropdown allows changing the value at any time.
 
 ### Step 1 — Analyze trajectory data
 
@@ -303,7 +331,7 @@ curl -s -X POST "http://localhost:8000/api/datasets/{dataset_id}/labels/save"
 The save endpoint writes labels to a JSON file inside the dataset's `meta/` directory:
 
 ```text
-{HMI_DATA_PATH}/{dataset_id}/meta/episode_labels.json
+{DATA_DIR}/{dataset_id}/meta/episode_labels.json
 ```
 
 For example, with the default dataset path:
@@ -375,7 +403,7 @@ The React app has these key areas for Playwright interaction:
 |-------|----------|
 | Backend fails to start | Check `backend/.venv` exists; run `cd backend && uv venv --python 3.12 && source .venv/bin/activate && uv pip install -e ".[dev,analysis,export]"` |
 | Frontend shows "Loading..." indefinitely | Verify backend is healthy: `curl http://localhost:8000/health` |
-| No datasets visible | Check `HMI_DATA_PATH` in `backend/.env` points to a directory with dataset subdirectories |
+| No datasets visible | Check `DATA_DIR` in `backend/.env` points to a directory with dataset subdirectories |
 | Port conflict | Set `BACKEND_PORT` or `FRONTEND_PORT` environment variables |
 | CORS errors | Backend allows localhost ports 5173-5177; check the frontend port is in range |
 | Labels not persisted after restart | Call `POST /api/datasets/{id}/labels/save` after API-based annotation |
