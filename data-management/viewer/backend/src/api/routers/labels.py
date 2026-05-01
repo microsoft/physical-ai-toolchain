@@ -169,7 +169,7 @@ def _create_label_storage(
     """Create label storage backend based on config."""
     if storage_backend == "azure" and blob_provider is not None:
         return BlobLabelStorage(blob_provider)
-    return LocalLabelStorage(os.environ.get("HMI_DATA_PATH", "./data"))
+    return LocalLabelStorage(os.environ.get("DATA_DIR", "./data"))
 
 
 _label_storage: LabelStorage | None = None
@@ -192,7 +192,7 @@ def _get_label_storage() -> LabelStorage:
 
 
 def _get_base_path() -> str:
-    return os.environ.get("HMI_DATA_PATH", "./data")
+    return os.environ.get("DATA_DIR", "./data")
 
 
 def _labels_path_for_base(dataset_id: str, base_path: str) -> Path:

@@ -53,19 +53,23 @@ Dataset Analysis Tool - Development Server Launcher
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-    --backend       Start backend only
-    --frontend      Start frontend only
-    --help, -h      Show this help message
+    --backend             Start backend only
+    --frontend            Start frontend only
+    --data-dir <path>     Local datasets directory (overrides DATA_DIR env var)
+    --help, -h            Show this help message
 
 Environment Variables:
+    DATA_DIR        Local datasets directory (default: ../../datasets relative to script)
     BACKEND_PORT    Backend port (default: 8000)
     FRONTEND_PORT   Frontend port (default: 5173)
     HEALTH_TIMEOUT  Seconds to wait for backend health (default: 30)
 
 Examples:
-    ./start.sh                          # Start both services
-    BACKEND_PORT=9000 ./start.sh        # Use custom backend port
-    ./start.sh --backend                # Start backend only
+    ./start.sh                                    # Start both services
+    ./start.sh --data-dir /path/to/datasets       # Use a specific datasets directory
+    DATA_DIR=/path/to/datasets ./start.sh         # Same, via env var
+    BACKEND_PORT=9000 ./start.sh                  # Use custom backend port
+    ./start.sh --backend                          # Start backend only
 
 EOF
 }
@@ -139,6 +143,18 @@ start_backend() {
         log_info "Defaulting DATAVIEWER_AUTH_DISABLED=true for local development"
     fi
 
+    # Resolve datasets directory: prefer explicit DATA_DIR, otherwise default
+    # to <repo>/datasets (../../datasets relative to this script).
+    if [[ -z "${DATA_DIR:-}" ]]; then
+        DATA_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)/datasets"
+        log_info "Defaulting DATA_DIR=${DATA_DIR}"
+    fi
+    if [[ ! -d "${DATA_DIR}" ]]; then
+        log_warn "DATA_DIR does not exist: ${DATA_DIR}"
+    fi
+    export DATA_DIR
+    log_info "Using DATA_DIR=${DATA_DIR}"
+
     if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
         log_warn "Virtual environment not found at ${BACKEND_DIR}/.venv"
         log_info "Creating virtual environment..."
@@ -193,6 +209,20 @@ main() {
                 ;;
             --frontend)
                 frontend_only=true
+                shift
+                ;;
+            --data-dir)
+                if [[ $# -lt 2 || -z "$2" ]]; then
+                    log_error "--data-dir requires a path argument"
+                    exit 1
+                fi
+                DATA_DIR="$2"
+                export DATA_DIR
+                shift 2
+                ;;
+            --data-dir=*)
+                DATA_DIR="${1#--data-dir=}"
+                export DATA_DIR
                 shift
                 ;;
             --help|-h)
