@@ -16,13 +16,13 @@ dependencies = [
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
     "onnx==1.21.0",
-    "onnxscript==0.6.2",
-    "onnxruntime-gpu==1.24.4",
+    "onnxscript==0.7.0",
+    "onnxruntime-gpu==1.25.1",
     "toml==0.10.2",
-    "gymnasium==1.2.3",
+    "gymnasium==1.3.0",
     "torch==2.10.0",
-    "tensordict==0.12.1",
-    "lerobot==0.5.0",
+    "tensordict==0.12.2",
+    "lerobot==0.5.1",
 ]
 
 [build-system]
@@ -37,8 +37,8 @@ dev = [
     "pytest==9.0.3",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
-    "hypothesis==6.151.13",
-    "matplotlib==3.10.8",
+    "hypothesis==6.152.4",
+    "matplotlib==3.10.9",
     "numpy==2.2.6",
     "torch==2.10.0",
 ]
