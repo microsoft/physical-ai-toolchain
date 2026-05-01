@@ -11,7 +11,7 @@
 # pytest-fuzz          | fuzz-regression-tests.yml      | repo root                      | --cov=tests --cov=data-management/viewer/backend/src --cov=training
 # vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | vitest --coverage
 # vitest-components    | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/components/
-# vitest-features      | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/components/features/
+# vitest-features      | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/components/{dashboard,annotation-panel,frame-editor,episode-viewer}/
 # vitest-lib           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/lib/
 # vitest-state         | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/stores/, src/hooks/
 # vitest-app           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/App.tsx
@@ -24,7 +24,8 @@
 #   go ⊂ terraform (infrastructure/terraform/e2e/ ⊂ infrastructure/terraform/);
 #     deduplicated at the component layer (infrastructure-terraform vs infrastructure-go-e2e).
 #   vitest-* (components/features/lib/state/app) overlap the aggregate vitest flag and each
-#     other (vitest-features ⊂ vitest-components since features live under components/);
+#     other (vitest-features ⊂ vitest-components since the feature directories
+#     dashboard/, annotation-panel/, frame-editor/, episode-viewer/ all live under src/components/);
 #     intentional to surface per-section coverage trends without losing the aggregate view.
 
 codecov:

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { jsonResponse } from '@/test/test-utils'
+
 import {
   _resetCsrfToken,
   ApiClientError,
@@ -37,14 +39,6 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function jsonResponse(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    headers: { 'content-type': 'application/json' },
-  })
-}
-
 describe('ApiClientError', () => {
   it('captures code, status, and details', () => {
     const err = new ApiClientError('not found', 'NOT_FOUND', 404, { id: '1' })
@@ -67,7 +61,9 @@ describe('fetchDatasets', () => {
   })
 
   it('throws ApiClientError on failure', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ code: 'SERVER_ERROR', message: 'boom' }, 500))
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ code: 'SERVER_ERROR', message: 'boom' }, { status: 500 }),
+    )
 
     await expect(fetchDatasets()).rejects.toThrow(ApiClientError)
   })
@@ -222,7 +218,7 @@ describe('fetchAnnotationSummary', () => {
 describe('error handling', () => {
   it('creates ApiClientError from JSON error response', async () => {
     mockFetch.mockResolvedValueOnce(
-      jsonResponse({ code: 'DATASET_NOT_FOUND', message: 'Dataset not found' }, 404),
+      jsonResponse({ code: 'DATASET_NOT_FOUND', message: 'Dataset not found' }, { status: 404 }),
     )
 
     try {
