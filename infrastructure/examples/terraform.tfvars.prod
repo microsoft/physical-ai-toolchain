@@ -82,3 +82,21 @@ should_enable_purge_protection          = true
 // should_deploy_monitor_workspace  = true
 // should_deploy_ampls              = true
 // should_deploy_dce                = true
+
+// =============================================================================
+// Conversion Pipeline (Optional)
+// =============================================================================
+// Production posture: F32 capacity. The conversion pipeline reuses the
+// platform stdl... data-lake account, so should_create_data_lake_storage must
+// be true whenever should_deploy_conversion_pipeline is true (enforced by a
+// root-level precondition).
+// =============================================================================
+
+should_deploy_conversion_pipeline = false
+should_create_data_lake_storage   = true
+conversion_pipeline_config = {
+  should_create_fabric_capacity        = true
+  should_create_fabric_workspace       = true
+  fabric_capacity_sku                  = "F32"
+  should_enable_event_grid_dead_letter = true
+}

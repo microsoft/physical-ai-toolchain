@@ -394,14 +394,14 @@ class TestExportEndpoints:
 
     @pytest.fixture
     def client(self, tmp_path: Path):
-        """TestClient with HMI_DATA_PATH pointing to synthetic HDF5 data."""
+        """TestClient with DATA_DIR pointing to synthetic HDF5 data."""
         # Create dataset structure
         dataset_dir = tmp_path / "test-hdf5-dataset"
         dataset_dir.mkdir()
         for ep_idx in range(3):
             create_test_hdf5(dataset_dir / f"episode_{ep_idx:06d}.hdf5")
 
-        os.environ["HMI_DATA_PATH"] = str(tmp_path)
+        os.environ["DATA_DIR"] = str(tmp_path)
 
         import src.api.config as config_mod
         import src.api.services.annotation_service as ann_mod
