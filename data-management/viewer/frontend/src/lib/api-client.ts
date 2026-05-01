@@ -85,6 +85,22 @@ export function transformKeys<T>(obj: unknown): T {
 }
 
 /**
+ * Apply transformKeys to a dataset payload while preserving the original
+ * `features` map keys (camera/feature names like ``observation.images.front``
+ * must not be camelCased).
+ */
+function preserveDatasetFeatureKeys(raw: Record<string, unknown>): DatasetInfo {
+  const originalFeatures = raw.features as Record<string, unknown> | undefined
+  const dataset = transformKeys<DatasetInfo>(raw)
+  if (originalFeatures) {
+    dataset.features = Object.fromEntries(
+      Object.entries(originalFeatures).map(([key, value]) => [key, transformKeys(value)]),
+    ) as DatasetInfo['features']
+  }
+  return dataset
+}
+
+/**
  * Custom error class for API errors.
  */
 export class ApiClientError extends Error {
@@ -131,7 +147,8 @@ export async function fetchDatasets(): Promise<DatasetInfo[]> {
   const response = await fetch(`${API_BASE}/datasets`, {
     headers: await requestHeaders(),
   })
-  return handleResponse<DatasetInfo[]>(response)
+  const raw = await handleResponse<Array<Record<string, unknown>>>(response)
+  return raw.map(preserveDatasetFeatureKeys)
 }
 
 /**
@@ -141,7 +158,8 @@ export async function fetchDataset(datasetId: string): Promise<DatasetInfo> {
   const response = await fetch(`${API_BASE}/datasets/${datasetId}`, {
     headers: await requestHeaders(),
   })
-  return handleResponse<DatasetInfo>(response)
+  const raw = await handleResponse<Record<string, unknown>>(response)
+  return preserveDatasetFeatureKeys(raw)
 }
 
 /**

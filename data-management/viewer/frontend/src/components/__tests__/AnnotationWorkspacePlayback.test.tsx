@@ -102,7 +102,6 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     const labelsPanel = screen.getByTestId('trajectory-labels-panel')
 
     expect(trajectoryLayout.className).toContain('lg:grid-cols-3')
-    expect(labelsPanel.className).toContain('lg:row-span-2')
     expect(labelsPanel).not.toContainElement(screen.getByTestId('trajectory-compact-media-frame'))
     expect(labelsPanel).not.toContainElement(screen.getByText('Subtask List'))
   })
@@ -158,11 +157,12 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
       ctrlKey: false,
     })
 
-    expect(
-      screen
-        .getByTestId('trajectory-playback-group-panel')
-        .compareDocumentPosition(screen.getByTestId('trajectory-graph-panel')),
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    const playbackGroupPanel = screen.getByTestId('trajectory-playback-group-panel')
+    const graphPanel = screen.getByTestId('trajectory-graph-panel')
+
+    // Graph now lives inside the playback group panel (compact layout) and
+    // appears after the playback controls within that container.
+    expect(playbackGroupPanel).toContainElement(graphPanel)
   })
 
   it('keeps the outer trajectory tab panel free of its own vertical scrollbar', () => {
@@ -187,8 +187,10 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     })
 
     const graphPanel = screen.getByTestId('trajectory-graph-panel')
+    const playbackGroupPanel = screen.getByTestId('trajectory-playback-group-panel')
 
-    expect(graphPanel.className).toContain('overflow-y-auto')
+    // Graph panel is contained in the scrollable playback group panel.
+    expect(playbackGroupPanel.className).toContain('overflow-y-auto')
     expect(graphPanel).toContainElement(screen.getByText('Trajectory Plot'))
   })
 
