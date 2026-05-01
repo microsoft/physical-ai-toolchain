@@ -1,5 +1,12 @@
 import '@testing-library/jest-dom/vitest'
 
+import { cleanup } from '@testing-library/react'
+import { afterEach } from 'vitest'
+
+afterEach(() => {
+  cleanup()
+})
+
 /**
  * Happy DOM does not implement several browser APIs that Radix UI primitives
  * (and a handful of dashboard widgets) rely on. Install minimal feature-detect
