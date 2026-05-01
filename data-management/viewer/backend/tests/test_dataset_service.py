@@ -45,7 +45,6 @@ class TestDatasetDiscovery:
         ids = [d.id for d in datasets]
         assert DATASET_ID in ids
 
-
     async def test_get_dataset_returns_info(self, service):
         ds = await service.get_dataset(DATASET_ID)
         assert ds is not None
@@ -53,18 +52,15 @@ class TestDatasetDiscovery:
         assert ds.total_episodes == 64
         assert ds.fps == 30.0
 
-
     async def test_get_dataset_features(self, service):
         ds = await service.get_dataset(DATASET_ID)
         assert "observation.state" in ds.features
         assert "action" in ds.features
         assert "observation.images.il-camera" in ds.features
 
-
     async def test_get_nonexistent_dataset(self, service):
         ds = await service.get_dataset("nonexistent_dataset")
         assert ds is None
-
 
     def test_dataset_is_lerobot(self, service):
         service._discover_dataset(DATASET_ID)
@@ -85,19 +81,16 @@ class TestListEpisodes:
         episodes = await service.list_episodes(DATASET_ID)
         assert len(episodes) == 64
 
-
     async def test_pagination_offset(self, service):
         episodes = await service.list_episodes(DATASET_ID, offset=60, limit=10)
         assert len(episodes) == 4
         assert episodes[0].index == 60
-
 
     async def test_pagination_limit(self, service):
         episodes = await service.list_episodes(DATASET_ID, offset=0, limit=5)
         assert len(episodes) == 5
         assert episodes[0].index == 0
         assert episodes[4].index == 4
-
 
     async def test_episode_meta_fields(self, service):
         episodes = await service.list_episodes(DATASET_ID, limit=1)
@@ -107,22 +100,18 @@ class TestListEpisodes:
         assert ep.task_index == 0
         assert isinstance(ep.has_annotations, bool)
 
-
     async def test_filter_has_annotations_false(self, service):
         """With no annotations saved, all episodes should appear."""
         episodes = await service.list_episodes(DATASET_ID, has_annotations=False)
         assert len(episodes) == 64
 
-
     async def test_filter_task_index(self, service):
         episodes = await service.list_episodes(DATASET_ID, task_index=0)
         assert len(episodes) == 64
 
-
     async def test_filter_task_index_no_match(self, service):
         episodes = await service.list_episodes(DATASET_ID, task_index=99)
         assert len(episodes) == 0
-
 
 
 class TestGetEpisode:
@@ -134,11 +123,9 @@ class TestGetEpisode:
         assert ep.meta.index == 0
         assert ep.meta.length > 0
 
-
     async def test_episode_has_trajectory(self, service):
         ep = await service.get_episode(DATASET_ID, 0)
         assert len(ep.trajectory_data) > 0
-
 
     async def test_trajectory_point_fields(self, service):
         ep = await service.get_episode(DATASET_ID, 0)
@@ -150,17 +137,14 @@ class TestGetEpisode:
         assert len(pt.end_effector_pose) == 6
         assert 0 <= pt.gripper_state <= 1
 
-
     async def test_episode_has_video_urls(self, service):
         ep = await service.get_episode(DATASET_ID, 0)
         assert "observation.images.il-camera" in ep.video_urls
         assert f"/api/datasets/{DATASET_ID}/episodes/0/video/" in ep.video_urls["observation.images.il-camera"]
 
-
     async def test_trajectory_length_matches_meta(self, service):
         ep = await service.get_episode(DATASET_ID, 10)
         assert ep.meta.length == len(ep.trajectory_data)
-
 
 
 class TestTrajectory:
@@ -170,13 +154,11 @@ class TestTrajectory:
         traj = await service.get_episode_trajectory(DATASET_ID, 0)
         assert len(traj) > 0
 
-
     async def test_trajectory_timestamps_increase(self, service):
         traj = await service.get_episode_trajectory(DATASET_ID, 0)
         timestamps = [pt.timestamp for pt in traj]
         for i in range(1, len(timestamps)):
             assert timestamps[i] >= timestamps[i - 1]
-
 
 
 class TestCameras:
@@ -185,7 +167,6 @@ class TestCameras:
     async def test_get_cameras(self, service):
         cameras = await service.get_episode_cameras(DATASET_ID, 0)
         assert "observation.images.il-camera" in cameras
-
 
 
 class TestVideoFilePath:
@@ -216,14 +197,12 @@ class TestEpisodeCacheIntegration:
 
         assert stats_after.hits == stats_before.hits + 1
 
-
     async def test_invalidation_forces_reload(self, service):
         await service.get_episode(DATASET_ID, 0)
         assert service._episode_cache.get(DATASET_ID, 0) is not None
 
         service.invalidate_episode_cache(DATASET_ID, 0)
         assert service._episode_cache.get(DATASET_ID, 0) is None
-
 
     async def test_prefetch_populates_adjacent_episodes(self, service):
         # Discover dataset metadata first so prefetch knows total_episodes
@@ -237,7 +216,6 @@ class TestEpisodeCacheIntegration:
             cached = service._episode_cache.get(DATASET_ID, idx)
             assert cached is not None, f"Episode {idx} should be prefetched"
 
-
     async def test_trajectory_served_from_cache(self, service):
         await service.get_episode(DATASET_ID, 0)
         stats_before = service._episode_cache.stats()
@@ -247,7 +225,6 @@ class TestEpisodeCacheIntegration:
 
         assert len(traj) > 0
         assert stats_after.hits == stats_before.hits + 1
-
 
 
 class TestNestedDatasetDiscovery:
@@ -270,7 +247,6 @@ class TestNestedDatasetDiscovery:
         assert "e2emanufacturing--session_a" in ids
         assert "e2emanufacturing--session_b" in ids
 
-
     async def test_nested_datasets_have_group(self, tmp_path):
         """Nested datasets should have their parent folder as the group."""
         parent = tmp_path / "my_project"
@@ -283,7 +259,6 @@ class TestNestedDatasetDiscovery:
         datasets = await service.list_datasets()
         ds = next(d for d in datasets if d.id == "my_project--recording_1")
         assert ds.group == "my_project"
-
 
     async def test_nested_dataset_path_resolves(self, tmp_path):
         """Nested dataset IDs resolve correctly to filesystem paths."""
@@ -299,7 +274,6 @@ class TestNestedDatasetDiscovery:
         assert ds is not None
         assert ds.total_episodes == 1
 
-
     async def test_flat_datasets_have_no_group(self, tmp_path):
         """Standard top-level datasets should have no group."""
         (tmp_path / "flat_ds").mkdir()
@@ -309,7 +283,6 @@ class TestNestedDatasetDiscovery:
         datasets = await service.list_datasets()
         ds = next(d for d in datasets if d.id == "flat_ds")
         assert ds.group is None
-
 
     async def test_three_level_nested_datasets_discovered(self, tmp_path):
         """Datasets 3 levels deep are discovered with correct --separated IDs."""
@@ -322,7 +295,6 @@ class TestNestedDatasetDiscovery:
         ids = {d.id for d in datasets}
         assert "project--recordings--session_1" in ids
 
-
     async def test_deep_nested_dataset_group_includes_all_parents(self, tmp_path):
         """Group for 3-level dataset includes all parent segments."""
         deep = tmp_path / "project" / "recordings" / "session_1"
@@ -333,7 +305,6 @@ class TestNestedDatasetDiscovery:
         datasets = await service.list_datasets()
         ds = next(d for d in datasets if d.id == "project--recordings--session_1")
         assert ds.group == "project--recordings"
-
 
     async def test_deep_nested_dataset_path_resolves(self, tmp_path):
         """3-level nested dataset IDs resolve correctly to filesystem paths."""
@@ -347,7 +318,6 @@ class TestNestedDatasetDiscovery:
         assert ds is not None
         assert ds.total_episodes == 1
 
-
     async def test_six_level_nesting_rejected(self, tmp_path):
         """Dataset IDs with more than 5 segments are rejected."""
         from src.api.services.dataset_service.service import _validate_dataset_id
@@ -355,14 +325,12 @@ class TestNestedDatasetDiscovery:
         with pytest.raises(ValueError, match="too deep"):
             _validate_dataset_id("a--b--c--d--e--f")
 
-
     async def test_five_level_nesting_accepted(self, tmp_path):
         """Dataset IDs with exactly 5 segments are accepted."""
         from src.api.services.dataset_service.service import _validate_dataset_id
 
         result = _validate_dataset_id("a--b--c--d--e")
         assert result == "a--b--c--d--e"
-
 
 
 class TestLocalAnnotationPathResolution:
@@ -377,7 +345,6 @@ class TestLocalAnnotationPathResolution:
         expected = tmp_path / "project" / "recordings" / "session_1" / "annotations" / "episodes"
         assert ann_dir == expected
 
-
     async def test_flat_annotation_path_unchanged(self, tmp_path):
         """Annotations for flat datasets use a single directory level."""
         from src.api.storage.local import LocalStorageAdapter
@@ -386,7 +353,6 @@ class TestLocalAnnotationPathResolution:
         ann_dir = adapter._get_annotations_dir("flat_dataset")
         expected = tmp_path / "flat_dataset" / "annotations" / "episodes"
         assert ann_dir == expected
-
 
 
 class TestDatasetIdToBlobPrefix:
@@ -419,7 +385,6 @@ class TestLabelsPathResolution:
         expected = tmp_path / "project" / "recordings" / "session_1" / "meta" / "episode_labels.json"
         assert path == expected
 
-
     async def test_flat_labels_path_unchanged(self, tmp_path):
         """Labels for flat datasets use single directory level."""
         from src.api.routers.labels import _labels_path_for_base
@@ -427,7 +392,6 @@ class TestLabelsPathResolution:
         path = _labels_path_for_base("flat_dataset", str(tmp_path))
         expected = tmp_path / "flat_dataset" / "meta" / "episode_labels.json"
         assert path == expected
-
 
 
 class TestBlobLabelStorage:
@@ -444,7 +408,6 @@ class TestBlobLabelStorage:
         assert result.available_labels == ["SUCCESS", "FAILURE", "PARTIAL"]
 
 
-
 class TestCombinedBlobScan:
     """Test combined single-pass blob scanning."""
 
@@ -453,7 +416,6 @@ class TestCombinedBlobScan:
         from src.api.storage.blob_dataset import BlobDatasetProvider
 
         assert hasattr(BlobDatasetProvider, "scan_all_dataset_ids")
-
 
 
 class TestGetBlobPrefix:
@@ -493,7 +455,6 @@ class TestBlobSyncTempPrefixes:
         with pytest.raises(ValueError, match="Invalid dataset identifier"):
             await service._ensure_blob_synced("../escape")
 
-
     async def test_blob_meta_sync_prefix_excludes_path_separators(self, tmp_path, monkeypatch):
         class FakeBlobProvider:
             async def sync_meta_only_to_local(self, dataset_id: str, local_dir: Path) -> bool:
@@ -512,7 +473,6 @@ class TestBlobSyncTempPrefixes:
         service = DatasetService(base_path=str(tmp_path), blob_provider=FakeBlobProvider())
         with pytest.raises(ValueError, match="Invalid dataset identifier"):
             await service._ensure_blob_meta_synced("..\\escape")
-
 
 
 def _create_hdf5_with_images(path, num_frames=10, num_joints=6, width=64, height=48):
@@ -547,7 +507,6 @@ class TestHDF5VideoGeneration:
         assert episode is not None
         assert len(episode.video_urls) > 0
 
-
     async def test_hdf5_video_file_created_on_access(self, tmp_path):
         """Accessing video path generates and caches an mp4 file."""
         import importlib.util
@@ -570,7 +529,6 @@ class TestHDF5VideoGeneration:
         assert Path(video_path).exists()
         assert Path(video_path).suffix == ".mp4"
 
-
     async def test_hdf5_single_frame_uses_slice(self, tmp_path):
         """get_frame_image should load only the requested frame, not the full array."""
         from src.api.services.dataset_service.hdf5_handler import HDF5FormatHandler
@@ -585,7 +543,6 @@ class TestHDF5VideoGeneration:
         frame_bytes = handler.get_frame_image("slice_dataset", 0, 2, "cam0")
         assert frame_bytes is not None
         assert len(frame_bytes) > 0
-
 
 
 class TestBlobTempDirCleanup:
@@ -604,7 +561,6 @@ class TestBlobTempDirCleanup:
         assert not fake_dir.exists()
         assert "test_ds" not in service._blob_synced
 
-
     async def test_evict_dataset_removes_meta_synced_temp_dir(self, tmp_path):
         """Evicting a dataset cleans up its meta sync temp directory."""
         service = DatasetService(base_path=str(tmp_path))
@@ -618,7 +574,6 @@ class TestBlobTempDirCleanup:
 
         assert not fake_dir.exists()
         assert "test_ds" not in service._blob_meta_synced
-
 
     def test_cleanup_all_temp_dirs(self, tmp_path):
         """cleanup_temp_dirs removes all synced and meta-synced directories."""
