@@ -86,7 +86,12 @@ describe('useEpisodeAnnotations', () => {
     selectDataset('ds-1')
     setEpisode(0)
     const annotation = makeAnnotation('user-1', { notes: 'good run' })
-    mockedFetchAnnotations.mockResolvedValueOnce({ annotations: [annotation] })
+    mockedFetchAnnotations.mockResolvedValueOnce({
+      schemaVersion: '1.0',
+      episodeIndex: 0,
+      datasetId: 'ds-1',
+      annotations: [annotation],
+    })
 
     const { result } = renderHookWithQuery(() => useEpisodeAnnotations('user-1'))
 
@@ -101,6 +106,9 @@ describe('useEpisodeAnnotations', () => {
     selectDataset('ds-1')
     setEpisode(0)
     mockedFetchAnnotations.mockResolvedValueOnce({
+      schemaVersion: '1.0',
+      episodeIndex: 0,
+      datasetId: 'ds-1',
       annotations: [makeAnnotation('someone-else')],
     })
 

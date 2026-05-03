@@ -51,7 +51,10 @@ beforeEach(() => {
   offlineStorageMocks.removeSyncItem.mockResolvedValue(undefined)
   offlineStorageMocks.updateAnnotationSyncStatus.mockResolvedValue(undefined)
   offlineStorageMocks.updateSyncItemRetry.mockResolvedValue(undefined)
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('{}', { status: 200 })),
+  )
 })
 
 afterEach(() => {
@@ -111,7 +114,7 @@ describe('processSyncQueue', () => {
     await vi.runAllTimersAsync()
     const result = await promise
 
-    expect(global.fetch).toHaveBeenCalledWith(
+    expect(globalThis.fetch).toHaveBeenCalledWith(
       '/api/datasets/ds-1/episodes/ep-1/annotations',
       expect.objectContaining({
         method: 'POST',
@@ -138,7 +141,7 @@ describe('processSyncQueue', () => {
     await vi.runAllTimersAsync()
     await promise
 
-    expect(global.fetch).toHaveBeenCalledWith(
+    expect(globalThis.fetch).toHaveBeenCalledWith(
       '/api/annotations/ann-9',
       expect.objectContaining({ method: 'PUT' }),
     )
@@ -154,7 +157,7 @@ describe('processSyncQueue', () => {
     await vi.runAllTimersAsync()
     await promise
 
-    expect(global.fetch).toHaveBeenCalledWith(
+    expect(globalThis.fetch).toHaveBeenCalledWith(
       '/api/annotations/ann-9',
       expect.objectContaining({ method: 'DELETE' }),
     )
@@ -201,7 +204,7 @@ describe('processSyncQueue', () => {
 
     const result = await processSyncQueue()
 
-    expect(global.fetch).not.toHaveBeenCalled()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(result.failedCount).toBe(1)
     expect(result.errors[0]).toEqual({ id: 'item-1', error: 'Exceeded max retries: boom' })
   })

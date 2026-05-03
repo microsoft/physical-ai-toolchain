@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => {
     addToSyncQueue: vi.fn(async () => undefined),
     deleteAnnotationLocal: vi.fn(async () => undefined),
     getAnnotationLocal: vi.fn(),
-    getAnnotationsBySyncStatus: vi.fn(async () => []),
+    getAnnotationsBySyncStatus: vi.fn(async (): Promise<unknown[]> => []),
     isOnline: vi.fn(() => true),
     syncQueueManager: {
       addListener: vi.fn((cb: (result: unknown) => void) => {
