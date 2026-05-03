@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useAnnotationWorkflow } from '@/hooks/use-annotation-workflow'
 import { useAnnotationStore, useEpisodeStore } from '@/stores'
 
 const saveMock = vi.fn()
@@ -37,7 +38,6 @@ afterEach(() => {
 describe('useAnnotationWorkflow', () => {
   it('save() invokes the underlying save and marks the store as saved', async () => {
     const onSaveSuccess = vi.fn()
-    const { useAnnotationWorkflow } = await import('@/hooks/use-annotation-workflow')
     const { result } = renderHook(() => useAnnotationWorkflow({ onSaveSuccess }))
 
     useAnnotationStore.getState().updateNotes('hello')
@@ -55,7 +55,6 @@ describe('useAnnotationWorkflow', () => {
   it('save() is a no-op when there is no current annotation or dataset', async () => {
     useAnnotationStore.getState().clear()
 
-    const { useAnnotationWorkflow } = await import('@/hooks/use-annotation-workflow')
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     await act(async () => {
@@ -66,7 +65,6 @@ describe('useAnnotationWorkflow', () => {
   })
 
   it('saveAndAdvance() advances to next episode by default', async () => {
-    const { useAnnotationWorkflow } = await import('@/hooks/use-annotation-workflow')
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     await act(async () => {
@@ -78,7 +76,6 @@ describe('useAnnotationWorkflow', () => {
   })
 
   it('saveAndAdvance() does not advance when autoAdvance is false', async () => {
-    const { useAnnotationWorkflow } = await import('@/hooks/use-annotation-workflow')
     const { result } = renderHook(() => useAnnotationWorkflow({ autoAdvance: false }))
 
     await act(async () => {
@@ -93,7 +90,6 @@ describe('useAnnotationWorkflow', () => {
     useAnnotationStore.getState().updateNotes('draft')
     expect(useAnnotationStore.getState().isDirty).toBe(true)
 
-    const { useAnnotationWorkflow } = await import('@/hooks/use-annotation-workflow')
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
@@ -105,7 +101,6 @@ describe('useAnnotationWorkflow', () => {
   })
 
   it('flagForReview() is idempotent', async () => {
-    const { useAnnotationWorkflow } = await import('@/hooks/use-annotation-workflow')
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
@@ -123,7 +118,6 @@ describe('useAnnotationWorkflow', () => {
 
   it('navigateWithCheck opens dialog when dirty and runs immediately when clean', async () => {
     const action = vi.fn()
-    const { useAnnotationWorkflow } = await import('@/hooks/use-annotation-workflow')
     const { result, rerender } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
@@ -149,7 +143,6 @@ describe('useAnnotationWorkflow', () => {
 
   it('confirmNavigation runs the pending action and resets state', async () => {
     const action = vi.fn()
-    const { useAnnotationWorkflow } = await import('@/hooks/use-annotation-workflow')
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
@@ -171,7 +164,6 @@ describe('useAnnotationWorkflow', () => {
 
   it('cancelNavigation closes the dialog without running the action', async () => {
     const action = vi.fn()
-    const { useAnnotationWorkflow } = await import('@/hooks/use-annotation-workflow')
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {

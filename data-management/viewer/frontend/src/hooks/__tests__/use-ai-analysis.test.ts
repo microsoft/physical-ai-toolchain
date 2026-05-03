@@ -1,7 +1,13 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import { createElement, type ReactNode } from 'react'
+import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import {
+  useAISuggestion,
+  useAnomalyDetection,
+  useRequestAISuggestion,
+  useTrajectoryAnalysis,
+} from '@/hooks/use-ai-analysis'
+import { renderHookWithProviders } from '@/test-utils/render-hook'
 
 const getAnnotationSuggestionMock = vi.fn()
 const analyzeTrajectoryMock = vi.fn()
@@ -12,20 +18,6 @@ vi.mock('@/api/ai-analysis', () => ({
   analyzeTrajectory: (...args: unknown[]) => analyzeTrajectoryMock(...args),
   detectAnomalies: (...args: unknown[]) => detectAnomaliesMock(...args),
 }))
-
-function makeQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
-}
-
-function makeWrapper(client: QueryClient) {
-  return ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client }, children)
-}
 
 const positions3 = [
   [0, 0, 0],
@@ -47,16 +39,12 @@ describe('useAISuggestion', () => {
   it('fetches suggestion when trajectory has at least 3 positions', async () => {
     getAnnotationSuggestionMock.mockResolvedValueOnce({ rating: 'success' })
 
-    const { useAISuggestion } = await import('@/hooks/use-ai-analysis')
-    const wrapper = makeWrapper(makeQueryClient())
-    const { result } = renderHook(
-      () =>
-        useAISuggestion({
-          datasetId: 'ds-1',
-          episodeId: 'ep-0',
-          trajectoryData: { positions: positions3 } as never,
-        }),
-      { wrapper },
+    const { result } = renderHookWithProviders(() =>
+      useAISuggestion({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: { positions: positions3 } as never,
+      }),
     )
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
@@ -65,16 +53,12 @@ describe('useAISuggestion', () => {
   })
 
   it('is disabled when trajectoryData is undefined', async () => {
-    const { useAISuggestion } = await import('@/hooks/use-ai-analysis')
-    const wrapper = makeWrapper(makeQueryClient())
-    renderHook(
-      () =>
-        useAISuggestion({
-          datasetId: 'ds-1',
-          episodeId: 'ep-0',
-          trajectoryData: undefined,
-        }),
-      { wrapper },
+    renderHookWithProviders(() =>
+      useAISuggestion({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: undefined,
+      }),
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -82,21 +66,17 @@ describe('useAISuggestion', () => {
   })
 
   it('is disabled when fewer than 3 positions are provided', async () => {
-    const { useAISuggestion } = await import('@/hooks/use-ai-analysis')
-    const wrapper = makeWrapper(makeQueryClient())
-    renderHook(
-      () =>
-        useAISuggestion({
-          datasetId: 'ds-1',
-          episodeId: 'ep-0',
-          trajectoryData: {
-            positions: [
-              [0, 0, 0],
-              [1, 1, 1],
-            ],
-          } as never,
-        }),
-      { wrapper },
+    renderHookWithProviders(() =>
+      useAISuggestion({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: {
+          positions: [
+            [0, 0, 0],
+            [1, 1, 1],
+          ],
+        } as never,
+      }),
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -104,17 +84,13 @@ describe('useAISuggestion', () => {
   })
 
   it('is disabled when enabled is false', async () => {
-    const { useAISuggestion } = await import('@/hooks/use-ai-analysis')
-    const wrapper = makeWrapper(makeQueryClient())
-    renderHook(
-      () =>
-        useAISuggestion({
-          datasetId: 'ds-1',
-          episodeId: 'ep-0',
-          trajectoryData: { positions: positions3 } as never,
-          enabled: false,
-        }),
-      { wrapper },
+    renderHookWithProviders(() =>
+      useAISuggestion({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: { positions: positions3 } as never,
+        enabled: false,
+      }),
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -126,16 +102,12 @@ describe('useTrajectoryAnalysis', () => {
   it('fetches metrics for valid trajectory', async () => {
     analyzeTrajectoryMock.mockResolvedValueOnce({ smoothness: 0.9 })
 
-    const { useTrajectoryAnalysis } = await import('@/hooks/use-ai-analysis')
-    const wrapper = makeWrapper(makeQueryClient())
-    const { result } = renderHook(
-      () =>
-        useTrajectoryAnalysis({
-          datasetId: 'ds-1',
-          episodeId: 'ep-0',
-          trajectoryData: { positions: positions3 } as never,
-        }),
-      { wrapper },
+    const { result } = renderHookWithProviders(() =>
+      useTrajectoryAnalysis({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: { positions: positions3 } as never,
+      }),
     )
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
@@ -144,16 +116,12 @@ describe('useTrajectoryAnalysis', () => {
   })
 
   it('is disabled without trajectoryData', async () => {
-    const { useTrajectoryAnalysis } = await import('@/hooks/use-ai-analysis')
-    const wrapper = makeWrapper(makeQueryClient())
-    renderHook(
-      () =>
-        useTrajectoryAnalysis({
-          datasetId: 'ds-1',
-          episodeId: 'ep-0',
-          trajectoryData: undefined,
-        }),
-      { wrapper },
+    renderHookWithProviders(() =>
+      useTrajectoryAnalysis({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: undefined,
+      }),
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -165,16 +133,12 @@ describe('useAnomalyDetection', () => {
   it('fetches anomalies for valid trajectory', async () => {
     detectAnomaliesMock.mockResolvedValueOnce({ anomalies: [] })
 
-    const { useAnomalyDetection } = await import('@/hooks/use-ai-analysis')
-    const wrapper = makeWrapper(makeQueryClient())
-    const { result } = renderHook(
-      () =>
-        useAnomalyDetection({
-          datasetId: 'ds-1',
-          episodeId: 'ep-0',
-          trajectoryData: { positions: positions3 } as never,
-        }),
-      { wrapper },
+    const { result } = renderHookWithProviders(() =>
+      useAnomalyDetection({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: { positions: positions3 } as never,
+      }),
     )
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
@@ -183,16 +147,12 @@ describe('useAnomalyDetection', () => {
   })
 
   it('is disabled with fewer than 3 positions', async () => {
-    const { useAnomalyDetection } = await import('@/hooks/use-ai-analysis')
-    const wrapper = makeWrapper(makeQueryClient())
-    renderHook(
-      () =>
-        useAnomalyDetection({
-          datasetId: 'ds-1',
-          episodeId: 'ep-0',
-          trajectoryData: { positions: [[0, 0, 0]] } as never,
-        }),
-      { wrapper },
+    renderHookWithProviders(() =>
+      useAnomalyDetection({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: { positions: [[0, 0, 0]] } as never,
+      }),
     )
 
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -204,9 +164,7 @@ describe('useRequestAISuggestion', () => {
   it('invokes getAnnotationSuggestion on mutate', async () => {
     getAnnotationSuggestionMock.mockResolvedValueOnce({ rating: 'success' })
 
-    const { useRequestAISuggestion } = await import('@/hooks/use-ai-analysis')
-    const wrapper = makeWrapper(makeQueryClient())
-    const { result } = renderHook(() => useRequestAISuggestion(), { wrapper })
+    const { result } = renderHookWithProviders(() => useRequestAISuggestion())
 
     const payload = { positions: positions3 } as never
     act(() => {
@@ -216,5 +174,23 @@ describe('useRequestAISuggestion', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(getAnnotationSuggestionMock).toHaveBeenCalledWith(payload, expect.anything())
     expect(result.current.data).toEqual({ rating: 'success' })
+  })
+
+  it('does not throw when the consumer unmounts before the request resolves', async () => {
+    let resolveSuggestion!: (value: unknown) => void
+    const deferred = new Promise<unknown>((resolve) => {
+      resolveSuggestion = resolve
+    })
+    getAnnotationSuggestionMock.mockImplementationOnce(() => deferred)
+
+    const { result, unmount } = renderHookWithProviders(() => useRequestAISuggestion())
+
+    act(() => {
+      result.current.mutate({ positions: positions3 } as never)
+    })
+
+    unmount()
+    resolveSuggestion({ rating: 'success' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
   })
 })

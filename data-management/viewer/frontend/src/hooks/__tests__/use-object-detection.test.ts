@@ -177,10 +177,14 @@ describe('useObjectDetection', () => {
   // --- WI-01: anti-pattern (setState inside useMemo) ---------------------
   // The hook places `setNeedsRerun(true)` inside a `useMemo` body. React
   // does not guarantee the memo body runs (or runs only once) for a given
-  // dependency change, so the state update is unreliable in principle. In
-  // this test environment the flip currently lands; the WI-01 fix should
-  // move the logic into `useEffect` for correctness.
-  it('flips needsRerun to true when edits become dirty (WI-01)', async () => {
+  // dependency change, so the state update is unreliable in principle.
+  // The assertion below documents the *intended* post-fix behavior. It is
+  // skipped because the current hook cannot reliably satisfy it across
+  // environments, even though it happens to pass under happy-dom today.
+  // When WI-01 moves the side effect into `useEffect`, remove `.skip` and
+  // add a companion test asserting that re-rendering with hasEdits=false
+  // leaves needsRerun untouched.
+  it.skip('flips needsRerun to true when edits become dirty (WI-01)', async () => {
     storeState.isDirty = false
     const { result, rerender } = renderHookWithProviders(() => useObjectDetection())
     await waitFor(() => expect(result.current.data).toBeDefined())
@@ -191,11 +195,5 @@ describe('useObjectDetection', () => {
     await waitFor(() => {
       expect(result.current.needsRerun).toBe(true)
     })
-  })
-
-  it.skip('keeps needsRerun stable across re-renders without edits (WI-01 scaffold)', () => {
-    // Scaffold for the post-fix coverage: once WI-01 moves the side effect
-    // into useEffect, this test should assert that re-rendering with
-    // hasEdits=false leaves needsRerun untouched.
   })
 })

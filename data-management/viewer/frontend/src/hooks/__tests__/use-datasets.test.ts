@@ -11,18 +11,8 @@ import {
 } from '@/hooks/use-datasets'
 import { _resetCsrfToken } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
+import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
 import { renderHookWithProviders } from '@/test-utils/render-hook'
-
-const mockFetch = vi.fn()
-
-function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(data),
-  }
-}
 
 const sampleDataset = {
   id: 'ds-1',
@@ -34,9 +24,8 @@ const sampleDataset = {
 }
 
 beforeEach(() => {
-  mockFetch.mockReset()
+  installFetchMock()
   _resetCsrfToken()
-  vi.stubGlobal('fetch', mockFetch)
   useDatasetStore.getState().reset()
 })
 

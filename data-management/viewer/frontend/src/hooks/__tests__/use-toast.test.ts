@@ -101,4 +101,20 @@ describe('useToast', () => {
 
     expect(result.current.toasts).toHaveLength(1)
   })
+
+  it('does not throw when the auto-dismiss timer fires after unmount', () => {
+    const { result, unmount } = renderHook(() => useToast())
+
+    act(() => {
+      result.current.toast({ title: 'Pending' })
+    })
+
+    unmount()
+
+    expect(() => {
+      act(() => {
+        vi.advanceTimersByTime(5000)
+      })
+    }).not.toThrow()
+  })
 })

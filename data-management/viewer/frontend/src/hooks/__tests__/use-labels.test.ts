@@ -1,29 +1,16 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import { createElement, type ReactNode } from 'react'
+import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  useAddLabelOption,
+  useCurrentEpisodeLabels,
+  useDatasetLabels,
+  useRemoveLabelOption,
+  useSaveEpisodeLabels,
+} from '@/hooks/use-labels'
 import { useDatasetStore, useLabelStore } from '@/stores'
-
-const mockFetch = vi.fn()
-
-function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(data),
-  }
-}
-
-function makeQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
-}
+import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
+import { renderHookWithProviders } from '@/test-utils/render-hook'
 
 function selectDataset(id = 'ds-1') {
   const dataset = {
@@ -39,8 +26,7 @@ function selectDataset(id = 'ds-1') {
 }
 
 beforeEach(() => {
-  mockFetch.mockReset()
-  vi.stubGlobal('fetch', mockFetch)
+  installFetchMock()
   useDatasetStore.getState().reset()
   useLabelStore.getState().reset()
 })
@@ -60,14 +46,9 @@ describe('use-labels hooks', () => {
         }),
       )
 
-      const queryClient = makeQueryClient()
-      const wrapper = ({ children }: { children: ReactNode }) =>
-        createElement(QueryClientProvider, { client: queryClient }, children)
-
       selectDataset('ds-1')
 
-      const { useDatasetLabels } = await import('@/hooks/use-labels')
-      const { result } = renderHook(() => useDatasetLabels(), { wrapper })
+      const { result } = renderHookWithProviders(() => useDatasetLabels())
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
@@ -82,12 +63,7 @@ describe('use-labels hooks', () => {
     })
 
     it('does not fetch when no dataset is selected', async () => {
-      const queryClient = makeQueryClient()
-      const wrapper = ({ children }: { children: ReactNode }) =>
-        createElement(QueryClientProvider, { client: queryClient }, children)
-
-      const { useDatasetLabels } = await import('@/hooks/use-labels')
-      renderHook(() => useDatasetLabels(), { wrapper })
+      renderHookWithProviders(() => useDatasetLabels())
 
       await new Promise((resolve) => setTimeout(resolve, 0))
       expect(mockFetch).not.toHaveBeenCalled()
@@ -98,14 +74,9 @@ describe('use-labels hooks', () => {
     it('PUTs labels and commits them to the store', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }))
 
-      const queryClient = makeQueryClient()
-      const wrapper = ({ children }: { children: ReactNode }) =>
-        createElement(QueryClientProvider, { client: queryClient }, children)
-
       selectDataset('ds-1')
 
-      const { useSaveEpisodeLabels } = await import('@/hooks/use-labels')
-      const { result } = renderHook(() => useSaveEpisodeLabels(), { wrapper })
+      const { result } = renderHookWithProviders(() => useSaveEpisodeLabels())
 
       await act(async () => {
         await result.current.mutateAsync({
@@ -128,14 +99,9 @@ describe('use-labels hooks', () => {
     it('POSTs new label option', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(['SUCCESS', 'NEW']))
 
-      const queryClient = makeQueryClient()
-      const wrapper = ({ children }: { children: ReactNode }) =>
-        createElement(QueryClientProvider, { client: queryClient }, children)
-
       selectDataset('ds-1')
 
-      const { useAddLabelOption } = await import('@/hooks/use-labels')
-      const { result } = renderHook(() => useAddLabelOption(), { wrapper })
+      const { result } = renderHookWithProviders(() => useAddLabelOption())
 
       await act(async () => {
         await result.current.mutateAsync('new')
@@ -153,14 +119,9 @@ describe('use-labels hooks', () => {
     it('DELETEs label option using uppercased path', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse(['SUCCESS']))
 
-      const queryClient = makeQueryClient()
-      const wrapper = ({ children }: { children: ReactNode }) =>
-        createElement(QueryClientProvider, { client: queryClient }, children)
-
       selectDataset('ds-1')
 
-      const { useRemoveLabelOption } = await import('@/hooks/use-labels')
-      const { result } = renderHook(() => useRemoveLabelOption(), { wrapper })
+      const { result } = renderHookWithProviders(() => useRemoveLabelOption())
 
       await act(async () => {
         await result.current.mutateAsync('custom')
@@ -179,12 +140,7 @@ describe('use-labels hooks', () => {
       useLabelStore.getState().setAvailableLabels(['SUCCESS', 'FAILURE'])
       useLabelStore.getState().setEpisodeLabels(0, ['SUCCESS'])
 
-      const queryClient = makeQueryClient()
-      const wrapper = ({ children }: { children: ReactNode }) =>
-        createElement(QueryClientProvider, { client: queryClient }, children)
-
-      const { useCurrentEpisodeLabels } = await import('@/hooks/use-labels')
-      const { result } = renderHook(() => useCurrentEpisodeLabels(0), { wrapper })
+      const { result } = renderHookWithProviders(() => useCurrentEpisodeLabels(0))
 
       expect(result.current.currentLabels).toEqual(['SUCCESS'])
       expect(useLabelStore.getState().availableLabels).toEqual(['SUCCESS', 'FAILURE'])

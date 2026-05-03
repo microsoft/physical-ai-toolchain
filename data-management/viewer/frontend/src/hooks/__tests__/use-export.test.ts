@@ -233,4 +233,22 @@ describe('useExport', () => {
     expect(result.current.error).toBeNull()
     expect(result.current.previewStats).toBeNull()
   })
+
+  it('does not throw when stream callbacks fire after the consumer unmounts', () => {
+    const { result, unmount } = renderHook(() => useExport({ datasetId: 'ds-1' }))
+
+    act(() => {
+      result.current.startExport(sampleRequest)
+    })
+
+    const { onProgress, onComplete, onError } = captureStreamCallbacks()
+
+    unmount()
+
+    expect(() => {
+      onProgress(sampleProgress)
+      onComplete(sampleResult)
+      onError('post-unmount error')
+    }).not.toThrow()
+  })
 })

@@ -1,28 +1,24 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import { createElement, type ReactNode } from 'react'
+import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  useAnnotationSummary,
+  useAutoAnalysis,
+  useDeleteAnnotation,
+  useEpisodeAnnotations,
+  useSaveAnnotation,
+  useSaveCurrentAnnotation,
+} from '@/hooks/use-annotations'
 import { _resetCsrfToken } from '@/lib/api-client'
 import { useAnnotationStore, useDatasetStore, useEpisodeStore } from '@/stores'
+import {
+  installFetchMock,
+  jsonResponse,
+  mockFetch,
+  mockMutationFetch,
+} from '@/test-utils/fetch-mocks'
+import { renderHookWithProviders } from '@/test-utils/render-hook'
 import type { EpisodeAnnotation } from '@/types'
-
-const mockFetch = vi.fn()
-
-function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(data),
-  }
-}
-
-function mockMutationFetch(apiResponse: ReturnType<typeof jsonResponse>) {
-  mockFetch
-    .mockResolvedValueOnce(jsonResponse({ csrf_token: 'test-csrf-token' }))
-    .mockResolvedValueOnce(apiResponse)
-}
 
 function makeAnnotation(annotatorId: string): EpisodeAnnotation {
   return {
@@ -34,15 +30,6 @@ function makeAnnotation(annotatorId: string): EpisodeAnnotation {
     anomalies: [],
     notes: '',
   } as unknown as EpisodeAnnotation
-}
-
-function makeQueryClient() {
-  return new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  })
 }
 
 function selectDataset(id = 'ds-1', episodeIndex = 0) {
@@ -60,9 +47,8 @@ function selectDataset(id = 'ds-1', episodeIndex = 0) {
 }
 
 beforeEach(() => {
-  mockFetch.mockReset()
+  installFetchMock()
   _resetCsrfToken()
-  vi.stubGlobal('fetch', mockFetch)
   useDatasetStore.getState().reset()
   useAnnotationStore.getState().clear()
   useEpisodeStore.getState().reset()
@@ -77,14 +63,9 @@ describe('useEpisodeAnnotations', () => {
     const annotation = makeAnnotation('me')
     mockFetch.mockResolvedValueOnce(jsonResponse({ annotations: [annotation] }))
 
-    const { useEpisodeAnnotations } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
     selectDataset()
 
-    renderHook(() => useEpisodeAnnotations('me'), { wrapper })
+    renderHookWithProviders(() => useEpisodeAnnotations('me'))
 
     await waitFor(() => {
       expect(useAnnotationStore.getState().currentAnnotation).not.toBeNull()
@@ -95,14 +76,9 @@ describe('useEpisodeAnnotations', () => {
   it('initializes a new annotation when no entry matches the annotator', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ annotations: [makeAnnotation('someone-else')] }))
 
-    const { useEpisodeAnnotations } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
     selectDataset()
 
-    renderHook(() => useEpisodeAnnotations('me'), { wrapper })
+    renderHookWithProviders(() => useEpisodeAnnotations('me'))
 
     await waitFor(() => {
       expect(useAnnotationStore.getState().currentAnnotation).not.toBeNull()
@@ -111,12 +87,7 @@ describe('useEpisodeAnnotations', () => {
   })
 
   it('does not fetch when no dataset is selected', async () => {
-    const { useEpisodeAnnotations } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
-    renderHook(() => useEpisodeAnnotations('me'), { wrapper })
+    renderHookWithProviders(() => useEpisodeAnnotations('me'))
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mockFetch).not.toHaveBeenCalled()
@@ -125,17 +96,11 @@ describe('useEpisodeAnnotations', () => {
 
 describe('useSaveAnnotation', () => {
   it('sends X-CSRF-Token header and marks annotation saved on success', async () => {
-    const { useSaveAnnotation } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
     const annotation = makeAnnotation('me')
     mockMutationFetch(jsonResponse({ annotations: [annotation] }))
 
+    const { result, queryClient } = renderHookWithProviders(() => useSaveAnnotation())
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-
-    const { result } = renderHook(() => useSaveAnnotation(), { wrapper })
 
     act(() => {
       result.current.mutate({ datasetId: 'ds-1', episodeIndex: 0, annotation })
@@ -156,18 +121,11 @@ describe('useSaveAnnotation', () => {
   })
 
   it('sets the annotation store error message when the request fails', async () => {
-    const { useSaveAnnotation } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
     mockFetch
       .mockResolvedValueOnce(jsonResponse({ csrf_token: 'test-csrf-token' }))
       .mockResolvedValueOnce(jsonResponse({ code: 'BOOM', message: 'save failed' }, 500))
 
-    const { result } = renderHook(() => useSaveAnnotation(), {
-      wrapper,
-    })
+    const { result } = renderHookWithProviders(() => useSaveAnnotation())
 
     act(() => {
       result.current.mutate({
@@ -180,18 +138,34 @@ describe('useSaveAnnotation', () => {
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect(useAnnotationStore.getState().error).toBe('save failed')
   })
+
+  it('does not throw when the consumer unmounts before the request resolves', async () => {
+    const annotation = makeAnnotation('me')
+    let resolveFetch!: (response: Response) => void
+    const deferred = new Promise<Response>((resolve) => {
+      resolveFetch = resolve
+    })
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ csrf_token: 'test-csrf-token' }))
+      .mockReturnValueOnce(deferred)
+
+    const { result, unmount } = renderHookWithProviders(() => useSaveAnnotation())
+
+    act(() => {
+      result.current.mutate({ datasetId: 'ds-1', episodeIndex: 0, annotation })
+    })
+
+    unmount()
+    resolveFetch(jsonResponse({ annotations: [annotation] }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
 })
 
 describe('useSaveCurrentAnnotation', () => {
   it('does nothing when no current annotation is set', async () => {
-    const { useSaveCurrentAnnotation } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
     selectDataset()
 
-    const { result } = renderHook(() => useSaveCurrentAnnotation(), { wrapper })
+    const { result } = renderHookWithProviders(() => useSaveCurrentAnnotation())
 
     act(() => {
       result.current.save()
@@ -202,16 +176,11 @@ describe('useSaveCurrentAnnotation', () => {
   })
 
   it('saves the store annotation when prerequisites are present', async () => {
-    const { useSaveCurrentAnnotation } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
     selectDataset()
     useAnnotationStore.getState().loadAnnotation(makeAnnotation('me'))
     mockMutationFetch(jsonResponse({ annotations: [makeAnnotation('me')] }))
 
-    const { result } = renderHook(() => useSaveCurrentAnnotation(), { wrapper })
+    const { result } = renderHookWithProviders(() => useSaveCurrentAnnotation())
 
     act(() => {
       result.current.save()
@@ -224,16 +193,11 @@ describe('useSaveCurrentAnnotation', () => {
 
 describe('useDeleteAnnotation', () => {
   it('clears the annotation store and invalidates queries when annotatorId is omitted', async () => {
-    const { useDeleteAnnotation } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
     useAnnotationStore.getState().loadAnnotation(makeAnnotation('me'))
     mockMutationFetch(jsonResponse({ annotations: [] }))
 
+    const { result, queryClient } = renderHookWithProviders(() => useDeleteAnnotation())
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-    const { result } = renderHook(() => useDeleteAnnotation(), { wrapper })
 
     act(() => {
       result.current.mutate({ datasetId: 'ds-1', episodeIndex: 0 })
@@ -255,15 +219,10 @@ describe('useDeleteAnnotation', () => {
   })
 
   it('does not clear the store when an annotatorId is supplied', async () => {
-    const { useDeleteAnnotation } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
     useAnnotationStore.getState().loadAnnotation(makeAnnotation('me'))
     mockMutationFetch(jsonResponse({ annotations: [] }))
 
-    const { result } = renderHook(() => useDeleteAnnotation(), { wrapper })
+    const { result } = renderHookWithProviders(() => useDeleteAnnotation())
 
     act(() => {
       result.current.mutate({
@@ -281,15 +240,10 @@ describe('useDeleteAnnotation', () => {
 
 describe('useAutoAnalysis', () => {
   it('applies suggested rating and flags to the annotation store on success', async () => {
-    const { useAutoAnalysis } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
     useAnnotationStore.getState().loadAnnotation(makeAnnotation('me'))
     mockMutationFetch(jsonResponse({ suggestedRating: 3, flags: ['jerky'] }))
 
-    const { result } = renderHook(() => useAutoAnalysis(), { wrapper })
+    const { result } = renderHookWithProviders(() => useAutoAnalysis())
 
     act(() => {
       result.current.mutate({ datasetId: 'ds-1', episodeIndex: 0 })
@@ -307,24 +261,14 @@ describe('useAnnotationSummary', () => {
   it('fetches the summary endpoint when datasetId is provided', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ totalEpisodes: 1, annotated: 1 }))
 
-    const { useAnnotationSummary } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
-    const { result } = renderHook(() => useAnnotationSummary('ds-1'), { wrapper })
+    const { result } = renderHookWithProviders(() => useAnnotationSummary('ds-1'))
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(mockFetch.mock.calls[0][0]).toBe('/api/datasets/ds-1/annotations/summary')
   })
 
   it('is disabled when datasetId is undefined', async () => {
-    const { useAnnotationSummary } = await import('@/hooks/use-annotations')
-    const queryClient = makeQueryClient()
-    const wrapper = ({ children }: { children: ReactNode }) =>
-      createElement(QueryClientProvider, { client: queryClient }, children)
-
-    renderHook(() => useAnnotationSummary(undefined), { wrapper })
+    renderHookWithProviders(() => useAnnotationSummary(undefined))
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mockFetch).not.toHaveBeenCalled()

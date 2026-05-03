@@ -4,18 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardStats } from '@/hooks/use-dashboard'
 import { useDashboardMetrics, useDashboardStats } from '@/hooks/use-dashboard'
 import { _resetCsrfToken } from '@/lib/api-client'
+import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
 import { renderHookWithProviders } from '@/test-utils/render-hook'
-
-const mockFetch = vi.fn()
-
-function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(data),
-  }
-}
 
 function makeStats(overrides: Partial<DashboardStats> = {}): DashboardStats {
   return {
@@ -34,9 +24,8 @@ function makeStats(overrides: Partial<DashboardStats> = {}): DashboardStats {
 }
 
 beforeEach(() => {
-  mockFetch.mockReset()
+  installFetchMock()
   _resetCsrfToken()
-  vi.stubGlobal('fetch', mockFetch)
 })
 
 afterEach(() => {
