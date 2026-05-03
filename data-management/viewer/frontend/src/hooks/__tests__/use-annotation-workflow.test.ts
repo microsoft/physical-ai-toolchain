@@ -9,8 +9,8 @@ vi.mock('@/hooks/use-annotations', () => ({
   useSaveCurrentAnnotation: vi.fn(),
 }))
 
-import { useSaveCurrentAnnotation } from '@/hooks/use-annotations'
 import { useAnnotationWorkflow } from '@/hooks/use-annotation-workflow'
+import { useSaveCurrentAnnotation } from '@/hooks/use-annotations'
 import { useAnnotationStore, useEpisodeStore } from '@/stores'
 
 const mockedUseSaveCurrentAnnotation = vi.mocked(useSaveCurrentAnnotation)

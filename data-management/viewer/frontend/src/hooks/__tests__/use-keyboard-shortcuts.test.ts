@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   formatShortcut,
+  type KeyboardShortcut,
   useAnnotationShortcuts,
   useKeyboardShortcuts,
-  type KeyboardShortcut,
 } from '@/hooks/use-keyboard-shortcuts'
 
 const originalPlatform = Object.getOwnPropertyDescriptor(navigator, 'platform')
@@ -41,9 +41,7 @@ afterEach(() => {
 describe('useKeyboardShortcuts', () => {
   it('invokes a matching shortcut and prevents default by default', () => {
     const action = vi.fn()
-    renderHook(() =>
-      useKeyboardShortcuts([{ key: 's', action, description: 'Save' }]),
-    )
+    renderHook(() => useKeyboardShortcuts([{ key: 's', action, description: 'Save' }]))
 
     const event = dispatchKey({ key: 's' })
     expect(action).toHaveBeenCalledTimes(1)
@@ -289,9 +287,7 @@ describe('useAnnotationShortcuts', () => {
   it('wires insert frame shortcut when action is provided', () => {
     const actions = makeActions()
     const insertFrame = vi.fn()
-    const { result } = renderHook(() =>
-      useAnnotationShortcuts({ ...actions, insertFrame }),
-    )
+    const { result } = renderHook(() => useAnnotationShortcuts({ ...actions, insertFrame }))
 
     dispatchKey({ key: 'i' })
     expect(insertFrame).toHaveBeenCalledTimes(1)

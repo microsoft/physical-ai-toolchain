@@ -4,11 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { _resetCsrfToken } from '@/lib/api-client'
 import { renderHookWithQuery } from '@/test/render-hook-with-query'
 
-import {
-  useDashboardMetrics,
-  useDashboardStats,
-  type DashboardStats,
-} from '../use-dashboard'
+import { type DashboardStats, useDashboardMetrics, useDashboardStats } from '../use-dashboard'
 
 const mockFetch = vi.fn()
 
@@ -101,7 +97,7 @@ describe('useDashboardMetrics', () => {
 
   it('computes weighted averageRating and skips non-numeric keys', async () => {
     const stats = makeStats({
-      rating_distribution: { '1': 1, '5': 3, 'invalid': 99 },
+      rating_distribution: { '1': 1, '5': 3, invalid: 99 },
     })
     mockFetch.mockResolvedValueOnce(jsonResponse(stats))
 
@@ -262,13 +258,7 @@ describe('useDashboardMetrics', () => {
     const { result } = renderHookWithQuery(() => useDashboardMetrics('ds-1'))
     await waitFor(() => expect(result.current.metrics).not.toBeNull())
 
-    expect(result.current.metrics?.topIssues.map((i) => i.name)).toEqual([
-      'f',
-      'b',
-      'e',
-      'c',
-      'd',
-    ])
+    expect(result.current.metrics?.topIssues.map((i) => i.name)).toEqual(['f', 'b', 'e', 'c', 'd'])
     expect(result.current.metrics?.topAnomalies).toEqual([
       { name: 'x', count: 10 },
       { name: 'y', count: 1 },
