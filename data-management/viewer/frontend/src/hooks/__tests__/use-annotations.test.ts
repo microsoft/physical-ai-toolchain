@@ -14,6 +14,7 @@ import { useAnnotationStore, useDatasetStore, useEpisodeStore } from '@/stores'
 import {
   installFetchMock,
   jsonResponse,
+  type JsonResponseLike,
   mockFetch,
   mockMutationFetch,
 } from '@/test-utils/fetch-mocks'
@@ -141,8 +142,8 @@ describe('useSaveAnnotation', () => {
 
   it('does not throw when the consumer unmounts before the request resolves', async () => {
     const annotation = makeAnnotation('me')
-    let resolveFetch!: (response: Response) => void
-    const deferred = new Promise<Response>((resolve) => {
+    let resolveFetch!: (response: JsonResponseLike) => void
+    const deferred = new Promise<JsonResponseLike>((resolve) => {
       resolveFetch = resolve
     })
     mockFetch
