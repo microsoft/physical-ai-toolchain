@@ -14,7 +14,7 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.152.3",
+    "hypothesis==6.152.4",
     "numpy==2.4.4",
     "ruff==0.15.12",
     "pytest==9.0.3",
