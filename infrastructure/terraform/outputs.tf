@@ -196,3 +196,32 @@ output "osmo_workload_identity" {
   description = "OSMO workload identity for deployment scripts"
   value       = module.platform.osmo_workload_identity
 }
+
+// ============================================================
+// Conversion Pipeline Outputs (Optional)
+// ============================================================
+
+output "conversion_pipeline_event_grid_topic" {
+  description = "Conversion pipeline Event Grid system topic. Null when conversion pipeline is disabled."
+  value       = try(module.conversion_pipeline[0].event_grid_topic, null)
+}
+
+output "conversion_pipeline_event_grid_subscription" {
+  description = "Conversion pipeline Event Grid subscription. Null when conversion pipeline is disabled."
+  value       = try(module.conversion_pipeline[0].event_grid_subscription, null)
+}
+
+output "conversion_pipeline_event_grid_dlq_container" {
+  description = "Conversion pipeline Event Grid dead-letter container. Null when DLQ is disabled or pipeline is disabled."
+  value       = try(module.conversion_pipeline[0].event_grid_dlq_container, null)
+}
+
+output "conversion_pipeline_fabric_workspace" {
+  description = "Conversion pipeline Microsoft Fabric workspace. Null when conversion pipeline is disabled."
+  value       = try(module.conversion_pipeline[0].fabric_workspace, null)
+}
+
+output "conversion_pipeline_fabric_capacity" {
+  description = "Conversion pipeline Microsoft Fabric capacity. Null when capacity is reused or pipeline is disabled."
+  value       = try(module.conversion_pipeline[0].fabric_capacity, null)
+}
