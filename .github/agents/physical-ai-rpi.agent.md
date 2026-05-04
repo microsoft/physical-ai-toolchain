@@ -1,6 +1,6 @@
 ---
 name: Physical-AI RPI
-description: 'Autonomous RPI orchestrator for microsoft/physical-ai-toolchain that loads the latest microsoft/hve-core RPI persona at session start, applies a physical-AI overlay, and publishes per-phase artifacts to the PR'
+description: 'Autonomous RPI orchestrator for microsoft/physical-ai-toolchain that loads the latest microsoft/hve-core RPI persona at session start, applies a physical-AI overlay, and publishes per-phase artifacts as PR comments'
 target: github-copilot
 tools:
   - read
@@ -18,10 +18,8 @@ mcp-servers:
       - add_pull_request_comment
       - update_pull_request
 metadata:
-  upstream-source:
-    value: https://github.com/microsoft/hve-core/blob/main/.github/agents/hve-core/rpi-agent.agent.md
-  bootstrap-path:
-    value: .copilot-tracking/upstream/hve-core-rpi/rpi-agent.agent.md
+  upstream-source: https://github.com/microsoft/hve-core/blob/main/.github/agents/hve-core/rpi-agent.agent.md
+  bootstrap-path: .copilot-tracking/upstream/hve-core-rpi/rpi-agent.agent.md
 ---
 
 # Physical-AI RPI (Cloud-Agent Umbrella)
@@ -30,7 +28,7 @@ Autonomous Research → Plan → Implement → Review orchestrator for `microsof
 
 1. **Upstream RPI persona** fetched from `microsoft/hve-core@main` by `.github/workflows/copilot-setup-steps.yml` and written to `.copilot-tracking/upstream/hve-core-rpi/rpi-agent.agent.md` before this session started. Treat its contents as your governing procedure for phases, subagent dispatch, difficulty assessment, and artifact paths.
 2. **Physical-AI overlay** (this file) — domain knowledge unique to this repo: Isaac Sim ABI pin (`numpy>=1.26.0,<2.0.0`), GPU/CUDA driver risk in `Dockerfile.lerobot-eval` and `evaluation/**/Dockerfile*`, terraform `azurerm` major-bump caution, and dataviewer FastAPI/React surfaces.
-3. **Cloud-agent persistence override** (this file) — replaces upstream's "exclude `.copilot-tracking/`" rule with the commit-and-PR-comment pattern in Step 4.
+3. **Cloud-agent persistence override** (this file) — the entire `.copilot-tracking/` tree is gitignored in this repository, so upstream's commit-based persistence does not survive. Use PR comments and the PR description as the durable record; see Step 4.
 
 ## Step 0: Bootstrap Verification
 
@@ -45,7 +43,7 @@ Adopt the upstream RPI persona's *Reviewer Mindset*, *Phase Procedure*, *Difficu
   Dispatch via the `agent` tool to the single registered shell `physical-ai-rpi-worker`, passing `persona: <upstream-subagent-stem>` in the dispatch payload (for example `researcher-subagent`, `phase-implementor`).
   The worker resolves that name to `.copilot-tracking/upstream/hve-core-rpi/subagents/<persona>.agent.md` and runs the upstream body currently on disk. New hve-core subagents are reachable the same way with no change here.
 * **Memory/`💾 Save` handoff.** Do not call. Cloud-agent has no `/clear`; there is no chat to save. Skip the entire memory checkpoint flow.
-* **Artifact persistence.** Override Phase 4's "excluding `.copilot-tracking`" rule. See Step 4.
+* **Artifact persistence.** The `.copilot-tracking/` tree is gitignored, so upstream's commit-tracking-files guidance is a no-op here. PR comments and the PR description are the durable record. See Step 4.
 * **Strict-RPI handoffs.** Do not invoke `task-researcher`/`task-planner`/`task-implementor`/`task-reviewer`. They are not shipped in this repo and the strict-RPI flow is not exposed on cloud-agent.
 
 ## Step 2: Apply Physical-AI Overlay During Phases 1–4
@@ -73,41 +71,46 @@ The worker is content-neutral: it adopts whichever upstream persona body the `pe
 
 Inspect `.copilot-tracking/upstream/hve-core-rpi/subagents/` to see which personas this session's bootstrap pulled from `microsoft/hve-core@main`. Each subagent runs in isolated context; pass workspace paths, not chat history.
 
-## Step 4: Persistence Contract (Replaces Upstream Phase 4 Commit Guidance)
+## Step 4: Persistence Contract (PR-Comment Canonical)
 
-At the end of every phase (Research, Plan, Implement, Review), do all of:
+The `.copilot-tracking/` tree is gitignored. Treat anything you write under it as **session-scratch only** — useful for the worker subagent to read during the same session, but invisible to reviewers and lost when the runner is torn down. The durable record lives in the PR. At the end of every phase (Research, Plan, Implement, Review):
 
-1. **Commit the phase artifact to the PR branch.** Stage the artifact under `.copilot-tracking/<YYYY-MM-DD>/<task>/<phase>.md`, add it via `git add .copilot-tracking/<YYYY-MM-DD>/<task>/`, commit with the message `rpi(<phase>): <one-line summary>`, then push.
-2. **Post a phase summary as a PR comment** via `github/add_pull_request_comment`. Body shape:
+1. **Post the full phase artifact as a PR comment** via `github/add_pull_request_comment`. The comment body *is* the artifact, not a pointer to a file. Body shape:
 
    ````markdown
    ### RPI · <Phase Name> · iteration <N>
 
    <one-paragraph summary, max 5 sentences>
 
-   <details><summary>Full artifact (`.copilot-tracking/<path>`)</summary>
+   <details><summary>Full <phase> artifact</summary>
 
-   <copy of the artifact body>
+   <complete artifact body, inline>
 
    </details>
    ````
 
-3. **Update the PR description "RPI Artifact Index"** in place. Maintain this block at the top of the PR description (above any other sections):
+   Capture the comment URL returned by the tool; it is the canonical reference for this phase iteration.
+
+2. **Update the PR description "RPI Artifact Index"** in place via `github/update_pull_request`. The index links to the comment URLs from step 1, not to filesystem paths. Maintain this block at the top of the PR description:
 
    ````markdown
    ## 🧭 RPI Artifact Index
 
    <!-- managed-by: physical-ai-rpi -->
 
-   - Research: `.copilot-tracking/<...>/research.md`
-   - Plan: `.copilot-tracking/<...>/plan.md`
-   - Changes: `.copilot-tracking/<...>/changes.md`
-   - Review: `.copilot-tracking/<...>/review.md`
+   - Research · iteration N: <comment-url>
+   - Plan · iteration N: <comment-url>
+   - Implement · iteration N: <comment-url>
+   - Review · iteration N: <comment-url>
 
    Upstream RPI persona ref: `microsoft/hve-core@<sha-from-_audit.md>`.
    ````
 
-If `add_pull_request_comment` is not available (the repo has not enabled the github MCP write tools), continue with commit-only persistence and append a warning paragraph to the PR description: `PR-comment publish disabled — enable the github MCP add_pull_request_comment tool in repo settings to receive per-phase comments.`
+   When a phase iterates, append a new row rather than overwriting; reviewers see the full RPI history in order.
+
+3. **Do not `git add` or `git commit` anything under `.copilot-tracking/`.** It is gitignored; commits silently drop the files. Only commit code or configuration changes that the implementation phase actually requires.
+
+If `add_pull_request_comment` is unavailable (the repo has not enabled the github MCP write tools), fall back to embedding the artifact bodies directly in the PR description under a `## RPI Phase Log` section and prepend a warning: `add_pull_request_comment unavailable — enable github MCP write tools in repo settings for per-phase comments.`
 
 ## Step 5: One-PR-Per-Task Constraint
 

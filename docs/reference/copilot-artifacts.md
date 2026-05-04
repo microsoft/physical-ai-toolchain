@@ -26,6 +26,8 @@ automatically in VS Code.
 |-------------|----------------------------|-----------------------------------------------------|-------------------------------------------------------------------|
 | Agent       | Dataviewer Developer       | Interactive dataset analysis and tool development   | `.github/agents/dataviewer-developer.agent.md`                    |
 | Agent       | OSMO Training Manager      | LeRobot training lifecycle on OSMO with Azure ML    | `.github/agents/osmo-training-manager.agent.md`                   |
+| Agent       | Physical-AI RPI            | Cloud-agent RPI orchestrator (umbrella)             | `.github/agents/physical-ai-rpi.agent.md`                         |
+| Agent       | Physical-AI RPI Worker     | Hidden generic subagent shell for Physical-AI RPI   | `.github/agents/physical-ai-rpi-worker.agent.md`                  |
 | Instruction | Commit Messages            | Conventional Commits format for all commit messages | `.github/instructions/commit-message.instructions.md`             |
 | Instruction | Dataviewer                 | Coding standards for dataviewer development         | `.github/instructions/dataviewer.instructions.md`                 |
 | Instruction | Docs Style and Conventions | Writing standards for all markdown files            | `.github/instructions/docs-style-and-conventions.instructions.md` |
@@ -83,6 +85,48 @@ on OSMO with Azure ML integration.
 Five-phase workflow: Submit → Monitor → Analyze → Summarize → Inference
 Evaluation. Handles VM eviction recovery, CUDA errors, and KeyError
 failures.
+
+### Physical-AI RPI (Umbrella) and Physical-AI RPI Worker
+
+Paired cloud-agent profiles that surface the autonomous Research → Plan →
+Implement → Review workflow from `microsoft/hve-core` inside cloud-agent
+sessions for this repository. The umbrella is picker-visible; the worker
+is hidden and reachable only via the umbrella's `agent` tool fan-out.
+
+| Property | Umbrella (`physical-ai-rpi`)                                       | Worker (`physical-ai-rpi-worker`)                                |
+|----------|--------------------------------------------------------------------|------------------------------------------------------------------|
+| Target   | `github-copilot` (cloud-agent only)                                | `github-copilot` (cloud-agent only)                              |
+| Picker   | Visible (`user-invocable: true`, default)                          | Hidden (`user-invocable: false`, `disable-model-invocation: true`) |
+| Tools    | `read`, `edit`, `search`, `bash`, `agent`, `github/*` write tools  | `read`, `edit`, `search`, `bash`, read-only `github/*`           |
+| Role     | Orchestrator: bootstrap verification, RPI procedure, persistence   | Content-neutral executor: adopts upstream persona by name        |
+| Persists | Posts full phase artifacts as PR comments and maintains an "RPI Artifact Index" in the PR description | None (umbrella owns PR comments and PR description) |
+
+The two-agent split exists because cloud-agent surface constraints cannot
+be satisfied with a single profile:
+
+- **Picker visibility versus hiding.** A profile is either selectable or
+  not. The umbrella must surface in the picker; the worker must stay
+  hidden so only the umbrella can dispatch it.
+- **Subagent context isolation.** The cloud-agent `agent` tool runs each
+  dispatch target in a fresh context window. The umbrella needs that isolation
+  when fanning out to upstream `researcher-subagent` and
+  `phase-implementor` personas — without it, every research finding and
+  implementation diff would pollute the orchestrator context.
+- **Decoupling from `microsoft/hve-core`'s subagent roster.** The worker
+  takes a `persona: <stem>` parameter and resolves it to
+  `.copilot-tracking/upstream/hve-core-rpi/subagents/<persona>.agent.md`
+  at dispatch time. New upstream personas auto-onboard via the next
+  bootstrap with no PR in this repo.
+- **Different tool grants.** The umbrella holds github write tools for
+  per-phase PR comments; the worker is read-only on github and never
+  commits. Merging them would leak orchestrator write authority into
+  every research and implementation invocation.
+
+Upstream RPI persona bodies are downloaded into the workspace by
+`.github/workflows/copilot-setup-steps.yml` (`Bootstrap hve-core RPI
+persona` step). The umbrella body reads `_audit.md` for the resolved
+`microsoft/hve-core@main` SHA and fails fast with a PR comment if the
+bootstrap is missing.
 
 ## 📝 Instructions
 
