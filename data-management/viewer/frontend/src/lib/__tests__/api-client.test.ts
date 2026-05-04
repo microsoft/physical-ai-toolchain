@@ -38,12 +38,11 @@ afterEach(() => {
 })
 
 function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(data), {
     status,
     statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(data),
-  }
+    headers: { 'content-type': 'application/json' },
+  })
 }
 
 describe('ApiClientError', () => {
@@ -238,12 +237,13 @@ describe('error handling', () => {
   })
 
   it('handles non-JSON error responses', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-      json: () => Promise.reject(new Error('not json')),
-    })
+    mockFetch.mockResolvedValueOnce(
+      new Response('not json body', {
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { 'content-type': 'text/plain' },
+      }),
+    )
 
     try {
       await fetchDatasets()

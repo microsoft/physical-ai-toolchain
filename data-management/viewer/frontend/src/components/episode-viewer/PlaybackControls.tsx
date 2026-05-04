@@ -44,7 +44,13 @@ export function PlaybackControls({
     <div className="bg-muted flex items-center gap-4 rounded-lg p-2">
       {/* Frame navigation */}
       <div className="flex items-center gap-1">
-        <Button variant="ghost" size="icon" onClick={() => setCurrentFrame(0)} title="Go to start">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setCurrentFrame(0)}
+          title="Go to start"
+          aria-label="Go to start"
+        >
           <SkipBack className="h-4 w-4" />
         </Button>
         <Button
@@ -52,6 +58,7 @@ export function PlaybackControls({
           size="icon"
           onClick={() => setCurrentFrame(Math.max(0, currentFrame - 1))}
           title="Previous frame (←)"
+          aria-label="Previous frame"
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
@@ -63,6 +70,7 @@ export function PlaybackControls({
         size="icon"
         onClick={togglePlayback}
         title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+        aria-label={isPlaying ? 'Pause' : 'Play'}
       >
         {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
       </Button>
@@ -74,6 +82,7 @@ export function PlaybackControls({
           size="icon"
           onClick={() => setCurrentFrame(currentFrame + 1)}
           title="Next frame (→)"
+          aria-label="Next frame"
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -82,6 +91,7 @@ export function PlaybackControls({
           size="icon"
           onClick={() => setCurrentFrame(totalFrames - 1)}
           title="Go to end"
+          aria-label="Go to end"
         >
           <SkipForward className="h-4 w-4" />
         </Button>

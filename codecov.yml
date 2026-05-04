@@ -10,6 +10,11 @@
 # pytest-evaluation    | evaluation-pytests.yml         | evaluation                     | --cov=.
 # pytest-fuzz          | fuzz-regression-tests.yml      | repo root                      | --cov=tests --cov=data-management/viewer/backend/src --cov=training
 # vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | vitest --coverage
+# vitest-components    | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/components/
+# vitest-features      | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/components/features/
+# vitest-lib           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/lib/
+# vitest-state         | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/stores/, src/hooks/
+# vitest-app           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/App.tsx
 # go                   | go-tests.yml                   | infrastructure/terraform/e2e   | go test -cover
 # terraform            | terraform-tests.yml            | infrastructure/terraform       | terraform test
 # pester               | pester-tests.yml               | repo root                      | Invoke-Pester -CodeCoverage
@@ -18,6 +23,9 @@
 #   pytest-fuzz overlaps pytest-training (training/) and pytest-dataviewer (viewer/backend/src/).
 #   go ⊂ terraform (infrastructure/terraform/e2e/ ⊂ infrastructure/terraform/);
 #     deduplicated at the component layer (infrastructure-terraform vs infrastructure-go-e2e).
+#   vitest-* (components/features/lib/state/app) overlap the aggregate vitest flag and each
+#     other (vitest-features ⊂ vitest-components since features live under components/);
+#     intentional to surface per-section coverage trends without losing the aggregate view.
 
 codecov:
   notify:
@@ -82,6 +90,31 @@ coverage:
           - vitest
         target: auto
         threshold: 1%
+      vitest-components:
+        flags:
+          - vitest-components
+        target: auto
+        threshold: 1%
+      vitest-features:
+        flags:
+          - vitest-features
+        target: auto
+        threshold: 1%
+      vitest-lib:
+        flags:
+          - vitest-lib
+        target: auto
+        threshold: 1%
+      vitest-state:
+        flags:
+          - vitest-state
+        target: auto
+        threshold: 1%
+      vitest-app:
+        flags:
+          - vitest-app
+        target: auto
+        threshold: 1%
       pytest-evaluation:
         flags:
           - pytest-evaluation
@@ -131,6 +164,26 @@ coverage:
         flags:
           - vitest
         informational: true
+      vitest-components:
+        flags:
+          - vitest-components
+        informational: true
+      vitest-features:
+        flags:
+          - vitest-features
+        informational: true
+      vitest-lib:
+        flags:
+          - vitest-lib
+        informational: true
+      vitest-state:
+        flags:
+          - vitest-state
+        informational: true
+      vitest-app:
+        flags:
+          - vitest-app
+        informational: true
       pytest-evaluation:
         flags:
           - pytest-evaluation
@@ -170,6 +223,32 @@ flags:
   vitest:
     paths:
       - data-management/viewer/frontend/src/
+    carryforward: true
+  vitest-components:
+    paths:
+      - data-management/viewer/frontend/src/components/
+    carryforward: true
+  vitest-features:
+    paths:
+      - data-management/viewer/frontend/src/components/dashboard/
+      - data-management/viewer/frontend/src/components/annotation-panel/
+      - data-management/viewer/frontend/src/components/frame-editor/
+      - data-management/viewer/frontend/src/components/episode-viewer/
+    carryforward: true
+  vitest-lib:
+    paths:
+      - data-management/viewer/frontend/src/lib/
+      - data-management/viewer/frontend/src/api/
+      - data-management/viewer/frontend/src/types/
+    carryforward: true
+  vitest-state:
+    paths:
+      - data-management/viewer/frontend/src/stores/
+      - data-management/viewer/frontend/src/hooks/
+    carryforward: true
+  vitest-app:
+    paths:
+      - data-management/viewer/frontend/src/App.tsx
     carryforward: true
   go:
     paths:
