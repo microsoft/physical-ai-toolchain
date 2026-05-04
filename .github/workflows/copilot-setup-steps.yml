@@ -78,6 +78,68 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      # Bootstrap the microsoft/hve-core RPI persona for the cloud-agent
+      # `Physical-AI RPI` umbrella. This step runs outside the cloud-agent
+      # firewall (per the customize-the-agent-firewall docs) so it can fetch
+      # raw.githubusercontent.com content that the agent itself cannot reach.
+      # The umbrella agent reads `_audit.md` at session start and fails fast
+      # with a PR comment if these files are missing.
+      - name: Bootstrap hve-core RPI persona
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPO: microsoft/hve-core
+          UPSTREAM_REF: main
+          UPSTREAM_SUBAGENTS_PATH: .github/agents/hve-core/subagents
+          UPSTREAM_UMBRELLA_PATH: .github/agents/hve-core/rpi-agent.agent.md
+          DEST_DIR: .copilot-tracking/upstream/hve-core-rpi
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${DEST_DIR}/subagents"
+
+          sha="$(gh api "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_REF}" --jq .sha)"
+          if [ -z "${sha}" ]; then
+            echo "Failed to resolve ${UPSTREAM_REPO}@${UPSTREAM_REF} SHA" >&2
+            exit 1
+          fi
+
+          echo "Resolved ${UPSTREAM_REPO}@${UPSTREAM_REF} -> ${sha}"
+
+          umbrella_url="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${sha}/${UPSTREAM_UMBRELLA_PATH}"
+          curl -fsSL "${umbrella_url}" -o "${DEST_DIR}/rpi-agent.agent.md"
+
+          mapfile -t subagent_names < <(
+            gh api "repos/${UPSTREAM_REPO}/contents/${UPSTREAM_SUBAGENTS_PATH}?ref=${sha}" \
+              --jq '.[] | select(.type=="file") | select(.name | endswith(".agent.md")) | .name'
+          )
+
+          if [ "${#subagent_names[@]}" -eq 0 ]; then
+            echo "No subagents discovered under ${UPSTREAM_REPO}@${sha}:${UPSTREAM_SUBAGENTS_PATH}" >&2
+            exit 1
+          fi
+
+          for name in "${subagent_names[@]}"; do
+            url="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${sha}/${UPSTREAM_SUBAGENTS_PATH}/${name}"
+            curl -fsSL "${url}" -o "${DEST_DIR}/subagents/${name}"
+          done
+
+          {
+            echo "# hve-core RPI bootstrap audit"
+            echo
+            echo "- upstream: ${UPSTREAM_REPO}"
+            echo "- ref: ${sha}"
+            echo "- resolved-at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- umbrella: rpi-agent.agent.md"
+            echo "- subagents:"
+            for name in "${subagent_names[@]}"; do
+              echo "  - ${name}"
+            done
+          } > "${DEST_DIR}/_audit.md"
+
+          echo "Bootstrap complete:"
+          ls -la "${DEST_DIR}" "${DEST_DIR}/subagents"
+
       - name: Install PowerShell modules (Pester 5.7.1, powershell-yaml)
         shell: pwsh
         run: |
