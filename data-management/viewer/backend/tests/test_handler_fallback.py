@@ -5,6 +5,7 @@ Tests _try_handlers iteration and get_episode handler chain behavior
 using stub handlers to verify fallback from primary to secondary handler.
 """
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -135,8 +136,7 @@ class TestResolveHandler:
 class TestListDatasetsRefresh:
     """Test local dataset discovery refresh removes deleted datasets."""
 
-    @pytest.mark.asyncio
-    async def test_list_datasets_prunes_deleted_local_dataset(self, tmp_path):
+    def test_list_datasets_prunes_deleted_local_dataset(self, tmp_path):
         svc = DatasetService(base_path=str(tmp_path))
         dataset_dir = tmp_path / "deleted-dataset"
         dataset_dir.mkdir()
@@ -161,13 +161,13 @@ class TestListDatasetsRefresh:
         svc._lerobot_handler = handler
         svc._hdf5_handler = handler
 
-        initial = await svc.list_datasets()
+        initial = asyncio.run(svc.list_datasets())
 
         assert [dataset.id for dataset in initial] == ["deleted-dataset"]
 
         dataset_dir.rmdir()
 
-        refreshed = await svc.list_datasets()
+        refreshed = asyncio.run(svc.list_datasets())
 
         assert [dataset.id for dataset in refreshed] == []
 
@@ -187,8 +187,7 @@ class TestHasLoader:
 class TestGetEpisodeHandlerChain:
     """Test async get_episode handler chain with blob fallback."""
 
-    @pytest.mark.asyncio
-    async def test_get_episode_uses_primary_handler(self, service_with_stubs):
+    def test_get_episode_uses_primary_handler(self, service_with_stubs):
         svc = service_with_stubs
         episode = EpisodeData(
             meta=EpisodeMeta(index=0, length=10, task_index=0),
@@ -202,12 +201,11 @@ class TestGetEpisodeHandlerChain:
         svc._lerobot_handler = primary
         svc._hdf5_handler = secondary
 
-        result = await svc.get_episode("ds1", 0)
+        result = asyncio.run(svc.get_episode("ds1", 0))
         assert result is not None
         assert result.meta.length == 10
 
-    @pytest.mark.asyncio
-    async def test_get_episode_falls_through_to_secondary(self, service_with_stubs):
+    def test_get_episode_falls_through_to_secondary(self, service_with_stubs):
         svc = service_with_stubs
         episode = EpisodeData(
             meta=EpisodeMeta(index=0, length=5, task_index=0),
@@ -221,12 +219,11 @@ class TestGetEpisodeHandlerChain:
         svc._lerobot_handler = primary
         svc._hdf5_handler = secondary
 
-        result = await svc.get_episode("ds1", 0)
+        result = asyncio.run(svc.get_episode("ds1", 0))
         assert result is not None
         assert result.meta.length == 5
 
-    @pytest.mark.asyncio
-    async def test_get_episode_returns_empty_when_no_handler(self, service_with_stubs):
+    def test_get_episode_returns_empty_when_no_handler(self, service_with_stubs):
         svc = service_with_stubs
         primary = StubHandler("primary")
         secondary = StubHandler("secondary")
@@ -234,13 +231,12 @@ class TestGetEpisodeHandlerChain:
         svc._lerobot_handler = primary
         svc._hdf5_handler = secondary
 
-        result = await svc.get_episode("unknown", 0)
+        result = asyncio.run(svc.get_episode("unknown", 0))
         assert result is not None
         assert result.meta.length == 0
         assert result.trajectory_data == []
 
-    @pytest.mark.asyncio
-    async def test_get_episode_blob_sync_delegates_to_handler(self, tmp_path):
+    def test_get_episode_blob_sync_delegates_to_handler(self, tmp_path):
         """Blob sync path should delegate loader creation to the handler."""
         svc = DatasetService(base_path=str(tmp_path))
 
@@ -270,7 +266,7 @@ class TestGetEpisodeHandlerChain:
         svc._hdf5_handler = StubHandler("secondary")
         svc._handlers = [primary, svc._hdf5_handler]
 
-        result = await svc.get_episode("blob_ds", 0)
+        result = asyncio.run(svc.get_episode("blob_ds", 0))
         assert result is not None
         assert result.meta.length == 3
         svc._ensure_blob_synced.assert_awaited_once_with("blob_ds")

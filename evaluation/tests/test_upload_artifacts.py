@@ -214,6 +214,7 @@ class TestUploadToMlflow:
         monkeypatch.setenv("MAX_STEPS", "500")
         monkeypatch.setenv("VIDEO_LENGTH", "200")
         monkeypatch.setenv("INFERENCE_FORMAT", "both")
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         _, mock_utils, _ = self._inject_mock_modules(monkeypatch)
         mock_storage = MagicMock()
@@ -453,6 +454,7 @@ class TestUploadToBlobFallback:
         mock_container.upload_blob.assert_called()
 
     def test_no_files_returns_false(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
         self._inject_azure_mocks(monkeypatch)
         result = upload_to_blob_fallback(
             task="t",
@@ -465,6 +467,7 @@ class TestUploadToBlobFallback:
         assert result is False
 
     def test_per_file_upload_exception_continues(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
         (tmp_path / "policy.onnx").write_bytes(b"model-onnx")
         (tmp_path / "policy.jit").write_bytes(b"model-jit")
         _, mock_container = self._inject_azure_mocks(monkeypatch)
@@ -482,6 +485,8 @@ class TestUploadToBlobFallback:
         assert mock_container.upload_blob.call_count == 2
 
     def test_video_upload_success_and_exception(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+        (tmp_path / "home").mkdir()
         (tmp_path / "policy.onnx").write_bytes(b"model-data")
         videos_dir = tmp_path / "videos"
         videos_dir.mkdir()

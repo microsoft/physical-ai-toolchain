@@ -54,6 +54,7 @@ addopts = [
     "--cov=metrics",
     "--cov-report=term-missing",
     "--cov-report=xml:logs/coverage.xml",
+    "--cov-fail-under=80",
     "--junitxml=logs/pytest-results.xml",
 ]
 markers = [

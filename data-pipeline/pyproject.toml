@@ -1,0 +1,45 @@
+[project]
+name = "physical-ai-data-pipeline"
+version = "0.1.0"
+description = "Data capture pipeline runtime"
+requires-python = ">=3.12"
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["capture/tests"]
+pythonpath = ["."]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=capture",
+    "--cov-report=term-missing",
+    "--cov-report=xml:logs/coverage.xml",
+    # TODO: Re-enable --cov-fail-under=80 once `capture/` source modules land.
+    # The package currently ships only test scaffolding, so any threshold is vacuous.
+    "--junitxml=logs/pytest-results.xml",
+]
+
+[tool.coverage.run]
+source = ["capture"]
+branch = true
+omit = [
+    "**/conftest.py",
+    "**/__init__.py",
+    "**/tests/**",
+]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.coverage.xml]
+output = "logs/coverage.xml"

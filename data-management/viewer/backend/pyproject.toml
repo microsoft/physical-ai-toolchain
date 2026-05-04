@@ -78,3 +78,12 @@ constraint-dependencies = ["pygments==2.20.0"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = ["src/**/conftest.py", "src/**/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
