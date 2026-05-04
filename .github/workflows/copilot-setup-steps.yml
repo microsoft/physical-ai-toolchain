@@ -73,6 +73,11 @@ jobs:
       - name: Setup TFLint
         uses: terraform-linters/setup-tflint@b480b8fcdaa6f2c577f8e4fa799e89e756bb7c93  # v6.2.2
 
+      - name: Install gh-aw CLI extension
+        run: gh extension install github/gh-aw
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Install PowerShell modules (Pester 5.7.1, powershell-yaml)
         shell: pwsh
         run: |

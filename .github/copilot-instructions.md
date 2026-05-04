@@ -301,6 +301,8 @@ GitHub Copilot Coding Agent runs in a cloud GitHub Actions environment, separate
 
 The cloud-agent workflow does NOT install: `actionlint` (devcontainer-only, used for `npm run lint:yaml`), `golangci-lint`, `terraform-docs`, `osmo`, `ngc`, Azure CLI, kubectl, helm, k9s. These are Azure-deployment or local-validation tools the agent does not need to author or test code.
 
+The cloud-agent workflow installs `gh aw` (GitHub Agentic Workflows CLI) without version pinning. The latest stable release is installed at session start because `gh aw` maintains backward compatibility with older compiled workflows, lock files embed their `compiler_version` for auditability, and the extension releases multiple times per week making pinning impractical.
+
 ### Environment Synchronization
 
 Treat `.github/workflows/copilot-setup-steps.yml` and `.devcontainer/devcontainer.json` as paired environments. When changing toolchain versions in either file, evaluate whether the other needs the same change:
