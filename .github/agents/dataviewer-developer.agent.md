@@ -14,6 +14,14 @@ handoffs:
     agent: Dataviewer Developer
     prompt: "Annotate episodes in the current dataset"
     send: true
+  - label: "🤖 Run VLM Judge"
+    agent: Dataviewer Developer
+    prompt: "Run the VLM-as-judge harness across the loaded datasets and summarize results"
+    send: true
+  - label: "📝 Annotate dataset"
+    agent: Dataviewer Developer
+    prompt: "/dataviewer-annotate "
+    send: false
 ---
 
 # Dataviewer Developer
@@ -224,6 +232,48 @@ Follow these codebase conventions:
 
 Return to Phase 2 to continue browsing, or repeat Phase 4 for additional features.
 
+### Phase 5: VLM-as-Judge Evaluation
+
+Drive the VLM judge harness against the loaded datasets, either through the dataviewer's `JudgePanel` (UI verification) or the `evaluation.vlm_judge` CLI (bulk batches). Both share one disk cache, so CLI primes UI and vice versa.
+
+Full surface reference and prompt schema live in the dataviewer skill ("VLM-as-Judge Workflow" and "VLM-as-Judge Endpoints"). The agent steps below stay focused on orchestration and reporting.
+
+#### Step 1: Confirm the judge is enabled
+
+1. Read `data-management/viewer/backend/.env`.
+2. Verify `VLM_JUDGE_ENABLED=true` and that `VLM_JUDGE_BACKEND` matches user intent (`echo` for wiring, `qwen3-vl` for local GPU, `openai-compat` for remote endpoints).
+3. **For `qwen3-vl` backend**, prefer the shim pattern: rewrite `.env` to `VLM_JUDGE_BACKEND=openai-compat` + `VLM_JUDGE_BASE_URL=http://127.0.0.1:8001/v1`, then start `python -m evaluation.vlm_judge.openai_shim` from the **root** `.venv` (which has Torch + transformers). The dataviewer's own venv stays lightweight. Probe `http://127.0.0.1:8001/health` before continuing.
+4. If any value is missing, edit `.env` and **restart** `start.sh` — uvicorn auto-reload does not pick up env changes.
+5. Probe `GET /api/datasets/{id}/episodes/0/judge` for the user's first dataset; a response with `enabled: true` confirms the router is mounted.
+
+#### Step 2: Smoke-test with the echo backend
+
+When the user wants confidence in the wiring before paying for inference:
+
+1. Set `VLM_JUDGE_BACKEND=echo` in `.env`, restart the backend.
+2. Run `python -m evaluation.vlm_judge.run --dataset datasets/<id> --backend echo --limit 2 --n-frames 6 --output /tmp/vj-<id>.jsonl` for each dataset.
+3. Tail the JSONL to verify episode discovery, view selection, and frame extraction. The VLM responses are deterministic placeholders; `outcome_success` is always `true`.
+
+#### Step 3: Run the real judge
+
+1. Switch `VLM_JUDGE_BACKEND` to `qwen3-vl` (local) or `openai-compat` with `VLM_JUDGE_BASE_URL` (remote). Restart the backend.
+2. Per dataset, prefer the wrapper scripts under `evaluation/vlm_judge/scripts/` when present; fall back to `python -m evaluation.vlm_judge.run` for arbitrary paths.
+3. Pipe each dataset to its own JSONL under `outputs/vlm-judge/`.
+4. After CLI completion, open the dataviewer and Playwright-click into a sample episode to confirm the panel renders the cached payload (`cached: true` badge).
+
+#### Step 4: Verify in the UI via Playwright
+
+1. `browser_snapshot` to read the Trajectory tab DOM.
+2. Either click the **Run judge** button via the snapshot ref, or use the JS fallback in the skill (find the `VLM Judge` `<h3>` and click the matching button).
+3. `browser_wait_for(text="SUCCESS")` (or `FAILURE` / `Inconclusive`) to confirm the outcome badge rendered.
+4. Spot-check failure cases by selecting an episode you expect to fail and confirming the milestones list + failure-mode chip render.
+
+#### Step 5: Summarize
+
+Report the run with: dataset id, episodes evaluated, judge model, prompt version, success rate, mean VOC, and a short list of any 4xx/5xx responses (the router maps 404 to missing dataset/episode and 422 to a missing instruction). Save the output paths so the user can drill in via `jq` or re-import into MLflow downstream.
+
+Return to Phase 2 for episode-level review or Phase 3 if the judge findings should drive label corrections.
+
 ## Conversation Guidelines
 
 - Announce the current phase when beginning work.
@@ -235,3 +285,4 @@ Return to Phase 2 to continue browsing, or repeat Phase 4 for additional feature
 - When annotating, report progress with counts (e.g., "Annotated 32/64 episodes, 31 LEFT, 33 RIGHT").
 - For annotation tasks, prefer API-first bulk operations followed by UI verification over annotating each episode individually through the UI.
 - Always call the save endpoint after bulk API annotation to persist labels to disk.
+- For VLM judge runs, prefer the CLI for bulk evaluation and the UI panel for verification of representative episodes; both share the same disk cache so work is never duplicated.
