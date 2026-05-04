@@ -7,7 +7,7 @@ dependencies = [
     "fastapi==0.136.1",
     "uvicorn[standard]==0.46.0",
     "pydantic==2.13.3",
-    "python-multipart==0.0.26",
+    "python-multipart==0.0.27",
     "python-dotenv==1.2.2",
     "aiofiles==25.1.0",
     "numpy==2.4.4",
@@ -32,7 +32,7 @@ azure = [
     "azure-identity==1.25.3",
 ]
 huggingface = [
-    "huggingface-hub==1.12.0",
+    "huggingface-hub==1.13.0",
 ]
 hdf5 = [
     "h5py==3.16.0",
@@ -43,7 +43,7 @@ export = [
     "Pillow==12.2.0",
 ]
 yolo = [
-    "ultralytics==8.4.41",
+    "ultralytics==8.4.46",
     "numpy==2.4.4",
     "Pillow==12.2.0",
 ]
