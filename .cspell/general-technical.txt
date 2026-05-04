@@ -2035,3 +2035,19 @@ vsmserver
 envaccount
 envcontainer
 mycontainer
+# LeIsaac / Lightwheel ecosystem
+configclass
+envhub
+glvnd
+leisaac
+libglvnd
+libglx
+lightwheel
+micromamba
+nvenc
+teleop
+teleoperation
+ttyacm
+usds
+dualcam
+smolvla
