@@ -18,6 +18,9 @@ mcp-servers:
       - add_pull_request_comment
       - update_pull_request
 metadata:
+  # upstream-source records the canonical hve-core URL for human reference.
+  # The actual SHA used by this session is recorded in _audit.md by the
+  # `Bootstrap hve-core RPI persona` step in copilot-setup-steps.yml.
   upstream-source: https://github.com/microsoft/hve-core/blob/main/.github/agents/hve-core/rpi-agent.agent.md
   bootstrap-path: .copilot-tracking/upstream/hve-core-rpi/rpi-agent.agent.md
 ---
@@ -32,7 +35,7 @@ Autonomous Research → Plan → Implement → Review orchestrator for `microsof
 
 ## Step 0: Bootstrap Verification
 
-1. Read `.copilot-tracking/upstream/hve-core-rpi/_audit.md`. Record the `ref:` SHA in your working notes; you will include it in the PR description audit footer.
+1. Read `.copilot-tracking/upstream/hve-core-rpi/_audit.md`. Record the `resolved-sha:` value in your working notes; you will include it in the PR description audit footer alongside the `requested-ref:` so reviewers can verify the pin.
 2. Read `.copilot-tracking/upstream/hve-core-rpi/rpi-agent.agent.md`. If the file is missing or empty, the bootstrap step failed. Stop, post a PR comment via `github/add_pull_request_comment` with the body `Could not load microsoft/hve-core RPI persona; firewall or registry failure. Re-run the task once the bootstrap is green.`, and exit.
 
 ## Step 1: Instruction Priority
@@ -77,7 +80,7 @@ The `.copilot-tracking/` tree is gitignored. Treat anything you write under it a
 
 1. **Post the full phase artifact as a PR comment** via `github/add_pull_request_comment`. The comment body *is* the artifact, not a pointer to a file. Body shape:
 
-   ````markdown
+   `````markdown
    ### RPI · <Phase Name> · iteration <N>
 
    <one-paragraph summary, max 5 sentences>
@@ -87,13 +90,13 @@ The `.copilot-tracking/` tree is gitignored. Treat anything you write under it a
    <complete artifact body, inline>
 
    </details>
-   ````
+   `````
 
    Capture the comment URL returned by the tool; it is the canonical reference for this phase iteration.
 
 2. **Update the PR description "RPI Artifact Index"** in place via `github/update_pull_request`. The index links to the comment URLs from step 1, not to filesystem paths. Maintain this block at the top of the PR description:
 
-   ````markdown
+   `````markdown
    ## 🧭 RPI Artifact Index
 
    <!-- managed-by: physical-ai-rpi -->
@@ -103,8 +106,8 @@ The `.copilot-tracking/` tree is gitignored. Treat anything you write under it a
    - Implement · iteration N: <comment-url>
    - Review · iteration N: <comment-url>
 
-   Upstream RPI persona ref: `microsoft/hve-core@<sha-from-_audit.md>`.
-   ````
+   Upstream RPI persona ref: `microsoft/hve-core@<resolved-sha-from-_audit.md>` (requested ref: `<requested-ref-from-_audit.md>`).
+   `````
 
    When a phase iterates, append a new row rather than overwriting; reviewers see the full RPI history in order.
 

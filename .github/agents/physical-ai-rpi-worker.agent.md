@@ -13,6 +13,9 @@ tools:
   - github/search_code
   - github/list_pull_requests
 metadata:
+  # upstream-source records the canonical hve-core directory for human reference.
+  # The actual SHA used by this session is recorded in _audit.md by the
+  # `Bootstrap hve-core RPI persona` step in copilot-setup-steps.yml.
   upstream-source: https://github.com/microsoft/hve-core/tree/main/.github/agents/hve-core/subagents
   bootstrap-path: .copilot-tracking/upstream/hve-core-rpi/subagents/
 ---
