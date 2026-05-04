@@ -6,17 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { _resetCsrfToken } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
 import { useJointConfigStore } from '@/stores/joint-config-store'
+import { jsonResponse } from '@/test/test-utils'
 
 const mockFetch = vi.fn()
-
-function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(data),
-  }
-}
 
 function mockMutationFetch(apiResponse: ReturnType<typeof jsonResponse>) {
   mockFetch
