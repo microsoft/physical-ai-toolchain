@@ -59,6 +59,11 @@ terraform init && terraform plan -var-file=terraform.tfvars
 terraform apply -var-file=terraform.tfvars
 ```
 
+> [!IMPORTANT]
+> The conversion-pipeline module (`should_deploy_conversion_pipeline = true`) uses the `microsoft/fabric` provider, which authenticates via Azure CLI. Run `az login` before `terraform plan` / `apply`. The signed-in identity must be in a security group allow-listed under the Fabric tenant admin setting "Service principals can use Fabric APIs" (or the equivalent user/CLI-context allow-list).
+>
+> The conversion pipeline writes to the platform-owned data-lake account (`stdl...`); set `should_create_data_lake_storage = true` whenever `should_deploy_conversion_pipeline = true`.
+
 ### 3. Connect to the cluster
 
 ```bash

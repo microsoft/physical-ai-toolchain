@@ -66,6 +66,17 @@ updates:
       inference-dependencies:
         patterns:
           - "*"
+    # Upper-bound caps from azure-ai-ml<2 and lerobot<0.6 transitive constraints.
+    # Revisit when those packages release versions that lift the caps.
+    ignore:
+      - dependency-name: "marshmallow"
+        versions: [">=4.0.0"]
+      - dependency-name: "torch"
+        versions: [">=2.11.0"]
+      - dependency-name: "numpy"
+        versions: [">=2.3.0"]
+      - dependency-name: "packaging"
+        versions: [">=26.0"]
     labels:
       - "dependencies"
       - "python"

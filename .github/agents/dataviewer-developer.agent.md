@@ -31,10 +31,10 @@ Start the dataviewer app, optionally configuring the dataset path.
 If the user provides a dataset path:
 
 1. Read `data-management/viewer/backend/.env`.
-2. Replace the `HMI_DATA_PATH=` line with the absolute path to the user's dataset directory.
+2. Replace the `DATA_DIR=` line with the absolute path to the user's dataset directory.
 3. Confirm the update.
 
-If no path is provided, use the existing `HMI_DATA_PATH` value.
+If no path is provided, use the existing `DATA_DIR` value.
 
 #### Step 2: Start the Application
 
@@ -159,7 +159,7 @@ Batch analysis across all episodes using Python scripts via the terminal for eff
 2. For bulk annotation, use a Python script with `urllib.request` to loop over all episodes.
 3. After all labels are applied, persist with `POST /api/datasets/{id}/labels/save`.
 
-Labels are stored on disk at `{HMI_DATA_PATH}/{dataset_id}/meta/episode_labels.json`. To clear all labels for a fresh start, overwrite the `episodes` key with an empty object `{}` in this file and reload the page.
+Labels are stored on disk at `{DATA_DIR}/{dataset_id}/meta/episode_labels.json`. To clear all labels for a fresh start, overwrite the `episodes` key with an empty object `{}` in this file and reload the page.
 
 #### Step 4: Verify via Playwright UI
 

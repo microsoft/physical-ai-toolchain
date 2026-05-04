@@ -42,8 +42,8 @@ Copy `backend/.env.example` to `backend/.env` and set values for your environmen
 ### Local File Storage (default)
 
 ```env
-HMI_STORAGE_BACKEND=local
-HMI_DATA_PATH=/path/to/your/datasets
+STORAGE_BACKEND=local
+DATA_DIR=/path/to/your/datasets
 ```
 
 ### Azure Blob Storage
@@ -54,7 +54,7 @@ which supports managed identity, workload identity, and Azure CLI credentials
 automatically — no SAS token required in AKS or Container Apps.
 
 ```env
-HMI_STORAGE_BACKEND=azure
+STORAGE_BACKEND=azure
 AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 AZURE_STORAGE_DATASET_CONTAINER=datasets
 AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
@@ -75,8 +75,8 @@ Expected blob structure:
 
 | Variable                             | Default         | Description                                                    |
 |--------------------------------------|-----------------|----------------------------------------------------------------|
-| `HMI_STORAGE_BACKEND`                | `local`         | Storage backend: `local` or `azure`                            |
-| `HMI_DATA_PATH`                      | `./data`        | Local dataset directory (local mode)                           |
+| `STORAGE_BACKEND`                    | `local`         | Storage backend: `local` or `azure`                            |
+| `DATA_DIR`                      | `./data`        | Local dataset directory (local mode)                           |
 | `AZURE_STORAGE_ACCOUNT_NAME`         | —               | Azure Storage account name (azure mode)                        |
 | `AZURE_STORAGE_DATASET_CONTAINER`    | —               | Blob container for dataset files                               |
 | `AZURE_STORAGE_ANNOTATION_CONTAINER` | —               | Blob container for annotations (defaults to dataset container) |
@@ -196,16 +196,45 @@ npm run dev
 
 The application will be available at `http://localhost:5173`.
 
+## Annotation Features
+
+The annotation workspace exposes per-episode controls grouped by panel. Persisted state is stored alongside the dataset and surfaced through the REST API.
+
+### Multi-camera viewing
+
+Datasets that record multiple camera streams (e.g. `observation.images.front`, `observation.images.wrist`) drive a camera selector in the annotation workspace header. The selector lists every camera advertised by the episode's `cameras` array, falling back to the keys of `videoUrls` when the array is empty.
+
+| Behavior | Detail |
+|----------|--------|
+| Default selection | First entry in `episode.cameras` (or `videoUrls`) |
+| Override | User selection persists for the current episode |
+| Stale fallback | When the selected camera is missing on episode change, selection resets to the new `cameras[0]` |
+| Frame extraction | The chosen camera drives both video playback and `/frames/{idx}` thumbnail requests |
+
+### Language instruction (VLA annotation)
+
+Each episode can carry a structured `LanguageInstructionAnnotation` for vision-language-action training. The widget appears in the annotation panel and writes through `PUT /api/datasets/{id}/episodes/{idx}/annotations`.
+
+| Field | Purpose |
+|-------|---------|
+| `instruction` | Primary natural-language task description (max 1000 characters) |
+| `source` | Provenance: `human`, `template`, `llm-generated`, or `retroactive` |
+| `language` | BCP-47 language tag, defaults to `en` |
+| `paraphrases` | Alternative phrasings for data augmentation (up to 50 entries, 1000 characters each) |
+| `subtask_instructions` | Ordered subtask decomposition for hierarchical conditioning (up to 100 entries, 1000 characters each) |
+
+When a dataset task description is available, the widget seeds the instruction with `source = template` via the "Use as Instruction" button. Otherwise, "Add Instruction" creates a blank instruction with `source = human`. The source can be changed at any time through the dropdown.
+
 ## Container Deployment
 
 ### Docker Compose (local)
 
 ```bash
 # Local storage mode (mount datasets directory)
-HMI_LOCAL_DATA_PATH=/path/to/datasets docker compose up --build
+DATAVIEWER_HOST_DATA_DIR=/path/to/datasets docker compose up --build
 
 # Azure Blob Storage mode
-export HMI_STORAGE_BACKEND=azure
+export STORAGE_BACKEND=azure
 export AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 export AZURE_STORAGE_DATASET_CONTAINER=datasets
 export AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
@@ -217,7 +246,7 @@ docker compose up --build
 For AKS with workload identity or Container Apps with managed identity, set:
 
 ```env
-HMI_STORAGE_BACKEND=azure
+STORAGE_BACKEND=azure
 AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 AZURE_STORAGE_DATASET_CONTAINER=datasets
 BACKEND_HOST=0.0.0.0

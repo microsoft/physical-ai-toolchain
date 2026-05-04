@@ -10,14 +10,14 @@ from src.api.main import app
 
 @pytest.fixture(autouse=True)
 def reset_auth_state(tmp_path):
-    """Reset the auth provider singleton and set a valid HMI_DATA_PATH before each test."""
+    """Reset the auth provider singleton and set a valid DATA_DIR before each test."""
     from src.api import auth as auth_mod
 
-    os.environ["HMI_DATA_PATH"] = str(tmp_path)
+    os.environ["DATA_DIR"] = str(tmp_path)
     auth_mod.reset_auth_provider()
     yield
     auth_mod.reset_auth_provider()
-    os.environ.pop("HMI_DATA_PATH", None)
+    os.environ.pop("DATA_DIR", None)
 
 
 @pytest.fixture

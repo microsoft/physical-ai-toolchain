@@ -40,6 +40,9 @@ Install these tools before contributing:
 | terraform-docs | 0.21.0          | <https://github.com/terraform-docs/terraform-docs/releases>           |
 | hve-core       | latest          | <https://github.com/microsoft/hve-core>                               |
 
+> [!NOTE]
+> GitHub Copilot Coding Agent runs in a separate cloud GitHub Actions environment provisioned by [.github/workflows/copilot-setup-steps.yml](../../.github/workflows/copilot-setup-steps.yml). When you bump a language runtime or test runner version locally (devcontainer or this list), update the matching pin in that workflow so cloud-agent sessions stay aligned.
+
 ## Azure Access Requirements
 
 Deploying this architecture requires Azure subscription access with specific permissions and quotas:

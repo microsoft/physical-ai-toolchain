@@ -93,17 +93,19 @@ Render the review body as markdown in this order:
 
 ## Validation Signal
 
-The agent runs AFTER the `PR Validation` orchestrator finishes (`workflow_run`
-trigger). Use the deterministic CI conclusion as the canonical validation
-signal. Do not invoke `uv`, `pytest`, `npm ci`, `terraform`, or `go` from the
-bash tool — those binaries live on the host runner and are not visible
-inside the AWF firewall sandbox.
+The agent runs via `pull_request_target` and may execute BEFORE the
+`PR Validation` orchestrator has completed. Treat the deterministic CI
+conclusion as the canonical validation signal when it is available, and as
+`pending` otherwise. Do not invoke `uv`, `pytest`, `npm ci`, `terraform`,
+or `go` from the bash tool — those binaries live on the host runner and
+are not visible inside the AWF firewall sandbox.
 
 The orchestrator's overall conclusion is injected into the prompt as
-`PR_VALIDATION_CONCLUSION` (one of `success`, `failure`, `cancelled`,
-`neutral`, `skipped`, `timed_out`, `action_required`). Map the touched
-surfaces to the per-job check runs below and read each conclusion via the
-`github` MCP `pull_requests` toolset (or `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`).
+`PR_VALIDATION_CONCLUSION` (one of `pending`, `in_progress:<status>`,
+`success`, `failure`, `cancelled`, `neutral`, `skipped`, `timed_out`,
+`action_required`, or `unknown`). Map the touched surfaces to the
+per-job check runs below and read each conclusion via the `github` MCP
+`pull_requests` toolset (or `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`).
 
 ### Surface to Check Run Map
 
@@ -165,9 +167,10 @@ review body with three parts:
    violation, peer-dep conflict, breaking-changelog quote), prepend
    `⚠️ Maintainer review recommended` to the top of the review body once.
 
-If the orchestrator conclusion is unavailable (workflow not yet completed,
-PR resolution failed, or check-runs API returns empty), state:
-`⚠️ Deterministic CI conclusion unavailable; verdict is advisory only.`
+If the orchestrator conclusion is unavailable or still in progress
+(`pending`, `in_progress:*`, or `unknown`; PR resolution failed; or the
+check-runs API returns empty), state:
+`⚠️ Deterministic CI conclusion not yet available; verdict is advisory only.`
 and keep the verdict at `COMMENT`.
 
 ### Verdict Adjustment
@@ -181,8 +184,9 @@ and keep the verdict at `COMMENT`.
   check name plus its `html_url`. Do NOT skip enrichment — maintainers rely
   on the advisory output to triage which package in a grouped PR caused
   the failure.
-* `PR_VALIDATION_CONCLUSION` is `neutral`, `skipped`, or `action_required`
-  → verdict stays at `COMMENT`; body explains the inconclusive state.
+* `PR_VALIDATION_CONCLUSION` is `neutral`, `skipped`, `action_required`,
+  `pending`, `in_progress:*`, or `unknown` → verdict stays at `COMMENT`;
+  body explains the inconclusive or pending state.
 * The Isaac Sim ABI guard is sticky: a `numpy` 2.x bump keeps the verdict
   at `COMMENT` and forces the high-risk banner regardless of CI conclusion.
 

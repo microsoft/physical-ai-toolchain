@@ -185,6 +185,82 @@ class TestBuildTrajectory:
         assert points[0].end_effector_pose == [0.0] * 6
         assert points[0].gripper_state == 0.0
 
+    def test_velocity_estimated_from_finite_differences(self):
+        """When velocities are missing, estimate via dq/dt and pad final sample."""
+        from src.api.services.dataset_service.base import build_trajectory
+
+        length = 3
+        timestamps = np.array([0.0, 1.0, 2.0])
+        joint_positions = np.array(
+            [
+                [0.0, 0.0],
+                [1.0, 2.0],
+                [3.0, 6.0],
+            ]
+        )
+
+        points = build_trajectory(
+            length=length,
+            timestamps=timestamps,
+            joint_positions=joint_positions,
+        )
+
+        # Forward differences for the first two samples; last sample repeats
+        # the previous diff so the array stays the same length.
+        assert points[0].joint_velocities == pytest.approx([1.0, 2.0])
+        assert points[1].joint_velocities == pytest.approx([2.0, 4.0])
+        assert points[2].joint_velocities == pytest.approx([2.0, 4.0])
+
+    def test_velocity_estimation_clamps_zero_dt(self):
+        """Non-monotonic timestamps must not produce NaN/Inf velocities."""
+        from src.api.services.dataset_service.base import build_trajectory
+
+        timestamps = np.array([0.0, 0.0, 0.0])
+        joint_positions = np.array(
+            [
+                [0.0, 0.0],
+                [1.0, -1.0],
+                [2.0, -2.0],
+            ]
+        )
+
+        points = build_trajectory(
+            length=3,
+            timestamps=timestamps,
+            joint_positions=joint_positions,
+        )
+
+        for point in points:
+            for value in point.joint_velocities:
+                assert np.isfinite(value)
+
+    def test_velocity_estimation_skipped_for_single_row(self):
+        """Single-frame trajectories must not crash the velocity estimator."""
+        from src.api.services.dataset_service.base import build_trajectory
+
+        points = build_trajectory(
+            length=1,
+            timestamps=np.array([0.0]),
+            joint_positions=np.zeros((1, 6)),
+        )
+
+        assert len(points) == 1
+        assert points[0].joint_velocities == [0.0] * 6
+
+    def test_velocity_guard_handles_length_gt_positions_shape(self):
+        """If length is overstated relative to joint_positions, no diff crash."""
+        from src.api.services.dataset_service.base import build_trajectory
+
+        # length>1 but joint_positions has only one row: guard must skip
+        # estimation rather than IndexError on the diff-padding step.
+        points = build_trajectory(
+            length=1,
+            timestamps=np.array([0.0]),
+            joint_positions=np.ones((1, 4)),
+        )
+
+        assert points[0].joint_velocities == [0.0] * 4
+
 
 class TestSubdirectoryEpisodeDiscovery:
     """
