@@ -82,9 +82,9 @@ describe('analyzeTrajectory', () => {
     mockFetch.mockResolvedValueOnce(okResponse())
     mockHandleResponse.mockRejectedValueOnce(new Error('parse failure'))
 
-    await expect(
-      analyzeTrajectory({ positions: [], timestamps: [] }),
-    ).rejects.toThrow('parse failure')
+    await expect(analyzeTrajectory({ positions: [], timestamps: [] })).rejects.toThrow(
+      'parse failure',
+    )
   })
 })
 

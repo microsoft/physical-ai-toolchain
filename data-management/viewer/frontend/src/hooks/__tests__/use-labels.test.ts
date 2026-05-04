@@ -80,9 +80,7 @@ describe('useDatasetLabels', () => {
 describe('useSaveEpisodeLabels', () => {
   it('PUTs labels and commits them to the store', async () => {
     selectDataset()
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({ episode_index: 3, labels: ['SUCCESS'] }),
-    )
+    mockFetch.mockResolvedValueOnce(jsonResponse({ episode_index: 3, labels: ['SUCCESS'] }))
 
     const { result } = renderHookWithQuery(() => useSaveEpisodeLabels())
 
@@ -105,18 +103,16 @@ describe('useSaveEpisodeLabels', () => {
   it('throws when no dataset is selected', async () => {
     const { result } = renderHookWithQuery(() => useSaveEpisodeLabels())
 
-    await expect(
-      result.current.mutateAsync({ episodeIdx: 0, labels: [] }),
-    ).rejects.toThrow('No dataset selected')
+    await expect(result.current.mutateAsync({ episodeIdx: 0, labels: [] })).rejects.toThrow(
+      'No dataset selected',
+    )
   })
 })
 
 describe('useAddLabelOption', () => {
   it('POSTs new label and updates available labels', async () => {
     selectDataset()
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse(['SUCCESS', 'FAILURE', 'NEW']),
-    )
+    mockFetch.mockResolvedValueOnce(jsonResponse(['SUCCESS', 'FAILURE', 'NEW']))
 
     const { result } = renderHookWithQuery(() => useAddLabelOption())
 

@@ -19,7 +19,11 @@ function makePoint(frame: number, jointPositions: number[]): TrajectoryPoint {
 }
 
 const POSITION_GROUP: JointGroup = { id: 'right-pos', label: 'Right Pos', indices: [0, 1, 2] }
-const ORIENT_GROUP: JointGroup = { id: 'right-orient', label: 'Right Orient', indices: [3, 4, 5, 6] }
+const ORIENT_GROUP: JointGroup = {
+  id: 'right-orient',
+  label: 'Right Orient',
+  indices: [3, 4, 5, 6],
+}
 const GRIP_GROUP: JointGroup = { id: 'right-grip', label: 'Right Grip', indices: [7] }
 const OTHER_GROUP: JointGroup = { id: 'misc-x', label: 'Misc', indices: [8, 9] }
 
@@ -73,7 +77,10 @@ describe('rankJointGroupsBySignificance', () => {
   })
 
   it('treats unknown id suffixes as other and uses vector path length', () => {
-    const trajectory = [makePoint(0, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), makePoint(1, [0, 0, 0, 0, 0, 0, 0, 0, 1, 0])]
+    const trajectory = [
+      makePoint(0, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+      makePoint(1, [0, 0, 0, 0, 0, 0, 0, 0, 1, 0]),
+    ]
     const ranked = rankJointGroupsBySignificance(trajectory, [OTHER_GROUP], 16)
     expect(ranked[0].kind).toBe('other')
     expect(ranked[0].rawScore).toBeCloseTo(1)

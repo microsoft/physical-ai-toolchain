@@ -80,9 +80,13 @@ describe('rankJointGroupsBySignificance properties', () => {
         fc.float({ min: Math.fround(0.1), max: 10, noNaN: true }),
         (frames, scale) => {
           const base = buildTrajectory(frames.map((f) => [f[0], f[1], f[2]]))
-          const scaled = buildTrajectory(frames.map((f) => [f[0] * scale, f[1] * scale, f[2] * scale]))
-          const baseScore = rankJointGroupsBySignificance(base, [POSITION_GROUP], 3)[0]?.rawScore ?? 0
-          const scaledScore = rankJointGroupsBySignificance(scaled, [POSITION_GROUP], 3)[0]?.rawScore ?? 0
+          const scaled = buildTrajectory(
+            frames.map((f) => [f[0] * scale, f[1] * scale, f[2] * scale]),
+          )
+          const baseScore =
+            rankJointGroupsBySignificance(base, [POSITION_GROUP], 3)[0]?.rawScore ?? 0
+          const scaledScore =
+            rankJointGroupsBySignificance(scaled, [POSITION_GROUP], 3)[0]?.rawScore ?? 0
           expect(scaledScore).toBeCloseTo(baseScore * scale, 4)
         },
       ),

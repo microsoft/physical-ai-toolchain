@@ -15,11 +15,7 @@ vi.mock('@/api/ai-analysis', () => ({
   getAnnotationSuggestion: vi.fn(),
 }))
 
-import {
-  analyzeTrajectory,
-  detectAnomalies,
-  getAnnotationSuggestion,
-} from '@/api/ai-analysis'
+import { analyzeTrajectory, detectAnomalies, getAnnotationSuggestion } from '@/api/ai-analysis'
 
 const mockedAnalyze = vi.mocked(analyzeTrajectory)
 const mockedDetect = vi.mocked(detectAnomalies)

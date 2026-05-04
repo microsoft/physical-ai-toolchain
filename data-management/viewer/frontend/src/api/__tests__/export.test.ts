@@ -87,9 +87,12 @@ describe('getExportPreview', () => {
 
     expect(result).toEqual(stats)
     expect(mockRequestHeaders).toHaveBeenCalledTimes(1)
-    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/export/preview?episode_indices=0%2C1%2C2', {
-      headers: { Authorization: 'Bearer test' },
-    })
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/api/datasets/ds-1/export/preview?episode_indices=0%2C1%2C2',
+      {
+        headers: { Authorization: 'Bearer test' },
+      },
+    )
   })
 
   it('appends removed_frames when provided', async () => {

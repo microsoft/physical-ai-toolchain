@@ -5,10 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useObjectDetection } from '@/hooks/use-object-detection'
 import { useDatasetStore, useEditStore, useEpisodeStore } from '@/stores'
-import type {
-  DetectionRequest,
-  EpisodeDetectionSummary,
-} from '@/types/detection'
+import type { DetectionRequest, EpisodeDetectionSummary } from '@/types/detection'
 
 vi.mock('@/api/detection', () => ({
   clearDetections: vi.fn(),
@@ -48,9 +45,7 @@ function makeSummary(overrides: Partial<EpisodeDetectionSummary> = {}): EpisodeD
       {
         frame: 1,
         processing_time_ms: 12,
-        detections: [
-          { class_id: 0, class_name: 'person', confidence: 0.6, bbox: [5, 5, 15, 15] },
-        ],
+        detections: [{ class_id: 0, class_name: 'person', confidence: 0.6, bbox: [5, 5, 15, 15] }],
       },
     ],
     class_summary: {
