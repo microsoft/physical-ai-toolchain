@@ -10,6 +10,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Run with `--no-file-parallelism` when invoking coverage locally to
+    // avoid happy-dom timer/global races between concurrent test files.
     environment: 'happy-dom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
@@ -32,10 +34,10 @@ export default defineConfig({
         'src/main.tsx',
       ],
       thresholds: {
-        lines: 45,
-        functions: 35,
-        branches: 35,
-        statements: 45,
+        lines: 55,
+        functions: 55,
+        branches: 40,
+        statements: 55,
       },
     },
   },
