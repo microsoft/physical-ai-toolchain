@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 import types
 from pathlib import Path
@@ -280,3 +281,286 @@ def test_upload_checkpoint_wires_blob_name_and_propagates_upload_error(
             model_name="model-a",
             step=42,
         )
+
+
+def test_upload_files_batch_truncates_failure_summary_above_five(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    storage_context = context_module.AzureStorageContext(blob_client=Mock(), container_name="container-a")
+
+    def mock_upload_file(self, *, local_path: str, blob_name: str) -> str:
+        raise RuntimeError(f"failure for {local_path}")
+
+    monkeypatch.setattr(context_module.AzureStorageContext, "upload_file", mock_upload_file)
+
+    files = [(f"/tmp/file-{i}.ckpt", f"checkpoints/file-{i}.ckpt") for i in range(7)]
+
+    uploaded = storage_context.upload_files_batch(files)
+
+    assert uploaded == []
+    output = capsys.readouterr().out
+    assert "Failed to upload 7 files" in output
+    assert "... and 2 more" in output
+
+
+def test_upload_files_batch_empty_returns_empty() -> None:
+    storage_context = context_module.AzureStorageContext(blob_client=Mock(), container_name="container-a")
+    assert storage_context.upload_files_batch([]) == []
+
+
+def test_upload_files_batch_all_success_skips_failure_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    storage_context = context_module.AzureStorageContext(blob_client=Mock(), container_name="container-a")
+
+    def mock_upload_file(self, *, local_path: str, blob_name: str) -> str:
+        return blob_name
+
+    monkeypatch.setattr(context_module.AzureStorageContext, "upload_file", mock_upload_file)
+
+    files = [(f"/tmp/file-{i}.ckpt", f"checkpoints/file-{i}.ckpt") for i in range(3)]
+    uploaded = storage_context.upload_files_batch(files)
+
+    assert set(uploaded) == {"checkpoints/file-0.ckpt", "checkpoints/file-1.ckpt", "checkpoints/file-2.ckpt"}
+    assert "Failed to upload" not in capsys.readouterr().out
+
+
+def _install_storage_blob_modules(
+    *,
+    blob_service_client: object,
+    azure_error_cls: type[Exception],
+    resource_exists_cls: type[Exception],
+) -> dict[str, types.ModuleType | None]:
+    azure_storage_module = types.ModuleType("azure.storage")
+    azure_storage_blob_module = types.ModuleType("azure.storage.blob")
+    azure_core_module = types.ModuleType("azure.core")
+    azure_core_exceptions_module = types.ModuleType("azure.core.exceptions")
+
+    azure_storage_blob_module.BlobServiceClient = blob_service_client
+    azure_core_exceptions_module.AzureError = azure_error_cls
+    azure_core_exceptions_module.ResourceExistsError = resource_exists_cls
+
+    modules = {
+        "azure.storage": azure_storage_module,
+        "azure.storage.blob": azure_storage_blob_module,
+        "azure.core": azure_core_module,
+        "azure.core.exceptions": azure_core_exceptions_module,
+    }
+    previous = {name: sys.modules.get(name) for name in modules}
+    for name, module in modules.items():
+        sys.modules[name] = module
+    return previous
+
+
+def _restore_modules(previous: dict[str, types.ModuleType | None]) -> None:
+    for name, module in previous.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
+
+
+def test_build_storage_context_returns_none_when_account_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AZURE_STORAGE_ACCOUNT_NAME", raising=False)
+    assert context_module._build_storage_context(credential=object()) is None
+
+
+def test_build_storage_context_creates_container_and_returns_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_STORAGE_ACCOUNT_NAME", "acct1")
+    monkeypatch.delenv("AZURE_STORAGE_CONTAINER_NAME", raising=False)
+
+    container_client = Mock()
+    blob_client_instance = Mock()
+    blob_client_instance.get_container_client.return_value = container_client
+    blob_service_client = Mock(return_value=blob_client_instance)
+
+    class _ResourceExistsError(Exception):
+        pass
+
+    class _AzureError(Exception):
+        pass
+
+    previous = _install_storage_blob_modules(
+        blob_service_client=blob_service_client,
+        azure_error_cls=_AzureError,
+        resource_exists_cls=_ResourceExistsError,
+    )
+    try:
+        result = context_module._build_storage_context(credential="cred")
+    finally:
+        _restore_modules(previous)
+
+    assert isinstance(result, context_module.AzureStorageContext)
+    assert result.container_name == "isaaclab-training-logs"
+    blob_service_client.assert_called_once_with(
+        account_url="https://acct1.blob.core.windows.net/",
+        credential="cred",
+    )
+    container_client.create_container.assert_called_once_with()
+
+
+def test_build_storage_context_swallows_resource_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_STORAGE_ACCOUNT_NAME", "acct1")
+    monkeypatch.setenv("AZURE_STORAGE_CONTAINER_NAME", "custom-container")
+
+    class _ResourceExistsError(Exception):
+        pass
+
+    class _AzureError(Exception):
+        pass
+
+    container_client = Mock()
+    container_client.create_container.side_effect = _ResourceExistsError("already exists")
+    blob_client_instance = Mock()
+    blob_client_instance.get_container_client.return_value = container_client
+    blob_service_client = Mock(return_value=blob_client_instance)
+
+    previous = _install_storage_blob_modules(
+        blob_service_client=blob_service_client,
+        azure_error_cls=_AzureError,
+        resource_exists_cls=_ResourceExistsError,
+    )
+    try:
+        result = context_module._build_storage_context(credential="cred")
+    finally:
+        _restore_modules(previous)
+
+    assert result is not None
+    assert result.container_name == "custom-container"
+
+
+def test_build_storage_context_raises_azure_config_error_on_azure_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_STORAGE_ACCOUNT_NAME", "acct1")
+
+    class _ResourceExistsError(Exception):
+        pass
+
+    class _AzureError(Exception):
+        pass
+
+    blob_service_client = Mock(side_effect=_AzureError("boom"))
+
+    previous = _install_storage_blob_modules(
+        blob_service_client=blob_service_client,
+        azure_error_cls=_AzureError,
+        resource_exists_cls=_ResourceExistsError,
+    )
+    try:
+        with pytest.raises(context_module.AzureConfigError, match="Failed to initialize Azure Storage container"):
+            context_module._build_storage_context(credential="cred")
+    finally:
+        _restore_modules(previous)
+
+
+def test_build_credential_uses_default_identity_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+    monkeypatch.setenv("DEFAULT_IDENTITY_CLIENT_ID", "fallback-client-id")
+    monkeypatch.delenv("AZURE_AUTHORITY_HOST", raising=False)
+    monkeypatch.setenv("AZURE_EXCLUDE_MANAGED_IDENTITY", "false")
+
+    captured: dict[str, object] = {}
+
+    class _StubCredential:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(context_module, "DefaultAzureCredential", _StubCredential)
+
+    credential = context_module._build_credential()
+
+    assert isinstance(credential, _StubCredential)
+    assert captured["managed_identity_client_id"] == "fallback-client-id"
+    assert captured["exclude_managed_identity_credential"] is False
+    assert captured["authority"] is None
+    assert os.environ["AZURE_CLIENT_ID"] == "fallback-client-id"
+
+
+def test_build_credential_honors_exclude_flag_and_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZURE_CLIENT_ID", "explicit-id")
+    monkeypatch.delenv("DEFAULT_IDENTITY_CLIENT_ID", raising=False)
+    monkeypatch.setenv("AZURE_AUTHORITY_HOST", "https://login.example/")
+    monkeypatch.setenv("AZURE_EXCLUDE_MANAGED_IDENTITY", "TRUE")
+
+    captured: dict[str, object] = {}
+
+    class _StubCredential:
+        def __init__(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(context_module, "DefaultAzureCredential", _StubCredential)
+
+    context_module._build_credential()
+
+    assert captured["managed_identity_client_id"] == "explicit-id"
+    assert captured["authority"] == "https://login.example/"
+    assert captured["exclude_managed_identity_credential"] is True
+
+
+def test_bootstrap_azure_ml_workspace_get_failure_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(context_module, "require_env", lambda name, error_type=RuntimeError: "value")
+    monkeypatch.setattr(context_module, "set_env_defaults", Mock())
+    monkeypatch.setattr(context_module, "_build_credential", Mock(return_value=object()))
+
+    ml_client_mock = Mock()
+    ml_client_mock.workspaces.get.side_effect = RuntimeError("workspace unreachable")
+    monkeypatch.setattr(context_module, "MLClient", Mock(return_value=ml_client_mock))
+
+    with pytest.raises(context_module.AzureConfigError, match="Failed to access workspace"):
+        context_module.bootstrap_azure_ml(experiment_name="exp-name")
+
+
+def test_bootstrap_azure_ml_missing_tracking_uri_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(context_module, "require_env", lambda name, error_type=RuntimeError: "value")
+    monkeypatch.setattr(context_module, "set_env_defaults", Mock())
+    monkeypatch.setattr(context_module, "_build_credential", Mock(return_value=object()))
+
+    workspace = types.SimpleNamespace(mlflow_tracking_uri=None)
+    ml_client_mock = Mock()
+    ml_client_mock.workspaces.get.return_value = workspace
+    monkeypatch.setattr(context_module, "MLClient", Mock(return_value=ml_client_mock))
+
+    with pytest.raises(context_module.AzureConfigError, match="does not expose an MLflow tracking URI"):
+        context_module.bootstrap_azure_ml(experiment_name="exp-name")
+
+
+def test_bootstrap_azure_ml_skips_set_experiment_when_name_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(context_module, "require_env", lambda name, error_type=RuntimeError: "value")
+    monkeypatch.setattr(context_module, "set_env_defaults", Mock())
+    monkeypatch.setattr(context_module, "_build_credential", Mock(return_value=object()))
+
+    workspace = types.SimpleNamespace(mlflow_tracking_uri="https://mlflow.example")
+    ml_client_mock = Mock()
+    ml_client_mock.workspaces.get.return_value = workspace
+    monkeypatch.setattr(context_module, "MLClient", Mock(return_value=ml_client_mock))
+
+    set_tracking_uri_mock = Mock()
+    set_experiment_mock = Mock()
+    monkeypatch.setattr(context_module.mlflow, "set_tracking_uri", set_tracking_uri_mock)
+    monkeypatch.setattr(context_module.mlflow, "set_experiment", set_experiment_mock)
+    monkeypatch.setattr(context_module, "_build_storage_context", Mock(return_value=None))
+
+    result = context_module.bootstrap_azure_ml(experiment_name="")
+
+    assert result.tracking_uri == "https://mlflow.example"
+    set_tracking_uri_mock.assert_called_once_with("https://mlflow.example")
+    set_experiment_mock.assert_not_called()

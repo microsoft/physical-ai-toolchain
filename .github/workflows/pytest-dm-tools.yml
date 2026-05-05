@@ -43,6 +43,7 @@ jobs:
           --cov=data-management/tools
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-dm-tools.xml
+          --cov-fail-under=80
 
       - name: Upload coverage.xml artifact
         if: always()

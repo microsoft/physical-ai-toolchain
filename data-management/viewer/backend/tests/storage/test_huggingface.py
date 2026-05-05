@@ -236,6 +236,181 @@ class TestHuggingFaceHubAdapter(TestCase):
             assert mock_to_thread.call_count >= 1
 
 
+class TestHuggingFaceHubAdapterBranches(TestCase):
+    """Additional branch coverage tests for HuggingFaceHubAdapter."""
+
+    def setUp(self):
+        self.repo_id = "lerobot/test-dataset"
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
+    @patch("src.api.storage.huggingface.HfFileSystem")
+    @patch("src.api.storage.huggingface.hf_hub_download")
+    def test_download_file_wraps_exception_in_storage_error(self, mock_download, mock_fs_class):
+        """_download_file converts hf_hub_download failures into StorageError."""
+        from src.api.storage.base import StorageError
+        from src.api.storage.huggingface import HuggingFaceHubAdapter
+
+        mock_download.side_effect = RuntimeError("network down")
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+
+        with self.assertRaises(StorageError) as ctx:
+            asyncio.run(adapter._download_file("meta/info.json"))
+        assert "network down" in str(ctx.exception)
+
+    @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
+    @patch("src.api.storage.huggingface.HfFileSystem")
+    @patch("src.api.storage.huggingface.hf_hub_download")
+    def test_get_dataset_info_wraps_parse_error(self, mock_download, mock_fs_class):
+        """get_dataset_info wraps non-StorageError exceptions as StorageError."""
+        from src.api.storage.base import StorageError
+        from src.api.storage.huggingface import HuggingFaceHubAdapter
+
+        # Write malformed JSON to trigger parse error
+        info_path = Path(self.temp_dir) / "info.json"
+        info_path.write_text("{ not valid json")
+        mock_download.return_value = str(info_path)
+
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        with self.assertRaises(StorageError) as ctx:
+            asyncio.run(adapter.get_dataset_info())
+        assert self.repo_id in str(ctx.exception)
+
+    @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
+    @patch("src.api.storage.huggingface.HfFileSystem")
+    @patch("src.api.storage.huggingface.hf_hub_download")
+    def test_get_dataset_info_with_string_tasks(self, mock_download, mock_fs_class):
+        """get_dataset_info handles tasks given as plain strings."""
+        from src.api.storage.huggingface import HuggingFaceHubAdapter
+
+        info_data = {
+            "name": "Stringy Tasks",
+            "total_episodes": 2,
+            "fps": 10.0,
+            "features": {"action": {"dtype": "float32", "shape": [7]}},
+            "tasks": ["pick", "place"],
+        }
+        info_path = Path(self.temp_dir) / "info.json"
+        info_path.write_text(json.dumps(info_data))
+        mock_download.return_value = str(info_path)
+
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        result = asyncio.run(adapter.get_dataset_info())
+
+        assert [t.description for t in result.tasks] == ["pick", "place"]
+        assert [t.task_index for t in result.tasks] == [0, 1]
+
+    @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
+    @patch("src.api.storage.huggingface.HfFileSystem")
+    @patch("src.api.storage.huggingface.hf_hub_download")
+    def test_list_episodes_from_parquet_metadata(self, mock_download, mock_fs_class):
+        """list_episodes parses chunk-*/episode_NNNNNN.parquet entries and skips bad names."""
+        from src.api.storage.huggingface import HuggingFaceHubAdapter
+
+        info_data = {
+            "name": "Parquet Discovery",
+            "total_episodes": 0,
+            "fps": 30.0,
+            "features": {},
+            "tasks": [],
+        }
+        info_path = Path(self.temp_dir) / "info.json"
+        info_path.write_text(json.dumps(info_data))
+        mock_download.return_value = str(info_path)
+
+        mock_fs = MagicMock()
+
+        def ls_side_effect(path):
+            if path.endswith("/meta/episodes"):
+                return [
+                    f"datasets/{self.repo_id}/meta/episodes/chunk-000",
+                    f"datasets/{self.repo_id}/meta/episodes/not-a-chunk",
+                ]
+            if path.endswith("chunk-000"):
+                return [
+                    f"{path}/episode_000002.parquet",
+                    f"{path}/episode_000000.parquet",
+                    f"{path}/episode_bad.parquet",  # ValueError → continue
+                    f"{path}/README.md",  # non-parquet → skipped
+                ]
+            return []
+
+        mock_fs.ls.side_effect = ls_side_effect
+        mock_fs_class.return_value = mock_fs
+
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        result = asyncio.run(adapter.list_episodes())
+
+        assert [ep.index for ep in result] == [0, 2]
+
+    @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
+    @patch("src.api.storage.huggingface.HfFileSystem")
+    @patch("src.api.storage.huggingface.hf_hub_download")
+    def test_get_dataset_info_reraises_storage_error(self, mock_download, mock_fs_class):
+        """get_dataset_info should re-raise StorageError from _download_file unchanged."""
+        from src.api.storage.base import StorageError
+        from src.api.storage.huggingface import HuggingFaceHubAdapter
+
+        mock_download.side_effect = OSError("hub unreachable")
+
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        with pytest.raises(StorageError) as excinfo:
+            asyncio.run(adapter.get_dataset_info())
+        assert "hub unreachable" in str(excinfo.value)
+
+    @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
+    @patch("src.api.storage.huggingface.HfFileSystem")
+    @patch("src.api.storage.huggingface.hf_hub_download")
+    def test_list_episodes_reraises_storage_error(self, mock_download, mock_fs_class):
+        """list_episodes should re-raise StorageError from get_dataset_info unchanged."""
+        from src.api.storage.base import StorageError
+        from src.api.storage.huggingface import HuggingFaceHubAdapter
+
+        mock_download.side_effect = OSError("hub unreachable")
+
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        with pytest.raises(StorageError) as excinfo:
+            asyncio.run(adapter.list_episodes())
+        assert "hub unreachable" in str(excinfo.value)
+
+    @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
+    @patch("src.api.storage.huggingface.HfFileSystem")
+    @patch("src.api.storage.huggingface.hf_hub_download")
+    def test_get_episode_data_reraises_storage_error(self, mock_download, mock_fs_class):
+        """get_episode_data should re-raise StorageError from get_dataset_info unchanged."""
+        from src.api.storage.base import StorageError
+        from src.api.storage.huggingface import HuggingFaceHubAdapter
+
+        mock_download.side_effect = OSError("hub unreachable")
+
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        with pytest.raises(StorageError) as excinfo:
+            asyncio.run(adapter.get_episode_data(0))
+        assert "hub unreachable" in str(excinfo.value)
+
+    @patch("src.api.storage.huggingface.HF_AVAILABLE", True)
+    @patch("src.api.storage.huggingface.HfFileSystem")
+    @patch("src.api.storage.huggingface.hf_hub_download")
+    def test_get_episode_data_wraps_unexpected_exception(self, mock_download, mock_fs_class):
+        """get_episode_data should wrap non-StorageError exceptions in StorageError."""
+        from src.api.storage.base import StorageError
+        from src.api.storage.huggingface import HuggingFaceHubAdapter
+
+        adapter = HuggingFaceHubAdapter(repo_id=self.repo_id, cache_dir=self.temp_dir)
+        # Pre-populate cache so get_dataset_info isn't called; then make features access fail
+        adapter._info_cache = MagicMock()
+        adapter._info_cache.get.side_effect = RuntimeError("boom")
+
+        with pytest.raises(StorageError) as excinfo:
+            asyncio.run(adapter.get_episode_data(5))
+        assert "Failed to get episode 5" in str(excinfo.value)
+
+
 class TestHuggingFaceHubAdapterImportError(TestCase):
     """Tests for HuggingFaceHubAdapter when huggingface_hub is not installed."""
 

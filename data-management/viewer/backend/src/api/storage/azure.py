@@ -22,8 +22,17 @@ try:
 
     AZURE_AVAILABLE = True
 except ImportError:
-    HttpResponseError = Exception
-    ResourceNotFoundError = Exception
+    # Distinct sentinel subclasses so `except` clauses don't accidentally
+    # match unrelated exceptions when the SDK isn't installed. Tests patch
+    # these module attributes to inject their own classes.
+    class _HttpResponseErrorStub(Exception):
+        """Sentinel for HttpResponseError when azure SDK is unavailable."""
+
+    class _ResourceNotFoundErrorStub(Exception):
+        """Sentinel for ResourceNotFoundError when azure SDK is unavailable."""
+
+    HttpResponseError = _HttpResponseErrorStub
+    ResourceNotFoundError = _ResourceNotFoundErrorStub
     DefaultAzureCredential = None
     ContentSettings = None
     BlobServiceClient = None
