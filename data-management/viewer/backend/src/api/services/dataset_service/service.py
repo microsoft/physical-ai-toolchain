@@ -652,11 +652,13 @@ class DatasetService:
         # Clean up completed tasks
         self._prefetch_tasks = {t for t in self._prefetch_tasks if not t.done()}
 
+        coro = _prefetch()
         try:
-            task = asyncio.create_task(_prefetch())
+            task = asyncio.create_task(coro)
             self._prefetch_tasks.add(task)
             task.add_done_callback(self._prefetch_tasks.discard)
         except RuntimeError as error:
+            coro.close()
             logger.debug("Skipping episode prefetch for episode %d: %s", int(episode_idx), error)
 
     def is_safe_video_path(self, video_path: str) -> bool:
