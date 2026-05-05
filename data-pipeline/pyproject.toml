@@ -17,8 +17,7 @@ addopts = [
     "--cov=capture",
     "--cov-report=term-missing",
     "--cov-report=xml:logs/coverage.xml",
-    # TODO: Re-enable --cov-fail-under=80 once `capture/` source modules land.
-    # The package currently ships only test scaffolding, so any threshold is vacuous.
+    "--cov-fail-under=80",
     "--junitxml=logs/pytest-results.xml",
 ]
 
