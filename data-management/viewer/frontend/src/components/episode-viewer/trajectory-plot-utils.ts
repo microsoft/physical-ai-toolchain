@@ -7,7 +7,7 @@ interface TrajectoryPointLike {
   jointVelocities: number[]
   action?: number[]
   gripperState?: number
-  gripperIsClosed?: boolean | null
+  signals?: Record<string, number | boolean | null | undefined>
 }
 
 interface BuildTrajectoryChartDataOptions {
@@ -54,6 +54,10 @@ export function normalizeSeries(value: number, min: number, max: number) {
   }
 
   return (value - min) / (max - min)
+}
+
+export function signalDataKey(name: string) {
+  return `signal_${name.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`
 }
 
 export function buildTrajectoryChartData({
@@ -117,8 +121,11 @@ export function buildTrajectoryChartData({
       data.gripper_state = point.gripperState
     }
 
-    if (point.gripperIsClosed !== undefined && point.gripperIsClosed !== null) {
-      data.gripper_is_closed = point.gripperIsClosed ? 1 : 0
+    for (const [name, value] of Object.entries(point.signals ?? {})) {
+      if (value === undefined || value === null) {
+        continue
+      }
+      data[signalDataKey(name)] = typeof value === 'boolean' ? (value ? 1 : 0) : value
     }
 
     return data

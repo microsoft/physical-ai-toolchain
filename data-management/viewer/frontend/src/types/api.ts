@@ -102,8 +102,8 @@ export interface TrajectoryPoint {
   gripperState: number
   /** Action array */
   action?: number[]
-  /** Whether the gripper is closed */
-  gripperIsClosed?: boolean | null
+  /** Additional scalar telemetry by feature name */
+  signals?: Record<string, number | boolean>
 }
 
 /** Complete episode data for viewing */

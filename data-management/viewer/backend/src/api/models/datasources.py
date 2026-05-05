@@ -102,7 +102,7 @@ class TrajectoryPoint(BaseModel):
     end_effector_pose: list[float] = Field(description="End-effector pose (position + orientation)")
     gripper_state: float = Field(ge=0, le=1, description="Gripper state (0=open, 1=closed)")
     action: list[float] = Field(default_factory=list, description="Action array")
-    gripper_is_closed: bool | None = Field(default=None, description="Whether the gripper is closed")
+    signals: dict[str, float | int | bool] = Field(default_factory=dict, description="Additional scalar telemetry")
 
 
 class FrameInsertion(BaseModel):

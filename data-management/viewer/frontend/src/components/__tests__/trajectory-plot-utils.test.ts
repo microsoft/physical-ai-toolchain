@@ -5,6 +5,7 @@ import {
   buildTrajectoryChartData,
   normalizeSeries,
   resolveTrajectorySelectionRange,
+  signalDataKey,
 } from '@/components/episode-viewer/trajectory-plot-utils'
 
 describe('trajectory-plot-utils', () => {
@@ -51,7 +52,7 @@ describe('trajectory-plot-utils', () => {
     expect(chartData[0]).toMatchObject({ joint_0: 0.1, joint_1: 0.2 })
   })
 
-  it('adds action and gripper signals to chart data', () => {
+  it('adds action and auxiliary signals to chart data', () => {
     const chartData = buildTrajectoryChartData({
       trajectoryData: [
         {
@@ -61,7 +62,7 @@ describe('trajectory-plot-utils', () => {
           jointVelocities: [0.1, 0.2],
           action: [0.4, 0.8],
           gripperState: 0.25,
-          gripperIsClosed: false,
+          signals: { 'observation.gripper.is_closed': false, 'observation.force': 1.5 },
         },
         {
           frame: 1,
@@ -70,7 +71,7 @@ describe('trajectory-plot-utils', () => {
           jointVelocities: [0.2, 0.4],
           action: [0.6, 1.2],
           gripperState: 0.75,
-          gripperIsClosed: true,
+          signals: { 'observation.gripper.is_closed': true, 'observation.force': 2.5 },
         },
       ],
       trajectoryAdjustments: new Map(),
@@ -79,8 +80,14 @@ describe('trajectory-plot-utils', () => {
       showAction: true,
     })
 
-    expect(chartData[0]).toMatchObject({ action_0: 0.4, action_1: 0.8, gripper_state: 0.25, gripper_is_closed: 0 })
-    expect(chartData[1]).toMatchObject({ action_0: 0.6, action_1: 1.2, gripper_state: 0.75, gripper_is_closed: 1 })
+    const closedKey = signalDataKey('observation.gripper.is_closed')
+    const forceKey = signalDataKey('observation.force')
+    expect(chartData[0]).toMatchObject({ action_0: 0.4, action_1: 0.8, gripper_state: 0.25 })
+    expect(chartData[0]?.[closedKey]).toBe(0)
+    expect(chartData[0]?.[forceKey]).toBe(1.5)
+    expect(chartData[1]).toMatchObject({ action_0: 0.6, action_1: 1.2, gripper_state: 0.75 })
+    expect(chartData[1]?.[closedKey]).toBe(1)
+    expect(chartData[1]?.[forceKey]).toBe(2.5)
   })
 
   it('normalizes values and resolves drag selection ranges predictably', () => {

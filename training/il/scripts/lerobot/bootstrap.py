@@ -6,6 +6,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,22 @@ class MLflowConfig:
 
     tracking_uri: str
     experiment_name: str
+
+
+def create_azure_credential() -> Any:
+    """Create the Azure credential used by local and managed training runs."""
+    from azure.identity import AzureCliCredential, DefaultAzureCredential
+
+    if os.environ.get("AZURE_USE_CLI_CREDENTIAL", "").lower() in {"1", "true", "yes"}:
+        tenant_id = os.environ.get("AZURE_TENANT_ID")
+        if tenant_id:
+            return AzureCliCredential(tenant_id=tenant_id)
+        return AzureCliCredential()
+
+    return DefaultAzureCredential(
+        managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID"),
+        authority=os.environ.get("AZURE_AUTHORITY_HOST"),
+    )
 
 
 def bootstrap_mlflow(
@@ -38,7 +55,6 @@ def bootstrap_mlflow(
     try:
         import mlflow
         from azure.ai.ml import MLClient
-        from azure.identity import DefaultAzureCredential
     except ImportError as exc:
         print(f"[ERROR] Missing required package: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -57,10 +73,7 @@ def bootstrap_mlflow(
     print("[INFO] Initializing Azure ML connection...")
 
     try:
-        credential = DefaultAzureCredential(
-            managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID"),
-            authority=os.environ.get("AZURE_AUTHORITY_HOST"),
-        )
+        credential = create_azure_credential()
 
         client = MLClient(
             credential=credential,
@@ -70,6 +83,10 @@ def bootstrap_mlflow(
         )
 
         workspace = client.workspaces.get(workspace_name)
+        if workspace is None:
+            print(f"[ERROR] Azure ML workspace not found: {workspace_name}", file=sys.stderr)
+            sys.exit(1)
+
         tracking_uri = workspace.mlflow_tracking_uri
 
         if not tracking_uri:

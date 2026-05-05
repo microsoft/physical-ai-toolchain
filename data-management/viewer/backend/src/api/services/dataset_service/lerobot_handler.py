@@ -159,7 +159,7 @@ class LeRobotFormatHandler:
                 joint_velocities=lr_data.joint_velocities,
                 end_effector_poses=lr_data.actions[:, :6] if lr_data.actions is not None else None,
                 actions=lr_data.actions,
-                gripper_is_closed=lr_data.gripper_is_closed,
+                signals=lr_data.signals,
             )
 
             video_urls: dict[str, str] = {}
@@ -207,7 +207,7 @@ class LeRobotFormatHandler:
                 joint_velocities=lr_data.joint_velocities,
                 end_effector_poses=lr_data.actions[:, :6] if lr_data.actions is not None else None,
                 actions=lr_data.actions,
-                gripper_is_closed=lr_data.gripper_is_closed,
+                signals=lr_data.signals,
             )
         except Exception as e:
             logger.warning(

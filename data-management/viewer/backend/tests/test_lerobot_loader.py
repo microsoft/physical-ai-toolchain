@@ -238,6 +238,7 @@ class TestV2EpisodeLayout:
             "features": {
                 "observation.state": {"dtype": "float32", "shape": [6]},
                 "action": {"dtype": "float32", "shape": [6]},
+                "observation.gripper.is_closed": {"dtype": "bool", "shape": [1]},
                 "observation.images.front": {"dtype": "video", "shape": [480, 640, 3]},
             },
         }
@@ -277,11 +278,11 @@ class TestV2EpisodeLayout:
         assert ep.length == 2
         assert "observation.images.front" in ep.video_paths
 
-    def test_load_episode_extracts_gripper_closed(self, v2_dataset):
+    def test_load_episode_extracts_auxiliary_signals(self, v2_dataset):
         loader = LeRobotLoader(v2_dataset)
         ep = loader.load_episode(0)
 
-        assert ep.gripper_is_closed.tolist() == [False, True, False]
+        assert ep.signals["observation.gripper.is_closed"].tolist() == [False, True, False]
 
     def test_get_video_path_v2(self, v2_dataset):
         loader = LeRobotLoader(v2_dataset)

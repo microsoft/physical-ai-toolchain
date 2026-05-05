@@ -20,8 +20,29 @@ const TRAJECTORY_CHART_INITIAL_DIMENSION = { width: 320, height: TRAJECTORY_CHAR
 const TOOLTIP_OFFSET = 12
 const AUXILIARY_LINES = [
   { key: 'gripper_state', name: 'gripper state', color: '#f59e0b' },
-  { key: 'gripper_is_closed', name: 'gripper.is_closed', color: '#a855f7' },
 ]
+
+function auxiliaryLines(chartData: Array<Record<string, number | boolean>>) {
+  const signalKeys = new Set<string>()
+  for (const point of chartData) {
+    for (const key of Object.keys(point)) {
+      if (key.startsWith('signal_')) {
+        signalKeys.add(key)
+      }
+    }
+  }
+
+  return [
+    ...AUXILIARY_LINES,
+    ...Array.from(signalKeys)
+      .sort()
+      .map((key, index) => ({
+        key,
+        name: key.replace(/^signal_/, '').replace(/_/g, '.'),
+        color: JOINT_COLORS[(index + 4) % JOINT_COLORS.length],
+      })),
+  ]
+}
 
 function TrajectoryTooltipPortal({
   active,
@@ -194,7 +215,7 @@ export function TrajectoryPlotChart({
             )
           })}
 
-          {AUXILIARY_LINES.filter(({ key }) => chartData.some((point) => key in point)).map(
+          {auxiliaryLines(chartData).filter(({ key }) => chartData.some((point) => key in point)).map(
             ({ key, name, color }) => (
               <Line
                 key={key}

@@ -5,6 +5,7 @@ Defines the contract that LeRobot, HDF5, and future format handlers
 must implement to integrate with the DatasetService orchestrator.
 """
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -28,7 +29,7 @@ def build_trajectory(
     end_effector_poses: NDArray[np.float64] | None = None,
     gripper_states: NDArray[np.float64] | None = None,
     actions: NDArray[np.float64] | None = None,
-    gripper_is_closed: NDArray[np.bool_] | None = None,
+    signals: Mapping[str, NDArray] | None = None,
     clamp_gripper: bool = False,
 ) -> list[TrajectoryPoint]:
     """
@@ -60,10 +61,16 @@ def build_trajectory(
         joint_vel = joint_velocities[i].tolist() if joint_velocities is not None else [0.0] * num_joints
         ee_pose = end_effector_poses[i].tolist() if end_effector_poses is not None else [0.0] * 6
         action = actions[i].tolist() if actions is not None else []
-        gripper_closed = bool(gripper_is_closed[i]) if gripper_is_closed is not None else None
-        gripper = float(gripper_states[i]) if gripper_states is not None else float(gripper_closed or False)
+        gripper = float(gripper_states[i]) if gripper_states is not None else 0.0
         if clamp_gripper:
             gripper = max(0.0, min(1.0, gripper))
+        point_signals: dict[str, float | int | bool] = {}
+        for name, values in (signals or {}).items():
+            value = values[i]
+            if isinstance(value, np.generic):
+                value = value.item()
+            if isinstance(value, bool | int | float):
+                point_signals[name] = value
 
         points.append(
             TrajectoryPoint(
@@ -74,7 +81,7 @@ def build_trajectory(
                 end_effector_pose=ee_pose,
                 gripper_state=gripper,
                 action=action,
-                gripper_is_closed=gripper_closed,
+                signals=point_signals,
             )
         )
 
