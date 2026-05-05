@@ -12,7 +12,7 @@ on:
   workflow_run:
     workflows: ["PR Validation"]
     types: [completed]
-    branches: [main]
+    branches: ["dependabot/**"]
   bots: ["dependabot[bot]"]
   roles: [admin, maintainer, write]
 permissions:
@@ -186,8 +186,11 @@ Advisory-only review of Dependabot-authored pull requests in microsoft/physical-
 
 ## Trigger Posture
 
-This workflow runs via `workflow_run` after the `PR Validation` orchestrator completes on `main` for a
-`pull_request` event. Because `workflow_run` evaluates the workflow file from the default branch, the
+This workflow runs via `workflow_run` after the `PR Validation` orchestrator completes on a Dependabot
+PR's head branch (`dependabot/**`) for a `pull_request` event. The `branches:` filter on `workflow_run`
+matches the *triggering run's `head_branch`*, not its base — using `main` here would silently never fire
+for Dependabot PRs (regression observed in #583, fixed in #584; do not change without re-reading those).
+Because `workflow_run` evaluates the workflow file from the default branch, the
 agent step always uses the trusted, merged definition rather than fork content. The gh-aw compiler
 auto-injects fork-PR exclusion and a `repository.id` guard into the lock file. The workflow-level
 `if:` short-circuits any non-PR triggering event, any PR not authored by `dependabot[bot]` (gated on
