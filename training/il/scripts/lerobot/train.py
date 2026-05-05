@@ -9,7 +9,7 @@ Usage:
 
 Environment variables:
     DATASET_REPO_ID: HuggingFace dataset repository.
-    POLICY_TYPE: Policy architecture (act, diffusion).
+    POLICY_TYPE: Policy architecture (act, diffusion, smolvla).
     OUTPUT_DIR: Container output directory.
     JOB_NAME: Job identifier.
     SYSTEM_METRICS: Enable system metrics collection (default: true).
@@ -138,6 +138,8 @@ def _build_train_params() -> dict[str, str]:
         "policy_type": os.environ.get("POLICY_TYPE", "act"),
         "job_name": os.environ.get("JOB_NAME", ""),
         "policy_repo_id": os.environ.get("POLICY_REPO_ID", ""),
+        "policy_path": os.environ.get("POLICY_PATH", ""),
+        "task_instruction": os.environ.get("TASK_INSTRUCTION", ""),
         "training_steps": os.environ.get("TRAINING_STEPS", "100000"),
         "batch_size": os.environ.get("BATCH_SIZE", "32"),
         "learning_rate": os.environ.get("LEARNING_RATE", "1e-4"),
@@ -290,8 +292,12 @@ def main() -> int:
         if dataset_repo_id:
             cmd.append(f"--dataset.repo_id={dataset_repo_id}")
 
-    if "--policy.type" not in cli_text:
-        cmd.append(f"--policy.type={policy_type}")
+    if "--policy.type" not in cli_text and "--policy.path" not in cli_text:
+        policy_path = os.environ.get("POLICY_PATH", "")
+        if policy_path:
+            cmd.append(f"--policy.path={policy_path}")
+        else:
+            cmd.append(f"--policy.type={policy_type}")
 
     if "--output_dir" not in cli_text:
         output_dir = os.environ.get("OUTPUT_DIR", "/workspace/outputs/train")

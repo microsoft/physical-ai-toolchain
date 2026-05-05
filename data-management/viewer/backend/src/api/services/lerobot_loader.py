@@ -179,6 +179,30 @@ class LeRobotLoader:
         """
         return self._load_info()
 
+    @staticmethod
+    def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        with open(path, encoding="utf-8") as jsonl_file:
+            for line in jsonl_file:
+                stripped = line.strip()
+                if stripped:
+                    rows.append(json.loads(stripped))
+        return rows
+
+    @staticmethod
+    def _jsonl_column_to_numpy(rows: list[dict[str, Any]], name: str) -> NDArray:
+        values = [row.get(name) for row in rows]
+        if not values:
+            return np.array([], dtype=np.float64)
+        if isinstance(values[0], list):
+            return np.array(values, dtype=np.float64)
+        return np.array(values)
+
+    @staticmethod
+    def _get_video_template(info: LeRobotDatasetInfo, camera_key: str) -> str:
+        feature_info = info.features.get(camera_key, {})
+        return str(feature_info.get("videos_path") or feature_info.get("video_path") or info.video_path)
+
     def _is_v2_layout(self, info: LeRobotDatasetInfo) -> bool:
         """Return True if the dataset uses the v2.x one-episode-per-file layout.
 
@@ -337,6 +361,19 @@ class LeRobotLoader:
             for chunk_dir in sorted(meta_episodes_dir.iterdir()):
                 if not chunk_dir.is_dir() or not chunk_dir.name.startswith("chunk-"):
                     continue
+                for jsonl_file in sorted(chunk_dir.glob("*.jsonl")):
+                    try:
+                        for row in self._read_jsonl(jsonl_file):
+                            idx = int(row.get("episode_index", len(result)))
+                            result[idx] = {
+                                "length": int(row.get("length", 0)),
+                                "task_index": int(row.get("task_index", 0)),
+                                "cameras": cameras,
+                                "fps": float(row.get("fps", info.fps)),
+                                "robot_type": info.robot_type,
+                            }
+                    except (json.JSONDecodeError, OSError, ValueError) as e:
+                        logger.warning("Failed to read %s: %s", jsonl_file, e)
                 for parquet_file in sorted(chunk_dir.glob("*.parquet")):
                     try:
                         table = pq.read_table(parquet_file)
@@ -389,6 +426,9 @@ class LeRobotLoader:
         # Load parquet data
         data_path = self._format_path(info.data_path, chunk_idx, file_idx, episode_index=episode_index)
         full_path = self.base_path / data_path
+
+        if full_path.suffix == ".jsonl":
+            return self._load_episode_jsonl(episode_index, info, full_path, chunk_idx, file_idx)
 
         try:
             table = pq.read_table(full_path)
@@ -449,7 +489,11 @@ class LeRobotLoader:
                 if feature_info.get("dtype") == "video":
                     video_key = feature_name
                     video_rel_path = self._format_path(
-                        info.video_path, chunk_idx, file_idx, video_key, episode_index=episode_index
+                        self._get_video_template(info, video_key),
+                        chunk_idx,
+                        file_idx,
+                        video_key,
+                        episode_index=episode_index,
                     )
                     video_full_path = self.base_path / video_rel_path
                     if video_full_path.exists():
@@ -476,6 +520,81 @@ class LeRobotLoader:
             raise
         except Exception as e:
             raise LeRobotLoaderError(f"Failed to load episode {episode_index}: {e}", cause=e)
+
+    def _load_episode_jsonl(
+        self,
+        episode_index: int,
+        info: LeRobotDatasetInfo,
+        full_path: Path,
+        chunk_idx: int,
+        file_idx: int,
+    ) -> LeRobotEpisodeData:
+        try:
+            rows = self._read_jsonl(full_path)
+        except (json.JSONDecodeError, OSError) as e:
+            raise LeRobotLoaderError(f"Failed to read {full_path}: {e}", cause=e)
+
+        rows = [row for row in rows if int(row.get("episode_index", episode_index)) == episode_index]
+        rows.sort(key=lambda row: int(row.get("frame_index", 0)))
+
+        if not rows:
+            raise LeRobotLoaderError(f"Episode {episode_index} not found in {full_path}")
+
+        length = len(rows)
+        timestamps = self._jsonl_column_to_numpy(rows, "timestamp")
+        if timestamps.size == 0:
+            timestamps = np.arange(length, dtype=np.float64) / info.fps
+
+        frame_indices = self._jsonl_column_to_numpy(rows, "frame_index")
+        if frame_indices.size == 0:
+            frame_indices = np.arange(length, dtype=np.int64)
+
+        if "observation.state" in rows[0]:
+            joint_positions = self._jsonl_column_to_numpy(rows, "observation.state")
+        elif "qpos" in rows[0]:
+            joint_positions = self._jsonl_column_to_numpy(rows, "qpos")
+        else:
+            joint_positions = np.zeros((length, 6), dtype=np.float64)
+
+        joint_velocities: NDArray[np.float64] | None = None
+        if "observation.velocity" in rows[0]:
+            joint_velocities = self._jsonl_column_to_numpy(rows, "observation.velocity").astype(np.float64)
+        elif "qvel" in rows[0]:
+            joint_velocities = self._jsonl_column_to_numpy(rows, "qvel").astype(np.float64)
+
+        actions = self._jsonl_column_to_numpy(rows, "action") if "action" in rows[0] else np.zeros_like(joint_positions)
+
+        task_index = int(rows[0].get("task_index", 0))
+        video_paths: dict[str, Path] = {}
+        for feature_name, feature_info in info.features.items():
+            if feature_info.get("dtype") == "video":
+                video_rel_path = self._format_path(
+                    self._get_video_template(info, feature_name),
+                    chunk_idx,
+                    file_idx,
+                    feature_name,
+                    episode_index=episode_index,
+                )
+                video_full_path = self.base_path / video_rel_path
+                if video_full_path.exists():
+                    video_paths[feature_name] = video_full_path
+
+        return LeRobotEpisodeData(
+            episode_index=episode_index,
+            length=length,
+            timestamps=timestamps.astype(np.float64),
+            frame_indices=frame_indices.astype(np.int64),
+            joint_positions=joint_positions.astype(np.float64),
+            joint_velocities=joint_velocities,
+            actions=actions.astype(np.float64),
+            task_index=task_index,
+            video_paths=video_paths,
+            metadata={
+                "robot_type": info.robot_type,
+                "fps": info.fps,
+                "codebase_version": info.codebase_version,
+            },
+        )
 
     def get_episode_info(self, episode_index: int) -> dict[str, Any]:
         """
@@ -506,6 +625,20 @@ class LeRobotLoader:
         full_path = self.base_path / data_path
 
         try:
+            if full_path.suffix == ".jsonl":
+                rows = self._read_jsonl(full_path)
+                rows = [row for row in rows if int(row.get("episode_index", episode_index)) == episode_index]
+                cameras = [name for name, feature in info.features.items() if feature.get("dtype") == "video"]
+                task_index = int(rows[0].get("task_index", 0)) if rows else 0
+                return {
+                    "episode_index": episode_index,
+                    "length": len(rows),
+                    "fps": info.fps,
+                    "cameras": cameras,
+                    "task_index": task_index,
+                    "robot_type": info.robot_type,
+                }
+
             table = pq.read_table(full_path)
 
             if "episode_index" in table.column_names:
@@ -547,7 +680,11 @@ class LeRobotLoader:
         chunk_idx, file_idx = self._find_episode_location(episode_index)
 
         video_rel_path = self._format_path(
-            info.video_path, chunk_idx, file_idx, camera_key, episode_index=episode_index
+            self._get_video_template(info, camera_key),
+            chunk_idx,
+            file_idx,
+            camera_key,
+            episode_index=episode_index,
         )
         video_full_path = self.base_path / video_rel_path
 

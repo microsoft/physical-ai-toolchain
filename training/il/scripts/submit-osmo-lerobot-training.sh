@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Submit LeRobot behavioral cloning training workflow to OSMO
-# Supports ACT and Diffusion policy architectures with Azure ML MLflow logging
+# Supports ACT, Diffusion, and SmolVLA policy architectures with Azure ML MLflow logging
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,7 +29,7 @@ show_help() {
 Usage: submit-osmo-lerobot-training.sh [OPTIONS] [-- osmo-submit-flags]
 
 Submit a LeRobot behavioral cloning training workflow to OSMO.
-Supports ACT and Diffusion policy architectures with Azure ML MLflow logging.
+Supports ACT, Diffusion, and SmolVLA policy architectures with Azure ML MLflow logging.
 
 REQUIRED:
     -d, --dataset-repo-id ID     HuggingFace dataset repository (e.g., user/dataset)
@@ -42,12 +42,14 @@ DATA SOURCE:
 
 TRAINING OPTIONS:
     -w, --workflow PATH           Workflow template (default: training/il/workflows/osmo/lerobot-train.yaml)
-    -p, --policy-type TYPE        Policy architecture: act, diffusion (default: act)
+    -p, --policy-type TYPE        Policy architecture: act, diffusion, smolvla (default: act)
     -j, --job-name NAME           Job identifier (default: lerobot-act-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
     -i, --image IMAGE             Container image (default: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime)
-        --policy-repo-id ID       Pre-trained policy for fine-tuning (HuggingFace repo)
+        --policy-repo-id ID       HuggingFace model repository for trained policy outputs
+        --policy-path ID          Pre-trained policy path for fine-tuning (e.g., lerobot/smolvla_base)
         --lerobot-version VER     Specific LeRobot version or "latest" (default: latest)
+        --task-instruction TEXT   Natural language VLA task instruction logged with the run
 
 TRAINING HYPERPARAMETERS:
         --training-steps N        Total training iterations (default: 100000)
@@ -121,7 +123,9 @@ job_name="${JOB_NAME:-lerobot-act-training}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
 image="${IMAGE:-pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime}"
 policy_repo_id="${POLICY_REPO_ID:-}"
+policy_path="${POLICY_PATH:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
+task_instruction="${TASK_INSTRUCTION:-}"
 
 from_blob=false
 storage_account="${BLOB_STORAGE_ACCOUNT:-${AZURE_STORAGE_ACCOUNT_NAME:-}}"
@@ -169,7 +173,9 @@ while [[ $# -gt 0 ]]; do
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
     -i|--image)                   image="$2"; shift 2 ;;
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
+    --policy-path)                policy_path="$2"; shift 2 ;;
     --lerobot-version)            lerobot_version="$2"; shift 2 ;;
+    --task-instruction)           task_instruction="$2"; shift 2 ;;
     --from-blob)                  from_blob=true; shift ;;
     --storage-account)            storage_account="$2"; shift 2 ;;
     --storage-container)          storage_container="$2"; shift 2 ;;
@@ -215,8 +221,8 @@ fi
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
 
 case "$policy_type" in
-  act|diffusion) ;;
-  *) fatal "Unsupported policy type: $policy_type (use: act, diffusion)" ;;
+  act|diffusion|smolvla) ;;
+  *) fatal "Unsupported policy type: $policy_type (use: act, diffusion, smolvla)" ;;
 esac
 
 [[ -z "$subscription_id" ]] && fatal "Azure subscription ID required (set AZURE_SUBSCRIPTION_ID or deploy infra)"
@@ -238,6 +244,8 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Save Freq" "$save_freq"
   print_kv "Val Split" "$val_split"
   print_kv "System Metrics" "$system_metrics"
+  print_kv "Policy Path" "${policy_path:-<none>}"
+  print_kv "Task Instruction" "${task_instruction:-<none>}"
   [[ "$from_blob" == "true" ]] && print_kv "Blob Source" "$storage_account/$storage_container/$blob_prefix"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
   print_kv "Subscription" "$subscription_id"
@@ -292,6 +300,7 @@ submit_args=(
   "policy_type=$policy_type"
   "job_name=$job_name"
   "output_dir=$output_dir"
+  "task_instruction=$task_instruction"
   "training_steps=$training_steps"
   "batch_size=$batch_size"
   "learning_rate=$learning_rate"
@@ -305,6 +314,7 @@ submit_args=(
 )
 
 [[ -n "$policy_repo_id" ]]      && submit_args+=("policy_repo_id=$policy_repo_id")
+[[ -n "$policy_path" ]]         && submit_args+=("policy_path=$policy_path")
 [[ -n "$lerobot_version" ]]     && submit_args+=("lerobot_version=$lerobot_version")
 [[ -n "$eval_freq" ]]           && submit_args+=("eval_freq=$eval_freq")
 [[ -n "$experiment_name" ]]     && submit_args+=("experiment_name=$experiment_name")
@@ -332,8 +342,10 @@ info "  Learning Rate: $learning_rate"
 info "  Val Split: $val_split"
 info "  System Metrics: $system_metrics"
 info "  Payload: ${archive_size} bytes"
+[[ -n "$policy_path" ]] && info "  Policy Path: $policy_path"
+[[ -n "$task_instruction" ]] && info "  Task Instruction: $task_instruction"
 [[ "$from_blob" == "true" ]] && info "  Data Source: Azure Blob ($storage_account/$storage_container/$blob_prefix)"
-[[ -n "$policy_repo_id" ]] && info "  Fine-tune from: $policy_repo_id"
+[[ -n "$policy_repo_id" ]] && info "  Policy repo: $policy_repo_id"
 [[ -n "$register_checkpoint" ]] && info "  Register model: $register_checkpoint"
 
 osmo "${submit_args[@]}" || fatal "Failed to submit workflow"
@@ -350,6 +362,8 @@ print_kv "Training Steps" "$training_steps"
 print_kv "Batch Size" "$batch_size"
 print_kv "Learning Rate" "$learning_rate"
 print_kv "Val Split" "$val_split"
+print_kv "Policy Path" "${policy_path:-<none>}"
+print_kv "Task Instruction" "${task_instruction:-<none>}"
 print_kv "Register Model" "${register_checkpoint:-<none>}"
 print_kv "Workflow" "$workflow"
 

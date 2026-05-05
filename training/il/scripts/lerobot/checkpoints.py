@@ -24,12 +24,10 @@ def _get_aml_client() -> Any | None:
 
     try:
         from azure.ai.ml import MLClient
-        from azure.identity import DefaultAzureCredential
 
-        credential = DefaultAzureCredential(
-            managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID"),
-            authority=os.environ.get("AZURE_AUTHORITY_HOST"),
-        )
+        from training.il.scripts.lerobot.bootstrap import create_azure_credential
+
+        credential = create_azure_credential()
         return MLClient(
             credential=credential,
             subscription_id=subscription_id,

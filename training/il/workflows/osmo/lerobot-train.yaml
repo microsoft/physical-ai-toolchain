@@ -25,6 +25,8 @@ workflow:
         OUTPUT_DIR: "{{ output_dir }}"
         JOB_NAME: "{{ job_name }}"
         POLICY_REPO_ID: "{{ policy_repo_id }}"
+        POLICY_PATH: "{{ policy_path }}"
+        TASK_INSTRUCTION: "{{ task_instruction }}"
         TRAINING_STEPS: "{{ training_steps }}"
         BATCH_SIZE: "{{ batch_size }}"
         LEARNING_RATE: "{{ learning_rate }}"
@@ -59,6 +61,12 @@ workflow:
             echo "Job Name: ${JOB_NAME}"
             echo "Output Dir: ${OUTPUT_DIR}"
             echo "Logging: Azure ML MLflow"
+            if [[ -n "${POLICY_PATH:-}" ]]; then
+              echo "Policy Path: ${POLICY_PATH}"
+            fi
+            if [[ -n "${TASK_INSTRUCTION:-}" ]]; then
+              echo "Task Instruction: ${TASK_INSTRUCTION}"
+            fi
             echo "Val Split: ${VAL_SPLIT:-0.1}"
             echo "System Metrics: ${SYSTEM_METRICS:-true}"
             if [[ -n "${STORAGE_ACCOUNT:-}" ]]; then
@@ -103,6 +111,14 @@ workflow:
               exit 1
             fi
             uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
+            if [[ "${POLICY_TYPE}" == "smolvla" ]]; then
+              echo "Installing SmolVLA runtime dependencies..."
+              LEROBOT_PACKAGE="lerobot[smolvla]"
+              if [[ -n "${LEROBOT_VERSION:-}" && "${LEROBOT_VERSION}" != "latest" ]]; then
+                LEROBOT_PACKAGE="lerobot[smolvla]==${LEROBOT_VERSION}"
+              fi
+              uv pip install --system "${LEROBOT_PACKAGE}"
+            fi
 
             # Build training command arguments
             TRAIN_ARGS=()
@@ -145,6 +161,8 @@ default-values:
   output_dir: /workspace/outputs/train
   job_name: lerobot-training
   policy_repo_id: ""
+  policy_path: ""
+  task_instruction: ""
   training_steps: "100000"
   batch_size: "32"
   learning_rate: "1e-4"
