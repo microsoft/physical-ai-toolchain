@@ -43,6 +43,7 @@ jobs:
           --cov=fleet-deployment/inference
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-inference.xml
+          --cov-fail-under=80
 
       - name: Upload coverage.xml artifact
         if: always()
