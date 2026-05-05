@@ -230,6 +230,7 @@ flags:
       - data-management/viewer/frontend/src/components/
     carryforward: true
   vitest-features:
+    # Most actively developed feature areas tracked individually; remaining components fall under vitest-components.
     paths:
       - data-management/viewer/frontend/src/components/dashboard/
       - data-management/viewer/frontend/src/components/annotation-panel/
