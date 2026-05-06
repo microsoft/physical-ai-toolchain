@@ -165,6 +165,14 @@ output "data_lake_storage_account" {
   } : null
 }
 
+output "datasets_container" {
+  description = "Datasets container on the data lake storage account. Null when data lake is disabled"
+  value = var.should_create_data_lake_storage ? {
+    id   = azurerm_storage_container.datasets[0].id
+    name = azurerm_storage_container.datasets[0].name
+  } : null
+}
+
 output "data_lake_storage_account_access" {
   description = "Data lake storage account access credentials. Null when data lake is disabled"
   value = var.should_create_data_lake_storage ? {

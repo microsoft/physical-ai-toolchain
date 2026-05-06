@@ -1,0 +1,57 @@
+name: Terraform Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory passed to checkov via -d
+        required: false
+        type: string
+        default: infrastructure/terraform
+      soft-fail:
+        description: Whether to continue on Checkov violations
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  checkov:
+    name: Checkov
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run Checkov
+        id: checkov
+        uses: bridgecrewio/checkov-action@9201a8e6eaa919e3444d7c4ca691896efde4f033 # v12.3101.0
+        continue-on-error: ${{ inputs.soft-fail }}
+        with:
+          directory: ${{ inputs.working-directory }}
+          framework: terraform
+          output_format: sarif
+          soft_fail: ${{ inputs.soft-fail }}
+          download_external_modules: false
+
+      - name: Upload SARIF to GitHub code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: results.sarif
+          category: checkov
+
+      - name: Upload Checkov SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: checkov-sarif
+          path: results.sarif
+          retention-days: 30

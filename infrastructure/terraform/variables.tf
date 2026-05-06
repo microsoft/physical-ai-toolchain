@@ -529,3 +529,37 @@ variable "should_include_aks_dns_zone" {
   description = "Whether to include the AKS private DNS zone in core DNS zones"
   default     = true
 }
+
+/*
+ * Conversion Pipeline Configuration - Optional
+ *
+ * The conversion pipeline module is opt-in. When should_deploy_conversion_pipeline
+ * is false (default), no conversion-pipeline resources are created and the
+ * conversion_pipeline_config object's fields go unused. When true, the module
+ * provisions an Event Grid system topic + subscription on the platform-owned
+ * data-lake account, an in-account dead-letter container, the Microsoft Fabric
+ * capacity + workspace, and Fabric SP RBAC. Durable storage (raw -> converted)
+ * lives on the platform module's data-lake account; should_create_data_lake_storage
+ * must be true (enforced by a precondition on the conversion-pipeline module).
+ */
+
+variable "should_deploy_conversion_pipeline" {
+  type        = bool
+  description = "Whether to deploy the conversion-pipeline module (raw -> converted ingest with Event Grid + Fabric)"
+  default     = false
+}
+
+variable "conversion_pipeline_config" {
+  type = object({
+    should_enable_event_grid_dead_letter = optional(bool, true)
+    raw_blob_suffix_filters              = optional(list(string), [".bag", ".bag.zst", ".mcap"])
+    conversion_subscriber_url            = optional(string, null)
+    should_create_fabric_capacity        = optional(bool, true)
+    should_create_fabric_workspace       = optional(bool, true)
+    fabric_capacity_sku                  = optional(string, "F2")
+    fabric_admin_members                 = optional(list(string), [])
+    fabric_workspace_sp_object_id        = optional(string, null)
+  })
+  description = "Conversion pipeline module configuration. Only consumed when should_deploy_conversion_pipeline is true"
+  default     = {}
+}
