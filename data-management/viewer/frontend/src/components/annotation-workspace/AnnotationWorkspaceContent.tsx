@@ -30,6 +30,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
       canvasRef={shell.canvasRef}
       videoRef={shell.videoRef}
       videoSrc={shell.videoSrc}
+      videoUrls={shell.videoUrls}
       onVideoEnded={shell.handleVideoEnded}
       onLoadedMetadata={shell.handleLoadedMetadata}
       displayFilter={shell.displayFilter}

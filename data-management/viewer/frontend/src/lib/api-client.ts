@@ -107,10 +107,12 @@ function preserveDatasetFeatureKeys(raw: Record<string, unknown>): DatasetInfo {
  * Apply transformKeys to an episode payload while preserving the original
  * trajectory variable map keys (e.g. ``observation.gripper.is_closed``) which
  * must not be camelCased so frontend lookups via ``trajectoryVariables[i].key``
- * remain valid.
+ * remain valid. Also preserves the ``video_urls`` map keys so they match the
+ * raw camera names returned in ``cameras`` (e.g. ``observation.images.cam_0``).
  */
 function preserveEpisodeVariableKeys(raw: Record<string, unknown>): EpisodeData {
   const rawTrajectory = raw.trajectory_data as Array<Record<string, unknown>> | undefined
+  const rawVideoUrls = raw.video_urls as Record<string, unknown> | undefined
   const episode = transformKeys<EpisodeData>(raw)
   if (rawTrajectory && Array.isArray(episode.trajectoryData)) {
     episode.trajectoryData = episode.trajectoryData.map((frame, frameIndex) => {
@@ -122,6 +124,9 @@ function preserveEpisodeVariableKeys(raw: Record<string, unknown>): EpisodeData 
       }
       return { ...frame, variables: { ...(originalVariables as Record<string, number>) } }
     })
+  }
+  if (rawVideoUrls) {
+    episode.videoUrls = { ...(rawVideoUrls as Record<string, string>) }
   }
   return episode
 }

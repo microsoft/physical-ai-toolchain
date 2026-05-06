@@ -79,13 +79,15 @@ export function useAnnotationWorkspaceMediaSources({
     }
   }, [cameras, cameraOverride])
 
+  const videoUrls = useMemo(() => currentEpisode?.videoUrls ?? {}, [currentEpisode?.videoUrls])
+
   const videoSrc = useMemo(() => {
-    if (!currentEpisode?.videoUrls || !cameraName) {
+    if (!cameraName) {
       return null
     }
 
-    return currentEpisode.videoUrls[cameraName]
-  }, [cameraName, currentEpisode?.videoUrls])
+    return videoUrls[cameraName] ?? null
+  }, [cameraName, videoUrls])
 
   const isInsertedFrame = originalFrameIndex === null
 
@@ -208,5 +210,6 @@ export function useAnnotationWorkspaceMediaSources({
     interpolatedImageUrl,
     isInsertedFrame,
     videoSrc,
+    videoUrls,
   }
 }
