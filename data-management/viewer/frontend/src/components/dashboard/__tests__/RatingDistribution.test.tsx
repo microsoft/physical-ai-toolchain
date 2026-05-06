@@ -1,6 +1,6 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('recharts', () => {
   const Passthrough = ({ children }: { children?: ReactNode }) => <div>{children}</div>
@@ -40,10 +40,6 @@ vi.mock('recharts', () => {
 })
 
 import { RatingDistribution } from '@/components/dashboard/RatingDistribution'
-
-afterEach(() => {
-  cleanup()
-})
 
 describe('RatingDistribution', () => {
   it('renders the default title and a zero total when distribution is empty', () => {

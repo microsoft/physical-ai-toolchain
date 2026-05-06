@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('date-fns', () => ({
   formatDistanceToNow: () => 'just now',
@@ -41,10 +41,6 @@ const annotators: AnnotatorInfo[] = [
   },
 ]
 
-afterEach(() => {
-  cleanup()
-})
-
 describe('AnnotatorLeaderboard', () => {
   it('renders the empty state when no annotators are provided', () => {
     render(<AnnotatorLeaderboard annotators={[]} />)
@@ -52,10 +48,10 @@ describe('AnnotatorLeaderboard', () => {
   })
 
   it('sorts annotators by episodes_annotated descending', () => {
-    const { container } = render(<AnnotatorLeaderboard annotators={annotators} />)
-    const names = Array.from(container.querySelectorAll('span.truncate.font-medium')).map((el) =>
-      el.textContent?.trim(),
-    )
+    render(<AnnotatorLeaderboard annotators={annotators} />)
+    const names = screen
+      .getAllByText(/^(Alice Anderson|Bob Brown|Carol Clark|Dave)$/)
+      .map((el) => el.textContent?.trim())
     expect(names).toEqual(['Bob Brown', 'Carol Clark', 'Alice Anderson', 'Dave'])
   })
 

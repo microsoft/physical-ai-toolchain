@@ -95,7 +95,7 @@ function setup(opts: SetupOpts = {}) {
   mockedEpisode.mockImplementation(((selector: unknown) =>
     typeof selector === 'function'
       ? (selector as (s: unknown) => unknown)({ currentEpisode: episode })
-      : episode) as never)
+      : episode) as unknown as typeof useEpisodeStore)
 
   mockedPlayback.mockReturnValue({
     currentFrame: opts.currentFrame ?? 0,
@@ -104,14 +104,14 @@ function setup(opts: SetupOpts = {}) {
     setCurrentFrame,
     togglePlayback,
     setPlaybackSpeed: vi.fn(),
-  } as never)
+  } as unknown as ReturnType<typeof usePlaybackControls>)
 
   mockedDisplay.mockReturnValue({
-    displayAdjustment: { brightness: 1, contrast: 1, saturation: 1 },
+    displayAdjustment: { brightness: 1, contrast: 1, saturation: 1, gamma: 1, hue: 0 },
     isActive: false,
     setAdjustment: vi.fn(),
     resetAdjustments: vi.fn(),
-  } as never)
+  } as unknown as ReturnType<typeof useViewerDisplay>)
 
   return { setCurrentFrame, togglePlayback }
 }

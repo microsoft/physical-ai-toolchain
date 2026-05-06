@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('date-fns', () => ({
   formatDistanceToNow: (date: Date) => {
@@ -39,10 +39,6 @@ const baseActivities: ActivityItem[] = [
   },
 ]
 
-afterEach(() => {
-  cleanup()
-})
-
 describe('ActivityFeed', () => {
   it('renders the empty state when no activities are provided', () => {
     render(<ActivityFeed activities={[]} />)
@@ -50,10 +46,8 @@ describe('ActivityFeed', () => {
   })
 
   it('sorts activities by timestamp descending', () => {
-    const { container } = render(<ActivityFeed activities={baseActivities} />)
-    const names = Array.from(container.querySelectorAll('.font-medium')).map((el) =>
-      el.textContent?.trim(),
-    )
+    render(<ActivityFeed activities={baseActivities} />)
+    const names = screen.getAllByText(/^(Alice|Bob|Carol)$/).map((el) => el.textContent?.trim())
     expect(names).toEqual(['Bob', 'Carol', 'Alice'])
   })
 
@@ -77,8 +71,10 @@ describe('ActivityFeed', () => {
   })
 
   it('respects the limit prop', () => {
-    const { container } = render(<ActivityFeed activities={baseActivities} limit={2} />)
-    const names = container.querySelectorAll('span.truncate.font-medium')
-    expect(names).toHaveLength(2)
+    render(<ActivityFeed activities={baseActivities} limit={2} />)
+    expect(screen.getAllByText(/^(Alice|Bob|Carol)$/)).toHaveLength(2)
+    expect(screen.getByText('Bob')).toBeInTheDocument()
+    expect(screen.getByText('Carol')).toBeInTheDocument()
+    expect(screen.queryByText('Alice')).not.toBeInTheDocument()
   })
 })

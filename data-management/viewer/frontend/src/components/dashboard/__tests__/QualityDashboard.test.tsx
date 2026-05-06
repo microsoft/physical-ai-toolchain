@@ -1,6 +1,6 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const useDashboardMetricsMock = vi.fn()
 
@@ -52,10 +52,6 @@ beforeEach(() => {
   useDashboardMetricsMock.mockReset()
 })
 
-afterEach(() => {
-  cleanup()
-})
-
 describe('QualityDashboard', () => {
   it('renders skeleton placeholders while loading', () => {
     useDashboardMetricsMock.mockReturnValue({
@@ -65,10 +61,8 @@ describe('QualityDashboard', () => {
       error: null,
       refetch: vi.fn(),
     })
-    const { container } = render(<QualityDashboard datasetId="ds-1" />)
-
-    const skeletons = container.querySelectorAll('.animate-pulse')
-    expect(skeletons.length).toBeGreaterThanOrEqual(5)
+    render(<QualityDashboard datasetId="ds-1" />)
+    expect(screen.getAllByTestId('dashboard-skeleton')).toHaveLength(5)
   })
 
   it('renders error alert and wires retry button to refetch', async () => {

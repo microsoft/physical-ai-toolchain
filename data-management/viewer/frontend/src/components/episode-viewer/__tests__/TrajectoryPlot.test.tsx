@@ -94,19 +94,25 @@ describe('TrajectoryPlot', () => {
   })
 
   it('renders the placeholder when no episode is loaded', () => {
-    mockedState.mockReturnValue(buildState({ currentEpisode: null }) as never)
+    mockedState.mockReturnValue(
+      buildState({ currentEpisode: null }) as unknown as ReturnType<typeof useTrajectoryPlotState>,
+    )
     render(<TrajectoryPlot />)
     expect(screen.getByText('No episode selected')).toBeInTheDocument()
   })
 
   it('renders the empty-data placeholder when chartData is empty', () => {
-    mockedState.mockReturnValue(buildState({ chartData: [] }) as never)
+    mockedState.mockReturnValue(
+      buildState({ chartData: [] }) as unknown as ReturnType<typeof useTrajectoryPlotState>,
+    )
     render(<TrajectoryPlot />)
     expect(screen.getByText('No trajectory data available')).toBeInTheDocument()
   })
 
   it('renders controls, chart, and defaults editor when data is present', () => {
-    mockedState.mockReturnValue(buildState() as never)
+    mockedState.mockReturnValue(
+      buildState() as unknown as ReturnType<typeof useTrajectoryPlotState>,
+    )
     render(<TrajectoryPlot />)
     expect(screen.getByTestId('trajectory-controls')).toBeInTheDocument()
     expect(screen.getByTestId('trajectory-chart')).toBeInTheDocument()
@@ -120,7 +126,9 @@ describe('TrajectoryPlot', () => {
       options?.onSuccess?.()
     })
     mockedState.mockReturnValue(
-      buildState({ saveDefaultsMutate: mutate, setDefaultsOpen }) as never,
+      buildState({ saveDefaultsMutate: mutate, setDefaultsOpen }) as unknown as ReturnType<
+        typeof useTrajectoryPlotState
+      >,
     )
 
     render(<TrajectoryPlot onSaved={onSaved} />)

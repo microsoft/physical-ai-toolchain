@@ -73,23 +73,23 @@ function setup(opts: SetupOptions = {}) {
   mockedEpisode.mockImplementation(((selector: unknown) =>
     typeof selector === 'function'
       ? (selector as (s: unknown) => unknown)({ currentEpisode: episode })
-      : episode) as never)
+      : episode) as unknown as typeof useEpisodeStore)
   mockedAnnotation.mockImplementation(((selector: unknown) =>
     typeof selector === 'function'
       ? (selector as (s: unknown) => unknown)({ currentAnnotation: annotation })
-      : annotation) as never)
+      : annotation) as unknown as typeof useAnnotationStore)
   mockedEdit.mockImplementation(((selector: unknown) =>
     typeof selector === 'function'
       ? (selector as (s: unknown) => unknown)({
           removedFrames: opts.removedFrames ?? new Set<number>(),
         })
-      : (opts.removedFrames ?? new Set<number>())) as never)
+      : (opts.removedFrames ?? new Set<number>())) as unknown as typeof useEditStore)
   mockedFrameInsertion.mockReturnValue({
     insertedFrames: opts.insertedFrames ?? new Map(),
-  } as never)
+  } as unknown as ReturnType<typeof useFrameInsertionState>)
   mockedTrajectoryAdjustment.mockReturnValue({
     trajectoryAdjustments: opts.trajectoryAdjustments ?? new Map(),
-  } as never)
+  } as unknown as ReturnType<typeof useTrajectoryAdjustmentState>)
   mockedPlayback.mockReturnValue({
     currentFrame: opts.currentFrame ?? 0,
     setCurrentFrame,
@@ -97,7 +97,7 @@ function setup(opts: SetupOptions = {}) {
     playbackSpeed: 1,
     togglePlayback: vi.fn(),
     setPlaybackSpeed: vi.fn(),
-  } as never)
+  } as unknown as ReturnType<typeof usePlaybackControls>)
 
   return { setCurrentFrame }
 }
@@ -183,6 +183,7 @@ describe('Timeline', () => {
     const slider = screen.getByRole('slider')
     const playhead = slider.querySelector('[style*="left"]') as HTMLElement | null
     expect(playhead).not.toBeNull()
-    expect(playhead!.style.left).toBe('50%')
+    if (!playhead) return
+    expect(playhead.style.left).toBe('50%')
   })
 })

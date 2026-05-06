@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 
 import { type IssueItem, IssuesSummary } from '@/components/dashboard/IssuesSummary'
 
@@ -16,10 +16,6 @@ const anomalies: IssueItem[] = [
   { name: 'unexpected_motion', count: 2 },
   { name: 'sensor_glitch', count: 1 },
 ]
-
-afterEach(() => {
-  cleanup()
-})
 
 describe('IssuesSummary', () => {
   it('renders the empty state when no issues or anomalies are provided', () => {
