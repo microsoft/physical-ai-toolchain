@@ -38,7 +38,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks()
 })
-
 describe('ApiClientError', () => {
   it('captures code, status, and details', () => {
     const err = new ApiClientError('not found', 'NOT_FOUND', 404, { id: '1' })
