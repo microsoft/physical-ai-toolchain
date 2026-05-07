@@ -1,4 +1,14 @@
 import '@testing-library/jest-dom/vitest'
+
+import { cleanup } from '@testing-library/react'
+import { afterEach } from 'vitest'
+
+// `globals: false` in vitest config prevents @testing-library/react's auto-cleanup
+// from registering, so unmount rendered trees between tests manually.
+afterEach(() => {
+  cleanup()
+})
+
 /**
  * Happy DOM does not implement several browser APIs that Radix UI primitives
  * (and a handful of dashboard widgets) rely on. Install minimal feature-detect
