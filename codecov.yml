@@ -24,7 +24,7 @@
 #   go ⊂ terraform (infrastructure/terraform/e2e/ ⊂ infrastructure/terraform/);
 #     deduplicated at the component layer (infrastructure-terraform vs infrastructure-go-e2e).
 #   vitest-* (components/features/lib/state/app) overlap the aggregate vitest flag and each
-#     other (vitest-features ⊂ vitest-components since the feature directories
+#     other (vitest-features  vitest-components since the feature directories
 #     dashboard/, annotation-panel/, frame-editor/, episode-viewer/ all live under src/components/);
 #     intentional to surface per-section coverage trends without losing the aggregate view.
 
@@ -230,7 +230,7 @@ flags:
       - data-management/viewer/frontend/src/components/
     carryforward: true
   vitest-features:
-    # Most actively developed feature areas tracked individually; remaining components fall under vitest-components.
+  # Most actively developed feature areas tracked individually; remaining components fall under vitest-components.
     paths:
       - data-management/viewer/frontend/src/components/dashboard/
       - data-management/viewer/frontend/src/components/annotation-panel/

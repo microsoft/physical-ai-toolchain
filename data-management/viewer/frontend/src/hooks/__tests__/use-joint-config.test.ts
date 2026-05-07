@@ -9,7 +9,6 @@ import { useJointConfigStore } from '@/stores/joint-config-store'
 import { jsonResponse } from '@/test/test-utils'
 
 const mockFetch = vi.fn()
-
 function mockMutationFetch(apiResponse: ReturnType<typeof jsonResponse>) {
   mockFetch
     .mockResolvedValueOnce(jsonResponse({ csrf_token: 'test-csrf-token' }))

@@ -33,13 +33,13 @@ export function QualityDashboard({ datasetId, className }: QualityDashboardProps
     return (
       <div className={cn('space-y-6', className)}>
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          <Skeleton className="h-64" />
-          <Skeleton className="h-64" />
-          <Skeleton className="h-64" />
+          <Skeleton data-testid="dashboard-skeleton" className="h-64" />
+          <Skeleton data-testid="dashboard-skeleton" className="h-64" />
+          <Skeleton data-testid="dashboard-skeleton" className="h-64" />
         </div>
         <div className="grid gap-6 md:grid-cols-2">
-          <Skeleton className="h-80" />
-          <Skeleton className="h-80" />
+          <Skeleton data-testid="dashboard-skeleton" className="h-80" />
+          <Skeleton data-testid="dashboard-skeleton" className="h-80" />
         </div>
       </div>
     )
