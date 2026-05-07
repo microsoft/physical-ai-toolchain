@@ -59,7 +59,7 @@ export function ProgressOverview({
               <CheckCircle2 className="h-5 w-5 text-green-600" />
             </div>
             <div>
-              <p className="text-2xl font-semibold">{annotatedEpisodes.toLocaleString()}</p>
+              <p className="text-2xl font-semibold">{annotatedEpisodes.toLocaleString('en-US')}</p>
               <p className="text-muted-foreground text-xs">Completed</p>
             </div>
           </div>
@@ -69,7 +69,7 @@ export function ProgressOverview({
               <Clock className="h-5 w-5 text-yellow-600" />
             </div>
             <div>
-              <p className="text-2xl font-semibold">{pendingEpisodes.toLocaleString()}</p>
+              <p className="text-2xl font-semibold">{pendingEpisodes.toLocaleString('en-US')}</p>
               <p className="text-muted-foreground text-xs">Pending</p>
             </div>
           </div>
@@ -79,7 +79,7 @@ export function ProgressOverview({
               <FileText className="h-5 w-5 text-blue-600" />
             </div>
             <div>
-              <p className="text-2xl font-semibold">{totalEpisodes.toLocaleString()}</p>
+              <p className="text-2xl font-semibold">{totalEpisodes.toLocaleString('en-US')}</p>
               <p className="text-muted-foreground text-xs">Total Episodes</p>
             </div>
           </div>
