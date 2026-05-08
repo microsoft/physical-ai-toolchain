@@ -47,9 +47,12 @@ if [[ -n "${STORAGE_ACCOUNT:-}" ]]; then
   python3 -m training.il.scripts.lerobot.download_dataset
   FULL_DATASET_PATH="${DATASET_ROOT}/${DATASET_REPO_ID}"
   echo "Dataset materialized at: ${FULL_DATASET_PATH}"
+  # use_imagenet_stats=true so lerobot normalizes images with ImageNet
+  # (3,1,1) per-channel mean/std instead of trying to use the v3.0 dataset's
+  # image stats, whose shape does not match lerobot 0.4.x's normalize_processor.
   train_args+=(
     --dataset.root="${FULL_DATASET_PATH}"
-    --dataset.use_imagenet_stats=false
+    --dataset.use_imagenet_stats=true
     --dataset.video_backend=pyav
   )
 elif [[ -n "${HF_TOKEN:-}" ]]; then
