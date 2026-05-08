@@ -80,7 +80,10 @@ def bootstrap_mlflow(
 
         resolved_name = experiment_name or f"lerobot-{policy_type}-{job_name}"
         mlflow.set_experiment(resolved_name)
-        mlflow.autolog(log_models=False, log_input_examples=False)
+
+        # Skip mlflow.autolog: it tries to use the tracking URI as a model
+        # registry URI, which the Azure ML MLflow endpoint does not implement.
+        # Metrics are logged explicitly by the training wrapper.
 
         print(f"[INFO] MLflow tracking URI: {tracking_uri}")
         print(f"[INFO] MLflow experiment: {resolved_name}")
