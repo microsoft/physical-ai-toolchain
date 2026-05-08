@@ -360,7 +360,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          $today = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+          $today = [datetime]::UtcNow.ToString('yyyy-MM-dd')
           $path = 'CHANGELOG.md'
           $content = Get-Content -Raw -LiteralPath $path
           $updated = [regex]::Replace($content, '(?m)^ms\.date:\s.*$', "ms.date: $today")
@@ -368,11 +368,7 @@ jobs:
             Write-Host "CHANGELOG.md ms.date already set to $today"
             exit 0
           }
-          Set-Content -LiteralPath $path -Value $updated -NoNewline
-          if (& git diff --quiet -- $path) {
-            Write-Host "No diff after rewrite; nothing to commit"
-            exit 0
-          }
+          Set-Content -LiteralPath $path -Value $updated -NoNewline -Encoding utf8NoBOM
           & git config user.name 'github-actions[bot]'
           & git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           & git remote set-url origin "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git"
