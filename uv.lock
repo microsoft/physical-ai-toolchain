@@ -1648,7 +1648,7 @@ wheels = [
 
 [[package]]
 name = "physical-ai-toolchain"
-version = "0.7.4"
+version = "0.8.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
