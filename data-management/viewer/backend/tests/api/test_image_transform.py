@@ -1,8 +1,11 @@
 """Tests for image transformation functions including color adjustments."""
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
+from src.api.services import image_transform as image_transform_module
 from src.api.services.image_transform import (
     ColorAdjustment,
     CropRegion,
@@ -10,6 +13,7 @@ from src.api.services.image_transform import (
     ImageTransformError,
     ResizeDimensions,
     apply_brightness,
+    apply_camera_transforms,
     apply_color_adjustment,
     apply_color_filter,
     apply_contrast,
@@ -19,6 +23,8 @@ from src.api.services.image_transform import (
     apply_resize,
     apply_saturation,
     apply_transform,
+    apply_transforms_batch,
+    get_output_dimensions,
 )
 
 
@@ -295,6 +301,205 @@ class TestApplyColorFilter:
         result = apply_color_filter(sample_rgb_frame, "cool")
 
         assert result.shape == sample_rgb_frame.shape
+
+
+class TestErrorPathsAndPILUnavailable:
+    """Tests for validation errors, exception wrapping, and PIL unavailability."""
+
+    def test_apply_crop_zero_dimensions_raises(self, sample_rgb_frame: np.ndarray) -> None:
+        crop = CropRegion(x=0, y=0, width=0, height=10)
+        with pytest.raises(ImageTransformError, match="Crop dimensions must be positive"):
+            apply_crop(sample_rgb_frame, crop)
+
+    def test_apply_resize_zero_dimensions_raises(self, sample_rgb_frame: np.ndarray) -> None:
+        with pytest.raises(ImageTransformError, match="Resize dimensions must be positive"):
+            apply_resize(sample_rgb_frame, ResizeDimensions(width=0, height=10))
+
+    def test_apply_resize_wraps_pil_failure(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module.Image, "fromarray", side_effect=RuntimeError("boom")),
+            pytest.raises(ImageTransformError, match="Resize operation failed"),
+        ):
+            apply_resize(sample_rgb_frame, ResizeDimensions(width=10, height=10))
+
+    def test_apply_brightness_pil_unavailable_raises(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module, "PIL_AVAILABLE", False),
+            pytest.raises(ImageTransformError, match=r"PIL .* required"),
+        ):
+            apply_brightness(sample_rgb_frame, 0.2)
+
+    def test_apply_brightness_wraps_pil_failure(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module.Image, "fromarray", side_effect=RuntimeError("boom")),
+            pytest.raises(ImageTransformError, match="Brightness adjustment failed"),
+        ):
+            apply_brightness(sample_rgb_frame, 0.2)
+
+    def test_apply_contrast_pil_unavailable_raises(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module, "PIL_AVAILABLE", False),
+            pytest.raises(ImageTransformError, match=r"PIL .* required"),
+        ):
+            apply_contrast(sample_rgb_frame, 0.2)
+
+    def test_apply_contrast_wraps_pil_failure(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module.Image, "fromarray", side_effect=RuntimeError("boom")),
+            pytest.raises(ImageTransformError, match="Contrast adjustment failed"),
+        ):
+            apply_contrast(sample_rgb_frame, 0.2)
+
+    def test_apply_saturation_pil_unavailable_raises(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module, "PIL_AVAILABLE", False),
+            pytest.raises(ImageTransformError, match=r"PIL .* required"),
+        ):
+            apply_saturation(sample_rgb_frame, 0.2)
+
+    def test_apply_saturation_wraps_pil_failure(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module.Image, "fromarray", side_effect=RuntimeError("boom")),
+            pytest.raises(ImageTransformError, match="Saturation adjustment failed"),
+        ):
+            apply_saturation(sample_rgb_frame, 0.2)
+
+    def test_apply_gamma_non_positive_raises(self, sample_rgb_frame: np.ndarray) -> None:
+        with pytest.raises(ImageTransformError, match="Gamma must be positive"):
+            apply_gamma(sample_rgb_frame, 0.0)
+
+    def test_apply_gamma_wraps_failure(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module.np, "power", side_effect=RuntimeError("boom")),
+            pytest.raises(ImageTransformError, match="Gamma correction failed"),
+        ):
+            apply_gamma(sample_rgb_frame, 1.5)
+
+    def test_apply_hue_rotation_pil_unavailable_raises(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module, "PIL_AVAILABLE", False),
+            pytest.raises(ImageTransformError, match=r"PIL .* required"),
+        ):
+            apply_hue_rotation(sample_rgb_frame, 45)
+
+    def test_apply_hue_rotation_wraps_failure(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module.Image, "fromarray", side_effect=RuntimeError("boom")),
+            pytest.raises(ImageTransformError, match="Hue rotation failed"),
+        ):
+            apply_hue_rotation(sample_rgb_frame, 45)
+
+    def test_apply_color_filter_pil_unavailable_raises(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module, "PIL_AVAILABLE", False),
+            pytest.raises(ImageTransformError, match=r"PIL .* required"),
+        ):
+            apply_color_filter(sample_rgb_frame, "grayscale")
+
+    def test_apply_color_filter_unknown_raises(self, sample_rgb_frame: np.ndarray) -> None:
+        with pytest.raises(ImageTransformError, match="Unknown color filter"):
+            apply_color_filter(sample_rgb_frame, "nonexistent_filter")
+
+    def test_apply_color_filter_wraps_failure(self, sample_rgb_frame: np.ndarray) -> None:
+        with (
+            patch.object(image_transform_module.Image, "fromarray", side_effect=RuntimeError("boom")),
+            pytest.raises(ImageTransformError, match="Color filter failed"),
+        ):
+            apply_color_filter(sample_rgb_frame, "grayscale")
+
+    def test_apply_color_filter_empty_string_returns_original(self, sample_rgb_frame: np.ndarray) -> None:
+        result = apply_color_filter(sample_rgb_frame, "")
+        np.testing.assert_array_equal(result, sample_rgb_frame)
+
+
+class TestApplyTransformsBatch:
+    """Tests for apply_transforms_batch."""
+
+    def test_no_transform_returns_input_unchanged(self, sample_rgb_frame: np.ndarray) -> None:
+        frames = np.stack([sample_rgb_frame, sample_rgb_frame], axis=0)
+        result = apply_transforms_batch(frames, ImageTransform())
+        assert result is frames
+
+    def test_applies_transform_and_invokes_progress_callback(self, sample_rgb_frame: np.ndarray) -> None:
+        frames = np.stack([sample_rgb_frame, sample_rgb_frame, sample_rgb_frame], axis=0)
+        transform = ImageTransform(crop=CropRegion(x=0, y=0, width=10, height=10))
+        progress_calls: list[tuple[int, int]] = []
+
+        result = apply_transforms_batch(frames, transform, progress_callback=lambda c, t: progress_calls.append((c, t)))
+
+        assert result.shape == (3, 10, 10, 3)
+        assert progress_calls == [(1, 3), (2, 3), (3, 3)]
+
+
+class TestApplyCameraTransforms:
+    """Tests for apply_camera_transforms."""
+
+    def test_no_transform_returns_input_dict_values(self, sample_rgb_frame: np.ndarray) -> None:
+        frames = np.stack([sample_rgb_frame], axis=0)
+        images = {"cam0": frames, "cam1": frames}
+
+        result = apply_camera_transforms(images, global_transform=None, camera_transforms=None)
+
+        assert result["cam0"] is frames
+        assert result["cam1"] is frames
+
+    def test_global_transform_applied_to_all_cameras(self, sample_rgb_frame: np.ndarray) -> None:
+        frames = np.stack([sample_rgb_frame], axis=0)
+        images = {"cam0": frames, "cam1": frames}
+        global_transform = ImageTransform(crop=CropRegion(x=0, y=0, width=10, height=10))
+
+        result = apply_camera_transforms(images, global_transform=global_transform, camera_transforms=None)
+
+        assert result["cam0"].shape == (1, 10, 10, 3)
+        assert result["cam1"].shape == (1, 10, 10, 3)
+
+    def test_per_camera_transform_overrides_global(self, sample_rgb_frame: np.ndarray) -> None:
+        frames = np.stack([sample_rgb_frame], axis=0)
+        images = {"cam0": frames, "cam1": frames}
+        global_transform = ImageTransform(crop=CropRegion(x=0, y=0, width=10, height=10))
+        camera_transforms = {"cam1": ImageTransform(crop=CropRegion(x=0, y=0, width=20, height=20))}
+
+        result = apply_camera_transforms(
+            images,
+            global_transform=global_transform,
+            camera_transforms=camera_transforms,
+        )
+
+        assert result["cam0"].shape == (1, 10, 10, 3)
+        assert result["cam1"].shape == (1, 20, 20, 3)
+
+    def test_progress_callback_receives_camera_name(self, sample_rgb_frame: np.ndarray) -> None:
+        frames = np.stack([sample_rgb_frame], axis=0)
+        images = {"cam0": frames}
+        transform = ImageTransform(crop=CropRegion(x=0, y=0, width=10, height=10))
+        calls: list[tuple[str, int, int]] = []
+
+        apply_camera_transforms(
+            images,
+            global_transform=transform,
+            camera_transforms=None,
+            progress_callback=lambda cam, c, t: calls.append((cam, c, t)),
+        )
+
+        assert calls == [("cam0", 1, 1)]
+
+
+class TestGetOutputDimensions:
+    """Tests for get_output_dimensions."""
+
+    def test_no_transform_returns_original(self) -> None:
+        assert get_output_dimensions((640, 480), ImageTransform()) == (640, 480)
+
+    def test_crop_changes_dimensions(self) -> None:
+        transform = ImageTransform(crop=CropRegion(x=0, y=0, width=100, height=80))
+        assert get_output_dimensions((640, 480), transform) == (100, 80)
+
+    def test_resize_overrides_crop(self) -> None:
+        transform = ImageTransform(
+            crop=CropRegion(x=0, y=0, width=100, height=80),
+            resize=ResizeDimensions(width=64, height=64),
+        )
+        assert get_output_dimensions((640, 480), transform) == (64, 64)
         # Blue channel should generally increase
 
     def test_filter_unknown_raises_error(self, sample_rgb_frame: np.ndarray) -> None:

@@ -13,6 +13,9 @@
 		"mycontainer",
 		"noseparator",
 		"preds",
+		"refetches",
+		"unstub",
+		"uppercased",
 		"xticklabels"
 	],
 	"ignorePaths": [
