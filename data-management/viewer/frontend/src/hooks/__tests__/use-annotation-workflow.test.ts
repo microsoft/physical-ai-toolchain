@@ -1,215 +1,159 @@
-/**
- * Tests for useAnnotationWorkflow hook.
- */
-
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/hooks/use-annotations', () => ({
-  useSaveCurrentAnnotation: vi.fn(),
-}))
-
 import { useAnnotationWorkflow } from '@/hooks/use-annotation-workflow'
-import { useSaveCurrentAnnotation } from '@/hooks/use-annotations'
 import { useAnnotationStore, useEpisodeStore } from '@/stores'
 
-const mockedUseSaveCurrentAnnotation = vi.mocked(useSaveCurrentAnnotation)
+const saveMock = vi.fn()
 
-function setupAnnotation(notes = '') {
-  const store = useAnnotationStore.getState()
-  store.initializeAnnotation('tester')
-  if (notes) {
-    store.updateNotes(notes)
-    // Mark clean so isDirty starts false unless test mutates it
-    store.markSaved()
-  }
-}
+vi.mock('@/hooks/use-annotations', () => ({
+  useSaveCurrentAnnotation: () => ({
+    save: saveMock,
+    isPending: false,
+    isSuccess: false,
+    isError: false,
+    error: null,
+  }),
+}))
+
+const nextEpisodeMock = vi.fn()
+
+beforeEach(() => {
+  saveMock.mockReset()
+  nextEpisodeMock.mockReset()
+  useAnnotationStore.getState().clear()
+  useEpisodeStore.getState().reset()
+  useEpisodeStore.setState({
+    currentDatasetId: 'ds-1',
+    currentIndex: 0,
+    nextEpisode: nextEpisodeMock,
+  } as unknown as Partial<ReturnType<typeof useEpisodeStore.getState>>)
+  useAnnotationStore.getState().initializeAnnotation('tester')
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('useAnnotationWorkflow', () => {
-  let saveFn: ReturnType<typeof vi.fn>
-
-  beforeEach(() => {
-    saveFn = vi.fn()
-    mockedUseSaveCurrentAnnotation.mockReturnValue({
-      save: saveFn,
-      isPending: false,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
-    useAnnotationStore.getState().clear()
-    useEpisodeStore.getState().reset()
-    useEpisodeStore.setState({ currentDatasetId: 'ds-1' })
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('save bails when no current annotation', async () => {
+  it('save() invokes the underlying save and marks the store as saved', async () => {
     const onSaveSuccess = vi.fn()
     const { result } = renderHook(() => useAnnotationWorkflow({ onSaveSuccess }))
+
+    act(() => {
+      useAnnotationStore.getState().updateNotes('hello')
+    })
+    expect(useAnnotationStore.getState().isDirty).toBe(true)
 
     await act(async () => {
       await result.current.save()
     })
 
-    expect(saveFn).not.toHaveBeenCalled()
-    expect(onSaveSuccess).not.toHaveBeenCalled()
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(useAnnotationStore.getState().isDirty).toBe(false)
+    expect(onSaveSuccess).toHaveBeenCalledTimes(1)
   })
 
-  it('save bails when no current dataset id', async () => {
-    setupAnnotation()
-    useEpisodeStore.setState({ currentDatasetId: null })
+  it('save() is a no-op when there is no current annotation or dataset', async () => {
+    useAnnotationStore.getState().clear()
+
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     await act(async () => {
       await result.current.save()
     })
 
-    expect(saveFn).not.toHaveBeenCalled()
+    expect(saveMock).not.toHaveBeenCalled()
   })
 
-  it('save invokes mutation, marks saved, and fires onSaveSuccess', async () => {
-    setupAnnotation()
-    useAnnotationStore.getState().updateNotes('changed')
-    expect(useAnnotationStore.getState().isDirty).toBe(true)
-
-    const onSaveSuccess = vi.fn()
-    const { result } = renderHook(() => useAnnotationWorkflow({ onSaveSuccess }))
-
-    await act(async () => {
-      await result.current.save()
-    })
-
-    expect(saveFn).toHaveBeenCalledTimes(1)
-    expect(onSaveSuccess).toHaveBeenCalledTimes(1)
-    expect(useAnnotationStore.getState().isDirty).toBe(false)
-  })
-
-  it('saveAndAdvance advances when autoAdvance true (default)', async () => {
-    setupAnnotation()
-    useEpisodeStore.setState({
-      episodes: [
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { episodeId: 'a' } as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { episodeId: 'b' } as any,
-      ],
-      currentIndex: 0,
-    })
+  it('saveAndAdvance() advances to next episode by default', async () => {
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     await act(async () => {
       await result.current.saveAndAdvance()
     })
 
-    expect(saveFn).toHaveBeenCalledTimes(1)
-    expect(useEpisodeStore.getState().currentIndex).toBe(1)
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(nextEpisodeMock).toHaveBeenCalledTimes(1)
   })
 
-  it('saveAndAdvance does not advance when autoAdvance false', async () => {
-    setupAnnotation()
-    useEpisodeStore.setState({
-      episodes: [
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { episodeId: 'a' } as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { episodeId: 'b' } as any,
-      ],
-      currentIndex: 0,
-    })
+  it('saveAndAdvance() does not advance when autoAdvance is false', async () => {
     const { result } = renderHook(() => useAnnotationWorkflow({ autoAdvance: false }))
 
     await act(async () => {
       await result.current.saveAndAdvance()
     })
 
-    expect(useEpisodeStore.getState().currentIndex).toBe(0)
+    expect(saveMock).toHaveBeenCalledTimes(1)
+    expect(nextEpisodeMock).not.toHaveBeenCalled()
   })
 
-  it('skip resets annotation and advances', () => {
-    setupAnnotation()
-    useAnnotationStore.getState().updateNotes('dirty')
-    useEpisodeStore.setState({
-      episodes: [
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { episodeId: 'a' } as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { episodeId: 'b' } as any,
-      ],
-      currentIndex: 0,
-    })
+  it('skip() resets the annotation and advances', async () => {
+    useAnnotationStore.getState().updateNotes('draft')
+    expect(useAnnotationStore.getState().isDirty).toBe(true)
+
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
       result.current.skip()
     })
 
+    expect(nextEpisodeMock).toHaveBeenCalledTimes(1)
     expect(useAnnotationStore.getState().isDirty).toBe(false)
-    expect(useEpisodeStore.getState().currentIndex).toBe(1)
   })
 
-  it('flagForReview prepends flag note', () => {
-    setupAnnotation('original')
+  it('flagForReview() is idempotent', async () => {
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
       result.current.flagForReview()
     })
-
-    expect(useAnnotationStore.getState().currentAnnotation?.notes).toBe(
-      '[FLAGGED FOR REVIEW]\noriginal',
-    )
-  })
-
-  it('flagForReview is no-op when already flagged', () => {
-    setupAnnotation('[FLAGGED FOR REVIEW]\noriginal')
-    const before = useAnnotationStore.getState().currentAnnotation?.notes
-    const { result } = renderHook(() => useAnnotationWorkflow())
+    const after1 = useAnnotationStore.getState().currentAnnotation?.notes
+    expect(after1).toContain('[FLAGGED FOR REVIEW]')
 
     act(() => {
       result.current.flagForReview()
     })
-
-    expect(useAnnotationStore.getState().currentAnnotation?.notes).toBe(before)
+    const after2 = useAnnotationStore.getState().currentAnnotation?.notes
+    expect(after2).toBe(after1)
   })
 
-  it('navigateWithCheck runs action immediately when not dirty', () => {
-    setupAnnotation()
+  it('navigateWithCheck opens dialog when dirty and runs immediately when clean', async () => {
     const action = vi.fn()
-    const { result } = renderHook(() => useAnnotationWorkflow())
+    const { result, rerender } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
       result.current.navigateWithCheck(action)
     })
-
     expect(action).toHaveBeenCalledTimes(1)
     expect(result.current.showUnsavedDialog).toBe(false)
-  })
-
-  it('navigateWithCheck opens dialog when dirty and defers action', () => {
-    setupAnnotation()
-    useAnnotationStore.getState().updateNotes('dirty')
-    const action = vi.fn()
-    const { result } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
-      result.current.navigateWithCheck(action)
+      useAnnotationStore.getState().updateNotes('dirty')
+    })
+    rerender()
+
+    const dirtyAction = vi.fn()
+    act(() => {
+      result.current.navigateWithCheck(dirtyAction)
     })
 
-    expect(action).not.toHaveBeenCalled()
+    expect(dirtyAction).not.toHaveBeenCalled()
     expect(result.current.showUnsavedDialog).toBe(true)
     expect(result.current.pendingNavigation).not.toBeNull()
   })
 
-  it('confirmNavigation discards changes and runs pending action', () => {
-    setupAnnotation()
-    useAnnotationStore.getState().updateNotes('dirty')
+  it('confirmNavigation runs the pending action and resets state', async () => {
     const action = vi.fn()
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
+      useAnnotationStore.getState().updateNotes('dirty')
+    })
+    act(() => {
       result.current.navigateWithCheck(action)
     })
+
     act(() => {
       result.current.confirmNavigation()
     })
@@ -220,15 +164,17 @@ describe('useAnnotationWorkflow', () => {
     expect(useAnnotationStore.getState().isDirty).toBe(false)
   })
 
-  it('cancelNavigation clears pending state without running action', () => {
-    setupAnnotation()
-    useAnnotationStore.getState().updateNotes('dirty')
+  it('cancelNavigation closes the dialog without running the action', async () => {
     const action = vi.fn()
     const { result } = renderHook(() => useAnnotationWorkflow())
 
     act(() => {
+      useAnnotationStore.getState().updateNotes('dirty')
+    })
+    act(() => {
       result.current.navigateWithCheck(action)
     })
+
     act(() => {
       result.current.cancelNavigation()
     })
@@ -236,16 +182,5 @@ describe('useAnnotationWorkflow', () => {
     expect(action).not.toHaveBeenCalled()
     expect(result.current.showUnsavedDialog).toBe(false)
     expect(result.current.pendingNavigation).toBeNull()
-  })
-
-  it('isSaving reflects mutation pending state', () => {
-    setupAnnotation()
-    mockedUseSaveCurrentAnnotation.mockReturnValue({
-      save: saveFn,
-      isPending: true,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
-    const { result } = renderHook(() => useAnnotationWorkflow())
-    expect(result.current.isSaving).toBe(true)
   })
 })

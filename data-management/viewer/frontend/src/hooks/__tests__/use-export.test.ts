@@ -1,187 +1,228 @@
+/**
+ * Tests for useExport hook.
+ *
+ * Covers SSE-style streaming, abort, preview fetching, and reset behavior.
+ * The underlying SSE connection is fully abstracted by createExportStream,
+ * so we mock that and invoke the captured progress/complete/error callbacks
+ * directly to drive state transitions deterministically.
+ */
+
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ExportPreviewStats, ExportRequestWithEdits } from '@/api/export'
 import { useExport } from '@/hooks/use-export'
+import type { ExportProgress, ExportResult } from '@/types'
 
-vi.mock('@/api/export', () => ({
-  createExportStream: vi.fn(),
-  getExportPreview: vi.fn(),
+const { mockCreateExportStream, mockGetExportPreview, mockCancel } = vi.hoisted(() => ({
+  mockCreateExportStream: vi.fn(),
+  mockGetExportPreview: vi.fn(),
+  mockCancel: vi.fn(),
 }))
 
-import { createExportStream, getExportPreview } from '@/api/export'
+vi.mock('@/api/export', () => ({
+  createExportStream: mockCreateExportStream,
+  getExportPreview: mockGetExportPreview,
+  exportEpisodes: vi.fn(),
+}))
 
-const mockedCreateStream = vi.mocked(createExportStream)
-const mockedPreview = vi.mocked(getExportPreview)
+interface CapturedCallbacks {
+  onProgress: (p: ExportProgress) => void
+  onComplete: (r: ExportResult) => void
+  onError: (e: string) => void
+}
+
+function captureStreamCallbacks(): CapturedCallbacks {
+  const calls = mockCreateExportStream.mock.calls
+  const lastCall = calls[calls.length - 1]
+  return {
+    onProgress: lastCall[2],
+    onComplete: lastCall[3],
+    onError: lastCall[4],
+  }
+}
+
+const sampleRequest: ExportRequestWithEdits = {
+  episode_indices: [0, 1],
+  format: 'lerobot',
+} as unknown as ExportRequestWithEdits
+
+const sampleProgress: ExportProgress = {
+  current: 1,
+  total: 2,
+  status: 'processing',
+} as unknown as ExportProgress
+
+const sampleResult: ExportResult = {
+  output_path: '/tmp/export.zip',
+  episodes_exported: 2,
+} as unknown as ExportResult
+
+const samplePreview: ExportPreviewStats = {
+  episodeCount: 2,
+  totalFrames: 200,
+} as unknown as ExportPreviewStats
 
 describe('useExport', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    mockCreateExportStream.mockReset()
+    mockGetExportPreview.mockReset()
+    mockCancel.mockReset()
+    mockCreateExportStream.mockReturnValue(mockCancel)
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('startExport is a no-op without a datasetId', () => {
+  it('initializes with empty state', () => {
+    const { result } = renderHook(() => useExport({ datasetId: 'ds-1' }))
+
+    expect(result.current.isExporting).toBe(false)
+    expect(result.current.progress).toBeNull()
+    expect(result.current.result).toBeNull()
+    expect(result.current.error).toBeNull()
+    expect(result.current.previewStats).toBeNull()
+    expect(result.current.isLoadingPreview).toBe(false)
+  })
+
+  it('does not start export when datasetId is undefined', () => {
     const { result } = renderHook(() => useExport({ datasetId: undefined }))
+
     act(() => {
-      result.current.startExport({
-        format: 'lerobot',
-        episodes: [],
-        edits: { removed_frames: {}, edited_annotations: {} },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any)
+      result.current.startExport(sampleRequest)
     })
-    expect(mockedCreateStream).not.toHaveBeenCalled()
+
+    expect(mockCreateExportStream).not.toHaveBeenCalled()
     expect(result.current.isExporting).toBe(false)
   })
 
-  it('streams progress and result via createExportStream', async () => {
-    let progressCb: ((p: unknown) => void) | undefined
-    let completeCb: ((r: unknown) => void) | undefined
-    mockedCreateStream.mockImplementation((_d, _r, onProgress, onComplete) => {
-      progressCb = onProgress as (p: unknown) => void
-      completeCb = onComplete as (r: unknown) => void
-      return () => {}
-    })
-
-    const { result } = renderHook(() => useExport({ datasetId: 'ds' }))
+  it('starts export and updates state via stream callbacks', () => {
+    const { result } = renderHook(() => useExport({ datasetId: 'ds-1' }))
 
     act(() => {
-      result.current.startExport({
-        format: 'lerobot',
-        episodes: [0, 1],
-        edits: { removed_frames: {}, edited_annotations: {} },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any)
+      result.current.startExport(sampleRequest)
     })
 
+    expect(mockCreateExportStream).toHaveBeenCalledWith(
+      'ds-1',
+      sampleRequest,
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+    )
     expect(result.current.isExporting).toBe(true)
-    expect(mockedCreateStream).toHaveBeenCalledTimes(1)
+
+    const { onProgress, onComplete } = captureStreamCallbacks()
 
     act(() => {
-      progressCb?.({ stage: 'processing', percent: 50 })
+      onProgress(sampleProgress)
     })
-    expect(result.current.progress).toEqual({ stage: 'processing', percent: 50 })
+    expect(result.current.progress).toEqual(sampleProgress)
+    expect(result.current.isExporting).toBe(true)
 
     act(() => {
-      completeCb?.({ downloadUrl: 'https://example.com/out.zip' })
+      onComplete(sampleResult)
     })
+    expect(result.current.result).toEqual(sampleResult)
     expect(result.current.isExporting).toBe(false)
-    expect(result.current.result).toEqual({ downloadUrl: 'https://example.com/out.zip' })
   })
 
-  it('reports errors from the export stream', () => {
-    let errorCb: ((e: string) => void) | undefined
-    mockedCreateStream.mockImplementation((_d, _r, _p, _c, onError) => {
-      errorCb = onError
-      return () => {}
-    })
-
-    const { result } = renderHook(() => useExport({ datasetId: 'ds' }))
+  it('captures error from stream and clears exporting flag', () => {
+    const { result } = renderHook(() => useExport({ datasetId: 'ds-1' }))
 
     act(() => {
-      result.current.startExport({
-        format: 'lerobot',
-        episodes: [0],
-        edits: { removed_frames: {}, edited_annotations: {} },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any)
+      result.current.startExport(sampleRequest)
     })
+
+    const { onError } = captureStreamCallbacks()
 
     act(() => {
-      errorCb?.('boom')
+      onError('boom')
     })
 
-    expect(result.current.isExporting).toBe(false)
     expect(result.current.error).toBe('boom')
+    expect(result.current.isExporting).toBe(false)
   })
 
-  it('cancelExport cancels the active stream and sets cancellation message', () => {
-    const cancel = vi.fn()
-    mockedCreateStream.mockReturnValue(cancel)
-
-    const { result } = renderHook(() => useExport({ datasetId: 'ds' }))
+  it('cancelExport invokes cancel ref and sets cancelled error', () => {
+    const { result } = renderHook(() => useExport({ datasetId: 'ds-1' }))
 
     act(() => {
-      result.current.startExport({
-        format: 'lerobot',
-        episodes: [0],
-        edits: { removed_frames: {}, edited_annotations: {} },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any)
+      result.current.startExport(sampleRequest)
     })
 
     act(() => {
       result.current.cancelExport()
     })
 
-    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(mockCancel).toHaveBeenCalledTimes(1)
     expect(result.current.isExporting).toBe(false)
     expect(result.current.error).toBe('Export cancelled')
   })
 
-  it('fetchPreview populates previewStats on success', async () => {
-    mockedPreview.mockResolvedValueOnce({
-      total_episodes: 2,
-      total_frames: 100,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any)
+  it('cancelExport is a no-op when no export is in flight', () => {
+    const { result } = renderHook(() => useExport({ datasetId: 'ds-1' }))
 
-    const { result } = renderHook(() => useExport({ datasetId: 'ds' }))
-
-    await act(async () => {
-      await result.current.fetchPreview([0, 1])
+    act(() => {
+      result.current.cancelExport()
     })
 
-    expect(mockedPreview).toHaveBeenCalledWith('ds', [0, 1], undefined)
-    expect(result.current.previewStats).toEqual({ total_episodes: 2, total_frames: 100 })
+    expect(mockCancel).not.toHaveBeenCalled()
+    expect(result.current.error).toBe('Export cancelled')
+  })
+
+  it('fetchPreview populates previewStats on success', async () => {
+    mockGetExportPreview.mockResolvedValueOnce(samplePreview)
+    const { result } = renderHook(() => useExport({ datasetId: 'ds-1' }))
+
+    await act(async () => {
+      await result.current.fetchPreview([0, 1], [5])
+    })
+
+    expect(mockGetExportPreview).toHaveBeenCalledWith('ds-1', [0, 1], [5])
+    expect(result.current.previewStats).toEqual(samplePreview)
     expect(result.current.isLoadingPreview).toBe(false)
   })
 
-  it('fetchPreview captures error messages from rejection', async () => {
-    mockedPreview.mockRejectedValueOnce(new Error('preview failed'))
-
-    const { result } = renderHook(() => useExport({ datasetId: 'ds' }))
+  it('fetchPreview sets error and clears loading on failure', async () => {
+    mockGetExportPreview.mockRejectedValueOnce(new Error('preview failed'))
+    const { result } = renderHook(() => useExport({ datasetId: 'ds-1' }))
 
     await act(async () => {
       await result.current.fetchPreview([0])
     })
 
-    await waitFor(() => expect(result.current.isLoadingPreview).toBe(false))
-    expect(result.current.error).toBe('preview failed')
+    await waitFor(() => {
+      expect(result.current.error).toBe('preview failed')
+    })
+    expect(result.current.isLoadingPreview).toBe(false)
   })
 
-  it('fetchPreview is a no-op without datasetId', async () => {
+  it('fetchPreview is a no-op when datasetId is undefined', async () => {
     const { result } = renderHook(() => useExport({ datasetId: undefined }))
+
     await act(async () => {
       await result.current.fetchPreview([0])
     })
-    expect(mockedPreview).not.toHaveBeenCalled()
+
+    expect(mockGetExportPreview).not.toHaveBeenCalled()
   })
 
-  it('reset clears progress, result, error, and previewStats', async () => {
-    let errorCb: ((e: string) => void) | undefined
-    mockedCreateStream.mockImplementation((_d, _r, _p, _c, onError) => {
-      errorCb = onError
-      return () => {}
-    })
-
-    const { result } = renderHook(() => useExport({ datasetId: 'ds' }))
+  it('reset clears progress, result, error, and preview', () => {
+    const { result } = renderHook(() => useExport({ datasetId: 'ds-1' }))
 
     act(() => {
-      result.current.startExport({
-        format: 'lerobot',
-        episodes: [0],
-        edits: { removed_frames: {}, edited_annotations: {} },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any)
+      result.current.startExport(sampleRequest)
     })
+    const { onProgress, onError } = captureStreamCallbacks()
     act(() => {
-      errorCb?.('failed')
+      onProgress(sampleProgress)
+      onError('oops')
     })
 
-    expect(result.current.error).toBe('failed')
+    expect(result.current.progress).not.toBeNull()
+    expect(result.current.error).not.toBeNull()
 
     act(() => {
       result.current.reset()
@@ -191,5 +232,23 @@ describe('useExport', () => {
     expect(result.current.result).toBeNull()
     expect(result.current.error).toBeNull()
     expect(result.current.previewStats).toBeNull()
+  })
+
+  it('does not throw when stream callbacks fire after the consumer unmounts', () => {
+    const { result, unmount } = renderHook(() => useExport({ datasetId: 'ds-1' }))
+
+    act(() => {
+      result.current.startExport(sampleRequest)
+    })
+
+    const { onProgress, onComplete, onError } = captureStreamCallbacks()
+
+    unmount()
+
+    expect(() => {
+      onProgress(sampleProgress)
+      onComplete(sampleResult)
+      onError('post-unmount error')
+    }).not.toThrow()
   })
 })
