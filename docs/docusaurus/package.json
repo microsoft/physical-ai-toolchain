@@ -22,8 +22,8 @@
     "clsx": "2.1.1",
     "docusaurus-plugin-image-zoom": "3.0.1",
     "prism-react-renderer": "2.4.1",
-    "react": "19.2.5",
-    "react-dom": "19.2.5"
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "3.10.1",
@@ -34,8 +34,8 @@
     "@types/jest": "30.0.0",
     "@types/react": "19.2.14",
     "identity-obj-proxy": "3.0.0",
-    "jest": "30.3.0",
-    "jest-environment-jsdom": "30.3.0",
+    "jest": "30.4.1",
+    "jest-environment-jsdom": "30.4.1",
     "ts-jest": "29.4.9",
     "typescript": "6.0.3"
   },
