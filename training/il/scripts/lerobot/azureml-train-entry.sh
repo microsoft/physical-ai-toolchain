@@ -26,18 +26,19 @@ if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
 fi
 uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
 
-# Build lerobot-train args
+# Build args forwarded to the MLflow training wrapper. Only flags whose values
+# are not derivable from environment variables go here. The wrapper at
+# training.il.scripts.lerobot.train invokes lerobot-train, parses metrics from
+# stdout, streams them to MLflow, and uploads new checkpoint subdirectories
+# under ${OUTPUT_DIR}/checkpoints/ to the MLflow artifact store every 60s so
+# training can survive preemption / crash without losing intermediate work.
+#
 # `--policy.push_to_hub=false` because we register checkpoints to Azure ML, not
 # HuggingFace Hub; without it lerobot-train requires `policy.repo_id`.
 # `--wandb.enable=false` because logging goes through MLflow / Azure ML; we do
 # not use Weights & Biases.
 train_args=(
-  --dataset.repo_id="${DATASET_REPO_ID}"
-  --policy.type="${POLICY_TYPE}"
   --policy.push_to_hub=false
-  --output_dir="${OUTPUT_DIR}"
-  --job_name="${JOB_NAME}"
-  --policy.device=cuda
   --wandb.enable=false
 )
 
@@ -59,18 +60,9 @@ elif [[ -n "${HF_TOKEN:-}" ]]; then
   python3 -c "from huggingface_hub import login; login(token='${HF_TOKEN}', add_to_git_credential=False)"
 fi
 
-[[ -n "${POLICY_REPO_ID:-}" ]] && train_args+=(--policy.repo_id="${POLICY_REPO_ID}")
-[[ -n "${TRAINING_STEPS:-}" ]] && train_args+=(--steps="${TRAINING_STEPS}")
-[[ -n "${BATCH_SIZE:-}" ]] && train_args+=(--batch_size="${BATCH_SIZE}")
-[[ -n "${EVAL_FREQ:-}" ]] && train_args+=(--eval_freq="${EVAL_FREQ}")
-[[ -n "${SAVE_FREQ:-}" ]] && train_args+=(--save_freq="${SAVE_FREQ}")
-
-echo "Running: lerobot-train ${train_args[*]}"
-lerobot-train "${train_args[@]}"
+echo "Running: python -m training.il.scripts.lerobot.train ${train_args[*]}"
+python3 -m training.il.scripts.lerobot.train "${train_args[@]}"
 
 echo "=== Training Complete ==="
-
-if [[ -n "${REGISTER_CHECKPOINT:-}" ]]; then
-  echo "Registering checkpoint to Azure ML..."
-  python3 -m training.il.scripts.lerobot.register_checkpoint
-fi
+# The wrapper invokes register_final_checkpoint() automatically when
+# REGISTER_CHECKPOINT is set and the run succeeds; nothing to do here.
