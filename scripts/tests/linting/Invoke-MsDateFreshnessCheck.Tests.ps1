@@ -158,6 +158,18 @@ Describe 'Get-MarkdownFiles' -Tag 'Unit' {
             $files = @(Get-MarkdownFiles -SearchPaths @('.') -ChangedOnly -Base 'origin/main')
             $files | Should -BeNullOrEmpty
         }
+
+        It 'Excludes CHANGELOG.md when only changed file' {
+            New-Item -ItemType File -Path 'CHANGELOG.md' -Force | Out-Null
+
+            Mock git {
+                $global:LASTEXITCODE = 0
+                return @('CHANGELOG.md')
+            } -ModuleName 'LintingHelpers' -ParameterFilter { $args[0] -eq 'diff' }
+
+            $files = @(Get-MarkdownFiles -SearchPaths @('.') -ChangedOnly -Base 'origin/main')
+            $files | Should -BeNullOrEmpty
+        }
     }
 
     Context 'Multiple paths' {
