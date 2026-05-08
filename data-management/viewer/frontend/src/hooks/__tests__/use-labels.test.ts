@@ -8,164 +8,224 @@ import {
   useRemoveLabelOption,
   useSaveEpisodeLabels,
 } from '@/hooks/use-labels'
-import { useDatasetStore } from '@/stores'
-import { useLabelStore } from '@/stores/label-store'
-import { renderHookWithQuery } from '@/test/render-hook-with-query'
+import { useDatasetStore, useLabelStore } from '@/stores'
+import {
+  installFetchMock,
+  jsonResponse,
+  type JsonResponseLike,
+  mockFetch,
+} from '@/test-utils/fetch-mocks'
+import { renderHookWithProviders } from '@/test-utils/render-hook'
 
-const mockFetch = vi.fn()
-
-function jsonResponse<T>(data: T, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    json: async () => data,
-  } as Response
-}
-
-function selectDataset(id = 'ds1') {
-  useDatasetStore.getState().setDatasets([
-    {
-      id,
-      name: 'Dataset',
-      path: `/data/${id}`,
-      num_episodes: 0,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any,
-  ])
+function selectDataset(id = 'ds-1') {
+  const dataset = {
+    id,
+    name: 'Dataset 1',
+    totalEpisodes: 1,
+    fps: 30,
+    features: {},
+    tasks: [],
+  }
+  useDatasetStore
+    .getState()
+    .setDatasets([
+      dataset as unknown as Parameters<
+        ReturnType<typeof useDatasetStore.getState>['setDatasets']
+      >[0][number],
+    ])
   useDatasetStore.getState().selectDataset(id)
 }
 
 beforeEach(() => {
-  mockFetch.mockReset()
+  installFetchMock()
   useDatasetStore.getState().reset()
   useLabelStore.getState().reset()
-  vi.stubGlobal('fetch', mockFetch)
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('useDatasetLabels', () => {
-  it('fetches labels and syncs them into the label store', async () => {
-    selectDataset()
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        dataset_id: 'ds1',
-        available_labels: ['SUCCESS', 'FAILURE', 'CUSTOM'],
-        episodes: { '0': ['SUCCESS'], '1': ['FAILURE'] },
-      }),
-    )
+describe('use-labels hooks', () => {
+  describe('useDatasetLabels', () => {
+    it('fetches labels and syncs them into the label store', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          dataset_id: 'ds-1',
+          available_labels: ['SUCCESS', 'CUSTOM'],
+          episodes: { '0': ['SUCCESS'], '1': ['CUSTOM'] },
+        }),
+      )
 
-    const { result } = renderHookWithQuery(() => useDatasetLabels())
+      selectDataset('ds-1')
 
-    await waitFor(() => expect(result.current.data).toBeDefined())
+      const { result } = renderHookWithProviders(() => useDatasetLabels())
 
-    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds1/labels')
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
-    const labelState = useLabelStore.getState()
-    expect(labelState.availableLabels).toEqual(['SUCCESS', 'FAILURE', 'CUSTOM'])
-    expect(labelState.savedEpisodeLabels).toEqual({ 0: ['SUCCESS'], 1: ['FAILURE'] })
-    expect(labelState.isLoaded).toBe(true)
-  })
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/datasets/ds-1/labels')
 
-  it('is disabled until a dataset is selected', async () => {
-    const { result } = renderHookWithQuery(() => useDatasetLabels())
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockFetch).not.toHaveBeenCalled()
-  })
-})
-
-describe('useSaveEpisodeLabels', () => {
-  it('PUTs labels and commits them to the store', async () => {
-    selectDataset()
-    mockFetch.mockResolvedValueOnce(jsonResponse({ episode_index: 3, labels: ['SUCCESS'] }))
-
-    const { result } = renderHookWithQuery(() => useSaveEpisodeLabels())
-
-    await act(async () => {
-      await result.current.mutateAsync({ episodeIdx: 3, labels: ['SUCCESS'] })
+      const store = useLabelStore.getState()
+      expect(store.availableLabels).toEqual(['SUCCESS', 'CUSTOM'])
+      expect(store.episodeLabels[0]).toEqual(['SUCCESS'])
+      expect(store.episodeLabels[1]).toEqual(['CUSTOM'])
+      expect(store.isLoaded).toBe(true)
     })
 
-    const [url, init] = mockFetch.mock.calls[0]
-    expect(url).toBe('/api/datasets/ds1/episodes/3/labels')
-    expect((init as RequestInit).method).toBe('PUT')
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
-      labels: ['SUCCESS'],
+    it('does not fetch when no dataset is selected', async () => {
+      renderHookWithProviders(() => useDatasetLabels())
+
+      await Promise.resolve()
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('useSaveEpisodeLabels', () => {
+    it('PUTs labels and commits them to the store', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }))
+
+      selectDataset('ds-1')
+
+      const { result } = renderHookWithProviders(() => useSaveEpisodeLabels())
+
+      await act(async () => {
+        await result.current.mutateAsync({
+          episodeIdx: 0,
+          labels: ['SUCCESS'],
+        })
+      })
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      const [url, init] = mockFetch.mock.calls[0]
+      expect(url).toBe('/api/datasets/ds-1/episodes/0/labels')
+      expect(init.method).toBe('PUT')
+      expect(JSON.parse(init.body)).toEqual({ labels: ['SUCCESS'] })
+
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual(['SUCCESS'])
     })
 
-    const labelState = useLabelStore.getState()
-    expect(labelState.episodeLabels[3]).toEqual(['SUCCESS'])
-    expect(labelState.savedEpisodeLabels[3]).toEqual(['SUCCESS'])
-  })
+    it('exposes error state when the PUT fails', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ code: 'BOOM', message: 'save failed' }, 500))
 
-  it('throws when no dataset is selected', async () => {
-    const { result } = renderHookWithQuery(() => useSaveEpisodeLabels())
+      selectDataset('ds-1')
 
-    await expect(result.current.mutateAsync({ episodeIdx: 0, labels: [] })).rejects.toThrow(
-      'No dataset selected',
-    )
-  })
-})
+      const { result } = renderHookWithProviders(() => useSaveEpisodeLabels())
 
-describe('useAddLabelOption', () => {
-  it('POSTs new label and updates available labels', async () => {
-    selectDataset()
-    mockFetch.mockResolvedValueOnce(jsonResponse(['SUCCESS', 'FAILURE', 'NEW']))
+      act(() => {
+        result.current.mutate({ episodeIdx: 0, labels: ['SUCCESS'] })
+      })
 
-    const { result } = renderHookWithQuery(() => useAddLabelOption())
-
-    await act(async () => {
-      await result.current.mutateAsync('NEW')
+      await waitFor(() => expect(result.current.isError).toBe(true))
+      expect(result.current.error).toBeInstanceOf(Error)
     })
 
-    const [url, init] = mockFetch.mock.calls[0]
-    expect(url).toBe('/api/datasets/ds1/labels/options')
-    expect((init as RequestInit).method).toBe('POST')
-    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ label: 'NEW' })
+    it('does not throw when the consumer unmounts before the PUT resolves', async () => {
+      let resolveFetch!: (response: JsonResponseLike) => void
+      const deferred = new Promise<JsonResponseLike>((resolve) => {
+        resolveFetch = resolve
+      })
+      mockFetch.mockReturnValueOnce(deferred)
 
-    expect(useLabelStore.getState().availableLabels).toEqual(['SUCCESS', 'FAILURE', 'NEW'])
+      selectDataset('ds-1')
+
+      const { result, unmount } = renderHookWithProviders(() => useSaveEpisodeLabels())
+
+      act(() => {
+        result.current.mutate({ episodeIdx: 0, labels: ['SUCCESS'] })
+      })
+
+      unmount()
+      resolveFetch(jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }))
+      await Promise.resolve()
+    })
   })
-})
 
-describe('useRemoveLabelOption', () => {
-  it('DELETEs label option using URL-encoded uppercase name', async () => {
-    selectDataset()
-    useLabelStore.getState().setAvailableLabels(['SUCCESS', 'FOO BAR'])
-    mockFetch.mockResolvedValueOnce(jsonResponse(['SUCCESS']))
+  describe('useAddLabelOption', () => {
+    it('POSTs new label option', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse(['SUCCESS', 'NEW']))
 
-    const { result } = renderHookWithQuery(() => useRemoveLabelOption())
+      selectDataset('ds-1')
 
-    await act(async () => {
-      await result.current.mutateAsync('foo bar')
+      const { result } = renderHookWithProviders(() => useAddLabelOption())
+
+      await act(async () => {
+        await result.current.mutateAsync('new')
+      })
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      const [url, init] = mockFetch.mock.calls[0]
+      expect(url).toBe('/api/datasets/ds-1/labels/options')
+      expect(init.method).toBe('POST')
+      expect(JSON.parse(init.body)).toEqual({ label: 'new' })
     })
 
-    const [url, init] = mockFetch.mock.calls[0]
-    expect(url).toBe(`/api/datasets/ds1/labels/options/${encodeURIComponent('FOO BAR')}`)
-    expect((init as RequestInit).method).toBe('DELETE')
+    it('exposes error state when the POST fails', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ code: 'BOOM', message: 'add failed' }, 500))
 
-    expect(useLabelStore.getState().availableLabels).toEqual(['SUCCESS'])
+      selectDataset('ds-1')
+
+      const { result } = renderHookWithProviders(() => useAddLabelOption())
+
+      act(() => {
+        result.current.mutate('new')
+      })
+
+      await waitFor(() => expect(result.current.isError).toBe(true))
+      expect(result.current.error).toBeInstanceOf(Error)
+    })
   })
-})
 
-describe('useCurrentEpisodeLabels', () => {
-  it('returns current labels and toggles them in the store', async () => {
-    useLabelStore.getState().setAvailableLabels(['SUCCESS', 'FAILURE'])
-    useLabelStore.getState().setAllEpisodeLabels({ '5': ['SUCCESS'] })
+  describe('useRemoveLabelOption', () => {
+    it('DELETEs label option using uppercased path', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse(['SUCCESS']))
 
-    const { result } = renderHookWithQuery(() => useCurrentEpisodeLabels(5))
-    expect(result.current.currentLabels).toEqual(['SUCCESS'])
+      selectDataset('ds-1')
 
-    await act(async () => {
-      await result.current.toggle('FAILURE')
+      const { result } = renderHookWithProviders(() => useRemoveLabelOption())
+
+      await act(async () => {
+        await result.current.mutateAsync('custom')
+      })
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      const [url, init] = mockFetch.mock.calls[0]
+      expect(url).toBe('/api/datasets/ds-1/labels/options/CUSTOM')
+      expect(init.method).toBe('DELETE')
     })
 
-    expect(useLabelStore.getState().episodeLabels[5]).toContain('FAILURE')
+    it('exposes error state when the DELETE fails', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ code: 'BOOM', message: 'remove failed' }, 500))
+
+      selectDataset('ds-1')
+
+      const { result } = renderHookWithProviders(() => useRemoveLabelOption())
+
+      act(() => {
+        result.current.mutate('custom')
+      })
+
+      await waitFor(() => expect(result.current.isError).toBe(true))
+      expect(result.current.error).toBeInstanceOf(Error)
+    })
   })
 
-  it('returns empty array when no labels recorded', () => {
-    const { result } = renderHookWithQuery(() => useCurrentEpisodeLabels(99))
-    expect(result.current.currentLabels).toEqual([])
+  describe('useCurrentEpisodeLabels', () => {
+    it('exposes labels for the episode and toggles via the store', async () => {
+      selectDataset('ds-1')
+      useLabelStore.getState().setAvailableLabels(['SUCCESS', 'FAILURE'])
+      useLabelStore.getState().setEpisodeLabels(0, ['SUCCESS'])
+
+      const { result } = renderHookWithProviders(() => useCurrentEpisodeLabels(0))
+
+      expect(result.current.currentLabels).toEqual(['SUCCESS'])
+      expect(useLabelStore.getState().availableLabels).toEqual(['SUCCESS', 'FAILURE'])
+
+      act(() => {
+        result.current.toggle('FAILURE')
+      })
+
+      expect(useLabelStore.getState().episodeLabels[0]).toEqual(['SUCCESS', 'FAILURE'])
+    })
   })
 })

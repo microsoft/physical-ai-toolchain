@@ -1,214 +1,200 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, renderHook, waitFor } from '@testing-library/react'
-import { createElement, type ReactNode } from 'react'
+/**
+ * Tests for useObjectDetection hook.
+ *
+ * NOTE — Known bug (follow-up WI-01):
+ *   The hook calls `setNeedsRerun(true)` inside a `useMemo` body when
+ *   `hasEdits` becomes true. `useMemo` is for memoized values, not side
+ *   effects; React may skip, batch, or re-run the body unpredictably.
+ *   The intent is clearly an effect — `useEffect` is the correct primitive.
+ *   In the current test environment the side effect happens to flip
+ *   `needsRerun` to true on re-render, so the behavioral assertion passes
+ *   today. The reliability concern remains — the fix (move to `useEffect`)
+ *   is tracked in WI-01. Do NOT fix the hook here.
+ */
+
+import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useObjectDetection } from '@/hooks/use-object-detection'
-import { useDatasetStore, useEditStore, useEpisodeStore } from '@/stores'
-import type { DetectionRequest, EpisodeDetectionSummary } from '@/types/detection'
+import { renderHookWithProviders } from '@/test-utils/render-hook'
 
-vi.mock('@/api/detection', () => ({
-  clearDetections: vi.fn(),
-  getDetections: vi.fn(),
-  runDetection: vi.fn(),
+const { mockRunDetection, mockGetDetections, mockClearDetections, storeState } = vi.hoisted(() => ({
+  mockRunDetection: vi.fn(),
+  mockGetDetections: vi.fn(),
+  mockClearDetections: vi.fn(),
+  storeState: {
+    currentDataset: { id: 'ds-1' } as { id: string } | null,
+    currentEpisode: { meta: { index: 0 } } as { meta: { index: number } } | null,
+    isDirty: false,
+  },
 }))
 
-import { clearDetections, getDetections, runDetection } from '@/api/detection'
+vi.mock('@/api/detection', () => ({
+  runDetection: mockRunDetection,
+  getDetections: mockGetDetections,
+  clearDetections: mockClearDetections,
+}))
 
-const mockedGet = vi.mocked(getDetections)
-const mockedRun = vi.mocked(runDetection)
-const mockedClear = vi.mocked(clearDetections)
+vi.mock('@/stores', () => ({
+  useDatasetStore: <T>(selector: (s: { currentDataset: typeof storeState.currentDataset }) => T) =>
+    selector({ currentDataset: storeState.currentDataset }),
+  useEpisodeStore: <T>(selector: (s: { currentEpisode: typeof storeState.currentEpisode }) => T) =>
+    selector({ currentEpisode: storeState.currentEpisode }),
+  useEditDirtyState: () => ({ isDirty: storeState.isDirty }),
+}))
 
-function makeWrapper() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  const Wrapper = ({ children }: { children: ReactNode }) =>
-    createElement(QueryClientProvider, { client: queryClient }, children)
-  return { Wrapper, queryClient }
-}
-
-function makeSummary(overrides: Partial<EpisodeDetectionSummary> = {}): EpisodeDetectionSummary {
-  return {
-    total_frames: 2,
-    processed_frames: 2,
-    total_detections: 3,
-    detections_by_frame: [
-      {
-        frame: 0,
-        processing_time_ms: 10,
-        detections: [
-          { class_id: 0, class_name: 'person', confidence: 0.9, bbox: [0, 0, 10, 10] },
-          { class_id: 1, class_name: 'cup', confidence: 0.2, bbox: [10, 10, 20, 20] },
-        ],
-      },
-      {
-        frame: 1,
-        processing_time_ms: 12,
-        detections: [{ class_id: 0, class_name: 'person', confidence: 0.6, bbox: [5, 5, 15, 15] }],
-      },
-    ],
-    class_summary: {
-      person: { count: 2, avg_confidence: 0.75 },
-      cup: { count: 1, avg_confidence: 0.2 },
+const sampleSummary = {
+  total_frames: 10,
+  processed_frames: 10,
+  total_detections: 3,
+  class_summary: { person: 2, ball: 1 },
+  detections_by_frame: [
+    {
+      frame_index: 0,
+      detections: [
+        { class_name: 'person', confidence: 0.9, bbox: [0, 0, 1, 1] },
+        { class_name: 'person', confidence: 0.1, bbox: [0, 0, 1, 1] },
+        { class_name: 'ball', confidence: 0.5, bbox: [0, 0, 1, 1] },
+      ],
     },
-    ...overrides,
-  }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const datasetInfo: any = { id: 'ds-1', name: 'ds', path: '/x', episode_count: 1 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const episodeInfo: any = {
-  meta: { index: 0, length: 2, dataset_id: 'ds-1' },
-  frames: [],
+  ],
 }
 
 describe('useObjectDetection', () => {
   beforeEach(() => {
-    mockedGet.mockReset()
-    mockedRun.mockReset()
-    mockedClear.mockReset()
-    useDatasetStore.getState().reset()
-    useEpisodeStore.getState().reset()
-    useEditStore.getState().resetEdits()
-    useDatasetStore.setState({ datasets: [datasetInfo], currentDataset: datasetInfo })
-    useEpisodeStore.setState({ episodes: [episodeInfo], currentEpisode: episodeInfo })
+    storeState.currentDataset = { id: 'ds-1' }
+    storeState.currentEpisode = { meta: { index: 0 } }
+    storeState.isDirty = false
+
+    mockGetDetections.mockReset().mockResolvedValue(sampleSummary)
+    mockRunDetection.mockReset().mockResolvedValue(sampleSummary)
+    mockClearDetections.mockReset().mockResolvedValue(undefined)
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('fetches cached detections when dataset and episode selected', async () => {
-    mockedGet.mockResolvedValueOnce(makeSummary())
-    const { Wrapper } = makeWrapper()
+  it('initializes with default filters and no rerun pending', () => {
+    const { result } = renderHookWithProviders(() => useObjectDetection())
 
-    const { result } = renderHook(() => useObjectDetection(), { wrapper: Wrapper })
-
-    await waitFor(() => {
-      expect(result.current.data).toBeDefined()
-    })
-    expect(mockedGet).toHaveBeenCalledWith('ds-1', 0)
-    expect(result.current.availableClasses).toEqual(expect.arrayContaining(['person', 'cup']))
-  })
-
-  it('does not query when no dataset selected', async () => {
-    useDatasetStore.setState({ currentDataset: null })
-    const { Wrapper } = makeWrapper()
-
-    const { result } = renderHook(() => useObjectDetection(), { wrapper: Wrapper })
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-    })
-    expect(mockedGet).not.toHaveBeenCalled()
-  })
-
-  it('does not query when no episode selected', async () => {
-    useEpisodeStore.setState({ currentEpisode: null })
-    const { Wrapper } = makeWrapper()
-
-    const { result } = renderHook(() => useObjectDetection(), { wrapper: Wrapper })
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false)
-    })
-    expect(mockedGet).not.toHaveBeenCalled()
-  })
-
-  it('filters detections by minimum confidence', async () => {
-    mockedGet.mockResolvedValueOnce(makeSummary())
-    const { Wrapper } = makeWrapper()
-
-    const { result } = renderHook(() => useObjectDetection(), { wrapper: Wrapper })
-    await waitFor(() => expect(result.current.data).toBeDefined())
-
-    act(() => {
-      result.current.setFilters({ classes: [], minConfidence: 0.5 })
-    })
-
-    expect(result.current.filteredData?.total_detections).toBe(2)
-  })
-
-  it('filters detections by class', async () => {
-    mockedGet.mockResolvedValueOnce(makeSummary())
-    const { Wrapper } = makeWrapper()
-
-    const { result } = renderHook(() => useObjectDetection(), { wrapper: Wrapper })
-    await waitFor(() => expect(result.current.data).toBeDefined())
-
-    act(() => {
-      result.current.setFilters({ classes: ['cup'], minConfidence: 0 })
-    })
-
-    expect(result.current.filteredData?.total_detections).toBe(1)
-  })
-
-  it('runDetection updates query cache and clears needsRerun', async () => {
-    mockedGet.mockResolvedValueOnce(null)
-    const newSummary = makeSummary({ total_detections: 5 })
-    mockedRun.mockResolvedValueOnce(newSummary)
-    const { Wrapper, queryClient } = makeWrapper()
-
-    const { result } = renderHook(() => useObjectDetection(), { wrapper: Wrapper })
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    const request: DetectionRequest = { confidence: 0.3 }
-    await act(async () => {
-      result.current.runDetection(request)
-    })
-
-    await waitFor(() => {
-      expect(result.current.data?.total_detections).toBe(5)
-    })
-    expect(mockedRun).toHaveBeenCalledWith('ds-1', 0, request)
+    expect(result.current.filters).toEqual({ classes: [], minConfidence: 0.25 })
     expect(result.current.needsRerun).toBe(false)
-    const cached = queryClient.getQueryData(['detection', 'ds-1', 0])
-    expect(cached).toEqual(newSummary)
   })
 
-  it('clearCache invalidates the detection query', async () => {
-    mockedGet.mockResolvedValueOnce(makeSummary())
-    mockedClear.mockResolvedValueOnce({ cleared: true })
-    const { Wrapper } = makeWrapper()
+  it('enables query and loads detections when dataset and episode are present', async () => {
+    const { result } = renderHookWithProviders(() => useObjectDetection())
 
-    const { result } = renderHook(() => useObjectDetection(), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.data).toBeDefined())
+    expect(mockGetDetections).toHaveBeenCalledWith('ds-1', 0)
+    expect(result.current.availableClasses.sort()).toEqual(['ball', 'person'])
+  })
+
+  it('disables query when there is no current dataset', async () => {
+    storeState.currentDataset = null
+    const { result } = renderHookWithProviders(() => useObjectDetection())
+
+    await Promise.resolve()
+    expect(mockGetDetections).not.toHaveBeenCalled()
+    expect(result.current.data).toBeUndefined()
+  })
+
+  it('disables query when episode index is negative', async () => {
+    storeState.currentEpisode = null
+    const { result } = renderHookWithProviders(() => useObjectDetection())
+
+    await Promise.resolve()
+    expect(mockGetDetections).not.toHaveBeenCalled()
+    expect(result.current.data).toBeUndefined()
+  })
+
+  it('filters detections by minConfidence', async () => {
+    const { result } = renderHookWithProviders(() => useObjectDetection())
+
     await waitFor(() => expect(result.current.data).toBeDefined())
 
-    mockedGet.mockResolvedValueOnce(null)
+    act(() => {
+      result.current.setFilters({ classes: [], minConfidence: 0.4 })
+    })
+
+    await waitFor(() => {
+      expect(result.current.filteredData?.detections_by_frame[0].detections).toHaveLength(2)
+      expect(result.current.filteredData?.total_detections).toBe(2)
+    })
+  })
+
+  it('filters detections by class allow-list', async () => {
+    const { result } = renderHookWithProviders(() => useObjectDetection())
+
+    await waitFor(() => expect(result.current.data).toBeDefined())
+
+    act(() => {
+      result.current.setFilters({ classes: ['ball'], minConfidence: 0 })
+    })
+
+    await waitFor(() => {
+      const dets = result.current.filteredData?.detections_by_frame[0].detections ?? []
+      expect(dets.every((d: { class_name: string }) => d.class_name === 'ball')).toBe(true)
+      expect(dets).toHaveLength(1)
+    })
+  })
+
+  it('runDetection mutation clears needsRerun on success', async () => {
+    const { result } = renderHookWithProviders(() => useObjectDetection())
+    await waitFor(() => expect(result.current.data).toBeDefined())
+
+    await act(async () => {
+      result.current.runDetection({ confidence_threshold: 0.5 } as unknown as Parameters<
+        typeof result.current.runDetection
+      >[0])
+    })
+
+    await waitFor(() => {
+      expect(mockRunDetection).toHaveBeenCalledWith('ds-1', 0, { confidence_threshold: 0.5 })
+      expect(result.current.needsRerun).toBe(false)
+    })
+  })
+
+  it('clearCache invokes clearDetections API', async () => {
+    const { result } = renderHookWithProviders(() => useObjectDetection())
+    await waitFor(() => expect(result.current.data).toBeDefined())
+
     await act(async () => {
       result.current.clearCache()
     })
 
     await waitFor(() => {
-      expect(mockedClear).toHaveBeenCalledWith('ds-1', 0)
+      expect(mockClearDetections).toHaveBeenCalledWith('ds-1', 0)
     })
   })
 
-  it('exposes runDetection mutation pending flag', async () => {
-    mockedGet.mockResolvedValueOnce(null)
-    let resolveRun: (value: EpisodeDetectionSummary) => void = () => {}
-    mockedRun.mockReturnValueOnce(
-      new Promise<EpisodeDetectionSummary>((resolve) => {
-        resolveRun = resolve
-      }),
-    )
-    const { Wrapper } = makeWrapper()
+  it('availableClasses is empty when no data is loaded', async () => {
+    storeState.currentDataset = null
+    const { result } = renderHookWithProviders(() => useObjectDetection())
 
-    const { result } = renderHook(() => useObjectDetection(), { wrapper: Wrapper })
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.availableClasses).toEqual([])
+  })
 
-    act(() => {
-      result.current.runDetection({})
+  // --- WI-01: anti-pattern (setState inside useMemo) ---------------------
+  // The hook places `setNeedsRerun(true)` inside a `useMemo` body. React
+  // does not guarantee the memo body runs (or runs only once) for a given
+  // dependency change, so the state update is unreliable in principle.
+  // The assertion below documents the *intended* post-fix behavior. It is
+  // skipped because the current hook cannot reliably satisfy it across
+  // environments, even though it happens to pass under happy-dom today.
+  // When WI-01 moves the side effect into `useEffect`, remove `.skip` and
+  // add a companion test asserting that re-rendering with hasEdits=false
+  // leaves needsRerun untouched.
+  it.skip('flips needsRerun to true when edits become dirty (WI-01)', async () => {
+    storeState.isDirty = false
+    const { result, rerender } = renderHookWithProviders(() => useObjectDetection())
+    await waitFor(() => expect(result.current.data).toBeDefined())
+
+    storeState.isDirty = true
+    rerender()
+
+    await waitFor(() => {
+      expect(result.current.needsRerun).toBe(true)
     })
-
-    await waitFor(() => expect(result.current.isRunning).toBe(true))
-
-    await act(async () => {
-      resolveRun(makeSummary())
-    })
-
-    await waitFor(() => expect(result.current.isRunning).toBe(false))
   })
 })

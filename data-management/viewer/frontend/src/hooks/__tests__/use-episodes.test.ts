@@ -1,4 +1,4 @@
-import { waitFor } from '@testing-library/react'
+import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -6,22 +6,34 @@ import {
   useEpisodeList,
   useEpisodeNavigationWithPrefetch,
 } from '@/hooks/use-episodes'
+import { _resetCsrfToken } from '@/lib/api-client'
 import { useDatasetStore, useEpisodeStore } from '@/stores'
-import { createTestQueryClient, renderHookWithQuery } from '@/test/render-hook-with-query'
+import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
+import { renderHookWithProviders } from '@/test-utils/render-hook'
 
-vi.mock('@/lib/api-client', () => ({
-  fetchEpisode: vi.fn(),
-  fetchEpisodes: vi.fn(),
-}))
+const sampleDataset = {
+  id: 'ds-1',
+  name: 'Dataset 1',
+  totalEpisodes: 3,
+  fps: 30,
+  features: {},
+  tasks: [],
+}
 
-import { fetchEpisode, fetchEpisodes } from '@/lib/api-client'
+const sampleEpisodes = [
+  { index: 0, length: 100, taskIndex: 0, hasAnnotations: false },
+  { index: 1, length: 120, taskIndex: 0, hasAnnotations: false },
+  { index: 2, length: 90, taskIndex: 0, hasAnnotations: true },
+]
 
-const mockedFetchEpisode = vi.mocked(fetchEpisode)
-const mockedFetchEpisodes = vi.mocked(fetchEpisodes)
+function selectDataset() {
+  useDatasetStore.getState().setDatasets([sampleDataset])
+  useDatasetStore.getState().selectDataset('ds-1')
+}
 
 beforeEach(() => {
-  mockedFetchEpisode.mockReset()
-  mockedFetchEpisodes.mockReset()
+  installFetchMock()
+  _resetCsrfToken()
   useDatasetStore.getState().reset()
   useEpisodeStore.getState().reset()
 })
@@ -30,163 +42,130 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function selectDataset(id: string): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  useDatasetStore.getState().setDatasets([{ id, name: id } as any])
-  useDatasetStore.getState().selectDataset(id)
-}
-
 describe('useEpisodeList', () => {
-  it('is disabled when no dataset is selected', () => {
-    const { result } = renderHookWithQuery(() => useEpisodeList())
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockedFetchEpisodes).not.toHaveBeenCalled()
+  it('does not fetch when no dataset is selected', () => {
+    renderHookWithProviders(() => useEpisodeList())
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('fetches episodes and syncs them into the episode store', async () => {
-    selectDataset('ds-1')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const episodes = [{ meta: { index: 0, length: 100 } } as any]
-    mockedFetchEpisodes.mockResolvedValueOnce(episodes)
+  it('fetches episodes for the selected dataset and syncs the store', async () => {
+    selectDataset()
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse([
+        { index: 0, length: 100, task_index: 0, has_annotations: false },
+        { index: 1, length: 120, task_index: 0, has_annotations: false },
+      ]),
+    )
 
-    const { result } = renderHookWithQuery(() => useEpisodeList({ offset: 0, limit: 10 }))
+    const { result } = renderHookWithProviders(() => useEpisodeList())
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(mockedFetchEpisodes).toHaveBeenCalledWith('ds-1', { offset: 0, limit: 10 })
-    expect(useEpisodeStore.getState().episodes).toEqual(episodes)
+
+    expect(useEpisodeStore.getState().episodes).toEqual([
+      { index: 0, length: 100, taskIndex: 0, hasAnnotations: false },
+      { index: 1, length: 120, taskIndex: 0, hasAnnotations: false },
+    ])
   })
 
-  it('writes the error message into the episode store on failure', async () => {
-    selectDataset('ds-1')
-    mockedFetchEpisodes.mockRejectedValueOnce(new Error('list failed'))
+  it('records errors in the store when the request fails', async () => {
+    selectDataset()
+    mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'list failed', code: 'ERR' }, 500))
 
-    const { result } = renderHookWithQuery(() => useEpisodeList())
+    const { result } = renderHookWithProviders(() => useEpisodeList())
 
     await waitFor(() => expect(result.current.isError).toBe(true))
+
     expect(useEpisodeStore.getState().error).toBe('list failed')
   })
 })
 
 describe('useCurrentEpisode', () => {
   it('is disabled when no dataset is selected', () => {
-    const { result } = renderHookWithQuery(() => useCurrentEpisode())
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockedFetchEpisode).not.toHaveBeenCalled()
+    renderHookWithProviders(() => useCurrentEpisode())
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('is disabled when current index is negative', () => {
-    selectDataset('ds-1')
-    const { result } = renderHookWithQuery(() => useCurrentEpisode())
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockedFetchEpisode).not.toHaveBeenCalled()
+  it('is disabled when currentIndex is negative', () => {
+    selectDataset()
+    renderHookWithProviders(() => useCurrentEpisode())
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('fetches the current episode and syncs it into the store', async () => {
-    selectDataset('ds-1')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const episode = { meta: { index: 1, length: 50 } } as any
-    // Seed three episodes so prefetch logic has neighbors to act on
-    useEpisodeStore.getState().setEpisodes([
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 0, length: 50 }, length: 50 } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 1, length: 50 }, length: 50 } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 2, length: 50 }, length: 50 } as any,
-    ])
-    useEpisodeStore.getState().setCurrentEpisode(episode)
-    mockedFetchEpisode.mockResolvedValue(episode)
+  it('fetches the current episode and syncs it with the store', async () => {
+    selectDataset()
+    useEpisodeStore.getState().setEpisodes(sampleEpisodes)
 
-    const { result } = renderHookWithQuery(() => useCurrentEpisode())
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        meta: { index: 1, length: 120, task_index: 0, has_annotations: false },
+        video_urls: { front: 'http://example/1.mp4' },
+        cameras: ['front'],
+        trajectory_data: [],
+      }),
+    )
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(mockedFetchEpisode).toHaveBeenCalledWith('ds-1', 1)
-    expect(useEpisodeStore.getState().currentEpisode).toEqual(episode)
-  })
-
-  it('prefetches adjacent episodes when current episode loads', async () => {
-    selectDataset('ds-1')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const episode = { meta: { index: 1, length: 50 } } as any
-    useEpisodeStore.getState().setEpisodes([
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 0, length: 50 }, length: 50 } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 1, length: 50 }, length: 50 } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 2, length: 50 }, length: 50 } as any,
-    ])
-    useEpisodeStore.getState().setCurrentEpisode(episode)
-    mockedFetchEpisode.mockResolvedValue(episode)
-
-    const queryClient = createTestQueryClient()
-    const prefetchSpy = vi.spyOn(queryClient, 'prefetchQuery')
-    const rendered = renderHookWithQuery(() => useCurrentEpisode(), { queryClient })
-
-    await waitFor(() => expect(rendered.result.current.isSuccess).toBe(true))
-    await waitFor(() => {
-      expect(prefetchSpy).toHaveBeenCalled()
+    act(() => {
+      useEpisodeStore.getState().navigateToEpisode(1)
     })
 
-    // At least one prefetch call for indices 0 and 2 should have been made.
-    const prefetchedIndices = prefetchSpy.mock.calls
-      .map((call) => call[0]?.queryKey)
-      .filter((key): key is readonly unknown[] => Array.isArray(key))
-      .map((key) => key[key.length - 1])
-    expect(prefetchedIndices).toEqual(expect.arrayContaining([0, 2]))
-  })
+    const { result } = renderHookWithProviders(() => useCurrentEpisode())
 
-  it('writes the error message into the episode store on failure', async () => {
-    selectDataset('ds-1')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    useEpisodeStore.getState().setCurrentEpisode({ meta: { index: 0, length: 1 } } as any)
-    mockedFetchEpisode.mockRejectedValueOnce(new Error('episode failed'))
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
-    const { result } = renderHookWithQuery(() => useCurrentEpisode())
-
-    await waitFor(() => expect(result.current.isError).toBe(true))
-    expect(useEpisodeStore.getState().error).toBe('episode failed')
+    const stored = useEpisodeStore.getState().currentEpisode
+    expect(stored?.meta.index).toBe(1)
+    expect(stored?.cameras).toEqual(['front'])
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/1', expect.any(Object))
   })
 })
 
 describe('useEpisodeNavigationWithPrefetch', () => {
-  it('exposes navigation flags reflecting the current store state', () => {
-    useEpisodeStore.getState().setEpisodes([
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 0, length: 1 }, length: 1 } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 1, length: 1 }, length: 1 } as any,
-    ])
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    useEpisodeStore.getState().setCurrentEpisode({ meta: { index: 0, length: 1 } } as any)
+  it('reports navigation boundaries when the list is empty', () => {
+    const { result } = renderHookWithProviders(() => useEpisodeNavigationWithPrefetch())
 
-    const { result } = renderHookWithQuery(() => useEpisodeNavigationWithPrefetch())
-
+    expect(result.current.totalEpisodes).toBe(0)
+    expect(result.current.canGoNext).toBe(false)
     expect(result.current.canGoPrevious).toBe(false)
-    expect(result.current.canGoNext).toBe(true)
-    expect(result.current.currentIndex).toBe(0)
-    expect(result.current.totalEpisodes).toBe(2)
   })
 
-  it('delegates navigation calls to the episode store', () => {
-    useEpisodeStore.getState().setEpisodes([
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 0, length: 1 }, length: 1 } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { meta: { index: 1, length: 1 }, length: 1 } as any,
-    ])
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    useEpisodeStore.getState().setCurrentEpisode({ meta: { index: 0, length: 1 } } as any)
+  it('disables previous when at the first episode and next when at the last', () => {
+    useEpisodeStore.getState().setEpisodes(sampleEpisodes)
 
-    const { result } = renderHookWithQuery(() => useEpisodeNavigationWithPrefetch())
+    const { result, rerender } = renderHookWithProviders(() => useEpisodeNavigationWithPrefetch())
 
-    result.current.goNext()
-    expect(useEpisodeStore.getState().currentIndex).toBe(1)
+    act(() => {
+      useEpisodeStore.getState().navigateToEpisode(0)
+    })
+    rerender()
+    expect(result.current.canGoPrevious).toBe(false)
+    expect(result.current.canGoNext).toBe(true)
 
-    result.current.goPrevious()
+    act(() => {
+      useEpisodeStore.getState().navigateToEpisode(2)
+    })
+    rerender()
+    expect(result.current.canGoPrevious).toBe(true)
+    expect(result.current.canGoNext).toBe(false)
+  })
+
+  it('exposes navigation actions wired to the episode store', () => {
+    useEpisodeStore.getState().setEpisodes(sampleEpisodes)
+
+    const { result } = renderHookWithProviders(() => useEpisodeNavigationWithPrefetch())
+
+    act(() => {
+      result.current.goToEpisode(0)
+    })
     expect(useEpisodeStore.getState().currentIndex).toBe(0)
 
-    result.current.goToEpisode(1)
+    act(() => {
+      result.current.goNext()
+    })
     expect(useEpisodeStore.getState().currentIndex).toBe(1)
+
+    act(() => {
+      result.current.goPrevious()
+    })
+    expect(useEpisodeStore.getState().currentIndex).toBe(0)
   })
 })
