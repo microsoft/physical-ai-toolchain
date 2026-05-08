@@ -53,12 +53,13 @@ if [[ -n "${STORAGE_ACCOUNT:-}" ]]; then
   # image stats, whose shape does not match lerobot 0.4.x's normalize_processor.
   # tolerance_s=0.04 (~1 frame at 30fps) accommodates real-world recording
   # jitter; the lerobot default 1e-4s is unrealistically tight and rejects
-  # most non-synthetic videos.
+  # most non-synthetic videos. The flag is top-level (--tolerance_s), not
+  # under --dataset.
   train_args+=(
     --dataset.root="${FULL_DATASET_PATH}"
     --dataset.use_imagenet_stats=true
     --dataset.video_backend=pyav
-    --dataset.tolerance_s=0.04
+    --tolerance_s=0.04
   )
 elif [[ -n "${HF_TOKEN:-}" ]]; then
   python3 -c "from huggingface_hub import login; login(token='${HF_TOKEN}', add_to_git_credential=False)"
