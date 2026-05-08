@@ -127,7 +127,7 @@ datasets==4.8.4
     #   lerobot
 deepdiff==8.6.2
     # via lerobot
-diffusers==0.35.2
+diffusers==0.38.0
     # via lerobot
 dill==0.4.1
     # via
