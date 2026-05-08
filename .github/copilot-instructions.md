@@ -464,7 +464,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 * Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
 * Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main)
 * Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)
-* Codecov: `pytest` and `pester` flags, 80-100% range, carryforward enabled
+* Codecov: 12+ flags including `pytest-*`, `vitest`/`vitest-*`, `pester`, `go`, `terraform`; 80-100% range; carryforward enabled; OIDC tokenless upload via `codecov/codecov-action@v6`
 
 ## Contributing References
 
