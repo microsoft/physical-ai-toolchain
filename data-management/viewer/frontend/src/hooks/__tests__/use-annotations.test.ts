@@ -90,7 +90,7 @@ describe('useEpisodeAnnotations', () => {
   it('does not fetch when no dataset is selected', async () => {
     renderHookWithProviders(() => useEpisodeAnnotations('me'))
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })
@@ -158,7 +158,7 @@ describe('useSaveAnnotation', () => {
 
     unmount()
     resolveFetch(jsonResponse({ annotations: [annotation] }))
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
   })
 })
 
@@ -172,7 +172,7 @@ describe('useSaveCurrentAnnotation', () => {
       result.current.save()
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
@@ -271,7 +271,7 @@ describe('useAnnotationSummary', () => {
   it('is disabled when datasetId is undefined', async () => {
     renderHookWithProviders(() => useAnnotationSummary(undefined))
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })

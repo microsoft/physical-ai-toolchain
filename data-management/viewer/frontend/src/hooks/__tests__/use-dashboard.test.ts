@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardStats } from '@/hooks/use-dashboard'
 import { useDashboardMetrics, useDashboardStats } from '@/hooks/use-dashboard'
 import { _resetCsrfToken } from '@/lib/api-client'
+import type { JsonResponseLike } from '@/test-utils/fetch-mocks'
 import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
 import { renderHookWithProviders } from '@/test-utils/render-hook'
 
@@ -62,6 +63,19 @@ describe('useDashboardStats', () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect(result.current.error?.message).toBe('stats failed')
+  })
+
+  it('does not throw when the consumer unmounts before the request resolves', async () => {
+    let resolveFetch!: (value: JsonResponseLike) => void
+    const deferred = new Promise<JsonResponseLike>((resolve) => {
+      resolveFetch = resolve
+    })
+    mockFetch.mockReturnValueOnce(deferred)
+
+    const { unmount } = renderHookWithProviders(() => useDashboardStats('ds-1'))
+    unmount()
+    resolveFetch(jsonResponse(makeStats()))
+    await Promise.resolve()
   })
 })
 

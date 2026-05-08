@@ -27,7 +27,7 @@ beforeEach(() => {
     currentDatasetId: 'ds-1',
     currentIndex: 0,
     nextEpisode: nextEpisodeMock,
-  } as never)
+  } as unknown as Partial<ReturnType<typeof useEpisodeStore.getState>>)
   useAnnotationStore.getState().initializeAnnotation('tester')
 })
 
@@ -40,7 +40,9 @@ describe('useAnnotationWorkflow', () => {
     const onSaveSuccess = vi.fn()
     const { result } = renderHook(() => useAnnotationWorkflow({ onSaveSuccess }))
 
-    useAnnotationStore.getState().updateNotes('hello')
+    act(() => {
+      useAnnotationStore.getState().updateNotes('hello')
+    })
     expect(useAnnotationStore.getState().isDirty).toBe(true)
 
     await act(async () => {

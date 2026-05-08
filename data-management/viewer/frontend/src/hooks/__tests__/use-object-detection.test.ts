@@ -94,8 +94,7 @@ describe('useObjectDetection', () => {
     storeState.currentDataset = null
     const { result } = renderHookWithProviders(() => useObjectDetection())
 
-    // Wait a tick to ensure no fetch fires.
-    await new Promise((r) => setTimeout(r, 0))
+    await Promise.resolve()
     expect(mockGetDetections).not.toHaveBeenCalled()
     expect(result.current.data).toBeUndefined()
   })
@@ -104,7 +103,7 @@ describe('useObjectDetection', () => {
     storeState.currentEpisode = null
     const { result } = renderHookWithProviders(() => useObjectDetection())
 
-    await new Promise((r) => setTimeout(r, 0))
+    await Promise.resolve()
     expect(mockGetDetections).not.toHaveBeenCalled()
     expect(result.current.data).toBeUndefined()
   })
@@ -145,7 +144,9 @@ describe('useObjectDetection', () => {
     await waitFor(() => expect(result.current.data).toBeDefined())
 
     await act(async () => {
-      result.current.runDetection({ confidence_threshold: 0.5 } as never)
+      result.current.runDetection({ confidence_threshold: 0.5 } as unknown as Parameters<
+        typeof result.current.runDetection
+      >[0])
     })
 
     await waitFor(() => {

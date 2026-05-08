@@ -38,6 +38,22 @@ export default defineConfig({
         functions: 55,
         branches: 40,
         statements: 55,
+        // Per-file enforcement on hand-tested directories to catch regressions
+        // in individual files. Component-level coverage tracked separately.
+        'src/hooks/**': {
+          perFile: true,
+          lines: 50,
+          functions: 45,
+          branches: 25,
+          statements: 45,
+        },
+        'src/stores/**': {
+          perFile: true,
+          lines: 85,
+          functions: 75,
+          branches: 60,
+          statements: 85,
+        },
       },
     },
   },

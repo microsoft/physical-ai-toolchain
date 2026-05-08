@@ -9,7 +9,12 @@ import {
   useSaveEpisodeLabels,
 } from '@/hooks/use-labels'
 import { useDatasetStore, useLabelStore } from '@/stores'
-import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
+import {
+  installFetchMock,
+  jsonResponse,
+  type JsonResponseLike,
+  mockFetch,
+} from '@/test-utils/fetch-mocks'
 import { renderHookWithProviders } from '@/test-utils/render-hook'
 
 function selectDataset(id = 'ds-1') {
@@ -21,7 +26,13 @@ function selectDataset(id = 'ds-1') {
     features: {},
     tasks: [],
   }
-  useDatasetStore.getState().setDatasets([dataset as never])
+  useDatasetStore
+    .getState()
+    .setDatasets([
+      dataset as unknown as Parameters<
+        ReturnType<typeof useDatasetStore.getState>['setDatasets']
+      >[0][number],
+    ])
   useDatasetStore.getState().selectDataset(id)
 }
 
@@ -65,7 +76,7 @@ describe('use-labels hooks', () => {
     it('does not fetch when no dataset is selected', async () => {
       renderHookWithProviders(() => useDatasetLabels())
 
-      await new Promise((resolve) => setTimeout(resolve, 0))
+      await Promise.resolve()
       expect(mockFetch).not.toHaveBeenCalled()
     })
   })
@@ -93,6 +104,41 @@ describe('use-labels hooks', () => {
 
       expect(useLabelStore.getState().episodeLabels[0]).toEqual(['SUCCESS'])
     })
+
+    it('exposes error state when the PUT fails', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ code: 'BOOM', message: 'save failed' }, 500))
+
+      selectDataset('ds-1')
+
+      const { result } = renderHookWithProviders(() => useSaveEpisodeLabels())
+
+      act(() => {
+        result.current.mutate({ episodeIdx: 0, labels: ['SUCCESS'] })
+      })
+
+      await waitFor(() => expect(result.current.isError).toBe(true))
+      expect(result.current.error).toBeInstanceOf(Error)
+    })
+
+    it('does not throw when the consumer unmounts before the PUT resolves', async () => {
+      let resolveFetch!: (response: JsonResponseLike) => void
+      const deferred = new Promise<JsonResponseLike>((resolve) => {
+        resolveFetch = resolve
+      })
+      mockFetch.mockReturnValueOnce(deferred)
+
+      selectDataset('ds-1')
+
+      const { result, unmount } = renderHookWithProviders(() => useSaveEpisodeLabels())
+
+      act(() => {
+        result.current.mutate({ episodeIdx: 0, labels: ['SUCCESS'] })
+      })
+
+      unmount()
+      resolveFetch(jsonResponse({ episode_index: 0, labels: ['SUCCESS'] }))
+      await Promise.resolve()
+    })
   })
 
   describe('useAddLabelOption', () => {
@@ -113,6 +159,21 @@ describe('use-labels hooks', () => {
       expect(init.method).toBe('POST')
       expect(JSON.parse(init.body)).toEqual({ label: 'new' })
     })
+
+    it('exposes error state when the POST fails', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ code: 'BOOM', message: 'add failed' }, 500))
+
+      selectDataset('ds-1')
+
+      const { result } = renderHookWithProviders(() => useAddLabelOption())
+
+      act(() => {
+        result.current.mutate('new')
+      })
+
+      await waitFor(() => expect(result.current.isError).toBe(true))
+      expect(result.current.error).toBeInstanceOf(Error)
+    })
   })
 
   describe('useRemoveLabelOption', () => {
@@ -131,6 +192,21 @@ describe('use-labels hooks', () => {
       const [url, init] = mockFetch.mock.calls[0]
       expect(url).toBe('/api/datasets/ds-1/labels/options/CUSTOM')
       expect(init.method).toBe('DELETE')
+    })
+
+    it('exposes error state when the DELETE fails', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ code: 'BOOM', message: 'remove failed' }, 500))
+
+      selectDataset('ds-1')
+
+      const { result } = renderHookWithProviders(() => useRemoveLabelOption())
+
+      act(() => {
+        result.current.mutate('custom')
+      })
+
+      await waitFor(() => expect(result.current.isError).toBe(true))
+      expect(result.current.error).toBeInstanceOf(Error)
     })
   })
 

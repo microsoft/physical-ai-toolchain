@@ -1,6 +1,11 @@
 import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type {
+  AnomalyDetectionRequest,
+  SuggestAnnotationRequest,
+  TrajectoryData,
+} from '@/api/ai-analysis'
 import {
   useAISuggestion,
   useAnomalyDetection,
@@ -43,7 +48,7 @@ describe('useAISuggestion', () => {
       useAISuggestion({
         datasetId: 'ds-1',
         episodeId: 'ep-0',
-        trajectoryData: { positions: positions3 } as never,
+        trajectoryData: { positions: positions3 } as unknown as SuggestAnnotationRequest,
       }),
     )
 
@@ -61,7 +66,7 @@ describe('useAISuggestion', () => {
       }),
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
     expect(getAnnotationSuggestionMock).not.toHaveBeenCalled()
   })
 
@@ -75,11 +80,11 @@ describe('useAISuggestion', () => {
             [0, 0, 0],
             [1, 1, 1],
           ],
-        } as never,
+        } as unknown as SuggestAnnotationRequest,
       }),
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
     expect(getAnnotationSuggestionMock).not.toHaveBeenCalled()
   })
 
@@ -88,12 +93,12 @@ describe('useAISuggestion', () => {
       useAISuggestion({
         datasetId: 'ds-1',
         episodeId: 'ep-0',
-        trajectoryData: { positions: positions3 } as never,
+        trajectoryData: { positions: positions3 } as unknown as SuggestAnnotationRequest,
         enabled: false,
       }),
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
     expect(getAnnotationSuggestionMock).not.toHaveBeenCalled()
   })
 })
@@ -106,7 +111,7 @@ describe('useTrajectoryAnalysis', () => {
       useTrajectoryAnalysis({
         datasetId: 'ds-1',
         episodeId: 'ep-0',
-        trajectoryData: { positions: positions3 } as never,
+        trajectoryData: { positions: positions3 } as unknown as TrajectoryData,
       }),
     )
 
@@ -124,8 +129,24 @@ describe('useTrajectoryAnalysis', () => {
       }),
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
     expect(analyzeTrajectoryMock).not.toHaveBeenCalled()
+  })
+
+  it('exposes error state when the analysis request fails', async () => {
+    analyzeTrajectoryMock.mockRejectedValueOnce(new Error('analysis failed'))
+
+    const { result } = renderHookWithProviders(() =>
+      useTrajectoryAnalysis({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: { positions: positions3 } as unknown as TrajectoryData,
+      }),
+    )
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.error).toBeInstanceOf(Error)
+    expect((result.current.error as Error).message).toBe('analysis failed')
   })
 })
 
@@ -137,7 +158,7 @@ describe('useAnomalyDetection', () => {
       useAnomalyDetection({
         datasetId: 'ds-1',
         episodeId: 'ep-0',
-        trajectoryData: { positions: positions3 } as never,
+        trajectoryData: { positions: positions3 } as unknown as AnomalyDetectionRequest,
       }),
     )
 
@@ -151,12 +172,28 @@ describe('useAnomalyDetection', () => {
       useAnomalyDetection({
         datasetId: 'ds-1',
         episodeId: 'ep-0',
-        trajectoryData: { positions: [[0, 0, 0]] } as never,
+        trajectoryData: { positions: [[0, 0, 0]] } as unknown as AnomalyDetectionRequest,
       }),
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
     expect(detectAnomaliesMock).not.toHaveBeenCalled()
+  })
+
+  it('exposes error state when the anomaly detection request fails', async () => {
+    detectAnomaliesMock.mockRejectedValueOnce(new Error('detection failed'))
+
+    const { result } = renderHookWithProviders(() =>
+      useAnomalyDetection({
+        datasetId: 'ds-1',
+        episodeId: 'ep-0',
+        trajectoryData: { positions: positions3 } as unknown as AnomalyDetectionRequest,
+      }),
+    )
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.error).toBeInstanceOf(Error)
+    expect((result.current.error as Error).message).toBe('detection failed')
   })
 })
 
@@ -166,7 +203,7 @@ describe('useRequestAISuggestion', () => {
 
     const { result } = renderHookWithProviders(() => useRequestAISuggestion())
 
-    const payload = { positions: positions3 } as never
+    const payload = { positions: positions3 } as unknown as SuggestAnnotationRequest
     act(() => {
       result.current.mutate(payload)
     })
@@ -186,11 +223,11 @@ describe('useRequestAISuggestion', () => {
     const { result, unmount } = renderHookWithProviders(() => useRequestAISuggestion())
 
     act(() => {
-      result.current.mutate({ positions: positions3 } as never)
+      result.current.mutate({ positions: positions3 } as unknown as SuggestAnnotationRequest)
     })
 
     unmount()
     resolveSuggestion({ rating: 'success' })
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await Promise.resolve()
   })
 })
