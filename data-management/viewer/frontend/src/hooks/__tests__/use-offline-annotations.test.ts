@@ -1,242 +1,302 @@
+/**
+ * Tests for useOfflineAnnotations hook.
+ *
+ * Covers IndexedDB-backed local persistence, online/offline event handling,
+ * pending-count refresh, sync queue listener registration/cleanup, and
+ * online-triggered immediate sync on save.
+ */
+
 import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useOfflineAnnotations } from '@/hooks/use-offline-annotations'
-import { renderHookWithQuery } from '@/test/render-hook-with-query'
+import { renderHookWithProviders } from '@/test-utils/render-hook'
 
-const mocks = vi.hoisted(() => {
-  const listeners: Array<(result: unknown) => void> = []
-  return {
-    listeners,
-    saveAnnotationLocal: vi.fn(async () => undefined),
-    addToSyncQueue: vi.fn(async () => undefined),
-    deleteAnnotationLocal: vi.fn(async () => undefined),
-    getAnnotationLocal: vi.fn(),
-    getAnnotationsBySyncStatus: vi.fn(async (): Promise<unknown[]> => []),
-    isOnline: vi.fn(() => true),
-    syncQueueManager: {
-      addListener: vi.fn((cb: (result: unknown) => void) => {
-        listeners.push(cb)
-        return () => {
-          const idx = listeners.indexOf(cb)
-          if (idx >= 0) listeners.splice(idx, 1)
-        }
-      }),
-      process: vi.fn(async () => ({ syncedCount: 0, failedCount: 0, conflictCount: 0 })),
-      start: vi.fn(),
-      stop: vi.fn(),
-    },
-  }
-})
+const {
+  mockSaveAnnotationLocal,
+  mockGetAnnotationLocal,
+  mockGetAnnotationsBySyncStatus,
+  mockDeleteAnnotationLocal,
+  mockAddToSyncQueue,
+  mockIsOnline,
+  mockSyncManager,
+} = vi.hoisted(() => ({
+  mockSaveAnnotationLocal: vi.fn(),
+  mockGetAnnotationLocal: vi.fn(),
+  mockGetAnnotationsBySyncStatus: vi.fn(),
+  mockDeleteAnnotationLocal: vi.fn(),
+  mockAddToSyncQueue: vi.fn(),
+  mockIsOnline: vi.fn(),
+  mockSyncManager: {
+    addListener: vi.fn(),
+    process: vi.fn(),
+    start: vi.fn(),
+    stop: vi.fn(),
+  },
+}))
 
 vi.mock('@/lib/offline-storage', () => ({
-  saveAnnotationLocal: mocks.saveAnnotationLocal,
-  addToSyncQueue: mocks.addToSyncQueue,
-  deleteAnnotationLocal: mocks.deleteAnnotationLocal,
-  getAnnotationLocal: mocks.getAnnotationLocal,
-  getAnnotationsBySyncStatus: mocks.getAnnotationsBySyncStatus,
+  saveAnnotationLocal: mockSaveAnnotationLocal,
+  getAnnotationLocal: mockGetAnnotationLocal,
+  getAnnotationsBySyncStatus: mockGetAnnotationsBySyncStatus,
+  deleteAnnotationLocal: mockDeleteAnnotationLocal,
+  addToSyncQueue: mockAddToSyncQueue,
 }))
 
 vi.mock('@/lib/sync-queue', () => ({
-  isOnline: mocks.isOnline,
-  syncQueueManager: mocks.syncQueueManager,
+  isOnline: mockIsOnline,
+  syncQueueManager: mockSyncManager,
 }))
 
 describe('useOfflineAnnotations', () => {
   beforeEach(() => {
-    mocks.listeners.length = 0
-    mocks.saveAnnotationLocal.mockClear()
-    mocks.addToSyncQueue.mockClear()
-    mocks.deleteAnnotationLocal.mockClear()
-    mocks.getAnnotationLocal.mockReset()
-    mocks.getAnnotationsBySyncStatus.mockReset().mockResolvedValue([])
-    mocks.isOnline.mockReset().mockReturnValue(true)
-    mocks.syncQueueManager.addListener.mockClear()
-    mocks.syncQueueManager.process
-      .mockReset()
-      .mockResolvedValue({ syncedCount: 0, failedCount: 0, conflictCount: 0 })
-    mocks.syncQueueManager.start.mockClear()
-    mocks.syncQueueManager.stop.mockClear()
+    mockSaveAnnotationLocal.mockReset().mockResolvedValue(undefined)
+    mockGetAnnotationLocal.mockReset().mockResolvedValue(undefined)
+    mockGetAnnotationsBySyncStatus.mockReset().mockResolvedValue([])
+    mockDeleteAnnotationLocal.mockReset().mockResolvedValue(undefined)
+    mockAddToSyncQueue.mockReset().mockResolvedValue(undefined)
+    mockIsOnline.mockReset().mockReturnValue(true)
+    mockSyncManager.addListener.mockReset().mockReturnValue(() => {})
+    mockSyncManager.process.mockReset().mockResolvedValue({
+      success: true,
+      syncedCount: 0,
+      failedCount: 0,
+    })
+    mockSyncManager.start.mockReset()
+    mockSyncManager.stop.mockReset()
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('reflects online state from isOnline()', async () => {
-    mocks.isOnline.mockReturnValue(false)
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
-    expect(result.current.isOnline).toBe(false)
-    await waitFor(() => expect(mocks.getAnnotationsBySyncStatus).toHaveBeenCalled())
+  it('initializes with current online state and zero pending count', async () => {
+    mockIsOnline.mockReturnValue(true)
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
+
+    expect(result.current.isOnline).toBe(true)
+    expect(result.current.isSyncing).toBe(false)
+    expect(result.current.lastSyncResult).toBeNull()
+    await waitFor(() => {
+      expect(mockGetAnnotationsBySyncStatus).toHaveBeenCalledWith('pending')
+    })
+  })
+
+  it('reflects pending count from storage', async () => {
+    mockGetAnnotationsBySyncStatus.mockResolvedValue([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
+
+    await waitFor(() => {
+      expect(result.current.pendingCount).toBe(3)
+    })
   })
 
   it('updates online state in response to window events', async () => {
-    mocks.isOnline.mockReturnValue(true)
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
+    mockIsOnline.mockReturnValue(true)
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
+
     expect(result.current.isOnline).toBe(true)
 
-    await act(async () => {
+    act(() => {
       window.dispatchEvent(new Event('offline'))
     })
-    expect(result.current.isOnline).toBe(false)
+    await waitFor(() => expect(result.current.isOnline).toBe(false))
 
-    await act(async () => {
+    act(() => {
       window.dispatchEvent(new Event('online'))
     })
-    expect(result.current.isOnline).toBe(true)
+    await waitFor(() => expect(result.current.isOnline).toBe(true))
   })
 
-  it('saveLocal persists, queues update, and triggers process when online', async () => {
-    mocks.isOnline.mockReturnValue(true)
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
+  it('removes window listeners on unmount', () => {
+    const removeSpy = vi.spyOn(window, 'removeEventListener')
+    const { unmount } = renderHookWithProviders(() => useOfflineAnnotations())
+
+    unmount()
+
+    expect(removeSpy).toHaveBeenCalledWith('online', expect.any(Function))
+    expect(removeSpy).toHaveBeenCalledWith('offline', expect.any(Function))
+  })
+
+  it('subscribes to syncQueueManager and unsubscribes on unmount', () => {
+    const unsubscribe = vi.fn()
+    mockSyncManager.addListener.mockReturnValue(unsubscribe)
+
+    const { unmount } = renderHookWithProviders(() => useOfflineAnnotations())
+
+    expect(mockSyncManager.addListener).toHaveBeenCalledTimes(1)
+
+    unmount()
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('saveLocal persists, queues, refreshes count, and syncs when online', async () => {
+    mockIsOnline.mockReturnValue(true)
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
 
     await act(async () => {
-      await result.current.saveLocal('ds-1', 'ep-2', 'ann-3', { foo: 'bar' })
+      await result.current.saveLocal('ds-1', 'ep-1', 'ann-1', { foo: 'bar' })
     })
 
-    expect(mocks.saveAnnotationLocal).toHaveBeenCalledWith(
+    expect(mockSaveAnnotationLocal).toHaveBeenCalledWith(
       'ds-1',
-      'ep-2',
-      'ann-3',
+      'ep-1',
+      'ann-1',
       { foo: 'bar' },
       'pending',
     )
-    expect(mocks.addToSyncQueue).toHaveBeenCalledWith('update', 'ds-1', 'ep-2', 'ann-3', {
+    expect(mockAddToSyncQueue).toHaveBeenCalledWith('update', 'ds-1', 'ep-1', 'ann-1', {
       foo: 'bar',
     })
-    expect(mocks.syncQueueManager.process).toHaveBeenCalled()
+    expect(mockSyncManager.process).toHaveBeenCalled()
   })
 
-  it('saveLocal does not call process when offline', async () => {
-    mocks.isOnline.mockReturnValue(false)
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
+  it('saveLocal does not trigger immediate sync when offline', async () => {
+    mockIsOnline.mockReturnValue(false)
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
+
+    mockSyncManager.process.mockClear()
 
     await act(async () => {
-      await result.current.saveLocal('ds-1', 'ep-2', 'ann-3', { foo: 'bar' })
+      await result.current.saveLocal('ds-1', 'ep-1', 'ann-1', { foo: 'bar' })
     })
 
-    expect(mocks.syncQueueManager.process).not.toHaveBeenCalled()
+    expect(mockSyncManager.process).not.toHaveBeenCalled()
   })
 
-  it('getLocal maps storage record to OfflineAnnotation', async () => {
-    mocks.getAnnotationLocal.mockResolvedValue({
-      id: 'ann-3',
+  it('deleteLocal queues a delete when annotation exists', async () => {
+    mockGetAnnotationLocal.mockResolvedValueOnce({
+      id: 'ann-1',
       datasetId: 'ds-1',
-      episodeId: 'ep-2',
-      data: { value: 1 },
+      episodeId: 'ep-1',
+      data: {},
       syncStatus: 'pending',
-      localUpdatedAt: '2025-01-01T00:00:00Z',
+      localUpdatedAt: 'now',
     })
-
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
-
-    const annotation = await result.current.getLocal('ann-3')
-    expect(annotation).toEqual({
-      id: 'ann-3',
-      datasetId: 'ds-1',
-      episodeId: 'ep-2',
-      data: { value: 1 },
-      syncStatus: 'pending',
-      localUpdatedAt: '2025-01-01T00:00:00Z',
-    })
-  })
-
-  it('getLocal returns undefined when storage misses', async () => {
-    mocks.getAnnotationLocal.mockResolvedValue(undefined)
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
-    await expect(result.current.getLocal('missing')).resolves.toBeUndefined()
-  })
-
-  it('getPending returns mapped pending annotations', async () => {
-    mocks.getAnnotationsBySyncStatus.mockResolvedValue([
-      {
-        id: 'a1',
-        datasetId: 'd1',
-        episodeId: 'e1',
-        data: { x: 1 },
-        syncStatus: 'pending',
-        localUpdatedAt: 't1',
-      },
-    ])
-
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
-    const pending = await result.current.getPending()
-    expect(pending).toHaveLength(1)
-    expect(pending[0]).toMatchObject({ id: 'a1', syncStatus: 'pending' })
-  })
-
-  it('deleteLocal queues delete when annotation exists then removes', async () => {
-    mocks.getAnnotationLocal.mockResolvedValue({
-      id: 'ann-3',
-      datasetId: 'ds-1',
-      episodeId: 'ep-2',
-      data: { value: 1 },
-      syncStatus: 'pending',
-      localUpdatedAt: 't',
-    })
-
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
 
     await act(async () => {
-      await result.current.deleteLocal('ann-3')
+      await result.current.deleteLocal('ann-1')
     })
 
-    expect(mocks.addToSyncQueue).toHaveBeenCalledWith('delete', 'ds-1', 'ep-2', 'ann-3', null)
-    expect(mocks.deleteAnnotationLocal).toHaveBeenCalledWith('ann-3')
+    expect(mockAddToSyncQueue).toHaveBeenCalledWith('delete', 'ds-1', 'ep-1', 'ann-1', null)
+    expect(mockDeleteAnnotationLocal).toHaveBeenCalledWith('ann-1')
   })
 
-  it('deleteLocal skips queue entry when annotation missing', async () => {
-    mocks.getAnnotationLocal.mockResolvedValue(undefined)
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
+  it('deleteLocal skips queue when annotation does not exist', async () => {
+    mockGetAnnotationLocal.mockResolvedValueOnce(undefined)
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
 
     await act(async () => {
       await result.current.deleteLocal('missing')
     })
 
-    expect(mocks.addToSyncQueue).not.toHaveBeenCalled()
-    expect(mocks.deleteAnnotationLocal).toHaveBeenCalledWith('missing')
+    expect(mockAddToSyncQueue).not.toHaveBeenCalled()
+    expect(mockDeleteAnnotationLocal).toHaveBeenCalledWith('missing')
   })
 
-  it('sync toggles isSyncing and stores result', async () => {
-    const syncResult = { syncedCount: 2, failedCount: 0, conflictCount: 0 }
-    mocks.syncQueueManager.process.mockResolvedValue(syncResult)
+  it('getLocal returns mapped annotation when present', async () => {
+    mockGetAnnotationLocal.mockResolvedValueOnce({
+      id: 'ann-1',
+      datasetId: 'ds-1',
+      episodeId: 'ep-1',
+      data: { x: 1 },
+      syncStatus: 'synced',
+      localUpdatedAt: 't',
+      extraField: 'ignored',
+    })
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
 
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
+    const value = await result.current.getLocal('ann-1')
 
-    let returned: unknown
+    expect(value).toEqual({
+      id: 'ann-1',
+      datasetId: 'ds-1',
+      episodeId: 'ep-1',
+      data: { x: 1 },
+      syncStatus: 'synced',
+      localUpdatedAt: 't',
+    })
+  })
+
+  it('getLocal returns undefined when annotation is missing', async () => {
+    mockGetAnnotationLocal.mockResolvedValueOnce(undefined)
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
+
+    const value = await result.current.getLocal('missing')
+
+    expect(value).toBeUndefined()
+  })
+
+  it('getPending maps results from storage', async () => {
+    mockGetAnnotationsBySyncStatus.mockResolvedValue([
+      {
+        id: 'a',
+        datasetId: 'd',
+        episodeId: 'e',
+        data: 1,
+        syncStatus: 'pending',
+        localUpdatedAt: 't',
+      },
+    ])
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
+
+    const pending = await result.current.getPending()
+
+    expect(pending).toHaveLength(1)
+    expect(pending[0].id).toBe('a')
+  })
+
+  it('sync toggles isSyncing and stores last result', async () => {
+    const syncResult = { success: true, syncedCount: 2, failedCount: 0 }
+    mockSyncManager.process.mockResolvedValueOnce(syncResult)
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
+
     await act(async () => {
-      returned = await result.current.sync()
+      const r = await result.current.sync()
+      expect(r).toEqual(syncResult)
     })
 
-    expect(returned).toEqual(syncResult)
     expect(result.current.isSyncing).toBe(false)
     expect(result.current.lastSyncResult).toEqual(syncResult)
   })
 
   it('startSync and stopSync delegate to syncQueueManager', () => {
-    const { result } = renderHookWithQuery(() => useOfflineAnnotations())
-    act(() => result.current.startSync())
-    expect(mocks.syncQueueManager.start).toHaveBeenCalled()
-    act(() => result.current.stopSync())
-    expect(mocks.syncQueueManager.stop).toHaveBeenCalled()
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
+
+    act(() => {
+      result.current.startSync()
+    })
+    expect(mockSyncManager.start).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      result.current.stopSync()
+    })
+    expect(mockSyncManager.stop).toHaveBeenCalledTimes(1)
   })
 
-  it('listener invalidates annotation queries when items synced', async () => {
-    const { result, queryClient } = renderHookWithQuery(() => useOfflineAnnotations())
-    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
-
-    await waitFor(() => expect(mocks.syncQueueManager.addListener).toHaveBeenCalled())
-    expect(mocks.listeners.length).toBeGreaterThan(0)
-
-    await act(async () => {
-      mocks.listeners[0]({ syncedCount: 1, failedCount: 0, conflictCount: 0 })
+  it('listener invocation refreshes pending count and lastSyncResult', async () => {
+    let captured: ((r: unknown) => void) | undefined
+    mockSyncManager.addListener.mockImplementation((fn: (r: unknown) => void) => {
+      captured = fn
+      return () => {}
     })
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['annotations'] })
-    expect(result.current.lastSyncResult).toEqual({
-      syncedCount: 1,
-      failedCount: 0,
-      conflictCount: 0,
+    const { result } = renderHookWithProviders(() => useOfflineAnnotations())
+
+    await waitFor(() => expect(captured).toBeDefined())
+
+    mockGetAnnotationsBySyncStatus.mockResolvedValueOnce([{ id: 'p' }])
+    const syncResult = { success: true, syncedCount: 1, failedCount: 0 }
+
+    await act(async () => {
+      captured?.(syncResult)
+    })
+
+    await waitFor(() => {
+      expect(result.current.lastSyncResult).toEqual(syncResult)
+      expect(result.current.pendingCount).toBe(1)
     })
   })
 })

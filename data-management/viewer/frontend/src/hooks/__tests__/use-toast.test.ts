@@ -13,42 +13,59 @@ afterEach(() => {
 })
 
 describe('useToast', () => {
-  it('starts with no toasts', () => {
+  it('starts with an empty toast queue', () => {
     const { result } = renderHook(() => useToast())
+
     expect(result.current.toasts).toEqual([])
   })
 
-  it('adds a toast when toast() is called and returns its id', () => {
+  it('toast() appends a new toast and returns its id', () => {
     const { result } = renderHook(() => useToast())
 
     let id = ''
     act(() => {
-      id = result.current.toast({ title: 'Hello', description: 'World' })
+      id = result.current.toast({ title: 'Saved', description: 'Changes persisted' })
     })
 
-    expect(id).toMatch(/.+/)
+    expect(id).toBeTruthy()
     expect(result.current.toasts).toHaveLength(1)
     expect(result.current.toasts[0]).toMatchObject({
       id,
-      title: 'Hello',
-      description: 'World',
+      title: 'Saved',
+      description: 'Changes persisted',
     })
   })
 
-  it('generates a unique id for each toast', () => {
+  it('supports multiple queued toasts in insertion order', () => {
+    const { result } = renderHook(() => useToast())
+
+    act(() => {
+      result.current.toast({ title: 'First' })
+      result.current.toast({ title: 'Second', variant: 'destructive' })
+    })
+
+    expect(result.current.toasts).toHaveLength(2)
+    expect(result.current.toasts[0].title).toBe('First')
+    expect(result.current.toasts[1].title).toBe('Second')
+    expect(result.current.toasts[1].variant).toBe('destructive')
+  })
+
+  it('dismiss() removes a toast by id', () => {
     const { result } = renderHook(() => useToast())
 
     let firstId = ''
     let secondId = ''
     act(() => {
-      firstId = result.current.toast({ title: 'one' })
-    })
-    act(() => {
-      secondId = result.current.toast({ title: 'two' })
+      firstId = result.current.toast({ title: 'First' })
+      secondId = result.current.toast({ title: 'Second' })
     })
 
-    expect(firstId).not.toBe(secondId)
-    expect(result.current.toasts.map((t) => t.id)).toEqual([firstId, secondId])
+    act(() => {
+      result.current.dismiss(firstId)
+    })
+
+    expect(result.current.toasts).toHaveLength(1)
+    expect(result.current.toasts[0].id).toBe(secondId)
   })
 
   it('auto-dismisses a toast after 5 seconds', () => {
@@ -57,6 +74,7 @@ describe('useToast', () => {
     act(() => {
       result.current.toast({ title: 'Auto' })
     })
+
     expect(result.current.toasts).toHaveLength(1)
 
     act(() => {
@@ -70,46 +88,33 @@ describe('useToast', () => {
     expect(result.current.toasts).toHaveLength(0)
   })
 
-  it('dismiss() removes the toast with the matching id and leaves others intact', () => {
-    const { result } = renderHook(() => useToast())
-
-    let firstId = ''
-    let secondId = ''
-    act(() => {
-      firstId = result.current.toast({ title: 'one' })
-      secondId = result.current.toast({ title: 'two' })
-    })
-    expect(result.current.toasts).toHaveLength(2)
-
-    act(() => {
-      result.current.dismiss(firstId)
-    })
-
-    expect(result.current.toasts).toHaveLength(1)
-    expect(result.current.toasts[0].id).toBe(secondId)
-  })
-
-  it('dismiss() with an unknown id is a no-op', () => {
+  it('dismiss() of an unknown id is a no-op', () => {
     const { result } = renderHook(() => useToast())
 
     act(() => {
-      result.current.toast({ title: 'one' })
+      result.current.toast({ title: 'Keep' })
     })
-    expect(result.current.toasts).toHaveLength(1)
 
     act(() => {
       result.current.dismiss('does-not-exist')
     })
+
     expect(result.current.toasts).toHaveLength(1)
   })
 
-  it('supports the destructive variant', () => {
-    const { result } = renderHook(() => useToast())
+  it('does not throw when the auto-dismiss timer fires after unmount', () => {
+    const { result, unmount } = renderHook(() => useToast())
 
     act(() => {
-      result.current.toast({ title: 'Boom', variant: 'destructive' })
+      result.current.toast({ title: 'Pending' })
     })
 
-    expect(result.current.toasts[0].variant).toBe('destructive')
+    unmount()
+
+    expect(() => {
+      act(() => {
+        vi.advanceTimersByTime(5000)
+      })
+    }).not.toThrow()
   })
 })

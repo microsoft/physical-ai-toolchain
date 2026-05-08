@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useDataviewerShellState } from '@/hooks/use-dataviewer-shell-state'
@@ -50,7 +50,7 @@ describe('useDataviewerShellState', () => {
     mockIsDiagnosticsEnabled.mockReturnValue(false)
   })
 
-  it('selects the first available dataset and keeps the dataset store in sync', () => {
+  it('selects the first available dataset and keeps the dataset store in sync', async () => {
     const { result } = renderHook(() =>
       useDataviewerShellState({
         datasets,
@@ -67,9 +67,11 @@ describe('useDataviewerShellState', () => {
     expect(useDatasetStore.getState().currentDataset?.id).toBe('dataset-a')
     expect(result.current.canGoPreviousEpisode).toBe(false)
     expect(result.current.canGoNextEpisode).toBe(true)
+
+    await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
   })
 
-  it('resets to the next available dataset when the selected dataset disappears and toggles diagnostics', () => {
+  it('resets to the next available dataset when the selected dataset disappears and toggles diagnostics', async () => {
     const { result, rerender } = renderHook(
       ({ nextDatasets }) =>
         useDataviewerShellState({
@@ -82,19 +84,24 @@ describe('useDataviewerShellState', () => {
       { initialProps: { nextDatasets: datasets } },
     )
 
-    act(() => {
+    await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
+
+    await act(async () => {
       result.current.setDatasetId('dataset-b')
       result.current.setSelectedEpisode(1)
       result.current.toggleDiagnostics()
     })
 
     expect(mockEnableDiagnostics).toHaveBeenCalledOnce()
+    await waitFor(() => expect(result.current.isWarmingCache).toBe(false))
 
-    rerender({
-      nextDatasets: [datasets[0]],
+    await act(async () => {
+      rerender({
+        nextDatasets: [datasets[0]],
+      })
     })
 
-    expect(result.current.datasetId).toBe('dataset-a')
+    await waitFor(() => expect(result.current.datasetId).toBe('dataset-a'))
     expect(result.current.selectedEpisode).toBe(0)
 
     act(() => {

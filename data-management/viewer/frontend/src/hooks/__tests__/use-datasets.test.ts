@@ -9,41 +9,23 @@ import {
   useEpisode,
   useEpisodes,
 } from '@/hooks/use-datasets'
+import { _resetCsrfToken } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
-import { renderHookWithQuery } from '@/test/render-hook-with-query'
+import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
+import { renderHookWithProviders } from '@/test-utils/render-hook'
 
-vi.mock('@/lib/api-client', () => ({
-  fetchDatasets: vi.fn(),
-  fetchDataset: vi.fn(),
-  fetchEpisodes: vi.fn(),
-  fetchEpisode: vi.fn(),
-  fetchCapabilities: vi.fn(),
-  fetchCacheStats: vi.fn(),
-}))
-
-import {
-  fetchCacheStats,
-  fetchCapabilities,
-  fetchDataset,
-  fetchDatasets,
-  fetchEpisode,
-  fetchEpisodes,
-} from '@/lib/api-client'
-
-const mockedDatasets = vi.mocked(fetchDatasets)
-const mockedDataset = vi.mocked(fetchDataset)
-const mockedEpisodes = vi.mocked(fetchEpisodes)
-const mockedEpisode = vi.mocked(fetchEpisode)
-const mockedCapabilities = vi.mocked(fetchCapabilities)
-const mockedCacheStats = vi.mocked(fetchCacheStats)
+const sampleDataset = {
+  id: 'ds-1',
+  name: 'Dataset 1',
+  totalEpisodes: 5,
+  fps: 30,
+  features: {},
+  tasks: [],
+}
 
 beforeEach(() => {
-  mockedDatasets.mockReset()
-  mockedDataset.mockReset()
-  mockedEpisodes.mockReset()
-  mockedEpisode.mockReset()
-  mockedCapabilities.mockReset()
-  mockedCacheStats.mockReset()
+  installFetchMock()
+  _resetCsrfToken()
   useDatasetStore.getState().reset()
 })
 
@@ -52,132 +34,176 @@ afterEach(() => {
 })
 
 describe('useDatasets', () => {
-  it('fetches datasets and syncs them to the dataset store', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const datasets = [{ id: 'ds-1', name: 'One' } as any, { id: 'ds-2', name: 'Two' } as any]
-    mockedDatasets.mockResolvedValueOnce(datasets)
+  it('fetches the dataset list and syncs the store', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([sampleDataset]))
 
-    const { result } = renderHookWithQuery(() => useDatasets())
+    const { result } = renderHookWithProviders(() => useDatasets())
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(result.current.data).toEqual(datasets)
-    expect(useDatasetStore.getState().datasets).toEqual(datasets)
+
+    expect(result.current.data).toEqual([sampleDataset])
+    expect(useDatasetStore.getState().datasets).toEqual([sampleDataset])
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets', expect.any(Object))
   })
 
-  it('writes error message into the dataset store when query fails', async () => {
-    mockedDatasets.mockRejectedValueOnce(new Error('boom'))
+  it('records errors in the store when the request fails', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'boom', code: 'ERR' }, 500))
 
-    const { result } = renderHookWithQuery(() => useDatasets())
+    const { result } = renderHookWithProviders(() => useDatasets())
 
     await waitFor(() => expect(result.current.isError).toBe(true))
+
     expect(useDatasetStore.getState().error).toBe('boom')
   })
 })
 
 describe('useDataset', () => {
-  it('fetches a single dataset by id', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ds = { id: 'ds-1', name: 'One' } as any
-    mockedDataset.mockResolvedValueOnce(ds)
-
-    const { result } = renderHookWithQuery(() => useDataset('ds-1'))
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(mockedDataset).toHaveBeenCalledWith('ds-1')
-    expect(result.current.data).toEqual(ds)
+  it('does not fetch when datasetId is undefined', () => {
+    renderHookWithProviders(() => useDataset(undefined))
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('is disabled when datasetId is undefined', () => {
-    const { result } = renderHookWithQuery(() => useDataset(undefined))
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockedDataset).not.toHaveBeenCalled()
+  it('fetches a single dataset when an id is provided', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(sampleDataset))
+
+    const { result } = renderHookWithProviders(() => useDataset('ds-1'))
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data).toEqual(sampleDataset)
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1', expect.any(Object))
   })
 })
 
 describe('useEpisodes', () => {
-  it('fetches episodes and forwards options to the API client', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const episodes = [{ episode_index: 0 } as any]
-    mockedEpisodes.mockResolvedValueOnce(episodes)
+  it('does not fetch when datasetId is undefined', () => {
+    renderHookWithProviders(() => useEpisodes(undefined))
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
 
-    const { result } = renderHookWithQuery(() =>
-      useEpisodes('ds-1', { offset: 10, limit: 20, hasAnnotations: true }),
+  it('serializes options into the request URL and transforms the response', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse([
+        { index: 0, length: 100, task_index: 0, has_annotations: false },
+        { index: 1, length: 80, task_index: 1, has_annotations: true },
+      ]),
+    )
+
+    const { result } = renderHookWithProviders(() =>
+      useEpisodes('ds-1', { limit: 50, offset: 0, hasAnnotations: true, taskIndex: 2 }),
     )
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(mockedEpisodes).toHaveBeenCalledWith('ds-1', {
-      offset: 10,
-      limit: 20,
-      hasAnnotations: true,
-    })
-  })
 
-  it('is disabled when datasetId is undefined', () => {
-    const { result } = renderHookWithQuery(() => useEpisodes(undefined))
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockedEpisodes).not.toHaveBeenCalled()
+    expect(result.current.data).toEqual([
+      { index: 0, length: 100, taskIndex: 0, hasAnnotations: false },
+      { index: 1, length: 80, taskIndex: 1, hasAnnotations: true },
+    ])
+
+    const calledUrl = mockFetch.mock.calls[0][0] as string
+    expect(calledUrl).toContain('/api/datasets/ds-1/episodes?')
+    expect(calledUrl).toContain('limit=50')
+    expect(calledUrl).toContain('offset=0')
+    expect(calledUrl).toContain('has_annotations=true')
+    expect(calledUrl).toContain('task_index=2')
   })
 })
 
 describe('useEpisode', () => {
-  it('fetches a specific episode by index', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const episode = { episode_index: 7 } as any
-    mockedEpisode.mockResolvedValueOnce(episode)
-
-    const { result } = renderHookWithQuery(() => useEpisode('ds-1', 7))
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(mockedEpisode).toHaveBeenCalledWith('ds-1', 7)
+  it('is disabled when datasetId is missing', () => {
+    renderHookWithProviders(() => useEpisode(undefined, 0))
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('is disabled when episodeIndex is undefined', () => {
-    const { result } = renderHookWithQuery(() => useEpisode('ds-1', undefined))
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockedEpisode).not.toHaveBeenCalled()
+    renderHookWithProviders(() => useEpisode('ds-1', undefined))
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('is disabled when episodeIndex is negative', () => {
-    const { result } = renderHookWithQuery(() => useEpisode('ds-1', -1))
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockedEpisode).not.toHaveBeenCalled()
+    renderHookWithProviders(() => useEpisode('ds-1', -1))
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('fetches the episode payload and applies key transforms', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        meta: { index: 0, length: 100, task_index: 0, has_annotations: false },
+        video_urls: { front: 'http://example/front.mp4' },
+        cameras: ['front'],
+        trajectory_data: [],
+      }),
+    )
+
+    const { result } = renderHookWithProviders(() => useEpisode('ds-1', 0))
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data).toEqual({
+      meta: { index: 0, length: 100, taskIndex: 0, hasAnnotations: false },
+      videoUrls: { front: 'http://example/front.mp4' },
+      cameras: ['front'],
+      trajectoryData: [],
+    })
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0', expect.any(Object))
   })
 })
 
 describe('useCapabilities', () => {
-  it('fetches capabilities for a dataset', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const caps = { supports_video: true } as any
-    mockedCapabilities.mockResolvedValueOnce(caps)
-
-    const { result } = renderHookWithQuery(() => useCapabilities('ds-1'))
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(mockedCapabilities).toHaveBeenCalledWith('ds-1')
+  it('does not fetch when datasetId is undefined', () => {
+    renderHookWithProviders(() => useCapabilities(undefined))
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('is disabled when datasetId is undefined', () => {
-    const { result } = renderHookWithQuery(() => useCapabilities(undefined))
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockedCapabilities).not.toHaveBeenCalled()
+  it('fetches capabilities for the dataset', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ has_videos: true, has_trajectory: true, camera_keys: ['front'] }),
+    )
+
+    const { result } = renderHookWithProviders(() => useCapabilities('ds-1'))
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data).toEqual({
+      hasVideos: true,
+      hasTrajectory: true,
+      cameraKeys: ['front'],
+    })
   })
 })
 
 describe('useCacheStats', () => {
-  it('fetches cache stats when enabled', async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const stats = { hits: 1, misses: 2 } as any
-    mockedCacheStats.mockResolvedValueOnce(stats)
-
-    const { result } = renderHookWithQuery(() => useCacheStats(true))
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
-    expect(mockedCacheStats).toHaveBeenCalled()
+  it('does not fetch when disabled', () => {
+    renderHookWithProviders(() => useCacheStats(false))
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('does not fetch when disabled', () => {
-    const { result } = renderHookWithQuery(() => useCacheStats(false))
-    expect(result.current.fetchStatus).toBe('idle')
-    expect(mockedCacheStats).not.toHaveBeenCalled()
+  it('fetches cache stats and transforms the response when enabled', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        capacity: 100,
+        size: 25,
+        hits: 80,
+        misses: 20,
+        hit_rate: 0.8,
+        total_bytes: 1024,
+        max_memory_bytes: 4096,
+      }),
+    )
+
+    const { result } = renderHookWithProviders(() => useCacheStats(true))
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data).toEqual({
+      capacity: 100,
+      size: 25,
+      hits: 80,
+      misses: 20,
+      hitRate: 0.8,
+      totalBytes: 1024,
+      maxMemoryBytes: 4096,
+    })
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/cache/stats', expect.any(Object))
   })
 })
