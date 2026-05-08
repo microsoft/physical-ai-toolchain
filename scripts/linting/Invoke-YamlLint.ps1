@@ -78,6 +78,9 @@ function Invoke-YamlLintCore {
         }
     }
 
+    # Exclude gh-aw compiler-generated lock files (machine-generated, not editable)
+    $filesToLint = @($filesToLint | Where-Object { $_ -notmatch '\.lock\.(yml|yaml)$' })
+
     Write-Host "Found $(@($filesToLint).Count) workflow file(s) to lint"
     if (@($filesToLint).Count -gt 0) {
         $filesToLint | ForEach-Object { Write-Host "  - $_" }

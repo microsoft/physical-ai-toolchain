@@ -13,8 +13,6 @@ on:
     workflows: ["PR Validation"]
     types: [completed]
     branches: ["dependabot/**"]
-  bots: ["dependabot[bot]"]
-  roles: [admin, maintainer, write]
 permissions:
   contents: read
   pull-requests: read
