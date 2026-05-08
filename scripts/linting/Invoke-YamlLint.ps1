@@ -67,13 +67,15 @@ function Invoke-YamlLintCore {
     if ($ChangedFilesOnly) {
         Write-Host "Linting changed workflow files only (base: $BaseBranch)"
         $allChanged = @(Get-ChangedFilesFromGit -BaseBranch $BaseBranch -FileExtensions @('*.yml', '*.yaml'))
-        $filesToLint = @($allChanged | Where-Object { $_ -match '\.github[\\/]workflows[\\/]' })
+        $filesToLint = @($allChanged | Where-Object {
+            $_ -match '\.github[\\/]workflows[\\/]' -and $_ -notmatch '\.lock\.yml$'
+        })
     }
     else {
         Write-Host 'Linting all GitHub Actions workflow files'
         $workflowDir = Join-Path $repoRoot '.github/workflows'
         if (Test-Path $workflowDir) {
-            $filesToLint = @(Get-ChildItem -Path $workflowDir -Recurse -Include '*.yml', '*.yaml' -File |
+            $filesToLint = @(Get-ChildItem -Path $workflowDir -Recurse -Include '*.yml', '*.yaml' -Exclude '*.lock.yml' -File |
                 Select-Object -ExpandProperty FullName)
         }
     }

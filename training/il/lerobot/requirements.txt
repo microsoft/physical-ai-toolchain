@@ -170,7 +170,7 @@ fsspec==2026.2.0
     #   torch
 gitdb==4.0.12
     # via gitpython
-gitpython==3.1.47
+gitpython==3.1.49
     # via
     #   mlflow-skinny
     #   wandb
@@ -253,7 +253,7 @@ kiwisolver==1.5.0
     # via matplotlib
 lerobot==0.4.4
     # via robotics-training-il (pyproject.toml)
-mako==1.3.11
+mako==1.3.12
     # via alembic
 markupsafe==3.0.3
     # via
