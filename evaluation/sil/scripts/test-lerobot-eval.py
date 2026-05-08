@@ -167,9 +167,11 @@ def run_inference_test(args: argparse.Namespace) -> None:
     mae = np.mean(np.abs(pred - gt))
     per_joint_mae = np.mean(np.abs(pred - gt), axis=0)
 
-    avg_inf_ms = np.mean(inference_times) * 1000
-    p95_inf_ms = np.percentile(inference_times, 95) * 1000
-    throughput = 1.0 / np.mean(inference_times)
+    inf_times_arr = np.asarray(inference_times, dtype=float)
+    avg_inf_ms = np.mean(inf_times_arr) * 1000
+    p95_inf_ms = np.percentile(inf_times_arr, 95) * 1000
+    mean_inf = float(np.mean(inf_times_arr)) if inf_times_arr.size else 0.0
+    throughput = (1.0 / mean_inf) if (mean_inf > 0 and np.isfinite(mean_inf)) else 0.0
 
     print(f"\n{'=' * 60}")
     print("Inference Results")
@@ -183,9 +185,12 @@ def run_inference_test(args: argparse.Namespace) -> None:
     print(f"  Throughput:         {throughput:.1f} steps/s")
     print(f"  Realtime capable:   {'yes' if throughput >= fps else 'no'} (need {fps} Hz)")
 
-    # Action range sanity check
-    pred_range = np.ptp(pred, axis=0)
-    gt_range = np.ptp(gt, axis=0)
+    # Action range sanity check (suppress numpy warnings for intentionally
+    # degenerate predictions — degeneracy is reported via the explicit
+    # WARNING/ERROR prints below rather than via numpy RuntimeWarnings).
+    with np.errstate(invalid="ignore", divide="ignore"):
+        pred_range = np.ptp(pred, axis=0)
+        gt_range = np.ptp(gt, axis=0)
     print(f"\n  Predicted range:    [{', '.join(f'{r:.3f}' for r in pred_range)}]")
     print(f"  Ground truth range: [{', '.join(f'{r:.3f}' for r in gt_range)}]")
 
