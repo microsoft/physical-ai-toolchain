@@ -6,10 +6,9 @@ import {
   useEpisodeList,
   useEpisodeNavigationWithPrefetch,
 } from '@/hooks/use-episodes'
-import { _resetCsrfToken } from '@/lib/api-client'
 import { useDatasetStore, useEpisodeStore } from '@/stores'
 import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
-import { renderHookWithProviders } from '@/test-utils/render-hook'
+import { renderHookWithProviders } from '@/test-utils/render'
 
 const sampleDataset = {
   id: 'ds-1',
@@ -32,8 +31,7 @@ function selectDataset() {
 }
 
 beforeEach(() => {
-  installFetchMock()
-  _resetCsrfToken()
+  installFetchMock({ csrf: false })
   useDatasetStore.getState().reset()
   useEpisodeStore.getState().reset()
 })

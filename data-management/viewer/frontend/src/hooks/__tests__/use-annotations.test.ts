@@ -9,7 +9,6 @@ import {
   useSaveAnnotation,
   useSaveCurrentAnnotation,
 } from '@/hooks/use-annotations'
-import { _resetCsrfToken } from '@/lib/api-client'
 import { useAnnotationStore, useDatasetStore, useEpisodeStore } from '@/stores'
 import {
   installFetchMock,
@@ -18,7 +17,7 @@ import {
   mockFetch,
   mockMutationFetch,
 } from '@/test-utils/fetch-mocks'
-import { renderHookWithProviders } from '@/test-utils/render-hook'
+import { renderHookWithProviders } from '@/test-utils/render'
 import type { EpisodeAnnotation } from '@/types'
 
 function makeAnnotation(annotatorId: string): EpisodeAnnotation {
@@ -48,8 +47,7 @@ function selectDataset(id = 'ds-1', episodeIndex = 0) {
 }
 
 beforeEach(() => {
-  installFetchMock()
-  _resetCsrfToken()
+  installFetchMock({ csrf: false })
   useDatasetStore.getState().reset()
   useAnnotationStore.getState().clear()
   useEpisodeStore.getState().reset()

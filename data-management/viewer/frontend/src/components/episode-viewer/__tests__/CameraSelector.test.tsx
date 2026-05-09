@@ -2,7 +2,7 @@ import { fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { renderWithQuery } from '@/test/test-utils'
+import { renderWithQuery } from '@/test-utils/render'
 
 import { CameraSelector } from '../CameraSelector'
 
