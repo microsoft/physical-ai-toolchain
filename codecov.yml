@@ -24,7 +24,7 @@
 #   go ⊂ terraform (infrastructure/terraform/e2e/ ⊂ infrastructure/terraform/);
 #     deduplicated at the component layer (infrastructure-terraform vs infrastructure-go-e2e).
 #   vitest-* (components/features/lib/state/app) overlap the aggregate vitest flag and each
-#     other (vitest-features  vitest-components since the feature directories
+#     other (vitest-features ⊂ vitest-components since the feature directories
 #     dashboard/, annotation-panel/, frame-editor/, episode-viewer/ all live under src/components/);
 #     intentional to surface per-section coverage trends without losing the aggregate view.
 
@@ -45,42 +45,51 @@ coverage:
         flags:
           - go
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       pester:
         flags:
           - pester
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       pytest-training:
         flags:
           - pytest-training
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       pytest-dm-tools:
         flags:
           - pytest-dm-tools
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       pytest-data-pipeline:
         flags:
           - pytest-data-pipeline
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       pytest-inference:
         flags:
           - pytest-inference
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       pytest-dataviewer:
         flags:
           - pytest-dataviewer
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       pytest-fuzz:
         flags:
           - pytest-fuzz
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
+      # terraform flag intentionally left at loose defaults: report_type=test_results, no coverage XML to gate
       terraform:
         flags:
           - terraform
@@ -90,37 +99,44 @@ coverage:
         flags:
           - vitest
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       vitest-components:
         flags:
           - vitest-components
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       vitest-features:
         flags:
           - vitest-features
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       vitest-lib:
         flags:
           - vitest-lib
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       vitest-state:
         flags:
           - vitest-state
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       vitest-app:
         flags:
           - vitest-app
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
       pytest-evaluation:
         flags:
           - pytest-evaluation
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
     patch:
       default:
         target: auto
@@ -128,35 +144,68 @@ coverage:
       go:
         flags:
           - go
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       pester:
         flags:
           - pester
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       pytest-training:
         flags:
           - pytest-training
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       pytest-dm-tools:
         flags:
           - pytest-dm-tools
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       pytest-data-pipeline:
         flags:
           - pytest-data-pipeline
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       pytest-inference:
         flags:
           - pytest-inference
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       pytest-dataviewer:
         flags:
           - pytest-dataviewer
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       pytest-fuzz:
         flags:
           - pytest-fuzz
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
+      # terraform flag intentionally omitted from enforcing patch gate: report_type=test_results, no coverage XML to gate
       terraform:
         flags:
           - terraform
@@ -164,31 +213,59 @@ coverage:
       vitest:
         flags:
           - vitest
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       vitest-components:
         flags:
           - vitest-components
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       vitest-features:
         flags:
           - vitest-features
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       vitest-lib:
         flags:
           - vitest-lib
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       vitest-state:
         flags:
           - vitest-state
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       vitest-app:
         flags:
           - vitest-app
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
       pytest-evaluation:
         flags:
           - pytest-evaluation
-        informational: true
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
 
 flags:
   pytest-training:
@@ -270,10 +347,15 @@ component_management:
     statuses:
       - type: project
         target: auto
-        threshold: 1%
+        threshold: 0%
+        removed_code_behavior: adjust_base
+        if_not_found: success
       - type: patch
-        target: auto
-        threshold: 5%
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
   individual_components:
     - component_id: training
       name: Training

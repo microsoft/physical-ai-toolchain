@@ -45,6 +45,16 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--junitxml=logs/pytest-results.xml",
+    # Local-dev coverage parity with CI flag scopes (pytest-training, pytest-dm-tools,
+    # pytest-inference, pytest-fuzz). CI per-flag uploads remain authoritative for the
+    # 80% gate; --cov-fail-under=0 keeps local runs advisory.
+    "--cov=training",
+    "--cov=data-management/tools",
+    "--cov=fleet-deployment/inference",
+    "--cov=tests",
+    "--cov-report=term-missing",
+    "--cov-report=xml:logs/coverage-root.xml",
+    "--cov-fail-under=0",
 ]
 markers = [
     "e2e: marks tests that submit real GPU training jobs (deselect: -m 'not e2e')",
