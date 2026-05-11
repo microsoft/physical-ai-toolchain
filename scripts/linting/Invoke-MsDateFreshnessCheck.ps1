@@ -63,13 +63,27 @@ function Get-MarkdownFiles {
         [string]$Base = 'origin/main'
     )
 
+    $excludePatterns = @('node_modules', '.git', 'logs', '.copilot-tracking', 'CHANGELOG.md', 'scripts/tests')
+
     if ($ChangedOnly) {
         Write-Verbose "Getting changed markdown files relative to $Base"
         $files = @(Get-ChangedFilesFromGit -BaseBranch $Base -FileExtensions @('*.md'))
-        return @($files | Where-Object { Test-Path $_ -PathType Leaf })
+        return @($files | Where-Object {
+                if (-not (Test-Path $_ -PathType Leaf)) { return $false }
+                $normalized = $_ -replace '\\', '/'
+                $name = Split-Path $_ -Leaf
+                foreach ($pattern in $excludePatterns) {
+                    if ($name -eq $pattern -or
+                        $normalized -like "$pattern/*" -or
+                        $normalized -like "*/$pattern/*" -or
+                        $normalized -like "*/$pattern") {
+                        return $false
+                    }
+                }
+                return $true
+            })
     }
 
-    $excludePatterns = @('node_modules', '.git', 'logs', '.copilot-tracking', 'CHANGELOG.md', 'scripts/tests')
     $allFiles = @()
 
     # Explicit paths bypass exclusion filtering (e.g., 'logs/specific.md')
