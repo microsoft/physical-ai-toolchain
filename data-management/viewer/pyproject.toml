@@ -7,7 +7,7 @@ dependencies = [
     "fastapi==0.136.1",
     "uvicorn[standard]==0.46.0",
     "pydantic==2.13.4",
-    "python-multipart==0.0.27",
+    "python-multipart==0.0.28",
     "python-dotenv==1.2.2",
     "aiofiles==25.1.0",
     "numpy==2.4.4",
@@ -43,7 +43,7 @@ export = [
     "Pillow==12.2.0",
 ]
 yolo = [
-    "ultralytics==8.4.47",
+    "ultralytics==8.4.48",
     "numpy==2.4.4",
     "Pillow==12.2.0",
 ]
