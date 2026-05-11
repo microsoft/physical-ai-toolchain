@@ -2,7 +2,7 @@
 title: Infrastructure as Code
 description: Terraform configuration for Azure resources including AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-04-29
 ms.topic: how-to
 keywords:
   - terraform
@@ -31,12 +31,17 @@ cp terraform.tfvars.example terraform.tfvars
 terraform init && terraform apply
 ```
 
-## ⚙️ Optional AML diagnostics
+## ⚙️ AzureML network controls
 
 Set `should_enable_aml_diagnostic_logs = true` in `terraform.tfvars` to create an AML workspace diagnostic setting that sends all AML resource logs to the platform Log Analytics workspace. The default is `false`.
 
+Set `aml_managed_network_isolation_mode` explicitly for the AzureML workspace managed network. Allowed values are `Disabled`, `AllowInternetOutbound`, and `AllowOnlyApprovedOutbound`. This setting is independent from `should_enable_private_endpoint`, which still controls Azure private endpoints, private DNS zones, and related network topology.
+
+Treat changes to `aml_managed_network_isolation_mode` as AzureML redeploy operations. AzureML does not support disabling managed network isolation after it is enabled, or switching between `AllowInternetOutbound` and `AllowOnlyApprovedOutbound` in place. Delete and recreate managed compute resources when enabling managed networking on an existing workspace; recreate the workspace for unsupported mode transitions.
+
 ```hcl
 should_enable_aml_diagnostic_logs = true
+aml_managed_network_isolation_mode = "AllowOnlyApprovedOutbound"
 ```
 
 ## 📖 Documentation
