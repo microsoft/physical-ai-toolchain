@@ -1043,6 +1043,7 @@ pytest
 python
 PYTHONHASHSEED
 PYTHONPATH
+PYTHONUNBUFFERED
 pyyaml
 Qdrant
 qgis

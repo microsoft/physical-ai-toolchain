@@ -1,0 +1,26 @@
+workflow:
+  name: "{{workflow_name}}"
+  resources:
+    default: { cpu: 4, memory: 8Gi, storage: 4Gi, gpu: 0 }
+  timeout: { exec_timeout: 6h, queue_timeout: 1h }
+  tasks:
+    - name: mirror
+      image: "{{image}}"
+      command: ["bash"]
+      args: ["-lc", "set -euo pipefail; pip install --quiet 'mlflow>=2.10,<3' 'azureml-mlflow>=1.55' 'azure-identity>=1.17' 'azure-ai-ml>=1.20' && python /scripts/aml_mirror.py"]
+      environment:
+        OUTPUT_DIR: "{{output_base}}/{{run_id}}"
+        RUN_ID: "{{run_id}}-replay"
+        REPLAY_RUN_ID: "{{run_id}}"
+        AZUREML_MODEL_NAME: "{{model_name}}"
+        PYTHONUNBUFFERED: "1"
+      files:
+        - path: /scripts/aml_mirror.py
+          contents_from: training/utils/aml_mirror.py
+
+default-values:
+  workflow_name: replay-azureml
+  run_id: ""
+  model_name: ""
+  output_base: /outputs
+  image: python:3.11-slim
