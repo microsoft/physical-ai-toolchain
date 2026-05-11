@@ -52,12 +52,12 @@
     "react-is": "19.2.6",
     "react-player": "3.4.0",
     "recharts": "3.8.1",
-    "tailwind-merge": "3.5.0",
+    "tailwind-merge": "3.6.0",
     "zustand": "5.0.13"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@tailwindcss/vite": "4.2.4",
+    "@tailwindcss/vite": "4.3.0",
     "@tanstack/eslint-plugin-query": "5.100.9",
     "@testing-library/dom": "10.4.1",
     "@testing-library/jest-dom": "6.9.1",
@@ -80,7 +80,7 @@
     "lint-staged": "16.4.0",
     "prettier": "3.8.3",
     "prettier-plugin-tailwindcss": "0.8.0",
-    "tailwindcss": "4.2.4",
+    "tailwindcss": "4.3.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.59.2",
     "vite": "8.0.11",
