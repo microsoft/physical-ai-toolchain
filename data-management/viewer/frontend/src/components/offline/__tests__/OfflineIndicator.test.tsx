@@ -3,7 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { OfflineIndicator } from '@/components/offline/OfflineIndicator'
-import { useOfflineAnnotations } from '@/hooks/use-offline-annotations'
+import {
+  useOfflineAnnotations,
+  type UseOfflineAnnotationsResult,
+} from '@/hooks/use-offline-annotations'
 
 vi.mock('@/hooks/use-offline-annotations', () => ({
   useOfflineAnnotations: vi.fn(),
@@ -19,7 +22,7 @@ vi.mock('@/components/ui/popover', () => ({
 
 const mockedHook = vi.mocked(useOfflineAnnotations)
 
-const baseHookState = {
+const baseHookState: UseOfflineAnnotationsResult = {
   isOnline: true,
   pendingCount: 0,
   isSyncing: false,

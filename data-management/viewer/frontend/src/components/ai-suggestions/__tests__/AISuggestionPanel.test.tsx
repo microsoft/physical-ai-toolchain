@@ -247,7 +247,7 @@ describe('AISuggestionPanel', () => {
       (_input: SuggestAnnotationRequest, options?: { onSuccess?: () => void }) => {
         options?.onSuccess?.()
       },
-    )
+    ) as unknown as RequestAISuggestionResult['mutate']
     mockedUseAISuggestion.mockReturnValue(buildQueryResult({ data: buildSuggestion(), refetch }))
     mockedUseRequestAISuggestion.mockReturnValue(buildMutationResult({ mutate }))
     render(

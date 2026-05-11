@@ -109,7 +109,7 @@ describe('ConflictResolution', () => {
 
   it('switches to local choice via Enter key on card', () => {
     renderConflict()
-    const localCard = screen.getByText('Local Version').closest('[role="button"]')!
+    const localCard = screen.getByText('Local Version').closest('[role="button"]') as HTMLElement
     localCard.focus()
     // userEvent keyboard would not target a div role=button reliably; use fireEvent
     const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
