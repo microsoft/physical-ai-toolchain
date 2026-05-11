@@ -152,9 +152,8 @@ component_management:
   default_rules:
     statuses:
       - type: project
-        target: auto
+        target: 80%
         threshold: 0%
-        removed_code_behavior: adjust_base
         if_not_found: success
       - type: patch
         target: 80%
