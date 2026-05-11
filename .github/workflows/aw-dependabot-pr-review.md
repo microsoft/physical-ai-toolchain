@@ -81,17 +81,24 @@ steps:
         let pr = (run.pull_requests || [])[0];
         if (!pr) {
           // Fork PRs do not appear in workflow_run.pull_requests; fall back to search.
-          const q = `repo:${context.repo.owner}/${context.repo.repo} is:pr sha:${run.head_sha}`;
+          // Filter to open Dependabot PRs with the exact head SHA to avoid ambiguity
+          // when Dependabot opens several PRs in the same batch.
+          const q = `repo:${context.repo.owner}/${context.repo.repo} is:pr is:open author:app/dependabot sha:${run.head_sha}`;
           const { data } = await github.rest.search.issuesAndPullRequests({ q });
-          const hit = (data.items || [])[0];
-          if (!hit) {
+          const matches = (data.items || []).filter(i =>
+            i.user.login === 'dependabot[bot]' && i.state === 'open');
+          if (matches.length === 0) {
             core.exportVariable('PR_DEPENDABOT_SKIP_REASON', 'pr-resolution-failed');
+            return;
+          }
+          if (matches.length > 1) {
+            core.setFailed(`Ambiguous PR resolution: ${matches.length} open Dependabot PRs match SHA ${run.head_sha}`);
             return;
           }
           const { data: full } = await github.rest.pulls.get({
             owner: context.repo.owner,
             repo: context.repo.repo,
-            pull_number: hit.number,
+            pull_number: matches[0].number,
           });
           pr = full;
         } else {
@@ -126,15 +133,16 @@ steps:
         core.exportVariable('PR_VALIDATION_RUN_URL', run.html_url || '');
 
         // Resolve per-surface check-runs ONCE here so the persona does not re-walk them.
+        // Paginate to avoid silently missing checks when the matrix grows beyond a single page.
         let failing = [];
         try {
-          const { data: checks } = await github.rest.checks.listForRef({
+          const checkRuns = await github.paginate(github.rest.checks.listForRef, {
             owner: context.repo.owner,
             repo: context.repo.repo,
             ref: pr.head.sha,
             per_page: 100,
-          });
-          failing = (checks.check_runs || [])
+          }, response => response.data.check_runs);
+          failing = checkRuns
             .filter(c => c.status === 'completed'
               && !['success', 'neutral', 'skipped'].includes(c.conclusion))
             .map(c => ({ name: c.name, html_url: c.html_url, conclusion: c.conclusion }));
