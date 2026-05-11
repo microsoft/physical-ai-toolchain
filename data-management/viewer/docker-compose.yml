@@ -10,12 +10,12 @@ services:
       BACKEND_PORT: "8000"
 
       # Storage backend: local | azure
-      HMI_STORAGE_BACKEND: "${HMI_STORAGE_BACKEND:-local}"
+      STORAGE_BACKEND: "${STORAGE_BACKEND:-local}"
 
-      # Local storage (used when HMI_STORAGE_BACKEND=local)
-      HMI_DATA_PATH: "/data"
+      # Local storage (used when STORAGE_BACKEND=local)
+      DATA_DIR: "/data"
 
-      # Azure Blob Storage (required when HMI_STORAGE_BACKEND=azure)
+      # Azure Blob Storage (required when STORAGE_BACKEND=azure)
       AZURE_STORAGE_ACCOUNT_NAME: "${AZURE_STORAGE_ACCOUNT_NAME:-}"
       AZURE_STORAGE_DATASET_CONTAINER: "${AZURE_STORAGE_DATASET_CONTAINER:-}"
       AZURE_STORAGE_ANNOTATION_CONTAINER: "${AZURE_STORAGE_ANNOTATION_CONTAINER:-}"
@@ -29,9 +29,9 @@ services:
       DATAVIEWER_AUTH_DISABLED: "${DATAVIEWER_AUTH_DISABLED:-true}"
     volumes:
       # Mount local dataset directory when using local storage backend
-      - "${HMI_LOCAL_DATA_PATH:-./datasets}:/data:ro"
+      - "${DATAVIEWER_HOST_DATA_DIR:-./datasets}:/data:ro"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
       interval: 30s
       timeout: 5s
       retries: 3

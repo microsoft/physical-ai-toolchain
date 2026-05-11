@@ -29,7 +29,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Setup uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
@@ -43,6 +43,7 @@ jobs:
           --cov=data-pipeline/capture
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-data-pipeline.xml
+          --cov-fail-under=80
 
       - name: Upload coverage.xml artifact
         if: always()

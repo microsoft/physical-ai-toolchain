@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM python:3.12-slim@sha256:520153e2deb359602c9cffd84e491e3431d76e7bf95a3255c9ce9433b76ab99a AS base
+FROM python:3.13.13-slim@sha256:6f8a543598e40391683c7c80552f4a97759c7fecf23f048ba95147f40d676755 AS base
 
 WORKDIR /app
 
@@ -46,8 +46,8 @@ EXPOSE 8000
 # BACKEND_HOST=0.0.0.0 binds to all interfaces (required in containers)
 ENV BACKEND_HOST=0.0.0.0 \
     BACKEND_PORT=8000 \
-    HMI_STORAGE_BACKEND=local \
-    HMI_DATA_PATH=/data
+    STORAGE_BACKEND=local \
+    DATA_DIR=/data
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

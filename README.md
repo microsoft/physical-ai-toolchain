@@ -76,7 +76,7 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 ./setup-dev.sh
 ```
 
-The setup script installs Python 3.11 via [uv](https://docs.astral.sh/uv/), creates a virtual environment, and installs training dependencies. Follow the [Quickstart Guide](docs/getting-started/quickstart.md) for the full deployment walkthrough.
+The setup script installs Python 3.12 via [uv](https://docs.astral.sh/uv/), creates a virtual environment, and installs training dependencies. Follow the [Quickstart Guide](docs/getting-started/quickstart.md) for the full deployment walkthrough.
 
 ## Documentation
 
@@ -156,7 +156,7 @@ Agents operate within the same security boundaries, managed identities, and RBAC
 
 Prerequisites:
 
-- Python 3.11+
+- Python 3.12+
 - Docker with NVIDIA Container Toolkit
 - Terraform 1.5+ (for infrastructure deployment)
 - Azure CLI with an active subscription

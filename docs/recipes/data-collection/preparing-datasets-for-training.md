@@ -9,7 +9,7 @@ Download a dataset from Azure Blob Storage or HuggingFace, inspect its structure
 
 | Requirement     | Details                                                          |
 |-----------------|------------------------------------------------------------------|
-| Python          | 3.11+ with `uv` or `pip`                                         |
+| Python          | 3.12+ with `uv` or `pip`                                         |
 | Azure CLI       | Authenticated (`az login`) — for Azure Blob datasets             |
 | Azure Storage   | Storage account with dataset container — for Azure Blob datasets |
 | HuggingFace CLI | `pip install huggingface-hub` — for HuggingFace datasets         |

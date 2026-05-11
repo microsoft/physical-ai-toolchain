@@ -10,8 +10,10 @@ export default defineConfig({
     },
   },
   test: {
+    // Run with `--no-file-parallelism` when invoking coverage locally to
+    // avoid happy-dom timer/global races between concurrent test files.
     environment: 'happy-dom',
-    globals: true,
+    globals: false,
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     reporters: ['default', 'junit'],
@@ -32,10 +34,80 @@ export default defineConfig({
         'src/main.tsx',
       ],
       thresholds: {
-        lines: 45,
-        functions: 35,
-        branches: 35,
-        statements: 45,
+        lines: 55,
+        functions: 55,
+        branches: 40,
+        statements: 55,
+        // Per-file enforcement on hand-tested directories to catch regressions
+        // in individual files. Component-level coverage tracked separately.
+        'src/hooks/**': {
+          perFile: true,
+          lines: 50,
+          functions: 45,
+          branches: 25,
+          statements: 45,
+        },
+        'src/stores/**': {
+          perFile: true,
+          lines: 85,
+          functions: 75,
+          branches: 60,
+          statements: 85,
+        },
+        'src/api/ai-analysis.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        'src/api/detection.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        'src/api/export.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        'src/lib/auth-config.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        'src/lib/edit-draft-storage.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        'src/lib/joint-significance.ts': {
+          statements: 80,
+          branches: 75,
+          functions: 80,
+          lines: 80,
+        },
+        'src/lib/offline-storage.ts': {
+          statements: 80,
+          branches: 75,
+          functions: 80,
+          lines: 80,
+        },
+        'src/lib/query-client.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
+        'src/lib/sync-queue.ts': {
+          statements: 80,
+          branches: 80,
+          functions: 80,
+          lines: 80,
+        },
       },
     },
   },

@@ -155,6 +155,27 @@ export interface AnomalyAnnotation {
 }
 
 // ============================================================================
+// Language Instruction Types (VLA)
+// ============================================================================
+
+/** Source of the language instruction */
+export type InstructionSource = 'human' | 'template' | 'llm-generated' | 'retroactive'
+
+/** Language instruction annotation for VLA-conditioned training */
+export interface LanguageInstructionAnnotation {
+  /** Primary task instruction */
+  instruction: string
+  /** How this instruction was produced */
+  source: InstructionSource
+  /** ISO 639-1 language code */
+  language: string
+  /** Alternative phrasings for data augmentation */
+  paraphrases: string[]
+  /** Ordered subtask decomposition */
+  subtaskInstructions: string[]
+}
+
+// ============================================================================
 // Combined Episode Annotation Types
 // ============================================================================
 
@@ -172,6 +193,8 @@ export interface EpisodeAnnotation {
   dataQuality: DataQualityAnnotation
   /** Anomaly annotations */
   anomalies: AnomalyAnnotation
+  /** Language instruction for VLA training */
+  languageInstruction?: LanguageInstructionAnnotation
   /** Free-form notes about the episode */
   notes?: string
 }
@@ -240,6 +263,17 @@ export function createDefaultDataQuality(): DataQualityAnnotation {
 export function createDefaultAnomalyAnnotation(): AnomalyAnnotation {
   return {
     anomalies: [],
+  }
+}
+
+/** Create a default language instruction annotation */
+export function createDefaultLanguageInstruction(): LanguageInstructionAnnotation {
+  return {
+    instruction: '',
+    source: 'human',
+    language: 'en',
+    paraphrases: [],
+    subtaskInstructions: [],
   }
 }
 

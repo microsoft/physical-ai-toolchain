@@ -16,7 +16,7 @@ The frontend serves static assets and proxies `/api/` requests to the backend se
 
 | Image    | Base         | Build Context                      |
 |----------|--------------|------------------------------------|
-| Backend  | Python 3.11  | `data-management/viewer/backend/`  |
+| Backend  | Python 3.12  | `data-management/viewer/backend/`  |
 | Frontend | nginx:alpine | `data-management/viewer/frontend/` |
 
 Images are pushed to the Azure Container Registry provisioned by the infrastructure domain.

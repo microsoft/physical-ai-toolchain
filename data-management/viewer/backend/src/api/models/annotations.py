@@ -7,7 +7,7 @@ for task completeness, trajectory quality, data quality, and anomaly annotations
 
 from datetime import datetime
 from enum import Enum, StrEnum
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
 from pydantic import Field
 
@@ -201,6 +201,37 @@ class AnomalyAnnotation(SanitizedModel):
 
 
 # ============================================================================
+# Language Instruction Types (VLA)
+# ============================================================================
+
+
+class InstructionSource(StrEnum):
+    """Source of the language instruction annotation."""
+
+    HUMAN = "human"
+    TEMPLATE = "template"
+    LLM_GENERATED = "llm-generated"
+    RETROACTIVE = "retroactive"
+
+
+class LanguageInstructionAnnotation(SanitizedModel):
+    """Natural language instruction for VLA-conditioned training.
+
+    Stores the primary task instruction plus optional paraphrases and
+    subtask decomposition used for data augmentation and hierarchical
+    policy conditioning.
+    """
+
+    instruction: str = Field(min_length=1, max_length=1000)
+    source: InstructionSource
+    language: str = Field(default="en", max_length=10)
+    paraphrases: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=50)
+    subtask_instructions: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=100)
+
+    model_config: ClassVar = {"use_enum_values": True}
+
+
+# ============================================================================
 # Combined Episode Annotation Types
 # ============================================================================
 
@@ -214,6 +245,7 @@ class EpisodeAnnotation(SanitizedModel):
     trajectory_quality: TrajectoryQualityAnnotation
     data_quality: DataQualityAnnotation
     anomalies: AnomalyAnnotation
+    language_instruction: LanguageInstructionAnnotation | None = None
     notes: str | None = None
 
 

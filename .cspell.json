@@ -13,7 +13,10 @@
 		"mycontainer",
 		"noseparator",
 		"preds",
+		"refetches",
 		"sdgcpu",
+		"unstub",
+		"uppercased",
 		"xticklabels"
 	],
 	"ignorePaths": [
@@ -39,7 +42,9 @@
 		"**/.terraform/**",
 		"**/.terraform.lock.hcl",
 		"**/scripts/tests/Fixtures/**",
-		"**/TERRAFORM.md"
+		"**/TERRAFORM.md",
+		"CHANGELOG.md",
+		"**/CHANGELOG.md"
 	],
 	"dictionaryDefinitions": [
 		{

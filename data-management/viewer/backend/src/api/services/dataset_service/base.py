@@ -33,9 +33,24 @@ def build_trajectory(
     Convert raw numpy arrays into a list of TrajectoryPoint models.
 
     Works for both LeRobot and HDF5 data by accepting optional arrays
-    with sensible defaults (zeros) for missing fields.
+    with sensible defaults (zeros) for missing fields. When ``joint_velocities``
+    is not provided, it is estimated via finite differences of
+    ``joint_positions`` over ``timestamps`` so the velocity view in the UI is
+    populated for datasets that only record positions.
     """
     num_joints = joint_positions.shape[1] if joint_positions.ndim > 1 else 6
+
+    if joint_velocities is None and joint_positions.ndim == 2 and joint_positions.shape[0] > 1 and length > 1:
+        # Backwards/forwards differences along the time axis. Guard against
+        # zero or non-monotonic timestamps by clamping dt to a small positive
+        # value.
+        dt = np.diff(timestamps)
+        dt = np.where(dt > 1e-6, dt, 1e-6)
+        diffs = np.diff(joint_positions, axis=0) / dt[:, None]
+        joint_velocities = np.empty_like(joint_positions)
+        joint_velocities[:-1] = diffs
+        joint_velocities[-1] = diffs[-1]
+
     points: list[TrajectoryPoint] = []
 
     for i in range(length):

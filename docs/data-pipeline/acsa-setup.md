@@ -50,14 +50,14 @@ Recording pods mount the `recording-data` PVC and write bag files to it. The ACS
 
 ## 📋 Prerequisites
 
-| Requirement                    | Details                                                                              |
-|--------------------------------|--------------------------------------------------------------------------------------|
-| Azure Arc-connected K8s cluster | Edge cluster registered with Azure Arc (`az connectedk8s show`)                     |
-| Azure CLI 2.60+               | With `k8s-extension` and `connectedk8s` extensions                                   |
-| Terraform outputs              | Infrastructure deployed via `infrastructure/terraform/` with a storage account      |
-| kubectl + envsubst             | For manifest rendering and application                                               |
-| Azure RBAC                     | Contributor on the Arc cluster resource group; Storage Blob Data Owner on the storage account |
-| Network connectivity          | Direct kubectl access or Arc proxy for private clusters                               |
+| Requirement                     | Details                                                                                       |
+|---------------------------------|-----------------------------------------------------------------------------------------------|
+| Azure Arc-connected K8s cluster | Edge cluster registered with Azure Arc (`az connectedk8s show`)                               |
+| Azure CLI 2.60+                 | With `k8s-extension` and `connectedk8s` extensions                                            |
+| Terraform outputs               | Infrastructure deployed via `infrastructure/terraform/` with a storage account                |
+| kubectl + envsubst              | For manifest rendering and application                                                        |
+| Azure RBAC                      | Contributor on the Arc cluster resource group; Storage Blob Data Owner on the storage account |
+| Network connectivity            | Direct kubectl access or Arc proxy for private clusters                                       |
 
 > [!NOTE]
 > The deploy script automatically installs missing Azure CLI extensions (`k8s-extension`, `connectedk8s`).
@@ -86,49 +86,49 @@ The script reads storage account details from `infrastructure/terraform/terrafor
 
 ### Script Arguments
 
-| Argument                      | Environment Variable              | Default                                  | Description                                |
-|-------------------------------|-----------------------------------|------------------------------------------|--------------------------------------------|
-| `--cluster-name`              | `ARC_CLUSTER_NAME`                | (required)                               | Arc-connected cluster name                 |
-| `--cluster-resource-group`    | `ARC_RESOURCE_GROUP`              | (required)                               | Resource group of the Arc cluster          |
-| `-t, --tf-dir`                | `DEFAULT_TF_DIR`                  | `../../infrastructure/terraform`         | Terraform directory for output discovery   |
-| `--storage-account`           | `STORAGE_ACCOUNT_NAME`            | Auto-discovered from Terraform           | Storage account name override              |
-| `--storage-resource-group`    | `STORAGE_ACCOUNT_RESOURCE_GROUP`  | Same as cluster resource group           | Storage account resource group             |
-| `--connectivity-mode`         | `ACSA_CONNECTIVITY_MODE`          | `direct`                                 | `direct` or `proxy`                        |
-| `--proxy-port`                | `ACSA_PROXY_PORT`                 | `47011`                                  | Arc proxy port (proxy mode only)           |
-| `--config-preview`            | —                                 | —                                        | Print configuration and exit               |
+| Argument                   | Environment Variable             | Default                          | Description                              |
+|----------------------------|----------------------------------|----------------------------------|------------------------------------------|
+| `--cluster-name`           | `ARC_CLUSTER_NAME`               | (required)                       | Arc-connected cluster name               |
+| `--cluster-resource-group` | `ARC_RESOURCE_GROUP`             | (required)                       | Resource group of the Arc cluster        |
+| `-t, --tf-dir`             | `DEFAULT_TF_DIR`                 | `../../infrastructure/terraform` | Terraform directory for output discovery |
+| `--storage-account`        | `STORAGE_ACCOUNT_NAME`           | Auto-discovered from Terraform   | Storage account name override            |
+| `--storage-resource-group` | `STORAGE_ACCOUNT_RESOURCE_GROUP` | Same as cluster resource group   | Storage account resource group           |
+| `--connectivity-mode`      | `ACSA_CONNECTIVITY_MODE`         | `direct`                         | `direct` or `proxy`                      |
+| `--proxy-port`             | `ACSA_PROXY_PORT`                | `47011`                          | Arc proxy port (proxy mode only)         |
+| `--config-preview`         | —                                | —                                | Print configuration and exit             |
 
 ### Defaults Configuration
 
 Central defaults live in `data-pipeline/setup/defaults.conf`. Override any value via environment variables before running the script.
 
-| Variable                       | Default                   | Description                                  |
-|--------------------------------|---------------------------|----------------------------------------------|
-| `ACSA_EXTENSION_VERSION`       | `2.11.2`                  | ACSA Arc extension version                   |
-| `ACSA_RELEASE_TRAIN`           | `stable`                  | Extension release train                      |
-| `ACSA_DISK_STORAGE_CLASS`      | `default,local-path`      | Backing disk storage classes                 |
-| `ACSA_PVC_NAME`                | `recording-data`          | PVC name for recording volume                |
-| `ACSA_PVC_SIZE`                | `50Gi`                    | PVC storage request                          |
-| `ACSA_STORAGE_CLASS`           | `cloud-backed-sc`         | ACSA storage class name                      |
-| `BLOB_CONTAINER_NAME`          | `datasets`                | Target Blob Storage container                |
-| `SUBVOLUME_NAME`               | `recordings`              | IngestSubvolume resource name                |
-| `SUBVOLUME_PATH`               | `recordings`              | Path prefix within the Blob container        |
-| `ACSA_INGEST_ORDER`            | `oldest-first`            | File ingest order (`oldest-first`)           |
-| `ACSA_INGEST_MIN_DELAY_SEC`    | `30`                      | Minimum delay before ingesting a file        |
-| `ACSA_EVICTION_ORDER`          | `unordered`               | Cache eviction order                         |
-| `ACSA_EVICTION_MIN_DELAY_SEC`  | `600`                     | Minimum time (seconds) before evicting cached files |
-| `ACSA_ON_DELETE`               | `trigger-immediate-ingest`| Behavior when the subvolume is deleted       |
-| `EDGE_NAMESPACE`               | `data-pipeline`           | Kubernetes namespace for ACSA resources      |
+| Variable                      | Default                    | Description                                         |
+|-------------------------------|----------------------------|-----------------------------------------------------|
+| `ACSA_EXTENSION_VERSION`      | `2.11.2`                   | ACSA Arc extension version                          |
+| `ACSA_RELEASE_TRAIN`          | `stable`                   | Extension release train                             |
+| `ACSA_DISK_STORAGE_CLASS`     | `default,local-path`       | Backing disk storage classes                        |
+| `ACSA_PVC_NAME`               | `recording-data`           | PVC name for recording volume                       |
+| `ACSA_PVC_SIZE`               | `50Gi`                     | PVC storage request                                 |
+| `ACSA_STORAGE_CLASS`          | `cloud-backed-sc`          | ACSA storage class name                             |
+| `BLOB_CONTAINER_NAME`         | `datasets`                 | Target Blob Storage container                       |
+| `SUBVOLUME_NAME`              | `recordings`               | IngestSubvolume resource name                       |
+| `SUBVOLUME_PATH`              | `recordings`               | Path prefix within the Blob container               |
+| `ACSA_INGEST_ORDER`           | `oldest-first`             | File ingest order (`oldest-first`)                  |
+| `ACSA_INGEST_MIN_DELAY_SEC`   | `30`                       | Minimum delay before ingesting a file               |
+| `ACSA_EVICTION_ORDER`         | `unordered`                | Cache eviction order                                |
+| `ACSA_EVICTION_MIN_DELAY_SEC` | `600`                      | Minimum time (seconds) before evicting cached files |
+| `ACSA_ON_DELETE`              | `trigger-immediate-ingest` | Behavior when the subvolume is deleted              |
+| `EDGE_NAMESPACE`              | `data-pipeline`            | Kubernetes namespace for ACSA resources             |
 
 ### Sync Behavior
 
 ACSA `IngestSubvolume` controls how files move from edge to cloud:
 
-| Parameter        | Default                     | Behavior                                                |
-|------------------|-----------------------------|---------------------------------------------------------|
-| Ingest order     | `oldest-first`              | Oldest files sync first, preserving recording chronology |
-| Ingest delay     | 30 seconds                  | Wait before syncing — avoids uploading files still being written |
-| Eviction delay   | 600 seconds (10 minutes)    | Keep cached files locally after upload for re-reads      |
-| On delete        | `trigger-immediate-ingest`  | Upload all remaining data immediately when the subvolume is deleted |
+| Parameter      | Default                    | Behavior                                                            |
+|----------------|----------------------------|---------------------------------------------------------------------|
+| Ingest order   | `oldest-first`             | Oldest files sync first, preserving recording chronology            |
+| Ingest delay   | 30 seconds                 | Wait before syncing — avoids uploading files still being written    |
+| Eviction delay | 600 seconds (10 minutes)   | Keep cached files locally after upload for re-reads                 |
+| On delete      | `trigger-immediate-ingest` | Upload all remaining data immediately when the subvolume is deleted |
 
 ## 📦 Deployment Steps
 
@@ -353,8 +353,8 @@ lsof -i :47011
 
 ## 📚 Related Documentation
 
-| Resource | Description |
-|----------|-------------|
-| [Chunking and Compression Configuration](chunking-compression-config.md) | ROS 2 bag chunking and compression settings for edge recording |
-| [Azure Container Storage enabled by Azure Arc](https://learn.microsoft.com/azure/azure-arc/container-storage/) | Microsoft documentation for ACSA |
-| [IngestSubvolume specification](https://learn.microsoft.com/azure/azure-arc/container-storage/cloud-ingest-edge-volume-configuration) | CRD reference for `IngestSubvolume` |
+| Resource                                                                                                                              | Description                                                    |
+|---------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
+| [Chunking and Compression Configuration](chunking-compression-config.md)                                                              | ROS 2 bag chunking and compression settings for edge recording |
+| [Azure Container Storage enabled by Azure Arc](https://learn.microsoft.com/azure/azure-arc/container-storage/)                        | Microsoft documentation for ACSA                               |
+| [IngestSubvolume specification](https://learn.microsoft.com/azure/azure-arc/container-storage/cloud-ingest-edge-volume-configuration) | CRD reference for `IngestSubvolume`                            |
