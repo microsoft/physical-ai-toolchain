@@ -19,7 +19,9 @@ Add, remove, or resize AKS GPU and CPU node pools on a running cluster and recon
 
 ## When to Use
 
-Use this when a workload requires resources the existing pools cannot provide. An AKS node pool has a single VM SKU, so changing the SKU means provisioning a new pool rather than editing an existing one. `add` and `remove` are independent operations: `add` only appends a new pool, and `remove` only destroys the named pool. Running `add` never deletes or modifies existing pools. To replace a SKU, run `add` for the new pool, migrate workloads, then run `remove` on the old pool as a separate step. Examples:
+Use this when a workload requires resources the existing pools cannot provide. An AKS node pool has a single VM SKU, so changing the SKU means provisioning a new pool rather than editing an existing one.
+
+`add` and `remove` are independent operations: `add` only appends a new pool, and `remove` only destroys the named pool. Running `add` never deletes or modifies existing pools. To replace a SKU, run `add` for the new pool, migrate workloads, then run `remove` on the old pool as a separate step. Examples:
 
 - An SDG workflow requires `>= 6.5` vCPU but the initial pool uses `Standard_B4` (4 vCPU). Add a new pool with a larger SKU; the original pool stays in place until you remove it.
 - A new model needs H100 GPUs, but only A10 Spot nodes exist. Add a new H100 pool alongside the existing A10 pool.
