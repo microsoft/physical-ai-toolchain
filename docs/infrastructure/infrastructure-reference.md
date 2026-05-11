@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-02
+ms.date: 2026-04-29
 ms.topic: reference
 keywords:
   - architecture
@@ -96,6 +96,18 @@ Root Module (001-iac/)
 | `should_deploy_dce`               | Data Collection Endpoint, AMPLS link (if AMPLS enabled)  |
 | `should_deploy_aml_compute`       | AzureML managed GPU compute cluster                      |
 | `should_include_aks_dns_zone`     | AKS private DNS zone in core zones                       |
+
+### AzureML managed network isolation
+
+Use `aml_managed_network_isolation_mode` to control the AzureML workspace managed network directly.
+
+| Value                        | AzureML workspace behavior                                           |
+|-----------------------------|----------------------------------------------------------------------|
+| `Disabled`                  | AzureML managed network is off, and AML compute can use a subnet ID  |
+| `AllowInternetOutbound`     | AzureML managed network is on with Microsoft-managed outbound access  |
+| `AllowOnlyApprovedOutbound` | AzureML managed network is on and outbound access is restricted       |
+
+Treat changes to `aml_managed_network_isolation_mode` as AzureML redeploy operations. AzureML does not support disabling managed network isolation after it is enabled, or switching between `AllowInternetOutbound` and `AllowOnlyApprovedOutbound` in place. Delete and recreate managed compute resources when enabling managed networking on an existing workspace; recreate the workspace for unsupported mode transitions.
 
 ## 📦 Modules
 

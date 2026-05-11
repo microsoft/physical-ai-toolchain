@@ -2,7 +2,7 @@
 title: Conversion Pipeline Module
 description: The conversion pipeline reuses the platform-owned ADLS Gen2 data-lake account (stdl...) for raw -> converted storage. This module owns only the Event Grid system topic + subscription that route BlobCreated events to the conversion subscriber, an in-account dead-letter container, and the Fabric capacity + workspace.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-28
+ms.date: 2026-05-11
 ms.topic: reference
 ---
 
@@ -19,14 +19,14 @@ capacity + workspace.
 |-----------|-----------------|
 | terraform | >= 1.9.8, < 2.0 |
 | azurerm   | >= 4.51.0       |
-| fabric    | 1.3.0           |
+| fabric    | >= 1.3.0        |
 
 ## Providers
 
 | Name      | Version   |
 |-----------|-----------|
 | azurerm   | >= 4.51.0 |
-| fabric    | 1.3.0     |
+| fabric    | >= 1.3.0  |
 | terraform | n/a       |
 
 ## Resources
@@ -37,26 +37,28 @@ capacity + workspace.
 | [azurerm_eventgrid_system_topic_event_subscription.raw_blob_created](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/eventgrid_system_topic_event_subscription) | resource    |
 | [azurerm_fabric_capacity.this](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/fabric_capacity)                                                                 | resource    |
 | [azurerm_role_assignment.eventgrid_dlq_writer](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment)                                                 | resource    |
-| [azurerm_role_assignment.fabric_sp_data_lake_contributor](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment)                                      | resource    |
+| [azurerm_role_assignment.fabric_sp_datasets_reader](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment)                                            | resource    |
 | [azurerm_storage_container.event_grid_dlq](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_container)                                                   | resource    |
-| [fabric_workspace.this](https://registry.terraform.io/providers/microsoft/fabric/1.3.0/docs/resources/workspace)                                                                                | resource    |
+| [azurerm_storage_data_lake_gen2_path.fabric_converted](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/storage_data_lake_gen2_path)                             | resource    |
+| [fabric_workspace.this](https://registry.terraform.io/providers/microsoft/fabric/latest/docs/resources/workspace)                                                                               | resource    |
 | [terraform_data.defer_fabric_capacity_created](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data)                                                          | resource    |
 | [terraform_data.defer_fabric_capacity_existing](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data)                                                         | resource    |
-| [fabric_capacity.created](https://registry.terraform.io/providers/microsoft/fabric/1.3.0/docs/data-sources/capacity)                                                                            | data source |
-| [fabric_capacity.existing](https://registry.terraform.io/providers/microsoft/fabric/1.3.0/docs/data-sources/capacity)                                                                           | data source |
+| [fabric_capacity.created](https://registry.terraform.io/providers/microsoft/fabric/latest/docs/data-sources/capacity)                                                                           | data source |
+| [fabric_capacity.existing](https://registry.terraform.io/providers/microsoft/fabric/latest/docs/data-sources/capacity)                                                                          | data source |
 
 ## Inputs
 
 | Name                                      | Description                                                                                                                                                                                                    | Type                                                          | Default                               | Required |
 |-------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|---------------------------------------|:--------:|
 | data\_lake\_storage\_account              | Platform-owned ADLS Gen2 data-lake account (stdl...) used as the durable raw -> converted store                                                                                                                | ```object({ id = string name = string })```                   | n/a                                   |   yes    |
+| datasets\_container                       | Datasets container on the platform-owned data-lake account. Used to scope Fabric SP ACL grants to raw/ and converted/ folders                                                                                  | ```object({ id = string name = string })```                   | n/a                                   |   yes    |
 | environment                               | Environment for all resources in this module: dev, staging, or prod                                                                                                                                            | `string`                                                      | n/a                                   |   yes    |
 | resource\_group                           | Resource group object containing name, id, and location                                                                                                                                                        | ```object({ id = string name = string location = string })``` | n/a                                   |   yes    |
 | resource\_prefix                          | Prefix for all resources in this module                                                                                                                                                                        | `string`                                                      | n/a                                   |   yes    |
 | conversion\_subscriber\_url               | Optional webhook URL for the downstream conversion subscriber. When null, the subscription is created without a webhook destination (DLQ-only) until the conversion compute lands                              | `string`                                                      | `null`                                |    no    |
 | fabric\_admin\_members                    | Entra UPNs or object IDs that should be granted Fabric capacity administration                                                                                                                                 | `list(string)`                                                | `[]`                                  |    no    |
 | fabric\_capacity\_sku                     | SKU for the Fabric capacity (F2 through F2048). Only used when should\_create\_fabric\_capacity is true                                                                                                        | `string`                                                      | `"F2"`                                |    no    |
-| fabric\_workspace\_sp\_object\_id         | Object ID of the Fabric workspace service principal. When provided, the SP is granted Storage Blob Data Contributor on the platform data-lake account                                                          | `string`                                                      | `null`                                |    no    |
+| fabric\_workspace\_sp\_object\_id         | Object ID of the Fabric workspace service principal. When provided, the SP is granted Storage Blob Data Reader on the datasets container plus an ADLS Gen2 ACL granting rwx on the converted/ folder           | `string`                                                      | `null`                                |    no    |
 | instance                                  | Instance identifier for naming resources: 001, 002, etc                                                                                                                                                        | `string`                                                      | `"001"`                               |    no    |
 | location                                  | Override location for module resources. Defaults to var.resource\_group.location when null                                                                                                                     | `string`                                                      | `null`                                |    no    |
 | raw\_blob\_suffix\_filters                | Suffix filters used by the Event Grid subscription's advanced\_filter.string\_ends\_with on the raw container                                                                                                  | `list(string)`                                                | ```[ ".bag", ".bag.zst", ".mcap" ]``` |    no    |

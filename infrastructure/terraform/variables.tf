@@ -492,6 +492,17 @@ variable "should_enable_aml_diagnostic_logs" {
   default     = false
 }
 
+variable "aml_managed_network_isolation_mode" {
+  type        = string
+  description = "AzureML workspace managed network isolation mode. This is independent from should_enable_private_endpoint and governs the AzureML workspace managed network only"
+  default     = "AllowOnlyApprovedOutbound"
+
+  validation {
+    condition     = contains(["Disabled", "AllowInternetOutbound", "AllowOnlyApprovedOutbound"], var.aml_managed_network_isolation_mode)
+    error_message = "aml_managed_network_isolation_mode must be one of: Disabled, AllowInternetOutbound, AllowOnlyApprovedOutbound"
+  }
+}
+
 variable "should_deploy_aml_compute" {
   type        = bool
   description = "Whether to deploy an AzureML managed compute cluster for GPU workloads"

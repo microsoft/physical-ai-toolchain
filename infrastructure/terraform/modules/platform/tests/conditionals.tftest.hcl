@@ -14,7 +14,8 @@ override_data {
 }
 
 variables {
-  current_user_oid = "00000000-0000-0000-0000-000000000001"
+  current_user_oid                   = "00000000-0000-0000-0000-000000000001"
+  aml_managed_network_isolation_mode = "Disabled"
 }
 
 run "setup" {
@@ -692,6 +693,74 @@ run "aml_compute_disabled" {
   assert {
     condition     = length(azurerm_machine_learning_compute_cluster.gpu) == 0
     error_message = "AML compute cluster should not be created when disabled"
+  }
+}
+
+run "aml_compute_disabled_managed_network_uses_custom_subnet" {
+  command = plan
+
+  variables {
+    resource_prefix                    = run.setup.resource_prefix
+    environment                        = run.setup.environment
+    instance                           = run.setup.instance
+    location                           = run.setup.location
+    resource_group                     = run.setup.resource_group
+    current_user_oid                   = run.setup.current_user_oid
+    should_deploy_aml_compute          = true
+    aml_managed_network_isolation_mode = "Disabled"
+    aml_compute_config = {
+      vm_size               = "Standard_NC4as_T4_v3"
+      vm_priority           = "LowPriority"
+      min_node_count        = 0
+      max_node_count        = 1
+      scale_down_after_idle = "PT5M"
+      cluster_name          = "gpu-cluster"
+      subnet_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test/providers/Microsoft.Network/virtualNetworks/vnet-test/subnets/snet-aml"
+    }
+  }
+
+  assert {
+    condition     = azapi_resource.ml_workspace.body.properties.managedNetwork.isolationMode == "Disabled"
+    error_message = "AML workspace managed network isolation mode should be disabled"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu[0].subnet_resource_id == var.aml_compute_config.subnet_id
+    error_message = "AML compute should use the configured subnet when managed network isolation is disabled"
+  }
+}
+
+run "aml_compute_managed_network_without_custom_subnet" {
+  command = plan
+
+  variables {
+    resource_prefix                    = run.setup.resource_prefix
+    environment                        = run.setup.environment
+    instance                           = run.setup.instance
+    location                           = run.setup.location
+    resource_group                     = run.setup.resource_group
+    current_user_oid                   = run.setup.current_user_oid
+    should_deploy_aml_compute          = true
+    aml_managed_network_isolation_mode = "AllowOnlyApprovedOutbound"
+    aml_compute_config = {
+      vm_size               = "Standard_NC4as_T4_v3"
+      vm_priority           = "LowPriority"
+      min_node_count        = 0
+      max_node_count        = 1
+      scale_down_after_idle = "PT5M"
+      cluster_name          = "gpu-cluster"
+      subnet_id             = null
+    }
+  }
+
+  assert {
+    condition     = azapi_resource.ml_workspace.body.properties.managedNetwork.isolationMode == "AllowOnlyApprovedOutbound"
+    error_message = "AML workspace should use the configured managed network isolation mode"
+  }
+
+  assert {
+    condition     = local.aml_compute_subnet_resource_id == null
+    error_message = "AML compute should omit subnet_resource_id when managed network isolation is enabled"
   }
 }
 

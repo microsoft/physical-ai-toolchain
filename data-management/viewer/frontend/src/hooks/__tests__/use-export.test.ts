@@ -169,7 +169,8 @@ describe('useExport', () => {
     })
 
     expect(mockCancel).not.toHaveBeenCalled()
-    expect(result.current.error).toBe('Export cancelled')
+    expect(result.current.error).toBeNull()
+    expect(result.current.isExporting).toBe(false)
   })
 
   it('fetchPreview populates previewStats on success', async () => {
