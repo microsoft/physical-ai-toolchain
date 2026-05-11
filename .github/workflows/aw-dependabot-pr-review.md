@@ -210,9 +210,12 @@ which under `types: [completed]` is always one of `success`, `failure`, `cancell
 The resolver step exports `PR Validation`'s final conclusion directly from
 `context.payload.workflow_run.conclusion` (no separate `listWorkflowRunsForRepo` call), then enumerates
 per-surface check-runs once via `checks.listForRef` so the agent never has to walk the checks API itself.
-The `checks: read` permission grants exactly that scope and nothing more. The agent must never attempt
-to run validation tooling (`uv`, `pytest`, `npm ci`, `terraform`, `go`) from the bash tool because those
-binaries are not visible inside the AWF firewall sandbox.
+The `checks: read` permission grants exactly that scope and nothing more. The agent runs without a
+working tree — all PR context comes from REST APIs in the resolver. Do not add a checkout step; the
+compiler-generated "Checkout PR branch" step in the lock file is permanently skipped under
+`workflow_run` because neither `github.event.pull_request` nor `github.event.issue.pull_request` is set.
+The agent must never attempt to run validation tooling (`uv`, `pytest`, `npm ci`, `terraform`, `go`)
+from the bash tool because those binaries are not visible inside the AWF firewall sandbox.
 
 The resolver step exports these environment variables for the agent to read:
 
