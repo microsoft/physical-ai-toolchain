@@ -47,6 +47,28 @@ SKIP_FILES = frozenset(
 )
 
 
+def _log_tensorboard_metrics(tb_dir: pathlib.Path) -> int:
+    """Parse tensorboard event files and log scalars as MLflow metrics."""
+    try:
+        from tbparse import SummaryReader
+    except ImportError:
+        print("tbparse not installed, skipping metric extraction from tensorboard")
+        return 0
+
+    reader = SummaryReader(str(tb_dir))
+    scalars = reader.scalars
+    if scalars.empty:
+        return 0
+
+    count = 0
+    for tag in scalars["tag"].unique():
+        tag_data = scalars[scalars["tag"] == tag].sort_values("step")
+        for _, row in tag_data.iterrows():
+            mlflow.log_metric(tag, row["value"], step=int(row["step"]))
+            count += 1
+    return count
+
+
 def main() -> int:
     missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
     if missing:
@@ -81,7 +103,8 @@ def main() -> int:
         tb_dir = output_dir / "runs"
         if tb_dir.exists():
             mlflow.log_artifacts(str(tb_dir), artifact_path="tensorboard")
-            print(f"logged tensorboard from {tb_dir}")
+            metric_count = _log_tensorboard_metrics(tb_dir)
+            print(f"logged tensorboard from {tb_dir} ({metric_count} metric points)")
 
         ckpts = sorted(
             glob.glob(str(output_dir / "checkpoint-*")),
