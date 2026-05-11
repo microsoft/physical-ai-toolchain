@@ -421,12 +421,17 @@ elif [[ -z "$aml_workspace_name" ]]; then
 else
   section "Configure Azure ML Pod Template (Optional)"
   info "Injecting AzureML metadata into default_user pod template (workspace: $aml_workspace_name)"
-  export AZURE_SUBSCRIPTION_ID="$aml_subscription_id"
-  export AZURE_RESOURCE_GROUP="$aml_resource_group"
-  export AZUREML_WORKSPACE_NAME="$aml_workspace_name"
 
-  envsubst < "$CONFIG_DIR/pod-template-config.template.json" \
-    > "$CONFIG_DIR/out/pod-template-config.json"
+  jq --arg sub "$aml_subscription_id" \
+     --arg rg "$aml_resource_group" \
+     --arg ws "$aml_workspace_name" \
+     '.default_user.spec.containers[0].env = [
+        {"name": "AZURE_SUBSCRIPTION_ID", "value": $sub},
+        {"name": "AZURE_RESOURCE_GROUP", "value": $rg},
+        {"name": "AZUREML_WORKSPACE_NAME", "value": $ws}
+      ]' "$CONFIG_DIR/out/pod-template-config.json" \
+    > "$CONFIG_DIR/out/pod-template-config.json.tmp" \
+    && mv "$CONFIG_DIR/out/pod-template-config.json.tmp" "$CONFIG_DIR/out/pod-template-config.json"
 fi
 
 # Generate platform-specific configs from terraform node pool state
