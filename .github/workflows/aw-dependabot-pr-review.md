@@ -13,6 +13,8 @@ on:
     workflows: ["PR Validation"]
     types: [completed]
     branches: ["dependabot/**"]
+concurrency:
+  job-discriminator: ${{ github.event.workflow_run.head_sha }}
 permissions:
   contents: read
   pull-requests: read
