@@ -68,8 +68,8 @@ function Invoke-YamlLintCore {
         Write-Host "Linting changed workflow files only (base: $BaseBranch)"
         $allChanged = @(Get-ChangedFilesFromGit -BaseBranch $BaseBranch -FileExtensions @('*.yml', '*.yaml'))
         $filesToLint = @($allChanged | Where-Object {
-            $_ -match '\.github[\\/]workflows[\\/]'
-        })
+                $_ -match '\.github[\\/]workflows[\\/]'
+            })
     }
     else {
         Write-Host 'Linting all GitHub Actions workflow files'
