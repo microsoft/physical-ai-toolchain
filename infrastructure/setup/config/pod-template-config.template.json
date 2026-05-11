@@ -55,21 +55,7 @@
                             "nvidia.com/gpu": "{{USER_GPU}}",
                             "ephemeral-storage": "{{USER_STORAGE}}"
                         }
-                    },
-                    "env": [
-                        {
-                            "name": "AZURE_SUBSCRIPTION_ID",
-                            "value": "${AZURE_SUBSCRIPTION_ID}"
-                        },
-                        {
-                            "name": "AZURE_RESOURCE_GROUP",
-                            "value": "${AZURE_RESOURCE_GROUP}"
-                        },
-                        {
-                            "name": "AZUREML_WORKSPACE_NAME",
-                            "value": "${AZUREML_WORKSPACE_NAME}"
-                        }
-                    ]
+                    }
                 }
             ]
         }
