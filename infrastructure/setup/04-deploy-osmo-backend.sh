@@ -35,6 +35,7 @@ OPTIONS:
     --skip-preflight        Skip preflight version checks
     --use-local-osmo        Use local osmo-dev CLI instead of production osmo
     --skip-configure-datasets  Skip dataset bucket configuration
+    --skip-azureml-pod-template  Skip AzureML pod-template environment extension
     --dataset-container NAME   Container name for datasets (default: datasets)
     --dataset-bucket NAME      OSMO bucket name (default: training)
 
@@ -64,6 +65,7 @@ config_preview=false
 skip_preflight=false
 use_local_osmo=false
 skip_configure_datasets=false
+skip_azureml_pod_template="${SKIP_AZUREML_POD_TEMPLATE:-false}"
 dataset_container="${DATASET_CONTAINER_NAME}"
 dataset_bucket="${DATASET_BUCKET_NAME}"
 chart_version_set=false
@@ -89,6 +91,7 @@ while [[ $# -gt 0 ]]; do
     --skip-preflight)      skip_preflight=true; shift ;;
     --use-local-osmo)      use_local_osmo=true; shift ;;
     --skip-configure-datasets) skip_configure_datasets=true; shift ;;
+    --skip-azureml-pod-template) skip_azureml_pod_template=true; shift ;;
     --dataset-container)   dataset_container="$2"; shift 2 ;;
     --dataset-bucket)      dataset_bucket="$2"; shift 2 ;;
     *)                     fatal "Unknown option: $1" ;;
@@ -201,6 +204,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Default Pool" "default (shares with $DEFAULT_POOL)"
   print_kv "Dataset Container" "$dataset_container"
   print_kv "Dataset Bucket" "$dataset_bucket"
+  print_kv "AzureML Mirror" "$([[ $skip_azureml_pod_template == true ]] && echo 'disabled' || echo 'auto-detect')"
   exit 0
 fi
 
@@ -405,6 +409,25 @@ export ACR_LOGIN_SERVER="$acr_login_server"
 
 # Render shared pod template (substitutes WORKFLOW_SERVICE_ACCOUNT)
 envsubst < "$pod_template_file" > "$CONFIG_DIR/out/pod-template-config.json"
+
+aml_workspace_name=$(tf_get "$tf_output" "azureml_workspace.value.name")
+aml_resource_group=$(tf_get "$tf_output" "resource_group.value.name")
+aml_subscription_id=$(az account show --query id -o tsv)
+
+if [[ "$skip_azureml_pod_template" == "true" ]]; then
+  info "AzureML pod-template extension explicitly skipped (--skip-azureml-pod-template)"
+elif [[ -z "$aml_workspace_name" ]]; then
+  info "No AzureML workspace in Terraform outputs; skipping pod-template extension"
+else
+  section "Configure Azure ML Pod Template (Optional)"
+  info "Injecting AzureML metadata into default_user pod template (workspace: $aml_workspace_name)"
+  export AZURE_SUBSCRIPTION_ID="$aml_subscription_id"
+  export AZURE_RESOURCE_GROUP="$aml_resource_group"
+  export AZUREML_WORKSPACE_NAME="$aml_workspace_name"
+
+  envsubst < "$CONFIG_DIR/pod-template-config.template.json" \
+    > "$CONFIG_DIR/out/pod-template-config.json"
+fi
 
 # Generate platform-specific configs from terraform node pool state
 combined_pools="{}"
