@@ -19,10 +19,10 @@ Add, remove, or resize AKS GPU and CPU node pools on a running cluster and recon
 
 ## When to Use
 
-Use this when a workload requires resources the existing pools cannot provide. Examples:
+Use this when a workload requires resources the existing pools cannot provide. An AKS node pool has a single VM SKU, so changing the SKU means provisioning a new pool rather than editing an existing one. `add` and `remove` are independent operations: `add` only appends a new pool, and `remove` only destroys the named pool. Running `add` never deletes or modifies existing pools. To replace a SKU, run `add` for the new pool, migrate workloads, then run `remove` on the old pool as a separate step. Examples:
 
-- An SDG workflow requires `>= 6.5` vCPU but the initial pool uses `Standard_B4` (4 vCPU).
-- A new model needs H100 GPUs, but only A10 Spot nodes exist.
+- An SDG workflow requires `>= 6.5` vCPU but the initial pool uses `Standard_B4` (4 vCPU). Add a new pool with a larger SKU; the original pool stays in place until you remove it.
+- A new model needs H100 GPUs, but only A10 Spot nodes exist. Add a new H100 pool alongside the existing A10 pool.
 - A pool is no longer used and should be removed to reclaim quota.
 
 ## How It Works
@@ -59,7 +59,8 @@ bash infrastructure/setup/optional/manage-node-pools.sh <command> [OPTIONS]
 | Flag                 | Purpose                                                                   |
 |----------------------|---------------------------------------------------------------------------|
 | `-t`, `--tf-dir DIR` | Terraform directory (default: `infrastructure/terraform/`)                |
-| `--skip-apply`       | Update the overlay file but skip `terraform apply`                        |
+| `--config-preview`   | Print resolved configuration and exit without writing the overlay, applying Terraform, or syncing OSMO (matches the `01`–`04` deploy scripts) |
+| `--skip-apply`       | Write the overlay but skip `terraform apply` (still mutates state)        |
 | `--skip-osmo-sync`   | Skip `04-deploy-osmo-backend.sh` reconciliation                           |
 | `--osmo-args ARGS`   | Extra args forwarded to `04-deploy-osmo-backend.sh` (quote the whole string) |
 

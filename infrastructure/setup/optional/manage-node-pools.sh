@@ -31,7 +31,9 @@ COMMANDS:
 COMMON OPTIONS:
     -h, --help                   Show this help message
     -t, --tf-dir DIR             Terraform directory (default: $DEFAULT_TF_DIR)
-    --skip-apply                 Skip 'terraform apply' (add/remove only)
+    --config-preview             Print resolved configuration and exit without writing
+                                 the overlay, applying Terraform, or syncing OSMO
+    --skip-apply                 Write overlay but skip 'terraform apply' (add/remove only)
     --skip-osmo-sync             Skip OSMO config reconciliation (add/remove only)
     --osmo-args ARGS             Extra args forwarded to 04-deploy-osmo-backend.sh
                                  (quote the whole string, e.g. --osmo-args '--use-acr')
@@ -103,6 +105,7 @@ labels=()
 zones=()
 skip_apply=false
 skip_osmo_sync=false
+config_preview=false
 osmo_args=""
 
 while [[ $# -gt 0 ]]; do
@@ -124,6 +127,7 @@ while [[ $# -gt 0 ]]; do
     --zone)              zones+=("$2"); shift 2 ;;
     --skip-apply)        skip_apply=true; shift ;;
     --skip-osmo-sync)    skip_osmo_sync=true; shift ;;
+    --config-preview)    config_preview=true; shift ;;
     --osmo-args)         osmo_args="$2"; shift 2 ;;
     *)                   fatal "Unknown option: $1" ;;
   esac
@@ -329,6 +333,12 @@ cmd_add() {
   print_kv "Autoscale" "$([[ $auto_scale == true ]] && echo "true ($min_count..$max_count)" || echo "false ($node_count nodes)")"
   [[ ${#taints[@]} -gt 0 ]] && print_kv "Taints" "${taints[*]}"
   [[ ${#labels[@]} -gt 0 ]] && print_kv "Labels" "${labels[*]}"
+  print_kv "Overlay" "$managed_tfvars"
+
+  if [[ "$config_preview" == "true" ]]; then
+    info "--config-preview: exiting without writing overlay or applying changes"
+    return
+  fi
 
   save_managed_pools "$merged"
   info "Wrote overlay: $managed_tfvars"
@@ -363,6 +373,14 @@ cmd_remove() {
   fi
 
   section "Removing node pool '$pool_name'"
+  print_kv "Pool" "$pool_name"
+  print_kv "Overlay" "$managed_tfvars"
+
+  if [[ "$config_preview" == "true" ]]; then
+    info "--config-preview: exiting without writing overlay or applying changes"
+    return
+  fi
+
   local merged
   merged=$(echo "$existing" | jq --arg n "$pool_name" 'del(.[$n])')
   save_managed_pools "$merged"
@@ -378,6 +396,12 @@ cmd_remove() {
 
 cmd_sync() {
   section "Re-sync OSMO configs"
+  print_kv "Terraform dir" "$tf_dir"
+  print_kv "OSMO args" "${osmo_args:-<none>}"
+  if [[ "$config_preview" == "true" ]]; then
+    info "--config-preview: exiting without invoking 04-deploy-osmo-backend.sh"
+    return
+  fi
   skip_apply=true
   run_osmo_sync
 }
