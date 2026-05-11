@@ -129,7 +129,7 @@ steps:
 
         // PR Validation conclusion comes directly from the triggering workflow_run payload;
         // it is always final under `types: [completed]`.
-        core.exportVariable('PR_VALIDATION_CONCLUSION', run.conclusion || 'unknown');
+        core.exportVariable('PR_VALIDATION_CONCLUSION', run.conclusion);
         core.exportVariable('PR_VALIDATION_RUN_URL', run.html_url || '');
 
         // Resolve per-surface check-runs ONCE here so the persona does not re-walk them.
