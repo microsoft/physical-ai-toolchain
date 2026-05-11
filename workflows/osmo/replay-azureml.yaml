@@ -7,16 +7,14 @@ workflow:
     - name: mirror
       image: "{{image}}"
       command: ["bash"]
-      args: ["-lc", "set -euo pipefail; pip install --quiet 'mlflow>=2.10,<3' 'azureml-mlflow>=1.55' 'azure-identity>=1.17' 'azure-ai-ml>=1.20' && python /scripts/aml_mirror.py"]
+      args: ["-lc", "set -euo pipefail; echo \"$AML_MIRROR_B64\" | base64 -d > /tmp/aml_mirror.py; pip install --quiet 'mlflow>=2.10,<3' 'azureml-mlflow>=1.55' 'azure-identity>=1.17' 'azure-ai-ml>=1.20' 'tbparse>=0.0.8' && python /tmp/aml_mirror.py"]
       environment:
         OUTPUT_DIR: "{{output_base}}/{{run_id}}"
         RUN_ID: "{{run_id}}-replay"
         REPLAY_RUN_ID: "{{run_id}}"
         AZUREML_MODEL_NAME: "{{model_name}}"
         PYTHONUNBUFFERED: "1"
-      files:
-        - path: /scripts/aml_mirror.py
-          contents_from: training/utils/aml_mirror.py
+        AML_MIRROR_B64: "{{aml_mirror_b64}}"
 
 default-values:
   workflow_name: replay-azureml
@@ -24,3 +22,4 @@ default-values:
   model_name: ""
   output_base: /outputs
   image: python:3.11-slim
+  aml_mirror_b64: ""
