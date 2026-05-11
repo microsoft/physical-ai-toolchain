@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { EpisodeDetectionSummary } from '@/types/detection'
 
@@ -65,8 +65,6 @@ vi.mock('recharts', () => {
     ),
   }
 })
-
-import { vi } from 'vitest'
 
 const buildSummary = (
   overrides: Partial<EpisodeDetectionSummary> = {},
