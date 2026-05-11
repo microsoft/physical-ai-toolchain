@@ -210,4 +210,59 @@ describe('ExportDialog', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^done$/i })).toBeInTheDocument()
   })
+
+  it('calls reset and onOpenChange(false) when Cancel button clicked', async () => {
+    const user = userEvent.setup()
+    const onOpenChange = vi.fn()
+    const reset = vi.fn()
+    vi.mocked(useExport).mockReturnValue(createUseExportReturn({ reset }))
+
+    renderWithQuery(
+      <ExportDialog open onOpenChange={onOpenChange} datasetId="dataset-1" episodeIndices={[0]} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(reset).toHaveBeenCalledTimes(1)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('displays edited frame count summary when edits remove frames', () => {
+    editState.removedFrames = new Set([1, 2, 3])
+    vi.mocked(getEffectiveFrameCount).mockReturnValue(97)
+
+    renderWithQuery(
+      <ExportDialog open onOpenChange={vi.fn()} datasetId="dataset-1" episodeIndices={[0]} />,
+    )
+
+    expect(screen.getByText(/Frames:\s*97/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/original:\s*100,\s*removed:\s*3,\s*inserted:\s*0/i),
+    ).toBeInTheDocument()
+  })
+
+  it('updates outputPath and toggles checkboxes via user input', async () => {
+    const user = userEvent.setup()
+    const startExport = vi.fn()
+    vi.mocked(useExport).mockReturnValue(createUseExportReturn({ startExport }))
+
+    renderWithQuery(
+      <ExportDialog open onOpenChange={vi.fn()} datasetId="dataset-1" episodeIndices={[0]} />,
+    )
+
+    const input = screen.getByLabelText(/output directory/i)
+    await user.clear(input)
+    await user.type(input, '/new/path')
+    await user.click(screen.getByLabelText(/apply crop/i))
+    await user.click(screen.getByLabelText(/include subtask/i))
+    await user.click(screen.getByRole('button', { name: /start export/i }))
+
+    expect(startExport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outputPath: '/new/path',
+        applyEdits: false,
+        includeSubtasks: false,
+      }),
+    )
+  })
 })

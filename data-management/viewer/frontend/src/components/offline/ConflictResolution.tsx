@@ -64,6 +64,8 @@ export function ConflictResolution({
     try {
       await onResolve(choice)
       onOpenChange(false)
+    } catch (err) {
+      console.error('Conflict resolution failed', err)
     } finally {
       setIsResolving(false)
     }

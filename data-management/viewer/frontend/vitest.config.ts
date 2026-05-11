@@ -32,6 +32,8 @@ export default defineConfig({
         'src/test/**',
         'src/vite-env.d.ts',
         'src/main.tsx',
+        'src/components/**/index.ts',
+        'src/components/ui/**',
       ],
       thresholds: {
         lines: 55,
@@ -56,10 +58,10 @@ export default defineConfig({
         },
         'src/components/**': {
           perFile: true,
-          lines: 60,
-          functions: 55,
-          branches: 40,
-          statements: 60,
+          lines: 85,
+          functions: 80,
+          branches: 70,
+          statements: 85,
         },
         'src/components/export/ExportDialog.tsx': {
           perFile: true,

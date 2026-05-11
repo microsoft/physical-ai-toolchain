@@ -269,11 +269,11 @@ component_management:
   default_rules:
     statuses:
       - type: project
-        target: auto
+        target: 80%
         threshold: 1%
       - type: patch
-        target: auto
-        threshold: 5%
+        target: 80%
+        threshold: 0%
   individual_components:
     - component_id: training
       name: Training
