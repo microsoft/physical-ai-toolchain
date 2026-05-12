@@ -102,7 +102,7 @@ class TestLogTensorboardMetrics:
         assert _MOD._log_tensorboard_metrics(tmp_path) == 0
 
     def test_logs_metrics_for_each_scalar(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        import pandas as pd
+        pd = pytest.importorskip("pandas")
 
         data = pd.DataFrame({"tag": ["loss", "loss", "reward"], "step": [1, 2, 1], "value": [0.5, 0.3, 1.0]})
         fake_reader = SimpleNamespace(scalars=data)
