@@ -51,6 +51,16 @@ TRAINING OPTIONS:
     -j, --job-name NAME           Job identifier (default: lerobot-act-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
         --policy-repo-id ID       Pre-trained policy for fine-tuning (HuggingFace repo)
+        --init-from-policy-model URI
+                                  Warm-start weights from a previously registered AzureML
+                                  model. Accepted forms:
+                                    azureml:NAME:VERSION       (numeric version required)
+                                    azureml://.../models/NAME/versions/VERSION
+                                    https://...blob.core.windows.net/...
+                                  Shorthands like azureml:NAME or azureml:NAME@latest
+                                  are rejected to keep runs reproducible.
+                                  Optimizer, scheduler, and step counter start fresh.
+                                  Mutually exclusive with --policy-repo-id.
         --lerobot-version VER     Specific LeRobot version or "latest" (default: latest)
 
 TRAINING HYPERPARAMETERS:
@@ -94,6 +104,11 @@ EXAMPLES:
       -p diffusion \
       --training-steps 50000 \
       --batch-size 16
+
+    # Warm-start a new run from a previously registered checkpoint
+    submit-azureml-lerobot-training.sh \
+      -d user/dataset \
+      --init-from-policy-model azureml:lerobot-act:7
 
     # Register trained model and stream logs
     submit-azureml-lerobot-training.sh \
@@ -168,6 +183,7 @@ policy_type="${POLICY_TYPE:-act}"
 job_name="${JOB_NAME:-lerobot-act-training}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
 policy_repo_id="${POLICY_REPO_ID:-}"
+init_from_policy_model="${INIT_FROM_POLICY_MODEL:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
 
 blob_urls=()
@@ -212,6 +228,7 @@ while [[ $# -gt 0 ]]; do
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
+    --init-from-policy-model)     init_from_policy_model="$2"; shift 2 ;;
     --lerobot-version)            lerobot_version="$2"; shift 2 ;;
     --blob-url)                   blob_urls+=("$2"); shift 2 ;;
     --dataset-root)               dataset_root="$2"; shift 2 ;;
@@ -259,6 +276,28 @@ case "$policy_type" in
   *) fatal "Unsupported policy type: $policy_type (use: act, diffusion)" ;;
 esac
 
+if [[ -n "$init_from_policy_model" && -n "$policy_repo_id" ]]; then
+  fatal "--init-from-policy-model and --policy-repo-id are mutually exclusive"
+fi
+
+# Accept only fully-qualified, version-pinned URIs. Reject @latest and bare
+# azureml:NAME so reruns of the same job spec do not silently drift to a newer
+# registered model.
+if [[ -n "$init_from_policy_model" ]]; then
+  case "$init_from_policy_model" in
+    azureml://*/models/*/versions/[0-9]*) ;;
+    https://*) ;;
+    azureml:*:*)
+      version="${init_from_policy_model##*:}"
+      [[ "$version" =~ ^[0-9]+$ ]] || fatal \
+        "--init-from-policy-model: version must be numeric (got '$init_from_policy_model'). Use azureml:NAME:VERSION; @latest and shorthands are not accepted."
+      ;;
+    *)
+      fatal "--init-from-policy-model: unsupported URI form '$init_from_policy_model'. Use azureml:NAME:VERSION, azureml://.../models/NAME/versions/VERSION, or https://..."
+      ;;
+  esac
+fi
+
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Dataset" "$dataset_repo_id"
@@ -270,6 +309,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Batch Size" "${batch_size:-<default>}"
   print_kv "Save Freq" "$save_freq"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
+  print_kv "Init From Model" "${init_from_policy_model:-<none>}"
   if [[ ${#blob_urls[@]} -gt 0 ]]; then
     print_kv "Blob URLs" "${#blob_urls[@]} dataset(s)"
     print_kv "Dataset Root" "$dataset_root"
@@ -350,6 +390,13 @@ az_args+=(
 )
 
 [[ -n "$policy_repo_id" ]]      && az_args+=(--set "inputs.policy_repo_id=$policy_repo_id")
+if [[ -n "$init_from_policy_model" ]]; then
+  az_args+=(
+    --set "inputs.init_from_policy_model.type=custom_model"
+    --set "inputs.init_from_policy_model.mode=download"
+    --set "inputs.init_from_policy_model.path=$init_from_policy_model"
+  )
+fi
 [[ -n "$lerobot_version" ]]     && az_args+=(--set "inputs.lerobot_version=$lerobot_version")
 [[ -n "$training_steps" ]]      && az_args+=(--set "inputs.training_steps=$training_steps")
 [[ -n "$batch_size" ]]          && az_args+=(--set "inputs.batch_size=$batch_size")
@@ -382,6 +429,7 @@ az_args+=(
 )
 
 [[ -n "$policy_repo_id" ]]      && az_args+=(--set "environment_variables.POLICY_REPO_ID=$policy_repo_id")
+[[ -n "$init_from_policy_model" ]] && az_args+=(--set "environment_variables.INIT_FROM_POLICY_MODEL_SOURCE=$init_from_policy_model")
 [[ -n "$lerobot_version" ]]     && az_args+=(--set "environment_variables.LEROBOT_VERSION=$lerobot_version")
 [[ -n "$training_steps" ]]      && az_args+=(--set "environment_variables.TRAINING_STEPS=$training_steps")
 [[ -n "$batch_size" ]]          && az_args+=(--set "environment_variables.BATCH_SIZE=$batch_size")
@@ -433,4 +481,5 @@ print_kv "Instance Type" "$instance_type"
 print_kv "Environment" "${environment_name}:${environment_version}"
 print_kv "Workspace" "$workspace_name"
 [[ ${#blob_urls[@]} -gt 0 ]] && print_kv "Blob Datasets" "${#blob_urls[@]}"
+[[ -n "$init_from_policy_model" ]] && print_kv "Init From Model" "$init_from_policy_model"
 [[ -n "$save_as" ]] && print_kv "Saved Job YAML" "$save_as"

@@ -91,6 +91,7 @@ Select the architecture with `--policy-type`:
 | `--batch-size`      | (LeRobot default)                               | Training batch size                |
 | `--save-freq`       | `5000`                                          | Checkpoint save frequency          |
 | `--policy-repo-id`  | (none)                                          | Pre-trained policy for fine-tuning |
+| `--init-from-policy-model` | (none)                                   | Warm-start from a previously registered AzureML model (`azureml:NAME:VERSION`); mutually exclusive with `--policy-repo-id`. **AzureML only.** |
 
 ### Fine-Tuning from Existing Policy
 
@@ -101,6 +102,25 @@ Select the architecture with `--policy-type`:
   --training-steps 50000 \
   --batch-size 16
 ```
+
+### Warm-Starting from a Registered AzureML Model (AzureML only)
+
+After a previous AzureML run has registered a checkpoint with `--register-checkpoint NAME`, a follow-up AzureML run can seed weights from that model. Optimizer state, scheduler state, and the step counter are not restored — only the policy weights — so this is "warm-start" rather than "resume". Not yet supported by the OSMO submission script.
+
+```bash
+./training/il/scripts/submit-azureml-lerobot-training.sh \
+  -d user/my-dataset \
+  --init-from-policy-model azureml:my-act-policy:7 \
+  --training-steps 50000
+```
+
+Accepted URI forms:
+
+- `azureml:NAME:VERSION` — version must be numeric. `azureml:NAME@latest` and bare `azureml:NAME` are rejected to keep submissions reproducible.
+- `azureml://locations/.../models/NAME/versions/VERSION` — fully-qualified workspace asset URI.
+- `https://...blob.core.windows.net/...` — direct blob URL pointing at a folder containing `config.json` and `model.safetensors`.
+
+The MLflow run for the new job is tagged with `warm_start.source`, and (for `azureml:NAME:VERSION` inputs) `warm_start.model_name` and `warm_start.model_version` so runs can be filtered by upstream model in the MLflow UI.
 
 ## 🔑 Credential Setup
 

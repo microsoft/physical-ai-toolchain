@@ -203,6 +203,16 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training") -> int:
             lineage_tags["dataset.source"] = "huggingface"
         if os.environ.get("REGISTER_CHECKPOINT"):
             lineage_tags["model.register_name"] = os.environ["REGISTER_CHECKPOINT"]
+        warm_start_source = os.environ.get("INIT_FROM_POLICY_MODEL_SOURCE", "")
+        if warm_start_source:
+            lineage_tags["warm_start.source"] = warm_start_source
+            # Submission script enforces that azureml: URIs use NAME:VERSION
+            # with a numeric version. Anything else is a fully-qualified URL
+            # (azureml://... or https://...) and is left unparsed.
+            match = re.match(r"^azureml:([^/:][^:]*):(\d+)$", warm_start_source)
+            if match:
+                lineage_tags["warm_start.model_name"] = match.group(1)
+                lineage_tags["warm_start.model_version"] = match.group(2)
         mlflow.set_tags(lineage_tags)
 
         print(f"[MLflow] Starting training: {' '.join(cmd)}")
@@ -317,7 +327,9 @@ def main() -> int:
         if dataset_repo_id:
             cmd.append(f"--dataset.repo_id={dataset_repo_id}")
 
-    if "--policy.type" not in cli_text:
+    # lerobot rejects --policy.path together with --policy.type; when warm-starting
+    # (--policy.path is present) the policy type is read from the loaded config.json.
+    if "--policy.type" not in cli_text and "--policy.path" not in cli_text:
         cmd.append(f"--policy.type={policy_type}")
 
     if "--output_dir" not in cli_text:

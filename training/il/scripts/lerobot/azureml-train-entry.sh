@@ -45,6 +45,30 @@ train_args=(
   --wandb.enable=false
 )
 
+# Warm-start from a previously registered policy model: load weights only;
+# optimizer, scheduler, and step counter all start fresh. Setting --policy.path
+# makes lerobot-train reconstruct the policy from the loaded config.json, so
+# do NOT also pass --policy.type (train.py suppresses its own injection when
+# --policy.path is in the CLI).
+#
+# AzureML exposes downloaded inputs via env vars named AZURE_ML_INPUT_<name>;
+# the ${{inputs.X}} command-line template ref is NOT substituted when
+# mechanism=Download (only for ro_mount). The env var name is derived from the
+# input key declared by the submission script (inputs.init_from_policy_model)
+# and must stay in sync with it.
+init_from_policy_model_path="${AZURE_ML_INPUT_init_from_policy_model:-}"
+if [[ -n "${init_from_policy_model_path}" ]]; then
+  echo "[INIT-FROM-POLICY-MODEL] Source URI: ${INIT_FROM_POLICY_MODEL_SOURCE:-<unset>}"
+  echo "[INIT-FROM-POLICY-MODEL] Mount path: ${init_from_policy_model_path}"
+  ls -la "${init_from_policy_model_path}" || echo "[INIT-FROM-POLICY-MODEL] WARNING: mount path not listable"
+  train_args+=(--policy.path="${init_from_policy_model_path}")
+else
+  echo "[INIT-FROM-POLICY-MODEL] Not set; training from random initialization."
+fi
+
+echo "[ENTRY] Final lerobot-train args:"
+printf '  %s\n' "${train_args[@]}"
+
 # Resolve data source: Azure Blob Storage URLs or HuggingFace Hub
 if [[ -n "${BLOB_URLS:-}" ]] && [[ "${BLOB_URLS}" != "{}" ]]; then
   echo "Downloading datasets from Azure Blob Storage..."
