@@ -123,6 +123,8 @@ export function BatchGrid({
           setProgress(Math.round(((i + chunk.length) / selectedArray.length) * 100))
         }
         clearSelection()
+      } catch (error) {
+        console.error('Batch rating failed:', error)
       } finally {
         setIsProcessing(false)
         setProgress(0)
@@ -145,6 +147,8 @@ export function BatchGrid({
           setProgress(Math.round(((i + chunk.length) / selectedArray.length) * 100))
         }
         clearSelection()
+      } catch (error) {
+        console.error('Batch quality update failed:', error)
       } finally {
         setIsProcessing(false)
         setProgress(0)

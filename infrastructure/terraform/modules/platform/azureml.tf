@@ -44,7 +44,7 @@ resource "azapi_resource" "ml_workspace" {
       v1LegacyMode             = false
       systemDatastoresAuthMode = var.should_enable_storage_shared_access_key ? "accessKey" : "identity"
       managedNetwork = {
-        isolationMode = var.should_enable_private_endpoint ? "AllowOnlyApprovedOutbound" : "Disabled"
+        isolationMode = var.aml_managed_network_isolation_mode
       }
     }
   }
@@ -99,11 +99,15 @@ resource "azurerm_monitor_diagnostic_setting" "ml_workspace_logs" {
   enabled_log {
     category_group = "allLogs"
   }
+}
 
-  metric {
-    category = "AllMetrics"
-    enabled  = false
-  }
+locals {
+  should_attach_aml_compute_to_customer_subnet = var.aml_managed_network_isolation_mode == "Disabled"
+  aml_compute_subnet_resource_id = (
+    local.should_attach_aml_compute_to_customer_subnet
+    ? coalesce(var.aml_compute_config.subnet_id, azurerm_subnet.main.id)
+    : null
+  )
 }
 
 // ============================================================
@@ -129,7 +133,14 @@ resource "azurerm_machine_learning_compute_cluster" "gpu" {
     scale_down_nodes_after_idle_duration = var.aml_compute_config.scale_down_after_idle
   }
 
-  // Custom subnet is incompatible with workspace managed VNet (AllowOnlyApprovedOutbound).
-  // Only set subnet_resource_id when workspace does NOT use managed VNet isolation.
-  subnet_resource_id = var.should_enable_private_endpoint ? null : coalesce(var.aml_compute_config.subnet_id, azurerm_subnet.main.id)
+  // Custom subnet is incompatible with AzureML managed network modes.
+  // Only set subnet_resource_id when the workspace managed network is disabled.
+  subnet_resource_id = local.aml_compute_subnet_resource_id
+
+  lifecycle {
+    precondition {
+      condition     = local.should_attach_aml_compute_to_customer_subnet || var.aml_compute_config.subnet_id == null
+      error_message = "aml_compute_config.subnet_id can only be set when aml_managed_network_isolation_mode is Disabled."
+    }
+  }
 }

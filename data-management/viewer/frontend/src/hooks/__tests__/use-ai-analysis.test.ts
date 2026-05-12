@@ -12,7 +12,7 @@ import {
   useRequestAISuggestion,
   useTrajectoryAnalysis,
 } from '@/hooks/use-ai-analysis'
-import { renderHookWithProviders } from '@/test-utils/render-hook'
+import { renderHookWithProviders } from '@/test-utils/render'
 
 const getAnnotationSuggestionMock = vi.fn()
 const analyzeTrajectoryMock = vi.fn()

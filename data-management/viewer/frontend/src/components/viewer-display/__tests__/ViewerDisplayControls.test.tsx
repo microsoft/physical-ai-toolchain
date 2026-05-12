@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useViewerSettingsStore } from '@/stores/viewer-settings-store'
-import { renderWithQuery } from '@/test/test-utils'
+import { renderWithQuery } from '@/test-utils/render'
 
 import { ViewerDisplayControls } from '../ViewerDisplayControls'
 

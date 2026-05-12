@@ -136,9 +136,10 @@ module "platform" {
   should_deploy_dce               = var.should_deploy_dce
 
   // AzureML compute
-  should_enable_aml_diagnostic_logs = var.should_enable_aml_diagnostic_logs
-  should_deploy_aml_compute         = var.should_deploy_aml_compute
-  aml_compute_config                = var.aml_compute_config
+  should_enable_aml_diagnostic_logs  = var.should_enable_aml_diagnostic_logs
+  should_deploy_aml_compute          = var.should_deploy_aml_compute
+  aml_compute_config                 = var.aml_compute_config
+  aml_managed_network_isolation_mode = var.aml_managed_network_isolation_mode
 
   // DNS zone flags
   should_include_aks_dns_zone = var.should_include_aks_dns_zone
