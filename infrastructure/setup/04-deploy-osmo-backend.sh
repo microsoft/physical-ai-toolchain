@@ -425,7 +425,7 @@ else
   jq --arg sub "$aml_subscription_id" \
      --arg rg "$aml_resource_group" \
      --arg ws "$aml_workspace_name" \
-     '.default_user.spec.containers[0].env = [
+     '.default_user.spec.containers[0].env //= [] | .default_user.spec.containers[0].env += [
         {"name": "AZURE_SUBSCRIPTION_ID", "value": $sub},
         {"name": "AZURE_RESOURCE_GROUP", "value": $rg},
         {"name": "AZUREML_WORKSPACE_NAME", "value": $ws}

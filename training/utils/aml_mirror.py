@@ -99,6 +99,8 @@ def main() -> int:
         if os.environ.get("REPLAY_RUN_ID"):
             mlflow.set_tag("osmo.replay", "true")
             mlflow.set_tag("osmo.replay_source", os.environ["REPLAY_RUN_ID"])
+        mlflow.set_tag("framework", os.environ.get("TRAINING_FRAMEWORK", "lerobot"))
+        mlflow.set_tag("source", "osmo-replay")
 
         tb_dir = output_dir / "runs"
         if tb_dir.exists():

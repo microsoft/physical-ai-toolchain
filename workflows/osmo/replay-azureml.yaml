@@ -16,6 +16,10 @@ workflow:
         PYTHONUNBUFFERED: "1"
         AML_MIRROR_B64: "{{aml_mirror_b64}}"
         AML_MIRROR_REQUIREMENTS_B64: "{{aml_mirror_requirements_b64}}"
+        TRAINING_FRAMEWORK: "{{ training_framework }}"
+        AZURE_SUBSCRIPTION_ID: "{{ azure_subscription_id }}"
+        AZURE_RESOURCE_GROUP: "{{ azure_resource_group }}"
+        AZUREML_WORKSPACE_NAME: "{{ azureml_workspace_name }}"
 
 default-values:
   workflow_name: replay-azureml
@@ -25,3 +29,7 @@ default-values:
   image: python:3.11-slim
   aml_mirror_b64: ""
   aml_mirror_requirements_b64: ""
+  training_framework: "lerobot"
+  azure_subscription_id: ""
+  azure_resource_group: ""
+  azureml_workspace_name: ""
