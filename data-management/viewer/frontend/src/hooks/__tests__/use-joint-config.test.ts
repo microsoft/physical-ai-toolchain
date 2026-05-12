@@ -3,22 +3,18 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { _resetCsrfToken } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
 import { useJointConfigStore } from '@/stores/joint-config-store'
-import { jsonResponse } from '@/test/test-utils'
-
-const mockFetch = vi.fn()
-function mockMutationFetch(apiResponse: ReturnType<typeof jsonResponse>) {
-  mockFetch
-    .mockResolvedValueOnce(jsonResponse({ csrf_token: 'test-csrf-token' }))
-    .mockResolvedValueOnce(apiResponse)
-}
+import { TEST_CSRF_TOKEN } from '@/test-utils/constants'
+import {
+  installFetchMock,
+  jsonResponse,
+  mockFetch,
+  mockMutationFetch,
+} from '@/test-utils/fetch-mocks'
 
 beforeEach(() => {
-  mockFetch.mockReset()
-  _resetCsrfToken()
-  vi.stubGlobal('fetch', mockFetch)
+  installFetchMock({ csrf: false })
   useDatasetStore.getState().reset()
   useJointConfigStore.getState().reset()
 })
@@ -45,7 +41,7 @@ describe('joint config API functions', () => {
 
     const putCall = mockFetch.mock.calls[1]
     expect(putCall[0]).toBe('/api/datasets/ds-1/joint-config')
-    expect(putCall[1].headers).toHaveProperty('X-CSRF-Token', 'test-csrf-token')
+    expect(putCall[1].headers).toHaveProperty('X-CSRF-Token', TEST_CSRF_TOKEN)
   })
 
   it('saveJointConfigDefaults sends X-CSRF-Token header', async () => {
@@ -65,7 +61,7 @@ describe('joint config API functions', () => {
 
     const putCall = mockFetch.mock.calls[1]
     expect(putCall[0]).toBe('/api/joint-config/defaults')
-    expect(putCall[1].headers).toHaveProperty('X-CSRF-Token', 'test-csrf-token')
+    expect(putCall[1].headers).toHaveProperty('X-CSRF-Token', TEST_CSRF_TOKEN)
   })
 
   it('useSaveJointConfig persists the latest reordered config when save runs immediately after a move', async () => {
