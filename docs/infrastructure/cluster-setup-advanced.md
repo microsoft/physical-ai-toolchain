@@ -162,7 +162,8 @@ kubectl describe sa osmo-service -n osmo-control-plane
 | `optional/deploy-volcano-scheduler.sh`    | Volcano (alternative to KAI)                            |
 | `optional/uninstall-volcano-scheduler.sh` | Uninstall Volcano scheduler                             |
 | `optional/add-user-to-platform.sh`        | Add user to OSMO platform                               |
-| `optional/manage-node-pools.sh`           | Add, remove, or resize AKS node pools (see [Manage Node Pools](manage-node-pools.md)) |
+
+For adding, removing, or resizing AKS node pools on a running cluster, see [Manage Node Pools](manage-node-pools.md).
 
 ## 🔗 Related
 

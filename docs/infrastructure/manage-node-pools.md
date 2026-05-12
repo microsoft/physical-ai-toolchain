@@ -1,9 +1,9 @@
 ---
 sidebar_position: 11
 title: Manage Node Pools
-description: Add and remove AKS node pools on an existing cluster without redeploying infrastructure
+description: Add, remove, and resize AKS node pools on an existing cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-24
+ms.date: 2026-05-12
 ms.topic: how-to
 keywords:
   - node-pools
@@ -12,161 +12,213 @@ keywords:
   - scaling
 ---
 
-Add, remove, or resize AKS GPU and CPU node pools on a running cluster and reconcile OSMO pool, platform, and pod-template configs without rerunning infrastructure deployment.
+Add, remove, and resize AKS GPU and CPU node pools on a running cluster, then reconcile OSMO pool, platform, and pod-template configs without redeploying infrastructure.
 
 > [!NOTE]
 > This workflow is for adjusting pool composition after initial deployment. For first-time cluster provisioning, see [Cluster Setup](cluster-setup.md).
 
 ## When to Use
 
-Use this when a workload requires resources the existing pools cannot provide. An AKS node pool has a single VM SKU, so changing the SKU means provisioning a new pool rather than editing an existing one.
+Use this when a workload requires resources the existing pools cannot provide. An AKS node pool has a single VM SKU, so changing the SKU means provisioning a new pool — node pool resources cannot be edited in place beyond a few mutable fields (see [What Can and Cannot Change in Place](#what-can-and-cannot-change-in-place)).
 
-`add` and `remove` are independent operations: `add` only appends a new pool, and `remove` only destroys the named pool. Running `add` never deletes or modifies existing pools. To replace a SKU, run `add` for the new pool, migrate workloads, then run `remove` on the old pool as a separate step. Examples:
+Examples:
 
-- An SDG workflow requires `>= 6.5` vCPU but the initial pool uses `Standard_B4` (4 vCPU). Add a new pool with a larger SKU; the original pool stays in place until you remove it.
+- An SDG workflow requires `>= 6.5` vCPU but the initial pool uses `Standard_B4` (4 vCPU). Add a new pool with a larger SKU.
 - A new model needs H100 GPUs, but only A10 Spot nodes exist. Add a new H100 pool alongside the existing A10 pool.
 - A pool is no longer used and should be removed to reclaim quota.
 
 ## How It Works
 
-The `node_pools` Terraform variable in `infrastructure/terraform/` drives AKS node pool creation through `for_each`. Adding or removing a map key causes Terraform to create or destroy only that pool and its subnet; existing pools, the control plane, and cluster state are untouched.
+All node pools are driven by the `node_pools` Terraform variable in `infrastructure/terraform/`. The variable is a map keyed by pool name; Terraform uses `for_each` over the map to manage each pool, its subnet, NSG associations, and NAT gateway associations independently.
 
-The script maintains a managed overlay at `infrastructure/terraform/node-pools.managed.auto.tfvars.json`. Terraform auto-loads `*.auto.tfvars.json` files after `terraform.tfvars`, so the overlay becomes the effective source of truth for `node_pools`. On first `add` or `remove`, the script seeds the overlay from whatever Terraform currently resolves `var.node_pools` to, then applies the mutation.
+Pool changes follow the standard repo flow:
 
-After `terraform apply` succeeds, the script re-runs `04-deploy-osmo-backend.sh`, which regenerates the OSMO `POD_TEMPLATE`, `POOL`, and `BACKEND` configs against the new pool list. The backend operator reloads these configs automatically.
+1. Edit `node_pools` in `infrastructure/terraform/terraform.tfvars`.
+2. Run `terraform apply` to create, destroy, or update pool resources.
+3. Rerun `infrastructure/setup/04-deploy-osmo-backend.sh` to regenerate OSMO `POD_TEMPLATE`, `POOL`, and `BACKEND` configs against the new pool list.
+
+Script `04` reads `node_pools` from Terraform state and embeds per-pool values (VM size in `nodeSelector`, taints as tolerations) into OSMO configs. **Skipping the rerun leaves stale OSMO configs**: workflow pods pin `nodeSelector` to the previous VM SKU and stay `Pending`.
 
 ## Prerequisites
 
 - Terraform state in `infrastructure/terraform/` matches the deployed cluster.
 - `kubectl`, `terraform`, `az`, `helm`, `osmo`, and `jq` available on `PATH`.
 - Active Azure CLI session (`az login`) with rights to modify the cluster resource group.
-- Active OSMO session compatible with the flags previously passed to `04-deploy-osmo-backend.sh` (for example, `--use-acr`).
 - VPN connection if the cluster is private (default).
+- The same flags you originally passed to `04-deploy-osmo-backend.sh` (for example, `--use-acr`).
 
-## Usage
+## What Can and Cannot Change in Place
 
-```bash
-bash infrastructure/setup/optional/manage-node-pools.sh <command> [OPTIONS]
-```
+These fields on a `node_pools` entry are `ForceNew` — editing them destroys and recreates the pool under the same name:
 
-| Command  | Purpose                                                                    |
-|----------|----------------------------------------------------------------------------|
-| `list`   | Print configured node pools from current Terraform state                   |
-| `add`    | Create a new node pool, apply Terraform, and sync OSMO configs             |
-| `remove` | Destroy a node pool, apply Terraform, and sync OSMO configs                |
-| `sync`   | Re-render OSMO `POD_TEMPLATE`, `POOL`, and `BACKEND` configs only          |
+| Field                        | In-place? | Notes                                                   |
+|------------------------------|-----------|---------------------------------------------------------|
+| `vm_size`                    | No        | VMSS SKU is immutable; AKS rejects in-place SKU changes |
+| `subnet_address_prefixes`    | No        | The subnet itself is also a `ForceNew` resource         |
+| `zones`                      | No        | Availability zone is set at pool creation               |
+| `priority`                   | No        | `Regular` vs `Spot` is set at pool creation             |
+| `eviction_policy`            | No        | Tied to `priority`; only valid for `Spot`               |
+| `gpu_driver`                 | No        | Affects pool creation flags                             |
+| `node_count`                 | Yes       | When autoscaler is disabled                             |
+| `min_count`, `max_count`     | Yes       | When autoscaler is enabled                              |
+| `should_enable_auto_scaling` | Yes       | Toggling on/off updates the existing pool               |
+| `node_labels`                | Yes       | Applied to existing nodes                               |
+| `node_taints`                | Yes       | Applied to existing nodes (workloads may be evicted)    |
 
-### Common Options
+Anything in the "No" rows means choosing between two flows:
 
-| Flag                 | Purpose                                                                   |
-|----------------------|---------------------------------------------------------------------------|
-| `-t`, `--tf-dir DIR` | Terraform directory (default: `infrastructure/terraform/`)                |
-| `--config-preview`   | Print resolved configuration and exit without writing the overlay, applying Terraform, or syncing OSMO (matches the `01`–`04` deploy scripts) |
-| `--skip-apply`       | Write the overlay but skip `terraform apply` (still mutates state)        |
-| `--skip-osmo-sync`   | Skip `04-deploy-osmo-backend.sh` reconciliation                           |
-| `--osmo-args ARGS`   | Extra args forwarded to `04-deploy-osmo-backend.sh` (quote the whole string) |
+- **Add new pool, then remove old** (recommended for SKU upgrades): zero capacity gap, no forced eviction. Workloads migrate at your pace.
+- **In-place replace** (simpler, but pool goes away before the new one is ready): brief capacity gap, all pods on the pool evicted at once.
 
-### Add Options
-
-| Flag                        | Required  | Description                                                   |
-|-----------------------------|-----------|---------------------------------------------------------------|
-| `--name NAME`               | yes       | Terraform map key and AKS node pool name                      |
-| `--vm-size SIZE`            | yes       | Azure VM size (for example, `Standard_D8ds_v5`)               |
-| `--subnet CIDR`             | yes       | Subnet address prefix; must not overlap existing subnets      |
-| `--priority P`              | no        | `Regular` or `Spot` (default `Regular`)                       |
-| `--node-count N`            | see below | Fixed node count                                              |
-| `--auto-scale`              | see below | Enable cluster autoscaler on this pool                        |
-| `--min-count N`             | see below | Min nodes with `--auto-scale`                                 |
-| `--max-count N`             | see below | Max nodes with `--auto-scale`                                 |
-| `--eviction-policy P`       | no        | `Delete` or `Deallocate` (Spot only, default `Delete`)        |
-| `--gpu-driver D`            | no        | `Install` or `None`; only set for GPU pools                   |
-| `--taint KEY=VAL:EFFECT`    | no        | Node taint; repeatable                                        |
-| `--label KEY=VAL`           | no        | Node label; repeatable                                        |
-| `--zone Z`                  | no        | Availability zone; repeatable                                 |
-
-Provide exactly one of `--node-count` or `--auto-scale`. `--auto-scale` requires both `--min-count` and `--max-count`.
-
-## Examples
+## Workflows
 
 ### List Current Pools
 
 ```bash
-bash infrastructure/setup/optional/manage-node-pools.sh list
+terraform -chdir=infrastructure/terraform output -json | \
+  jq -r '.node_pools.value | to_entries[] | "\(.key)\t\(.value.vm_size)\t\(.value.priority)"'
 ```
 
-Output:
+### Resize an Existing Pool (In-Place)
 
-```text
-NAME                 VM_SIZE                              PRIORITY   AUTOSCALE COUNT      TAINTS
-gpu                  Standard_NV36ads_A10_v5              Spot       true     1-1        nvidia.com/gpu:NoSchedule,kubernetes.azure.com/scalesetpriority=spot:NoSchedule
-```
+Resizing means changing `node_count`, `min_count`, `max_count`, `node_labels`, or `node_taints`. None of these recreate the pool.
 
-### Add a CPU Pool for SDG
+1. Edit `infrastructure/terraform/terraform.tfvars`:
 
-Add an 8-vCPU pool so workflows that require more than 4 vCPU can schedule:
+   ```hcl
+   node_pools = {
+     gpu = {
+       vm_size                    = "Standard_NV36ads_A10_v5"
+       subnet_address_prefixes    = ["10.0.7.0/24"]
+       priority                   = "Spot"
+       should_enable_auto_scaling = true
+       min_count                  = 1
+       max_count                  = 4   # changed from 1
+       eviction_policy            = "Delete"
+       node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
+       gpu_driver                 = "Install"
+     }
+   }
+   ```
 
-```bash
-bash infrastructure/setup/optional/manage-node-pools.sh add \
-  --name sdgcpu \
-  --vm-size Standard_D8ds_v5 \
-  --subnet 10.0.12.0/24 \
-  --node-count 1 \
-  --osmo-args '--use-acr'
-```
+2. Apply:
 
-### Add a Spot H100 Pool with Autoscaling
+   ```bash
+   source infrastructure/terraform/prerequisites/az-sub-init.sh
+   terraform -chdir=infrastructure/terraform apply
+   ```
 
-```bash
-bash infrastructure/setup/optional/manage-node-pools.sh add \
-  --name h100spot \
-  --vm-size Standard_NC40ads_H100_v5 \
-  --subnet 10.0.13.0/24 \
-  --priority Spot --eviction-policy Delete \
-  --auto-scale --min-count 0 --max-count 2 \
-  --taint 'nvidia.com/gpu=:NoSchedule' \
-  --taint 'kubernetes.azure.com/scalesetpriority=spot:NoSchedule' \
-  --label 'kubernetes.azure.com/scalesetpriority=spot' \
-  --gpu-driver Install \
-  --osmo-args '--use-acr'
-```
+3. Rerun the OSMO backend script if taints or labels changed (not needed for count-only changes):
+
+   ```bash
+   bash infrastructure/setup/04-deploy-osmo-backend.sh --use-acr
+   ```
+
+### Add a New Pool
+
+Use this to add capacity (different SKU, different priority, different zones) without disturbing existing pools.
+
+1. Add a new map entry in `terraform.tfvars` alongside the existing pools. Pick a non-overlapping subnet:
+
+   ```hcl
+   node_pools = {
+     gpu = { ... }                                     # existing - unchanged
+     sdgcpu = {                                        # new
+       vm_size                    = "Standard_D8ds_v5"
+       subnet_address_prefixes    = ["10.0.12.0/24"]
+       priority                   = "Regular"
+       should_enable_auto_scaling = false
+       node_count                 = 1
+     }
+   }
+   ```
+
+2. Apply Terraform (`for_each` creates only the new pool, its subnet, and NSG/NAT associations):
+
+   ```bash
+   terraform -chdir=infrastructure/terraform apply
+   ```
+
+3. Rerun the OSMO backend script so the new pool appears in `POOL` and `POD_TEMPLATE` configs:
+
+   ```bash
+   bash infrastructure/setup/04-deploy-osmo-backend.sh --use-acr
+   ```
+
+4. Verify:
+
+   ```bash
+   kubectl get nodes -l agentpool=sdgcpu
+   az aks nodepool list --resource-group <rg> --cluster-name <aks> -o table
+   osmo config show POOL
+   ```
 
 ### Remove a Pool
 
-```bash
-bash infrastructure/setup/optional/manage-node-pools.sh remove \
-  --name h100spot \
-  --osmo-args '--use-acr'
-```
+1. Drain workloads off the pool. For OSMO workflows, stop submitting to that pool and let active workflows finish, or cordon the nodes:
 
-### Resync OSMO Configs Only
+   ```bash
+   kubectl get nodes -l agentpool=<pool> -o name | xargs -I {} kubectl cordon {}
+   kubectl get nodes -l agentpool=<pool> -o name | xargs -I {} kubectl drain {} --ignore-daemonsets --delete-emptydir-data
+   ```
 
-Use after manually editing `terraform.tfvars` or the managed overlay:
+2. Delete the map entry from `terraform.tfvars` and apply:
 
-```bash
-terraform -chdir=infrastructure/terraform apply
-bash infrastructure/setup/optional/manage-node-pools.sh sync --osmo-args '--use-acr'
-```
+   ```bash
+   terraform -chdir=infrastructure/terraform apply
+   ```
 
-## Verification
+3. Update `DEFAULT_POOL` in `infrastructure/setup/.env.local` if it pointed at the removed pool, then rerun the OSMO backend script:
 
-After `add`:
+   ```bash
+   bash infrastructure/setup/04-deploy-osmo-backend.sh --use-acr
+   ```
 
-```bash
-kubectl get nodes -L agentpool
-az aks nodepool list --resource-group <rg> --cluster-name <aks> -o table
-osmo config show POOL
-```
+### Replace a Pool SKU (Two-Step, No Capacity Gap)
 
-After `remove`, confirm the pool no longer appears in `az aks nodepool list` and is absent from `osmo config show POOL`.
+Recommended path for upgrading from one SKU to another without evicting workloads.
+
+1. Add the new pool with a different name (see [Add a New Pool](#add-a-new-pool)).
+2. Migrate workloads. For OSMO, submit new workflows targeting the new pool; let active workflows on the old pool drain.
+3. Remove the old pool (see [Remove a Pool](#remove-a-pool)).
+
+### Replace a Pool SKU (In-Place, With Capacity Gap)
+
+Faster but disruptive. Use only when no workloads are running on the pool, or when downtime is acceptable.
+
+1. Edit `vm_size` on the existing map entry:
+
+   ```hcl
+   node_pools = {
+     gpu = {
+       vm_size = "Standard_NC40ads_H100_v5"   # changed
+       # ...
+     }
+   }
+   ```
+
+2. Apply - Terraform plans `-/+ destroy and replace`:
+
+   ```bash
+   terraform -chdir=infrastructure/terraform apply
+   ```
+
+   All nodes in the pool are evicted at once; new nodes come up under the same pool name.
+
+3. Rerun the OSMO backend script:
+
+   ```bash
+   bash infrastructure/setup/04-deploy-osmo-backend.sh --use-acr
+   ```
 
 ## Operational Notes
 
-- **Subnet planning.** Every pool gets its own subnet. Pick a CIDR that does not overlap `aks_subnet_config` or any other pool's `subnet_address_prefixes`.
-- **Default pool.** If `DEFAULT_POOL` in `.env.local` points at the pool being removed, update it before running `remove`. The OSMO backend script will fail if the value no longer matches a configured pool.
-- **Source-of-truth drift.** Once the overlay exists, continue using the script or edit the overlay directly. Mixing edits between `terraform.tfvars` and the overlay causes confusion because the overlay wins.
-- **OSMO flags.** Pass the same flags you used for the initial `04-deploy-osmo-backend.sh` via `--osmo-args` (for example, `--use-acr`, `--use-access-keys`). Omitting them reverts the backend to defaults.
-- **Spot constraints.** Azure rejects `upgrade_settings` for Spot pools; the Terraform module already handles this. `eviction_policy` applies only when `--priority Spot`.
-- **Autoscaling.** `--min-count 0` is allowed; the pool scales up on demand from pending pods.
+- **Subnet planning.** Every pool gets its own subnet. Pick a CIDR that does not overlap `aks_subnet_config` or any other pool's `subnet_address_prefixes`. AKS Overlay mode applies to pods; the node IP space is what you size here.
+- **Default pool.** `DEFAULT_POOL` in `infrastructure/setup/.env.local` must reference a configured pool. `04-deploy-osmo-backend.sh` auto-selects the first pool alphabetically when the variable is unset and warns.
+- **OSMO flag parity.** Pass the same flags you used for the initial `04-deploy-osmo-backend.sh` run (for example, `--use-acr`, `--use-access-keys`). Omitting them reverts the backend to defaults.
+- **Spot constraints.** Azure rejects `upgrade_settings` for Spot pools; the Terraform module already handles this. `eviction_policy` applies only when `priority = "Spot"`.
+- **Autoscaling.** `min_count = 0` is allowed; the pool scales up on demand from pending pods. KAI/Volcano coscheduling requires whole-pool capacity for gang-scheduled jobs.
+- **Script 03 is not affected.** Only `04-deploy-osmo-backend.sh` reads pool data. `03-deploy-osmo-control-plane.sh` does not need to be rerun for pool changes.
 
 ## 🔗 Related
 
