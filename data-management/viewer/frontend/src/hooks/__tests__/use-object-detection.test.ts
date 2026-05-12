@@ -16,7 +16,7 @@ import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useObjectDetection } from '@/hooks/use-object-detection'
-import { renderHookWithProviders } from '@/test-utils/render-hook'
+import { renderHookWithProviders } from '@/test-utils/render'
 
 const { mockRunDetection, mockGetDetections, mockClearDetections, storeState } = vi.hoisted(() => ({
   mockRunDetection: vi.fn(),

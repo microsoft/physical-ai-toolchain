@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { jsonResponse } from '@/test/test-utils'
+import {
+  installFetchMock,
+  jsonResponse,
+  mockFetch,
+  mockMutationFetch,
+} from '@/test-utils/fetch-mocks'
 
 import {
-  _resetCsrfToken,
   ApiClientError,
   deleteAnnotations,
   fetchAnnotations,
@@ -14,25 +18,15 @@ import {
   fetchDatasets,
   fetchEpisode,
   fetchEpisodes,
+  mutationFetch,
   mutationHeaders,
   saveAnnotation,
   triggerAutoAnalysis,
   warmCache,
 } from '../api-client'
 
-const mockFetch = vi.fn()
-
-/** Mock a successful CSRF token response followed by the API response. */
-function mockMutationFetch(apiResponse: ReturnType<typeof jsonResponse>) {
-  mockFetch
-    .mockResolvedValueOnce(jsonResponse({ csrf_token: 'test-token' }))
-    .mockResolvedValueOnce(apiResponse)
-}
-
 beforeEach(() => {
-  mockFetch.mockReset()
-  _resetCsrfToken()
-  vi.stubGlobal('fetch', mockFetch)
+  installFetchMock({ csrf: false })
 })
 
 afterEach(() => {
@@ -295,5 +289,70 @@ describe('warmCache', () => {
       '/api/datasets/ds-1/cache/warm?count=3',
       expect.objectContaining({ method: 'POST' }),
     )
+  })
+})
+
+describe('mutationFetch', () => {
+  it('skips CSRF fetch and omits X-CSRF-Token for GET requests', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+
+    await mutationFetch('/api/thing')
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    const [url, init] = mockFetch.mock.calls[0]
+    expect(url).toBe('/api/thing')
+    const headers = (init as RequestInit).headers as Record<string, string>
+    expect(headers).not.toHaveProperty('X-CSRF-Token')
+  })
+
+  it('skips CSRF fetch and omits X-CSRF-Token for HEAD requests', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({}))
+
+    await mutationFetch('/api/thing', { method: 'HEAD' })
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    const [, init] = mockFetch.mock.calls[0]
+    const headers = (init as RequestInit).headers as Record<string, string>
+    expect(headers).not.toHaveProperty('X-CSRF-Token')
+  })
+
+  it.each(['POST', 'PUT', 'DELETE', 'PATCH'])(
+    'fetches CSRF and attaches X-CSRF-Token for %s requests',
+    async (method) => {
+      mockMutationFetch(jsonResponse({ ok: true }))
+
+      await mutationFetch('/api/thing', { method })
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/csrf-token')
+      const [, init] = mockFetch.mock.calls[1]
+      const headers = (init as RequestInit).headers as Record<string, string>
+      expect(headers['X-CSRF-Token']).toBe('test-csrf-token')
+    },
+  )
+
+  it('treats lowercase method names as their canonical uppercase form', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+
+    await mutationFetch('/api/thing', { method: 'post' })
+
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/csrf-token')
+    const [, init] = mockFetch.mock.calls[1]
+    const headers = (init as RequestInit).headers as Record<string, string>
+    expect(headers['X-CSRF-Token']).toBe('test-csrf-token')
+  })
+
+  it('lets caller-provided headers win on key collision with X-CSRF-Token', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+
+    await mutationFetch('/api/thing', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': 'caller-override' },
+    })
+
+    const [, init] = mockFetch.mock.calls[1]
+    const headers = (init as RequestInit).headers as Record<string, string>
+    expect(headers['X-CSRF-Token']).toBe('caller-override')
   })
 })

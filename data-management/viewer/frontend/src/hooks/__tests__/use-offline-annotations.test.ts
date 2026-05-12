@@ -10,7 +10,7 @@ import { act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useOfflineAnnotations } from '@/hooks/use-offline-annotations'
-import { renderHookWithProviders } from '@/test-utils/render-hook'
+import { renderHookWithProviders } from '@/test-utils/render'
 
 const {
   mockSaveAnnotationLocal,

@@ -2,12 +2,20 @@ import 'fake-indexeddb/auto'
 import '@testing-library/jest-dom/vitest'
 
 import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
+
+import { _resetCsrfToken } from '@/lib/api-client'
 
 // `globals: false` in vitest config prevents @testing-library/react's auto-cleanup
 // from registering, so unmount rendered trees between tests manually.
 afterEach(() => {
   cleanup()
+})
+
+// Drop the cached CSRF token between tests so each test's pre-queued
+// `/api/csrf-token` mock response is consumed exactly once.
+beforeEach(() => {
+  _resetCsrfToken()
 })
 
 // Background TanStack Query refetches can fire after a test's afterEach restores
