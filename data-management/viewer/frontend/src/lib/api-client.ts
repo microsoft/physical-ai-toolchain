@@ -56,6 +56,20 @@ export async function mutationHeaders(): Promise<Record<string, string>> {
   return { 'X-CSRF-Token': await getCsrfToken(), ...(await getAuthHeaders()) }
 }
 
+/** Fetch wrapper that attaches CSRF + auth headers; caller headers win on key collision. */
+export async function mutationFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const method = (init.method ?? 'GET').toUpperCase()
+  const needsCsrf = method !== 'GET' && method !== 'HEAD'
+  const baseHeaders = needsCsrf ? await mutationHeaders() : await requestHeaders()
+  return fetch(input, {
+    ...init,
+    headers: { ...baseHeaders, ...(init.headers ?? {}) },
+  })
+}
+
 /** Reset cached CSRF token (for testing). */
 export function _resetCsrfToken(): void {
   _csrfToken = null

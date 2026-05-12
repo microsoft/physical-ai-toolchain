@@ -9,10 +9,9 @@ import {
   useEpisode,
   useEpisodes,
 } from '@/hooks/use-datasets'
-import { _resetCsrfToken } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
 import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
-import { renderHookWithProviders } from '@/test-utils/render-hook'
+import { renderHookWithProviders } from '@/test-utils/render'
 
 const sampleDataset = {
   id: 'ds-1',
@@ -24,8 +23,7 @@ const sampleDataset = {
 }
 
 beforeEach(() => {
-  installFetchMock()
-  _resetCsrfToken()
+  installFetchMock({ csrf: false })
   useDatasetStore.getState().reset()
 })
 

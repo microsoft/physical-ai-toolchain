@@ -24,7 +24,7 @@
 #   go ⊂ terraform (infrastructure/terraform/e2e/ ⊂ infrastructure/terraform/);
 #     deduplicated at the component layer (infrastructure-terraform vs infrastructure-go-e2e).
 #   vitest-* (components/features/lib/state/app) overlap the aggregate vitest flag and each
-#     other (vitest-features  vitest-components since the feature directories
+#     other (vitest-features overlaps vitest-components since the feature directories
 #     dashboard/, annotation-panel/, frame-editor/, episode-viewer/ all live under src/components/);
 #     intentional to surface per-section coverage trends without losing the aggregate view.
 
@@ -269,11 +269,11 @@ component_management:
   default_rules:
     statuses:
       - type: project
-        target: auto
+        target: 80%
         threshold: 1%
       - type: patch
-        target: auto
-        threshold: 5%
+        target: 80%
+        threshold: 0%
   individual_components:
     - component_id: training
       name: Training

@@ -54,10 +54,12 @@ export function useExport({ datasetId }: UseExportOptions): UseExportReturn {
         (res) => {
           setResult(res)
           setIsExporting(false)
+          cancelRef.current = null
         },
         (err) => {
           setError(err)
           setIsExporting(false)
+          cancelRef.current = null
         },
       )
 
@@ -67,7 +69,8 @@ export function useExport({ datasetId }: UseExportOptions): UseExportReturn {
   )
 
   const cancelExport = useCallback(() => {
-    cancelRef.current?.()
+    if (!cancelRef.current) return
+    cancelRef.current()
     cancelRef.current = null
     setIsExporting(false)
     setError('Export cancelled')
