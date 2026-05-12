@@ -170,6 +170,12 @@ updates:
       github-actions:
         patterns:
           - "*"
+        exclude-patterns:
+          - "github/gh-aw-actions/*"
+    # gh-aw-actions SHAs are managed by the gh-aw compiler (lock files).
+    # Dependabot must not bump them independently.
+    ignore:
+      - dependency-name: "github/gh-aw-actions/*"
     labels:
       - "dependencies"
       - "github-actions"

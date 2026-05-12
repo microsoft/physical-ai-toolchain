@@ -50,6 +50,10 @@ override_module {
   }
 }
 
+variables {
+  aml_managed_network_isolation_mode = "Disabled"
+}
+
 run "setup" {
   module {
     source = "./tests/setup"

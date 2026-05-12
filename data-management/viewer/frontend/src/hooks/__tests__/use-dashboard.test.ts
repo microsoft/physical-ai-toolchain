@@ -3,10 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DashboardStats } from '@/hooks/use-dashboard'
 import { useDashboardMetrics, useDashboardStats } from '@/hooks/use-dashboard'
-import { _resetCsrfToken } from '@/lib/api-client'
 import type { JsonResponseLike } from '@/test-utils/fetch-mocks'
 import { installFetchMock, jsonResponse, mockFetch } from '@/test-utils/fetch-mocks'
-import { renderHookWithProviders } from '@/test-utils/render-hook'
+import { renderHookWithProviders } from '@/test-utils/render'
 
 function makeStats(overrides: Partial<DashboardStats> = {}): DashboardStats {
   return {
@@ -25,8 +24,7 @@ function makeStats(overrides: Partial<DashboardStats> = {}): DashboardStats {
 }
 
 beforeEach(() => {
-  installFetchMock()
-  _resetCsrfToken()
+  installFetchMock({ csrf: false })
 })
 
 afterEach(() => {

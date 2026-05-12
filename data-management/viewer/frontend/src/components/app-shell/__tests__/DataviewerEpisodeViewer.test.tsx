@@ -3,8 +3,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DataviewerEpisodeViewer } from '../DataviewerEpisodeViewer'
 
+const mockSetCurrentEpisode = vi.fn()
+
 vi.mock('@/hooks/use-datasets', () => ({
   useEpisode: vi.fn(),
+}))
+
+vi.mock('@/stores', () => ({
+  useEpisodeStore: (
+    selector: (state: { setCurrentEpisode: typeof mockSetCurrentEpisode }) => unknown,
+  ) => selector({ setCurrentEpisode: mockSetCurrentEpisode }),
 }))
 
 vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
@@ -29,6 +37,7 @@ const baseProps = {
 describe('DataviewerEpisodeViewer', () => {
   afterEach(() => {
     vi.mocked(useEpisode).mockReset()
+    mockSetCurrentEpisode.mockReset()
   })
 
   it('renders the AnnotationWorkspace once the episode loads', () => {
@@ -41,5 +50,57 @@ describe('DataviewerEpisodeViewer', () => {
     render(<DataviewerEpisodeViewer {...baseProps} />)
 
     expect(screen.getByTestId('annotation-workspace')).toBeInTheDocument()
+  })
+
+  it('shows the loading message while the episode is fetching', () => {
+    vi.mocked(useEpisode).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
+    } as unknown as ReturnType<typeof useEpisode>)
+
+    render(<DataviewerEpisodeViewer {...baseProps} episodeIndex={3} />)
+
+    expect(screen.getByText('Loading episode 3...')).toBeInTheDocument()
+    expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
+  })
+
+  it('surfaces the error message when the fetch fails', () => {
+    vi.mocked(useEpisode).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('boom'),
+    } as unknown as ReturnType<typeof useEpisode>)
+
+    render(<DataviewerEpisodeViewer {...baseProps} />)
+
+    expect(screen.getByText('Error loading episode: boom')).toBeInTheDocument()
+    expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
+  })
+
+  it('renders the no-data placeholder when the episode is missing', () => {
+    vi.mocked(useEpisode).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: null,
+    } as unknown as ReturnType<typeof useEpisode>)
+
+    render(<DataviewerEpisodeViewer {...baseProps} />)
+
+    expect(screen.getByText('No episode data')).toBeInTheDocument()
+    expect(screen.queryByTestId('annotation-workspace')).not.toBeInTheDocument()
+  })
+
+  it('publishes the loaded episode to the episode store', () => {
+    const episode = { meta: { index: 2 }, episode_index: 2, length: 5 }
+    vi.mocked(useEpisode).mockReturnValue({
+      data: episode,
+      isLoading: false,
+      error: null,
+    } as unknown as ReturnType<typeof useEpisode>)
+
+    render(<DataviewerEpisodeViewer {...baseProps} episodeIndex={2} />)
+
+    expect(mockSetCurrentEpisode).toHaveBeenCalledWith(episode)
   })
 })
