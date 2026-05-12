@@ -45,6 +45,7 @@ workflow:
         ENCODED_ARCHIVE: "{{ encoded_archive }}"
         PAYLOAD_ROOT: "{{ payload_root }}"
         AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
+        MLFLOW_REGISTRY_URI: "file:///dev/null"
         MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
         MLFLOW_HTTP_REQUEST_TIMEOUT: "{{ mlflow_http_request_timeout }}"
       files:

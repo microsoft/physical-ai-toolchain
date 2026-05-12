@@ -26,6 +26,7 @@ workflow:
         AZURE_RESOURCE_GROUP: "{{ azure_resource_group }}"
         AZUREML_WORKSPACE_NAME: "{{ azure_workspace_name }}"
         AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
+        MLFLOW_REGISTRY_URI: "file:///dev/null"
         MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
         MLFLOW_HTTP_REQUEST_TIMEOUT: "{{ mlflow_http_request_timeout }}"
         RUN_AZURE_SMOKE_TEST: "{{ run_azure_smoke_test }}"

@@ -627,3 +627,5 @@ yarl==1.24.2
     # via aiohttp
 zipp==4.1.0
     # via importlib-metadata
+azureml-mlflow==1.62.0.post2
+jsonpickle==4.1.1
