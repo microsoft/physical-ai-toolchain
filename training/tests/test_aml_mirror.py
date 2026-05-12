@@ -203,7 +203,6 @@ class TestMain:
         (ckpt / "model.bin").write_bytes(b"x")
         monkeypatch.setattr(_MOD, "mlflow", _fake_mlflow)
 
-        original_link = os.link
         monkeypatch.setattr(os, "link", MagicMock(side_effect=OSError("cross-device")))
 
         result = _MOD.main()
