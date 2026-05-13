@@ -108,8 +108,26 @@ uv pip install "flash-attn==2.5.5" --no-build-isolation || \
 # decord for video decoding inside the LeRobot->RLDS converter
 uv pip install decord tensorflow tensorflow_datasets
 
-# ---- 4. Build RLDS dataset from blob-mounted LeRobot dataset ----
-DATASET_SOURCE="${DATASET_ROOT}/${DATASET_REPO_ID}"
+# ---- 4. Resolve dataset source ----
+#   Priority: pre-mounted AzureML data asset (DATASET_MOUNT) > BLOB_URLS download > raw
+#   DATASET_ROOT pre-populated by caller.
+if [[ -n "${DATASET_MOUNT:-}" ]] && [[ -d "${DATASET_MOUNT}" ]]; then
+  echo "[dataset] using AzureML mounted data asset at ${DATASET_MOUNT}"
+  DATASET_SOURCE="${DATASET_MOUNT}"
+elif [[ -n "${BLOB_URLS:-}" ]] && [[ "${BLOB_URLS}" != "[]" ]] && [[ "${BLOB_URLS}" != "{}" ]]; then
+  echo "[dataset] downloading from blob URLs via training.il.scripts.lerobot.download_dataset"
+  python -m training.il.scripts.lerobot.download_dataset
+  DATASET_SOURCE="${DATASET_ROOT}/${DATASET_REPO_ID}"
+else
+  DATASET_SOURCE="${DATASET_ROOT}/${DATASET_REPO_ID}"
+  echo "[dataset] using pre-populated ${DATASET_SOURCE}"
+fi
+
+if [[ ! -d "${DATASET_SOURCE}" ]]; then
+  echo "ERROR: dataset not found at ${DATASET_SOURCE}" >&2
+  exit 1
+fi
+
 MANIFEST_PATH="${WORKSPACE}/training_manifest.json"
 
 echo "[filter] LeRobot dataset @ ${DATASET_SOURCE}"

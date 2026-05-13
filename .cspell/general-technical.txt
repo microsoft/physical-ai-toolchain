@@ -2069,3 +2069,18 @@ topcam
 notanum
 fevil
 pusht
+
+# OpenVLA-OFT pipeline terms
+openvla
+moojink
+schaeffler
+rlds
+proprio
+ncads
+recognises
+tfds
+amlcompute
+ncadsa
+decord
+nnodes
+imgs

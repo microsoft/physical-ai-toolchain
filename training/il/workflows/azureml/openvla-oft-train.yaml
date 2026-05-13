@@ -42,6 +42,9 @@ inputs:
   run_id_note: physical_ai_toolchain
   blob_urls: '[]'
   dataset_root: /workspace/data
+  # The submit script appends a `dataset_asset` input (type uri_folder) when
+  # --dataset-asset NAME:VERSION is provided, mounting the registered data
+  # asset and exporting its path as DATASET_MOUNT to the entry script.
 
 command: echo "Command will be set by submission script"
 

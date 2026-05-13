@@ -33,8 +33,15 @@ Submit OpenVLA-OFT fine-tuning to Azure ML.
 DATA SOURCE:
     -d, --dataset-repo-id ID     Logical name (matches blob folder)
         --blob-url URL           Add blob dataset URL (repeatable; merged at runtime)
+        --dataset-asset SPEC     AzureML data asset (NAME:VERSION or NAME@latest). Mounts the asset
+                                 read-only at $DATASET_MOUNT; takes precedence over --blob-url.
         --dataset-root DIR       Container mount path (default: /workspace/data)
         --dataset-name NAME      RLDS dataset name (default: schaeffler_bimanual)
+
+PROFILES:
+        --profile NAME           Apply preset (overrides individual flags below where unset):
+                                   dryrun-a10  - A10 24 GB smoke test (1000 steps, batch=1, 1 image)
+                                   prod-a100   - 2x A100 80GB full OFT recipe (default)
 
 JOB IDENTITY:
     -j, --job-name NAME          Job identifier (default: openvla-oft-training)
@@ -163,6 +170,38 @@ stream_logs=false
 save_as=""
 config_preview=false
 forward_args=()
+dataset_asset="${DATASET_ASSET:-}"
+profile=""
+
+# --- Profiles (applied lazily after parse) ---
+apply_profile() {
+  case "$1" in
+    dryrun-a10)
+      # A10 24 GB smoke test: validates the pipeline (clone -> RLDS -> torchrun ->
+      # checkpoint upload) with minimum memory footprint. Drops to single image,
+      # no FiLM/proprio, lora_rank=16, action_chunk=8, batch=1.
+      [[ -z "${PROFILE_BATCH_SIZE_SET:-}" ]]           && batch_size=1
+      [[ -z "${PROFILE_NUM_IMAGES_SET:-}" ]]           && num_images_in_input=1
+      [[ -z "${PROFILE_USE_FILM_SET:-}" ]]             && use_film=False
+      [[ -z "${PROFILE_USE_PROPRIO_SET:-}" ]]          && use_proprio=False
+      [[ -z "${PROFILE_NUM_ACTIONS_CHUNK_SET:-}" ]]    && num_actions_chunk=8
+      [[ -z "${PROFILE_LORA_RANK_SET:-}" ]]            && lora_rank=16
+      [[ -z "${PROFILE_IMAGE_AUG_SET:-}" ]]            && image_aug=False
+      [[ -z "${PROFILE_MAX_STEPS_SET:-}" ]]            && max_steps=1000
+      [[ -z "${PROFILE_SAVE_FREQ_SET:-}" ]]            && save_freq=500
+      [[ -z "${PROFILE_NUM_STEPS_BEFORE_DECAY_SET:-}" ]] && num_steps_before_decay=800
+      [[ -z "${PROFILE_NUM_GPUS_SET:-}" ]]             && num_gpus=1
+      [[ -z "${PROFILE_INSTANCE_TYPE_SET:-}" ]]        && instance_type=gpu
+      [[ -z "${PROFILE_JOB_NAME_SET:-}" ]]             && job_name=openvla-oft-dryrun-a10
+      ;;
+    prod-a100|"")
+      : # defaults already match the OFT+ ALOHA recipe targeting 2x A100 80GB
+      ;;
+    *)
+      fatal "Unknown profile: $1 (expected dryrun-a10 or prod-a100)"
+      ;;
+  esac
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -171,11 +210,13 @@ while [[ $# -gt 0 ]]; do
     --environment-version)      environment_version="$2"; shift 2 ;;
     --image|-i)                 image="$2"; shift 2 ;;
     --assets-only)              assets_only=true; shift ;;
+    --profile)                  profile="$2"; shift 2 ;;
     -d|--dataset-repo-id)       dataset_repo_id="$2"; shift 2 ;;
     --dataset-name)             dataset_name="$2"; shift 2 ;;
+    --dataset-asset)            dataset_asset="$2"; shift 2 ;;
     --blob-url)                 blob_urls+=("$2"); shift 2 ;;
     --dataset-root)             dataset_root="$2"; shift 2 ;;
-    -j|--job-name)              job_name="$2"; shift 2 ;;
+    -j|--job-name)              job_name="$2"; PROFILE_JOB_NAME_SET=1; shift 2 ;;
     --display-name)             display_name="$2"; shift 2 ;;
     --experiment-name)          experiment_name="$2"; shift 2 ;;
     --vla-path)                 vla_path="$2"; shift 2 ;;
@@ -185,25 +226,25 @@ while [[ $# -gt 0 ]]; do
     --image-key-left)           image_key_left="$2"; shift 2 ;;
     --image-key-right)          image_key_right="$2"; shift 2 ;;
     --action-dim)               action_dim="$2"; shift 2 ;;
-    --proprio-dim)               proprio_dim="$2"; shift 2 ;;
-    --num-actions-chunk)        num_actions_chunk="$2"; shift 2 ;;
-    --num-images)               num_images_in_input="$2"; shift 2 ;;
-    --use-film)                 use_film="$2"; shift 2 ;;
-    --use-proprio)              use_proprio="$2"; shift 2 ;;
+    --proprio-dim)              proprio_dim="$2"; shift 2 ;;
+    --num-actions-chunk)        num_actions_chunk="$2"; PROFILE_NUM_ACTIONS_CHUNK_SET=1; shift 2 ;;
+    --num-images)               num_images_in_input="$2"; PROFILE_NUM_IMAGES_SET=1; shift 2 ;;
+    --use-film)                 use_film="$2"; PROFILE_USE_FILM_SET=1; shift 2 ;;
+    --use-proprio)              use_proprio="$2"; PROFILE_USE_PROPRIO_SET=1; shift 2 ;;
     --use-l1-regression)        use_l1_regression="$2"; shift 2 ;;
-    --batch-size)               batch_size="$2"; shift 2 ;;
+    --batch-size)               batch_size="$2"; PROFILE_BATCH_SIZE_SET=1; shift 2 ;;
     --learning-rate)            learning_rate="$2"; shift 2 ;;
-    --num-steps-before-decay)   num_steps_before_decay="$2"; shift 2 ;;
-    --max-steps)                max_steps="$2"; shift 2 ;;
-    --save-freq)                save_freq="$2"; shift 2 ;;
-    --lora-rank)                lora_rank="$2"; shift 2 ;;
-    --image-aug)                image_aug="$2"; shift 2 ;;
-    --num-gpus)                 num_gpus="$2"; shift 2 ;;
+    --num-steps-before-decay)   num_steps_before_decay="$2"; PROFILE_NUM_STEPS_BEFORE_DECAY_SET=1; shift 2 ;;
+    --max-steps)                max_steps="$2"; PROFILE_MAX_STEPS_SET=1; shift 2 ;;
+    --save-freq)                save_freq="$2"; PROFILE_SAVE_FREQ_SET=1; shift 2 ;;
+    --lora-rank)                lora_rank="$2"; PROFILE_LORA_RANK_SET=1; shift 2 ;;
+    --image-aug)                image_aug="$2"; PROFILE_IMAGE_AUG_SET=1; shift 2 ;;
+    --num-gpus)                 num_gpus="$2"; PROFILE_NUM_GPUS_SET=1; shift 2 ;;
     --subscription-id)          subscription_id="$2"; shift 2 ;;
     --resource-group)           resource_group="$2"; shift 2 ;;
     --workspace-name)           workspace_name="$2"; shift 2 ;;
     --compute)                  compute="$2"; shift 2 ;;
-    --instance-type)            instance_type="$2"; shift 2 ;;
+    --instance-type)            instance_type="$2"; PROFILE_INSTANCE_TYPE_SET=1; shift 2 ;;
     --stream)                   stream_logs=true; shift ;;
     -a|--save-as)               save_as="$2"; shift 2 ;;
     --config-preview)           config_preview=true; shift ;;
@@ -211,6 +252,8 @@ while [[ $# -gt 0 ]]; do
     *)                          fatal "Unknown option: $1" ;;
   esac
 done
+
+[[ -n "$profile" ]] && apply_profile "$profile"
 
 # -------- Validation --------
 require_tools az
@@ -220,8 +263,8 @@ ensure_ml_extension
 [[ -n "$resource_group" ]] || fatal "AZURE_RESOURCE_GROUP required"
 [[ -n "$workspace_name" ]] || fatal "AZUREML_WORKSPACE_NAME required"
 
-if [[ ${#blob_urls[@]} -eq 0 ]]; then
-  [[ -z "$dataset_repo_id" ]] && fatal "--dataset-repo-id is required (or provide --blob-url for blob storage)"
+if [[ ${#blob_urls[@]} -eq 0 && -z "$dataset_asset" ]]; then
+  [[ -z "$dataset_repo_id" ]] && fatal "--dataset-asset, --blob-url, or --dataset-repo-id is required"
 else
   dataset_repo_id="${dataset_repo_id:-dataset}"
 fi
@@ -239,7 +282,9 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Image" "$image"
   print_kv "Dataset repo id" "$dataset_repo_id"
   print_kv "Dataset name (RLDS)" "$dataset_name"
+  print_kv "Dataset asset" "${dataset_asset:-<none>}"
   print_kv "Blob URLs" "${blob_urls[*]:-<none>}"
+  print_kv "Profile" "${profile:-<none>}"
   print_kv "VLA path" "$vla_path"
   print_kv "openvla-oft ref" "$openvla_oft_ref"
   print_kv "transformers fork ref" "$transformers_ref"
@@ -334,6 +379,18 @@ submit_args=(
   --set "environment_variables.AZURE_RESOURCE_GROUP=$resource_group"
   --set "environment_variables.AZUREML_WORKSPACE_NAME=$workspace_name"
 )
+
+# Mount a registered AzureML data asset (uri_folder) as `dataset_asset` input and
+# export its mount path as DATASET_MOUNT for the entry script.
+if [[ -n "$dataset_asset" ]]; then
+  [[ "$dataset_asset" == azureml:* ]] || dataset_asset="azureml:$dataset_asset"
+  submit_args+=(
+    --set "inputs.dataset_asset.type=uri_folder"
+    --set "inputs.dataset_asset.mode=ro_mount"
+    --set "inputs.dataset_asset.path=$dataset_asset"
+    --set 'environment_variables.DATASET_MOUNT=${{inputs.dataset_asset}}'
+  )
+fi
 
 [[ "$stream_logs" == "true" ]] && submit_args+=(--stream)
 [[ -n "$save_as" ]] && submit_args+=(--save-as "$save_as")
