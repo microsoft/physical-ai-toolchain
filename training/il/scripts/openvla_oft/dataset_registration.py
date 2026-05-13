@@ -26,6 +26,12 @@ _LOGGER = logging.getLogger(__name__)
 _MARKER_START = "# >>> physical-ai-toolchain auto-registered dataset >>>"
 _MARKER_END = "# <<< physical-ai-toolchain auto-registered dataset <<<"
 
+# OFT's JOINT_POS_BIMANUAL action encoding hardcodes absolute_action_mask =
+# [True] * 14 (ALOHA-style 6 joints + 1 gripper per arm). Our UR5e bimanual
+# robot has 6 joints per arm and no gripper, so we pad the 12-D action with
+# two placeholder gripper dimensions to reach the 14-D model interface.
+_BIMANUAL_GRIPPER_PAD = 2
+
 
 def _strip_existing_block(text: str) -> str:
     pattern = re.compile(
@@ -70,11 +76,13 @@ from typing import Any, Dict
 import tensorflow as tf
 
 def {fn_name}(trajectory: Dict[str, Any]) -> Dict[str, Any]:
-    # Absolute joint-angle actions for a 12-DOF bimanual UR5e. No gripper dim.
+    # Absolute joint-angle actions for a 12-DOF bimanual UR5e (6+6, no grippers).
+    # OFT's JOINT_POS_BIMANUAL encoding expects ALOHA layout (14-D: 6+1 per arm),
+    # so pad with {_BIMANUAL_GRIPPER_PAD} placeholder gripper dimensions.
     trajectory["action"] = tf.concat(
         (
             trajectory["action"],
-            tf.zeros_like(trajectory["action"][:, :1]),  # placeholder gripper for OFT shape compat
+            tf.zeros_like(trajectory["action"][:, :{_BIMANUAL_GRIPPER_PAD}]),
         ),
         axis=-1,
     )
@@ -105,9 +113,12 @@ def _patch_constants(constants_path: Path, action_dim: int, proprio_dim: int, nu
     downstream code that imports the module-level names sees the updated dims.
     """
     text = constants_path.read_text()
+    # ACTION_DIM in constants.py drives model-head dimensions, which see the
+    # action AFTER our transform pads it to ALOHA bimanual layout.
+    model_action_dim = action_dim + _BIMANUAL_GRIPPER_PAD
     updates = {
         "NUM_ACTIONS_CHUNK": num_actions_chunk,
-        "ACTION_DIM": action_dim,
+        "ACTION_DIM": model_action_dim,
         "PROPRIO_DIM": proprio_dim,
     }
     for name, value in updates.items():
