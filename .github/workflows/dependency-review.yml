@@ -35,6 +35,8 @@ jobs:
           # GHSA-xxjr-mmjv-4gpg: lodash — prototype pollution in _.unset/_.omit; fixed in 4.17.23 (unreleased on npm); transitive Docusaurus dep at 4.17.21 (CVE-2025-13465)
           # GHSA-f23m-r3pf-42rh: lodash — array-path bypass re-enables prototype pollution; fixed in 4.18.0 (unreleased on npm); transitive Docusaurus dep at 4.17.21 (CVE-2026-2950)
           # GHSA-7qhf-v65m-g5f3: mlflow — unauthenticated FastAPI job endpoints under /ajax-api/3.0/jobs/*; no upstream fix; server-side only (CVE-2026-0545)
+          # GHSA-46r5-x6jq-v8g6: mlflow — AJAX artifact download authorization bypass; no upstream fix; server-side only, repo uses client only (CVE-2026-33866)
+          # GHSA-fh64-r2vc-xvhr: mlflow — stored XSS via YAML MLmodel artifacts; fixed in 3.11.1; blocked by azureml-mlflow<=3.9.0 ceiling; server-side only (CVE-2026-33865)
           # GHSA-c2c7-rcm5-vvqj: picomatch — ReDoS via extglob quantifiers; fixed in 2.3.2/4.0.4; transitive Docusaurus/jest dep via micromatch/chokidar (CVE-2026-33671)
           # GHSA-3v7f-55p6-f55p: picomatch — method injection in POSIX character classes; fixed in 2.3.2/4.0.4; transitive Docusaurus/jest dep via micromatch/chokidar (CVE-2026-33672)
           allow-ghsas: >-
@@ -47,5 +49,7 @@ jobs:
             GHSA-xxjr-mmjv-4gpg,
             GHSA-f23m-r3pf-42rh,
             GHSA-7qhf-v65m-g5f3,
+            GHSA-46r5-x6jq-v8g6,
+            GHSA-fh64-r2vc-xvhr,
             GHSA-c2c7-rcm5-vvqj,
             GHSA-3v7f-55p6-f55p
