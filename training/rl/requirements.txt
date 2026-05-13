@@ -2,12 +2,6 @@
 #    uv pip compile pyproject.toml -o requirements.txt
 absl-py==2.4.0
     # via tensorboard
-aiohappyeyeballs==2.6.1
-    # via aiohttp
-aiohttp==3.13.5
-    # via mlflow
-aiosignal==1.4.0
-    # via aiohttp
 alembic==1.18.4
     # via mlflow
 annotated-doc==0.0.4
@@ -20,14 +14,13 @@ asgiref==3.11.1
     # via opentelemetry-instrumentation-asgi
 attrs==26.1.0
     # via
-    #   aiohttp
     #   jsonschema
     #   referencing
-azure-ai-ml==1.32.0
+azure-ai-ml==1.33.0
     # via robotics-training-rl (pyproject.toml)
 azure-common==1.1.28
-    # via azure-ai-ml
-azure-core==1.39.0
+    # via azureml-mlflow
+azure-core==1.41.0
     # via
     #   robotics-training-rl (pyproject.toml)
     #   azure-ai-ml
@@ -39,6 +32,7 @@ azure-core==1.39.0
     #   azure-storage-blob
     #   azure-storage-file-datalake
     #   azure-storage-file-share
+    #   azureml-mlflow
     #   msrest
 azure-core-tracing-opentelemetry==1.0.0b12
     # via azure-monitor-opentelemetry
@@ -46,21 +40,27 @@ azure-identity==1.25.3
     # via
     #   robotics-training-rl (pyproject.toml)
     #   azure-monitor-opentelemetry-exporter
+    #   azureml-mlflow
 azure-mgmt-core==1.6.0
-    # via azure-ai-ml
+    # via
+    #   azure-ai-ml
+    #   azureml-mlflow
 azure-monitor-opentelemetry==1.8.7
     # via azure-ai-ml
 azure-monitor-opentelemetry-exporter==1.0.0b51
     # via azure-monitor-opentelemetry
-azure-storage-blob==12.28.0
+azure-storage-blob==12.27.1
     # via
     #   robotics-training-rl (pyproject.toml)
     #   azure-ai-ml
     #   azure-storage-file-datalake
+    #   azureml-mlflow
 azure-storage-file-datalake==12.22.0
     # via azure-ai-ml
 azure-storage-file-share==12.24.0
     # via azure-ai-ml
+azureml-mlflow==1.62.0.post2
+    # via robotics-training-rl (pyproject.toml)
 blinker==1.9.0
     # via flask
 cachetools==6.2.6
@@ -95,6 +95,7 @@ cryptography==46.0.7
     #   azure-identity
     #   azure-storage-blob
     #   azure-storage-file-share
+    #   azureml-mlflow
     #   google-auth
     #   mlflow
     #   msal
@@ -127,10 +128,6 @@ flask-cors==6.0.2
     # via mlflow
 fonttools==4.62.1
     # via matplotlib
-frozenlist==1.8.0
-    # via
-    #   aiohttp
-    #   aiosignal
 fsspec==2026.3.0
     # via torch
 gitdb==4.0.12
@@ -165,7 +162,6 @@ idna==3.11
     # via
     #   anyio
     #   requests
-    #   yarl
 importlib-metadata==8.7.1
     # via
     #   mlflow-skinny
@@ -186,6 +182,10 @@ jinja2==3.1.6
     #   torch
 joblib==1.5.3
     # via scikit-learn
+jsonpickle==4.1.1
+    # via
+    #   robotics-training-rl (pyproject.toml)
+    #   azureml-mlflow
 jsonschema==4.26.0
     # via azure-ai-ml
 jsonschema-specifications==2025.9.1
@@ -213,11 +213,13 @@ ml-dtypes==0.5.4
     #   onnx
     #   onnx-ir
     #   onnxscript
-mlflow==3.11.1
+mlflow==3.9.0
     # via robotics-training-rl (pyproject.toml)
-mlflow-skinny==3.11.1
-    # via mlflow
-mlflow-tracing==3.11.1
+mlflow-skinny==3.9.0
+    # via
+    #   azureml-mlflow
+    #   mlflow
+mlflow-tracing==3.9.0
     # via mlflow
 mpmath==1.3.0
     # via sympy
@@ -228,11 +230,9 @@ msal==1.36.0
 msal-extensions==1.3.1
     # via azure-identity
 msrest==0.7.1
-    # via azure-monitor-opentelemetry-exporter
-multidict==6.7.1
     # via
-    #   aiohttp
-    #   yarl
+    #   azure-monitor-opentelemetry-exporter
+    #   azureml-mlflow
 networkx==3.6.1
     # via torch
 numpy==1.26.4
@@ -401,7 +401,7 @@ opentelemetry-util-http==0.61b0
     #   opentelemetry-instrumentation-wsgi
 orjson==3.11.8
     # via tensordict
-packaging==26.1
+packaging==25.0
     # via
     #   robotics-training-rl (pyproject.toml)
     #   gunicorn
@@ -425,10 +425,6 @@ pillow==12.2.0
     #   torchvision
 prettytable==3.17.0
     # via skops
-propcache==0.4.1
-    # via
-    #   aiohttp
-    #   yarl
 protobuf==6.33.6
     # via
     #   databricks-sdk
@@ -471,6 +467,7 @@ pyperclip==1.11.0
     # via robotics-training-rl (pyproject.toml)
 python-dateutil==2.9.0.post0
     # via
+    #   azureml-mlflow
     #   graphene
     #   matplotlib
     #   pandas
@@ -478,7 +475,9 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
     # via mlflow-skinny
 pytz==2025.2
-    # via pandas
+    # via
+    #   azureml-mlflow
+    #   pandas
 pyvers==0.2.2
     # via tensordict
 pyyaml==6.0.3
@@ -504,7 +503,7 @@ rpds-py==0.30.0
     # via
     #   jsonschema
     #   referencing
-rsl-rl-lib==5.0.1
+rsl-rl-lib==5.3.0
     # via robotics-training-rl (pyproject.toml)
 scikit-learn==1.8.0
     # via
@@ -523,7 +522,7 @@ six==1.17.0
     # via python-dateutil
 skops==0.13.0
     # via mlflow
-skrl==2.0.0
+skrl==2.1.0
     # via robotics-training-rl (pyproject.toml)
 smmap==5.0.3
     # via gitdb
@@ -545,7 +544,7 @@ tensorboard==2.20.0
     # via skrl
 tensorboard-data-server==0.7.2
     # via tensorboard
-tensordict==0.12.1
+tensordict==0.12.2
     # via
     #   robotics-training-rl (pyproject.toml)
     #   rsl-rl-lib
@@ -566,7 +565,6 @@ triton==3.6.0
     # via torch
 typing-extensions==4.15.0
     # via
-    #   aiosignal
     #   alembic
     #   anyio
     #   azure-ai-ml
@@ -618,9 +616,5 @@ wrapt==1.17.3
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-dbapi
     #   opentelemetry-instrumentation-urllib3
-yarl==1.23.0
-    # via aiohttp
 zipp==3.23.1
     # via importlib-metadata
-azureml-mlflow==1.62.0.post2
-jsonpickle==4.1.1
