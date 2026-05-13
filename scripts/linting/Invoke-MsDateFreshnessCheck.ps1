@@ -63,7 +63,7 @@ function Get-MarkdownFiles {
         [string]$Base = 'origin/main'
     )
 
-    $excludePatterns = @('node_modules', '.git', 'logs', '.copilot-tracking', 'CHANGELOG.md', 'scripts/tests')
+    $excludePatterns = @('node_modules', '.git', 'logs', '.copilot-tracking', 'scripts/tests')
 
     if ($ChangedOnly) {
         Write-Verbose "Getting changed markdown files relative to $Base"
