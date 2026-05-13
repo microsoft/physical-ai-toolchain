@@ -616,8 +616,9 @@ typing-inspection==0.4.2
     #   pydantic
 tzdata==2026.1
     # via pandas
-urllib3==2.6.3
+urllib3==2.7.0
     # via
+    #   robotics-training-il (pyproject.toml)
     #   requests
     #   sentry-sdk
 uvicorn==0.45.0

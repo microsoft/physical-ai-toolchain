@@ -21,8 +21,10 @@ dependencies = [
     "huggingface-hub==1.14.0",
     "lerobot==0.5.1",
     "torchcodec==0.10.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
-    # Pin gitpython >=3.1.50 to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
-    "gitpython>=3.1.50",
+    # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
+    "gitpython==3.1.50",
+    # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
+    "urllib3==2.7.0",
 ]
 
 [build-system]
