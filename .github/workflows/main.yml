@@ -354,6 +354,28 @@ jobs:
           git commit -m "chore: regenerate uv.lock"
           git push
 
+      - name: Stamp ms.date in CHANGELOG.md
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          $today = [datetime]::UtcNow.ToString('yyyy-MM-dd')
+          $path = 'CHANGELOG.md'
+          $content = Get-Content -Raw -LiteralPath $path
+          $updated = [regex]::Replace($content, '(?m)^ms\.date:\s.*$', "ms.date: $today")
+          if ($updated -ceq $content) {
+            Write-Host "CHANGELOG.md ms.date already set to $today"
+            exit 0
+          }
+          Set-Content -LiteralPath $path -Value $updated -NoNewline -Encoding utf8NoBOM
+          & git config user.name 'github-actions[bot]'
+          & git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          & git remote set-url origin "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git"
+          & git add $path
+          & git commit -m 'chore: stamp ms.date in CHANGELOG.md'
+          & git push
+
       - name: Checkout default branch for tag signing
         if: ${{ steps.release.outputs.release_created == 'true' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
