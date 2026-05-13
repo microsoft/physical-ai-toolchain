@@ -252,6 +252,7 @@ component_management:
         - scripts/**/*.psm1
     - component_id: fuzz-suite
       name: Fuzz Suite
+      statuses: []
       paths:
         - tests/fuzz_harness.py
         - tests/fuzz-corpus/**
