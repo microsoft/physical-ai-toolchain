@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Submit LeRobot behavioral cloning training to Azure ML
-# Installs LeRobot dynamically and trains ACT/Diffusion policies from HuggingFace datasets
+# Installs LeRobot dynamically and trains ACT/Diffusion policies from datasets in
+# Azure Blob Storage (canonical) or HuggingFace (legacy fallback via --hf-dataset).
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

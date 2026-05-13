@@ -12,7 +12,7 @@
 # This file defines:
 # - The job structure and schema
 # - Input/output specifications
-# - Environment variable mappings for HuggingFace and logging
+# - Environment variable mappings for the Azure Blob dataset source and logging
 # - Identity configuration for Azure ML model registration
 #
 # To submit a job, use submit-azureml-lerobot-training.sh with appropriate flags.

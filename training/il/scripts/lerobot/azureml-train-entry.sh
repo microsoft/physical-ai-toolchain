@@ -27,7 +27,18 @@ if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
   echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
   exit 1
 fi
-uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
+
+# lerobot >= 0.5 requires Python >= 3.12, but the published PyTorch images
+# (pytorch/pytorch:*-cudaXX.X-cudnn9-runtime) ship Python 3.11. Use uv to
+# fetch a 3.12 toolchain and install everything into a dedicated venv;
+# subsequent `python3` and `lerobot-train` invocations resolve through the
+# venv's bin directory once it is on PATH.
+LEROBOT_VENV="/opt/lerobot-venv"
+uv python install 3.12
+uv venv --python 3.12 "${LEROBOT_VENV}"
+# shellcheck disable=SC1091
+source "${LEROBOT_VENV}/bin/activate"
+uv pip install --requirement "${LEROBOT_REQUIREMENTS}"
 
 # Build args forwarded to the MLflow training wrapper. Only flags whose values
 # are not derivable from environment variables go here. The wrapper at
