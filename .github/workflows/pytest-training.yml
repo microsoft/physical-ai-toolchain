@@ -39,7 +39,7 @@ jobs:
 
       - name: Run pytest
         run: >-
-          uv run pytest training/tests -v
+          uv run pytest -o addopts="" training/tests -v
           --cov=training
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-training.xml

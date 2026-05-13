@@ -37,7 +37,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Run fuzz regression tests
-        run: uv run pytest tests/fuzz_harness.py -v --cov=tests --cov=data-management/viewer/backend/src --cov=training --cov-report=xml:logs/coverage-fuzz.xml --cov-report=term-missing
+        run: uv run pytest -o addopts="" tests/fuzz_harness.py -v --cov=tests --cov=data-management/viewer/backend/src --cov=training --cov-report=xml:logs/coverage-fuzz.xml --cov-report=term-missing
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && always() }}

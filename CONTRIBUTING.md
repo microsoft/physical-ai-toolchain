@@ -412,12 +412,10 @@ uv run pytest training/tests -v \
   --cov-report=xml:logs/coverage-training.xml
 ```
 
-Substitute the component path and `--cov` target for each of the seven
-pytest component suites tracked by Codecov (`pytest-training`,
-`pytest-dm-tools`, `pytest-data-pipeline`, `pytest-inference`,
-`pytest-dataviewer`, `pytest-evaluation`, `pytest-fuzz`). Each flag enforces
-80% patch / 0% project drift in `codecov.yml`; `terraform` uploads test
-results only and is exempt.
+Substitute the component path and `--cov` target for the pytest component
+suite you are validating. Codecov tracks pytest uploads by flag, but only the
+named project statuses in `codecov.yml` are top-level project gates;
+`pytest-fuzz` is advisory and `terraform` uploads test results only.
 
 ### Test Organization
 
@@ -454,14 +452,16 @@ Coverage thresholds increase with each milestone:
 | v0.5.0    | 60%              |
 | v0.6.0    | 80%              |
 
-CI enforces coverage on every PR through Codecov. Each pytest, vitest,
-go, and pester flag carries an enforcing patch gate (`target: 80%`) and a
-project gate (`threshold: 0%`, `removed_code_behavior: adjust_base`). The
-`terraform` flag uploads test results rather than coverage XML and is
-not gated. The same defaults apply at the component level via
-`component_management.default_rules.statuses`. Local `uv run pytest`
-emits an advisory `--cov-fail-under=0` report; the CI flags remain
-authoritative for the merge gate.
+CI enforces coverage on every PR through Codecov. The top-level project gates
+are the named `pester`, `pytest-training`, `pytest-dm-tools`,
+`pytest-data-pipeline`, `pytest-inference`, `pytest-dataviewer`, and
+`pytest-evaluation` statuses, each targeting 80%. The default aggregate
+project status and aggregate patch status are disabled; component-level
+project and patch statuses still apply through
+`component_management.default_rules.statuses`. `pytest-fuzz`, `vitest-*`,
+`terraform`, and `go` uploads remain tracked but are not top-level project
+gates. Local `uv run pytest` emits an advisory `--cov-fail-under=0` report;
+Codecov flag uploads remain authoritative for PR coverage gates.
 
 ### Configuration
 

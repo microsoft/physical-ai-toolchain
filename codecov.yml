@@ -71,6 +71,7 @@ coverage:
       # fuzzing coverage is always low by design, vitest improvements are tracked in a separate
       # workstream, terraform reports test results without a coverage XML, and go e2e tests do
       # not produce meaningful coverage signal at the PR granularity.
+    # Disable the top-level aggregate patch status; component-level patch statuses still apply.
     patch: off
 
 flags:

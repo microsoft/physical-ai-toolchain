@@ -45,9 +45,8 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--junitxml=logs/pytest-results.xml",
-    # Local-dev coverage parity with CI flag scopes (pytest-training, pytest-dm-tools,
-    # pytest-inference, pytest-fuzz). CI per-flag uploads remain authoritative for the
-    # 80% gate; --cov-fail-under=0 keeps local runs advisory.
+    # Local advisory coverage for the root-discovered suites. Codecov flag uploads remain
+    # authoritative for PR coverage gates; --cov-fail-under=0 keeps local runs informational.
     "--cov=training",
     "--cov=data-management/tools",
     "--cov=fleet-deployment/inference",
