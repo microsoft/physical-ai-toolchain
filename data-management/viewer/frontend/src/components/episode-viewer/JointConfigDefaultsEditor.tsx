@@ -156,7 +156,7 @@ function InlineEditField({
         if (trimmed && trimmed !== value) onCommit(trimmed)
         else onCancel()
       }}
-      className="border-b border-primary bg-transparent px-1 text-sm outline-none"
+      className="border-primary border-b bg-transparent px-1 text-sm outline-hidden"
     />
   )
 }
@@ -203,7 +203,7 @@ function IndexEditField({
         if (!isNaN(parsed) && parsed >= 0) onCommit(parsed)
         else onCancel()
       }}
-      className="w-10 border-b border-primary bg-transparent text-center text-[10px] outline-none"
+      className="border-primary w-10 border-b bg-transparent text-center text-[10px] outline-hidden"
     />
   )
 }
@@ -418,7 +418,7 @@ export function JointConfigDefaultsEditor({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 text-destructive"
+                      className="text-destructive h-6 w-6"
                       aria-label="Delete group"
                       onClick={() => handleDeleteGroup(group.id)}
                     >
@@ -433,7 +433,7 @@ export function JointConfigDefaultsEditor({
                     return (
                       <div
                         key={jointId}
-                        className="border-current/20 group/chip inline-flex items-center gap-1 rounded border py-0.5 pl-1.5 pr-0.5 text-xs"
+                        className="group/chip inline-flex items-center gap-1 rounded-sm border border-current/20 py-0.5 pr-0.5 pl-1.5 text-xs"
                         style={{ color: getJointColor(joint.index, colors) }}
                       >
                         {editingIndex === jointId ? (
@@ -445,7 +445,7 @@ export function JointConfigDefaultsEditor({
                         ) : (
                           <button
                             data-testid="joint-index"
-                            className="bg-current/10 hover:bg-current/20 cursor-pointer rounded px-1 font-mono text-[10px]"
+                            className="cursor-pointer rounded-sm bg-current/10 px-1 font-mono text-[10px] hover:bg-current/20"
                             aria-label="Edit joint index"
                             onClick={() => setEditingIndex(jointId)}
                           >
@@ -454,7 +454,7 @@ export function JointConfigDefaultsEditor({
                         )}
                         <span
                           data-joint-color
-                          className="h-2 w-2 flex-shrink-0 rounded-full"
+                          className="h-2 w-2 shrink-0 rounded-full"
                           style={{ backgroundColor: getJointColor(joint.index, colors) }}
                         />
                         {editingJoint === jointId ? (
@@ -523,7 +523,7 @@ export function JointConfigDefaultsEditor({
                     )
                   })}
                   {group.jointIds.length === 0 && (
-                    <span className="text-xs italic text-muted-foreground">No joints assigned</span>
+                    <span className="text-muted-foreground text-xs italic">No joints assigned</span>
                   )}
                 </div>
               </div>
@@ -533,7 +533,7 @@ export function JointConfigDefaultsEditor({
               <>
                 <Separator />
                 <div data-testid="ungrouped-joints" className="rounded-lg border border-dashed p-3">
-                  <span className="mb-2 block text-sm font-semibold text-muted-foreground">
+                  <span className="text-muted-foreground mb-2 block text-sm font-semibold">
                     Ungrouped Joints
                   </span>
                   <div className="flex flex-wrap gap-1.5">
@@ -542,7 +542,7 @@ export function JointConfigDefaultsEditor({
                       return (
                         <div
                           key={jointId}
-                          className="border-current/20 group/chip inline-flex items-center gap-1 rounded border py-0.5 pl-1.5 pr-0.5 text-xs"
+                          className="group/chip inline-flex items-center gap-1 rounded-sm border border-current/20 py-0.5 pr-0.5 pl-1.5 text-xs"
                           style={{ color: getJointColor(joint.index, colors) }}
                         >
                           {editingIndex === jointId ? (
@@ -554,7 +554,7 @@ export function JointConfigDefaultsEditor({
                           ) : (
                             <button
                               data-testid="joint-index"
-                              className="bg-current/10 hover:bg-current/20 cursor-pointer rounded px-1 font-mono text-[10px]"
+                              className="cursor-pointer rounded-sm bg-current/10 px-1 font-mono text-[10px] hover:bg-current/20"
                               aria-label="Edit joint index"
                               onClick={() => setEditingIndex(jointId)}
                             >
@@ -563,7 +563,7 @@ export function JointConfigDefaultsEditor({
                           )}
                           <span
                             data-joint-color
-                            className="h-2 w-2 flex-shrink-0 rounded-full"
+                            className="h-2 w-2 shrink-0 rounded-full"
                             style={{ backgroundColor: getJointColor(joint.index, colors) }}
                           />
                           {editingJoint === jointId ? (

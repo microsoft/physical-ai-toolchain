@@ -30,7 +30,7 @@ Step-by-step guides that take you from a standing start to a working result. Eac
 | Recipe                                                                                | Description                                                         | Prerequisites           |
 |---------------------------------------------------------------------------------------|---------------------------------------------------------------------|-------------------------|
 | [Configuring Edge Data Recording](data-collection/configuring-edge-data-recording.md) | Set up ROS 2 edge recording on Jetson with chunking and compression | Jetson device, ROS 2    |
-| [Preparing Datasets for Training](data-collection/preparing-datasets-for-training.md) | Download, inspect, and validate datasets for LeRobot training       | Python 3.11+, Azure CLI |
+| [Preparing Datasets for Training](data-collection/preparing-datasets-for-training.md) | Download, inspect, and validate datasets for LeRobot training       | Python 3.12+, Azure CLI |
 
 ## 🔗 Related Documentation
 

@@ -99,7 +99,7 @@ export function SubtaskToolbar({
       {/* Segment controls (when selected) */}
       {selectedSegment && (
         <>
-          <div className="h-4 w-px bg-border" />
+          <div className="bg-border h-4 w-px" />
 
           {/* Edit label */}
           <Input
@@ -114,7 +114,7 @@ export function SubtaskToolbar({
             <PopoverTrigger asChild>
               <Button size="sm" variant="outline" className="w-8 p-0">
                 <div
-                  className="h-4 w-4 rounded"
+                  className="h-4 w-4 rounded-sm"
                   style={{ backgroundColor: selectedSegment.color }}
                 />
               </Button>
@@ -125,8 +125,8 @@ export function SubtaskToolbar({
                   <button
                     key={color}
                     className={cn(
-                      'h-6 w-6 rounded transition-transform hover:scale-110',
-                      selectedSegment.color === color && 'ring-2 ring-ring ring-offset-2',
+                      'h-6 w-6 rounded-sm transition-transform hover:scale-110',
+                      selectedSegment.color === color && 'ring-ring ring-2 ring-offset-2',
                     )}
                     style={{ backgroundColor: color }}
                     onClick={() => handleColorChange(color)}
@@ -147,7 +147,7 @@ export function SubtaskToolbar({
           </Button>
 
           {/* Segment info */}
-          <span className="text-xs text-muted-foreground">
+          <span className="text-muted-foreground text-xs">
             {selectedSegment.frameRange[0]} - {selectedSegment.frameRange[1]}
           </span>
         </>

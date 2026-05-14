@@ -67,7 +67,9 @@ function Invoke-YamlLintCore {
     if ($ChangedFilesOnly) {
         Write-Host "Linting changed workflow files only (base: $BaseBranch)"
         $allChanged = @(Get-ChangedFilesFromGit -BaseBranch $BaseBranch -FileExtensions @('*.yml', '*.yaml'))
-        $filesToLint = @($allChanged | Where-Object { $_ -match '\.github[\\/]workflows[\\/]' })
+        $filesToLint = @($allChanged | Where-Object {
+                $_ -match '\.github[\\/]workflows[\\/]'
+            })
     }
     else {
         Write-Host 'Linting all GitHub Actions workflow files'
@@ -77,6 +79,9 @@ function Invoke-YamlLintCore {
                 Select-Object -ExpandProperty FullName)
         }
     }
+
+    # Lock files are gh-aw machine-generated; never lint them.
+    $filesToLint = @($filesToLint | Where-Object { $_ -notmatch '\.lock\.(yml|yaml)$' })
 
     Write-Host "Found $(@($filesToLint).Count) workflow file(s) to lint"
     if (@($filesToLint).Count -gt 0) {

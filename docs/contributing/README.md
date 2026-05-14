@@ -68,7 +68,7 @@ Install required tools and configure Azure access before contributing. See [Prer
 | kubectl    | 1.31            |
 | Helm       | 3.16            |
 | Node.js    | 20+ LTS         |
-| Python     | 3.11+           |
+| Python     | 3.12+           |
 | shellcheck | 0.10+           |
 
 ## 📜 Code of Conduct

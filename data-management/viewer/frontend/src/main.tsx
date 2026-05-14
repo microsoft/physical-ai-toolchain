@@ -1,6 +1,6 @@
 import './index.css'
 
-import { EventType, PublicClientApplication } from '@azure/msal-browser'
+import { AccountInfo, EventType, PublicClientApplication } from '@azure/msal-browser'
 import { MsalProvider } from '@azure/msal-react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -22,13 +22,8 @@ if (isAuthEnabled) {
   }
 
   msalInstance.addEventCallback((event) => {
-    if (
-      event.eventType === EventType.LOGIN_SUCCESS &&
-      event.payload &&
-      'account' in event.payload &&
-      event.payload.account
-    ) {
-      msalInstance!.setActiveAccount(event.payload.account)
+    if (event.eventType === EventType.LOGIN_SUCCESS && event.payload) {
+      msalInstance!.setActiveAccount(event.payload as AccountInfo)
     }
   })
 }

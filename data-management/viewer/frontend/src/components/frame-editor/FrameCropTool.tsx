@@ -172,7 +172,7 @@ export function FrameCropTool({
       </div>
 
       {/* Crop area */}
-      <div className="relative overflow-hidden rounded-lg bg-muted">
+      <div className="bg-muted relative overflow-hidden rounded-lg">
         <ReactCrop
           crop={crop}
           onChange={(c: Crop) => setCrop(c)}
@@ -192,7 +192,7 @@ export function FrameCropTool({
 
       {/* Crop info */}
       {completedCrop && (
-        <div className="text-sm text-muted-foreground">
+        <div className="text-muted-foreground text-sm">
           Selection: {Math.round(completedCrop.width)} × {Math.round(completedCrop.height)} px at (
           {Math.round(completedCrop.x)}, {Math.round(completedCrop.y)})
         </div>

@@ -5,6 +5,7 @@ Tests dataset discovery, episode listing with pagination and filtering,
 episode data retrieval, trajectory extraction, and capability reporting.
 """
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -39,13 +40,11 @@ def service(test_dataset_path):
 class TestDatasetDiscovery:
     """Test automatic dataset discovery from the filesystem."""
 
-    @pytest.mark.asyncio
     async def test_list_datasets_finds_sample(self, service):
         datasets = await service.list_datasets()
         ids = [d.id for d in datasets]
         assert DATASET_ID in ids
 
-    @pytest.mark.asyncio
     async def test_get_dataset_returns_info(self, service):
         ds = await service.get_dataset(DATASET_ID)
         assert ds is not None
@@ -53,14 +52,12 @@ class TestDatasetDiscovery:
         assert ds.total_episodes == 64
         assert ds.fps == 30.0
 
-    @pytest.mark.asyncio
     async def test_get_dataset_features(self, service):
         ds = await service.get_dataset(DATASET_ID)
         assert "observation.state" in ds.features
         assert "action" in ds.features
         assert "observation.images.il-camera" in ds.features
 
-    @pytest.mark.asyncio
     async def test_get_nonexistent_dataset(self, service):
         ds = await service.get_dataset("nonexistent_dataset")
         assert ds is None
@@ -80,25 +77,21 @@ class TestDatasetDiscovery:
 class TestListEpisodes:
     """Test episode listing with pagination and filtering."""
 
-    @pytest.mark.asyncio
     async def test_default_list(self, service):
         episodes = await service.list_episodes(DATASET_ID)
         assert len(episodes) == 64
 
-    @pytest.mark.asyncio
     async def test_pagination_offset(self, service):
         episodes = await service.list_episodes(DATASET_ID, offset=60, limit=10)
         assert len(episodes) == 4
         assert episodes[0].index == 60
 
-    @pytest.mark.asyncio
     async def test_pagination_limit(self, service):
         episodes = await service.list_episodes(DATASET_ID, offset=0, limit=5)
         assert len(episodes) == 5
         assert episodes[0].index == 0
         assert episodes[4].index == 4
 
-    @pytest.mark.asyncio
     async def test_episode_meta_fields(self, service):
         episodes = await service.list_episodes(DATASET_ID, limit=1)
         ep = episodes[0]
@@ -107,18 +100,15 @@ class TestListEpisodes:
         assert ep.task_index == 0
         assert isinstance(ep.has_annotations, bool)
 
-    @pytest.mark.asyncio
     async def test_filter_has_annotations_false(self, service):
         """With no annotations saved, all episodes should appear."""
         episodes = await service.list_episodes(DATASET_ID, has_annotations=False)
         assert len(episodes) == 64
 
-    @pytest.mark.asyncio
     async def test_filter_task_index(self, service):
         episodes = await service.list_episodes(DATASET_ID, task_index=0)
         assert len(episodes) == 64
 
-    @pytest.mark.asyncio
     async def test_filter_task_index_no_match(self, service):
         episodes = await service.list_episodes(DATASET_ID, task_index=99)
         assert len(episodes) == 0
@@ -127,19 +117,16 @@ class TestListEpisodes:
 class TestGetEpisode:
     """Test full episode data retrieval."""
 
-    @pytest.mark.asyncio
     async def test_get_episode_returns_data(self, service):
         ep = await service.get_episode(DATASET_ID, 0)
         assert ep is not None
         assert ep.meta.index == 0
         assert ep.meta.length > 0
 
-    @pytest.mark.asyncio
     async def test_episode_has_trajectory(self, service):
         ep = await service.get_episode(DATASET_ID, 0)
         assert len(ep.trajectory_data) > 0
 
-    @pytest.mark.asyncio
     async def test_trajectory_point_fields(self, service):
         ep = await service.get_episode(DATASET_ID, 0)
         pt = ep.trajectory_data[0]
@@ -150,13 +137,11 @@ class TestGetEpisode:
         assert len(pt.end_effector_pose) == 6
         assert 0 <= pt.gripper_state <= 1
 
-    @pytest.mark.asyncio
     async def test_episode_has_video_urls(self, service):
         ep = await service.get_episode(DATASET_ID, 0)
         assert "observation.images.il-camera" in ep.video_urls
         assert f"/api/datasets/{DATASET_ID}/episodes/0/video/" in ep.video_urls["observation.images.il-camera"]
 
-    @pytest.mark.asyncio
     async def test_trajectory_length_matches_meta(self, service):
         ep = await service.get_episode(DATASET_ID, 10)
         assert ep.meta.length == len(ep.trajectory_data)
@@ -165,12 +150,10 @@ class TestGetEpisode:
 class TestTrajectory:
     """Test trajectory-only extraction."""
 
-    @pytest.mark.asyncio
     async def test_get_trajectory(self, service):
         traj = await service.get_episode_trajectory(DATASET_ID, 0)
         assert len(traj) > 0
 
-    @pytest.mark.asyncio
     async def test_trajectory_timestamps_increase(self, service):
         traj = await service.get_episode_trajectory(DATASET_ID, 0)
         timestamps = [pt.timestamp for pt in traj]
@@ -181,7 +164,6 @@ class TestTrajectory:
 class TestCameras:
     """Test camera discovery."""
 
-    @pytest.mark.asyncio
     async def test_get_cameras(self, service):
         cameras = await service.get_episode_cameras(DATASET_ID, 0)
         assert "observation.images.il-camera" in cameras
@@ -206,7 +188,6 @@ class TestVideoFilePath:
 class TestEpisodeCacheIntegration:
     """Test LRU cache behavior within the real dataset service."""
 
-    @pytest.mark.asyncio
     async def test_second_request_is_cache_hit(self, service):
         await service.get_episode(DATASET_ID, 0)
         stats_before = service._episode_cache.stats()
@@ -216,7 +197,6 @@ class TestEpisodeCacheIntegration:
 
         assert stats_after.hits == stats_before.hits + 1
 
-    @pytest.mark.asyncio
     async def test_invalidation_forces_reload(self, service):
         await service.get_episode(DATASET_ID, 0)
         assert service._episode_cache.get(DATASET_ID, 0) is not None
@@ -224,10 +204,7 @@ class TestEpisodeCacheIntegration:
         service.invalidate_episode_cache(DATASET_ID, 0)
         assert service._episode_cache.get(DATASET_ID, 0) is None
 
-    @pytest.mark.asyncio
     async def test_prefetch_populates_adjacent_episodes(self, service):
-        import asyncio
-
         # Discover dataset metadata first so prefetch knows total_episodes
         await service.get_dataset(DATASET_ID)
         await service.get_episode(DATASET_ID, 3)
@@ -239,7 +216,6 @@ class TestEpisodeCacheIntegration:
             cached = service._episode_cache.get(DATASET_ID, idx)
             assert cached is not None, f"Episode {idx} should be prefetched"
 
-    @pytest.mark.asyncio
     async def test_trajectory_served_from_cache(self, service):
         await service.get_episode(DATASET_ID, 0)
         stats_before = service._episode_cache.stats()
@@ -254,7 +230,6 @@ class TestEpisodeCacheIntegration:
 class TestNestedDatasetDiscovery:
     """Test discovery of datasets nested under parent folders."""
 
-    @pytest.mark.asyncio
     async def test_discovers_nested_hdf5_datasets(self, tmp_path):
         """Subdirectories with HDF5 files under a parent folder are discovered."""
         parent = tmp_path / "e2emanufacturing"
@@ -272,7 +247,6 @@ class TestNestedDatasetDiscovery:
         assert "e2emanufacturing--session_a" in ids
         assert "e2emanufacturing--session_b" in ids
 
-    @pytest.mark.asyncio
     async def test_nested_datasets_have_group(self, tmp_path):
         """Nested datasets should have their parent folder as the group."""
         parent = tmp_path / "my_project"
@@ -286,7 +260,6 @@ class TestNestedDatasetDiscovery:
         ds = next(d for d in datasets if d.id == "my_project--recording_1")
         assert ds.group == "my_project"
 
-    @pytest.mark.asyncio
     async def test_nested_dataset_path_resolves(self, tmp_path):
         """Nested dataset IDs resolve correctly to filesystem paths."""
         parent = tmp_path / "group"
@@ -301,7 +274,6 @@ class TestNestedDatasetDiscovery:
         assert ds is not None
         assert ds.total_episodes == 1
 
-    @pytest.mark.asyncio
     async def test_flat_datasets_have_no_group(self, tmp_path):
         """Standard top-level datasets should have no group."""
         (tmp_path / "flat_ds").mkdir()
@@ -312,7 +284,6 @@ class TestNestedDatasetDiscovery:
         ds = next(d for d in datasets if d.id == "flat_ds")
         assert ds.group is None
 
-    @pytest.mark.asyncio
     async def test_three_level_nested_datasets_discovered(self, tmp_path):
         """Datasets 3 levels deep are discovered with correct --separated IDs."""
         deep = tmp_path / "project" / "recordings" / "session_1"
@@ -324,7 +295,6 @@ class TestNestedDatasetDiscovery:
         ids = {d.id for d in datasets}
         assert "project--recordings--session_1" in ids
 
-    @pytest.mark.asyncio
     async def test_deep_nested_dataset_group_includes_all_parents(self, tmp_path):
         """Group for 3-level dataset includes all parent segments."""
         deep = tmp_path / "project" / "recordings" / "session_1"
@@ -336,7 +306,6 @@ class TestNestedDatasetDiscovery:
         ds = next(d for d in datasets if d.id == "project--recordings--session_1")
         assert ds.group == "project--recordings"
 
-    @pytest.mark.asyncio
     async def test_deep_nested_dataset_path_resolves(self, tmp_path):
         """3-level nested dataset IDs resolve correctly to filesystem paths."""
         deep = tmp_path / "project" / "recordings" / "session_1"
@@ -349,7 +318,6 @@ class TestNestedDatasetDiscovery:
         assert ds is not None
         assert ds.total_episodes == 1
 
-    @pytest.mark.asyncio
     async def test_six_level_nesting_rejected(self, tmp_path):
         """Dataset IDs with more than 5 segments are rejected."""
         from src.api.services.dataset_service.service import _validate_dataset_id
@@ -357,7 +325,6 @@ class TestNestedDatasetDiscovery:
         with pytest.raises(ValueError, match="too deep"):
             _validate_dataset_id("a--b--c--d--e--f")
 
-    @pytest.mark.asyncio
     async def test_five_level_nesting_accepted(self, tmp_path):
         """Dataset IDs with exactly 5 segments are accepted."""
         from src.api.services.dataset_service.service import _validate_dataset_id
@@ -369,7 +336,6 @@ class TestNestedDatasetDiscovery:
 class TestLocalAnnotationPathResolution:
     """Test that local annotations resolve --separated IDs to nested paths."""
 
-    @pytest.mark.asyncio
     async def test_nested_annotation_path_uses_nested_dirs(self, tmp_path):
         """Annotations for nested datasets use nested filesystem directories."""
         from src.api.storage.local import LocalStorageAdapter
@@ -379,7 +345,6 @@ class TestLocalAnnotationPathResolution:
         expected = tmp_path / "project" / "recordings" / "session_1" / "annotations" / "episodes"
         assert ann_dir == expected
 
-    @pytest.mark.asyncio
     async def test_flat_annotation_path_unchanged(self, tmp_path):
         """Annotations for flat datasets use a single directory level."""
         from src.api.storage.local import LocalStorageAdapter
@@ -412,7 +377,6 @@ class TestDatasetIdToBlobPrefix:
 class TestLabelsPathResolution:
     """Test that labels use nested filesystem paths for -- separated IDs."""
 
-    @pytest.mark.asyncio
     async def test_nested_labels_path_resolves(self, tmp_path):
         """Labels for nested datasets use nested filesystem directories."""
         from src.api.routers.labels import _labels_path_for_base
@@ -421,7 +385,6 @@ class TestLabelsPathResolution:
         expected = tmp_path / "project" / "recordings" / "session_1" / "meta" / "episode_labels.json"
         assert path == expected
 
-    @pytest.mark.asyncio
     async def test_flat_labels_path_unchanged(self, tmp_path):
         """Labels for flat datasets use single directory level."""
         from src.api.routers.labels import _labels_path_for_base
@@ -434,7 +397,6 @@ class TestLabelsPathResolution:
 class TestBlobLabelStorage:
     """Test blob-backed label storage for azure mode."""
 
-    @pytest.mark.asyncio
     async def test_blob_label_load_returns_default_when_missing(self):
         """Loading labels from blob returns defaults when blob doesn't exist."""
         from src.api.routers.labels import _create_label_storage
@@ -449,7 +411,6 @@ class TestBlobLabelStorage:
 class TestCombinedBlobScan:
     """Test combined single-pass blob scanning."""
 
-    @pytest.mark.asyncio
     async def test_scan_all_dataset_ids_returns_both_types(self):
         """scan_all_dataset_ids discovers both LeRobot and HDF5 datasets."""
         from src.api.storage.blob_dataset import BlobDatasetProvider
@@ -475,7 +436,6 @@ class TestGetBlobPrefix:
 class TestBlobSyncTempPrefixes:
     """Test temp-directory prefixes used for blob dataset sync."""
 
-    @pytest.mark.asyncio
     async def test_blob_sync_prefix_excludes_path_separators(self, tmp_path, monkeypatch):
         class FakeBlobProvider:
             async def sync_dataset_to_local(self, dataset_id: str, local_dir: Path) -> bool:
@@ -495,7 +455,6 @@ class TestBlobSyncTempPrefixes:
         with pytest.raises(ValueError, match="Invalid dataset identifier"):
             await service._ensure_blob_synced("../escape")
 
-    @pytest.mark.asyncio
     async def test_blob_meta_sync_prefix_excludes_path_separators(self, tmp_path, monkeypatch):
         class FakeBlobProvider:
             async def sync_meta_only_to_local(self, dataset_id: str, local_dir: Path) -> bool:
@@ -535,7 +494,6 @@ def _create_hdf5_with_images(path, num_frames=10, num_joints=6, width=64, height
 class TestHDF5VideoGeneration:
     """Test on-demand mp4 video generation from HDF5 image data."""
 
-    @pytest.mark.asyncio
     async def test_hdf5_episode_provides_video_url(self, tmp_path):
         """HDF5 episodes with cameras should populate video_urls."""
         ds_dir = tmp_path / "cam_dataset"
@@ -549,9 +507,14 @@ class TestHDF5VideoGeneration:
         assert episode is not None
         assert len(episode.video_urls) > 0
 
-    @pytest.mark.asyncio
     async def test_hdf5_video_file_created_on_access(self, tmp_path):
         """Accessing video path generates and caches an mp4 file."""
+        import importlib.util
+        import shutil
+
+        if shutil.which("ffmpeg") is None and importlib.util.find_spec("cv2") is None:
+            pytest.skip("Requires ffmpeg or cv2 for video encoding")
+
         from src.api.services.dataset_service.hdf5_handler import HDF5FormatHandler
 
         ds_dir = tmp_path / "vid_dataset"
@@ -566,7 +529,6 @@ class TestHDF5VideoGeneration:
         assert Path(video_path).exists()
         assert Path(video_path).suffix == ".mp4"
 
-    @pytest.mark.asyncio
     async def test_hdf5_single_frame_uses_slice(self, tmp_path):
         """get_frame_image should load only the requested frame, not the full array."""
         from src.api.services.dataset_service.hdf5_handler import HDF5FormatHandler
@@ -586,7 +548,6 @@ class TestHDF5VideoGeneration:
 class TestBlobTempDirCleanup:
     """Test that blob sync temp directories are cleaned up properly."""
 
-    @pytest.mark.asyncio
     async def test_evict_dataset_removes_synced_temp_dir(self, tmp_path):
         """Evicting a dataset cleans up its blob sync temp directory."""
         service = DatasetService(base_path=str(tmp_path))
@@ -600,7 +561,6 @@ class TestBlobTempDirCleanup:
         assert not fake_dir.exists()
         assert "test_ds" not in service._blob_synced
 
-    @pytest.mark.asyncio
     async def test_evict_dataset_removes_meta_synced_temp_dir(self, tmp_path):
         """Evicting a dataset cleans up its meta sync temp directory."""
         service = DatasetService(base_path=str(tmp_path))

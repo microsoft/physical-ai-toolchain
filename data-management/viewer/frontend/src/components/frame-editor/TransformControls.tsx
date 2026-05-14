@@ -130,7 +130,7 @@ export function TransformControls({
 
         <div className="flex items-end gap-2">
           <div className="flex-1">
-            <Label htmlFor="resize-width" className="text-xs text-muted-foreground">
+            <Label htmlFor="resize-width" className="text-muted-foreground text-xs">
               Width
             </Label>
             <Input
@@ -147,14 +147,14 @@ export function TransformControls({
           <button
             type="button"
             onClick={() => setMaintainAspect(!maintainAspect)}
-            className="p-2 text-muted-foreground transition-colors hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground p-2 transition-colors"
             title={maintainAspect ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
           >
             {maintainAspect ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
           </button>
 
           <div className="flex-1">
-            <Label htmlFor="resize-height" className="text-xs text-muted-foreground">
+            <Label htmlFor="resize-height" className="text-muted-foreground text-xs">
               Height
             </Label>
             <Input
@@ -171,7 +171,7 @@ export function TransformControls({
 
         {/* Presets */}
         <div className="flex flex-wrap gap-1">
-          <span className="mr-2 text-xs text-muted-foreground">Presets:</span>
+          <span className="text-muted-foreground mr-2 text-xs">Presets:</span>
           <Button
             variant="outline"
             size="sm"
@@ -225,7 +225,7 @@ export function TransformControls({
 
       {/* Current transform info */}
       {globalTransform && (
-        <div className="rounded bg-muted p-2 text-xs text-muted-foreground">
+        <div className="bg-muted text-muted-foreground rounded-sm p-2 text-xs">
           <div className="mb-1 font-medium">Current Transform:</div>
           {globalTransform.crop && (
             <div>

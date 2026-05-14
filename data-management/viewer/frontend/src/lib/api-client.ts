@@ -56,6 +56,20 @@ export async function mutationHeaders(): Promise<Record<string, string>> {
   return { 'X-CSRF-Token': await getCsrfToken(), ...(await getAuthHeaders()) }
 }
 
+/** Fetch wrapper that attaches CSRF + auth headers; caller headers win on key collision. */
+export async function mutationFetch(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+): Promise<Response> {
+  const method = (init.method ?? 'GET').toUpperCase()
+  const needsCsrf = method !== 'GET' && method !== 'HEAD'
+  const baseHeaders = needsCsrf ? await mutationHeaders() : await requestHeaders()
+  return fetch(input, {
+    ...init,
+    headers: { ...baseHeaders, ...(init.headers ?? {}) },
+  })
+}
+
 /** Reset cached CSRF token (for testing). */
 export function _resetCsrfToken(): void {
   _csrfToken = null
@@ -82,6 +96,22 @@ export function transformKeys<T>(obj: unknown): T {
     ) as T
   }
   return obj as T
+}
+
+/**
+ * Apply transformKeys to a dataset payload while preserving the original
+ * `features` map keys (camera/feature names like ``observation.images.front``
+ * must not be camelCased).
+ */
+function preserveDatasetFeatureKeys(raw: Record<string, unknown>): DatasetInfo {
+  const originalFeatures = raw.features as Record<string, unknown> | undefined
+  const dataset = transformKeys<DatasetInfo>(raw)
+  if (originalFeatures) {
+    dataset.features = Object.fromEntries(
+      Object.entries(originalFeatures).map(([key, value]) => [key, transformKeys(value)]),
+    ) as DatasetInfo['features']
+  }
+  return dataset
 }
 
 /**
@@ -131,7 +161,8 @@ export async function fetchDatasets(): Promise<DatasetInfo[]> {
   const response = await fetch(`${API_BASE}/datasets`, {
     headers: await requestHeaders(),
   })
-  return handleResponse<DatasetInfo[]>(response)
+  const raw = await handleResponse<Array<Record<string, unknown>>>(response)
+  return raw.map(preserveDatasetFeatureKeys)
 }
 
 /**
@@ -141,7 +172,8 @@ export async function fetchDataset(datasetId: string): Promise<DatasetInfo> {
   const response = await fetch(`${API_BASE}/datasets/${datasetId}`, {
     headers: await requestHeaders(),
   })
-  return handleResponse<DatasetInfo>(response)
+  const raw = await handleResponse<Record<string, unknown>>(response)
+  return preserveDatasetFeatureKeys(raw)
 }
 
 /**

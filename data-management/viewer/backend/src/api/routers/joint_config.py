@@ -76,7 +76,7 @@ _DEFAULT_GROUPS: list[dict] = [
 
 
 def _get_base_path() -> str:
-    return os.environ.get("HMI_DATA_PATH", "./data")
+    return os.environ.get("DATA_DIR", "./data")
 
 
 def _dataset_config_path(dataset_id: str) -> Path:

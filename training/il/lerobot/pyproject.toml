@@ -2,26 +2,25 @@
 name = "robotics-training-il"
 version = "0.1.0"
 description = "LeRobot workflow runtime dependencies"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.12"
 dependencies = [
-    "numpy==1.26.4",
-    "azure-core==1.38.1",
-    "azure-storage-blob==12.19.0",
-    "azure-identity==1.25.2",
-    "azure-ai-ml==1.31.0",
-    "marshmallow==4.2.3",
-    "mlflow==3.11.1",
-    "packaging==25.0",
+    "numpy==2.4.4",
+    "azure-core==1.41.0",
+    "azure-storage-blob==12.28.0",
+    "azure-identity==1.25.3",
+    "azure-ai-ml==1.33.0",
+    "marshmallow==4.3.0",
+    "mlflow==3.12.0",
+    "packaging==26.2",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "azureml-mlflow==1.61.0.post1",
-    "datasets==4.8.4",
-    "huggingface-hub[hf_xet]==0.36.2",
-    "lerobot==0.3.3",
-    "pyarrow==23.0.1",
-    "torchcodec==0.11.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
-    "wandb==0.25.1",
+    "datasets==4.8.5",
+    "huggingface-hub[hf_xet]==1.14.0",
+    "lerobot==0.5.1",
+    "pyarrow==24.0.0",
+    "torchcodec==0.11.1; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "wandb==0.26.1",
 ]
 
 [build-system]

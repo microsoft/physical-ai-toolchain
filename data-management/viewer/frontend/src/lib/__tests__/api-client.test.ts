@@ -1,47 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  _resetCsrfToken,
+  installFetchMock,
+  jsonResponse,
+  mockFetch,
+  mockMutationFetch,
+} from '@/test-utils/fetch-mocks'
+
+import {
   ApiClientError,
   deleteAnnotations,
   fetchAnnotations,
   fetchAnnotationSummary,
+  fetchCacheStats,
+  fetchCapabilities,
   fetchDataset,
   fetchDatasets,
   fetchEpisode,
   fetchEpisodes,
+  mutationFetch,
+  mutationHeaders,
   saveAnnotation,
   triggerAutoAnalysis,
+  warmCache,
 } from '../api-client'
 
-const mockFetch = vi.fn()
-
-/** Mock a successful CSRF token response followed by the API response. */
-function mockMutationFetch(apiResponse: ReturnType<typeof jsonResponse>) {
-  mockFetch
-    .mockResolvedValueOnce(jsonResponse({ csrf_token: 'test-token' }))
-    .mockResolvedValueOnce(apiResponse)
-}
-
 beforeEach(() => {
-  mockFetch.mockReset()
-  _resetCsrfToken()
-  vi.stubGlobal('fetch', mockFetch)
+  installFetchMock({ csrf: false })
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
-
-function jsonResponse(data: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(data),
-  }
-}
-
 describe('ApiClientError', () => {
   it('captures code, status, and details', () => {
     const err = new ApiClientError('not found', 'NOT_FOUND', 404, { id: '1' })
@@ -64,7 +54,9 @@ describe('fetchDatasets', () => {
   })
 
   it('throws ApiClientError on failure', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse({ code: 'SERVER_ERROR', message: 'boom' }, 500))
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ code: 'SERVER_ERROR', message: 'boom' }, { status: 500 }),
+    )
 
     await expect(fetchDatasets()).rejects.toThrow(ApiClientError)
   })
@@ -219,7 +211,7 @@ describe('fetchAnnotationSummary', () => {
 describe('error handling', () => {
   it('creates ApiClientError from JSON error response', async () => {
     mockFetch.mockResolvedValueOnce(
-      jsonResponse({ code: 'DATASET_NOT_FOUND', message: 'Dataset not found' }, 404),
+      jsonResponse({ code: 'DATASET_NOT_FOUND', message: 'Dataset not found' }, { status: 404 }),
     )
 
     try {
@@ -234,12 +226,13 @@ describe('error handling', () => {
   })
 
   it('handles non-JSON error responses', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-      json: () => Promise.reject(new Error('not json')),
-    })
+    mockFetch.mockResolvedValueOnce(
+      new Response('not json body', {
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { 'content-type': 'text/plain' },
+      }),
+    )
 
     try {
       await fetchDatasets()
@@ -250,5 +243,116 @@ describe('error handling', () => {
       expect(apiErr.code).toBe('UNKNOWN_ERROR')
       expect(apiErr.message).toBe('Internal Server Error')
     }
+  })
+})
+
+describe('CSRF token failures', () => {
+  it('rejects mutationHeaders when the CSRF endpoint fails', async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+
+    await expect(mutationHeaders()).rejects.toThrow(/CSRF token/i)
+  })
+
+  it('rejects mutationHeaders when the CSRF fetch network errors', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('network down'))
+
+    await expect(mutationHeaders()).rejects.toThrow(/network down/i)
+  })
+})
+
+describe('fetchCapabilities', () => {
+  it('GETs /api/datasets/:id/capabilities and camelCases the response', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ supports_annotations: true }))
+
+    const result = await fetchCapabilities('ds-1')
+    expect(result).toEqual({ supportsAnnotations: true })
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/capabilities', { headers: {} })
+  })
+})
+
+describe('fetchCacheStats', () => {
+  it('GETs /api/datasets/cache/stats and camelCases the response', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ total_bytes: 100, max_memory_bytes: 200 }))
+
+    const result = await fetchCacheStats()
+    expect(result).toEqual({ totalBytes: 100, maxMemoryBytes: 200 })
+  })
+})
+
+describe('warmCache', () => {
+  it('POSTs to /api/datasets/:id/cache/warm with the count query', async () => {
+    mockMutationFetch(jsonResponse({}))
+
+    await warmCache('ds-1', 3)
+
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      '/api/datasets/ds-1/cache/warm?count=3',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+})
+
+describe('mutationFetch', () => {
+  it('skips CSRF fetch and omits X-CSRF-Token for GET requests', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }))
+
+    await mutationFetch('/api/thing')
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    const [url, init] = mockFetch.mock.calls[0]
+    expect(url).toBe('/api/thing')
+    const headers = (init as RequestInit).headers as Record<string, string>
+    expect(headers).not.toHaveProperty('X-CSRF-Token')
+  })
+
+  it('skips CSRF fetch and omits X-CSRF-Token for HEAD requests', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({}))
+
+    await mutationFetch('/api/thing', { method: 'HEAD' })
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    const [, init] = mockFetch.mock.calls[0]
+    const headers = (init as RequestInit).headers as Record<string, string>
+    expect(headers).not.toHaveProperty('X-CSRF-Token')
+  })
+
+  it.each(['POST', 'PUT', 'DELETE', 'PATCH'])(
+    'fetches CSRF and attaches X-CSRF-Token for %s requests',
+    async (method) => {
+      mockMutationFetch(jsonResponse({ ok: true }))
+
+      await mutationFetch('/api/thing', { method })
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/csrf-token')
+      const [, init] = mockFetch.mock.calls[1]
+      const headers = (init as RequestInit).headers as Record<string, string>
+      expect(headers['X-CSRF-Token']).toBe('test-csrf-token')
+    },
+  )
+
+  it('treats lowercase method names as their canonical uppercase form', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+
+    await mutationFetch('/api/thing', { method: 'post' })
+
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockFetch.mock.calls[0][0]).toBe('/api/csrf-token')
+    const [, init] = mockFetch.mock.calls[1]
+    const headers = (init as RequestInit).headers as Record<string, string>
+    expect(headers['X-CSRF-Token']).toBe('test-csrf-token')
+  })
+
+  it('lets caller-provided headers win on key collision with X-CSRF-Token', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+
+    await mutationFetch('/api/thing', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': 'caller-override' },
+    })
+
+    const [, init] = mockFetch.mock.calls[1]
+    const headers = (init as RequestInit).headers as Record<string, string>
+    expect(headers['X-CSRF-Token']).toBe('caller-override')
   })
 })

@@ -55,6 +55,25 @@ updates:
       prefix: "chore"
       include: "scope"
 
+  # Python dependencies for imitation learning (LeRobot)
+  - package-ecosystem: "pip"
+    directory: "/training/il/lerobot"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      lerobot-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "python"
+      - "training"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
   # Python dependencies for evaluation
   - package-ecosystem: "pip"
     directory: "/evaluation"
@@ -66,6 +85,17 @@ updates:
       inference-dependencies:
         patterns:
           - "*"
+    # Upper-bound caps from azure-ai-ml<2 and lerobot<0.6 transitive constraints.
+    # Revisit when those packages release versions that lift the caps.
+    ignore:
+      - dependency-name: "marshmallow"
+        versions: [">=4.0.0"]
+      - dependency-name: "torch"
+        versions: [">=2.11.0"]
+      - dependency-name: "numpy"
+        versions: [">=2.3.0"]
+      - dependency-name: "packaging"
+        versions: [">=26.0"]
     labels:
       - "dependencies"
       - "python"
@@ -140,6 +170,12 @@ updates:
       github-actions:
         patterns:
           - "*"
+        exclude-patterns:
+          - "github/gh-aw-actions/*"
+    # gh-aw-actions SHAs are managed by the gh-aw compiler (lock files).
+    # Dependabot must not bump them independently.
+    ignore:
+      - dependency-name: "github/gh-aw-actions/*"
     labels:
       - "dependencies"
       - "github-actions"
@@ -191,11 +227,14 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
     groups:
-      dataviewer-frontend-dependencies:
+      dataviewer-frontend-patch-minor:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "npm"

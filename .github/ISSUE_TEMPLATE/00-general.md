@@ -54,14 +54,14 @@ Include any relevant information:
 
 <!-- Fill in if relevant to your issue -->
 
-| Component | Version                   |
-|-----------|---------------------------|
-| OS        | Ubuntu 22.04 / Windows 11 |
-| Python    | 3.10.x / 3.11.x           |
-| Terraform | 1.9.x                     |
-| Azure CLI | 2.x                       |
-| Isaac Sim | 4.5 / 5.0                 |
-| GPU       | NVIDIA RTX / A100         |
+| Component | Version                            |
+|-----------|------------------------------------|
+| OS        | Ubuntu 22.04 / Windows 11          |
+| Python    | 3.10.x / 3.11.x / 3.12.x          |
+| Terraform | 1.9.x                              |
+| Azure CLI | 2.x                                |
+| Isaac Sim | 4.5 / 5.0                          |
+| GPU       | NVIDIA RTX / A100                  |
 
 ## Additional Notes
 

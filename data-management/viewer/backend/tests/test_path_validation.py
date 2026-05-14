@@ -200,7 +200,7 @@ class TestEndpointTraversalRejection:
     @pytest.fixture
     def client(self, tmp_path):
         """Lightweight test client that does not require a real dataset directory."""
-        os.environ["HMI_DATA_PATH"] = str(tmp_path)
+        os.environ["DATA_DIR"] = str(tmp_path)
 
         import src.api.services.dataset_service as ds_mod
 

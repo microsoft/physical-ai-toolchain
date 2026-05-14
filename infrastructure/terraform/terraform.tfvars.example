@@ -144,6 +144,10 @@ reports_archive_tier_days              = 180
 // should_deploy_dce                = true
 // should_enable_aml_diagnostic_logs = false
 
+// AzureML workspace managed network isolation is independent from private endpoints.
+// Valid values: Disabled, AllowInternetOutbound, AllowOnlyApprovedOutbound.
+aml_managed_network_isolation_mode = "AllowOnlyApprovedOutbound"
+
 // AzureML Managed Compute (disabled by default)
 // Enable to provision GPU compute directly in the AzureML workspace.
 // should_deploy_aml_compute = false

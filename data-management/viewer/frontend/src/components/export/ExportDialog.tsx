@@ -115,7 +115,7 @@ export function ExportDialog({ open, onOpenChange, datasetId, episodeIndices }: 
               <Label htmlFor="include-subtasks">Include subtask metadata</Label>
             </div>
 
-            <div className="space-y-1 text-sm text-muted-foreground">
+            <div className="text-muted-foreground space-y-1 text-sm">
               <div>Episodes to export: {episodeIndices.length}</div>
               {totalFrames > 0 && (
                 <div>

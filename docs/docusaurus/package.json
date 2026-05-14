@@ -15,29 +15,29 @@
     "test": "jest"
   },
   "dependencies": {
-    "@docusaurus/core": "3.10.0",
-    "@docusaurus/plugin-client-redirects": "3.10.0",
-    "@docusaurus/preset-classic": "3.10.0",
+    "@docusaurus/core": "3.10.1",
+    "@docusaurus/plugin-client-redirects": "3.10.1",
+    "@docusaurus/preset-classic": "3.10.1",
     "@mdx-js/react": "3.1.1",
     "clsx": "2.1.1",
     "docusaurus-plugin-image-zoom": "3.0.1",
     "prism-react-renderer": "2.4.1",
-    "react": "19.2.5",
-    "react-dom": "19.2.5"
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
-    "@docusaurus/module-type-aliases": "3.10.0",
-    "@docusaurus/tsconfig": "3.10.0",
-    "@docusaurus/types": "3.10.0",
+    "@docusaurus/module-type-aliases": "3.10.1",
+    "@docusaurus/tsconfig": "3.10.1",
+    "@docusaurus/types": "3.10.1",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",
     "@types/jest": "30.0.0",
     "@types/react": "19.2.14",
     "identity-obj-proxy": "3.0.0",
-    "jest": "30.3.0",
-    "jest-environment-jsdom": "30.3.0",
+    "jest": "30.4.2",
+    "jest-environment-jsdom": "30.4.1",
     "ts-jest": "29.4.9",
-    "typescript": "6.0.2"
+    "typescript": "6.0.3"
   },
   "overrides": {
     "express": "4.22.1",

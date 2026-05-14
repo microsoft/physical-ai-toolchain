@@ -4,6 +4,7 @@ import {
   createDefaultAnomalyAnnotation,
   createDefaultDataQuality,
   createDefaultEpisodeAnnotation,
+  createDefaultLanguageInstruction,
   createDefaultTaskCompleteness,
   createDefaultTrajectoryQuality,
 } from '../annotations'
@@ -55,6 +56,17 @@ describe('annotation default factories', () => {
       expect(ann.trajectoryQuality.overallScore).toBe(3)
       expect(ann.dataQuality.overallQuality).toBe('good')
       expect(ann.anomalies.anomalies).toEqual([])
+    })
+  })
+
+  describe('createDefaultLanguageInstruction', () => {
+    it('returns a blank human-source English instruction with empty lists', () => {
+      const li = createDefaultLanguageInstruction()
+      expect(li.instruction).toBe('')
+      expect(li.source).toBe('human')
+      expect(li.language).toBe('en')
+      expect(li.paraphrases).toEqual([])
+      expect(li.subtaskInstructions).toEqual([])
     })
   })
 })

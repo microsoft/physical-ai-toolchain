@@ -78,8 +78,8 @@ export function ActivityFeed({
       <CardContent className="p-0">
         {sortedActivities.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-12 text-center">
-            <Clock className="h-8 w-8 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">No recent activity</p>
+            <Clock className="text-muted-foreground/50 h-8 w-8" />
+            <p className="text-muted-foreground text-sm">No recent activity</p>
           </div>
         ) : (
           <ScrollArea style={{ maxHeight }}>
@@ -92,7 +92,7 @@ export function ActivityFeed({
                 return (
                   <div
                     key={activity.id}
-                    className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/50"
+                    className="hover:bg-muted/50 flex items-start gap-3 px-4 py-3 transition-colors"
                   >
                     {/* Icon */}
                     <div
@@ -112,17 +112,17 @@ export function ActivityFeed({
                           {config.label}
                         </Badge>
                       </div>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <div className="text-muted-foreground flex items-center gap-2 text-sm">
                         <FileText className="h-3.5 w-3.5 shrink-0" />
                         <span className="truncate">{activity.episode_id}</span>
                       </div>
                       {activity.summary && (
-                        <p className="truncate text-xs text-muted-foreground">{activity.summary}</p>
+                        <p className="text-muted-foreground truncate text-xs">{activity.summary}</p>
                       )}
                     </div>
 
                     {/* Time */}
-                    <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                    <div className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
                       <Clock className="h-3 w-3" />
                       <span>{formatTime(activity.timestamp)}</span>
                     </div>

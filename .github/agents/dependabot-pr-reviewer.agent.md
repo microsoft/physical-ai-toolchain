@@ -91,6 +91,119 @@ Render the review body as markdown in this order:
   * The PR diff touches `.github/workflows/**`.
   * The PR author is not `dependabot[bot]`.
 
+## Validation Signal
+
+The agent runs via `workflow_run` AFTER the `PR Validation` orchestrator
+has reached a terminal conclusion. The deterministic CI signal is therefore
+always final — there is no `pending` or `in_progress:*` state to handle.
+Do not invoke `uv`, `pytest`, `npm ci`, `terraform`, or `go` from the bash
+tool — those binaries live on the host runner and are not visible inside
+the AWF firewall sandbox.
+
+The orchestrator's overall conclusion is injected into the prompt as
+`PR_VALIDATION_CONCLUSION` (one of `success`, `failure`, `cancelled`,
+`timed_out`, `neutral`, `skipped`, `action_required`, or `unknown`).
+The list of failing per-surface check-runs (JSON array of
+`{name, html_url, conclusion}`) is injected as `PR_VALIDATION_FAILING_CHECKS`.
+Read both directly from the environment. Do NOT call
+`checks.listForRef` or `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`
+— the workflow's resolver step already did that work.
+
+### Reference: Surface to Check Run Naming
+
+Informational reference for interpreting entries in
+`PR_VALIDATION_FAILING_CHECKS`. The persona does NOT walk this map via the
+checks API — the workflow's resolver step already enumerated failing
+check-runs server-side. Use this table only to map a failing check name
+back to the dependency surface it covers when composing the review body.
+
+| Surface | Authoritative check runs |
+| --- | --- |
+| dataviewer-frontend | `Dataviewer Frontend Tests` |
+| python-runtime (dataviewer) | `Dataviewer Backend Pytest`, `Pytest Data Management Tools`, `Python Lint` |
+| python-runtime (evaluation) | `Evaluation Pytest Tests`, `Pytest Inference`, `Python Lint` |
+| python-runtime (training) | `Pytest Training`, `Python Lint` |
+| training-rl-abi | `Pytest Training` (hosted CI cannot exercise Isaac Sim GPU paths) |
+| terraform-providers | `Terraform Validation`, `Terraform Lint`, `Terraform Tests` |
+| terraform-modules | `Terraform Tests`, `Terraform Validation` |
+| gomod | `Go Tests`, `Go Lint` |
+| docker | `Binary Integrity Check`, `Binary Dependency Freshness` |
+| github-actions | `Workflow Permissions Scan`, `SHA Staleness Check`, `Dependency Pinning Scan` |
+
+### Static Impact Reasoning
+
+Complement the CI signal with manifest-level reasoning the sandbox CAN do
+safely using `cat`, `grep`, `jq`, `npm view`, and `web-fetch`. These checks
+must run regardless of CI conclusion:
+
+* **Isaac Sim ABI guard (training-rl-abi).** When the diff touches
+  `training/rl/requirements.txt` or `training/rl/pyproject.toml`, read
+  `training/rl/scripts/train.sh` and confirm the pin
+  `numpy>=1.26.0,<2.0.0` is still satisfied by the resolved version in
+  `training/rl/requirements.txt`. A `numpy` 2.x bump MUST be flagged as
+  high-risk regardless of advisory severity or CI conclusion. Cite both file
+  paths in the comment.
+* **Torch / tensordict / onnxruntime-gpu.** A major bump invalidates GPU
+  smoke testing; flag as high-risk and note that hosted CI cannot validate
+  Isaac Sim behavior.
+* **Dataviewer frontend peer-dep conflicts.** Run
+  `npm view <pkg>@<new-version> peerDependencies` and compare against the
+  pinned `react`, `vite`, `typescript`, and `tailwindcss` versions in
+  `data-management/viewer/frontend/package.json`. Quote any peer-dep range
+  the new version breaches.
+* **Terraform provider majors.** Read the upstream provider changelog via
+  `web-fetch` (registry.terraform.io or the provider repo `CHANGELOG.md`)
+  and quote any breaking input/output rename relevant to the modules under
+  `infrastructure/terraform/`.
+* **Go module direct majors.** Quote the affected `go.mod` `module` line(s)
+  from the diff and note whether replace/retract directives changed.
+
+### Reporting
+
+Include a `### Validation Signal` block in the per-package section of the
+review body with three parts:
+
+1. **Deterministic CI:** quote the orchestrator conclusion as
+   `PR Validation: <conclusion>` followed by a bullet list rendered from
+   `PR_VALIDATION_FAILING_CHECKS` (entries are `{name, html_url, conclusion}`).
+   When `conclusion != success`, list every failing entry. When
+   `conclusion == success`, state "all per-surface check-runs passed".
+2. **Static impact reasoning:** one or two sentences citing the static
+   checks above. Always include the Isaac Sim ABI line when
+   `training/rl/requirements.txt` is in the diff, even on minor bumps.
+3. **Banner:** if any high-risk trigger fired (advisory severity, ABI guard
+   violation, peer-dep conflict, breaking-changelog quote), prepend
+   `⚠️ Maintainer review recommended` to the top of the review body once.
+
+If `PR_VALIDATION_CONCLUSION` is `neutral`, `skipped`, or `unknown`, or if
+`PR_DEPENDABOT_SKIP_REASON == 'pr-resolution-failed'`, prepend the caution
+banner described in Verdict Adjustment and keep the verdict at `COMMENT`.
+
+### Verdict Adjustment
+
+Map every terminal conclusion explicitly. Under `workflow_run`,
+`PR_VALIDATION_CONCLUSION` is always final — there are no `pending` or
+`in_progress:*` branches to consider.
+
+* `PR_VALIDATION_CONCLUSION == success` AND no static check raises a
+  concern AND no sticky high-risk trigger fires → verdict MAY upgrade
+  from `COMMENT` to `APPROVE`. Rationale must reference the orchestrator
+  conclusion plus a green `PR_VALIDATION_FAILING_CHECKS` (empty array).
+* `PR_VALIDATION_CONCLUSION ∈ {failure, cancelled, timed_out, action_required}`
+  → verdict stays at `COMMENT`. Body MUST quote each entry from
+  `PR_VALIDATION_FAILING_CHECKS` (`name` plus `html_url`). Do NOT skip
+  enrichment — maintainers rely on the advisory output to triage which
+  package in a grouped PR caused the failure.
+* `PR_VALIDATION_CONCLUSION ∈ {neutral, skipped, unknown}` OR
+  `PR_DEPENDABOT_SKIP_REASON == 'pr-resolution-failed'` → verdict stays
+  at `COMMENT`. Prepend the banner
+  `> [!CAUTION]`
+  `> Deterministic CI signal unavailable (\`{conclusion}\`); review is advisory only.`
+  to the top of the review body.
+* The Isaac Sim ABI guard is sticky: a `numpy` 2.x bump keeps the verdict
+  at `COMMENT` and forces the `⚠️ Maintainer review recommended` banner
+  regardless of CI conclusion.
+
 ## Forbidden Actions
 
 * No `git push`, no branch creation, no branch deletion.

@@ -1,5 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -10,11 +9,7 @@ import {
   type WorkspaceDiagnosticsSummaryInput,
 } from '@/components/annotation-workspace/annotation-workspace-diagnostics'
 import { AnnotationWorkspaceDiagnosticsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceDiagnosticsPanel'
-
-function renderWithQuery(ui: React.ReactElement) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
-}
+import { renderWithQuery } from '@/test-utils/render'
 
 const baseEvents = [
   {

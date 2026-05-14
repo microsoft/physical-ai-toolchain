@@ -137,7 +137,7 @@ export function AddIssueDialog({ open, onClose, onAdd, currentFrame }: AddIssueD
                 aria-labelledby="issue-frames-label"
               >
                 <div className="flex-1 space-y-1">
-                  <span className="text-xs text-muted-foreground">Start frame</span>
+                  <span className="text-muted-foreground text-xs">Start frame</span>
                   <Input
                     id="issue-frame-start"
                     type="number"
@@ -149,7 +149,7 @@ export function AddIssueDialog({ open, onClose, onAdd, currentFrame }: AddIssueD
                 </div>
                 <span className="text-muted-foreground">to</span>
                 <div className="flex-1 space-y-1">
-                  <span className="text-xs text-muted-foreground">End frame</span>
+                  <span className="text-muted-foreground text-xs">End frame</span>
                   <Input
                     id="issue-frame-end"
                     type="number"

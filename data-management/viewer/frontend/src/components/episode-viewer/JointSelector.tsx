@@ -93,7 +93,7 @@ function InlineEdit({
       onChange={(e) => setText(e.target.value)}
       onKeyDown={handleKeyDown}
       onBlur={onCancel}
-      className="w-20 border-b border-primary bg-transparent text-xs outline-none"
+      className="border-primary w-20 border-b bg-transparent text-xs outline-hidden"
     />
   )
 }
@@ -136,14 +136,14 @@ function SortableChip({
   }
 
   const chipClasses = cn(
-    'inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border transition-all',
+    'inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded-sm border transition-all',
     isSelected ? 'border-current font-medium' : 'border-transparent opacity-40 hover:opacity-70',
   )
 
   if (editingJoint === idx) {
     return (
       <div ref={setNodeRef} data-joint-chip className={chipClasses} style={style}>
-        <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: color }} />
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
         <InlineEdit value={label} onCommit={onCommitEdit} onCancel={onCancelEdit} />
       </div>
     )
@@ -160,7 +160,7 @@ function SortableChip({
       {...attributes}
       {...listeners}
     >
-      <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: color }} />
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
       {label}
     </button>
   )
@@ -205,7 +205,7 @@ function DroppableGroup({
         ref={setNodeRef}
         data-group-id={groupId}
         className={cn(
-          'flex items-center gap-1 rounded px-0.5 transition-colors',
+          'flex items-center gap-1 rounded-sm px-0.5 transition-colors',
           isOver && 'bg-accent/40',
         )}
       >
@@ -321,7 +321,7 @@ export function JointSelector({
   }
 
   if (jointCount === 0) {
-    return <span className="text-sm text-muted-foreground">No joints available</span>
+    return <span className="text-muted-foreground text-sm">No joints available</span>
   }
 
   const allGroupedIndices = new Set(groups.flatMap((g) => g.indices))
@@ -353,7 +353,7 @@ export function JointSelector({
       <button
         onClick={() => toggleGroup(group.indices)}
         className={cn(
-          'whitespace-nowrap text-xs font-medium transition-colors',
+          'text-xs font-medium whitespace-nowrap transition-colors',
           allActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
         )}
       >
@@ -375,7 +375,7 @@ export function JointSelector({
           </ContextMenuItem>
           {onDeleteGroup && (
             <ContextMenuItem
-              className="text-xs text-destructive focus:text-destructive"
+              className="text-destructive focus:text-destructive text-xs"
               onSelect={() => onDeleteGroup(group.id)}
             >
               Delete Grouping
@@ -422,10 +422,10 @@ export function JointSelector({
           <button
             onClick={selectAll}
             className={cn(
-              'rounded border px-2 py-0.5 text-xs transition-colors',
+              'rounded-sm border px-2 py-0.5 text-xs transition-colors',
               selectedJoints.length === jointCount
                 ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-transparent bg-muted text-muted-foreground hover:border-border',
+                : 'bg-muted text-muted-foreground hover:border-border border-transparent',
             )}
           >
             All
@@ -433,10 +433,10 @@ export function JointSelector({
           <button
             onClick={clearAll}
             className={cn(
-              'rounded border px-2 py-0.5 text-xs transition-colors',
+              'rounded-sm border px-2 py-0.5 text-xs transition-colors',
               selectedJoints.length === 0
                 ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-transparent bg-muted text-muted-foreground hover:border-border',
+                : 'bg-muted text-muted-foreground hover:border-border border-transparent',
             )}
           >
             None
@@ -444,7 +444,7 @@ export function JointSelector({
           {onOpenDefaults && (
             <button
               onClick={onOpenDefaults}
-              className="rounded border border-transparent bg-muted px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:border-border"
+              className="bg-muted text-muted-foreground hover:border-border rounded-sm border border-transparent px-1.5 py-0.5 text-xs transition-colors"
               aria-label="Edit joint defaults"
               title="Edit joint defaults"
             >
@@ -472,7 +472,7 @@ export function JointSelector({
                 <button
                   onClick={() => toggleGroup(otherIndices)}
                   className={cn(
-                    'whitespace-nowrap text-xs font-medium transition-colors',
+                    'text-xs font-medium whitespace-nowrap transition-colors',
                     otherIndices.every((i) => selectedJoints.includes(i))
                       ? 'text-foreground'
                       : 'text-muted-foreground hover:text-foreground',
@@ -490,11 +490,11 @@ export function JointSelector({
       <DragOverlay>
         {activeIdx !== null && (
           <button
-            className="inline-flex items-center gap-1 rounded border border-current px-1.5 py-0.5 text-xs font-medium shadow-lg"
+            className="inline-flex items-center gap-1 rounded-sm border border-current px-1.5 py-0.5 text-xs font-medium shadow-lg"
             style={{ color: getJointColor(activeIdx, colors) }}
           >
             <span
-              className="h-2 w-2 flex-shrink-0 rounded-full"
+              className="h-2 w-2 shrink-0 rounded-full"
               style={{ backgroundColor: getJointColor(activeIdx, colors) }}
             />
             {resolveLabel(activeIdx)}

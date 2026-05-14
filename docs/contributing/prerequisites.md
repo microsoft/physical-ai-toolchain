@@ -30,7 +30,7 @@ Install these tools before contributing:
 | kubectl        | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
 | Helm           | 3.16            | <https://helm.sh/docs/intro/install/>                                 |
 | Node.js/npm    | 20+ LTS         | <https://nodejs.org/>                                                 |
-| Python         | 3.11+           | <https://www.python.org/downloads/>                                   |
+| Python         | 3.12+           | <https://www.python.org/downloads/>                                   |
 | shellcheck     | 0.10+           | <https://www.shellcheck.net/>                                         |
 | uv             | latest          | <https://docs.astral.sh/uv/>                                          |
 | Go             | 1.24+           | <https://go.dev/dl/>                                                  |
@@ -39,6 +39,9 @@ Install these tools before contributing:
 | OSMO CLI       | latest          | <https://developer.nvidia.com/osmo>                                   |
 | terraform-docs | 0.21.0          | <https://github.com/terraform-docs/terraform-docs/releases>           |
 | hve-core       | latest          | <https://github.com/microsoft/hve-core>                               |
+
+> [!NOTE]
+> GitHub Copilot Coding Agent runs in a separate cloud GitHub Actions environment provisioned by [.github/workflows/copilot-setup-steps.yml](../../.github/workflows/copilot-setup-steps.yml). When you bump a language runtime or test runner version locally (devcontainer or this list), update the matching pin in that workflow so cloud-agent sessions stay aligned.
 
 ## Azure Access Requirements
 
@@ -125,7 +128,7 @@ helm version  # >= 3.16
 node --version  # >= 20
 
 # Python (for training scripts)
-python --version  # >= 3.11
+python --version  # >= 3.12
 
 # shellcheck (for shell script validation)
 shellcheck --version  # >= 0.10

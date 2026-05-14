@@ -142,7 +142,7 @@ export function FrameRemovalToolbar() {
       {/* Frequency-based removal */}
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Timer className="h-4 w-4 text-muted-foreground" />
+          <Timer className="text-muted-foreground h-4 w-4" />
           <Label className="text-xs font-medium">Remove by Frequency</Label>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -187,7 +187,7 @@ export function FrameRemovalToolbar() {
             Apply
           </Button>
           {getFrequencyPreview() > 0 && (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-muted-foreground text-xs">
               Will remove {getFrequencyPreview()} frames
             </span>
           )}

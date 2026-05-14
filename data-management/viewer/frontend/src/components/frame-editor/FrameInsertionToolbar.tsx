@@ -109,7 +109,7 @@ export function FrameInsertionToolbar() {
           step={0.1}
           onChange={(e) => setInterpolationFactor(e.target.value)}
         />
-        <span className="text-xs text-muted-foreground">(0=first frame, 1=second frame)</span>
+        <span className="text-muted-foreground text-xs">(0=first frame, 1=second frame)</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -137,7 +137,7 @@ export function FrameInsertionToolbar() {
       {/* Range insertion */}
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Layers className="h-4 w-4 text-muted-foreground" />
+          <Layers className="text-muted-foreground h-4 w-4" />
           <Label className="text-xs font-medium">Insert After Range</Label>
         </div>
         <div className="flex items-center gap-2">
@@ -180,7 +180,7 @@ export function FrameInsertionToolbar() {
       {/* Frequency-based insertion */}
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Timer className="h-4 w-4 text-muted-foreground" />
+          <Timer className="text-muted-foreground h-4 w-4" />
           <Label className="text-xs font-medium">Insert by Frequency</Label>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -225,7 +225,7 @@ export function FrameInsertionToolbar() {
             Apply
           </Button>
           {getFrequencyPreview() > 0 && (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-muted-foreground text-xs">
               Will insert {getFrequencyPreview()} frames
             </span>
           )}

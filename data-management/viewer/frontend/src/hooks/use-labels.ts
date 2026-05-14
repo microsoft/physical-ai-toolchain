@@ -5,6 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect } from 'react'
 
+import { mutationFetch } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
 import { useLabelStore } from '@/stores/label-store'
 
@@ -40,17 +41,20 @@ async function setEpisodeLabels(
   episodeIdx: number,
   labels: string[],
 ): Promise<EpisodeLabelsResponse> {
-  const res = await fetch(`${API_BASE}/datasets/${datasetId}/episodes/${episodeIdx}/labels`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ labels }),
-  })
+  const res = await mutationFetch(
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIdx}/labels`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ labels }),
+    },
+  )
   if (!res.ok) throw new Error('Failed to save labels')
   return res.json()
 }
 
 async function addLabelOption(datasetId: string, label: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/datasets/${datasetId}/labels/options`, {
+  const res = await mutationFetch(`${API_BASE}/datasets/${datasetId}/labels/options`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ label }),
@@ -60,7 +64,7 @@ async function addLabelOption(datasetId: string, label: string): Promise<string[
 }
 
 async function removeLabelOption(datasetId: string, label: string): Promise<string[]> {
-  const res = await fetch(
+  const res = await mutationFetch(
     `${API_BASE}/datasets/${datasetId}/labels/options/${encodeURIComponent(label.trim().toUpperCase())}`,
     {
       method: 'DELETE',

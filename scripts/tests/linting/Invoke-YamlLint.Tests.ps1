@@ -86,6 +86,13 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
             $content.totalFiles | Should -Be 2
         }
 
+        It 'Excludes *.lock.yml files' {
+            'name: Generated' | Set-Content (Join-Path $script:WorkflowDir 'aw-review.lock.yml')
+            Invoke-YamlLintCore -OutputPath $script:TestOutputPath
+            $content = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $content.totalFiles | Should -Be 2
+        }
+
         It 'Creates JSON output file' {
             Invoke-YamlLintCore -OutputPath $script:TestOutputPath
             Test-Path $script:TestOutputPath | Should -BeTrue
@@ -106,6 +113,20 @@ Describe 'Invoke-YamlLintCore' -Tag 'Unit' {
                     '.github/workflows/ci.yml',
                     '.github/workflows/deploy.yml',
                     'docs/config.yaml'
+                )
+            }
+
+            Invoke-YamlLintCore -ChangedFilesOnly -OutputPath $script:TestOutputPath
+            $content = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $content.totalFiles | Should -Be 2
+        }
+
+        It 'Excludes *.lock.yml files from changed files' {
+            Mock Get-ChangedFilesFromGit {
+                return @(
+                    '.github/workflows/ci.yml',
+                    '.github/workflows/aw-review.lock.yml',
+                    '.github/workflows/deploy.yml'
                 )
             }
 

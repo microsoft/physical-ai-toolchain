@@ -129,7 +129,7 @@ export function ExportPanel({
             </SelectContent>
           </Select>
           {selectedFormat && (
-            <p className="text-xs text-muted-foreground">{selectedFormat.description}</p>
+            <p className="text-muted-foreground text-xs">{selectedFormat.description}</p>
           )}
         </div>
 

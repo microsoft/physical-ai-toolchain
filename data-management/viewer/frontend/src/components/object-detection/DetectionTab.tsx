@@ -90,13 +90,13 @@ export function DetectionTab() {
       </CardHeader>
       <CardContent className="p-4 pt-0">
         {error && (
-          <div className="mb-4 rounded bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="bg-destructive/10 text-destructive mb-4 rounded-sm p-3 text-sm">
             <strong>Error:</strong> {error instanceof Error ? error.message : 'Detection failed'}
           </div>
         )}
 
         {!data && !isRunning && (
-          <div className="py-8 text-center text-muted-foreground">
+          <div className="text-muted-foreground py-8 text-center">
             <Scan className="mx-auto mb-3 h-12 w-12 opacity-50" />
             <p className="mb-2">No detection results yet</p>
             <p className="text-xs">Click "Run Detection" to analyze all frames with YOLO11</p>
@@ -104,7 +104,7 @@ export function DetectionTab() {
         )}
 
         {isRunning && !data && (
-          <div className="py-8 text-center text-muted-foreground">
+          <div className="text-muted-foreground py-8 text-center">
             <Loader2 className="mx-auto mb-3 h-12 w-12 animate-spin" />
             <p className="mb-2">Processing frames...</p>
             <p className="text-xs">This may take a moment for episodes with many frames</p>
@@ -135,7 +135,7 @@ export function DetectionTab() {
               <div className="aspect-video">
                 <DetectionViewer imageUrl={imageUrl} detections={currentDetections} />
               </div>
-              <div className="text-center text-sm text-muted-foreground">
+              <div className="text-muted-foreground text-center text-sm">
                 Frame {currentFrame} - {currentDetections.length} detection
                 {currentDetections.length !== 1 ? 's' : ''}
               </div>

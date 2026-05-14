@@ -88,13 +88,11 @@ workflow:
             unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
             export PYTHONPATH="${PAYLOAD_ROOT}:${PYTHONPATH:-}"
 
-            LEROBOT_MANIFEST="${PAYLOAD_ROOT}/training/il/lerobot/pyproject.toml"
-            LEROBOT_REQUIREMENTS="/tmp/lerobot-runtime-requirements.txt"
-            if [[ ! -f "${LEROBOT_MANIFEST}" ]]; then
-              echo "ERROR: LeRobot workflow manifest not found at ${LEROBOT_MANIFEST}" >&2
+            LEROBOT_REQUIREMENTS="${PAYLOAD_ROOT}/training/il/lerobot/requirements.txt"
+            if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
+              echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
               exit 1
             fi
-            uv pip compile "${LEROBOT_MANIFEST}" -o "${LEROBOT_REQUIREMENTS}"
             uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
 
             # Install MLflow and matplotlib when MLflow tracking is enabled

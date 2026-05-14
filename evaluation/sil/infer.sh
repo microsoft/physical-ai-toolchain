@@ -128,16 +128,19 @@ else
   export PYTHONPATH="${SRC_DIR}:${PYTHONPATH:-}"
 fi
 
-INFERENCE_MANIFEST="${INFERENCE_DIR}/pyproject.toml"
-INFERENCE_REQS="$(mktemp)"
+INFERENCE_REQS="${SRC_DIR}/training/il/lerobot/requirements.txt"
 cleanup() {
-  rm -rf "${CHECKPOINT_DIR:-}" "${INFERENCE_REQS}"
+  rm -rf "${CHECKPOINT_DIR:-}"
 }
 trap cleanup EXIT
 
+if [[ ! -f "${INFERENCE_REQS}" ]]; then
+  echo "Error: LeRobot requirements not found at ${INFERENCE_REQS}" >&2
+  exit 1
+fi
+
 if command -v uv &>/dev/null; then
-  echo "Installing inference workflow dependencies from manifest..."
-  uv pip compile "${INFERENCE_MANIFEST}" -o "${INFERENCE_REQS}"
+  echo "Installing inference workflow dependencies from pre-compiled requirements..."
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
     uv pip install --no-cache-dir --requirement "${INFERENCE_REQS}" || \
       uv pip install --no-cache-dir --requirement "${INFERENCE_REQS}" --index-strategy first-index \
@@ -148,7 +151,7 @@ if command -v uv &>/dev/null; then
         --extra-index-url https://download.pytorch.org/whl/cu124
   fi
 else
-  echo "Error: uv is required to compile workflow manifest dependencies" >&2
+  echo "Error: uv is required to install workflow dependencies" >&2
   exit 1
 fi
 

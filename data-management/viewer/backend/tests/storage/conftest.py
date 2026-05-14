@@ -1,6 +1,6 @@
 """Shared test fixtures for storage adapter tests."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from src.api.models.annotations import (
     AnomalyAnnotation,
@@ -19,7 +19,7 @@ from src.api.models.annotations import (
 
 def create_test_annotation(episode_index: int, user_id: str = "test-user") -> EpisodeAnnotationFile:
     """Create a test annotation file."""
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     annotation = EpisodeAnnotation(
         annotator_id=user_id,
         timestamp=now,

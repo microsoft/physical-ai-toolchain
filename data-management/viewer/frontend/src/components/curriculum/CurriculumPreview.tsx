@@ -72,8 +72,8 @@ export function CurriculumPreview({
       <CardContent>
         {episodes.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8">
-            <FileText className="mb-2 h-8 w-8 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">No episodes match the current filters</p>
+            <FileText className="text-muted-foreground/50 mb-2 h-8 w-8" />
+            <p className="text-muted-foreground text-sm">No episodes match the current filters</p>
           </div>
         ) : (
           <ScrollArea className="h-80">
@@ -81,25 +81,25 @@ export function CurriculumPreview({
               {displayedEpisodes.map((episode) => (
                 <div
                   key={episode.id}
-                  className="flex items-center gap-3 rounded-lg border bg-card p-2 transition-colors hover:bg-muted/50"
+                  className="bg-card hover:bg-muted/50 flex items-center gap-3 rounded-lg border p-2 transition-colors"
                 >
                   {/* Thumbnail or placeholder */}
                   {episode.thumbnail_url ? (
                     <img
                       src={episode.thumbnail_url}
                       alt=""
-                      className="h-10 w-14 rounded object-cover"
+                      className="h-10 w-14 rounded-sm object-cover"
                     />
                   ) : (
-                    <div className="flex h-10 w-14 items-center justify-center rounded bg-muted">
-                      <FileText className="h-4 w-4 text-muted-foreground" />
+                    <div className="bg-muted flex h-10 w-14 items-center justify-center rounded-sm">
+                      <FileText className="text-muted-foreground h-4 w-4" />
                     </div>
                   )}
 
                   {/* Episode info */}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{episode.episode_id}</p>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <div className="text-muted-foreground flex items-center gap-3 text-xs">
                       {episode.task_completion_rating && (
                         <span className="flex items-center gap-0.5">
                           <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
@@ -133,7 +133,7 @@ export function CurriculumPreview({
               ))}
 
               {hasMore && (
-                <div className="py-2 text-center text-sm text-muted-foreground">
+                <div className="text-muted-foreground py-2 text-center text-sm">
                   ... and {totalCount - previewLimit} more episodes
                 </div>
               )}

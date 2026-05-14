@@ -52,7 +52,7 @@ export function ActionButtons({
     <div className={cn('flex flex-col gap-2', className)}>
       {/* Dirty indicator */}
       {isDirty && (
-        <div className="flex items-center gap-2 rounded bg-orange-50 px-2 py-1 text-xs text-orange-600">
+        <div className="flex items-center gap-2 rounded-sm bg-orange-50 px-2 py-1 text-xs text-orange-600">
           <AlertCircle className="h-3 w-3" />
           Unsaved changes
         </div>

@@ -65,13 +65,13 @@ export const TimelineMarker = memo(function TimelineMarker({
       {/* Tooltip */}
       {showTooltip && (
         <div className="absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2">
-          <div className="min-w-[150px] rounded-md border bg-popover p-2 text-xs shadow-lg">
+          <div className="bg-popover min-w-[150px] rounded-md border p-2 text-xs shadow-lg">
             <div className="font-medium">{anomaly.type}</div>
             <div className="text-muted-foreground">{anomaly.description}</div>
             <div className="mt-1 flex gap-2">
               <span
                 className={cn(
-                  'rounded px-1',
+                  'rounded-sm px-1',
                   anomaly.severity === 'high'
                     ? 'bg-red-100 text-red-700'
                     : anomaly.severity === 'medium'
@@ -82,13 +82,13 @@ export const TimelineMarker = memo(function TimelineMarker({
                 {anomaly.severity}
               </span>
               {anomaly.verified && (
-                <span className="rounded bg-green-100 px-1 text-green-700">verified</span>
+                <span className="rounded-sm bg-green-100 px-1 text-green-700">verified</span>
               )}
               {anomaly.autoDetected && (
-                <span className="rounded bg-blue-100 px-1 text-blue-700">auto</span>
+                <span className="rounded-sm bg-blue-100 px-1 text-blue-700">auto</span>
               )}
             </div>
-            <div className="mt-1 text-muted-foreground">
+            <div className="text-muted-foreground mt-1">
               Frames {anomaly.frameRange[0]}-{anomaly.frameRange[1]}
             </div>
           </div>

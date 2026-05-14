@@ -64,7 +64,7 @@ function AxisInput({ label, value, delta, onDeltaChange, color }: AxisInputProps
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <Label className={cn('text-xs font-medium', color)}>{label}</Label>
-        <span className="font-mono text-xs text-muted-foreground">{adjustedValue.toFixed(4)}</span>
+        <span className="text-muted-foreground font-mono text-xs">{adjustedValue.toFixed(4)}</span>
       </div>
       <div className="flex items-center gap-2">
         <input
@@ -74,7 +74,7 @@ function AxisInput({ label, value, delta, onDeltaChange, color }: AxisInputProps
           min={-0.5}
           max={0.5}
           step={0.001}
-          className="h-2 flex-1 accent-primary"
+          className="accent-primary h-2 flex-1"
         />
         <Input
           type="number"
@@ -86,7 +86,7 @@ function AxisInput({ label, value, delta, onDeltaChange, color }: AxisInputProps
         />
       </div>
       {delta !== 0 && (
-        <div className="text-xs text-muted-foreground">
+        <div className="text-muted-foreground text-xs">
           Original: {value.toFixed(4)} → Δ: {delta >= 0 ? '+' : ''}
           {delta.toFixed(4)}
         </div>
@@ -163,7 +163,7 @@ function ArmEditor({
   )
 
   return (
-    <div className="space-y-3 rounded-lg bg-muted/50 p-3">
+    <div className="bg-muted/50 space-y-3 rounded-lg p-3">
       <div className="flex items-center justify-between">
         <h4 className={cn('text-sm font-medium', titleColor)}>{title}</h4>
         {hasChanges && (
@@ -206,7 +206,7 @@ function ArmEditor({
       <div className="space-y-1 border-t pt-2">
         <div className="flex items-center justify-between">
           <Label className="text-xs font-medium">Gripper</Label>
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="text-muted-foreground font-mono text-xs">
             {currentGripperValue.toFixed(4)}
           </span>
         </div>
@@ -218,7 +218,7 @@ function ArmEditor({
             min={0}
             max={1}
             step={0.01}
-            className="h-2 flex-1 accent-primary"
+            className="accent-primary h-2 flex-1"
           />
           <Input
             type="number"
@@ -356,7 +356,7 @@ export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
 
   if (!currentPoint) {
     return (
-      <div className={cn('p-4 text-sm text-muted-foreground', className)}>
+      <div className={cn('text-muted-foreground p-4 text-sm', className)}>
         No trajectory data available for this frame.
       </div>
     )
@@ -372,7 +372,7 @@ export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
             <span className="ml-2 text-xs text-orange-500">(has adjustments)</span>
           )}
         </div>
-        <div className="text-xs text-muted-foreground">
+        <div className="text-muted-foreground text-xs">
           {trajectoryAdjustments.size} frame(s) modified
         </div>
       </div>

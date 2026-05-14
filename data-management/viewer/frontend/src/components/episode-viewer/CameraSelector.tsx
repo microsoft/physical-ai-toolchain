@@ -46,7 +46,7 @@ export function CameraSelector({ cameras, selectedCamera, onSelectCamera }: Came
 
   if (cameras.length === 0) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div className="text-muted-foreground flex items-center gap-2 text-sm">
         <Camera className="h-4 w-4" />
         <span>No cameras available</span>
       </div>
@@ -76,7 +76,7 @@ export function CameraSelector({ cameras, selectedCamera, onSelectCamera }: Came
       </Button>
 
       {isOpen && (
-        <div className="absolute left-0 top-full z-50 mt-1 min-w-[150px] rounded-md border bg-popover shadow-lg">
+        <div className="bg-popover absolute top-full left-0 z-50 mt-1 min-w-[150px] rounded-md border shadow-lg">
           {cameras.map((camera) => (
             <button
               key={camera}
@@ -85,7 +85,7 @@ export function CameraSelector({ cameras, selectedCamera, onSelectCamera }: Came
                 setIsOpen(false)
               }}
               className={cn(
-                'w-full px-3 py-2 text-left text-sm transition-colors hover:bg-accent',
+                'hover:bg-accent w-full px-3 py-2 text-left text-sm transition-colors',
                 camera === selectedCamera && 'bg-accent',
               )}
             >

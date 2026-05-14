@@ -52,13 +52,13 @@ export function DetectionTimeline({
 
   return (
     <div className="space-y-2">
-      <div className="flex justify-between text-xs text-muted-foreground">
+      <div className="text-muted-foreground flex justify-between text-xs">
         <span>Frame 0</span>
         <span>Detection Density ({framesWithDetections.length} frames with detections)</span>
         <span>Frame {totalFrames - 1}</span>
       </div>
       <div
-        className="relative h-10 cursor-pointer rounded bg-muted"
+        className="bg-muted relative h-10 cursor-pointer rounded-sm"
         role="slider"
         tabIndex={0}
         aria-valuenow={currentFrame}
@@ -91,7 +91,7 @@ export function DetectionTimeline({
 
         {/* Current frame indicator */}
         <div
-          className="absolute bottom-0 top-0 z-10 w-0.5 bg-red-500"
+          className="absolute top-0 bottom-0 z-10 w-0.5 bg-red-500"
           style={{ left: `${(currentFrame / totalFrames) * 100}%` }}
         />
 
@@ -99,7 +99,7 @@ export function DetectionTimeline({
         {framesWithDetections.slice(0, 50).map((frame) => (
           <div
             key={frame}
-            className="z-5 absolute top-0 h-2 w-1 cursor-pointer bg-green-500 transition-all hover:h-3"
+            className="absolute top-0 z-5 h-2 w-1 cursor-pointer bg-green-500 transition-all hover:h-3"
             style={{ left: `${(frame / totalFrames) * 100}%` }}
             role="button"
             tabIndex={0}
@@ -118,7 +118,7 @@ export function DetectionTimeline({
           <button
             key={frame}
             onClick={() => onFrameClick(frame)}
-            className={`rounded px-2 py-1 text-xs transition-colors ${
+            className={`rounded-sm px-2 py-1 text-xs transition-colors ${
               currentFrame === frame ? 'bg-blue-500 text-white' : 'bg-muted hover:bg-muted/80'
             }`}
           >
@@ -126,7 +126,7 @@ export function DetectionTimeline({
           </button>
         ))}
         {framesWithDetections.length > 10 && (
-          <span className="py-1 text-xs text-muted-foreground">
+          <span className="text-muted-foreground py-1 text-xs">
             +{framesWithDetections.length - 10} more
           </span>
         )}

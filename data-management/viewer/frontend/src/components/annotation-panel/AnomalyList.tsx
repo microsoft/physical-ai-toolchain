@@ -36,7 +36,7 @@ interface AnomalyListProps {
  */
 export function AnomalyList({ anomalies, onRemove, onToggleVerified, onSeek }: AnomalyListProps) {
   if (anomalies.length === 0) {
-    return <p className="py-4 text-center text-sm text-muted-foreground">No anomalies detected</p>
+    return <p className="text-muted-foreground py-4 text-center text-sm">No anomalies detected</p>
   }
 
   return (
@@ -48,7 +48,7 @@ export function AnomalyList({ anomalies, onRemove, onToggleVerified, onSeek }: A
           <div
             key={anomaly.id}
             className={cn(
-              'flex items-start gap-2 rounded-md border p-2 text-foreground',
+              'text-foreground flex items-start gap-2 rounded-md border p-2',
               getSemanticToneClasses('surface', severityTone),
             )}
           >
@@ -79,10 +79,10 @@ export function AnomalyList({ anomalies, onRemove, onToggleVerified, onSeek }: A
                   </Badge>
                 )}
               </div>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">{anomaly.description}</p>
+              <p className="text-muted-foreground mt-0.5 truncate text-xs">{anomaly.description}</p>
               <button
                 onClick={() => onSeek?.(anomaly.frameRange[0])}
-                className="mt-0.5 text-xs text-primary hover:underline"
+                className="text-primary mt-0.5 text-xs hover:underline"
               >
                 Frames {anomaly.frameRange[0]}-{anomaly.frameRange[1]}
               </button>

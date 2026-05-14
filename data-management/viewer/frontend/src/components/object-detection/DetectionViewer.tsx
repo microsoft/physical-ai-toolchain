@@ -109,7 +109,7 @@ export function DetectionViewer({
     >
       <canvas ref={canvasRef} className="max-h-full max-w-full" />
       {detections.length > 0 && (
-        <div className="absolute bottom-2 right-2 rounded bg-black/70 px-2 py-1 text-xs text-white">
+        <div className="absolute right-2 bottom-2 rounded-sm bg-black/70 px-2 py-1 text-xs text-white">
           {detections.length} detection{detections.length !== 1 ? 's' : ''}
         </div>
       )}

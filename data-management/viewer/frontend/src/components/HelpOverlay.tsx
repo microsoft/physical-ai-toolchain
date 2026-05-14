@@ -91,17 +91,17 @@ export function HelpOverlay({ open, onClose, shortcuts = [] }: HelpOverlayProps)
 
     return (
       <div className="space-y-2">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        <h3 className="text-muted-foreground text-sm font-semibold tracking-wide uppercase">
           {title}
         </h3>
         <div className="grid gap-1">
           {items.map((item) => (
             <div
               key={`${item.key}-${item.description}`}
-              className="flex items-center justify-between rounded px-2 py-1.5 hover:bg-muted/50"
+              className="hover:bg-muted/50 flex items-center justify-between rounded-sm px-2 py-1.5"
             >
               <span className="text-sm">{'description' in item ? item.description : ''}</span>
-              <kbd className="rounded border bg-muted px-2 py-1 font-mono text-xs">
+              <kbd className="bg-muted rounded-sm border px-2 py-1 font-mono text-xs">
                 {'key' in item && typeof item.key === 'string'
                   ? 'action' in item
                     ? formatShortcut(item as KeyboardShortcut)
@@ -164,9 +164,9 @@ export function HelpOverlay({ open, onClose, shortcuts = [] }: HelpOverlayProps)
             </div>
           </div>
 
-          <div className="mt-6 border-t pt-4 text-center text-sm text-muted-foreground">
-            Press <kbd className="rounded border bg-muted px-1.5 py-0.5 text-xs">?</kbd> anytime to
-            show this help
+          <div className="text-muted-foreground mt-6 border-t pt-4 text-center text-sm">
+            Press <kbd className="bg-muted rounded-sm border px-1.5 py-0.5 text-xs">?</kbd> anytime
+            to show this help
           </div>
         </CardContent>
       </Card>

@@ -6,6 +6,18 @@
 	"flagWords": [
 		"TODO"
 	],
+	"words": [
+		"envaccount",
+		"envcontainer",
+		"myacct",
+		"mycontainer",
+		"noseparator",
+		"preds",
+		"refetches",
+		"unstub",
+		"uppercased",
+		"xticklabels"
+	],
 	"ignorePaths": [
 		"**/.github/chatmodes/**",
 		"**/node_modules/**",
@@ -29,7 +41,9 @@
 		"**/.terraform/**",
 		"**/.terraform.lock.hcl",
 		"**/scripts/tests/Fixtures/**",
-		"**/TERRAFORM.md"
+		"**/TERRAFORM.md",
+		"CHANGELOG.md",
+		"**/CHANGELOG.md"
 	],
 	"dictionaryDefinitions": [
 		{

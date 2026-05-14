@@ -14,7 +14,8 @@ override_data {
 }
 
 variables {
-  current_user_oid = "00000000-0000-0000-0000-000000000001"
+  current_user_oid                   = "00000000-0000-0000-0000-000000000001"
+  aml_managed_network_isolation_mode = "Disabled"
 }
 
 run "setup" {

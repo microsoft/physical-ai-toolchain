@@ -47,7 +47,7 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 
 * Do not modify files in `external/`
 * Version: managed by release-please across `pyproject.toml` and `package.json`
-* Python: >=3.11, managed by `uv` (not pip); `hatchling` builds `training/rl` into wheel
+* Python: >=3.12, managed by `uv` (not pip); `hatchling` builds `training/rl` into wheel
 * Linting: `npm run lint:md` (markdownlint-cli2), `npm run spell-check` (cspell), `npm run lint:yaml` (yaml-lint)
 
 ## Terraform Conventions
@@ -104,7 +104,7 @@ Detailed template and structure in `.github/instructions/shell-scripts.instructi
 
 ## Python Conventions
 
-* Package management: `uv` (not pip); `hatchling` builds; Python >=3.11
+* Package management: `uv` (not pip); `hatchling` builds; Python >=3.12
 * Child configs extend root ruff config: `extend = "../../pyproject.toml"`
 * `from __future__ import annotations` required as the first import in every module
 
@@ -184,7 +184,7 @@ Always %-style formatting: `_LOGGER.warning("Invalid %s, using default (%d)", ar
 ### Ruff Configuration
 
 ```toml
-target-version = "py311"
+target-version = "py312"
 line-length = 120
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
 quote-style = "double"
@@ -194,7 +194,7 @@ quote-style = "double"
 
 Detailed rules in `.github/instructions/dataviewer.instructions.md`.
 
-* Stack: Vite 6, React 18, TypeScript ~5.6, Tailwind CSS v3 + shadcn/ui, Zustand v5, TanStack Query v5
+* Stack: Vite 8, React 19, TypeScript ~6.0, Tailwind CSS v4 + shadcn/ui, Zustand v5, TanStack Query v5
 
 ### File Naming
 
@@ -211,7 +211,7 @@ Detailed rules in `.github/instructions/dataviewer.instructions.md`.
 
 * Named exports only (no `export default`)
 * `memo` for expensive renders
-* `forwardRef` for shadcn/ui primitives
+* `ref` as a prop for shadcn/ui primitives (React 19 ref-as-prop pattern)
 * Props interfaces defined in-file above the component
 
 ### TypeScript
@@ -229,7 +229,7 @@ Detailed rules in `.github/instructions/dataviewer.instructions.md`.
 
 ### Styling
 
-* Tailwind CSS v3 utility-first + `cn()` utility (`clsx` + `tailwind-merge`)
+* Tailwind CSS v4 utility-first + `cn()` utility (`clsx` + `tailwind-merge`)
 * CVA (class-variance-authority) for component variants
 * No CSS modules, no styled-components
 
@@ -294,6 +294,33 @@ Detailed rules in `.github/instructions/docs-style-and-conventions.instructions.
 * Avoid H4+ headings; restructure instead
 * Numbered lists only for sequential content
 * Code blocks: always specify language
+
+## Coding Agent Environment
+
+GitHub Copilot Coding Agent runs in a cloud GitHub Actions environment, separate from the local devcontainer. The `.github/workflows/copilot-setup-steps.yml` workflow pre-installs tools so the cloud agent can author code, run linters, and execute tests with the same capabilities a local contributor has in `.devcontainer/devcontainer.json`.
+
+The cloud-agent workflow does NOT install: `actionlint` (devcontainer-only, used for `npm run lint:yaml`), `golangci-lint`, `terraform-docs`, `osmo`, `ngc`, Azure CLI, kubectl, helm, k9s. These are Azure-deployment or local-validation tools the agent does not need to author or test code.
+
+The cloud-agent workflow installs `gh aw` (GitHub Agentic Workflows CLI) without version pinning. The latest stable release is installed at session start because `gh aw` maintains backward compatibility with older compiled workflows, lock files embed their `compiler_version` for auditability, and the extension releases multiple times per week making pinning impractical.
+
+### Environment Synchronization
+
+Treat `.github/workflows/copilot-setup-steps.yml` and `.devcontainer/devcontainer.json` as paired environments. When changing toolchain versions in either file, evaluate whether the other needs the same change:
+
+* Language runtimes (Python, Node, Go, Terraform) MUST stay aligned — drift causes "works locally, fails in agent" bugs.
+* Test runners (Pester, pytest, vitest) MUST stay aligned for the same reason.
+* Azure-deployment tools (`az`, `kubectl`, `helm`, OSMO, NGC) live in the devcontainer only.
+* Lint-only tools may live in either or both depending on whether the agent invokes the linter.
+
+The weekly `copilot-setup-steps.yml` cron and `Test-BinaryFreshness.ps1` weekly run together surface upstream drift across both surfaces.
+
+### Cloud-Agent RPI Wrapper
+
+The `Bootstrap hve-core RPI persona` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the latest `microsoft/hve-core@main` `rpi-agent.agent.md` plus every `subagents/*.agent.md` into `.copilot-tracking/upstream/hve-core-rpi/`.
+
+The `Physical-AI RPI` umbrella (`.github/agents/physical-ai-rpi.agent.md`) and its hidden generic worker (`.github/agents/physical-ai-rpi-worker.agent.md`) read those files at session start. The worker resolves a `persona: <stem>` dispatch parameter to a workspace path under `.copilot-tracking/upstream/hve-core-rpi/subagents/`, so new upstream personas auto-onboard via the next bootstrap with no change in this repo.
+
+See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the full umbrella/worker rationale.
 
 ## Git Workflow
 
@@ -445,7 +472,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 * Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
 * Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main)
 * Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)
-* Codecov: `pytest` and `pester` flags, 80-100% range, carryforward enabled
+* Codecov: 12+ flags including `pytest-*`, `vitest`/`vitest-*`, `pester`, `go`, `terraform`; 80-100% range; carryforward enabled; OIDC tokenless upload via `codecov/codecov-action@v6`
 
 ## Contributing References
 

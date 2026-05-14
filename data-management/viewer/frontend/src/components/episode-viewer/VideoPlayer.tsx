@@ -150,7 +150,7 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
 
   if (!currentEpisode) {
     return (
-      <div className={cn('flex items-center justify-center rounded-lg bg-muted', className)}>
+      <div className={cn('bg-muted flex items-center justify-center rounded-lg', className)}>
         <p className="text-muted-foreground">No episode selected</p>
       </div>
     )
@@ -165,7 +165,7 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
           selectedCamera={selectedCamera}
           onSelectCamera={setSelectedCamera}
         />
-        <span className="text-sm text-muted-foreground">
+        <span className="text-muted-foreground text-sm">
           Frame {currentFrame} / {totalFrames}
         </span>
       </div>
