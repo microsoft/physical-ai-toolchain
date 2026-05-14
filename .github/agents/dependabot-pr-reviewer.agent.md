@@ -93,21 +93,29 @@ Render the review body as markdown in this order:
 
 ## Validation Signal
 
-The agent runs via `pull_request_target` and may execute BEFORE the
-`PR Validation` orchestrator has completed. Treat the deterministic CI
-conclusion as the canonical validation signal when it is available, and as
-`pending` otherwise. Do not invoke `uv`, `pytest`, `npm ci`, `terraform`,
-or `go` from the bash tool — those binaries live on the host runner and
-are not visible inside the AWF firewall sandbox.
+The agent runs via `workflow_run` AFTER the `PR Validation` orchestrator
+has reached a terminal conclusion. The deterministic CI signal is therefore
+always final — there is no `pending` or `in_progress:*` state to handle.
+Do not invoke `uv`, `pytest`, `npm ci`, `terraform`, or `go` from the bash
+tool — those binaries live on the host runner and are not visible inside
+the AWF firewall sandbox.
 
 The orchestrator's overall conclusion is injected into the prompt as
-`PR_VALIDATION_CONCLUSION` (one of `pending`, `in_progress:<status>`,
-`success`, `failure`, `cancelled`, `neutral`, `skipped`, `timed_out`,
-`action_required`, or `unknown`). Map the touched surfaces to the
-per-job check runs below and read each conclusion via the `github` MCP
-`pull_requests` toolset (or `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`).
+`PR_VALIDATION_CONCLUSION` (one of `success`, `failure`, `cancelled`,
+`timed_out`, `neutral`, `skipped`, `action_required`, or `unknown`).
+The list of failing per-surface check-runs (JSON array of
+`{name, html_url, conclusion}`) is injected as `PR_VALIDATION_FAILING_CHECKS`.
+Read both directly from the environment. Do NOT call
+`checks.listForRef` or `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`
+— the workflow's resolver step already did that work.
 
-### Surface to Check Run Map
+### Reference: Surface to Check Run Naming
+
+Informational reference for interpreting entries in
+`PR_VALIDATION_FAILING_CHECKS`. The persona does NOT walk this map via the
+checks API — the workflow's resolver step already enumerated failing
+check-runs server-side. Use this table only to map a failing check name
+back to the dependency surface it covers when composing the review body.
 
 | Surface | Authoritative check runs |
 | --- | --- |
@@ -156,10 +164,10 @@ Include a `### Validation Signal` block in the per-package section of the
 review body with three parts:
 
 1. **Deterministic CI:** quote the orchestrator conclusion as
-   `PR Validation: <conclusion>` followed by a bullet list of the relevant
-   per-surface check runs from the map above with name, conclusion, and
-   `html_url`. When `conclusion != success`, list the failing job names
-   first.
+   `PR Validation: <conclusion>` followed by a bullet list rendered from
+   `PR_VALIDATION_FAILING_CHECKS` (entries are `{name, html_url, conclusion}`).
+   When `conclusion != success`, list every failing entry. When
+   `conclusion == success`, state "all per-surface check-runs passed".
 2. **Static impact reasoning:** one or two sentences citing the static
    checks above. Always include the Isaac Sim ABI line when
    `training/rl/requirements.txt` is in the diff, even on minor bumps.
@@ -167,28 +175,34 @@ review body with three parts:
    violation, peer-dep conflict, breaking-changelog quote), prepend
    `⚠️ Maintainer review recommended` to the top of the review body once.
 
-If the orchestrator conclusion is unavailable or still in progress
-(`pending`, `in_progress:*`, or `unknown`; PR resolution failed; or the
-check-runs API returns empty), state:
-`⚠️ Deterministic CI conclusion not yet available; verdict is advisory only.`
-and keep the verdict at `COMMENT`.
+If `PR_VALIDATION_CONCLUSION` is `neutral`, `skipped`, or `unknown`, or if
+`PR_DEPENDABOT_SKIP_REASON == 'pr-resolution-failed'`, prepend the caution
+banner described in Verdict Adjustment and keep the verdict at `COMMENT`.
 
 ### Verdict Adjustment
 
-* `PR_VALIDATION_CONCLUSION == success` AND every relevant per-surface check
-  is `success` AND no static check raises a concern → verdict MAY upgrade
+Map every terminal conclusion explicitly. Under `workflow_run`,
+`PR_VALIDATION_CONCLUSION` is always final — there are no `pending` or
+`in_progress:*` branches to consider.
+
+* `PR_VALIDATION_CONCLUSION == success` AND no static check raises a
+  concern AND no sticky high-risk trigger fires → verdict MAY upgrade
   from `COMMENT` to `APPROVE`. Rationale must reference the orchestrator
-  conclusion plus the green per-surface checks by name.
-* `PR_VALIDATION_CONCLUSION` is `failure`, `cancelled`, or `timed_out` →
-  verdict stays at `COMMENT`. Body MUST quote each failing per-surface
-  check name plus its `html_url`. Do NOT skip enrichment — maintainers rely
-  on the advisory output to triage which package in a grouped PR caused
-  the failure.
-* `PR_VALIDATION_CONCLUSION` is `neutral`, `skipped`, `action_required`,
-  `pending`, `in_progress:*`, or `unknown` → verdict stays at `COMMENT`;
-  body explains the inconclusive or pending state.
+  conclusion plus a green `PR_VALIDATION_FAILING_CHECKS` (empty array).
+* `PR_VALIDATION_CONCLUSION ∈ {failure, cancelled, timed_out, action_required}`
+  → verdict stays at `COMMENT`. Body MUST quote each entry from
+  `PR_VALIDATION_FAILING_CHECKS` (`name` plus `html_url`). Do NOT skip
+  enrichment — maintainers rely on the advisory output to triage which
+  package in a grouped PR caused the failure.
+* `PR_VALIDATION_CONCLUSION ∈ {neutral, skipped, unknown}` OR
+  `PR_DEPENDABOT_SKIP_REASON == 'pr-resolution-failed'` → verdict stays
+  at `COMMENT`. Prepend the banner
+  `> [!CAUTION]`
+  `> Deterministic CI signal unavailable (\`{conclusion}\`); review is advisory only.`
+  to the top of the review body.
 * The Isaac Sim ABI guard is sticky: a `numpy` 2.x bump keeps the verdict
-  at `COMMENT` and forces the high-risk banner regardless of CI conclusion.
+  at `COMMENT` and forces the `⚠️ Maintainer review recommended` banner
+  regardless of CI conclusion.
 
 ## Forbidden Actions
 
