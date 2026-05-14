@@ -55,7 +55,7 @@ jobs:
             echo "inference=$(match '^fleet-deployment/inference/')"
             echo "dv_backend=$(match '^data-management/viewer/backend/')"
             echo "dv_frontend=$(match '^data-management/viewer/frontend/')"
-            echo "fuzz=$(match '^(tests/fuzz|tests/fuzz_harness\\.py|tests/generate_fuzz_corpus\\.py|data-management/viewer/backend/src/|training/)')"
+            echo "fuzz=$(match '^(tests/fuzz|tests/fuzz_harness\.py|tests/generate_fuzz_corpus\.py|data-management/viewer/backend/src/|training/)')"
             echo "docusaurus=$(match '^docs/docusaurus/')"
             echo "pester=$pester_match"
           } >> "$GITHUB_OUTPUT"
