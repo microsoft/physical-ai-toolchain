@@ -108,8 +108,8 @@ def _register_model_via_aml(
                     blob_urls = [str(u) for u in parsed]
                     dataset_uri = blob_urls[0] if len(blob_urls) == 1 else " ".join(blob_urls)
                     dataset_source_kind = "azure-blob"
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as exc:
+                print(f"[AzureML] Failed to parse BLOB_URLS: {exc}. Falling back to other dataset source metadata.")
 
         if not dataset_uri and storage_account:
             container = storage_container or "datasets"
