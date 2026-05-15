@@ -86,12 +86,24 @@ def download_dataset(
     container_client = client.get_container_client(storage_container)
 
     downloaded = 0
+    dest_dir_resolved = dest_dir.resolve()
     for blob in container_client.list_blobs(name_starts_with=prefix):
         rel = blob.name[len(prefix) :]
         if ".cache/" in rel or rel.endswith(".lock") or rel.endswith(".metadata"):
             continue
 
-        local_path = dest_dir / rel
+        # Reject absolute paths and traversal segments to prevent writes outside dest_dir.
+        rel_path = Path(rel)
+        if rel_path.is_absolute() or any(part in ("..",) for part in rel_path.parts):
+            print(f"Skipping unsafe blob name: {blob.name}")
+            continue
+
+        local_path = dest_dir / rel_path
+        resolved = local_path.resolve()
+        if not resolved.is_relative_to(dest_dir_resolved):
+            print(f"Skipping blob outside dest_dir: {blob.name}")
+            continue
+
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(local_path, "wb") as f:
