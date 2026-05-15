@@ -57,7 +57,9 @@ environment_variables:
 
 outputs:
   checkpoints:
-    type: uri_folder
-    # rw_mount streams checkpoints to blob storage as they are written, so a
-    # spot eviction does not lose progress. `upload` only flushes at job end.
+    # custom_model auto-registers the output folder as a versioned Azure ML
+    # model asset on job completion (vs. uri_folder which only persists to
+    # blob without registry visibility). rw_mount streams checkpoints as
+    # they are written so a spot eviction does not lose progress.
+    type: custom_model
     mode: rw_mount
