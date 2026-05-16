@@ -25,6 +25,7 @@ dev = [
     "ipywidgets==8.1.8",
     "tqdm==4.67.3",
     "matplotlib==3.10.9",
+    "torch==2.10.0",
     "azureml-mlflow==1.62.0.post2",
     "azure-ai-ml==1.32.0",
 ]
@@ -105,6 +106,9 @@ branch = true
 omit = [
     "training/**/conftest.py",
     "training/**/__init__.py",
+    "training/tests/**",
+    "tests/e2e/**",
+    "tests/generate_fuzz_corpus.py",
 ]
 
 [tool.coverage.report]

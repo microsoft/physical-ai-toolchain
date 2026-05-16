@@ -1,23 +1,23 @@
 # Codecov configuration for physical-ai-toolchain.
 #
-# Flag → Workflow → cwd → coverage scope
-# ----------------------------------------------------------------------------
-# pytest-training      | pytest-training.yml            | repo root                      | --cov=training
-# pytest-dm-tools      | pytest-dm-tools.yml            | repo root                      | --cov=data-management/tools
-# pytest-data-pipeline | pytest-data-pipeline.yml       | repo root                      | --cov=data-pipeline/capture
-# pytest-inference     | pytest-inference.yml           | repo root                      | --cov=fleet-deployment/inference
-# pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend | --cov=src
-# pytest-evaluation    | evaluation-pytests.yml         | evaluation                     | --cov=.
-# pytest-fuzz          | fuzz-regression-tests.yml      | repo root                      | --cov=tests --cov=data-management/viewer/backend/src --cov=training
-# vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | vitest --coverage
-# vitest-components    | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/components/
-# vitest-features      | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/components/{dashboard,annotation-panel,frame-editor,episode-viewer}/
-# vitest-lib           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/lib/
-# vitest-state         | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/stores/, src/hooks/
-# vitest-app           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | subset: src/App.tsx
-# go                   | go-tests.yml                   | infrastructure/terraform/e2e   | go test -cover
-# terraform            | terraform-tests.yml            | infrastructure/terraform       | terraform test
-# pester               | pester-tests.yml               | repo root                      | Invoke-Pester -CodeCoverage
+# Flag → Workflow → cwd → uploaded coverage artifact → coverage scope
+# -----------------------------------------------------------------------------------------------
+# pytest-training      | pytest-training.yml            | repo root                       | logs/coverage-training.xml        | --cov=training
+# pytest-dm-tools      | pytest-dm-tools.yml            | repo root                       | logs/coverage-dm-tools.xml        | --cov=data-management/tools
+# pytest-data-pipeline | pytest-data-pipeline.yml       | repo root                       | logs/coverage-data-pipeline.xml   | --cov=data-pipeline/capture
+# pytest-inference     | pytest-inference.yml           | repo root                       | logs/coverage-inference.xml       | --cov=fleet-deployment/inference
+# pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage.xml                 | --cov=src
+# pytest-evaluation    | evaluation-pytests.yml         | evaluation                      | evaluation/logs/coverage.xml      | --cov=.
+# pytest-fuzz          | fuzz-regression-tests.yml      | repo root                       | logs/coverage.xml                 | --cov=tests --cov=data-management/viewer/backend/src --cov=training
+# vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | vitest --coverage
+# vitest-components    | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/components/
+# vitest-features      | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/components/{dashboard,annotation-panel,frame-editor,episode-viewer}/
+# vitest-lib           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/lib/
+# vitest-state         | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/stores/, src/hooks/
+# vitest-app           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/App.tsx
+# go                   | go-tests.yml                   | infrastructure/terraform/e2e    | coverage.out                      | go test -cover
+# terraform            | terraform-tests.yml            | infrastructure/terraform        | n/a                               | terraform test
+# pester               | pester-tests.yml               | repo root                       | logs/pester-coverage.xml          | Invoke-Pester -CodeCoverage
 #
 # Flag overlaps (intentional):
 #   pytest-fuzz overlaps pytest-training (training/) and pytest-dataviewer (viewer/backend/src/).

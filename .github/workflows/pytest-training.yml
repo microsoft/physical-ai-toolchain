@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      - name: Install Torch test dependency
+        run: uv pip install torch==2.10.0
+
       - name: Run pytest
         run: >-
           uv run pytest -o addopts="" training/tests -v
