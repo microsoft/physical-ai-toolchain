@@ -9,11 +9,11 @@ handoffs:
   - label: "🔍 Browse Dataset"
     agent: Dataviewer Developer
     prompt: "Browse the loaded datasets and show me what's available"
-    send: true
+    send: false
   - label: "🏷️ Annotate Episodes"
     agent: Dataviewer Developer
     prompt: "Annotate episodes in the current dataset"
-    send: true
+    send: false
 ---
 
 # Dataviewer Developer

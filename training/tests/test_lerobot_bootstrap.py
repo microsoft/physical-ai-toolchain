@@ -29,6 +29,7 @@ def fake_azure_modules(monkeypatch):
     """Inject mlflow, azure.ai.ml, and azure.identity as fake modules."""
     mlflow = ModuleType("mlflow")
     mlflow.set_tracking_uri = MagicMock()
+    mlflow.set_registry_uri = MagicMock()
     mlflow.set_experiment = MagicMock()
     mlflow.autolog = MagicMock()
 
@@ -62,9 +63,21 @@ def fake_azure_modules(monkeypatch):
 
 
 class TestBootstrapMlflow:
+    @staticmethod
+    def _patch_path(monkeypatch, config_path, registry_dir):
+        real_path_cls = _MOD.Path
+
+        def fake_path(arg):
+            s = str(arg)
+            if "mlflow_config.env" in s:
+                return config_path
+            return real_path_cls(registry_dir) if "mlflow_registry" in s else real_path_cls(arg)
+
+        monkeypatch.setattr(_MOD, "Path", fake_path)
+
     def test_success_default_experiment_name(self, azure_env, fake_azure_modules, tmp_path, monkeypatch):
         config_path = tmp_path / "mlflow_config.env"
-        monkeypatch.setattr(_MOD, "Path", lambda *_a, **_k: config_path)
+        self._patch_path(monkeypatch, config_path, tmp_path / "registry")
 
         result = _MOD.bootstrap_mlflow(policy_type="diffusion", job_name="job42")
 
@@ -72,12 +85,13 @@ class TestBootstrapMlflow:
         assert result.experiment_name == "lerobot-diffusion-job42"
         fake_azure_modules.mlflow.set_tracking_uri.assert_called_once_with("azureml://tracking")
         fake_azure_modules.mlflow.set_experiment.assert_called_once_with("lerobot-diffusion-job42")
-        fake_azure_modules.mlflow.autolog.assert_called_once()
+        # autolog is intentionally skipped: Azure ML MLflow endpoint does not implement model registry.
+        fake_azure_modules.mlflow.autolog.assert_not_called()
         assert "MLFLOW_TRACKING_URI=azureml://tracking" in config_path.read_text()
         assert "MLFLOW_EXPERIMENT_NAME=lerobot-diffusion-job42" in config_path.read_text()
 
     def test_success_explicit_experiment_name(self, azure_env, fake_azure_modules, tmp_path, monkeypatch):
-        monkeypatch.setattr(_MOD, "Path", lambda *_a, **_k: tmp_path / "cfg.env")
+        self._patch_path(monkeypatch, tmp_path / "cfg.env", tmp_path / "registry")
 
         result = _MOD.bootstrap_mlflow(experiment_name="custom-exp")
 
@@ -114,7 +128,7 @@ class TestBootstrapMlflow:
     def test_uses_optional_credential_env(self, azure_env, fake_azure_modules, tmp_path, monkeypatch):
         monkeypatch.setenv("AZURE_CLIENT_ID", "client-xyz")
         monkeypatch.setenv("AZURE_AUTHORITY_HOST", "https://login.example")
-        monkeypatch.setattr(_MOD, "Path", lambda *_a, **_k: tmp_path / "cfg.env")
+        self._patch_path(monkeypatch, tmp_path / "cfg.env", tmp_path / "registry")
 
         _MOD.bootstrap_mlflow()
 

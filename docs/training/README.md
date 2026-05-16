@@ -22,7 +22,7 @@ Training documentation for reinforcement learning with Isaac Lab and behavioral 
 |-----------------------------------------------|----------------------------------------------------------------------|
 | [Isaac Lab Training](isaac-lab-training.md)   | RL training with SKRL and RSL-RL backends on Azure ML and OSMO       |
 | [LeRobot Training](lerobot-training.md)       | Behavioral cloning with ACT and Diffusion policies                   |
-| [Experiment Tracking](experiment-tracking.md) | MLflow and WANDB setup, model registration, checkpoint flows         |
+| [Experiment Tracking](experiment-tracking.md) | MLflow setup, model registration, checkpoint flows                  |
 | [MLflow Integration](mlflow-integration.md)   | SKRL metric logging internals, metric filtering, and troubleshooting |
 
 ## ⚖️ Platform Comparison
@@ -31,7 +31,7 @@ Training documentation for reinforcement learning with Isaac Lab and behavioral 
 |---------------------|--------------------------|-----------------------------------------|
 | Submission          | `az ml job create`       | `osmo workflow submit`                  |
 | Orchestration       | Azure ML compute targets | OSMO workflow engine + KAI Scheduler    |
-| Experiment tracking | MLflow (managed)         | MLflow + WANDB (credential injection)   |
+| Experiment tracking | MLflow (managed)         | MLflow (Azure ML backend)              |
 | Dataset injection   | Azure ML datastores      | OSMO buckets (base64 or dataset upload) |
 | Model registration  | `az ml model create`     | Via MLflow or post-training script      |
 | Monitoring          | Azure ML Studio          | OSMO UI Dashboard                       |
