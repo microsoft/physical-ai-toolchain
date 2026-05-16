@@ -37,6 +37,7 @@ jobs:
           # GHSA-7qhf-v65m-g5f3: mlflow — unauthenticated FastAPI job endpoints under /ajax-api/3.0/jobs/*; no upstream fix; server-side only (CVE-2026-0545)
           # GHSA-c2c7-rcm5-vvqj: picomatch — ReDoS via extglob quantifiers; fixed in 2.3.2/4.0.4; transitive Docusaurus/jest dep via micromatch/chokidar (CVE-2026-33671)
           # GHSA-3v7f-55p6-f55p: picomatch — method injection in POSIX character classes; fixed in 2.3.2/4.0.4; transitive Docusaurus/jest dep via micromatch/chokidar (CVE-2026-33672)
+          # GHSA-98h9-4798-4q5v: diffusers — trust_remote_code bypass via custom_pipeline/local custom components; fixed in 0.38.0; transitive lerobot 0.5.1 dep pinned to <0.36.0 (CVE-2026-44513)
           allow-ghsas: >-
             GHSA-w8v5-vhqr-4h9v,
             GHSA-wf7f-8fxf-xfxc,
@@ -48,4 +49,5 @@ jobs:
             GHSA-f23m-r3pf-42rh,
             GHSA-7qhf-v65m-g5f3,
             GHSA-c2c7-rcm5-vvqj,
-            GHSA-3v7f-55p6-f55p
+            GHSA-3v7f-55p6-f55p,
+            GHSA-98h9-4798-4q5v

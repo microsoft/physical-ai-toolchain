@@ -60,7 +60,7 @@ The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows 
 ### LeRobot Submission Examples
 
 ```bash
-# ACT policy with WANDB logging
+# ACT policy with default MLflow tracking
 ./submit-osmo-lerobot-training.sh -d user/my-dataset
 
 # Diffusion policy with Azure MLflow
@@ -85,8 +85,7 @@ The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows 
 | `--dataset-repo-id` | (required)             | HuggingFace dataset repository ID  |
 | `--policy-type`     | `act`                  | Policy: `act`, `diffusion`         |
 | `--job-name`        | `lerobot-act-training` | Job identifier                     |
-| `--wandb-enable`    | enabled                | WANDB logging (default)            |
-| `--mlflow-enable`   | disabled               | Azure ML MLflow logging            |
+| `--mlflow-enable`   | enabled                | Azure ML MLflow logging            |
 | `--policy-repo-id`  | (none)                 | Pre-trained policy for fine-tuning |
 | `--training-steps`  | (LeRobot default)      | Total training iterations          |
 | `--save-freq`       | `5000`                 | Checkpoint save frequency          |

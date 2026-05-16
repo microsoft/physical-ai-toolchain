@@ -99,6 +99,10 @@ resource "azurerm_monitor_diagnostic_setting" "ml_workspace_logs" {
   enabled_log {
     category_group = "allLogs"
   }
+
+  enabled_metric {
+    category = "AllMetrics"
+  }
 }
 
 locals {

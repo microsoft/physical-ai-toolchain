@@ -39,7 +39,7 @@ jobs:
 
       - name: Run pytest
         run: >-
-          uv run pytest fleet-deployment/inference/tests -v
+          uv run pytest -o addopts="" fleet-deployment/inference/tests -v
           --cov=fleet-deployment/inference
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-inference.xml

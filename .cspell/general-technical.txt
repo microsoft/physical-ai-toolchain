@@ -470,6 +470,7 @@ gbps
 gcp
 gdpr
 geeksforgeeks
+gelu
 genai
 geofiltering
 geolocation
@@ -2052,3 +2053,4 @@ reraises
 topcam
 notanum
 fevil
+pusht
