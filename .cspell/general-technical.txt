@@ -470,6 +470,7 @@ gbps
 gcp
 gdpr
 geeksforgeeks
+gelu
 genai
 geofiltering
 geolocation

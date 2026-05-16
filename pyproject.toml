@@ -25,6 +25,7 @@ dev = [
     "ipywidgets==8.1.8",
     "tqdm==4.67.3",
     "matplotlib==3.10.9",
+    "torch==2.10.0",
     "azureml-mlflow==1.62.0.post2",
     "azure-ai-ml==1.32.0",
 ]
@@ -45,6 +46,15 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--junitxml=logs/pytest-results.xml",
+    # Local advisory coverage for the root-discovered suites. Codecov flag uploads remain
+    # authoritative for PR coverage gates; --cov-fail-under=0 keeps local runs informational.
+    "--cov=training",
+    "--cov=data-management/tools",
+    "--cov=fleet-deployment/inference",
+    "--cov=tests",
+    "--cov-report=term-missing",
+    "--cov-report=xml:logs/coverage-root.xml",
+    "--cov-fail-under=0",
 ]
 markers = [
     "e2e: marks tests that submit real GPU training jobs (deselect: -m 'not e2e')",
@@ -96,6 +106,9 @@ branch = true
 omit = [
     "training/**/conftest.py",
     "training/**/__init__.py",
+    "training/tests/**",
+    "tests/e2e/**",
+    "tests/generate_fuzz_corpus.py",
 ]
 
 [tool.coverage.report]
