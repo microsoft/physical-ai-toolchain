@@ -141,6 +141,46 @@ run "storage_security" {
     condition     = azurerm_storage_account.main.allow_nested_items_to_be_public == false
     error_message = "Storage account must not allow public blob access"
   }
+
+  assert {
+    condition     = azurerm_storage_account.main.shared_access_key_enabled == false
+    error_message = "Storage account must disable shared access keys by default (Azure AD only)"
+  }
+
+  assert {
+    condition     = azapi_resource.ml_workspace.body.properties.systemDatastoresAuthMode == "identity"
+    error_message = "ML workspace must use identity-based system datastore auth by default"
+  }
+}
+
+run "storage_shared_access_key_enabled" {
+  command = plan
+
+  variables {
+    resource_prefix                         = run.setup.resource_prefix
+    environment                             = run.setup.environment
+    instance                                = run.setup.instance
+    location                                = run.setup.location
+    resource_group                          = run.setup.resource_group
+    current_user_oid                        = run.setup.current_user_oid
+    should_enable_storage_shared_access_key = true
+    should_create_data_lake_storage         = true
+  }
+
+  assert {
+    condition     = azurerm_storage_account.main.shared_access_key_enabled == true
+    error_message = "Storage account shared access keys should be enabled when flag is true"
+  }
+
+  assert {
+    condition     = azurerm_storage_account.data_lake[0].shared_access_key_enabled == true
+    error_message = "Data lake storage account shared access keys should be enabled when flag is true"
+  }
+
+  assert {
+    condition     = azapi_resource.ml_workspace.body.properties.systemDatastoresAuthMode == "accessKey"
+    error_message = "ML workspace must use accessKey system datastore auth when shared access keys are enabled"
+  }
 }
 
 run "acr_security" {
@@ -192,6 +232,11 @@ run "data_lake_security" {
   assert {
     condition     = azurerm_storage_account.data_lake[0].allow_nested_items_to_be_public == false
     error_message = "Data lake storage account must not allow public blob access"
+  }
+
+  assert {
+    condition     = azurerm_storage_account.data_lake[0].shared_access_key_enabled == false
+    error_message = "Data lake storage account must disable shared access keys by default (Azure AD only)"
   }
 }
 

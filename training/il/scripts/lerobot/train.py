@@ -168,7 +168,14 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training") -> int:
     last_checkpoint_check = 0.0
     last_system_check = 0.0
 
-    with mlflow.start_run(run_name=os.environ.get("JOB_NAME", "lerobot-training")) as run:
+    # AzureML jobs auto-create an MLflow run and expose its ID in MLFLOW_RUN_ID.
+    # mlflow.start_run() picks it up automatically when no args are passed; passing
+    # a run_name in that case fails because the existing run is already named.
+    start_run_kwargs: dict = {}
+    if not os.environ.get("MLFLOW_RUN_ID"):
+        start_run_kwargs["run_name"] = os.environ.get("JOB_NAME", "lerobot-training")
+
+    with mlflow.start_run(**start_run_kwargs) as run:
         print(f"[MLflow] Run ID: {run.info.run_id}")
 
         params = _build_train_params()
@@ -177,6 +184,36 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training") -> int:
             params["storage_account"] = os.environ.get("STORAGE_ACCOUNT", "")
             params["blob_prefix"] = os.environ.get("BLOB_PREFIX", "")
         mlflow.log_params(params)
+
+        # Lineage tags: dataset -> run -> registered model. These are visible
+        # in the MLflow Run UI under "Tags" and are queryable via the SDK.
+        lineage_tags: dict[str, str] = {
+            "lerobot.framework": "lerobot",
+            "lerobot.policy_type": os.environ.get("POLICY_TYPE", "act"),
+            "lerobot.job_name": os.environ.get("JOB_NAME", ""),
+        }
+        if os.environ.get("DATASET_REPO_ID"):
+            lineage_tags["dataset.repo_id"] = os.environ["DATASET_REPO_ID"]
+        if os.environ.get("STORAGE_ACCOUNT"):
+            lineage_tags["dataset.storage_account"] = os.environ["STORAGE_ACCOUNT"]
+            lineage_tags["dataset.storage_container"] = os.environ.get("STORAGE_CONTAINER", "datasets")
+            lineage_tags["dataset.blob_prefix"] = os.environ.get("BLOB_PREFIX", "")
+            lineage_tags["dataset.source"] = "azure-blob"
+        elif os.environ.get("DATASET_REPO_ID"):
+            lineage_tags["dataset.source"] = "huggingface"
+        if os.environ.get("REGISTER_CHECKPOINT"):
+            lineage_tags["model.register_name"] = os.environ["REGISTER_CHECKPOINT"]
+        warm_start_source = os.environ.get("INIT_FROM_POLICY_MODEL_SOURCE", "")
+        if warm_start_source:
+            lineage_tags["warm_start.source"] = warm_start_source
+            # Submission script enforces that azureml: URIs use NAME:VERSION
+            # with a numeric version. Anything else is a fully-qualified URL
+            # (azureml://... or https://...) and is left unparsed.
+            match = re.match(r"^azureml:([^/:][^:]*):(\d+)$", warm_start_source)
+            if match:
+                lineage_tags["warm_start.model_name"] = match.group(1)
+                lineage_tags["warm_start.model_version"] = match.group(2)
+        mlflow.set_tags(lineage_tags)
 
         print(f"[MLflow] Starting training: {' '.join(cmd)}")
         process = subprocess.Popen(
@@ -290,7 +327,9 @@ def main() -> int:
         if dataset_repo_id:
             cmd.append(f"--dataset.repo_id={dataset_repo_id}")
 
-    if "--policy.type" not in cli_text:
+    # lerobot rejects --policy.path together with --policy.type; when warm-starting
+    # (--policy.path is present) the policy type is read from the loaded config.json.
+    if "--policy.type" not in cli_text and "--policy.path" not in cli_text:
         cmd.append(f"--policy.type={policy_type}")
 
     if "--output_dir" not in cli_text:

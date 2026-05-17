@@ -1,3 +1,4 @@
+# Build artifacts and generated files
 dist
 node_modules
 package-lock.json

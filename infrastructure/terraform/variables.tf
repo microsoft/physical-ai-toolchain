@@ -448,6 +448,12 @@ variable "should_enable_public_network_access" {
   default     = true
 }
 
+variable "should_enable_storage_shared_access_key" {
+  type        = bool
+  description = "Whether to enable Shared Key (SAS token) authorization for the storage account. When false, all requests must use Azure AD authentication (RBAC)"
+  default     = false
+}
+
 variable "should_enable_microsoft_defender" {
   type        = bool
   description = "Whether to enable Microsoft Defender for Containers on the AKS cluster"
@@ -485,6 +491,12 @@ variable "should_deploy_dce" {
 /*
  * AzureML Compute Configuration - Optional
  */
+
+variable "should_deploy_aks" {
+  type        = bool
+  description = "Whether to deploy AKS cluster (SiL module). Set to false for AzureML managed compute only"
+  default     = true
+}
 
 variable "should_enable_aml_diagnostic_logs" {
   type        = bool
