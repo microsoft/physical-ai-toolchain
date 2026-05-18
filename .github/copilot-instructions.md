@@ -448,6 +448,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 Terraform validation is per-directory — each deployment directory has its own provider configuration and state:
 
+* Run `tflint --init` once from the repository root before the first local `npm run lint:tf` run; this installs the Azure provider ruleset declared in `.tflint.hcl`
 * `npm run lint:tf` — TFLint recursive linting across all directories
 * `npm run lint:tf:validate` — `terraform fmt -check -recursive` + `terraform init -backend=false && terraform validate` per deployment directory (`.`, `vpn/`, `dns/`, `automation/`)
 * `terraform plan -var-file=terraform.tfvars` — validates configuration against provider APIs (requires `source infrastructure/terraform/prerequisites/az-sub-init.sh` first)
