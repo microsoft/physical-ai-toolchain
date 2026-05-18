@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 tenant=""
 help="Usage: az-sub-init.sh [--tenant your-tenant.onmicrosoft.com] [--help]
@@ -9,11 +10,15 @@ Attempts to set the ARM_SUBSCRIPTION_ID env var to 'id' from 'az account show' i
 
 Needed for Terraform
 
-Current ARM_SUBSCRIPTION_ID: ${ARM_SUBSCRIPTION_ID}"
+Current ARM_SUBSCRIPTION_ID: ${ARM_SUBSCRIPTION_ID:-}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
   --tenant)
+    if [[ $# -lt 2 ]]; then
+      echo "Error: --tenant requires a value"
+      exit 1
+    fi
     tenant="$2"
     shift 2
     ;;
