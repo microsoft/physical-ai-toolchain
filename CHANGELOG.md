@@ -15,6 +15,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Note:** This file is automatically maintained by [release-please](https://github.com/googleapis/release-please). Do not edit manually.
 
+## [0.9.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.8.0...v0.9.0) (2026-05-18)
+
+
+### ✨ Features
+
+* **agents:** thin GHCP cloud-agent wrapper exposing hve-core RPI ([#610](https://github.com/microsoft/physical-ai-toolchain/issues/610)) ([3f88f17](https://github.com/microsoft/physical-ai-toolchain/commit/3f88f171b09207e22ed04f7fd606df7fec184792))
+* **infrastructure:** add AML managed network isolation mode ([#642](https://github.com/microsoft/physical-ai-toolchain/issues/642)) ([5b3063d](https://github.com/microsoft/physical-ai-toolchain/commit/5b3063d3e6062479594a6c1c0e3dafdb69656c23))
+
+
+### 🐛 Bug Fixes
+
+* **build:** enforce 80% patch / 0% drift on seven pytest codecov flags ([#651](https://github.com/microsoft/physical-ai-toolchain/issues/651)) ([3bd7d74](https://github.com/microsoft/physical-ai-toolchain/commit/3bd7d74a0cfebf1470d6e902a7481a88d12be913))
+* **ci:** repair ERE regex in pr-validation path filter ([#691](https://github.com/microsoft/physical-ai-toolchain/issues/691)) ([1c62889](https://github.com/microsoft/physical-ai-toolchain/commit/1c628894127b186ac93a85c69573cba348c07c8c))
+* **data:** resolve dataviewer PR [#606](https://github.com/microsoft/physical-ai-toolchain/issues/606) follow-ups for issue [#624](https://github.com/microsoft/physical-ai-toolchain/issues/624) ([#650](https://github.com/microsoft/physical-ai-toolchain/issues/650)) ([0375994](https://github.com/microsoft/physical-ai-toolchain/commit/03759948e41b0a13126e982e443ca731a970b825))
+* **infrastructure:** bump ThinLinc to 4.20.1 ([#666](https://github.com/microsoft/physical-ai-toolchain/issues/666)) ([84a4351](https://github.com/microsoft/physical-ai-toolchain/commit/84a4351c4cc4469de22a41fbde1646576eb2cc2d)), closes [#665](https://github.com/microsoft/physical-ai-toolchain/issues/665)
+
+
+### ♻️ Code Refactoring
+
+* **agents:** migrate dependabot AW review to workflow_run trigger ([#612](https://github.com/microsoft/physical-ai-toolchain/issues/612)) ([eb53059](https://github.com/microsoft/physical-ai-toolchain/commit/eb53059ca3b7a460c32dab5305ce37a7e3b74664))
+
+
+### 🔧 Miscellaneous
+
+* **build:** auto-stamp ms.date in CHANGELOG.md on release PRs ([#647](https://github.com/microsoft/physical-ai-toolchain/issues/647)) ([462e331](https://github.com/microsoft/physical-ai-toolchain/commit/462e331ea43ed9e26c1b1324c747bfb806651290))
+* **build:** bump dependency-review-action v5.0.0, exclude gh-aw-actions from dependabot ([#670](https://github.com/microsoft/physical-ai-toolchain/issues/670)) ([44b8a71](https://github.com/microsoft/physical-ai-toolchain/commit/44b8a71f59d462131381997e68ac245fabd4b294))
+* **deps-dev:** bump hypothesis from 6.152.4 to 6.152.5 in the python-dependencies group across 1 directory ([#659](https://github.com/microsoft/physical-ai-toolchain/issues/659)) ([df0f23a](https://github.com/microsoft/physical-ai-toolchain/commit/df0f23ad517c6ec1e529b91980eb9517434ebb67))
+* **deps-dev:** bump jest from 30.4.1 to 30.4.2 in /docs/docusaurus in the docusaurus-dependencies group across 1 directory ([#656](https://github.com/microsoft/physical-ai-toolchain/issues/656)) ([addd3ab](https://github.com/microsoft/physical-ai-toolchain/commit/addd3ab9747feeb6592e4defbc7554eac72eaa52))
+* **deps-dev:** bump lint-staged from 16.4.0 to 17.0.4 in /data-management/viewer/frontend ([#658](https://github.com/microsoft/physical-ai-toolchain/issues/658)) ([d41e9af](https://github.com/microsoft/physical-ai-toolchain/commit/d41e9af87cf1afcf1abb3bd960f4dc11a8ed3e36))
+* **deps-dev:** bump lint-staged from 17.0.2 to 17.0.4 in the root-npm-dependencies group across 1 directory ([#654](https://github.com/microsoft/physical-ai-toolchain/issues/654)) ([275f3fe](https://github.com/microsoft/physical-ai-toolchain/commit/275f3feeb9516ed370ab179fd71d07715bc80cf6))
+* **deps:** bump azureml/openmpi4.1.0-ubuntu22.04 from 20260409.v4 to 20260507.v1 in /evaluation/sil/docker ([#652](https://github.com/microsoft/physical-ai-toolchain/issues/652)) ([c7242d3](https://github.com/microsoft/physical-ai-toolchain/commit/c7242d399a14d2a48778d4a98320abe0caad1bbe))
+* **deps:** bump node from 25.9.0-slim to 26.1.0-slim in /data-management/viewer/frontend ([#625](https://github.com/microsoft/physical-ai-toolchain/issues/625)) ([c3dd341](https://github.com/microsoft/physical-ai-toolchain/commit/c3dd341514fcb000f2d6715f0d2f8a97d1017a74))
+* **deps:** bump python from `d2462a6` to `6f8a543` in /data-management/viewer/backend ([#655](https://github.com/microsoft/physical-ai-toolchain/issues/655)) ([a3facc4](https://github.com/microsoft/physical-ai-toolchain/commit/a3facc428f5c1025792676f3caaa53f445517f83))
+* **deps:** bump python from 3.12-slim to 3.13.13-slim in /data-management/viewer/backend ([#596](https://github.com/microsoft/physical-ai-toolchain/issues/596)) ([a7c7d9f](https://github.com/microsoft/physical-ai-toolchain/commit/a7c7d9f2d8cc77f70eb9a32b9f902b457690bf89))
+* **deps:** bump the dataviewer-backend-dependencies group across 1 directory with 6 updates ([#661](https://github.com/microsoft/physical-ai-toolchain/issues/661)) ([38b61f6](https://github.com/microsoft/physical-ai-toolchain/commit/38b61f6fde1cb13f7c94482584528ef8564dc3fc))
+* **deps:** bump the dataviewer-dependencies group across 1 directory with 2 updates ([#660](https://github.com/microsoft/physical-ai-toolchain/issues/660)) ([d865c1a](https://github.com/microsoft/physical-ai-toolchain/commit/d865c1ad2168b899a2708a37afb94172b3ff07a4))
+* **deps:** bump the inference-dependencies group across 1 directory with 2 updates ([#653](https://github.com/microsoft/physical-ai-toolchain/issues/653)) ([2a8318a](https://github.com/microsoft/physical-ai-toolchain/commit/2a8318a0334b088e4ad75a9b9bf4bc1f092a309d))
+* **deps:** bump the lerobot-dependencies group across 1 directory with 96 updates ([#685](https://github.com/microsoft/physical-ai-toolchain/issues/685)) ([cb6cabf](https://github.com/microsoft/physical-ai-toolchain/commit/cb6cabfbfc49afdbb3b3becd6547c0940279d2bf))
+* **deps:** bump the uv group across 3 directories with 1 update ([#684](https://github.com/microsoft/physical-ai-toolchain/issues/684)) ([040329d](https://github.com/microsoft/physical-ai-toolchain/commit/040329d6c70593db5b003e2c4106db2506d97acf))
+* **deps:** bump urllib3 from 2.6.3 to 2.7.0 ([#682](https://github.com/microsoft/physical-ai-toolchain/issues/682)) ([1a7c52d](https://github.com/microsoft/physical-ai-toolchain/commit/1a7c52d00f52f1e184054a8f6a8ab435a0859837))
+* **deps:** bump urllib3 from 2.6.3 to 2.7.0 in /data-management/viewer ([#681](https://github.com/microsoft/physical-ai-toolchain/issues/681)) ([0cc39ad](https://github.com/microsoft/physical-ai-toolchain/commit/0cc39ada7f0062a99ddc59210f3b92f10657774e))
+* **deps:** bump urllib3 from 2.6.3 to 2.7.0 in /data-management/viewer/backend ([#680](https://github.com/microsoft/physical-ai-toolchain/issues/680)) ([c7c3aca](https://github.com/microsoft/physical-ai-toolchain/commit/c7c3aca2dce6d98f3f474fcf60127ebabf57294a))
+
+
+### 🔒 Security
+
+* **deps:** bump the github-actions group with 4 updates ([#701](https://github.com/microsoft/physical-ai-toolchain/issues/701)) ([b5cefe6](https://github.com/microsoft/physical-ai-toolchain/commit/b5cefe614dea5e0a9276e12749fc1132e9a74c5c))
+
 ## [0.8.0](https://github.com/microsoft/physical-ai-toolchain/compare/v0.7.4...v0.8.0) (2026-05-08)
 
 
