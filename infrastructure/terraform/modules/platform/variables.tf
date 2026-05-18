@@ -330,12 +330,12 @@ variable "aml_compute_clusters" {
   }))
   description = "AzureML managed compute clusters keyed by Azure ML compute cluster name. Empty map deploys no clusters."
   default     = {}
-      for cluster_name, _ in var.aml_compute_clusters : can(regex("^[A-Za-z0-9][A-Za-z0-9-]{1,22}[A-Za-z0-9]$", cluster_name))
+
   validation {
-    error_message = "aml_compute_clusters keys must be 3-24 characters, start and end with an alphanumeric character, and contain only letters, numbers, and hyphens."
+    condition = alltrue([
       for cluster_name, _ in var.aml_compute_clusters : can(regex("^[A-Za-z0-9][A-Za-z0-9-]{0,22}[A-Za-z0-9]$", cluster_name))
     ])
-    error_message = "aml_compute_clusters keys must be 2-24 characters, start and end with an alphanumeric character, and contain only letters, numbers, and hyphens."
+    error_message = "aml_compute_clusters keys must be 3-24 characters, start and end with an alphanumeric character, and contain only letters, numbers, and hyphens."
   }
 
   validation {

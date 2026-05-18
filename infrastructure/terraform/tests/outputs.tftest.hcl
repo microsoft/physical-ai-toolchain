@@ -136,6 +136,7 @@ run "aml_compute_clusters_output_populated" {
     instance                     = run.setup.instance
     location                     = run.setup.location
     should_create_resource_group = true
+    should_deploy_aks            = false
     aml_compute_clusters = {
       gpu-cluster = {
         vm_size                   = "Standard_NC4as_T4_v3"
