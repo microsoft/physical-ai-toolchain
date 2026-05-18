@@ -13,7 +13,9 @@
 		"mycontainer",
 		"noseparator",
 		"preds",
+		"prio",
 		"refetches",
+		"sdgcpu",
 		"unstub",
 		"uppercased",
 		"xticklabels"
