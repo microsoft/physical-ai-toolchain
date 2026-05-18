@@ -138,8 +138,7 @@ module "platform" {
 
   // AzureML compute
   should_enable_aml_diagnostic_logs  = var.should_enable_aml_diagnostic_logs
-  should_deploy_aml_compute          = var.should_deploy_aml_compute
-  aml_compute_config                 = var.aml_compute_config
+  aml_compute_clusters               = var.aml_compute_clusters
   aml_managed_network_isolation_mode = var.aml_managed_network_isolation_mode
 
   // DNS zone flags

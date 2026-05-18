@@ -1,5 +1,5 @@
 // Platform module variable validation tests
-// Validates that invalid nat_gateway_zones values are rejected by validation blocks
+// Validates that invalid variable values are rejected by validation blocks
 
 mock_provider "azurerm" {}
 mock_provider "azuread" {}
@@ -186,6 +186,10 @@ run "aml_isolation_mode_allow_only_approved_outbound_accepted" {
   }
 }
 
+// ============================================================
+// AML Compute Cluster Map Validation
+// ============================================================
+
 run "aml_compute_subnet_with_managed_network_rejected" {
   command = plan
 
@@ -196,18 +200,209 @@ run "aml_compute_subnet_with_managed_network_rejected" {
     location                           = run.setup.location
     resource_group                     = run.setup.resource_group
     current_user_oid                   = run.setup.current_user_oid
-    should_deploy_aml_compute          = true
     aml_managed_network_isolation_mode = "AllowOnlyApprovedOutbound"
-    aml_compute_config = {
-      vm_size               = "Standard_NC4as_T4_v3"
-      vm_priority           = "LowPriority"
-      min_node_count        = 0
-      max_node_count        = 1
-      scale_down_after_idle = "PT5M"
-      cluster_name          = "gpu-cluster"
-      subnet_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test/providers/Microsoft.Network/virtualNetworks/vnet-test/subnets/snet-aml"
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "PT5M"
+        subnet_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test/providers/Microsoft.Network/virtualNetworks/vnet-test/subnets/snet-aml"
+      }
     }
   }
 
-  expect_failures = [azurerm_machine_learning_compute_cluster.gpu[0]]
+  expect_failures = [azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"]]
+}
+
+run "aml_compute_invalid_name_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu_cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "PT5M"
+      }
+    }
+  }
+
+  expect_failures = [var.aml_compute_clusters]
+}
+
+run "aml_compute_invalid_vm_priority_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "Spot"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "PT5M"
+      }
+    }
+  }
+
+  expect_failures = [var.aml_compute_clusters]
+}
+
+run "aml_compute_negative_min_node_count_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = -1
+        max_node_count        = 1
+        scale_down_after_idle = "PT5M"
+      }
+    }
+  }
+
+  expect_failures = [var.aml_compute_clusters]
+}
+
+run "aml_compute_negative_max_node_count_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = -1
+        scale_down_after_idle = "PT5M"
+      }
+    }
+  }
+
+  expect_failures = [var.aml_compute_clusters]
+}
+
+run "aml_compute_min_node_count_greater_than_max_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 2
+        max_node_count        = 1
+        scale_down_after_idle = "PT5M"
+      }
+    }
+  }
+
+  expect_failures = [var.aml_compute_clusters]
+}
+
+run "aml_compute_invalid_identity_type_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "PT5M"
+        identity_type         = "SystemAssigned, UserAssigned"
+      }
+    }
+  }
+
+  expect_failures = [var.aml_compute_clusters]
+}
+
+run "aml_compute_invalid_scale_down_after_idle_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "5 minutes"
+      }
+    }
+  }
+
+  expect_failures = [var.aml_compute_clusters]
+}
+
+run "aml_compute_compound_scale_down_after_idle_accepted" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "PT1H30M"
+      }
+    }
+  }
 }
