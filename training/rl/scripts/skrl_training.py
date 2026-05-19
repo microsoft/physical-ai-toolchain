@@ -21,7 +21,7 @@ import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -157,7 +157,7 @@ def _prepare_log_paths(agent_cfg: dict[str, Any], cli_args: argparse.Namespace) 
     """
     experiment_cfg = agent_cfg.setdefault("agent", {}).setdefault("experiment", {})
     root_path = Path(experiment_cfg.get("directory") or Path("logs") / "skrl").resolve()
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H-%M-%S")
     algorithm_label = (cli_args.algorithm or "rl").lower()
     run_name = f"{timestamp}_{algorithm_label}_{cli_args.ml_framework}"
     custom_name = experiment_cfg.get("experiment_name")

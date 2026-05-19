@@ -155,7 +155,7 @@ The script stages files to exclude `__pycache__` and build artifacts via `.amlig
 
 ## 🔗 Related Documentation
 
-- [Experiment Tracking](experiment-tracking.md) for MLflow and WANDB setup
+- [Experiment Tracking](experiment-tracking.md) for MLflow setup
 - [MLflow Integration](mlflow-integration.md) for SKRL metric logging internals
 - [AzureML Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/README.md) for job template reference
 - [OSMO Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/osmo/README.md) for workflow template reference

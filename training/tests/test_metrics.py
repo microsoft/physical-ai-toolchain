@@ -77,6 +77,67 @@ def test_cpu_and_disk_collection_failures_are_non_fatal(monkeypatch: pytest.Monk
     assert collector._collect_disk_metrics() == {}
 
 
+def test_cpu_metrics_collection_converts_memory_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collect CPU and memory metrics with byte values converted to MiB."""
+
+    class FakePsutil:
+        cpu_interval: object | None = None
+
+        @classmethod
+        def cpu_percent(cls, interval: object = None) -> float:
+            cls.cpu_interval = interval
+            return 12.5
+
+        @staticmethod
+        def virtual_memory() -> SimpleNamespace:
+            return SimpleNamespace(
+                used=768 * 1024 * 1024,
+                available=256 * 1024 * 1024,
+                percent=75.0,
+            )
+
+    monkeypatch.setitem(sys.modules, "psutil", FakePsutil)
+    collector = SystemMetricsCollector(collect_gpu=False, collect_disk=False)
+
+    payload = collector._collect_cpu_metrics()
+
+    assert FakePsutil.cpu_interval is None
+    assert payload == {
+        "system/cpu_utilization_percentage": 12.5,
+        "system/memory_used_megabytes": 768.0,
+        "system/memory_available_megabytes": 256.0,
+        "system/memory_percent": 75.0,
+    }
+
+
+def test_disk_metrics_collection_converts_disk_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Collect disk metrics from the root path with byte values converted to GiB."""
+
+    class FakePsutil:
+        disk_path: str | None = None
+
+        @classmethod
+        def disk_usage(cls, path: str) -> SimpleNamespace:
+            cls.disk_path = path
+            return SimpleNamespace(
+                used=9 * 1024 * 1024 * 1024,
+                free=3 * 1024 * 1024 * 1024,
+                percent=80.0,
+            )
+
+    monkeypatch.setitem(sys.modules, "psutil", FakePsutil)
+    collector = SystemMetricsCollector(collect_gpu=False, collect_disk=True)
+
+    payload = collector._collect_disk_metrics()
+
+    assert FakePsutil.disk_path == "/"
+    assert payload == {
+        "system/disk_used_gigabytes": 9.0,
+        "system/disk_available_gigabytes": 3.0,
+        "system/disk_percent": 80.0,
+    }
+
+
 def test_gpu_collection_skips_failed_device_and_continues(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep collecting GPU metrics when one device fails."""
 
