@@ -185,7 +185,7 @@ huggingface-hub==1.14.0
     #   datasets
     #   diffusers
     #   lerobot
-idna==3.12
+idna==3.15
     # via
     #   anyio
     #   httpx
