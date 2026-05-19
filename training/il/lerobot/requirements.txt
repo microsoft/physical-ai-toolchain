@@ -124,7 +124,7 @@ datasets==4.8.4
     #   lerobot
 deepdiff==8.6.2
     # via lerobot
-diffusers==0.35.2
+diffusers==0.38.0
     # via lerobot
 dill==0.4.1
     # via
@@ -185,7 +185,7 @@ huggingface-hub==1.14.0
     #   datasets
     #   diffusers
     #   lerobot
-idna==3.12
+idna==3.15
     # via
     #   anyio
     #   httpx
