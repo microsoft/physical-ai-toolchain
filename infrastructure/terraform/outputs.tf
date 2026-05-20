@@ -153,9 +153,9 @@ output "data_lake_storage_account" {
 // AzureML Compute Outputs
 // ============================================================
 
-output "aml_compute_cluster" {
-  description = "AzureML managed compute cluster. Null when compute deployment is disabled."
-  value       = module.platform.aml_compute_cluster
+output "aml_compute_clusters" {
+  description = "AzureML managed compute clusters keyed by cluster name. Empty when no clusters are configured."
+  value       = module.platform.aml_compute_clusters
 }
 
 // ============================================================
