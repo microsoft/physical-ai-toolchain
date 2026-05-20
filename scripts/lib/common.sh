@@ -125,9 +125,16 @@ tf_require() {
 
 # Connect to AKS cluster
 connect_aks() {
-  local rg="${1:?resource group required}" name="${2:?cluster name required}"
+  local rg="${1:?resource group required}" name="${2:?cluster name required}" context_name
   info "Connecting to AKS cluster $name..."
   az aks get-credentials --resource-group "$rg" --name "$name" --overwrite-existing
+  # AAD-managed clusters (especially with disableLocalAccounts=true) require kubelogin
+  # to exchange Azure CLI tokens for the cluster API. Convert idempotently when available.
+  if command -v kubelogin >/dev/null 2>&1; then
+    context_name=$(kubectl config current-context 2>/dev/null || true)
+    [[ -n "$context_name" ]] || fatal "Could not determine current kubeconfig context after az aks get-credentials"
+    kubelogin convert-kubeconfig --context "$context_name" -l azurecli >/dev/null
+  fi
   verify_cluster_connectivity
 }
 
