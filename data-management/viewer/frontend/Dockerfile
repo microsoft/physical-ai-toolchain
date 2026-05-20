@@ -23,7 +23,7 @@ ENV VITE_AZURE_TENANT_ID=${VITE_AZURE_TENANT_ID}
 RUN npm run build
 
 # ─── Serve stage ─────────────────────────────────────────────────────────────
-FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de AS serve
+FROM nginx:1.31-alpine@sha256:dc48b7a872a79fb541ba5081d320b11b549231bc63ba465a7495afaa7d2ebcb8 AS serve
 
 # Remove default nginx page
 RUN rm -rf /usr/share/nginx/html/*

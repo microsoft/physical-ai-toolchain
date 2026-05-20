@@ -107,44 +107,56 @@ resource "azurerm_monitor_diagnostic_setting" "ml_workspace_logs" {
 
 locals {
   should_attach_aml_compute_to_customer_subnet = var.aml_managed_network_isolation_mode == "Disabled"
-  aml_compute_subnet_resource_id = (
-    local.should_attach_aml_compute_to_customer_subnet
-    ? coalesce(var.aml_compute_config.subnet_id, azurerm_subnet.main.id)
-    : null
-  )
+  aml_user_assigned_identity_id                = azurerm_user_assigned_identity.ml.id
+  aml_compute_clusters_normalized = {
+    for cluster_name, cluster in var.aml_compute_clusters : cluster_name => {
+      vm_size                   = cluster.vm_size
+      vm_priority               = cluster.vm_priority
+      min_node_count            = cluster.min_node_count
+      max_node_count            = cluster.max_node_count
+      scale_down_after_idle     = cluster.scale_down_after_idle
+      subnet_id                 = cluster.subnet_id
+      node_public_ip_enabled    = coalesce(cluster.node_public_ip_enabled, false)
+      ssh_public_access_enabled = coalesce(cluster.ssh_public_access_enabled, false)
+      identity_type             = coalesce(cluster.identity_type, "UserAssigned")
+      identity_ids              = coalesce(cluster.identity_type, "UserAssigned") == "UserAssigned" ? [local.aml_user_assigned_identity_id] : null
+      location                  = coalesce(cluster.location, var.resource_group.location)
+    }
+  }
 }
 
 // ============================================================
-// AzureML Managed Compute Cluster (Optional)
+// AzureML Managed Compute Clusters
 // ============================================================
 
 resource "azurerm_machine_learning_compute_cluster" "gpu" {
-  count = var.should_deploy_aml_compute ? 1 : 0
+  for_each = local.aml_compute_clusters_normalized
 
-  name                          = var.aml_compute_config.cluster_name
+  name                          = each.key
   machine_learning_workspace_id = azapi_resource.ml_workspace.id
-  location                      = var.resource_group.location
-  vm_size                       = var.aml_compute_config.vm_size
-  vm_priority                   = var.aml_compute_config.vm_priority
+  location                      = each.value.location
+  vm_size                       = each.value.vm_size
+  vm_priority                   = each.value.vm_priority
+  node_public_ip_enabled        = each.value.node_public_ip_enabled
+  ssh_public_access_enabled     = each.value.ssh_public_access_enabled
 
   identity {
-    type = "SystemAssigned"
+    type         = each.value.identity_type
+    identity_ids = each.value.identity_ids
   }
 
   scale_settings {
-    min_node_count                       = var.aml_compute_config.min_node_count
-    max_node_count                       = var.aml_compute_config.max_node_count
-    scale_down_nodes_after_idle_duration = var.aml_compute_config.scale_down_after_idle
+    min_node_count                       = each.value.min_node_count
+    max_node_count                       = each.value.max_node_count
+    scale_down_nodes_after_idle_duration = each.value.scale_down_after_idle
   }
 
-  // Custom subnet is incompatible with AzureML managed network modes.
-  // Only set subnet_resource_id when the workspace managed network is disabled.
-  subnet_resource_id = local.aml_compute_subnet_resource_id
+  subnet_resource_id = local.should_attach_aml_compute_to_customer_subnet ? coalesce(each.value.subnet_id, azurerm_subnet.main.id) : null
 
   lifecycle {
     precondition {
-      condition     = local.should_attach_aml_compute_to_customer_subnet || var.aml_compute_config.subnet_id == null
-      error_message = "aml_compute_config.subnet_id can only be set when aml_managed_network_isolation_mode is Disabled."
+      condition     = local.should_attach_aml_compute_to_customer_subnet || each.value.subnet_id == null
+      error_message = "aml_compute_clusters subnet_id can only be set when aml_managed_network_isolation_mode is Disabled."
     }
   }
 }
