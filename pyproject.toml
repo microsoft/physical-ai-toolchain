@@ -33,7 +33,10 @@ fuzz = ["atheris>=3.0"]
 
 [tool.uv]
 package = false
-constraint-dependencies = ["pygments==2.20.0"]
+constraint-dependencies = [
+    "gitpython==3.1.50",
+    "pygments==2.20.0",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "training/tests", "data-management/tools/tests", "fleet-deployment/inference/tests"]

@@ -37,6 +37,3 @@ override-dependencies = [
     "diffusers==0.38.0",
 ]
 package = false
-
-[tool.uv.pip]
-prerelease = "allow"
