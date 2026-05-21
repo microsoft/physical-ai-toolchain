@@ -391,7 +391,7 @@ AzureML runs on Arc-connected AKS clusters via the AzureML Kubernetes extension.
 
 Training runs in NVIDIA IsaacLab containers on GPU nodes via AzureML or OSMO.
 
-* Container: `nvcr.io/nvidia/isaac-lab:2.3.2`
+* Container: `DEFAULT_ISAAC_LAB_IMAGE` from `scripts/lib/common.sh` (currently `nvcr.io/nvidia/isaac-lab:2.3.2`)
   * Python path: `/isaac-sim/kit/python/bin/python3` (NOT system Python)
   * `PYTHON` env var: set to `/workspace/isaaclab/isaaclab.sh -p` (wrapper activating correct conda env)
 * EULA acceptance: all jobs MUST set `ACCEPT_EULA: "Y"` and `PRIVACY_CONSENT: "Y"`

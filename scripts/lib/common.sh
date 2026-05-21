@@ -16,6 +16,7 @@ unset _common_sh_dir _env_local
 # Shared container defaults for training and evaluation submission scripts.
 DEFAULT_ISAAC_LAB_IMAGE_VERSION="${DEFAULT_ISAAC_LAB_IMAGE_VERSION:-2.3.2}"
 DEFAULT_ISAAC_LAB_IMAGE="${DEFAULT_ISAAC_LAB_IMAGE:-nvcr.io/nvidia/isaac-lab:${DEFAULT_ISAAC_LAB_IMAGE_VERSION}}"
+export DEFAULT_ISAAC_LAB_IMAGE_VERSION DEFAULT_ISAAC_LAB_IMAGE
 
 # Logging functions with color support (NO_COLOR standard: https://no-color.org)
 if [[ -z "${NO_COLOR+x}" ]]; then

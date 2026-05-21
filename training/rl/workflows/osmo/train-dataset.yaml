@@ -77,6 +77,8 @@ workflow:
             bash "${TRAINING_ROOT}/scripts/train.sh" "${train_args[@]}"
 
 default-values:
+  # Submission scripts set image from scripts/lib/common.sh via --set-string.
+  # This value is the direct-workflow fallback; keep it in sync with DEFAULT_ISAAC_LAB_IMAGE.
   image: nvcr.io/nvidia/isaac-lab:2.3.2
   task: Isaac-Velocity-Rough-Anymal-C-v0
   num_envs: "2048"
