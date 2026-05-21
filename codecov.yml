@@ -1,23 +1,32 @@
 # Codecov configuration for physical-ai-toolchain.
 #
-# Flag → Workflow → cwd → coverage scope
-# ----------------------------------------------------------------------------
-# pytest-training      | pytest-training.yml            | repo root                      | --cov=training
-# pytest-dm-tools      | pytest-dm-tools.yml            | repo root                      | --cov=data-management/tools
-# pytest-data-pipeline | pytest-data-pipeline.yml       | repo root                      | --cov=data-pipeline/capture
-# pytest-inference     | pytest-inference.yml           | repo root                      | --cov=fleet-deployment/inference
-# pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend | --cov=src
-# pytest-evaluation    | evaluation-pytests.yml         | evaluation                     | --cov=.
-# pytest-fuzz          | fuzz-regression-tests.yml      | repo root                      | --cov=tests --cov=data-management/viewer/backend/src --cov=training
-# vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | vitest --coverage
-# go                   | go-tests.yml                   | infrastructure/terraform/e2e   | go test -cover
-# terraform            | terraform-tests.yml            | infrastructure/terraform       | terraform test
-# pester               | pester-tests.yml               | repo root                      | Invoke-Pester -CodeCoverage
+# Flag → Workflow → cwd → uploaded coverage artifact → coverage scope
+# -----------------------------------------------------------------------------------------------
+# pytest-training      | pytest-training.yml            | repo root                       | logs/coverage-training.xml        | --cov=training
+# pytest-dm-tools      | pytest-dm-tools.yml            | repo root                       | logs/coverage-dm-tools.xml        | --cov=data-management/tools
+# pytest-data-pipeline | pytest-data-pipeline.yml       | repo root                       | logs/coverage-data-pipeline.xml   | --cov=data-pipeline/capture
+# pytest-inference     | pytest-inference.yml           | repo root                       | logs/coverage-inference.xml       | --cov=fleet-deployment/inference
+# pytest-dataviewer    | dataviewer-backend-pytests.yml | data-management/viewer/backend  | logs/coverage.xml                 | --cov=src
+# pytest-evaluation    | evaluation-pytests.yml         | evaluation                      | evaluation/logs/coverage.xml      | --cov=.
+# pytest-fuzz          | fuzz-regression-tests.yml      | repo root                       | logs/coverage.xml                 | --cov=tests --cov=data-management/viewer/backend/src --cov=training
+# vitest               | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | vitest --coverage
+# vitest-components    | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/components/
+# vitest-features      | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/components/{dashboard,annotation-panel,frame-editor,episode-viewer}/
+# vitest-lib           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/lib/
+# vitest-state         | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/stores/, src/hooks/
+# vitest-app           | dataviewer-frontend-tests.yml  | data-management/viewer/frontend | coverage/lcov.info                | subset: src/App.tsx
+# go                   | go-tests.yml                   | infrastructure/terraform/e2e    | coverage.out                      | go test -cover
+# terraform            | terraform-tests.yml            | infrastructure/terraform        | n/a                               | terraform test
+# pester               | pester-tests.yml               | repo root                       | logs/pester-coverage.xml          | Invoke-Pester -CodeCoverage
 #
 # Flag overlaps (intentional):
 #   pytest-fuzz overlaps pytest-training (training/) and pytest-dataviewer (viewer/backend/src/).
 #   go ⊂ terraform (infrastructure/terraform/e2e/ ⊂ infrastructure/terraform/);
 #     deduplicated at the component layer (infrastructure-terraform vs infrastructure-go-e2e).
+#   vitest-* (components/features/lib/state/app) overlap the aggregate vitest flag and each
+#     other (vitest-features ⊂ vitest-components since the feature directories
+#     dashboard/, annotation-panel/, frame-editor/, episode-viewer/ all live under src/components/);
+#     intentional to surface per-section coverage trends without losing the aggregate view.
 
 codecov:
   notify:
@@ -29,112 +38,41 @@ coverage:
   range: "80...100"
   status:
     project:
-      default:
-        target: auto
-        threshold: 1%
-      go:
-        flags:
-          - go
-        target: auto
-        threshold: 1%
+      default: false
       pester:
         flags:
           - pester
-        target: auto
-        threshold: 1%
+        target: 80%
       pytest-training:
         flags:
           - pytest-training
-        target: auto
-        threshold: 1%
+        target: 80%
       pytest-dm-tools:
         flags:
           - pytest-dm-tools
-        target: auto
-        threshold: 1%
+        target: 80%
       pytest-data-pipeline:
         flags:
           - pytest-data-pipeline
-        target: auto
-        threshold: 1%
+        target: 80%
       pytest-inference:
         flags:
           - pytest-inference
-        target: auto
-        threshold: 1%
+        target: 80%
       pytest-dataviewer:
         flags:
           - pytest-dataviewer
-        target: auto
-        threshold: 1%
-      pytest-fuzz:
-        flags:
-          - pytest-fuzz
-        target: auto
-        threshold: 1%
-      terraform:
-        flags:
-          - terraform
-        target: auto
-        threshold: 1%
-      vitest:
-        flags:
-          - vitest
-        target: auto
-        threshold: 1%
+        target: 80%
       pytest-evaluation:
         flags:
           - pytest-evaluation
-        target: auto
-        threshold: 1%
-    patch:
-      default:
-        target: auto
-        threshold: 5%
-      go:
-        flags:
-          - go
-        informational: true
-      pester:
-        flags:
-          - pester
-        informational: true
-      pytest-training:
-        flags:
-          - pytest-training
-        informational: true
-      pytest-dm-tools:
-        flags:
-          - pytest-dm-tools
-        informational: true
-      pytest-data-pipeline:
-        flags:
-          - pytest-data-pipeline
-        informational: true
-      pytest-inference:
-        flags:
-          - pytest-inference
-        informational: true
-      pytest-dataviewer:
-        flags:
-          - pytest-dataviewer
-        informational: true
-      pytest-fuzz:
-        flags:
-          - pytest-fuzz
-        informational: true
-      terraform:
-        flags:
-          - terraform
-        informational: true
-      vitest:
-        flags:
-          - vitest
-        informational: true
-      pytest-evaluation:
-        flags:
-          - pytest-evaluation
-        informational: true
+        target: 80%
+      # pytest-fuzz, vitest-*, terraform, and go intentionally omitted from project status gating:
+      # fuzzing coverage is always low by design, vitest improvements are tracked in a separate
+      # workstream, terraform reports test results without a coverage XML, and go e2e tests do
+      # not produce meaningful coverage signal at the PR granularity.
+    # Disable the top-level aggregate patch status; component-level patch statuses still apply.
+    patch: off
 
 flags:
   pytest-training:
@@ -171,6 +109,33 @@ flags:
     paths:
       - data-management/viewer/frontend/src/
     carryforward: true
+  vitest-components:
+    paths:
+      - data-management/viewer/frontend/src/components/
+    carryforward: true
+  vitest-features:
+  # Most actively developed feature areas tracked individually; remaining components fall under vitest-components.
+    paths:
+      - data-management/viewer/frontend/src/components/dashboard/
+      - data-management/viewer/frontend/src/components/annotation-panel/
+      - data-management/viewer/frontend/src/components/frame-editor/
+      - data-management/viewer/frontend/src/components/episode-viewer/
+    carryforward: true
+  vitest-lib:
+    paths:
+      - data-management/viewer/frontend/src/lib/
+      - data-management/viewer/frontend/src/api/
+      - data-management/viewer/frontend/src/types/
+    carryforward: true
+  vitest-state:
+    paths:
+      - data-management/viewer/frontend/src/stores/
+      - data-management/viewer/frontend/src/hooks/
+    carryforward: true
+  vitest-app:
+    paths:
+      - data-management/viewer/frontend/src/App.tsx
+    carryforward: true
   go:
     paths:
       - infrastructure/terraform/e2e/
@@ -188,11 +153,15 @@ component_management:
   default_rules:
     statuses:
       - type: project
-        target: auto
-        threshold: 1%
+        target: 80%
+        threshold: 0%
+        if_not_found: success
       - type: patch
-        target: auto
-        threshold: 5%
+        target: 80%
+        threshold: 0%
+        only_pulls: true
+        if_ci_failed: error
+        if_not_found: success
   individual_components:
     - component_id: training
       name: Training
@@ -283,6 +252,7 @@ component_management:
         - scripts/**/*.psm1
     - component_id: fuzz-suite
       name: Fuzz Suite
+      statuses: []
       paths:
         - tests/fuzz_harness.py
         - tests/fuzz-corpus/**

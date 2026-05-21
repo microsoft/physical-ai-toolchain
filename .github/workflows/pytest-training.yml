@@ -37,12 +37,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      - name: Install Torch test dependency
+        run: uv pip install torch==2.10.0
+
       - name: Run pytest
         run: >-
-          uv run pytest training/tests -v
+          uv run pytest -o addopts="" training/tests -v
           --cov=training
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-training.xml
+          --cov-fail-under=80
 
       - name: Upload coverage.xml artifact
         if: always()

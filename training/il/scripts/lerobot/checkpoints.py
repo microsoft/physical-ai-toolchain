@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -74,21 +75,104 @@ def _register_model_via_aml(
         register_name = os.environ.get("REGISTER_CHECKPOINT", "") or job_name
         model_name = register_name.replace("_", "-")
 
+        # Lineage metadata: dataset -> job -> model.
+        # These tags make it possible to walk from a registered model back to
+        # the training run, the MLflow run, and the Azure Blob path (or
+        # HuggingFace repo as a rarely-used fallback) that produced it.
+        # Surfaces in the AML Model card and via `az ml model show --name <name>`.
+        #
+        # Three submission paths feed three different env-var conventions:
+        #   1. AzureML submission: BLOB_URLS (JSON array of canonical
+        #      https://<account>.blob.core.windows.net/<container>/<prefix> URLs).
+        #   2. OSMO submission: STORAGE_ACCOUNT + STORAGE_CONTAINER + BLOB_PREFIX
+        #      (the canonical URL is synthesized here for lineage parity).
+        #   3. HuggingFace fallback: DATASET_REPO_ID alone. Datasets in this
+        #      repo come from Azure Blob; HF is supported for legacy compatibility.
+        dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")
+        blob_urls_json = os.environ.get("BLOB_URLS", "")
+        storage_account = os.environ.get("STORAGE_ACCOUNT", "")
+        storage_container = os.environ.get("STORAGE_CONTAINER", "")
+        blob_prefix = os.environ.get("BLOB_PREFIX", "")
+        azureml_run_id = os.environ.get("AZUREML_RUN_ID", "") or os.environ.get("MLFLOW_RUN_ID", "")
+        mlflow_run_id = os.environ.get("MLFLOW_RUN_ID", "")
+        experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID", "")
+
+        dataset_uri = ""
+        dataset_source_kind = ""
+        blob_urls: list[str] = []
+
+        if blob_urls_json and blob_urls_json not in ("{}", "[]"):
+            try:
+                parsed = json.loads(blob_urls_json)
+                if isinstance(parsed, list) and parsed:
+                    blob_urls = [str(u) for u in parsed]
+                    dataset_uri = blob_urls[0] if len(blob_urls) == 1 else " ".join(blob_urls)
+                    dataset_source_kind = "azure-blob"
+            except (json.JSONDecodeError, TypeError) as exc:
+                print(f"[AzureML] Failed to parse BLOB_URLS: {exc}. Falling back to other dataset source metadata.")
+
+        if not dataset_uri and storage_account:
+            container = storage_container or "datasets"
+            prefix = blob_prefix.lstrip("/")
+            synthesized = f"https://{storage_account}.blob.core.windows.net/{container}"
+            if prefix:
+                synthesized = f"{synthesized}/{prefix}"
+            blob_urls = [synthesized]
+            dataset_uri = synthesized
+            dataset_source_kind = "azure-blob"
+
+        if not dataset_uri and dataset_repo_id:
+            dataset_uri = f"hf://{dataset_repo_id}"
+            dataset_source_kind = "huggingface"
+
+        description_lines = [
+            f"LeRobot {policy_type} policy",
+            f"Job: {job_name} (checkpoint {checkpoint_name})",
+        ]
+        if dataset_uri:
+            description_lines.append(f"Dataset: {dataset_uri}")
+        if azureml_run_id:
+            description_lines.append(f"AML run: {azureml_run_id}")
+        description = "\n".join(description_lines)
+
+        tags = {
+            "framework": "lerobot",
+            "policy_type": policy_type,
+            "job_name": job_name,
+            "checkpoint": checkpoint_name,
+            "source": source,
+        }
+        if dataset_source_kind:
+            tags["dataset_source"] = dataset_source_kind
+        if dataset_uri:
+            tags["dataset_uri"] = dataset_uri
+        if dataset_repo_id:
+            tags["dataset_repo_id"] = dataset_repo_id
+        if storage_account:
+            tags["storage_account"] = storage_account
+            tags["storage_container"] = storage_container or "datasets"
+            if blob_prefix:
+                tags["blob_prefix"] = blob_prefix
+        if blob_urls:
+            tags["blob_urls"] = blob_urls[0] if len(blob_urls) == 1 else json.dumps(blob_urls)
+        if azureml_run_id:
+            tags["azureml_run_id"] = azureml_run_id
+        if mlflow_run_id:
+            tags["mlflow_run_id"] = mlflow_run_id
+        if experiment_id:
+            tags["mlflow_experiment_id"] = experiment_id
+
         model = Model(
             path=str(checkpoint_path),
             name=model_name,
-            description=f"LeRobot {policy_type} policy from job: {job_name} (checkpoint {checkpoint_name})",
+            description=description,
             type=AssetTypes.CUSTOM_MODEL,
-            tags={
-                "framework": "lerobot",
-                "policy_type": policy_type,
-                "job_name": job_name,
-                "checkpoint": checkpoint_name,
-                "source": source,
-            },
+            tags=tags,
         )
         registered = client.models.create_or_update(model)
         print(f"[AzureML] Registered: {registered.name} v{registered.version} ({checkpoint_name})")
+        if dataset_uri:
+            print(f"[AzureML] Lineage: {dataset_uri} -> {job_name} -> {registered.name}:v{registered.version}")
         return True
     except Exception as exc:
         print(f"[AzureML] Failed to register checkpoint {checkpoint_name}: {exc}")

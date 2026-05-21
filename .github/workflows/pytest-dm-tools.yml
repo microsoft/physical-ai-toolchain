@@ -39,10 +39,11 @@ jobs:
 
       - name: Run pytest
         run: >-
-          uv run pytest data-management/tools/tests -v
+          uv run pytest -o addopts="" data-management/tools/tests -v
           --cov=data-management/tools
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-dm-tools.xml
+          --cov-fail-under=80
 
       - name: Upload coverage.xml artifact
         if: always()

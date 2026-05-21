@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-02
+ms.date: 2026-04-29
 ms.topic: reference
 keywords:
   - architecture
@@ -94,8 +94,56 @@ Root Module (001-iac/)
 | `should_deploy_monitor_workspace` | Azure Monitor Workspace for Prometheus                   |
 | `should_deploy_ampls`             | AMPLS, scoped services, private endpoint (if PE enabled) |
 | `should_deploy_dce`               | Data Collection Endpoint, AMPLS link (if AMPLS enabled)  |
-| `should_deploy_aml_compute`       | AzureML managed GPU compute cluster                      |
+| `aml_compute_clusters`            | AzureML managed compute clusters keyed by cluster name   |
 | `should_include_aks_dns_zone`     | AKS private DNS zone in core zones                       |
+
+### AzureML managed network isolation
+
+Use `aml_managed_network_isolation_mode` to control the AzureML workspace managed network directly.
+
+| Value                       | AzureML workspace behavior                                           |
+|-----------------------------|----------------------------------------------------------------------|
+| `Disabled`                  | AzureML managed network is off, and AML compute can use a subnet ID  |
+| `AllowInternetOutbound`     | AzureML managed network is on with Microsoft-managed outbound access |
+| `AllowOnlyApprovedOutbound` | AzureML managed network is on and outbound access is restricted      |
+
+Treat changes to `aml_managed_network_isolation_mode` as AzureML redeploy operations. AzureML does not support disabling managed network isolation after it is enabled, or switching between `AllowInternetOutbound` and `AllowOnlyApprovedOutbound` in place. Delete and recreate managed compute resources when enabling managed networking on an existing workspace; recreate the workspace for unsupported mode transitions.
+
+### AzureML compute cluster migration
+
+> [!WARNING]
+> Existing deployments that used the previous singular AzureML compute cluster resource require a one-time Terraform state migration. Without this migration, Terraform plans to destroy the existing cluster and create a replacement at the new keyed address.
+
+Replace the previous `should_deploy_aml_compute` and `aml_compute_config` settings with the `aml_compute_clusters` map in `terraform.tfvars`:
+
+```hcl
+aml_compute_clusters = {
+  "gpu-cluster" = {
+    vm_size               = "Standard_NC4as_T4_v3"
+    vm_priority           = "LowPriority"
+    min_node_count        = 0
+    max_node_count        = 1
+    scale_down_after_idle = "PT5M"
+    identity_type         = "SystemAssigned"
+  }
+}
+```
+
+Set `identity_type = "SystemAssigned"` when preserving the previous compute-cluster identity behavior. Omit `identity_type` to use the new default, `UserAssigned`, with the platform managed identity.
+
+Move existing Terraform state from the former `count` address to the new cluster-name key before applying:
+
+```bash
+terraform state mv \
+  'module.platform.azurerm_machine_learning_compute_cluster.gpu[0]' \
+  'module.platform.azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"]'
+```
+
+Update output consumers to read the cluster entry from the new map output:
+
+```bash
+terraform output -json aml_compute_clusters | jq '."gpu-cluster"'
+```
 
 ## 📦 Modules
 
@@ -123,8 +171,8 @@ terraform output key_vault_name
 # DNS server IP (for VPN clients)
 terraform output dns_server_ip
 
-# AzureML compute cluster (when enabled)
-terraform output aml_compute_cluster
+# AzureML compute clusters keyed by cluster name
+terraform output -json aml_compute_clusters | jq -r '."gpu-cluster".name'
 ```
 
 ## 🔧 Optional Components

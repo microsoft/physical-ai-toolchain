@@ -314,6 +314,14 @@ Treat `.github/workflows/copilot-setup-steps.yml` and `.devcontainer/devcontaine
 
 The weekly `copilot-setup-steps.yml` cron and `Test-BinaryFreshness.ps1` weekly run together surface upstream drift across both surfaces.
 
+### Cloud-Agent RPI Wrapper
+
+The `Bootstrap hve-core RPI persona` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the latest `microsoft/hve-core@main` `rpi-agent.agent.md` plus every `subagents/*.agent.md` into `.copilot-tracking/upstream/hve-core-rpi/`.
+
+The `Physical-AI RPI` umbrella (`.github/agents/physical-ai-rpi.agent.md`) and its hidden generic worker (`.github/agents/physical-ai-rpi-worker.agent.md`) read those files at session start. The worker resolves a `persona: <stem>` dispatch parameter to a workspace path under `.copilot-tracking/upstream/hve-core-rpi/subagents/`, so new upstream personas auto-onboard via the next bootstrap with no change in this repo.
+
+See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the full umbrella/worker rationale.
+
 ## Git Workflow
 
 Full specification in `.github/instructions/commit-message.instructions.md`.
@@ -440,6 +448,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 Terraform validation is per-directory — each deployment directory has its own provider configuration and state:
 
+* Run `tflint --init` once from the repository root before the first local `npm run lint:tf` run; this installs the Azure provider ruleset declared in `.tflint.hcl`
 * `npm run lint:tf` — TFLint recursive linting across all directories
 * `npm run lint:tf:validate` — `terraform fmt -check -recursive` + `terraform init -backend=false && terraform validate` per deployment directory (`.`, `vpn/`, `dns/`, `automation/`)
 * `terraform plan -var-file=terraform.tfvars` — validates configuration against provider APIs (requires `source infrastructure/terraform/prerequisites/az-sub-init.sh` first)
@@ -464,7 +473,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 * Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
 * Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main)
 * Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)
-* Codecov: `pytest` and `pester` flags, 80-100% range, carryforward enabled
+* Codecov: 12+ flags including `pytest-*`, `vitest`/`vitest-*`, `pester`, `go`, `terraform`; 80-100% range; carryforward enabled; OIDC tokenless upload via `codecov/codecov-action@v6`
 
 ## Contributing References
 

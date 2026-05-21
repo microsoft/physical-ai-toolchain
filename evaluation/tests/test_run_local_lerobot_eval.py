@@ -42,6 +42,27 @@ _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
 
+# ---------------- TestSafeThroughput ----------------
+
+
+class TestSafeThroughput:
+    def test_given_positive_latencies_when_safe_throughput_then_returns_inverse_mean(self) -> None:
+        result = _mod._safe_throughput([0.1, 0.2, 0.3])
+
+        assert result == pytest.approx(5.0)
+
+    def test_given_empty_input_when_safe_throughput_then_returns_zero(self) -> None:
+        result = _mod._safe_throughput([])
+
+        assert result == 0.0
+
+    @pytest.mark.parametrize("inf_times", ([0.0], [-1.0], [float("nan")], [float("inf")]))
+    def test_given_invalid_mean_latency_when_safe_throughput_then_returns_zero(self, inf_times: list[float]) -> None:
+        result = _mod._safe_throughput(inf_times)
+
+        assert result == 0.0
+
+
 # ---------------- helpers ----------------
 
 

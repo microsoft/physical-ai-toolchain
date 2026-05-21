@@ -14,7 +14,8 @@ override_data {
 }
 
 variables {
-  current_user_oid = "00000000-0000-0000-0000-000000000001"
+  current_user_oid                   = "00000000-0000-0000-0000-000000000001"
+  aml_managed_network_isolation_mode = "Disabled"
 }
 
 run "setup" {
@@ -657,41 +658,296 @@ run "aml_diagnostic_logs_disabled" {
 // AML Compute Conditional
 // ============================================================
 
-run "aml_compute_enabled" {
+run "aml_compute_one_cluster" {
   command = plan
 
   variables {
-    resource_prefix           = run.setup.resource_prefix
-    environment               = run.setup.environment
-    instance                  = run.setup.instance
-    location                  = run.setup.location
-    resource_group            = run.setup.resource_group
-    current_user_oid          = run.setup.current_user_oid
-    should_deploy_aml_compute = true
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "PT5M"
+      }
+    }
   }
 
   assert {
     condition     = length(azurerm_machine_learning_compute_cluster.gpu) == 1
-    error_message = "AML compute cluster should be created when enabled"
+    error_message = "AML compute cluster map should create one cluster"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].name == "gpu-cluster"
+    error_message = "AML compute cluster should use the configured map key as its name"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].vm_size == "Standard_NC4as_T4_v3"
+    error_message = "AML compute cluster should use the configured VM size"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].vm_priority == "LowPriority"
+    error_message = "AML compute cluster should use the configured VM priority"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].node_public_ip_enabled == false
+    error_message = "AML compute cluster should disable node public IPs by default"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].ssh_public_access_enabled == false
+    error_message = "AML compute cluster should disable SSH public access by default"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].identity[0].type == "UserAssigned"
+    error_message = "AML compute cluster should default to the platform user-assigned identity"
+  }
+
+  assert {
+    condition     = length(azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].identity[0].identity_ids) == 1
+    error_message = "AML compute cluster should attach one platform user-assigned identity"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].location == run.setup.location
+    error_message = "AML compute cluster should inherit the workspace location when cluster location is omitted"
   }
 }
 
-run "aml_compute_disabled" {
+run "aml_compute_empty_map" {
   command = plan
 
   variables {
-    resource_prefix           = run.setup.resource_prefix
-    environment               = run.setup.environment
-    instance                  = run.setup.instance
-    location                  = run.setup.location
-    resource_group            = run.setup.resource_group
-    current_user_oid          = run.setup.current_user_oid
-    should_deploy_aml_compute = false
+    resource_prefix      = run.setup.resource_prefix
+    environment          = run.setup.environment
+    instance             = run.setup.instance
+    location             = run.setup.location
+    resource_group       = run.setup.resource_group
+    current_user_oid     = run.setup.current_user_oid
+    aml_compute_clusters = {}
   }
 
   assert {
     condition     = length(azurerm_machine_learning_compute_cluster.gpu) == 0
-    error_message = "AML compute cluster should not be created when disabled"
+    error_message = "AML compute cluster map should create no clusters when empty"
+  }
+}
+
+run "aml_compute_multiple_clusters" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-training = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 2
+        scale_down_after_idle = "PT5M"
+      }
+      gpu-eval = {
+        vm_size               = "Standard_NC8as_T4_v3"
+        vm_priority           = "Dedicated"
+        min_node_count        = 1
+        max_node_count        = 3
+        scale_down_after_idle = "PT10M"
+      }
+    }
+  }
+
+  assert {
+    condition     = length(azurerm_machine_learning_compute_cluster.gpu) == 2
+    error_message = "AML compute cluster map should create one resource per configured cluster"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-training"].name == "gpu-training"
+    error_message = "AML compute should create the gpu-training cluster"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-eval"].name == "gpu-eval"
+    error_message = "AML compute should create the gpu-eval cluster"
+  }
+}
+
+run "aml_compute_system_assigned_with_location_override" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size                   = "Standard_NC4as_T4_v3"
+        vm_priority               = "LowPriority"
+        min_node_count            = 0
+        max_node_count            = 1
+        scale_down_after_idle     = "PT5M"
+        identity_type             = "SystemAssigned"
+        node_public_ip_enabled    = true
+        ssh_public_access_enabled = false
+        location                  = "eastus"
+      }
+    }
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].identity[0].type == "SystemAssigned"
+    error_message = "AML compute cluster should allow overriding identity type to system-assigned"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].identity[0].identity_ids == null
+    error_message = "AML compute cluster should not attach user-assigned identity IDs when system-assigned identity is selected"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].node_public_ip_enabled == true
+    error_message = "AML compute cluster should allow enabling node public IPs independently"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].ssh_public_access_enabled == false
+    error_message = "AML compute cluster should keep SSH public access disabled when only node public IPs are enabled"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].location == "eastus"
+    error_message = "AML compute cluster should allow overriding the cluster location"
+  }
+}
+
+run "aml_compute_ssh_public_access_override" {
+  command = plan
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size                   = "Standard_NC4as_T4_v3"
+        vm_priority               = "LowPriority"
+        min_node_count            = 0
+        max_node_count            = 1
+        scale_down_after_idle     = "PT5M"
+        node_public_ip_enabled    = false
+        ssh_public_access_enabled = true
+      }
+    }
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].node_public_ip_enabled == false
+    error_message = "AML compute cluster should keep node public IPs disabled when only SSH public access is enabled"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].ssh_public_access_enabled == true
+    error_message = "AML compute cluster should allow enabling SSH public access independently"
+  }
+}
+
+run "aml_compute_disabled_managed_network_uses_custom_subnet" {
+  command = plan
+
+  variables {
+    resource_prefix                    = run.setup.resource_prefix
+    environment                        = run.setup.environment
+    instance                           = run.setup.instance
+    location                           = run.setup.location
+    resource_group                     = run.setup.resource_group
+    current_user_oid                   = run.setup.current_user_oid
+    aml_managed_network_isolation_mode = "Disabled"
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "PT5M"
+        subnet_id             = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test/providers/Microsoft.Network/virtualNetworks/vnet-test/subnets/snet-aml"
+      }
+    }
+  }
+
+  assert {
+    condition     = azapi_resource.ml_workspace.body.properties.managedNetwork.isolationMode == "Disabled"
+    error_message = "AML workspace managed network isolation mode should be disabled"
+  }
+
+  assert {
+    condition     = length(azurerm_machine_learning_compute_cluster.gpu) == 1
+    error_message = "AML compute should be created when managed network isolation is disabled and a custom subnet is configured"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].subnet_resource_id == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test/providers/Microsoft.Network/virtualNetworks/vnet-test/subnets/snet-aml"
+    error_message = "AML compute should use the configured custom subnet when managed network isolation is disabled"
+  }
+}
+
+run "aml_compute_managed_network_without_custom_subnet" {
+  command = plan
+
+  variables {
+    resource_prefix                    = run.setup.resource_prefix
+    environment                        = run.setup.environment
+    instance                           = run.setup.instance
+    location                           = run.setup.location
+    resource_group                     = run.setup.resource_group
+    current_user_oid                   = run.setup.current_user_oid
+    aml_managed_network_isolation_mode = "AllowOnlyApprovedOutbound"
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size               = "Standard_NC4as_T4_v3"
+        vm_priority           = "LowPriority"
+        min_node_count        = 0
+        max_node_count        = 1
+        scale_down_after_idle = "PT5M"
+        subnet_id             = null
+      }
+    }
+  }
+
+  assert {
+    condition     = azapi_resource.ml_workspace.body.properties.managedNetwork.isolationMode == "AllowOnlyApprovedOutbound"
+    error_message = "AML workspace should use the configured managed network isolation mode"
+  }
+
+  assert {
+    condition     = length(azurerm_machine_learning_compute_cluster.gpu) == 1
+    error_message = "AML compute should be created when managed network isolation is enabled"
+  }
+
+  assert {
+    condition     = local.should_attach_aml_compute_to_customer_subnet == false
+    error_message = "AML compute should not attach to a customer subnet when managed network isolation is enabled"
   }
 }
 

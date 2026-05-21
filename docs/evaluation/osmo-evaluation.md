@@ -146,7 +146,7 @@ osmo workflow submit \
 
 ```bash
 osmo credential set hf_token <token>
-osmo credential set wandb_api_key <key>
+osmo credential set hf_token <token>
 ```
 
 ## 📺 Monitoring

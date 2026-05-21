@@ -1,19 +1,18 @@
 ---
 sidebar_position: 3
 title: Experiment Tracking
-description: MLflow and WANDB experiment tracking configuration for training workflows on Azure ML and OSMO
+description: MLflow experiment tracking configuration for training workflows on Azure ML and OSMO
 author: Microsoft Robotics-AI Team
 ms.date: 2026-02-23
 ms.topic: how-to
 keywords:
   - mlflow
-  - wandb
   - experiment tracking
   - model registration
   - checkpoints
 ---
 
-Experiment tracking for Isaac Lab and LeRobot training workflows. Azure ML provides managed MLflow tracking. OSMO supports both WANDB (default for LeRobot) and MLflow (via Azure ML backend).
+Experiment tracking for Isaac Lab and LeRobot training workflows. Azure ML provides managed MLflow tracking on both platforms (Azure ML directly, OSMO via the Azure ML backend).
 
 ## 📊 MLflow Tracking
 
@@ -53,36 +52,7 @@ Azure ML LeRobot submissions use MLflow automatically.
 | `--mlflow-token-retries` | `3`     | MLflow token refresh retry count  | `MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES` |
 | `--mlflow-http-timeout`  | `60`    | MLflow HTTP request timeout (sec) | `MLFLOW_HTTP_REQUEST_TIMEOUT`           |
 
-## 📈 WANDB Integration
-
-WANDB is the default experiment tracker for LeRobot workflows on OSMO. Tracks training loss, evaluation metrics, and model outputs.
-
-### Credential Setup
-
-```bash
-# Set WANDB API key (required)
-osmo credential set wandb_api_key --generic --value "..."
-
-# Set HuggingFace token (required for private datasets)
-osmo credential set hf_token --generic --value "hf_..."
-```
-
-### Enable and Disable
-
-WANDB is enabled by default on OSMO LeRobot workflows:
-
-```bash
-# Explicitly enable (default)
-./scripts/submit-osmo-lerobot-training.sh -d user/dataset --wandb-enable
-
-# Disable WANDB
-./scripts/submit-osmo-lerobot-training.sh -d user/dataset --wandb-disable
-
-# Use MLflow instead
-./scripts/submit-osmo-lerobot-training.sh -d user/dataset --mlflow-enable
-```
-
-## 📦 Model Registration
+## Model Registration
 
 Training scripts register model checkpoints to Azure ML automatically at completion.
 

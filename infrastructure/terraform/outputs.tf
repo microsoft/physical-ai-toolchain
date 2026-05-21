@@ -35,23 +35,23 @@ output "key_vault_name" {
 // ============================================================
 
 output "aks_cluster" {
-  description = "AKS cluster for robotics workloads."
-  value       = module.sil.aks_cluster
+  description = "AKS cluster for robotics workloads. Null when AKS deployment is disabled."
+  value       = try(module.sil[0].aks_cluster, null)
 }
 
 output "aks_oidc_issuer_url" {
-  description = "OIDC issuer URL for workload identity."
-  value       = module.sil.aks_oidc_issuer_url
+  description = "OIDC issuer URL for workload identity. Null when AKS deployment is disabled."
+  value       = try(module.sil[0].aks_oidc_issuer_url, null)
 }
 
 output "gpu_node_pool_subnets" {
-  description = "GPU node pool subnets created by SiL module."
-  value       = module.sil.gpu_node_pool_subnets
+  description = "GPU node pool subnets created by SiL module. Null when AKS deployment is disabled."
+  value       = try(module.sil[0].gpu_node_pool_subnets, null)
 }
 
 output "node_pools" {
-  description = "GPU node pool configurations for OSMO pool and pod template generation"
-  value       = module.sil.node_pools
+  description = "GPU node pool configurations for OSMO pool and pod template generation. Null when AKS deployment is disabled."
+  value       = try(module.sil[0].node_pools, null)
 }
 
 // ============================================================
@@ -153,9 +153,9 @@ output "data_lake_storage_account" {
 // AzureML Compute Outputs
 // ============================================================
 
-output "aml_compute_cluster" {
-  description = "AzureML managed compute cluster. Null when compute deployment is disabled."
-  value       = module.platform.aml_compute_cluster
+output "aml_compute_clusters" {
+  description = "AzureML managed compute clusters keyed by cluster name. Empty when no clusters are configured."
+  value       = module.platform.aml_compute_clusters
 }
 
 // ============================================================

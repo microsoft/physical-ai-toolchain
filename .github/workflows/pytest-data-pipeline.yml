@@ -39,10 +39,11 @@ jobs:
 
       - name: Run pytest
         run: >-
-          uv run pytest data-pipeline/capture/tests -v
+          uv run pytest -o addopts="" data-pipeline/capture/tests -v
           --cov=data-pipeline/capture
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-data-pipeline.xml
+          --cov-fail-under=80
 
       - name: Upload coverage.xml artifact
         if: always()

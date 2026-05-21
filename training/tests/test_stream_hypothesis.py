@@ -123,6 +123,56 @@ def test_isatty_returns_false():
     assert stream.isatty() is False
 
 
+def test_fileno_delegates_to_wrapped_stream() -> None:
+    """fileno mirrors the wrapped stream descriptor."""
+
+    class FileDescriptorStream:
+        def write(self, s: str) -> int:
+            return len(s)
+
+        def flush(self) -> None:
+            pass
+
+        def fileno(self) -> int:
+            return 42
+
+    stream = AnsiStrippingStream(FileDescriptorStream())
+    assert stream.fileno() == 42
+
+
+def test_install_ansi_stripping_wraps_stdout_and_sets_tqdm_interval(monkeypatch) -> None:
+    """install_ansi_stripping wraps stdout and sets the tqdm interval default."""
+    stdout = CaptureStream()
+    monkeypatch.setattr(stream_module.sys, "stdout", stdout)
+    monkeypatch.delenv("TQDM_MININTERVAL", raising=False)
+
+    stream_module.install_ansi_stripping()
+
+    assert isinstance(stream_module.sys.stdout, AnsiStrippingStream)
+    assert stream_module.sys.stdout._wrapped is stdout
+    assert stream_module.os.environ["TQDM_MININTERVAL"] == "30"
+
+
+def test_install_ansi_stripping_preserves_existing_tqdm_interval(monkeypatch) -> None:
+    """install_ansi_stripping does not replace an explicit tqdm interval."""
+    monkeypatch.setattr(stream_module.sys, "stdout", CaptureStream())
+    monkeypatch.setenv("TQDM_MININTERVAL", "5")
+
+    stream_module.install_ansi_stripping()
+
+    assert stream_module.os.environ["TQDM_MININTERVAL"] == "5"
+
+
+def test_install_ansi_stripping_does_not_double_wrap_stdout(monkeypatch) -> None:
+    """install_ansi_stripping keeps an existing AnsiStrippingStream instance."""
+    existing = AnsiStrippingStream(CaptureStream())
+    monkeypatch.setattr(stream_module.sys, "stdout", existing)
+
+    stream_module.install_ansi_stripping()
+
+    assert stream_module.sys.stdout is existing
+
+
 def test_encoding_falls_back_to_utf8():
     """When the wrapped stream has no encoding attr, default to utf-8."""
 

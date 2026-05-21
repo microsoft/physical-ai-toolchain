@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Submit LeRobot behavioral cloning training to Azure ML
-# Installs LeRobot dynamically and trains ACT/Diffusion policies from HuggingFace datasets
+# Installs LeRobot dynamically and trains ACT/Diffusion policies from datasets in
+# Azure Blob Storage (canonical) or HuggingFace (legacy fallback via --hf-dataset).
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,13 +32,18 @@ Usage: submit-azureml-lerobot-training.sh [OPTIONS] [-- az-ml-job-flags]
 
 Submit LeRobot behavioral cloning training to Azure ML.
 
-REQUIRED:
-    -d, --dataset-repo-id ID     HuggingFace dataset repository (e.g., user/dataset)
+OPTIONS:
+    -d, --dataset-repo-id ID     Dataset logical name for folder naming (default: dataset)
+
+DATA SOURCE:
+        --blob-url URL                Add blob dataset URL (repeatable; use multiple times for merge)
+        --dataset-root DIR            Container path where datasets are materialized
+                                      (default: /workspace/data)
 
 AZUREML ASSET OPTIONS:
     --environment-name NAME       AzureML environment name (default: lerobot-training-env)
     --environment-version VER     Environment version (default: 1.0.0)
-    --image IMAGE                 Container image (default: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime)
+    --image IMAGE                 Container image (default: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime)
     --assets-only                 Register environment without submitting job
 
 TRAINING OPTIONS:
@@ -46,6 +52,16 @@ TRAINING OPTIONS:
     -j, --job-name NAME           Job identifier (default: lerobot-act-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
         --policy-repo-id ID       Pre-trained policy for fine-tuning (HuggingFace repo)
+        --init-from-policy-model URI
+                                  Warm-start weights from a previously registered AzureML
+                                  model. Accepted forms:
+                                    azureml:NAME:VERSION       (numeric version required)
+                                    azureml://.../models/NAME/versions/VERSION
+                                    https://...blob.core.windows.net/...
+                                  Shorthands like azureml:NAME or azureml:NAME@latest
+                                  are rejected to keep runs reproducible.
+                                  Optimizer, scheduler, and step counter start fresh.
+                                  Mutually exclusive with --policy-repo-id.
         --lerobot-version VER     Specific LeRobot version or "latest" (default: latest)
 
 TRAINING HYPERPARAMETERS:
@@ -53,11 +69,6 @@ TRAINING HYPERPARAMETERS:
         --batch-size N            Training batch size
         --eval-freq N             Evaluation frequency
         --save-freq N             Checkpoint save frequency (default: 5000)
-
-LOGGING OPTIONS:
-        --wandb-enable            Enable WANDB logging (default)
-        --no-wandb                Disable WANDB logging
-        --wandb-project NAME      WANDB project name (default: lerobot-training)
 
 CHECKPOINT REGISTRATION:
     -r, --register-checkpoint NAME  Model name for Azure ML registration
@@ -71,6 +82,7 @@ AZURE CONTEXT:
         --experiment-name NAME    Experiment name override
         --display-name NAME       Display name override
         --stream                  Stream logs after submission
+    -a, --save-as PATH            Write created job state YAML to PATH
 
 ADVANCED:
         --mlflow-token-retries N  MLflow token refresh retries (default: 3)
@@ -84,7 +96,7 @@ Values resolved: CLI > Environment variables > Terraform outputs
 Additional arguments after -- are forwarded to az ml job create.
 
 EXAMPLES:
-    # ACT training with defaults
+    # ACT training with HuggingFace dataset
     submit-azureml-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
     # Diffusion policy with custom hyperparameters
@@ -93,6 +105,11 @@ EXAMPLES:
       -p diffusion \
       --training-steps 50000 \
       --batch-size 16
+
+    # Warm-start a new run from a previously registered checkpoint
+    submit-azureml-lerobot-training.sh \
+      -d user/dataset \
+      --init-from-policy-model azureml:lerobot-act:7
 
     # Register trained model and stream logs
     submit-azureml-lerobot-training.sh \
@@ -105,6 +122,17 @@ EXAMPLES:
       -d user/dataset \
       --policy-repo-id user/pretrained-act \
       --training-steps 10000
+
+    # Single blob dataset
+    submit-azureml-lerobot-training.sh \
+      --blob-url "https://mystorageaccount.blob.core.windows.net/datasets/pusht" \
+      -r pusht-model
+
+    # Multiple blob datasets (merged)
+    submit-azureml-lerobot-training.sh \
+      --blob-url "https://account1.blob.core.windows.net/train/pusht" \
+      --blob-url "https://account2.blob.core.windows.net/val/pusht" \
+      -r merged-pusht-model
 
     # Register environment only (no job submission)
     submit-azureml-lerobot-training.sh -d placeholder --assets-only
@@ -147,7 +175,7 @@ EOF
 
 environment_name="lerobot-training-env"
 environment_version="1.0.0"
-image="${IMAGE:-pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime}"
+image="${IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime}"
 assets_only=false
 
 job_file="$REPO_ROOT/training/il/workflows/azureml/lerobot-train.yaml"
@@ -156,15 +184,17 @@ policy_type="${POLICY_TYPE:-act}"
 job_name="${JOB_NAME:-lerobot-act-training}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
 policy_repo_id="${POLICY_REPO_ID:-}"
+init_from_policy_model="${INIT_FROM_POLICY_MODEL:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
+
+blob_urls=()
+dataset_root="${DATASET_ROOT:-/workspace/data}"
 
 training_steps="${TRAINING_STEPS:-}"
 batch_size="${BATCH_SIZE:-}"
 eval_freq="${EVAL_FREQ:-}"
 save_freq="${SAVE_FREQ:-5000}"
 
-wandb_enable="${WANDB_ENABLE:-true}"
-wandb_project="${WANDB_PROJECT:-lerobot-training}"
 register_checkpoint="${REGISTER_CHECKPOINT:-}"
 
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
@@ -178,6 +208,7 @@ instance_type="gpuspot"
 experiment_name=""
 display_name=""
 stream_logs=false
+save_as=""
 config_preview=false
 forward_args=()
 
@@ -198,14 +229,14 @@ while [[ $# -gt 0 ]]; do
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
+    --init-from-policy-model)     init_from_policy_model="$2"; shift 2 ;;
     --lerobot-version)            lerobot_version="$2"; shift 2 ;;
+    --blob-url)                   blob_urls+=("$2"); shift 2 ;;
+    --dataset-root)               dataset_root="$2"; shift 2 ;;
     --training-steps)             training_steps="$2"; shift 2 ;;
     --batch-size)                 batch_size="$2"; shift 2 ;;
     --eval-freq)                  eval_freq="$2"; shift 2 ;;
     --save-freq)                  save_freq="$2"; shift 2 ;;
-    --wandb-enable)               wandb_enable="true"; shift ;;
-    --no-wandb)                   wandb_enable="false"; shift ;;
-    --wandb-project)              wandb_project="$2"; shift 2 ;;
     -r|--register-checkpoint)     register_checkpoint="$2"; shift 2 ;;
     --subscription-id)            subscription_id="$2"; shift 2 ;;
     --resource-group)             resource_group="$2"; shift 2 ;;
@@ -217,6 +248,7 @@ while [[ $# -gt 0 ]]; do
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
     --stream)                     stream_logs=true; shift ;;
+    -a|--save-as)                 save_as="$2"; shift 2 ;;
     --config-preview)             config_preview=true; shift ;;
     --)                           shift; forward_args=("$@"); break ;;
     *)                            fatal "Unknown option: $1" ;;
@@ -230,15 +262,42 @@ done
 require_tools az
 ensure_ml_extension
 
-[[ -z "$dataset_repo_id" ]] && fatal "--dataset-repo-id is required"
 [[ -n "$subscription_id" ]] || fatal "AZURE_SUBSCRIPTION_ID required"
 [[ -n "$resource_group" ]] || fatal "AZURE_RESOURCE_GROUP required"
 [[ -n "$workspace_name" ]] || fatal "AZUREML_WORKSPACE_NAME required"
+
+if [[ ${#blob_urls[@]} -eq 0 ]]; then
+  [[ -z "$dataset_repo_id" ]] && fatal "--dataset-repo-id is required (or provide --blob-url for blob storage)"
+else
+  dataset_repo_id="${dataset_repo_id:-dataset}"
+fi
 
 case "$policy_type" in
   act|diffusion) ;;
   *) fatal "Unsupported policy type: $policy_type (use: act, diffusion)" ;;
 esac
+
+if [[ -n "$init_from_policy_model" && -n "$policy_repo_id" ]]; then
+  fatal "--init-from-policy-model and --policy-repo-id are mutually exclusive"
+fi
+
+# Accept only fully-qualified, version-pinned URIs. Reject @latest and bare
+# azureml:NAME so reruns of the same job spec do not silently drift to a newer
+# registered model.
+if [[ -n "$init_from_policy_model" ]]; then
+  case "$init_from_policy_model" in
+    azureml://*/models/*/versions/[0-9]*) ;;
+    https://*) ;;
+    azureml:*:*)
+      version="${init_from_policy_model##*:}"
+      [[ "$version" =~ ^[0-9]+$ ]] || fatal \
+        "--init-from-policy-model: version must be numeric (got '$init_from_policy_model'). Use azureml:NAME:VERSION; @latest and shorthands are not accepted."
+      ;;
+    *)
+      fatal "--init-from-policy-model: unsupported URI form '$init_from_policy_model'. Use azureml:NAME:VERSION, azureml://.../models/NAME/versions/VERSION, or https://..."
+      ;;
+  esac
+fi
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
@@ -250,8 +309,14 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Training Steps" "${training_steps:-<default>}"
   print_kv "Batch Size" "${batch_size:-<default>}"
   print_kv "Save Freq" "$save_freq"
-  print_kv "WANDB" "$wandb_enable"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
+  print_kv "Init From Model" "${init_from_policy_model:-<none>}"
+  if [[ ${#blob_urls[@]} -gt 0 ]]; then
+    print_kv "Blob URLs" "${#blob_urls[@]} dataset(s)"
+    print_kv "Dataset Root" "$dataset_root"
+  else
+    print_kv "Data Source" "HuggingFace Hub"
+  fi
   print_kv "Subscription" "$subscription_id"
   print_kv "Resource Group" "$resource_group"
   print_kv "Workspace" "$workspace_name"
@@ -284,100 +349,12 @@ fi
 #------------------------------------------------------------------------------
 # Build Training Command
 #
-# The AzureML job runs a training entry script that:
-# 1. Installs LeRobot dependencies from the workflow manifest
-# 2. Authenticates with HuggingFace Hub
-# 3. Configures MLflow tracking
-# 4. Runs lerobot-train with appropriate arguments
-# 5. Registers the final checkpoint to Azure ML
+# The AzureML job runs training/il/scripts/lerobot/azureml-train-entry.sh, which
+# is uploaded as part of the code asset. Keeping the inline command short avoids
+# multi-line YAML escaping issues with the Azure ML K8s extension.
 #------------------------------------------------------------------------------
 
-# Build the inline training command
-train_cmd='bash -c '"'"'
-set -euo pipefail
-
-echo "=== LeRobot AzureML Training ==="
-
-# Install runtime dependencies from pre-compiled requirements
-apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential > /dev/null 2>&1
-pip install --quiet uv
-LEROBOT_REQUIREMENTS="training/il/lerobot/requirements.txt"
-if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
-  echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
-  exit 1
-fi
-uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
-
-# HuggingFace auth
-if [[ -n "${HF_TOKEN:-}" ]]; then
-  python3 -c "from huggingface_hub import login; login(token=\"${HF_TOKEN}\", add_to_git_credential=False)"
-fi
-
-# Build lerobot-train args
-train_args=(
-  --dataset.repo_id="${DATASET_REPO_ID}"
-  --policy.type="${POLICY_TYPE}"
-  --output_dir="${OUTPUT_DIR}"
-  --job_name="${JOB_NAME}"
-  --policy.device=cuda
-)
-
-if [[ "${WANDB_ENABLE:-true}" == "true" ]]; then
-  train_args+=(--wandb.enable=true)
-  [[ -n "${WANDB_PROJECT:-}" ]] && train_args+=(--wandb.project="${WANDB_PROJECT}")
-else
-  train_args+=(--wandb.enable=false)
-fi
-
-[[ -n "${POLICY_REPO_ID:-}" ]] && train_args+=(--policy.repo_id="${POLICY_REPO_ID}")
-[[ -n "${TRAINING_STEPS:-}" ]] && train_args+=(--steps="${TRAINING_STEPS}")
-[[ -n "${BATCH_SIZE:-}" ]] && train_args+=(--batch_size="${BATCH_SIZE}")
-[[ -n "${EVAL_FREQ:-}" ]] && train_args+=(--eval_freq="${EVAL_FREQ}")
-[[ -n "${SAVE_FREQ:-}" ]] && train_args+=(--save_freq="${SAVE_FREQ}")
-
-echo "Running: lerobot-train ${train_args[*]}"
-lerobot-train "${train_args[@]}"
-
-echo "=== Training Complete ==="
-
-# Register checkpoint
-if [[ -n "${REGISTER_CHECKPOINT:-}" ]]; then
-  echo "Registering checkpoint to Azure ML..."
-  python3 -c "
-import os, sys
-from pathlib import Path
-from azure.ai.ml import MLClient
-from azure.ai.ml.entities import Model
-from azure.ai.ml.constants import AssetTypes
-from azure.identity import DefaultAzureCredential
-
-output_dir = Path(os.environ[\"OUTPUT_DIR\"])
-checkpoint_dirs = sorted(output_dir.glob(\"checkpoints/*\"), key=lambda p: p.stat().st_mtime, reverse=True)
-if not checkpoint_dirs:
-    pretrained = output_dir / \"pretrained_model\"
-    checkpoint_path = pretrained if pretrained.exists() else None
-else:
-    pretrained = checkpoint_dirs[0] / \"pretrained_model\"
-    checkpoint_path = pretrained if pretrained.exists() else checkpoint_dirs[0]
-
-if not checkpoint_path:
-    print(\"No checkpoints found\"); sys.exit(0)
-
-policy_type = os.environ.get(\"POLICY_TYPE\", \"act\")
-credential = DefaultAzureCredential()
-client = MLClient(credential, os.environ[\"AZURE_SUBSCRIPTION_ID\"], os.environ[\"AZURE_RESOURCE_GROUP\"], os.environ[\"AZUREML_WORKSPACE_NAME\"])
-model = Model(
-    path=str(checkpoint_path),
-    name=os.environ[\"REGISTER_CHECKPOINT\"],
-    description=\"LeRobot %s policy\" % policy_type,
-    type=AssetTypes.CUSTOM_MODEL,
-    tags={\"framework\": \"lerobot\", \"policy_type\": policy_type, \"source\": \"azureml-job\"},
-)
-registered = client.models.create_or_update(model)
-print(f\"Model registered: {registered.name} v{registered.version}\")
-"
-fi
-'"'"''
+train_cmd="bash il/scripts/lerobot/azureml-train-entry.sh"
 
 #------------------------------------------------------------------------------
 # Build Submission Command
@@ -388,6 +365,7 @@ az_args=(
   --resource-group "$resource_group"
   --workspace-name "$workspace_name"
   --file "$job_file"
+  --set "code=$REPO_ROOT/training"
   --set "environment=azureml:${environment_name}:${environment_version}"
 )
 
@@ -405,8 +383,6 @@ az_args+=(
   --set "inputs.job_name=$job_name"
   --set "inputs.output_dir=$output_dir"
   --set "inputs.save_freq=$save_freq"
-  --set "inputs.wandb_enable=$wandb_enable"
-  --set "inputs.wandb_project=$wandb_project"
   --set "inputs.subscription_id=$subscription_id"
   --set "inputs.resource_group=$resource_group"
   --set "inputs.workspace_name=$workspace_name"
@@ -415,22 +391,60 @@ az_args+=(
 )
 
 [[ -n "$policy_repo_id" ]]      && az_args+=(--set "inputs.policy_repo_id=$policy_repo_id")
+if [[ -n "$init_from_policy_model" ]]; then
+  az_args+=(
+    --set "inputs.init_from_policy_model.type=custom_model"
+    --set "inputs.init_from_policy_model.mode=download"
+    --set "inputs.init_from_policy_model.path=$init_from_policy_model"
+  )
+fi
 [[ -n "$lerobot_version" ]]     && az_args+=(--set "inputs.lerobot_version=$lerobot_version")
 [[ -n "$training_steps" ]]      && az_args+=(--set "inputs.training_steps=$training_steps")
 [[ -n "$batch_size" ]]          && az_args+=(--set "inputs.batch_size=$batch_size")
 [[ -n "$eval_freq" ]]           && az_args+=(--set "inputs.eval_freq=$eval_freq")
 [[ -n "$register_checkpoint" ]] && az_args+=(--set "inputs.register_checkpoint=$register_checkpoint")
 
+if [[ ${#blob_urls[@]} -gt 0 ]]; then
+  blob_urls_json=$(python3 -c "import json; import sys; print(json.dumps(sys.argv[1:]))" "${blob_urls[@]}")
+  az_args+=(--set "inputs.blob_urls=$blob_urls_json")
+  az_args+=(--set "inputs.dataset_root=$dataset_root")
+fi
+
 # Environment variables
+#
+# The Azure ML Kubernetes extension does not substitute `${{inputs.X}}` template
+# refs in `environment_variables` at runtime: it passes the literal string into
+# the container. Set every env var the entry script reads directly via
+# `--set environment_variables.X=Y` so the values are baked into the job spec.
 az_args+=(
   --set "environment_variables.AZURE_SUBSCRIPTION_ID=$subscription_id"
   --set "environment_variables.AZURE_RESOURCE_GROUP=$resource_group"
   --set "environment_variables.AZUREML_WORKSPACE_NAME=$workspace_name"
   --set "environment_variables.MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES=$mlflow_retries"
   --set "environment_variables.MLFLOW_HTTP_REQUEST_TIMEOUT=$mlflow_timeout"
+  --set "environment_variables.DATASET_REPO_ID=$dataset_repo_id"
+  --set "environment_variables.POLICY_TYPE=$policy_type"
+  --set "environment_variables.JOB_NAME=$job_name"
+  --set "environment_variables.OUTPUT_DIR=$output_dir"
+  --set "environment_variables.SAVE_FREQ=$save_freq"
 )
 
+[[ -n "$policy_repo_id" ]]      && az_args+=(--set "environment_variables.POLICY_REPO_ID=$policy_repo_id")
+[[ -n "$init_from_policy_model" ]] && az_args+=(--set "environment_variables.INIT_FROM_POLICY_MODEL_SOURCE=$init_from_policy_model")
+[[ -n "$lerobot_version" ]]     && az_args+=(--set "environment_variables.LEROBOT_VERSION=$lerobot_version")
+[[ -n "$training_steps" ]]      && az_args+=(--set "environment_variables.TRAINING_STEPS=$training_steps")
+[[ -n "$batch_size" ]]          && az_args+=(--set "environment_variables.BATCH_SIZE=$batch_size")
+[[ -n "$eval_freq" ]]           && az_args+=(--set "environment_variables.EVAL_FREQ=$eval_freq")
+[[ -n "$register_checkpoint" ]] && az_args+=(--set "environment_variables.REGISTER_CHECKPOINT=$register_checkpoint")
+
+if [[ ${#blob_urls[@]} -gt 0 ]]; then
+  blob_urls_json=$(python3 -c "import json; import sys; print(json.dumps(sys.argv[1:]))" "${blob_urls[@]}")
+  az_args+=(--set "environment_variables.BLOB_URLS=$blob_urls_json")
+  az_args+=(--set "environment_variables.DATASET_ROOT=$dataset_root")
+fi
+
 [[ ${#forward_args[@]} -gt 0 ]] && az_args+=("${forward_args[@]}")
+[[ -n "$save_as" ]] && az_args+=(--save-as "$save_as")
 az_args+=(--query "name" -o "tsv")
 
 #------------------------------------------------------------------------------
@@ -442,6 +456,7 @@ info "  Dataset: $dataset_repo_id"
 info "  Policy: $policy_type"
 info "  Job Name: $job_name"
 info "  Image: $image"
+[[ ${#blob_urls[@]} -gt 0 ]] && info "  Data Source: Blob URLs (${#blob_urls[@]} dataset(s))"
 
 job_result=$("${az_args[@]}") || fatal "Job submission failed"
 
@@ -466,3 +481,6 @@ print_kv "Compute" "${compute:-<not set>}"
 print_kv "Instance Type" "$instance_type"
 print_kv "Environment" "${environment_name}:${environment_version}"
 print_kv "Workspace" "$workspace_name"
+[[ ${#blob_urls[@]} -gt 0 ]] && print_kv "Blob Datasets" "${#blob_urls[@]}"
+[[ -n "$init_from_policy_model" ]] && print_kv "Init From Model" "$init_from_policy_model"
+[[ -n "$save_as" ]] && print_kv "Saved Job YAML" "$save_as"
