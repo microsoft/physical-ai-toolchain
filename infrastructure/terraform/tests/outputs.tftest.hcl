@@ -102,8 +102,8 @@ run "optional_outputs_null_when_disabled" {
     should_deploy_postgresql     = false
     should_deploy_redis          = false
     should_deploy_grafana        = false
-    should_deploy_aml_compute    = false
     should_deploy_aks            = false
+    aml_compute_clusters         = {}
   }
 
   assert {
@@ -122,8 +122,48 @@ run "optional_outputs_null_when_disabled" {
   }
 
   assert {
-    condition     = output.aml_compute_cluster == null
-    error_message = "aml_compute_cluster output should be null when AML compute is disabled"
+    condition     = length(output.aml_compute_clusters) == 0
+    error_message = "aml_compute_clusters output should be empty when no AML compute clusters are configured"
+  }
+}
+
+run "aml_compute_clusters_output_populated" {
+  command = plan
+
+  variables {
+    resource_prefix              = run.setup.resource_prefix
+    environment                  = run.setup.environment
+    instance                     = run.setup.instance
+    location                     = run.setup.location
+    should_create_resource_group = true
+    should_deploy_aks            = false
+    aml_compute_clusters = {
+      gpu-cluster = {
+        vm_size                   = "Standard_NC4as_T4_v3"
+        vm_priority               = "LowPriority"
+        min_node_count            = 0
+        max_node_count            = 1
+        scale_down_after_idle     = "PT5M"
+        node_public_ip_enabled    = false
+        ssh_public_access_enabled = false
+        identity_type             = "UserAssigned"
+      }
+    }
+  }
+
+  assert {
+    condition     = length(output.aml_compute_clusters) == 1
+    error_message = "root aml_compute_clusters output should include configured clusters"
+  }
+
+  assert {
+    condition     = output.aml_compute_clusters["gpu-cluster"].name == "gpu-cluster"
+    error_message = "root aml_compute_clusters output should forward platform output values keyed by cluster name"
+  }
+
+  assert {
+    condition     = length(keys(output.aml_compute_clusters["gpu-cluster"])) == 2 && contains(keys(output.aml_compute_clusters["gpu-cluster"]), "id") && contains(keys(output.aml_compute_clusters["gpu-cluster"]), "name")
+    error_message = "root aml_compute_clusters output values should expose only id and name"
   }
 
   assert {

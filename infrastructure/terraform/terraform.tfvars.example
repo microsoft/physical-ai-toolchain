@@ -148,16 +148,22 @@ reports_archive_tier_days              = 180
 // Valid values: Disabled, AllowInternetOutbound, AllowOnlyApprovedOutbound.
 aml_managed_network_isolation_mode = "AllowOnlyApprovedOutbound"
 
-// AzureML Managed Compute (disabled by default)
-// Enable to provision GPU compute directly in the AzureML workspace.
-// should_deploy_aml_compute = false
-// aml_compute_config = {
-//   vm_size               = "Standard_NC4as_T4_v3"
-//   vm_priority           = "LowPriority"
-//   min_node_count        = 0
-//   max_node_count        = 1
-//   scale_down_after_idle = "PT5M"
-//   cluster_name          = "gpu-cluster"
+// AzureML Managed Compute
+// Empty map deploys no AzureML managed compute clusters.
+// Keys are Azure ML compute cluster names.
+aml_compute_clusters = {}
+// aml_compute_clusters = {
+//   "nc4as-T4-v3-lowprio" = {
+//     vm_size                   = "Standard_NC4as_T4_v3"
+//     vm_priority               = "LowPriority"
+//     min_node_count            = 0
+//     max_node_count            = 1
+//     scale_down_after_idle     = "PT5M"
+//     node_public_ip_enabled    = false
+//     ssh_public_access_enabled = false
+//     identity_type             = "UserAssigned"
+//     // location               = "eastus"
+//   }
 // }
 
 // DNS Zones

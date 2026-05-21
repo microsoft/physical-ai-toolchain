@@ -162,16 +162,16 @@ This reference architecture validates through deployment rather than automated t
 
 ### Validation Expectations
 
-| Contribution Type           | Expected Validation                                                                 |
-|-----------------------------|-------------------------------------------------------------------------------------|
-| Documentation               | Read-through, link check (`npm run lint:md`)                                        |
-| Shell scripts               | ShellCheck validation, test in local/minimal environment                            |
-| Terraform modules           | `terraform fmt`, `terraform validate`, `terraform plan` output attached to PR       |
-| Full infrastructure changes | Deployment testing in dev subscription with cost estimate and teardown confirmation |
-| Training scripts            | AzureML job submission in test workspace with logs                                  |
-| Workflow templates          | Workflow execution validation with job outputs                                      |
-| Go modules                  | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`)                    |
-| Configuration manifests     | Syntax validation, test deployment in non-production cluster                        |
+| Contribution Type           | Expected Validation                                                                                                |
+|-----------------------------|--------------------------------------------------------------------------------------------------------------------|
+| Documentation               | Read-through, link check (`npm run lint:md`)                                                                       |
+| Shell scripts               | ShellCheck validation, test in local/minimal environment                                                           |
+| Terraform modules           | `terraform fmt`, `terraform validate`, `terraform plan` output attached to PR, `npm run test:go` (output contract) |
+| Full infrastructure changes | Deployment testing in dev subscription with cost estimate and teardown confirmation                                |
+| Training scripts            | AzureML job submission in test workspace with logs                                                                 |
+| Workflow templates          | Workflow execution validation with job outputs                                                                     |
+| Go modules                  | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`, requires `terraform-docs`)                        |
+| Configuration manifests     | Syntax validation, test deployment in non-production cluster                                                       |
 
 ### Testing Documentation
 
