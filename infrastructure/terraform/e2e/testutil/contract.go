@@ -48,12 +48,9 @@ func ValidateOutputContract(t *testing.T, declared, required []string) {
 	t.Logf("Required outputs: %v", required)
 
 	missing := findMissingOutputs(declared, required)
-
-	if len(missing) > 0 {
-		t.Errorf("Missing %d required outputs: %v", len(missing), missing)
-		t.Errorf("Declare these in infrastructure/terraform/outputs.tf or remove from InfraOutputs struct")
-	}
-	require.Empty(t, missing, "output contract validation failed")
+	require.Empty(t, missing,
+		"missing %d required outputs: %v -- declare these in infrastructure/terraform/outputs.tf or remove from InfraOutputs struct",
+		len(missing), missing)
 }
 
 // findMissingOutputs returns the required keys that are absent from the
