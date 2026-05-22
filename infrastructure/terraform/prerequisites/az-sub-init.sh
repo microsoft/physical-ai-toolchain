@@ -9,23 +9,27 @@ Attempts to set the ARM_SUBSCRIPTION_ID env var to 'id' from 'az account show' i
 
 Needed for Terraform
 
-Current ARM_SUBSCRIPTION_ID: ${ARM_SUBSCRIPTION_ID}"
+Current ARM_SUBSCRIPTION_ID: ${ARM_SUBSCRIPTION_ID:-}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
   --tenant)
+    if [[ $# -lt 2 ]]; then
+      echo "Error: --tenant requires a value"
+      return 1 2>/dev/null || exit 1
+    fi
     tenant="$2"
     shift 2
     ;;
   --help)
     echo "${help}"
-    exit 0
+    return 0 2>/dev/null || exit 0
     ;;
   *)
     echo "${help}"
     echo
     echo "Unknown option: $1"
-    exit 1
+    return 1 2>/dev/null || exit 1
     ;;
   esac
 done
@@ -55,12 +59,12 @@ login_to_azure() {
   if [[ -n "${tenant}" ]]; then
     if ! az login --tenant "${tenant}"; then
       echo "Error: Failed to login to Azure with tenant ${tenant}"
-      exit 1
+      return 1
     fi
   else
     if ! az login; then
       echo "Error: Failed to login to Azure"
-      exit 1
+      return 1
     fi
   fi
 }
@@ -73,12 +77,14 @@ if [[ -n "${current_subscription_id}" ]] && ! validate_azure_token; then
 fi
 
 if [[ -z "${current_subscription_id}" ]] || ! is_correct_tenant; then
-  login_to_azure
+  if ! login_to_azure; then
+    return 1 2>/dev/null || exit 1
+  fi
 
   current_subscription_id=$(get_current_subscription_id)
   if [[ -z "${current_subscription_id}" ]]; then
     echo "Error: Login succeeded but could not retrieve subscription ID"
-    exit 1
+    return 1 2>/dev/null || exit 1
   fi
 fi
 
