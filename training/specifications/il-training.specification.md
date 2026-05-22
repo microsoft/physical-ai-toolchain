@@ -21,7 +21,7 @@ LeRobot is runtime-installed via `uv pip` inside the Isaac Lab container. Traini
 
 | Setting        | Value                                       |
 |----------------|---------------------------------------------|
-| Container      | `nvcr.io/nvidia/isaac-lab:2.3.2`            |
+| Container      | `DEFAULT_ISAAC_LAB_IMAGE` from `scripts/lib/common.sh` (`nvcr.io/nvidia/isaac-lab:2.3.2`) |
 | Framework      | LeRobot (installed at runtime via `uv pip`) |
 | Dataset format | Hugging Face LeRobot-compatible             |
 

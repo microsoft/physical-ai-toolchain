@@ -27,7 +27,7 @@ read_terraform_outputs "${REPO_ROOT}/infrastructure/terraform" 2>/dev/null || tr
 source "${REPO_ROOT}/scripts/lib/common.sh"
 
 usage() {
-  cat <<'EOF'
+  cat << EOF
 Usage: submit-osmo-inference.sh [options] [-- osmo-submit-flags]
 
 Packages training and evaluation code, encodes the archive, and submits the evaluation workflow.
@@ -45,7 +45,7 @@ Options:
   -m, --max-steps N         Maximum inference steps (default: 500)
   -v, --video-length N      Video length in steps (default: 200)
   -f, --format FORMAT       Inference format: onnx, jit, both (default: both)
-  -i, --image IMAGE         Container image override
+  -i, --image IMAGE         Container image override (default: ${DEFAULT_ISAAC_LAB_IMAGE})
   -p, --payload-root DIR    Runtime extraction root override
 
 Azure context overrides (resolved from Terraform outputs if not provided):
@@ -94,7 +94,7 @@ TASK_VALUE=${TASK:-Isaac-Ant-v0}
 NUM_ENVS_VALUE=${NUM_ENVS:-4}
 MAX_STEPS_VALUE=${MAX_STEPS:-500}
 VIDEO_LENGTH_VALUE=${VIDEO_LENGTH:-200}
-IMAGE_VALUE=${IMAGE:-nvcr.io/nvidia/isaac-lab:2.3.2}
+IMAGE_VALUE=${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}
 PAYLOAD_ROOT_VALUE=${PAYLOAD_ROOT:-/workspace/isaac_payload}
 CHECKPOINT_URI_VALUE=${CHECKPOINT_URI:-}
 INFERENCE_FORMAT_VALUE=${INFERENCE_FORMAT:-both}

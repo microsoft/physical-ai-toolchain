@@ -16,7 +16,7 @@ read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 #------------------------------------------------------------------------------
 
 show_help() {
-  cat << 'EOF'
+  cat << EOF
 Usage: submit-azureml-validation.sh [OPTIONS]
 
 Submit an Azure ML validation job to evaluate a trained model.
@@ -27,8 +27,8 @@ MODEL OPTIONS:
 
 AZUREML ASSET OPTIONS:
     --environment-name NAME       AzureML environment name (default: isaaclab-training-env)
-    --environment-version VER     Environment version (default: 2.3.2)
-    --image IMAGE                 Container image (default: nvcr.io/nvidia/isaac-lab:2.3.2)
+    --environment-version VER     Environment version (default: ${DEFAULT_ISAAC_LAB_IMAGE_VERSION})
+    --image IMAGE                 Container image (default: ${DEFAULT_ISAAC_LAB_IMAGE})
 
 VALIDATION OPTIONS:
     --task TASK                   Override task ID (default: from model metadata)
@@ -92,8 +92,8 @@ EOF
 #------------------------------------------------------------------------------
 
 environment_name="isaaclab-training-env"
-environment_version="2.3.2"
-image="nvcr.io/nvidia/isaac-lab:2.3.2"
+environment_version="${ENVIRONMENT_VERSION:-$DEFAULT_ISAAC_LAB_IMAGE_VERSION}"
+image="${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}"
 
 model_name=""
 model_version="latest"
@@ -186,6 +186,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Instance Type" "$instance_type"
   print_kv "Job File" "$job_file"
   print_kv "Environment" "${environment_name}:${environment_version}"
+  print_kv "Image" "$image"
   exit 0
 fi
 
