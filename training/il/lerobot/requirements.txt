@@ -2,7 +2,7 @@
 #    uv pip compile pyproject.toml -o requirements.txt
 accelerate==1.13.0
     # via lerobot
-aiohappyeyeballs==2.6.1
+aiohappyeyeballs==2.6.2
     # via aiohttp
 aiohttp==3.13.5
     # via fsspec
@@ -76,9 +76,9 @@ azure-storage-file-share==12.25.0
     # via azure-ai-ml
 azureml-mlflow==1.62.0.post2
     # via robotics-training-il (pyproject.toml)
-cachetools==7.1.2
+cachetools==7.1.4
     # via mlflow-skinny
-certifi==2026.4.22
+certifi==2026.5.20
     # via
     #   httpcore
     #   httpx
@@ -89,7 +89,7 @@ cffi==2.0.0
     # via cryptography
 charset-normalizer==3.4.7
     # via requests
-click==8.4.0
+click==8.4.1
     # via
     #   mlflow-skinny
     #   typer
@@ -116,7 +116,7 @@ cuda-bindings==13.2.0
     # via torch
 cuda-pathfinder==1.5.4
     # via cuda-bindings
-databricks-sdk==0.108.0
+databricks-sdk==0.110.0
     # via mlflow-skinny
 datasets==4.8.5
     # via
@@ -140,7 +140,7 @@ evdev==1.9.3
     # via pynput
 farama-notifications==0.0.6
     # via gymnasium
-fastapi==0.136.1
+fastapi==0.136.3
     # via mlflow-skinny
 filelock==3.29.0
     # via
@@ -181,14 +181,14 @@ httpx==0.28.1
     #   datasets
     #   diffusers
     #   huggingface-hub
-huggingface-hub==1.15.0
+huggingface-hub==1.16.1
     # via
     #   robotics-training-il (pyproject.toml)
     #   accelerate
     #   datasets
     #   diffusers
     #   lerobot
-idna==3.15
+idna==3.16
     # via
     #   anyio
     #   httpx
@@ -260,7 +260,7 @@ mypy-extensions==1.1.0
     # via typing-inspect
 networkx==3.6.1
     # via torch
-numpy==2.4.5
+numpy==2.4.6
     # via
     #   robotics-training-il (pyproject.toml)
     #   accelerate
@@ -318,7 +318,7 @@ oauthlib==3.3.1
     # via requests-oauthlib
 opencv-python-headless==4.13.0.92
     # via lerobot
-opentelemetry-api==1.41.1
+opentelemetry-api==1.42.1
     # via
     #   azure-core-tracing-opentelemetry
     #   azure-monitor-opentelemetry-exporter
@@ -337,7 +337,7 @@ opentelemetry-api==1.41.1
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-opentelemetry-instrumentation==0.62b1
+opentelemetry-instrumentation==0.63b1
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-dbapi
@@ -350,41 +350,41 @@ opentelemetry-instrumentation==0.62b1
     #   opentelemetry-instrumentation-urllib
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
-opentelemetry-instrumentation-asgi==0.62b1
+opentelemetry-instrumentation-asgi==0.63b1
     # via opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-dbapi==0.62b1
+opentelemetry-instrumentation-dbapi==0.63b1
     # via opentelemetry-instrumentation-psycopg2
-opentelemetry-instrumentation-django==0.62b1
+opentelemetry-instrumentation-django==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-fastapi==0.62b1
+opentelemetry-instrumentation-fastapi==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-flask==0.62b1
+opentelemetry-instrumentation-flask==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-logging==0.62b1
+opentelemetry-instrumentation-logging==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-psycopg2==0.62b1
+opentelemetry-instrumentation-psycopg2==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-requests==0.62b1
+opentelemetry-instrumentation-requests==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib==0.62b1
+opentelemetry-instrumentation-urllib==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib3==0.62b1
+opentelemetry-instrumentation-urllib3==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-wsgi==0.62b1
+opentelemetry-instrumentation-wsgi==0.63b1
     # via
     #   opentelemetry-instrumentation-django
     #   opentelemetry-instrumentation-flask
-opentelemetry-proto==1.41.1
+opentelemetry-proto==1.42.1
     # via mlflow-skinny
 opentelemetry-resource-detector-azure==0.1.5
     # via azure-monitor-opentelemetry
-opentelemetry-sdk==1.41.1
+opentelemetry-sdk==1.42.1
     # via
     #   azure-monitor-opentelemetry
     #   azure-monitor-opentelemetry-exporter
     #   mlflow-skinny
     #   opentelemetry-resource-detector-azure
-opentelemetry-semantic-conventions==0.62b1
+opentelemetry-semantic-conventions==0.63b1
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-asgi
@@ -397,7 +397,7 @@ opentelemetry-semantic-conventions==0.62b1
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
-opentelemetry-util-http==0.62b1
+opentelemetry-util-http==0.63b1
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-django
@@ -435,7 +435,7 @@ propcache==0.5.2
     # via
     #   aiohttp
     #   yarl
-protobuf==7.34.1
+protobuf==7.35.0
     # via
     #   databricks-sdk
     #   mlflow-skinny
@@ -463,13 +463,13 @@ pydantic==2.13.4
     #   fastapi
     #   mlflow-skinny
     #   wandb
-pydantic-core==2.46.4
+pydantic-core==2.47.0
     # via pydantic
 pydash==8.0.6
     # via azure-ai-ml
 pygments==2.20.0
     # via rich
-pyjwt==2.12.1
+pyjwt==2.13.0
     # via
     #   azure-ai-ml
     #   msal
@@ -525,7 +525,7 @@ requests==2.34.2
     #   wandb
 requests-oauthlib==2.0.0
     # via msrest
-rerun-sdk==0.32.1
+rerun-sdk==0.32.2
     # via lerobot
 rich==15.0.0
     # via typer
@@ -554,7 +554,7 @@ smmap==5.0.3
     # via gitdb
 sqlparse==0.5.5
     # via mlflow-skinny
-starlette==1.0.0
+starlette==1.1.0
     # via fastapi
 strictyaml==1.7.3
     # via azure-ai-ml
@@ -569,7 +569,7 @@ torch==2.12.0
     #   accelerate
     #   lerobot
     #   torchvision
-torchcodec==0.12.0
+torchcodec==0.13.0
     # via
     #   robotics-training-il (pyproject.toml)
     #   lerobot
@@ -624,18 +624,18 @@ urllib3==2.7.0
     #   robotics-training-il (pyproject.toml)
     #   requests
     #   sentry-sdk
-uvicorn==0.47.0
+uvicorn==0.48.0
     # via mlflow-skinny
 wandb==0.27.0
     # via lerobot
-wrapt==2.1.2
+wrapt==2.2.1
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-dbapi
     #   opentelemetry-instrumentation-urllib3
 xxhash==3.7.0
     # via datasets
-yarl==1.23.0
+yarl==1.24.2
     # via aiohttp
-zipp==3.23.1
+zipp==4.1.0
     # via importlib-metadata
