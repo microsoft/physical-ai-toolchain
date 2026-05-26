@@ -636,8 +636,9 @@ uvicorn==0.48.0
     # via mlflow-skinny
 wandb==0.24.2
     # via lerobot
-wrapt==1.17.4rc1
+wrapt==1.17.3
     # via
+    #   robotics-training-il (pyproject.toml)
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-dbapi
     #   opentelemetry-instrumentation-urllib3

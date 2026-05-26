@@ -65,7 +65,6 @@ command: echo "Command will be set by submission script"
 environment_variables:
   AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
   TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
-  BLOB_URLS: ${{inputs.blob_urls}}
   # MLFLOW_HTTP_REQUEST_TIMEOUT: <set by script>
 
 outputs:

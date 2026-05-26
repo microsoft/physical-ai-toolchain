@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 # are pinned exactly because requirements.txt is installed with `uv pip install
 # --no-deps` from a compiled lockfile; pip's resolver does NOT run in the
 # container. Regenerate requirements.txt after any change here:
+#   cd training/il/lerobot
 #   uv pip compile pyproject.toml -o requirements.txt --python-version 3.12 \
 #     --python-platform manylinux_2_28_x86_64
 dependencies = [
@@ -46,6 +47,10 @@ dependencies = [
     "gitpython==3.1.50",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
+    # Pin wrapt to the latest stable in the 1.x line. opentelemetry-instrumentation
+    # constrains wrapt<2.0.0,>=1.0.0, but with `prerelease = "allow"` below uv
+    # would otherwise pick the 1.17.4 release candidate over 1.17.3 stable.
+    "wrapt==1.17.3",
 ]
 
 [build-system]
