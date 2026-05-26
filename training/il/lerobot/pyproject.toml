@@ -48,8 +48,9 @@ dependencies = [
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
     # Pin wrapt to the latest stable in the 1.x line. opentelemetry-instrumentation
-    # constrains wrapt<2.0.0,>=1.0.0, but with `prerelease = "allow"` below uv
-    # would otherwise pick the 1.17.4 release candidate over 1.17.3 stable.
+    # constrains wrapt below 2.0 and above 1.0, but with prerelease resolution
+    # enabled below uv would otherwise pick the 1.17.4 release candidate over
+    # 1.17.3 stable.
     "wrapt==1.17.3",
 ]
 

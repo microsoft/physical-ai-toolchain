@@ -40,15 +40,11 @@ _CHECKPOINTS = load_training_module(
 
 class TestParseBlobUrl:
     def test_full_url_with_prefix(self):
-        account, container, prefix = _DOWNLOAD.parse_blob_url(
-            "https://acct.blob.core.windows.net/cont/path/to/data"
-        )
+        account, container, prefix = _DOWNLOAD.parse_blob_url("https://acct.blob.core.windows.net/cont/path/to/data")
         assert (account, container, prefix) == ("acct", "cont", "path/to/data")
 
     def test_url_without_prefix(self):
-        account, container, prefix = _DOWNLOAD.parse_blob_url(
-            "https://acct.blob.core.windows.net/cont"
-        )
+        account, container, prefix = _DOWNLOAD.parse_blob_url("https://acct.blob.core.windows.net/cont")
         assert (account, container, prefix) == ("acct", "cont", "")
 
     @pytest.mark.parametrize(
@@ -242,9 +238,7 @@ def _clear_lineage_env(monkeypatch):
 
 
 class TestRegisterModelLineage:
-    def test_data_asset_only_sets_azureml_data_asset(
-        self, azure_env, fake_azure_modules, monkeypatch, tmp_path
-    ):
+    def test_data_asset_only_sets_azureml_data_asset(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
         _clear_lineage_env(monkeypatch)
         monkeypatch.setenv("DATASET_ASSETS", json.dumps(["azureml:ds:3"]))
         monkeypatch.setenv("REGISTER_CHECKPOINT", "m")
@@ -260,9 +254,7 @@ class TestRegisterModelLineage:
         lineage = json.loads((tmp_path / "azureml_lineage.json").read_text())
         assert lineage["dataset_assets"] == ["azureml:ds:3"]
 
-    def test_multiple_data_assets_use_bounded_summary_tag(
-        self, azure_env, fake_azure_modules, monkeypatch, tmp_path
-    ):
+    def test_multiple_data_assets_use_bounded_summary_tag(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
         _clear_lineage_env(monkeypatch)
         monkeypatch.setenv("DATASET_ASSETS", json.dumps(["azureml:a:1", "azureml:b:2"]))
         monkeypatch.setenv("REGISTER_CHECKPOINT", "m")
@@ -276,9 +268,7 @@ class TestRegisterModelLineage:
         lineage = json.loads((tmp_path / "azureml_lineage.json").read_text())
         assert lineage["dataset_assets"] == ["azureml:a:1", "azureml:b:2"]
 
-    def test_blob_only_sets_azure_blob(
-        self, azure_env, fake_azure_modules, monkeypatch, tmp_path
-    ):
+    def test_blob_only_sets_azure_blob(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
         _clear_lineage_env(monkeypatch)
         monkeypatch.setenv(
             "BLOB_URLS",
@@ -293,9 +283,7 @@ class TestRegisterModelLineage:
         assert tags["blob_url_count"] == "1"
         assert "dataset_assets" not in tags
 
-    def test_mixed_sources_set_mixed(
-        self, azure_env, fake_azure_modules, monkeypatch, tmp_path
-    ):
+    def test_mixed_sources_set_mixed(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
         _clear_lineage_env(monkeypatch)
         monkeypatch.setenv("DATASET_ASSETS", json.dumps(["azureml:ds:1"]))
         monkeypatch.setenv(
@@ -314,9 +302,7 @@ class TestRegisterModelLineage:
         assert lineage["dataset_assets"] == ["azureml:ds:1"]
         assert lineage["blob_urls"] == ["https://acct.blob.core.windows.net/cont/p"]
 
-    def test_huggingface_fallback(
-        self, azure_env, fake_azure_modules, monkeypatch, tmp_path
-    ):
+    def test_huggingface_fallback(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
         _clear_lineage_env(monkeypatch)
         monkeypatch.setenv("DATASET_REPO_ID", "user/ds")
         monkeypatch.setenv("REGISTER_CHECKPOINT", "m")
@@ -345,9 +331,7 @@ class TestRegisterModelLineage:
         assert "dataset_assets" not in tags
         assert "Failed to parse DATASET_ASSETS" in capsys.readouterr().out
 
-    def test_empty_dataset_assets_array_is_ignored(
-        self, azure_env, fake_azure_modules, monkeypatch, tmp_path
-    ):
+    def test_empty_dataset_assets_array_is_ignored(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
         _clear_lineage_env(monkeypatch)
         monkeypatch.setenv("DATASET_ASSETS", "[]")
         monkeypatch.setenv("DATASET_REPO_ID", "user/ds")
@@ -358,9 +342,7 @@ class TestRegisterModelLineage:
         assert tags["dataset_source"] == "huggingface"
         assert "dataset_assets" not in tags
 
-    def test_long_uri_lists_fit_azureml_tag_limit(
-        self, azure_env, fake_azure_modules, monkeypatch, tmp_path
-    ):
+    def test_long_uri_lists_fit_azureml_tag_limit(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
         _clear_lineage_env(monkeypatch)
         assets = [
             "azureml://subscriptions/00000000-0000-0000-0000-000000000000/"
@@ -624,9 +606,12 @@ def test_missing_compute_fails_fast_with_actionable_message():
 )
 def test_register_checkpoint_rejects_invalid_names(name):
     proc = _run_submit(
-        "--dataset-repo-id", "user/ds",
-        "--compute", "c",
-        "--register-checkpoint", name,
+        "--dataset-repo-id",
+        "user/ds",
+        "--compute",
+        "c",
+        "--register-checkpoint",
+        name,
     )
     assert proc.returncode != 0
     assert "--register-checkpoint" in proc.stderr
@@ -644,9 +629,12 @@ def test_register_checkpoint_rejects_invalid_names(name):
 )
 def test_register_checkpoint_accepts_valid_names(name):
     proc = _run_submit(
-        "--dataset-repo-id", "user/ds",
-        "--compute", "c",
-        "--register-checkpoint", name,
+        "--dataset-repo-id",
+        "user/ds",
+        "--compute",
+        "c",
+        "--register-checkpoint",
+        name,
     )
     assert proc.returncode == 0, proc.stderr
 
@@ -792,9 +780,7 @@ def test_entrypoint_downloads_blob_urls(tmp_path):
         tmp_path,
         extra={
             "DATASET_ASSET_COUNT": "0",
-            "BLOB_URLS": json.dumps(
-                ["https://acct.blob.core.windows.net/cont/prefix"]
-            ),
+            "BLOB_URLS": json.dumps(["https://acct.blob.core.windows.net/cont/prefix"]),
             "DATASET_REPO_ID": "dataset",
             "DATASET_ROOT": str(tmp_path / "data"),
         },
