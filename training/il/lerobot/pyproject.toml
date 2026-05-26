@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "LeRobot workflow runtime dependencies"
 requires-python = ">=3.12"
 dependencies = [
-    "numpy==2.4.5",
+    "numpy==2.4.6",
     "azure-core==1.41.0",
     "azure-storage-blob==12.29.0",
     "azure-identity==1.25.3",
@@ -18,9 +18,9 @@ dependencies = [
     "pyperclip==1.11.0",
     "datasets==4.8.5",
     "pyarrow==24.0.0",
-    "huggingface-hub==1.15.0",
+    "huggingface-hub==1.16.1",
     "lerobot==0.5.1",
-    "torchcodec==0.12.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "torchcodec==0.13.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
     "gitpython==3.1.50",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
