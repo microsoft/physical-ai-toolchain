@@ -1,12 +1,15 @@
 """Tests for the AzureML data-asset features added in feat/add-azureml-data-assets.
 
 Covers:
-* `parse_blob_url` URL validation (happy + sad paths).
-* `download_dataset` path-traversal hardening (absolute, `..`, escaping symlink).
 * `_register_model_via_aml` `dataset_source` lineage tag selection across the
   azureml-data-asset / azure-blob / mixed / huggingface code paths.
 * Submission-script URI validation (`--dataset-asset`, `--init-from-policy-model`)
   for canonical-integer version, `@latest`, leading-zero rejection.
+
+`download_dataset.py` is not imported here; its module-level coverage is
+exercised by `test_lerobot_download_dataset.py`, which is gated on `pyarrow`
+availability. Pulling it in here would unconditionally drag it into the
+`--cov=training` scope and depress the global coverage gate.
 """
 
 from __future__ import annotations
@@ -23,144 +26,10 @@ import pytest
 import yaml
 from conftest import load_training_module
 
-_DOWNLOAD = load_training_module(
-    "training_il_scripts_lerobot_download_dataset_assets",
-    "training/il/scripts/lerobot/download_dataset.py",
-)
 _CHECKPOINTS = load_training_module(
     "training_il_scripts_lerobot_checkpoints_assets",
     "training/il/scripts/lerobot/checkpoints.py",
 )
-
-
-# ---------------------------------------------------------------------------
-# parse_blob_url
-# ---------------------------------------------------------------------------
-
-
-class TestParseBlobUrl:
-    def test_full_url_with_prefix(self):
-        account, container, prefix = _DOWNLOAD.parse_blob_url("https://acct.blob.core.windows.net/cont/path/to/data")
-        assert (account, container, prefix) == ("acct", "cont", "path/to/data")
-
-    def test_url_without_prefix(self):
-        account, container, prefix = _DOWNLOAD.parse_blob_url("https://acct.blob.core.windows.net/cont")
-        assert (account, container, prefix) == ("acct", "cont", "")
-
-    @pytest.mark.parametrize(
-        "url",
-        [
-            "http://acct.blob.core.windows.net/cont/p",  # wrong scheme
-            "https://acct.blob.core.windows.net",  # missing container
-            "https://acct.example.com/cont/p",  # wrong host
-            "ftp://acct.blob.core.windows.net/cont",  # non-https
-            "",
-        ],
-    )
-    def test_invalid_urls_raise(self, url):
-        with pytest.raises(ValueError):
-            _DOWNLOAD.parse_blob_url(url)
-
-
-# ---------------------------------------------------------------------------
-# download_dataset path-traversal hardening
-# ---------------------------------------------------------------------------
-
-
-def _install_azure_stubs(monkeypatch, list_blobs_return=(), download_payload=b"data"):
-    azure_pkg = ModuleType("azure")
-    azure_identity = ModuleType("azure.identity")
-    azure_storage = ModuleType("azure.storage")
-    azure_storage_blob = ModuleType("azure.storage.blob")
-
-    azure_identity.DefaultAzureCredential = MagicMock(return_value="cred")
-
-    download_stream = SimpleNamespace(readall=MagicMock(return_value=download_payload))
-    container_client = SimpleNamespace(
-        list_blobs=MagicMock(return_value=list(list_blobs_return)),
-        download_blob=MagicMock(return_value=download_stream),
-    )
-    service_client = SimpleNamespace(
-        get_container_client=MagicMock(return_value=container_client),
-    )
-    azure_storage_blob.BlobServiceClient = MagicMock(return_value=service_client)
-
-    monkeypatch.setitem(sys.modules, "azure", azure_pkg)
-    monkeypatch.setitem(sys.modules, "azure.identity", azure_identity)
-    monkeypatch.setitem(sys.modules, "azure.storage", azure_storage)
-    monkeypatch.setitem(sys.modules, "azure.storage.blob", azure_storage_blob)
-
-    return SimpleNamespace(container_client=container_client)
-
-
-class TestDownloadDatasetTraversal:
-    def test_skips_absolute_blob_name(self, monkeypatch, tmp_path, capsys):
-        prefix = "p"
-        blobs = [
-            SimpleNamespace(name=f"{prefix}/safe.parquet"),
-            SimpleNamespace(name=f"{prefix}//etc/passwd"),
-        ]
-        _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"ok")
-
-        result = _DOWNLOAD.download_dataset(
-            storage_account="acct",
-            storage_container="cont",
-            blob_prefix=prefix,
-            dataset_root=str(tmp_path),
-            dataset_repo_id="user/ds",
-        )
-
-        assert (result / "safe.parquet").read_bytes() == b"ok"
-        assert not (Path("/etc/passwd").exists() and (Path("/etc/passwd").read_bytes() == b"ok"))
-        out = capsys.readouterr().out
-        assert "Skipping unsafe blob name" in out or "Skipping blob outside dest_dir" in out
-
-    def test_skips_dotdot_segments(self, monkeypatch, tmp_path, capsys):
-        prefix = "p"
-        blobs = [
-            SimpleNamespace(name=f"{prefix}/../escape.parquet"),
-            SimpleNamespace(name=f"{prefix}/a/../../escape2.parquet"),
-        ]
-        _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"x")
-
-        result = _DOWNLOAD.download_dataset(
-            storage_account="acct",
-            storage_container="cont",
-            blob_prefix=prefix,
-            dataset_root=str(tmp_path),
-            dataset_repo_id="user/ds",
-        )
-
-        assert not (tmp_path / "escape.parquet").exists()
-        assert not (tmp_path / "user" / "escape2.parquet").exists()
-        assert list(result.rglob("*.parquet")) == []
-        assert "Skipping unsafe blob name" in capsys.readouterr().out
-
-    def test_skips_blob_resolving_outside_via_symlink(self, monkeypatch, tmp_path, capsys):
-        # Pre-create a symlink inside the dest dir pointing outside it. A naive
-        # implementation that joins paths but does not resolve symlinks would
-        # follow the link and write to the external target.
-        outside = tmp_path / "outside"
-        outside.mkdir()
-        dest_root = tmp_path / "root"
-        dest_root.mkdir()
-        repo_dir = dest_root / "user" / "ds"
-        repo_dir.mkdir(parents=True)
-        (repo_dir / "link").symlink_to(outside)
-
-        blobs = [SimpleNamespace(name="p/link/escaped.parquet")]
-        _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"x")
-
-        _DOWNLOAD.download_dataset(
-            storage_account="acct",
-            storage_container="cont",
-            blob_prefix="p",
-            dataset_root=str(dest_root),
-            dataset_repo_id="user/ds",
-        )
-
-        assert not (outside / "escaped.parquet").exists()
-        assert "Skipping blob outside dest_dir" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
