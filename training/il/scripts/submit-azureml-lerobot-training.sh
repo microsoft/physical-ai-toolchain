@@ -78,18 +78,20 @@ AZURE CONTEXT:
         --resource-group NAME     Azure resource group
         --workspace-name NAME     Azure ML workspace
         --compute TARGET          Compute target override
-        --instance-type NAME      Instance type (default: gpuspot). The selected
-                                  InstanceType's `nvidia.com/gpu: N` request
-                                  determines how many GPUs the pod gets, and
-                                  the training wrapper auto-detects N at
-                                  runtime via torch.cuda.device_count() to
-                                  enable Accelerate multi-GPU launch when N>1.
-                                  Shipped multi-GPU types: gpu2/gpuspot2,
-                                  gpu4/gpuspot4 (see
+        --instance-type NAME      Instance type (default: gpuspot). Applies only
+                                  on AzureML-on-Kubernetes compute; on AzureML
+                                  managed AmlCompute this flag is ignored by
+                                  AzureML and pod GPU count comes from the
+                                  cluster's VM SKU. The training wrapper
+                                  auto-detects the visible GPU count via
+                                  torch.cuda.device_count() on both paths and
+                                  enables Accelerate multi-GPU launch when N>1.
+                                  Shipped multi-GPU Kubernetes types:
+                                  gpu2/gpuspot2, gpu4/gpuspot4 (see
                                   infrastructure/setup/manifests/azureml-instance-types.yaml).
         --mixed-precision MODE    Accelerate mixed-precision mode (no|fp16|bf16);
-                                  default: no. Only effective when the chosen
-                                  InstanceType exposes more than one GPU.
+                                  default: no. Only effective when more than
+                                  one GPU is visible to the pod.
         --experiment-name NAME    Experiment name override
         --display-name NAME       Display name override
         --stream                  Stream logs after submission

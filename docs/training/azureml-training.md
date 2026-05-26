@@ -50,17 +50,29 @@ Submit Isaac Lab reinforcement learning and LeRobot behavioral cloning training 
 | `job_name`        | `lerobot-act-training`                           | Unique job identifier                     |
 | `image`           | `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime` | Container image                           |
 | `save_freq`       | `5000`                                           | Checkpoint save frequency                 |
-| `instance_type`   | `gpuspot`                                        | InstanceType (determines pod GPU count)   |
+| `instance_type`   | `gpuspot`                                        | Pod size (AzureML-on-Kubernetes only)     |
 | `mixed_precision` | `no`                                             | Accelerate mixed precision (no/fp16/bf16) |
 
 ### Single-node multi-GPU training
 
-LeRobot training on Azure ML supports single-node multi-GPU execution via [Hugging Face Accelerate](https://huggingface.co/docs/lerobot/multi_gpu_training). The GPU count is a property of the pod (set by the `InstanceType`'s `nvidia.com/gpu: N` request); the wrapper detects it at runtime via `torch.cuda.device_count()` and, when `N > 1`, automatically launches `accelerate launch --multi_gpu --num_processes=N`. No AzureML `distribution:` block is required because the run stays within one pod.
+LeRobot training on Azure ML supports single-node multi-GPU execution via [Hugging Face Accelerate](https://huggingface.co/docs/lerobot/multi_gpu_training). The wrapper detects the visible GPU count at runtime via `torch.cuda.device_count()` and, when `N > 1`, automatically launches `accelerate launch --multi_gpu --num_processes=N`. No AzureML `distribution:` block is required because the run stays within one process group on one node.
 
-Prerequisites:
+Both AzureML compute backends are supported. GPU count is determined by the backend:
 
-- A node SKU with at least `N` GPUs (e.g., `Standard_NC128ds_xl_RTXPRO6000BSE_v6` for `N=4`).
-- A matching AzureML `InstanceType` CRD that requests `nvidia.com/gpu: N` (`gpu2`/`gpuspot2`/`gpu4`/`gpuspot4` are shipped in `infrastructure/setup/manifests/azureml-instance-types.yaml`).
+- **AzureML managed compute (`AmlCompute`):** pod GPU count equals the cluster's VM SKU GPU count (e.g., `Standard_NC48ads_A100_v4` → 2, `Standard_NC96ads_A100_v4` → 4). Pass `--compute <cluster-name>` (matching an entry in `aml_compute_clusters`). `--instance-type` is silently ignored by AzureML on this path.
+- **AzureML-on-Kubernetes (Arc-attached AKS):** pod GPU count is the `InstanceType` CRD's `nvidia.com/gpu: N` request. `gpu2`/`gpuspot2`/`gpu4`/`gpuspot4` are shipped in `infrastructure/setup/manifests/azureml-instance-types.yaml` and require a node SKU with at least `N` GPUs (e.g., `Standard_NC128ds_xl_RTXPRO6000BSE_v6` for `N=4`).
+
+Managed compute example:
+
+```bash
+./scripts/submit-azureml-lerobot-training.sh \
+  --dataset-repo-id user/dataset \
+  --compute gpu-training \
+  --mixed-precision bf16 \
+  --batch-size 8
+```
+
+AzureML-on-Kubernetes example:
 
 ```bash
 ./scripts/submit-azureml-lerobot-training.sh \

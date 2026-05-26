@@ -50,9 +50,10 @@ inputs:
   mlflow_token_refresh_retries: "3"
   mlflow_http_request_timeout: "60"
   # Single-node multi-GPU is launched in-pod via `accelerate launch`. The
-  # number of GPUs is detected at runtime via torch.cuda.device_count() (driven
-  # by the chosen InstanceType's nvidia.com/gpu resource request), so no
-  # AzureML `distribution:` block and no explicit GPU count is needed here.
+  # number of GPUs is detected at runtime via torch.cuda.device_count(); on
+  # AzureML managed AmlCompute that is the cluster VM SKU's GPU count, on
+  # AzureML-on-Kubernetes it is the InstanceType's nvidia.com/gpu request.
+  # No AzureML `distribution:` block is needed in either case.
   mixed_precision: "no"
 
 command: echo "Command will be set by submission script"
