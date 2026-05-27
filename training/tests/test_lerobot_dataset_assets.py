@@ -448,6 +448,16 @@ def test_dataset_asset_rejects_non_canonical_versions(uri):
     assert "--dataset-asset" in proc.stderr
 
 
+def test_dataset_asset_rejects_more_than_entrypoint_limit():
+    args = []
+    for index in range(65):
+        args.extend(["--dataset-asset", f"azureml:ds{index}:1"])
+
+    proc = _run_submit(*args, "--compute", "c")
+    assert proc.returncode != 0
+    assert "--dataset-asset: too many data assets (65); maximum is 64." in proc.stderr
+
+
 @pytest.mark.parametrize(
     "uri",
     [

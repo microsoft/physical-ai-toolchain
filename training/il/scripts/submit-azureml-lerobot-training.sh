@@ -36,7 +36,7 @@ OPTIONS:
     -d, --dataset-repo-id ID     Dataset logical name for folder naming (default: dataset)
 
 DATA SOURCE (combinable):
-        --dataset-asset URI           AzureML data asset to mount (ro_mount, repeatable).
+        --dataset-asset URI           AzureML data asset to mount (ro_mount, repeatable, max 64).
                                       Accepted forms:
                                         azureml:NAME:VERSION       (numeric version required)
                                         azureml://.../data/NAME/versions/VERSION
@@ -276,6 +276,7 @@ policy_repo_id="${POLICY_REPO_ID:-}"
 init_from_policy_model="${INIT_FROM_POLICY_MODEL:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
 
+dataset_asset_count_max=64
 dataset_assets=()
 blob_urls=()
 dataset_root="${DATASET_ROOT:-/workspace/data}"
@@ -391,6 +392,9 @@ fi
 # compute (azureml:cpu-cluster) is not a real target in user workspaces.
 # Fail fast instead of letting az ml job create return a late, cryptic error.
 [[ -n "$compute" ]] || fatal "--compute is required (or set AZUREML_COMPUTE env var, or expose 'compute_target' via Terraform outputs)."
+
+[[ ${#dataset_assets[@]} -le $dataset_asset_count_max ]] || fatal \
+  "--dataset-asset: too many data assets (${#dataset_assets[@]}); maximum is ${dataset_asset_count_max}."
 
 # Accept only fully-qualified, version-pinned URIs for data assets.
 # Version must be a canonical positive integer or "0" — leading zeros are
