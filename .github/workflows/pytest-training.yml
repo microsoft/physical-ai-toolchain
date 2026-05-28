@@ -37,9 +37,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      - name: Install Torch test dependency
+        run: uv pip install torch==2.10.0
+
       - name: Run pytest
         run: >-
-          uv run pytest training/tests -v
+          uv run pytest -o addopts="" training/tests -v
           --cov=training
           --cov-report=term-missing
           --cov-report=xml:logs/coverage-training.xml
@@ -55,7 +58,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: ${{ inputs.code-coverage && always() }}
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2  # v6.0.0
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354  # v6.0.1
         with:
           files: logs/coverage-training.xml
           use_oidc: true

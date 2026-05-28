@@ -10,12 +10,16 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 
 from .conftest import load_training_module
+
+if TYPE_CHECKING:
+    from pytest_mock import MockerFixture
 
 _MOD = load_training_module(
     "training_rl_skrl_training",
@@ -501,6 +505,35 @@ class _DirectMARCfg:
         self.num_envs = 1
         self.sim = SimpleNamespace(device="cpu")
         self.seed = 0
+
+
+def _make_training_modules(**overrides: object) -> _MOD.TrainingModules:
+    defaults = {
+        "hydra_task_config": MagicMock(),
+        "gym_module": SimpleNamespace(envs=SimpleNamespace(registry={"Isaac-Lift": object()}), make=MagicMock()),
+        "skrl_module": SimpleNamespace(config=SimpleNamespace(jax=SimpleNamespace(backend=None))),
+        "runner_cls": MagicMock(),
+        "manager_cfg_type": _ManagerCfg,
+        "direct_cfg_type": _DirectCfg,
+        "direct_mar_cfg_type": _DirectMARCfg,
+        "direct_mar_env_type": object,
+        "multi_agent_to_single_agent": MagicMock(),
+        "retrieve_file_path": MagicMock(return_value="/resolved/checkpoint.pt"),
+        "print_dict": MagicMock(),
+        "dump_yaml": MagicMock(),
+        "dump_pickle": MagicMock(),
+        "vec_env_wrapper": MagicMock(),
+        "mlflow_module": None,
+    }
+    defaults.update(overrides)
+    return _MOD.TrainingModules(**defaults)
+
+
+def _fake_module(name: str, **attrs: object) -> ModuleType:
+    module = ModuleType(name)
+    for attr_name, value in attrs.items():
+        setattr(module, attr_name, value)
+    return module
 
 
 class TestConfigureEnvironment:
@@ -1061,6 +1094,105 @@ class TestInitializeSimulation:
 
 
 # ---------------------------------------------------------------------------
+# _load_training_modules
+# ---------------------------------------------------------------------------
+
+
+class TestLoadTrainingModules:
+    def test_loads_torch_runner_without_mlflow(self, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture) -> None:
+        runner_cls = mocker.MagicMock()
+        hydra_task_config = mocker.MagicMock()
+        gym_module = _fake_module("gymnasium")
+        skrl_module = _fake_module("skrl")
+
+        monkeypatch.setitem(sys.modules, "gymnasium", gym_module)
+        monkeypatch.setitem(sys.modules, "isaaclab", _fake_module("isaaclab"))
+        monkeypatch.setitem(
+            sys.modules,
+            "isaaclab.envs",
+            _fake_module(
+                "isaaclab.envs",
+                DirectMARLEnv="direct-mar-env",
+                DirectMARLEnvCfg="direct-mar-cfg",
+                DirectRLEnvCfg="direct-cfg",
+                ManagerBasedRLEnvCfg="manager-cfg",
+                multi_agent_to_single_agent="converter",
+            ),
+        )
+        monkeypatch.setitem(sys.modules, "isaaclab.utils", _fake_module("isaaclab.utils"))
+        monkeypatch.setitem(sys.modules, "isaaclab.utils.assets", _fake_module("assets", retrieve_file_path="resolver"))
+        monkeypatch.setitem(sys.modules, "isaaclab.utils.dict", _fake_module("dict", print_dict="printer"))
+        monkeypatch.setitem(sys.modules, "isaaclab.utils.io", _fake_module("io", dump_yaml="yaml"))
+        monkeypatch.setitem(sys.modules, "isaaclab_tasks", _fake_module("isaaclab_tasks"))
+        monkeypatch.setitem(sys.modules, "isaaclab_tasks.utils", _fake_module("isaaclab_tasks.utils"))
+        monkeypatch.setitem(
+            sys.modules,
+            "isaaclab_tasks.utils.hydra",
+            _fake_module("hydra", hydra_task_config=hydra_task_config),
+        )
+        monkeypatch.setitem(sys.modules, "isaaclab_rl", _fake_module("isaaclab_rl"))
+        monkeypatch.setitem(sys.modules, "isaaclab_rl.skrl", _fake_module("skrl", SkrlVecEnvWrapper="vec-wrapper"))
+        monkeypatch.setitem(sys.modules, "skrl", skrl_module)
+        monkeypatch.setitem(sys.modules, "skrl.utils", _fake_module("skrl.utils"))
+        monkeypatch.setitem(sys.modules, "skrl.utils.runner", _fake_module("skrl.utils.runner"))
+        monkeypatch.setitem(sys.modules, "skrl.utils.runner.torch", _fake_module("torch_runner", Runner=runner_cls))
+
+        modules = _MOD._load_training_modules(SimpleNamespace(ml_framework="torch"), context=None)
+
+        assert modules.hydra_task_config is hydra_task_config
+        assert modules.gym_module is gym_module
+        assert modules.skrl_module is skrl_module
+        assert modules.runner_cls is runner_cls
+        assert modules.mlflow_module is None
+        assert modules.dump_pickle is None
+
+    def test_loads_jax_runner_and_mlflow_when_context_exists(
+        self, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+    ) -> None:
+        runner_cls = mocker.MagicMock()
+        mlflow_module = _fake_module("mlflow")
+
+        monkeypatch.setitem(sys.modules, "gymnasium", _fake_module("gymnasium"))
+        monkeypatch.setitem(sys.modules, "isaaclab", _fake_module("isaaclab"))
+        monkeypatch.setitem(
+            sys.modules,
+            "isaaclab.envs",
+            _fake_module(
+                "isaaclab.envs",
+                DirectMARLEnv="direct-mar-env",
+                DirectMARLEnvCfg="direct-mar-cfg",
+                DirectRLEnvCfg="direct-cfg",
+                ManagerBasedRLEnvCfg="manager-cfg",
+                multi_agent_to_single_agent="converter",
+            ),
+        )
+        monkeypatch.setitem(sys.modules, "isaaclab.utils", _fake_module("isaaclab.utils"))
+        monkeypatch.setitem(sys.modules, "isaaclab.utils.assets", _fake_module("assets", retrieve_file_path="resolver"))
+        monkeypatch.setitem(sys.modules, "isaaclab.utils.dict", _fake_module("dict", print_dict="printer"))
+        monkeypatch.setitem(
+            sys.modules,
+            "isaaclab.utils.io",
+            _fake_module("io", dump_yaml="yaml", dump_pickle="pickle"),
+        )
+        monkeypatch.setitem(sys.modules, "isaaclab_tasks", _fake_module("isaaclab_tasks"))
+        monkeypatch.setitem(sys.modules, "isaaclab_tasks.utils", _fake_module("isaaclab_tasks.utils"))
+        monkeypatch.setitem(sys.modules, "isaaclab_tasks.utils.hydra", _fake_module("hydra", hydra_task_config="hydra"))
+        monkeypatch.setitem(sys.modules, "isaaclab_rl", _fake_module("isaaclab_rl"))
+        monkeypatch.setitem(sys.modules, "isaaclab_rl.skrl", _fake_module("skrl", SkrlVecEnvWrapper="vec-wrapper"))
+        monkeypatch.setitem(sys.modules, "skrl", _fake_module("skrl"))
+        monkeypatch.setitem(sys.modules, "skrl.utils", _fake_module("skrl.utils"))
+        monkeypatch.setitem(sys.modules, "skrl.utils.runner", _fake_module("skrl.utils.runner"))
+        monkeypatch.setitem(sys.modules, "skrl.utils.runner.jax", _fake_module("jax_runner", Runner=runner_cls))
+        monkeypatch.setitem(sys.modules, "mlflow", mlflow_module)
+
+        modules = _MOD._load_training_modules(SimpleNamespace(ml_framework="jax"), context=MagicMock())
+
+        assert modules.runner_cls is runner_cls
+        assert modules.mlflow_module is mlflow_module
+        assert modules.dump_pickle == "pickle"
+
+
+# ---------------------------------------------------------------------------
 # _close_simulation
 # ---------------------------------------------------------------------------
 
@@ -1071,6 +1203,82 @@ class TestCloseSimulation:
         monkeypatch.setattr(_MOD.os, "_exit", lambda code: called.append(code))
         _MOD._close_simulation(None)
         assert called == [0]
+
+
+# ---------------------------------------------------------------------------
+# _prepare_launch_state, _instantiate_environment, _initialize_runner
+# ---------------------------------------------------------------------------
+
+
+class TestPrepareLaunchState:
+    def test_configures_launch_state_and_manager_descriptors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_cfg = _ManagerCfg()
+        env_cfg.to_dict = lambda: {"env": "cfg"}
+        agent_cfg = {"agent": {"rollouts": 3}}
+        modules = _make_training_modules()
+        cli = argparse.Namespace(
+            checkpoint="checkpoint.pt",
+            seed=12,
+            num_envs=6,
+            distributed=False,
+            max_iterations=4,
+            ml_framework="torch",
+            algorithm="PPO",
+            export_io_descriptors=True,
+        )
+        monkeypatch.chdir(tmp_path)
+
+        state = _MOD._prepare_launch_state(env_cfg, agent_cfg, cli, app_launcher=SimpleNamespace(), modules=modules)
+
+        assert state.resume_path == "/resolved/checkpoint.pt"
+        assert state.random_seed == 12
+        assert state.rollouts == 3
+        assert state.agent_dict["trainer"]["timesteps"] == 12
+        assert env_cfg.scene.num_envs == 6
+        assert env_cfg.export_io_descriptors is True
+        assert env_cfg.io_descriptors_output_dir == str(state.log_dir)
+        assert env_cfg.log_dir == str(state.log_dir)
+        modules.retrieve_file_path.assert_called_once_with("checkpoint.pt")
+        assert modules.print_dict.call_count == 2
+
+
+class TestInstantiateEnvironment:
+    def test_validates_creates_and_wraps_environment(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        modules = _make_training_modules()
+        raw_env = SimpleNamespace(unwrapped=object())
+        modules.gym_module.make.return_value = raw_env
+        wrapped_env = object()
+        wrap_environment = mocker.patch.object(_MOD, "_wrap_environment", return_value=wrapped_env)
+        cli = argparse.Namespace(task="Isaac-Lift", video=True, algorithm="PPO", ml_framework="torch")
+
+        result = _MOD._instantiate_environment(SimpleNamespace(), cli, modules, tmp_path)
+
+        assert result is wrapped_env
+        modules.gym_module.make.assert_called_once_with("Isaac-Lift", cfg=mocker.ANY, render_mode="rgb_array")
+        wrap_environment.assert_called_once()
+
+
+class TestInitializeRunner:
+    def test_creates_runner_and_applies_checkpoint_and_mlflow(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        runner = SimpleNamespace(agent=SimpleNamespace(load=mocker.MagicMock(), update="original"))
+        runner_cls = mocker.MagicMock(return_value=runner)
+        mlflow_module = SimpleNamespace()
+        modules = _make_training_modules(runner_cls=runner_cls, mlflow_module=mlflow_module)
+        wrapper = mocker.patch.object(_MOD, "create_mlflow_logging_wrapper", return_value="wrapped")
+        state = _MOD.LaunchState(
+            agent_dict={"agent": {}}, random_seed=1, rollouts=1, log_dir=tmp_path, resume_path="ckpt.pt"
+        )
+        env = object()
+
+        result = _MOD._initialize_runner(env, state, modules)
+
+        assert result is runner
+        runner_cls.assert_called_once_with(env, state.agent_dict)
+        runner.agent.load.assert_called_once_with("ckpt.pt")
+        wrapper.assert_called_once_with(agent=runner.agent, mlflow_module=mlflow_module, metric_filter=None)
+        assert runner.agent.update == "wrapped"
 
 
 # ---------------------------------------------------------------------------
@@ -1162,6 +1370,62 @@ class TestRunTrainingWithMlflow:
 
 
 # ---------------------------------------------------------------------------
+# _run_hydra_training
+# ---------------------------------------------------------------------------
+
+
+class TestRunHydraTraining:
+    def test_decorates_launch_and_closes_env(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        env_cfg = SimpleNamespace()
+        agent_cfg = {"agent": {}}
+        env = SimpleNamespace(close=mocker.MagicMock())
+        runner = SimpleNamespace(run=mocker.MagicMock())
+
+        def hydra_task_config(task: str, agent_entry: str):
+            assert task == "Isaac-Lift"
+            assert agent_entry == "skrl_cfg_entry_point"
+
+            def decorate(func):
+                def invoke() -> None:
+                    func(env_cfg, agent_cfg)
+
+                return invoke
+
+            return decorate
+
+        modules = _make_training_modules(hydra_task_config=hydra_task_config)
+        state = _MOD.LaunchState(agent_dict={}, random_seed=1, rollouts=1, log_dir=tmp_path, resume_path=None)
+        mocker.patch.object(_MOD, "_prepare_launch_state", return_value=state)
+        mocker.patch.object(_MOD, "_instantiate_environment", return_value=env)
+        mocker.patch.object(_MOD, "_initialize_runner", return_value=runner)
+        run_with_mlflow = mocker.patch.object(_MOD, "_run_training_with_mlflow")
+        prepare_shutdown = mocker.patch.object(_MOD, "prepare_for_shutdown")
+        cli = _make_cli(seed=-1)
+        cli.agent = None
+
+        _MOD._run_hydra_training(
+            args=_make_mlflow_args(),
+            cli_args=cli,
+            context=None,
+            app_launcher=SimpleNamespace(),
+            modules=modules,
+        )
+
+        assert 0 <= cli.seed <= 10000
+        run_with_mlflow.assert_called_once_with(
+            runner=runner,
+            state=state,
+            env_cfg=env_cfg,
+            args=mocker.ANY,
+            cli_args=cli,
+            context=None,
+            modules=modules,
+        )
+        prepare_shutdown.assert_called_once()
+        env.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # run_training error paths
 # ---------------------------------------------------------------------------
 
@@ -1179,3 +1443,57 @@ class TestRunTraining:
 
         with pytest.raises(SystemExit, match="IsaacLab packages are required"):
             _MOD.run_training(args=_make_mlflow_args(), hydra_args=[], context=None)
+
+    def test_runs_training_success_path(self, mocker: MockerFixture) -> None:
+        args = _make_mlflow_args()
+        hydra_args = ["--foo=bar"]
+        context = SimpleNamespace()
+        parser = SimpleNamespace()
+        cli_args = SimpleNamespace()
+        unparsed_args = ["--task=Isaac-Test-v0"]
+        app_launcher = SimpleNamespace()
+        simulation_app = SimpleNamespace()
+        modules = _make_training_modules()
+        app_launcher_cls = type("FakeAppLauncher", (), {})
+
+        isaaclab_module = ModuleType("isaaclab")
+        isaaclab_app_module = ModuleType("isaaclab.app")
+        isaaclab_app_module.AppLauncher = app_launcher_cls
+        mocker.patch.dict(
+            sys.modules,
+            {
+                "isaaclab": isaaclab_module,
+                "isaaclab.app": isaaclab_app_module,
+            },
+        )
+        build_parser = mocker.patch.object(_MOD, "_build_parser", return_value=parser)
+        prepare_cli_arguments = mocker.patch.object(
+            _MOD,
+            "_prepare_cli_arguments",
+            return_value=(cli_args, unparsed_args),
+        )
+        initialize_simulation = mocker.patch.object(
+            _MOD,
+            "_initialize_simulation",
+            return_value=(app_launcher, simulation_app),
+        )
+        install_ansi_stripping = mocker.patch.object(_MOD, "install_ansi_stripping")
+        load_training_modules = mocker.patch.object(_MOD, "_load_training_modules", return_value=modules)
+        run_hydra_training = mocker.patch.object(_MOD, "_run_hydra_training")
+        close_simulation = mocker.patch.object(_MOD, "_close_simulation")
+
+        _MOD.run_training(args=args, hydra_args=hydra_args, context=context)
+
+        build_parser.assert_called_once_with(app_launcher_cls)
+        prepare_cli_arguments.assert_called_once_with(parser, args, hydra_args)
+        initialize_simulation.assert_called_once_with(app_launcher_cls, cli_args, unparsed_args)
+        install_ansi_stripping.assert_called_once_with()
+        load_training_modules.assert_called_once_with(cli_args, context)
+        run_hydra_training.assert_called_once_with(
+            args=args,
+            cli_args=cli_args,
+            context=context,
+            app_launcher=app_launcher,
+            modules=modules,
+        )
+        close_simulation.assert_called_once_with(simulation_app)

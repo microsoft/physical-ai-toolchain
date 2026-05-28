@@ -470,6 +470,7 @@ gbps
 gcp
 gdpr
 geeksforgeeks
+gelu
 genai
 geofiltering
 geolocation
@@ -657,6 +658,7 @@ keras
 kerberos
 keyid
 kics
+killpg
 kinect
 kingsway
 kingswaysoft
@@ -2057,3 +2059,4 @@ kyverno
 openvex
 pickplace
 spdxjson
+pusht

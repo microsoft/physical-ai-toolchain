@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM python:3.13.13-slim@sha256:6f8a543598e40391683c7c80552f4a97759c7fecf23f048ba95147f40d676755 AS base
+FROM python:3.13.13-slim@sha256:aa938a849bcb82dce8f49480f056ab82bf5c1c3ebc294f0430f37b6820e7f286 AS base
 
 WORKDIR /app
 

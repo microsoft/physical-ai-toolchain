@@ -448,6 +448,12 @@ variable "should_enable_public_network_access" {
   default     = true
 }
 
+variable "should_enable_storage_shared_access_key" {
+  type        = bool
+  description = "Whether to enable Shared Key (SAS token) authorization for the storage account. When false, all requests must use Azure AD authentication (RBAC)"
+  default     = false
+}
+
 variable "should_enable_microsoft_defender" {
   type        = bool
   description = "Whether to enable Microsoft Defender for Containers on the AKS cluster"
@@ -486,6 +492,12 @@ variable "should_deploy_dce" {
  * AzureML Compute Configuration - Optional
  */
 
+variable "should_deploy_aks" {
+  type        = bool
+  description = "Whether to deploy AKS cluster (SiL module). Set to false for AzureML managed compute only"
+  default     = true
+}
+
 variable "should_enable_aml_diagnostic_logs" {
   type        = bool
   description = "Whether to enable AML workspace diagnostic logs in Log Analytics"
@@ -503,31 +515,55 @@ variable "aml_managed_network_isolation_mode" {
   }
 }
 
-variable "should_deploy_aml_compute" {
-  type        = bool
-  description = "Whether to deploy an AzureML managed compute cluster for GPU workloads"
-  default     = false
-}
+variable "aml_compute_clusters" {
+  type = map(object({
+    vm_size                   = string
+    vm_priority               = string
+    min_node_count            = optional(number, 0)
+    max_node_count            = optional(number, 1)
+    scale_down_after_idle     = optional(string, "PT5M")
+    subnet_id                 = optional(string)
+    node_public_ip_enabled    = optional(bool)
+    ssh_public_access_enabled = optional(bool)
+    identity_type             = optional(string)
+    location                  = optional(string)
+  }))
+  description = "AzureML managed compute clusters keyed by Azure ML compute cluster name. Empty map deploys no clusters."
+  default     = {}
 
-variable "aml_compute_config" {
-  type = object({
-    vm_size               = string
-    vm_priority           = string
-    min_node_count        = number
-    max_node_count        = number
-    scale_down_after_idle = optional(string, "PT5M")
-    cluster_name          = optional(string, "gpu-cluster")
-    subnet_id             = optional(string)
-  })
-  description = "AzureML managed compute cluster configuration including VM size, priority, scaling, and optional subnet placement"
-  default = {
-    vm_size               = "Standard_NC4as_T4_v3"
-    vm_priority           = "LowPriority"
-    min_node_count        = 0
-    max_node_count        = 1
-    scale_down_after_idle = "PT5M"
-    cluster_name          = "gpu-cluster"
-    subnet_id             = null
+  validation {
+    condition = alltrue([
+      for cluster_name, _ in var.aml_compute_clusters : can(regex("^[A-Za-z0-9][A-Za-z0-9-]{0,22}[A-Za-z0-9]$", cluster_name))
+    ])
+    error_message = "aml_compute_clusters keys must be 2-24 characters, start and end with an alphanumeric character, and contain only letters, numbers, and hyphens."
+  }
+
+  validation {
+    condition = alltrue([
+      for _, cluster in var.aml_compute_clusters : contains(["Dedicated", "LowPriority"], cluster.vm_priority)
+    ])
+    error_message = "aml_compute_clusters vm_priority values must be either Dedicated or LowPriority."
+  }
+
+  validation {
+    condition = alltrue([
+      for _, cluster in var.aml_compute_clusters : cluster.min_node_count >= 0 && cluster.max_node_count >= 0 && cluster.min_node_count <= cluster.max_node_count
+    ])
+    error_message = "aml_compute_clusters min_node_count and max_node_count must be greater than or equal to 0, and min_node_count must be less than or equal to max_node_count."
+  }
+
+  validation {
+    condition = alltrue([
+      for _, cluster in var.aml_compute_clusters : cluster.identity_type == null || contains(["SystemAssigned", "UserAssigned"], cluster.identity_type)
+    ])
+    error_message = "aml_compute_clusters identity_type values must be either SystemAssigned or UserAssigned."
+  }
+
+  validation {
+    condition = alltrue([
+      for _, cluster in var.aml_compute_clusters : can(regex("^PT([0-9]+H([0-9]+M)?([0-9]+S)?|[0-9]+M([0-9]+S)?|[0-9]+S)$", cluster.scale_down_after_idle))
+    ])
+    error_message = "aml_compute_clusters scale_down_after_idle must be an ISO 8601 time duration, such as PT30S, PT5M, PT1H, or PT1H30M."
   }
 }
 

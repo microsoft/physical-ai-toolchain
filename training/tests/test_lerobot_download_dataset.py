@@ -86,6 +86,84 @@ class TestDownloadDataset:
         stubs.service_client.get_container_client.assert_called_once_with("cont")
 
 
+class TestDownloadDatasetTraversal:
+    """Path-traversal hardening for download_dataset.
+
+    Originally added in feat/add-azureml-data-assets; lives here so the
+    `pytest.importorskip("pyarrow")` gate above keeps `download_dataset.py`
+    out of the `--cov=training` scope on CI runners that do not install
+    pyarrow.
+    """
+
+    def test_skips_absolute_blob_name(self, monkeypatch, tmp_path, capsys):
+        prefix = "p"
+        blobs = [
+            SimpleNamespace(name=f"{prefix}/safe.parquet"),
+            SimpleNamespace(name=f"{prefix}//etc/passwd"),
+        ]
+        _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"ok")
+
+        result = _MOD.download_dataset(
+            storage_account="acct",
+            storage_container="cont",
+            blob_prefix=prefix,
+            dataset_root=str(tmp_path),
+            dataset_repo_id="user/ds",
+        )
+
+        assert (result / "safe.parquet").read_bytes() == b"ok"
+        assert not (Path("/etc/passwd").exists() and (Path("/etc/passwd").read_bytes() == b"ok"))
+        out = capsys.readouterr().out
+        assert "Skipping unsafe blob name" in out or "Skipping blob outside dest_dir" in out
+
+    def test_skips_dotdot_segments(self, monkeypatch, tmp_path, capsys):
+        prefix = "p"
+        blobs = [
+            SimpleNamespace(name=f"{prefix}/../escape.parquet"),
+            SimpleNamespace(name=f"{prefix}/a/../../escape2.parquet"),
+        ]
+        _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"x")
+
+        result = _MOD.download_dataset(
+            storage_account="acct",
+            storage_container="cont",
+            blob_prefix=prefix,
+            dataset_root=str(tmp_path),
+            dataset_repo_id="user/ds",
+        )
+
+        assert not (tmp_path / "escape.parquet").exists()
+        assert not (tmp_path / "user" / "escape2.parquet").exists()
+        assert list(result.rglob("*.parquet")) == []
+        assert "Skipping unsafe blob name" in capsys.readouterr().out
+
+    def test_skips_blob_resolving_outside_via_symlink(self, monkeypatch, tmp_path, capsys):
+        # Pre-create a symlink inside the dest dir pointing outside it. A naive
+        # implementation that joins paths but does not resolve symlinks would
+        # follow the link and write to the external target.
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        dest_root = tmp_path / "root"
+        dest_root.mkdir()
+        repo_dir = dest_root / "user" / "ds"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "link").symlink_to(outside)
+
+        blobs = [SimpleNamespace(name="p/link/escaped.parquet")]
+        _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"x")
+
+        _MOD.download_dataset(
+            storage_account="acct",
+            storage_container="cont",
+            blob_prefix="p",
+            dataset_root=str(dest_root),
+            dataset_repo_id="user/ds",
+        )
+
+        assert not (outside / "escaped.parquet").exists()
+        assert "Skipping blob outside dest_dir" in capsys.readouterr().out
+
+
 class TestVerifyDataset:
     def test_returns_none_when_missing(self, tmp_path):
         assert _MOD.verify_dataset(tmp_path) is None
@@ -401,22 +479,25 @@ class TestVerifyFilePaths:
 
 class TestPrepareDataset:
     def test_exits_when_env_missing(self, monkeypatch):
-        monkeypatch.delenv("STORAGE_ACCOUNT", raising=False)
-        monkeypatch.delenv("BLOB_PREFIX", raising=False)
+        monkeypatch.delenv("BLOB_URLS", raising=False)
         monkeypatch.delenv("DATASET_REPO_ID", raising=False)
         with pytest.raises(SystemExit) as exc:
             _MOD.prepare_dataset()
         assert exc.value.code == _MOD.EXIT_FAILURE
 
     def test_full_flow_no_info(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("STORAGE_ACCOUNT", "acct")
-        monkeypatch.setenv("STORAGE_CONTAINER", "c")
-        monkeypatch.setenv("BLOB_PREFIX", "p")
+        monkeypatch.setenv("BLOB_URLS", '["https://acct.blob.core.windows.net/c/p"]')
         monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
         monkeypatch.setenv("DATASET_REPO_ID", "u/d")
 
-        download_dir = tmp_path / "u" / "d"
-        monkeypatch.setattr(_MOD, "download_dataset", MagicMock(return_value=download_dir))
+        staging_dir = tmp_path / ".staging" / "0"
+
+        def fake_download(url, root, idx):
+            staging_dir.mkdir(parents=True, exist_ok=True)
+            (staging_dir / "marker.txt").write_text("x")
+            return staging_dir
+
+        monkeypatch.setattr(_MOD, "download_dataset_from_url", MagicMock(side_effect=fake_download))
         monkeypatch.setattr(_MOD, "verify_dataset", MagicMock(return_value=None))
         sentinel_calls = MagicMock()
         for name in (
@@ -430,19 +511,24 @@ class TestPrepareDataset:
             monkeypatch.setattr(_MOD, name, sentinel_calls)
 
         result = _MOD.prepare_dataset()
-        assert result == download_dir
+        assert result == tmp_path / "u" / "d"
         # None info -> none of the patch helpers called
         sentinel_calls.assert_not_called()
 
     def test_full_flow_with_info(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("STORAGE_ACCOUNT", "acct")
-        monkeypatch.setenv("BLOB_PREFIX", "p")
+        monkeypatch.setenv("BLOB_URLS", '["https://acct.blob.core.windows.net/c/p"]')
         monkeypatch.setenv("DATASET_REPO_ID", "u/d")
-        monkeypatch.delenv("STORAGE_CONTAINER", raising=False)
-        monkeypatch.delenv("DATASET_ROOT", raising=False)
+        monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
+
+        staging_dir = tmp_path / ".staging" / "0"
+
+        def fake_download(url, root, idx):
+            staging_dir.mkdir(parents=True, exist_ok=True)
+            (staging_dir / "marker.txt").write_text("x")
+            return staging_dir
 
         info = {"total_episodes": 0, "features": {}}
-        monkeypatch.setattr(_MOD, "download_dataset", MagicMock(return_value=tmp_path))
+        monkeypatch.setattr(_MOD, "download_dataset_from_url", MagicMock(side_effect=fake_download))
         monkeypatch.setattr(_MOD, "verify_dataset", MagicMock(return_value=info))
         for name in (
             "patch_info_paths",
@@ -454,6 +540,288 @@ class TestPrepareDataset:
         ):
             monkeypatch.setattr(_MOD, name, MagicMock())
 
-        assert _MOD.prepare_dataset() == tmp_path
-        _MOD.patch_info_paths.assert_called_once_with(tmp_path, info)
-        _MOD._verify_file_paths.assert_called_once_with(tmp_path, info)
+        result = _MOD.prepare_dataset()
+        final = tmp_path / "u" / "d"
+        assert result == final
+        _MOD._verify_file_paths.assert_called_once()
+        # Helpers receive the staged (hidden sibling) directory, not the final one
+        called_dir = _MOD._verify_file_paths.call_args[0][0]
+        assert called_dir == tmp_path / "u" / ".d.new"
+
+
+class TestParseBlobUrl:
+    def test_valid_url_with_prefix(self):
+        account, container, prefix = _MOD.parse_blob_url(
+            "https://myacct.blob.core.windows.net/mycontainer/myprefix/data"
+        )
+        assert account == "myacct"
+        assert container == "mycontainer"
+        assert prefix == "myprefix/data"
+
+    def test_valid_url_without_prefix(self):
+        account, container, prefix = _MOD.parse_blob_url("https://myacct.blob.core.windows.net/mycontainer")
+        assert account == "myacct"
+        assert container == "mycontainer"
+        assert prefix == ""
+
+    def test_valid_url_single_level_prefix(self):
+        account, container, prefix = _MOD.parse_blob_url("https://acct.blob.core.windows.net/cont/p")
+        assert account == "acct"
+        assert container == "cont"
+        assert prefix == "p"
+
+    def test_invalid_url_no_scheme(self):
+        with pytest.raises(ValueError, match="Invalid blob URL"):
+            _MOD.parse_blob_url("http://acct.blob.core.windows.net/cont/p")
+
+    def test_invalid_url_wrong_domain(self):
+        with pytest.raises(ValueError, match="Invalid blob URL"):
+            _MOD.parse_blob_url("https://acct.storage.azure.com/cont/p")
+
+    def test_invalid_url_no_container(self):
+        with pytest.raises(ValueError, match="Invalid blob URL"):
+            _MOD.parse_blob_url("https://acct.blob.core.windows.net")
+
+    def test_multipart_account_name(self):
+        account, _container, _prefix = _MOD.parse_blob_url(
+            "https://my-account-name.blob.core.windows.net/container/prefix"
+        )
+        assert account == "my-account-name"
+
+
+class TestDownloadDatasetFromUrl:
+    def test_parses_url_and_downloads(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            _MOD,
+            "download_dataset",
+            MagicMock(return_value=tmp_path / ".staging" / "0"),
+        )
+        result = _MOD.download_dataset_from_url(
+            "https://acct.blob.core.windows.net/cont/prefix",
+            str(tmp_path),
+            0,
+        )
+        assert result == tmp_path / ".staging" / "0"
+        _MOD.download_dataset.assert_called_once_with(
+            storage_account="acct",
+            storage_container="cont",
+            blob_prefix="prefix",
+            dataset_root=str(tmp_path),
+            dataset_repo_id="0",
+        )
+
+    def test_creates_staging_directory(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(_MOD, "download_dataset", MagicMock(return_value=tmp_path / ".staging" / "1"))
+        _MOD.download_dataset_from_url(
+            "https://acct.blob.core.windows.net/cont/p",
+            str(tmp_path),
+            1,
+        )
+        assert (tmp_path / ".staging" / "1").exists()
+
+
+class TestMergeDatasets:
+    def test_calls_lerobot_edit_dataset_with_correct_args(self, monkeypatch, tmp_path):
+        staging_0 = tmp_path / ".staging" / "0"
+        staging_1 = tmp_path / ".staging" / "1"
+        staging_0.mkdir(parents=True)
+        staging_1.mkdir(parents=True)
+        destination = tmp_path / "out"
+
+        def fake_run(cmd, **_kwargs):
+            Path(cmd[cmd.index("--new_root") + 1]).mkdir(parents=True)
+            return MagicMock(returncode=0)
+
+        subprocess_mock = MagicMock(side_effect=fake_run)
+        monkeypatch.setattr("subprocess.run", subprocess_mock)
+
+        _MOD.merge_datasets([staging_0, staging_1], destination)
+
+        assert subprocess_mock.call_count == 1
+        call_args = subprocess_mock.call_args[0][0]
+        assert call_args[0] == "lerobot-edit-dataset"
+        assert call_args[call_args.index("--new_repo_id") + 1] == "merged"
+        assert call_args[call_args.index("--operation.type") + 1] == "merge"
+        assert "--operation.repo_ids" in call_args
+        assert "--operation.roots" in call_args
+        assert call_args[call_args.index("--new_root") + 1] == str(destination)
+
+    def test_raises_on_merge_failure(self, monkeypatch, tmp_path):
+        staging_0 = tmp_path / ".staging" / "0"
+        staging_0.mkdir(parents=True)
+
+        subprocess_mock = MagicMock(return_value=MagicMock(returncode=1))
+        monkeypatch.setattr("subprocess.run", subprocess_mock)
+
+        with pytest.raises(RuntimeError, match="Dataset merge failed"):
+            _MOD.merge_datasets([staging_0], tmp_path / "out")
+
+    def test_raises_when_destination_missing_after_run(self, monkeypatch, tmp_path):
+        staging_0 = tmp_path / ".staging" / "0"
+        staging_0.mkdir(parents=True)
+
+        # subprocess returns success but does not create the directory
+        subprocess_mock = MagicMock(return_value=MagicMock(returncode=0))
+        monkeypatch.setattr("subprocess.run", subprocess_mock)
+
+        with pytest.raises(RuntimeError, match="did not create"):
+            _MOD.merge_datasets([staging_0], tmp_path / "out")
+
+    def test_self_cleans_stale_destination(self, monkeypatch, tmp_path):
+        staging_0 = tmp_path / ".staging" / "0"
+        staging_0.mkdir(parents=True)
+        destination = tmp_path / "out"
+        destination.mkdir()
+        (destination / "stale.txt").write_text("old")
+
+        def fake_run(cmd, **_kwargs):
+            new_root = Path(cmd[cmd.index("--new_root") + 1])
+            assert not new_root.exists(), "merge_datasets must clean destination before invoking lerobot"
+            new_root.mkdir(parents=True)
+            return MagicMock(returncode=0)
+
+        monkeypatch.setattr("subprocess.run", MagicMock(side_effect=fake_run))
+
+        _MOD.merge_datasets([staging_0], destination)
+        assert not (destination / "stale.txt").exists()
+
+
+class TestMultiBlobFlow:
+    def test_multiple_blobs_triggers_merge(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(
+            "BLOB_URLS", '["https://a.blob.core.windows.net/c1/p1", "https://b.blob.core.windows.net/c2/p2"]'
+        )
+        monkeypatch.setenv("DATASET_REPO_ID", "merged")
+        monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
+
+        # Create staging directories with data
+        staging_0 = tmp_path / ".staging" / "0"
+        staging_1 = tmp_path / ".staging" / "1"
+        staging_0.mkdir(parents=True)
+        staging_1.mkdir(parents=True)
+        (staging_0 / "data.txt").write_text("data0")
+        (staging_1 / "data.txt").write_text("data1")
+
+        download_mock = MagicMock(side_effect=lambda url, root, idx: [staging_0, staging_1][idx])
+
+        def fake_merge(sources, destination):
+            destination.mkdir(parents=True)
+
+        verify_mock = MagicMock(return_value=None)
+
+        monkeypatch.setattr(_MOD, "download_dataset_from_url", download_mock)
+        monkeypatch.setattr(_MOD, "merge_datasets", MagicMock(side_effect=fake_merge))
+        monkeypatch.setattr(_MOD, "verify_dataset", verify_mock)
+        for name in (
+            "patch_info_paths",
+            "patch_image_stats",
+            "fix_video_timestamps",
+            "ensure_tasks_jsonl",
+            "ensure_episodes_stats",
+            "_verify_file_paths",
+        ):
+            monkeypatch.setattr(_MOD, name, MagicMock())
+
+        _MOD.prepare_dataset()
+
+        # Verify both URLs were downloaded
+        assert download_mock.call_count == 2
+        # Verify merge was called
+        _MOD.merge_datasets.assert_called_once()
+        merge_sources = _MOD.merge_datasets.call_args[0][0]
+        assert len(merge_sources) == 2
+
+    def test_single_blob_skips_merge(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("BLOB_URLS", '["https://a.blob.core.windows.net/c/p"]')
+        monkeypatch.setenv("DATASET_REPO_ID", "single")
+        monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
+
+        staging_0 = tmp_path / ".staging" / "0"
+        staging_0.mkdir(parents=True)
+
+        download_mock = MagicMock(return_value=staging_0)
+        merge_mock = MagicMock()
+        verify_mock = MagicMock(return_value=None)
+
+        monkeypatch.setattr(_MOD, "download_dataset_from_url", download_mock)
+        monkeypatch.setattr(_MOD, "merge_datasets", merge_mock)
+        monkeypatch.setattr(_MOD, "verify_dataset", verify_mock)
+        for name in (
+            "patch_info_paths",
+            "patch_image_stats",
+            "fix_video_timestamps",
+            "ensure_tasks_jsonl",
+            "ensure_episodes_stats",
+            "_verify_file_paths",
+        ):
+            monkeypatch.setattr(_MOD, name, MagicMock())
+
+        _MOD.prepare_dataset()
+
+        download_mock.assert_called_once()
+        merge_mock.assert_not_called()
+
+    def test_merge_destination_is_staged_sibling_of_final(self, monkeypatch, tmp_path):
+        """Merge writes to ``<final>.new`` (hidden sibling of final). A crash
+        during verification/patching cannot touch the final location."""
+        monkeypatch.setenv(
+            "BLOB_URLS",
+            '["https://a.blob.core.windows.net/c1/p1", "https://b.blob.core.windows.net/c2/p2"]',
+        )
+        monkeypatch.setenv("DATASET_REPO_ID", "isolation_check")
+        monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
+
+        staging_0 = tmp_path / ".staging" / "0"
+        staging_1 = tmp_path / ".staging" / "1"
+        staging_0.mkdir(parents=True)
+        staging_1.mkdir(parents=True)
+
+        observed = {}
+
+        def fake_merge(sources, destination):
+            observed["destination"] = destination
+            destination.mkdir(parents=True)
+
+        download_mock = MagicMock(side_effect=lambda url, root, idx: [staging_0, staging_1][idx])
+        monkeypatch.setattr(_MOD, "download_dataset_from_url", download_mock)
+        monkeypatch.setattr(_MOD, "merge_datasets", fake_merge)
+        monkeypatch.setattr(_MOD, "verify_dataset", MagicMock(return_value=None))
+        for name in (
+            "patch_info_paths",
+            "patch_image_stats",
+            "fix_video_timestamps",
+            "ensure_tasks_jsonl",
+            "ensure_episodes_stats",
+            "_verify_file_paths",
+        ):
+            monkeypatch.setattr(_MOD, name, MagicMock())
+
+        _MOD.prepare_dataset()
+
+        assert observed["destination"] == tmp_path / ".isolation_check.new"
+
+    def test_hierarchical_repo_id_publishes_to_nested_path(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("BLOB_URLS", '["https://a.blob.core.windows.net/c/p"]')
+        monkeypatch.setenv("DATASET_REPO_ID", "user/dataset")
+        monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
+
+        staging_0 = tmp_path / ".staging" / "0"
+        staging_0.mkdir(parents=True)
+        (staging_0 / "data.txt").write_text("x")
+
+        monkeypatch.setattr(_MOD, "download_dataset_from_url", MagicMock(return_value=staging_0))
+        monkeypatch.setattr(_MOD, "verify_dataset", MagicMock(return_value=None))
+        for name in (
+            "patch_info_paths",
+            "patch_image_stats",
+            "fix_video_timestamps",
+            "ensure_tasks_jsonl",
+            "ensure_episodes_stats",
+            "_verify_file_paths",
+        ):
+            monkeypatch.setattr(_MOD, name, MagicMock())
+
+        result = _MOD.prepare_dataset()
+
+        assert result == tmp_path / "user" / "dataset"
+        assert (tmp_path / "user" / "dataset" / "data.txt").read_text() == "x"

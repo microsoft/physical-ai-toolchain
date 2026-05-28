@@ -92,6 +92,7 @@ module "platform" {
   // Feature flags
   should_enable_private_endpoint          = var.should_enable_private_endpoint
   should_enable_public_network_access     = var.should_enable_public_network_access
+  should_enable_storage_shared_access_key = var.should_enable_storage_shared_access_key
   should_add_current_user_key_vault_admin = var.should_add_current_user_key_vault_admin
   should_add_current_user_storage_blob    = var.should_add_current_user_storage_blob
   should_enable_purge_protection          = var.should_enable_purge_protection
@@ -137,8 +138,7 @@ module "platform" {
 
   // AzureML compute
   should_enable_aml_diagnostic_logs  = var.should_enable_aml_diagnostic_logs
-  should_deploy_aml_compute          = var.should_deploy_aml_compute
-  aml_compute_config                 = var.aml_compute_config
+  aml_compute_clusters               = var.aml_compute_clusters
   aml_managed_network_isolation_mode = var.aml_managed_network_isolation_mode
 
   // DNS zone flags
@@ -146,11 +146,12 @@ module "platform" {
 }
 
 // ============================================================
-// SiL Module - AKS + AzureML Extension
+// SiL Module - AKS + AzureML Extension (Optional)
 // ============================================================
 
 module "sil" {
   source = "./modules/sil"
+  count  = var.should_deploy_aks ? 1 : 0
 
   depends_on = [module.platform]
 

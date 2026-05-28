@@ -13,9 +13,12 @@
 		"mycontainer",
 		"noseparator",
 		"preds",
+		"prio",
 		"refetches",
+		"sdgcpu",
 		"unstub",
 		"uppercased",
+		"varname",
 		"xticklabels"
 	],
 	"ignorePaths": [

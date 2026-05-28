@@ -156,6 +156,43 @@ terraform-docs --version  # >= 0.21.0
 code --list-extensions | grep -i hve-core
 ```
 
+### TFLint Local Setup
+
+Install TFLint v0.61.0 or newer before changing Terraform modules:
+
+```bash
+# macOS
+brew install tflint
+
+# Linux
+curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+```
+
+```powershell
+# Windows (Chocolatey)
+choco install tflint
+
+# Windows (Scoop)
+scoop install tflint
+```
+
+Initialize the repository TFLint plugins once from the repository root. This downloads the Azure provider
+ruleset declared in `.tflint.hcl`:
+
+```bash
+tflint --init
+```
+
+Then run the project wrapper before pushing Terraform changes:
+
+```bash
+npm run lint:tf
+```
+
+The wrapper runs TFLint recursively against `infrastructure/terraform/` with the shared `.tflint.hcl`
+configuration. A VS Code TFLint extension is optional for inline diagnostics, but the CLI setup above remains
+the required validation path.
+
 ### Validation Commands
 
 Run these commands before committing:
@@ -172,6 +209,7 @@ terraform init
 terraform validate
 
 # Lint Terraform configurations (required for infrastructure changes)
+tflint --init  # first time only, installs plugins from .tflint.hcl
 tflint --recursive infrastructure/terraform/
 ```
 
@@ -190,6 +228,10 @@ npm run lint:go
 
 # Test Go modules (required for Go changes)
 npm run test:go
+
+# Contract tests (validates Terraform outputs against Go struct — requires terraform-docs)
+# Run after adding/removing/renaming Terraform outputs
+./infrastructure/terraform/e2e/run-contract-tests.sh
 ```
 
 **Documentation:**

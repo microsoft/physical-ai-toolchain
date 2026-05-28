@@ -46,9 +46,6 @@ TRAINING OPTIONS:
         --save-freq N             Checkpoint save frequency (default: 5000)
 
 LOGGING OPTIONS:
-        --wandb-enable            Enable WANDB logging (default)
-        --no-wandb                Disable WANDB logging
-        --wandb-project NAME      WANDB project name (default: lerobot-training)
         --mlflow-enable           Enable Azure ML MLflow logging
         --experiment-name NAME    MLflow experiment name
 
@@ -117,8 +114,6 @@ training_steps="${TRAINING_STEPS:-}"
 batch_size="${BATCH_SIZE:-}"
 save_freq="${SAVE_FREQ:-5000}"
 
-wandb_enable="${WANDB_ENABLE:-true}"
-wandb_project="${WANDB_PROJECT:-lerobot-training}"
 mlflow_enable="${MLFLOW_ENABLE:-false}"
 experiment_name="${EXPERIMENT_NAME:-}"
 
@@ -155,9 +150,6 @@ while [[ $# -gt 0 ]]; do
     --training-steps)             training_steps="$2"; shift 2 ;;
     --batch-size)                 batch_size="$2"; shift 2 ;;
     --save-freq)                  save_freq="$2"; shift 2 ;;
-    --wandb-enable)               wandb_enable="true"; shift ;;
-    --no-wandb)                   wandb_enable="false"; shift ;;
-    --wandb-project)              wandb_project="$2"; shift 2 ;;
     --mlflow-enable)              mlflow_enable="true"; shift ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --eval-episodes)              eval_episodes="$2"; shift 2 ;;
@@ -215,7 +207,6 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Batch Size" "${batch_size:-<default>}"
   print_kv "Save Freq" "$save_freq"
   print_kv "Eval Episodes" "$eval_episodes"
-  print_kv "WANDB" "$wandb_enable"
   print_kv "MLflow" "$mlflow_enable"
   print_kv "Skip Inference" "$skip_inference"
   print_kv "Skip Wait" "$skip_wait"
@@ -248,12 +239,6 @@ train_args=(
 [[ -n "$training_steps" ]]   && train_args+=(--training-steps "$training_steps")
 [[ -n "$batch_size" ]]       && train_args+=(--batch-size "$batch_size")
 [[ -n "$experiment_name" ]]  && train_args+=(--experiment-name "$experiment_name")
-
-if [[ "$wandb_enable" == "true" ]]; then
-  train_args+=(--wandb-enable --wandb-project "$wandb_project")
-else
-  train_args+=(--no-wandb)
-fi
 
 [[ "$mlflow_enable" == "true" ]] && train_args+=(--mlflow-enable)
 

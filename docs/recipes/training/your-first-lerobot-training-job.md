@@ -121,6 +121,7 @@ The recipe succeeded when:
 | `--val-split`           | `0.1`      | Validation split ratio                     |
 | `--from-blob`           | (disabled) | Use Azure Blob Storage as data source      |
 | `--register-checkpoint` | (none)     | Model name for Azure ML registration       |
+| `--init-from-policy-model` | (none)  | Warm-start from a registered AzureML model (`azureml:NAME:VERSION`); AzureML submission script only |
 
 See [Scripts Reference](../../reference/scripts.md) for the full parameter table.
 
