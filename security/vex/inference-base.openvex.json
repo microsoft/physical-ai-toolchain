@@ -1,0 +1,163 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/microsoft/physical-ai-toolchain/security/vex/minimal-py312-inference/2026-05-18",
+  "author": "Physical AI Toolchain Security Team",
+  "timestamp": "2026-05-18T17:37:33Z",
+  "version": 2,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2024-35870"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-53179"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-56692"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-37899"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-38118"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-3298"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-42945"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-44431"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-44432"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-4786"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-6100"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-7210"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-mf9v-mfxr-j63j"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-qccp-gfcp-xxvc"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0?repository_url=mcr.microsoft.com/azureml"
+        }
+      ],
+      "status": "under_investigation"
+    }
+  ]
+}

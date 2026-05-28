@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1.6
+ARG BASE_IMAGE=mcr.microsoft.com/azureml/minimal-py312-inference:latest
+FROM ${BASE_IMAGE}
+
+ARG MODEL_NAME
+ARG MODEL_VERSION
+LABEL azureml.model.name="${MODEL_NAME}"
+LABEL azureml.model.version="${MODEL_VERSION}"
+
+# Layer the AML-downloaded artifact (script downloads to ./model/ relative to build context)
+COPY model/ /opt/model/
+
+# Inference node loads policy from the local path
+ENV POLICY_REPO_ID=/opt/model
+ENV POLICY_DEVICE=cuda
+
+ENTRYPOINT ["python", "-m", "fleet_deployment.inference.act_inference_node"]
