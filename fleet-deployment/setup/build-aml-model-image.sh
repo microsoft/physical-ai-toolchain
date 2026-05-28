@@ -64,11 +64,14 @@ OPTIONS:
                                  Terraform notation_akv.value.signing_key_uri)
     --akv-tenant ID              AKV tenant       (default: same as ACR tenant)
     --akv-subscription ID        AKV subscription (default: same as ACR subscription)
-    --vex-file PATH              OpenVEX statement to attach (sigstore only,
-                                 default: $DEFAULT_VEX_FILE if present)
-    --skip-attestations          Skip SBOM/VEX attestation steps (signing still runs)
     --skip-self-verify           Skip the verify-image.sh self-check
     --config-preview             Print configuration and exit
+
+ATTESTATIONS:
+    SBOM and OpenVEX attestations are produced by a separate script so
+    security/compliance can refresh them without rebuilding. After this
+    script completes, run:
+      fleet-deployment/setup/attest-image.sh --image <digest-ref>
 
 INFERENCE BASE IMAGE OVERRIDE:
     The inference base image is not exposed as a CLI flag. Override via:
@@ -105,7 +108,7 @@ EOF
 
 # CLI defaults — empty so the resolver can distinguish "unset" from "intentionally blank".
 # DEFAULT_TF_DIR (from defaults.conf) is typically a relative path; anchor it to SCRIPT_DIR
-# below alongside dockerfile / vex_file so discovery is independent of caller cwd.
+# below alongside dockerfile so discovery is independent of caller cwd.
 tf_dir="${DEFAULT_TF_DIR:-../../infrastructure/terraform}"
 model_name=""
 model_version=""
@@ -123,8 +126,6 @@ verify_mode=""
 akv_key_uri=""
 akv_tenant=""
 akv_subscription=""
-vex_file=""
-skip_attestations=false
 skip_self_verify=false
 config_preview=false
 
@@ -148,8 +149,6 @@ while [[ $# -gt 0 ]]; do
     --akv-key-id)         akv_key_uri="$2"; shift 2 ;;
     --akv-tenant)         akv_tenant="$2"; shift 2 ;;
     --akv-subscription)   akv_subscription="$2"; shift 2 ;;
-    --vex-file)           vex_file="$2"; shift 2 ;;
-    --skip-attestations)  skip_attestations=true; shift ;;
     --skip-self-verify)   skip_self_verify=true; shift ;;
     --config-preview)     config_preview=true; shift ;;
     *)                    fatal "Unknown option: $1" ;;
@@ -160,7 +159,7 @@ done
 model_version="${model_version:-${DEFAULT_AML_MODEL_VERSION:-latest}}"
 inference_base_image="${INFERENCE_BASE_IMAGE:-${DEFAULT_INFERENCE_BASE_IMAGE:-mcr.microsoft.com/azureml/minimal-py312-inference:latest}}"
 
-# Resolve dockerfile / vex_file / tf_dir against SCRIPT_DIR when defaults.conf supplies a
+# Resolve dockerfile / tf_dir against SCRIPT_DIR when defaults.conf supplies a
 # relative path. realpath -m canonicalizes the result (collapses '..' segments) and tolerates
 # non-existent paths so display stays clean for previews and fresh checkouts alike.
 resolve_path() {
@@ -173,7 +172,6 @@ resolve_path() {
   fi
 }
 dockerfile="$(resolve_path "$dockerfile" "${DEFAULT_DOCKERFILE:-./Dockerfile.inference}")"
-vex_file="$(resolve_path "$vex_file" "${DEFAULT_VEX_FILE:-../../security/vex/inference-base.openvex.json}")"
 # Anchor relative tf_dir to SCRIPT_DIR so Terraform discovery is independent of caller cwd.
 # 'none' is the documented sentinel for Terraform-optional mode and must not be resolved.
 if [[ "$tf_dir" != "none" && "$tf_dir" != /* ]]; then
@@ -277,7 +275,9 @@ case "$verify_mode" in
   sigstore|notation|none) ;;
   *) fatal "Invalid --verify-mode: $verify_mode (expected sigstore | notation | none)" ;;
 esac
-if [[ "$verify_mode" == "sigstore" && ! -f "$REPO_ROOT/scripts/security/verify-image.sh" ]]; then
+# Probe verify-image.sh once for both signing modes. Without it we cannot self-verify,
+# so downgrade to 'none' rather than ship an image we can't prove will admit.
+if [[ "$verify_mode" != "none" && ! -f "$REPO_ROOT/scripts/security/verify-image.sh" ]]; then
   warn "scripts/security/verify-image.sh not found (PR #592 not merged?); forcing verify_mode=none"
   verify_mode="none"
 fi
@@ -313,11 +313,18 @@ fi
 # Compute image_tag default — '<model_version>-sha-<git_short>' for FluxCD ImagePolicy
 # compatibility (per-model-name repo; Resolved Decision #17). Falls back to a UTC-timestamped
 # tag outside a git repo so the build is still uniquely identifiable.
+# In --config-preview with model_version=='latest' we cannot know the real version yet, so
+# substitute a placeholder rather than print a misleading 'latest-sha-<git>' tag the build
+# would never actually produce.
 if [[ -z "$image_tag" ]]; then
+  tag_version="$model_version"
+  if [[ "$config_preview" == "true" && "$model_version" == "latest" ]]; then
+    tag_version="<resolved-at-runtime>"
+  fi
   if git_short=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null); then
-    image_tag="${model_version}-sha-${git_short}"
+    image_tag="${tag_version}-sha-${git_short}"
   else
-    image_tag="${model_version}-build-$(date -u +%Y%m%d%H%M%S)"
+    image_tag="${tag_version}-build-$(date -u +%Y%m%d%H%M%S)"
   fi
 fi
 image_ref="${image_repo}:${image_tag}"
@@ -346,7 +353,6 @@ print_kv "Image Reference"     "${acr_login_server}/${image_ref}"
 print_kv "Dockerfile"          "$dockerfile"
 print_kv "Base Image"          "$inference_base_image"
 print_kv "Verify Mode"         "$verify_mode"
-print_kv "VEX File"            "$([[ -f "$vex_file" ]] && echo "$vex_file" || echo "(not present)")"
 if [[ "$verify_mode" == "notation" ]]; then
   print_kv "AKV Tenant"        "$akv_tenant"
   print_kv "AKV Subscription"  "$akv_subscription"
@@ -406,22 +412,32 @@ set_active_subscription "$acr_subscription" "$acr_tenant" "ACR build/push"
 
 # az acr build authenticates via the active az session and runs server-side in
 # ACR Tasks. No local docker daemon, no prior 'az acr login' required.
-az acr build \
+# Capture the JSON run object so we can read outputImages[].digest directly — this is
+# the digest produced by THIS build and is race-free against parallel pushes to the
+# same tag (looking the tag up afterwards via 'az acr repository show' is not).
+build_run_json=$(az acr build \
   --registry "$acr_name" \
   --image "$image_ref" \
   --file "$build_ctx/Dockerfile" \
   --build-arg "BASE_IMAGE=${inference_base_image}" \
   --build-arg "MODEL_NAME=${model_name}" \
   --build-arg "MODEL_VERSION=${model_version}" \
-  "$build_ctx"
+  --output json \
+  "$build_ctx")
 
 # Resolve the immutable digest — the only reference admission policies trust.
-digest=$(az acr repository show \
-  --name "$acr_name" \
-  --image "$image_ref" \
-  --query 'digest' -o tsv)
+# Prefer the build's own outputImages[0].digest; fall back to a tag lookup only when the
+# CLI version doesn't surface it (older az CLI releases omit this field).
+digest=$(echo "$build_run_json" | jq -r '.outputImages[0].digest // empty' 2>/dev/null || true)
+if [[ -z "$digest" ]]; then
+  warn "az acr build did not surface outputImages[0].digest; falling back to tag lookup (races with parallel pushes to the same tag)."
+  digest=$(az acr repository show \
+    --name "$acr_name" \
+    --image "$image_ref" \
+    --query 'digest' -o tsv)
+fi
 [[ -n "$digest" ]] || fatal "Failed to resolve digest for ${image_ref}"
-[[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || fatal "Unexpected digest shape from az acr repository show: $digest"
+[[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || fatal "Unexpected digest shape: $digest"
 
 image_digest_ref="${acr_login_server}/${image_repo}@${digest}"
 image_tag_ref="${acr_login_server}/${image_ref}"
@@ -435,7 +451,6 @@ info "Signing $image_digest_ref using $verify_mode mode"
 case "$verify_mode" in
   sigstore)
     require_tools cosign
-    [[ "$skip_attestations" == "true" ]] || require_tools syft
     # Local-mode safety guard: developer Entra identity won't satisfy production Kyverno.
     if [[ -z "${GITHUB_ACTIONS:-}" && -z "${TF_BUILD:-}" ]]; then
       warn "Signing locally with sigstore: certificate will bind to your developer Entra identity."
@@ -444,20 +459,10 @@ case "$verify_mode" in
     set_active_subscription "$acr_subscription" "$acr_tenant" "ACR signing context"
     az acr login --name "$acr_name"
     cosign sign --yes "$image_digest_ref"
-    if [[ "$skip_attestations" != "true" ]]; then
-      syft "$image_digest_ref" -o spdx-json > "$build_ctx/sbom.spdx.json"
-      cosign attest --yes --predicate "$build_ctx/sbom.spdx.json" --type spdxjson "$image_digest_ref"
-      if [[ -f "$vex_file" ]]; then
-        cosign attest --yes --predicate "$vex_file" --type openvex "$image_digest_ref"
-      else
-        warn "VEX file not present at '$vex_file' — skipping OpenVEX attestation."
-      fi
-    fi
     ;;
 
   notation)
-    require_tools notation oras
-    [[ "$skip_attestations" == "true" ]] || require_tools syft
+    require_tools notation
     [[ -n "$akv_key_uri" ]] || fatal "--akv-key-id (or DEFAULT_AKV_KEY_URI) is required for notation mode"
     # Step 1: cache ACR Docker token while context is in the ACR tenant.
     set_active_subscription "$acr_subscription" "$acr_tenant" "ACR signing context"
@@ -476,20 +481,6 @@ case "$verify_mode" in
       --plugin-config credential_type=azurecli \
       --id "$akv_key_uri" \
       "$image_digest_ref"
-    # Step 3: switch back to the ACR tenant so SBOM oras attach uses the ACR token.
-    # Same guard — no-op when AKV and ACR share a tenant.
-    if [[ "$akv_tenant" != "$acr_tenant" ]]; then
-      set_active_subscription "$acr_subscription" "$acr_tenant" "ACR oras attach"
-    fi
-    if [[ "$skip_attestations" != "true" ]]; then
-      # Notation has no native attestation primitive; emit SBOM as separate OCI referrer.
-      # OpenVEX is NOT attached in notation mode (--vex-file is sigstore-only).
-      syft "$image_digest_ref" -o spdx-json > "$build_ctx/sbom.spdx.json"
-      oras attach \
-        --artifact-type application/vnd.spdx+json \
-        "$image_digest_ref" \
-        "$build_ctx/sbom.spdx.json:application/spdx+json"
-    fi
     ;;
 
   none)
@@ -525,3 +516,5 @@ print_kv "Image (tag)"               "$image_tag_ref"
 print_kv "Verify Mode"               "$verify_mode"
 print_kv "Build Context (transient)" "$build_ctx"
 info "Done."
+info "Next: attach SBOM/VEX attestations via attest-image.sh:"
+info "  fleet-deployment/setup/attest-image.sh --image '$image_digest_ref'"

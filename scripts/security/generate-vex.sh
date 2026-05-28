@@ -10,7 +10,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 # shellcheck source=../../scripts/lib/common.sh
 source "$REPO_ROOT/scripts/lib/common.sh"
 
-DEFAULT_IMAGE="mcr.microsoft.com/azureml/minimal-py312-inference:latest"
+# Keep in sync with DEFAULT_INFERENCE_BASE_IMAGE in fleet-deployment/setup/defaults.conf.
+DEFAULT_IMAGE="mcr.microsoft.com/azureml/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0"
 DEFAULT_PRODUCT="minimal-py312-inference"
 DEFAULT_REPO_URL="mcr.microsoft.com/azureml"
 DEFAULT_AUTHOR="Physical AI Toolchain Security Team"
