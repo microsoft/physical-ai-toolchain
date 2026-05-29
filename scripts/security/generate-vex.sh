@@ -195,12 +195,21 @@ next_version=$((prev_version + 1))
 # All statements emitted as under_investigation; operators must triage each
 # CVE and replace status (and add justification/action_statement) before
 # publishing. See https://openvex.dev/ns/v0.2.0 for the schema.
+script_rel="scripts/security/$(basename "$0")"
+generator="$script_rel --image $image_ref --severity $severity"
+
 jq -n \
   --arg id "$vex_id" \
   --arg author "$author" \
   --arg ts "$timestamp" \
   --argjson version "$next_version" \
   --arg purl "$purl" \
+  --arg image "$image" \
+  --arg image_ref "$image_ref" \
+  --arg digest "$digest" \
+  --arg product "$product" \
+  --arg severity "$severity" \
+  --arg generator "$generator" \
   --rawfile cves "$cve_list" \
   '{
     "@context": "https://openvex.dev/ns/v0.2.0",
@@ -208,6 +217,14 @@ jq -n \
     "author": $author,
     "timestamp": $ts,
     "version": $version,
+    "_source": {
+      "image": $image,
+      "image_ref": $image_ref,
+      "digest": $digest,
+      "product": $product,
+      "severity_filter": $severity,
+      "generator": $generator
+    },
     "statements": (
       $cves
       | split("\n")
