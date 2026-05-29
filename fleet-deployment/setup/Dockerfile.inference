@@ -10,4 +10,4 @@ LABEL azureml.model.name="${MODEL_NAME}"
 LABEL azureml.model.version="${MODEL_VERSION}"
 
 # AML model artifact tree, materialized by build-aml-model-image.sh under ./model/.
-COPY model/ /opt/model/
+COPY model/ /policy/model/
