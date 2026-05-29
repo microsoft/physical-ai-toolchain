@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Experiment Tracking
 description: MLflow experiment tracking configuration for training workflows on Azure ML and OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-05-29
 ms.topic: how-to
 keywords:
   - mlflow
@@ -35,15 +35,14 @@ See [MLflow Integration](mlflow-integration.md) for SKRL metric categories, filt
 
 ### LeRobot
 
-Enable MLflow for LeRobot on OSMO:
+OSMO LeRobot submissions log to the Azure ML workspace resolved by the submission script:
 
 ```bash
 ./scripts/submit-osmo-lerobot-training.sh \
-  -d user/dataset \
-  --mlflow-enable
+  -d user/dataset
 ```
 
-Azure ML LeRobot submissions use MLflow automatically.
+Azure ML LeRobot submissions use MLflow automatically as well.
 
 ### MLflow Configuration
 

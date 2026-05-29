@@ -561,6 +561,7 @@ az_args+=(
 [[ -n "$register_checkpoint" ]] && az_args+=(--set "inputs.register_checkpoint=$register_checkpoint")
 
 if [[ ${#blob_urls[@]} -gt 0 ]]; then
+  python3 "$REPO_ROOT/training/il/scripts/lerobot/_validate_blob_urls.py" "${blob_urls[@]}"
   blob_urls_json=$(python3 -c "import json; import sys; print(json.dumps(sys.argv[1:]))" "${blob_urls[@]}")
   az_args+=(--set "inputs.blob_urls=$blob_urls_json")
   az_args+=(--set "inputs.dataset_root=$dataset_root")

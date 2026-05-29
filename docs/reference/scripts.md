@@ -49,6 +49,10 @@ Scripts auto-detect Azure context from Terraform outputs in `infrastructure/terr
 # LeRobot behavioral cloning (OSMO)
 ./submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
+# LeRobot behavioral cloning from Azure Blob (OSMO)
+./submit-osmo-lerobot-training.sh \
+  --blob-url https://account.blob.core.windows.net/datasets/pusht
+
 # LeRobot behavioral cloning (Azure ML)
 ./submit-azureml-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 

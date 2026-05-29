@@ -55,7 +55,7 @@ The script stages files to exclude `__pycache__` and build artifacts via `.amlig
 
 ## LeRobot Behavioral Cloning
 
-The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows supporting ACT and Diffusion policy architectures. Uses HuggingFace Hub datasets and installs runtime dependencies from `training/il/lerobot/pyproject.toml`.
+The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows supporting ACT and Diffusion policy architectures. It trains from HuggingFace Hub datasets or Azure Blob datasets and installs runtime dependencies from `training/il/lerobot/requirements.txt`.
 
 ### LeRobot Submission Examples
 
@@ -67,8 +67,12 @@ The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows 
 ./submit-osmo-lerobot-training.sh \
   -d user/my-dataset \
   -p diffusion \
-  --mlflow-enable \
   -r my-model-name
+
+# Train from Azure Blob Storage
+./submit-osmo-lerobot-training.sh \
+  --blob-url https://account.blob.core.windows.net/datasets/pusht \
+  -r pusht-model
 
 # Fine-tune from pre-trained policy
 ./submit-osmo-lerobot-training.sh \
@@ -80,15 +84,17 @@ The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows 
 
 ### LeRobot Parameters
 
-| Parameter           | Default                | Description                        |
-|---------------------|------------------------|------------------------------------|
-| `--dataset-repo-id` | (required)             | HuggingFace dataset repository ID  |
-| `--policy-type`     | `act`                  | Policy: `act`, `diffusion`         |
-| `--job-name`        | `lerobot-act-training` | Job identifier                     |
-| `--mlflow-enable`   | enabled                | Azure ML MLflow logging            |
-| `--policy-repo-id`  | (none)                 | Pre-trained policy for fine-tuning |
-| `--training-steps`  | (LeRobot default)      | Total training iterations          |
-| `--save-freq`       | `5000`                 | Checkpoint save frequency          |
+| Parameter           | Default                                              | Description                                                     |
+|---------------------|------------------------------------------------------|-----------------------------------------------------------------|
+| `--dataset-repo-id` | Required for HuggingFace; `dataset` for Blob sources | HuggingFace dataset repository ID or logical local dataset name |
+| `--blob-url`        | (none)                                               | Direct Azure Blob dataset URL; repeatable                       |
+| `--policy-type`     | `act`                                                | Policy: `act`, `diffusion`                                      |
+| `--job-name`        | `lerobot-act-training`                               | Job identifier                                                  |
+| `--policy-repo-id`  | (none)                                               | Pre-trained policy for fine-tuning                              |
+| `--training-steps`  | `100000`                                             | Total training iterations                                       |
+| `--batch-size`      | `32`                                                 | Training batch size                                             |
+| `--learning-rate`   | `1e-4`                                               | Optimizer learning rate                                         |
+| `--save-freq`       | `5000`                                               | Checkpoint save frequency                                       |
 
 ## LeRobot Inference
 
@@ -171,12 +177,11 @@ The `run-lerobot-pipeline.sh` script orchestrates the full LeRobot lifecycle: tr
   -d user/my-dataset \
   --skip-wait
 
-# Diffusion pipeline with MLflow
+# Diffusion pipeline
 ./run-lerobot-pipeline.sh \
   -d user/my-dataset \
   --policy-repo-id user/my-diffusion \
   -p diffusion \
-  --mlflow-enable \
   --training-steps 100000 \
   -r my-diffusion-model
 

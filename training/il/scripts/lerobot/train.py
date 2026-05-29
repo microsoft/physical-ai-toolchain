@@ -42,6 +42,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from training.il.scripts.lerobot._env import has_blob_urls
+
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 
@@ -317,10 +319,6 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
         print(f"[MLflow] Run ID: {run.info.run_id}")
 
         params = _build_train_params(num_gpus)
-        # Add extra params for azure-data variant
-        if os.environ.get("STORAGE_ACCOUNT"):
-            params["storage_account"] = os.environ.get("STORAGE_ACCOUNT", "")
-            params["blob_prefix"] = os.environ.get("BLOB_PREFIX", "")
         mlflow.log_params(params)
 
         # Lineage tags: dataset -> run -> registered model. These are visible
@@ -336,10 +334,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
         }
         if os.environ.get("DATASET_REPO_ID"):
             lineage_tags["dataset.repo_id"] = os.environ["DATASET_REPO_ID"]
-        if os.environ.get("STORAGE_ACCOUNT"):
-            lineage_tags["dataset.storage_account"] = os.environ["STORAGE_ACCOUNT"]
-            lineage_tags["dataset.storage_container"] = os.environ.get("STORAGE_CONTAINER", "datasets")
-            lineage_tags["dataset.blob_prefix"] = os.environ.get("BLOB_PREFIX", "")
+        if has_blob_urls():
             lineage_tags["dataset.source"] = "azure-blob"
         elif os.environ.get("DATASET_REPO_ID"):
             lineage_tags["dataset.source"] = "huggingface"
@@ -527,10 +522,12 @@ def main() -> int:
             if value:
                 cmd.append(f"{arg_name}={value}")
 
-    # Determine source tag
-    source = "osmo-lerobot-training"
-    if os.environ.get("STORAGE_ACCOUNT"):
-        source = "osmo-azure-data-training"
+    # Source tag for MLflow lineage: {platform}-lerobot-{datasource}.
+    # AZUREML_RUN_ID is set automatically by Azure ML on job pods; absent on OSMO.
+    # BLOB_URLS discriminates blob-fed runs from HuggingFace downloads on either platform.
+    platform = "azureml" if os.environ.get("AZUREML_RUN_ID") else "osmo"
+    datasource = "blob" if has_blob_urls() else "hf"
+    source = f"{platform}-lerobot-{datasource}"
 
     # Single-node multi-GPU: detect the GPU count visible to the job container
     # (AzureML-on-Kubernetes: pod's `nvidia.com/gpu` request via InstanceType;
@@ -551,7 +548,7 @@ def main() -> int:
 
     # Post-training checkpoint registration
     if exit_code == EXIT_SUCCESS and os.environ.get("REGISTER_CHECKPOINT"):
-        register_final_checkpoint()
+        exit_code = register_final_checkpoint()
 
     return exit_code
 

@@ -387,6 +387,7 @@ downtime
 dpu
 drawtext
 dremio
+dshm
 dsvm
 dtsx
 ducktail
