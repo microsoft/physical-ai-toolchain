@@ -27,7 +27,7 @@ that blocks large baked-in models does not apply.
 |----------------------------|-----------------------------------------------------------------|
 | `build-aml-model-image.sh` | Download AML model, `docker buildx build --push`, sign image, self-verify |
 | `attest-image.sh`          | Attach SBOM + OpenVEX attestations to an already-built image    |
-| `Dockerfile.inference`     | Base image + `COPY model/` + `act_inference_node` entrypoint    |
+| `Dockerfile.inference`     | `scratch` carrier: `COPY model/` only — no runtime, mounted via OCI image volume |
 | `defaults.conf`            | Centralized defaults consumed by both scripts                   |
 
 ## 🚀 Quick Start
@@ -110,9 +110,15 @@ fleet-deployment/setup/attest-image.sh --image <digest-ref> --skip-sbom
 
 ## 🏗️ Base Image Pinning
 
-`DEFAULT_INFERENCE_BASE_IMAGE` in [`defaults.conf`](defaults.conf) is pinned to a
-digest — not a floating tag — so the committed VEX provably applies to every
-build. Bumping the base is an intentional event:
+`DEFAULT_INFERENCE_BASE_IMAGE` in [`defaults.conf`](defaults.conf) is `scratch`.
+The image is a passive model artifact carrier mounted into consumer pods via
+OCI image volumes (KEP-4639) and is never executed, so it has no OS, no
+packages, and no scannable CVE surface. The committed VEX at
+[`security/vex/inference-base.openvex.json`](../../security/vex/inference-base.openvex.json)
+reflects this with zero statements.
+
+If a future variant of the image needs to execute (e.g. an embedded runtime
+for on-node inference), bump the base intentionally:
 
 1. Pick the new base digest (e.g. `crane digest mcr.microsoft.com/azureml/minimal-py312-inference:1.x`).
 2. Update `DEFAULT_INFERENCE_BASE_IMAGE` in `defaults.conf`.

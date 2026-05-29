@@ -46,6 +46,8 @@ OPTIONS:
     --image-repo REPO            ACR repository (default: <model-name>)
     --image-tag TAG              Image tag (default: <model-version>-sha-<git-short>)
     --dockerfile PATH            Dockerfile path (default: $DEFAULT_DOCKERFILE)
+    --platform PLATFORM          Target platform for buildx (default: $DEFAULT_IMAGE_PLATFORM)
+                                 Common values: linux/amd64, linux/arm64
     --aml-subscription ID        AML subscription   (default: Terraform subscription_id)
     --aml-tenant ID              AML tenant         (default: Terraform tenant_id)
     --aml-rg NAME                AML resource group (default: Terraform resource_group)
@@ -115,6 +117,7 @@ model_version=""
 image_repo=""
 image_tag=""
 dockerfile=""
+platform=""
 aml_subscription=""
 aml_tenant=""
 aml_rg=""
@@ -138,6 +141,7 @@ while [[ $# -gt 0 ]]; do
     --image-repo)         image_repo="$2"; shift 2 ;;
     --image-tag)          image_tag="$2"; shift 2 ;;
     --dockerfile)         dockerfile="$2"; shift 2 ;;
+    --platform)           platform="$2"; shift 2 ;;
     --aml-subscription)   aml_subscription="$2"; shift 2 ;;
     --aml-tenant)         aml_tenant="$2"; shift 2 ;;
     --aml-rg)             aml_rg="$2"; shift 2 ;;
@@ -158,6 +162,7 @@ done
 # Apply non-resolver defaults (these aren't Terraform-discoverable).
 model_version="${model_version:-${DEFAULT_AML_MODEL_VERSION:-latest}}"
 inference_base_image="${INFERENCE_BASE_IMAGE:-${DEFAULT_INFERENCE_BASE_IMAGE:-mcr.microsoft.com/azureml/minimal-py312-inference:latest}}"
+platform="${platform:-${DEFAULT_IMAGE_PLATFORM:-linux/amd64}}"
 
 # Resolve dockerfile / tf_dir against SCRIPT_DIR when defaults.conf supplies a
 # relative path. realpath -m canonicalizes the result (collapses '..' segments) and tolerates
@@ -351,6 +356,7 @@ print_kv "Image Repo"          "$image_repo"
 print_kv "Image Tag"           "$image_tag"
 print_kv "Image Reference"     "${acr_login_server}/${image_ref}"
 print_kv "Dockerfile"          "$dockerfile"
+print_kv "Platform"            "$platform"
 print_kv "Base Image"          "$inference_base_image"
 print_kv "Verify Mode"         "$verify_mode"
 if [[ "$verify_mode" == "notation" ]]; then
@@ -412,6 +418,7 @@ az acr login --name "$acr_name"
 build_metadata_file="$download_dir/buildx-metadata.json"
 docker buildx build \
   --push \
+  --platform "$platform" \
   --tag "${acr_login_server}/${image_ref}" \
   --file "$build_ctx/Dockerfile" \
   --build-arg "BASE_IMAGE=${inference_base_image}" \
