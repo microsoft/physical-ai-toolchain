@@ -2055,8 +2055,12 @@ topcam
 notanum
 fevil
 acrfleetprod
+containerimage
+gsub
+imagetools
 kyverno
 openvex
 pickplace
+rawfile
 spdxjson
 pusht
