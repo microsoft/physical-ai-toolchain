@@ -179,7 +179,7 @@ if [[ "$tf_dir" != "none" && "$tf_dir" != /* ]]; then
 fi
 
 # 'terraform' is only required when Terraform discovery is in use; resolved later in this section.
-require_tools az jq git
+require_tools az docker jq git
 require_az_extension ml
 
 model_name="${model_name:-${DEFAULT_AML_MODEL_NAME:-}}"
@@ -398,45 +398,34 @@ if [[ -z "$(ls -A "$build_ctx/model")" ]]; then
   fatal "Build context model/ directory is empty (no artifacts downloaded)"
 fi
 
-# ACR Tasks source-upload limit is 100 MB; fail fast with an actionable error.
-ctx_bytes=$(du -sb "$build_ctx" | awk '{print $1}')
-if (( ctx_bytes > 104857600 )); then
-  fatal "Build context size ${ctx_bytes} bytes exceeds 100 MB ACR Tasks upload limit. Consider model splitting or pre-publishing as OCI artifact."
-fi
-
 #------------------------------------------------------------------------------
 # Build and Push to ACR (ACR tenant)
 #------------------------------------------------------------------------------
 section "Build and Push to ACR"
 set_active_subscription "$acr_subscription" "$acr_tenant" "ACR build/push"
 
-# az acr build authenticates via the active az session and runs server-side in
-# ACR Tasks. No local docker daemon, no prior 'az acr login' required.
-# Capture the JSON run object so we can read outputImages[].digest directly — this is
-# the digest produced by THIS build and is race-free against parallel pushes to the
-# same tag (looking the tag up afterwards via 'az acr repository show' is not).
-build_run_json=$(az acr build \
-  --registry "$acr_name" \
-  --image "$image_ref" \
+# Build locally and stream layers straight to ACR; bypasses the ~100 MB ACR Tasks
+# source-upload cap that blocks large baked-in models. 'az acr login' caches an ACR
+# Docker token in the local daemon's credential store so 'docker buildx --push' authenticates.
+az acr login --name "$acr_name"
+
+build_metadata_file="$download_dir/buildx-metadata.json"
+docker buildx build \
+  --push \
+  --tag "${acr_login_server}/${image_ref}" \
   --file "$build_ctx/Dockerfile" \
   --build-arg "BASE_IMAGE=${inference_base_image}" \
   --build-arg "MODEL_NAME=${model_name}" \
   --build-arg "MODEL_VERSION=${model_version}" \
-  --output json \
-  "$build_ctx")
+  --metadata-file "$build_metadata_file" \
+  "$build_ctx"
 
-# Resolve the immutable digest — the only reference admission policies trust.
-# Prefer the build's own outputImages[0].digest; fall back to a tag lookup only when the
-# CLI version doesn't surface it (older az CLI releases omit this field).
-digest=$(echo "$build_run_json" | jq -r '.outputImages[0].digest // empty' 2>/dev/null || true)
-if [[ -z "$digest" ]]; then
-  warn "az acr build did not surface outputImages[0].digest; falling back to tag lookup (races with parallel pushes to the same tag)."
-  digest=$(az acr repository show \
-    --name "$acr_name" \
-    --image "$image_ref" \
-    --query 'digest' -o tsv)
-fi
-[[ -n "$digest" ]] || fatal "Failed to resolve digest for ${image_ref}"
+# Resolve the immutable digest from the buildx metadata file — the only reference
+# admission policies trust. 'containerimage.digest' is the manifest digest of the
+# image that THIS build just pushed, so it's race-free against parallel pushes to
+# the same tag.
+digest=$(jq -r '."containerimage.digest" // empty' "$build_metadata_file" 2>/dev/null || true)
+[[ -n "$digest" ]] || fatal "Failed to resolve digest from buildx metadata file: $build_metadata_file"
 [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || fatal "Unexpected digest shape: $digest"
 
 image_digest_ref="${acr_login_server}/${image_repo}@${digest}"

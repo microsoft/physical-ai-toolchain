@@ -6,8 +6,9 @@ Build, sign, and attest inference container images for the robot fleet.
 
 | Tool          | Purpose                                      | Required for                  |
 |---------------|----------------------------------------------|-------------------------------|
-| `az` CLI      | Azure auth, `az ml`, `az acr`                | All steps                     |
-| `jq`          | Terraform output parsing                     | Build (when using Terraform)  |
+| `az` CLI      | Azure auth, `az ml`, `az acr login`          | All steps                     |
+| `docker` (with `buildx`) | Local image build + push to ACR   | Build                         |
+| `jq`          | Terraform output parsing, buildx metadata    | Build                         |
 | `cosign` ≥2.2 | Image signing + attestation                  | `sigstore` mode               |
 | `syft`        | SBOM generation                              | Attest (unless `--skip-sbom`) |
 | `notation` ≥1.1 + `notation-azure-kv` ≥1.1 | AKV-backed image signing | `notation` mode |
@@ -16,11 +17,15 @@ Build, sign, and attest inference container images for the robot fleet.
 Run `az login` against every Entra tenant you need (AML tenant, ACR tenant,
 AKV tenant). Cross-tenant flows require a session in each.
 
+Builds run on the local Docker daemon and push layers directly to ACR — the
+script no longer routes through ACR Tasks, so the ~100 MB source-upload cap
+that blocks large baked-in models does not apply.
+
 ## 📂 Files
 
 | File                       | Purpose                                                         |
 |----------------------------|-----------------------------------------------------------------|
-| `build-aml-model-image.sh` | Download AML model, `az acr build`, sign image, self-verify     |
+| `build-aml-model-image.sh` | Download AML model, `docker buildx build --push`, sign image, self-verify |
 | `attest-image.sh`          | Attach SBOM + OpenVEX attestations to an already-built image    |
 | `Dockerfile.inference`     | Base image + `COPY model/` + `act_inference_node` entrypoint    |
 | `defaults.conf`            | Centralized defaults consumed by both scripts                   |
@@ -140,6 +145,41 @@ Per-value resolution order: **Terraform output → CLI flag → `DEFAULT_*` env 
 | `VEX file not present at '…' — skipping OpenVEX`           | Wrong `--vex-file` path or VEX not committed                              |
 | `verify-image.sh not present (PR #592 not merged yet)`     | Expected until [PR #592](https://github.com/microsoft/physical-ai-toolchain/pull/592) lands |
 | Sigstore signing locally rejected by Kyverno on cluster    | Signed with developer Entra identity; production builds must run in CI    |
+
+## 🧹 Model Image Cleanup on Cluster Nodes
+
+Model artifacts are baked into the inference image, so a node's containerd
+image store grows by one full model copy per pulled tag. There is no
+cluster-wide policy or CronJob managing this — image GC is a kubelet concern
+and runs per-node.
+
+Kubelet image GC is driven by three flags:
+
+| Flag                          | Default | Purpose                                           |
+|-------------------------------|---------|---------------------------------------------------|
+| `--image-gc-high-threshold`   | `85`    | Disk usage % that triggers GC                     |
+| `--image-gc-low-threshold`    | `80`    | GC removes unused images until disk drops to this |
+| `--image-maximum-gc-age`      | `0`     | Max age of unused images before GC (e.g. `168h`)  |
+
+Edge nodes baking multi-gigabyte models should tighten the thresholds and
+cap age. For k3s, set kubelet args in the install:
+
+```bash
+curl -sfL https://get.k3s.io | sh -s - \
+  --kubelet-arg=image-gc-high-threshold=70 \
+  --kubelet-arg=image-gc-low-threshold=60 \
+  --kubelet-arg=image-maximum-gc-age=168h
+```
+
+For manual cleanup on a k3s node:
+
+```bash
+sudo k3s crictl rmi --prune
+```
+
+This removes every image not referenced by a running container. Pair it with
+a digest-pinned FluxCD `ImagePolicy` so the next reconcile re-pulls only the
+current model image.
 
 ## 📚 Related
 
