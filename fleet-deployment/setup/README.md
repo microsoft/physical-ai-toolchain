@@ -29,6 +29,7 @@ that blocks large baked-in models does not apply.
 | `attest-image.sh`          | Attach SBOM + OpenVEX attestations to an already-built image    |
 | `Dockerfile.inference`     | `scratch` carrier: `COPY model/` only — no runtime, mounted via OCI image volume |
 | `defaults.conf`            | Centralized defaults consumed by both scripts                   |
+| `tests/test-model-image-pod.yaml` | Smoke-test pod that mounts a built model image via OCI image volume and lists `/policy/` |
 
 ## 🚀 Quick Start
 
