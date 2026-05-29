@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-require_tools helm sha256sum sed jq
+require_tools helm sed jq
 
 #------------------------------------------------------------------------------
 # Gather Configuration
@@ -65,7 +65,10 @@ fi
 
 update_default() {
   local var_name="$1" new_value="$2"
-  sed -i "/^${var_name}=/s/:-[^}]*/:-${new_value}/" "$defaults_conf"
+  local tmp_file
+  tmp_file="$(mktemp)"
+  sed "/^${var_name}=/s/:-[^}]*/:-${new_value}/" "$defaults_conf" > "$tmp_file"
+  mv "$tmp_file" "$defaults_conf"
 }
 
 ensure_v_prefix() {
@@ -81,12 +84,12 @@ strip_v_prefix() {
 pull_chart_sha() {
   local chart_ref="$1" version="$2" dest="$3"
   mkdir -p "$dest"
-  helm pull "$chart_ref" --version "$version" --destination "$dest" || \
+  helm pull "$chart_ref" --version "$version" --destination "$dest" >&2 || \
     fatal "helm pull failed for $chart_ref $version"
   local tgz
-  tgz=$(find "$dest" -maxdepth 1 -name '*.tgz' -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)
+  tgz=$(find_latest_chart_archive "$dest")
   [[ -n "$tgz" ]] || fatal "No .tgz found in $dest after helm pull"
-  sha256sum "$tgz" | awk '{print $1}'
+  calculate_sha256 "$tgz"
 }
 
 #------------------------------------------------------------------------------
