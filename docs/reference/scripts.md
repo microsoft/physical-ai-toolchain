@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Script Reference
 description: Submission script inventory, CLI arguments, variable reference, and configuration for AzureML and OSMO training and inference pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-08
+ms.date: 2026-06-01
 ms.topic: reference
 keywords:
   - scripts
@@ -14,7 +14,7 @@ keywords:
   - variables
 ---
 
-Inventory of submission scripts for training, validation, and inference workflows on Azure ML and OSMO platforms. Each entry includes CLI arguments, environment variable overrides, and Terraform output resolution.
+Inventory of submission scripts for training, evaluation, and inference workflows on Azure ML and OSMO platforms. Each entry includes CLI arguments, environment variable overrides, and Terraform output resolution.
 
 > [!NOTE]
 > For detailed submission examples, see [Script Examples](scripts-examples.md).
@@ -24,7 +24,7 @@ Inventory of submission scripts for training, validation, and inference workflow
 | Script                               | Purpose                                             | Platform |
 |--------------------------------------|-----------------------------------------------------|----------|
 | `submit-azureml-training.sh`         | Package code and submit Azure ML training job       | Azure ML |
-| `submit-azureml-validation.sh`       | Submit model validation job                         | Azure ML |
+| `submit-azureml-isaaclab-evaluation.sh` | Submit Isaac Lab policy evaluation job               | Azure ML |
 | `submit-azureml-lerobot-training.sh` | Submit LeRobot training to Azure ML                 | Azure ML |
 | `submit-osmo-training.sh`            | Package code and submit OSMO workflow (base64)      | OSMO     |
 | `submit-osmo-dataset-training.sh`    | Submit OSMO workflow using dataset folder injection | OSMO     |
@@ -61,8 +61,8 @@ Scripts auto-detect Azure context from Terraform outputs in `infrastructure/terr
   --policy-repo-id user/my-policy \
   -r my-model
 
-# Validation (requires registered model)
-./submit-azureml-validation.sh --model-name anymal-c-velocity --model-version 1
+# Evaluation (requires registered model)
+./submit-azureml-isaaclab-evaluation.sh --model-name anymal-c-velocity --model-version 1
 ```
 
 ## Prerequisites
@@ -96,7 +96,7 @@ Values resolve in order: **CLI arguments → environment variables → Terraform
 | `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                 | CLI                                     |
 | `--assets-only`                | `false`                            | Register environment without submitting a job   | CLI                                     |
 | `--job-file` / `-w`            | `workflows/azureml/train.yaml`     | Job YAML template                               | CLI                                     |
-| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | IsaacLab task                                   | `TASK`                                  |
+| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task                                   | `TASK`                                  |
 | `--num-envs` / `-n`            | `2048`                             | Number of parallel environments                 | `NUM_ENVS`                              |
 | `--max-iterations` / `-m`      | unset                              | Max iterations (empty to unset)                 | `MAX_ITERATIONS`                        |
 | `--checkpoint-uri` / `-c`      | unset                              | MLflow checkpoint artifact URI                  | `CHECKPOINT_URI`                        |
@@ -129,7 +129,7 @@ Example:
   --stream
 ```
 
-### `submit-azureml-validation.sh`
+### `submit-azureml-isaaclab-evaluation.sh`
 
 | Option                  | Default                            | Description                                      | Source                        |
 |-------------------------|------------------------------------|--------------------------------------------------|-------------------------------|
@@ -145,7 +145,7 @@ Example:
 | `--success-threshold`   | unset                              | Success threshold (defaults from model metadata) | CLI                           |
 | `--headless`            | `true`                             | Run headless                                     | CLI                           |
 | `--gui`                 | `false`                            | Disable headless mode                            | CLI                           |
-| `--job-file`            | `workflows/azureml/validate.yaml`  | Job YAML template                                | CLI                           |
+| `--job-file`            | `workflows/azureml/isaaclab-evaluation.yaml` | Job YAML template                                | CLI                           |
 | `--compute`             | from TF                            | Compute target override                          | `AZUREML_COMPUTE` / TF        |
 | `--instance-type`       | `gpuspot`                          | Instance type                                    | CLI                           |
 | `--experiment-name`     | unset                              | Experiment name override                         | CLI                           |
@@ -158,7 +158,7 @@ Example:
 Example:
 
 ```bash
-./submit-azureml-validation.sh \
+./submit-azureml-isaaclab-evaluation.sh \
   --model-name anymal-c-velocity \
   --model-version 1 \
   --stream
@@ -169,7 +169,7 @@ Example:
 | Option                         | Default                            | Description                                      | Source                        |
 |--------------------------------|------------------------------------|--------------------------------------------------|-------------------------------|
 | `--workflow` / `-w`            | `workflows/osmo/train.yaml`        | Workflow template                                | CLI                           |
-| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | IsaacLab task                                    | `TASK`                        |
+| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task                                    | `TASK`                        |
 | `--num-envs` / `-n`            | `2048`                             | Number of parallel environments                  | `NUM_ENVS`                    |
 | `--max-iterations` / `-m`      | unset                              | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
 | `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                  | `IMAGE`                       |
@@ -200,7 +200,7 @@ Example:
 | Option                         | Default                             | Description                                      | Source                        |
 |--------------------------------|-------------------------------------|--------------------------------------------------|-------------------------------|
 | `--workflow` / `-w`            | `workflows/osmo/train-dataset.yaml` | Workflow template                                | CLI                           |
-| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0`  | IsaacLab task                                    | `TASK`                        |
+| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0`  | Isaac Lab task                                    | `TASK`                        |
 | `--num-envs` / `-n`            | `2048`                              | Number of parallel environments                  | `NUM_ENVS`                    |
 | `--max-iterations` / `-m`      | unset                               | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
 | `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                  | `IMAGE`                       |
@@ -235,7 +235,7 @@ Scripts resolve values in order: CLI arguments → environment variables → Ter
 | `AZURE_SUBSCRIPTION_ID`  | Azure subscription               |
 | `AZURE_RESOURCE_GROUP`   | Resource group name              |
 | `AZUREML_WORKSPACE_NAME` | ML workspace name                |
-| `TASK`                   | IsaacLab task name               |
+| `TASK`                   | Isaac Lab task name               |
 | `NUM_ENVS`               | Number of parallel environments  |
 | `OSMO_DATASET_BUCKET`    | Dataset bucket for OSMO training |
 | `OSMO_DATASET_NAME`      | Dataset name for OSMO training   |
