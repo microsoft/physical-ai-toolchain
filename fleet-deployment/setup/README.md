@@ -142,6 +142,28 @@ for on-node inference), bump the base intentionally:
 Per-value resolution order: **Terraform output → CLI flag → `DEFAULT_*` env var
 → `defaults.conf` literal → fatal**.
 
+## 🧩 Enabling OCI Image Volumes on k3s
+
+Consumer pods mount the model carrier via OCI image volumes (KEP-4639). This
+is beta and default-on in Kubernetes 1.33+. On k3s clusters running 1.31 or
+1.32, enable the `ImageVolume` feature gate on both the apiserver and the
+kubelet via `/etc/rancher/k3s/config.yaml`:
+
+```yaml
+kube-apiserver-arg:
+  - "feature-gates=ImageVolume=true"
+kubelet-arg:
+  - "feature-gates=ImageVolume=true"
+```
+
+Restart the node service to apply (`sudo systemctl restart k3s` on the server
+node, `sudo systemctl restart k3s-agent` on agents — agents only need the
+`kubelet-arg` entry). Verify the gate is live:
+
+```bash
+sudo k3s kubectl get --raw /metrics | grep kubernetes_feature_enabled | grep ImageVolume
+```
+
 ## 🔍 Troubleshooting
 
 | Symptom                                                    | Likely cause                                                              |
