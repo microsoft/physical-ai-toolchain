@@ -1555,14 +1555,14 @@ class TestRunHydraTraining:
         """
         env_cfg = SimpleNamespace()
         agent_cfg = {"agent": {}}
-        captured: list[BaseException] = []
+        captured: list[ValueError] = []
 
         def hydra_task_config(task: str, agent_entry: str):
             def decorate(func):
                 def invoke() -> None:
                     try:
                         func(env_cfg, agent_cfg)
-                    except BaseException as exc:  # test harness records every escape
+                    except ValueError as exc:
                         captured.append(exc)
 
                 return invoke
@@ -1608,14 +1608,14 @@ class TestRunHydraTraining:
         """
         env_cfg = SimpleNamespace()
         agent_cfg = {"agent": {}}
-        captured: list[BaseException] = []
+        captured: list[RuntimeError] = []
 
         def hydra_task_config(task: str, agent_entry: str):
             def decorate(func):
                 def invoke() -> None:
                     try:
                         func(env_cfg, agent_cfg)
-                    except BaseException as exc:  # test harness records every escape
+                    except RuntimeError as exc:
                         captured.append(exc)
 
                 return invoke
