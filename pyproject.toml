@@ -96,6 +96,9 @@ select = [
 "data-management/viewer/backend/tests/*.py" = ["E402"]
 "data-pipeline/capture/tests/test_config_models.py" = ["E402"]
 "data-pipeline/capture/tests/test_config_models_hypothesis.py" = ["E402"]
+# GR00T data_config.py fragments are appended onto gr00t/experiment/data_config.py
+# at runtime; So100DataConfig and DATA_CONFIG_MAP are injected by the parent module.
+"training/vla/configs/groot/examples/data_config.py" = ["F821", "RUF012"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["training"]

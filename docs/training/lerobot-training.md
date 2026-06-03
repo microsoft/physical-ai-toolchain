@@ -58,6 +58,8 @@ Train, evaluate, and register in one command:
 |--------------|-----------------------------------|-------------------------------------------|
 | ACT          | Action Chunking with Transformers | Multi-step prediction, temporal coherence |
 | Diffusion    | Denoising Diffusion Policy        | Multi-modal action distributions          |
+| GR00T-N1.5   | Vision-Language-Action Foundation | Multi-embodiment, language-conditioned    |
+| GR00T-N1.7   | Vision-Language-Action Foundation | N1.5 + improved modality config pipeline  |
 
 Select the architecture with `--policy-type`:
 
@@ -67,6 +69,22 @@ Select the architecture with `--policy-type`:
 
 # Diffusion policy
 ./scripts/submit-osmo-lerobot-training.sh -d user/dataset -p diffusion
+
+# GR00T-N1.5 fine-tuning (VLA — separate script)
+./training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
+  --vla-version 1.5 \
+  --base-model nvidia/GR00T-N1.5-3B \
+  --data-config example \
+  --data-config-file training/vla/configs/groot/examples/data_config.py \
+  --blob-url https://myaccount.blob.core.windows.net/datasets/my-data
+
+# GR00T-N1.7 fine-tuning (VLA — separate script)
+./training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
+  --vla-version 1.7 \
+  --base-model nvidia/GR00T-N1.7-3B \
+  --data-config example \
+  --modality-config-file training/vla/configs/groot/examples/modality_config.py \
+  --blob-url https://myaccount.blob.core.windows.net/datasets/my-data
 ```
 
 ## ⚖️ Platform Selection
@@ -81,16 +99,16 @@ Select the architecture with `--policy-type`:
 
 ## ⚙️ Training Configuration
 
-| Parameter           | Default                                         | Description                        |
-|---------------------|-------------------------------------------------|------------------------------------|
-| `--dataset-repo-id` | (required)                                      | HuggingFace dataset repository     |
-| `--policy-type`     | `act`                                           | Policy: `act` or `diffusion`       |
-| `--job-name`        | `lerobot-act-training`                          | Job identifier                     |
-| `--image`           | `pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime` | Container image                    |
-| `--training-steps`  | (LeRobot default)                               | Total training iterations          |
-| `--batch-size`      | (LeRobot default)                               | Training batch size                |
-| `--save-freq`       | `5000`                                          | Checkpoint save frequency          |
-| `--policy-repo-id`  | (none)                                          | Pre-trained policy for fine-tuning |
+| Parameter           | Default                                         | Description                            |
+|---------------------|-------------------------------------------------|----------------------------------------|
+| `--dataset-repo-id` | (required)                                      | HuggingFace dataset repository         |
+| `--policy-type`     | `act`                                           | Policy: `act`, `diffusion`, or `groot` |
+| `--job-name`        | `lerobot-act-training`                          | Job identifier                         |
+| `--image`           | `pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime` | Container image                        |
+| `--training-steps`  | (LeRobot default)                               | Total training iterations              |
+| `--batch-size`      | (LeRobot default)                               | Training batch size                    |
+| `--save-freq`       | `5000`                                          | Checkpoint save frequency              |
+| `--policy-repo-id`  | (none)                                          | Pre-trained policy for fine-tuning     |
 | `--init-from-policy-model` | (none)                                   | Warm-start from a previously registered AzureML model (`azureml:NAME:VERSION`); mutually exclusive with `--policy-repo-id`. **AzureML only.** |
 
 ### Fine-Tuning from Existing Policy
@@ -282,6 +300,102 @@ The `run-lerobot-pipeline.sh` script orchestrates the full lifecycle on OSMO:
   -d user/dataset \
   --skip-wait
 ```
+
+## 🤖 GR00T VLA Fine-Tuning
+
+NVIDIA Isaac-GR00T (N1.5 and N1.7) is a vision-language-action foundation model for robot manipulation. Fine-tuning uses a dedicated VLA submission script and workflow (`training/vla/workflows/osmo/groot-train.yaml`); `--vla-version` selects the GR00T codebase ref and the matching config injection path.
+
+| Version | Default base model     | Config injection                                             |
+|---------|------------------------|--------------------------------------------------------------|
+| N1.5    | `nvidia/GR00T-N1.5-3B` | `--data-config-file` appended to `data_config.py`            |
+| N1.7    | `nvidia/GR00T-N1.7-3B` | `--modality-config-file` loaded via `--modality_config_path` |
+
+Reference templates for both versions live in [`training/vla/configs/groot/examples/`](https://github.com/microsoft/physical-ai-toolchain/blob/main/training/vla/configs/groot/examples/README.md).
+
+### Quick Start — GR00T-N1.5
+
+```bash
+./training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
+  --vla-version 1.5 \
+  --base-model nvidia/GR00T-N1.5-3B \
+  --data-config example \
+  --data-config-file training/vla/configs/groot/examples/data_config.py \
+  --blob-url https://myaccount.blob.core.windows.net/datasets/my-data
+```
+
+### Quick Start — GR00T-N1.7
+
+```bash
+./training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
+  --vla-version 1.7 \
+  --base-model nvidia/GR00T-N1.7-3B \
+  --data-config example \
+  --modality-config-file training/vla/configs/groot/examples/modality_config.py \
+  --blob-url https://myaccount.blob.core.windows.net/datasets/my-data
+```
+
+When `--vla-version 1.7` is set the script auto-resolves `${name}_modality_config.py` from `training/vla/configs/groot/` (or `examples/modality_config.py` when `--data-config example`); pass `--modality-config-file` explicitly to override.
+
+### GR00T Configuration
+
+| Parameter                | Default                                        | Description                                                |
+|--------------------------|------------------------------------------------|------------------------------------------------------------|
+| `--blob-url`             | (required)                                     | Full Azure Blob URL to LeRobot dataset                     |
+| `--vla-version`          | `1.5`                                          | GR00T codebase: `1.5` or `1.7`                             |
+| `--base-model`           | `nvidia/GR00T-N1.5-3B` (1.5) / `N1.7-3B` (1.7) | Base model for fine-tuning                                 |
+| `--data-config`          | (required)                                     | Data config key mapping dataset modalities to model inputs |
+| `--data-config-file`     | auto-resolved from `--data-config`             | N1.5 path: Python class appended to `data_config.py`       |
+| `--modality-config-file` | auto-resolved from `--data-config` (1.7 only)  | N1.7 path: Python `ModalityConfig` loaded at launch        |
+| `--embodiment-tag`       | `new_embodiment`                               | Embodiment identifier for custom robots                    |
+| `--groot-ref`            | auto-selected per `--vla-version`              | Isaac-GR00T git commit ref                                 |
+| `--max-steps`            | `500`                                          | Max training steps                                         |
+| `--batch-size`           | `4`                                            | Training batch size                                        |
+| `--save-steps`           | `100`                                          | Checkpoint save frequency                                  |
+| `--dataloader-workers`   | `0`                                            | Dataloader worker threads                                  |
+| `--platform`             | `h100gpu_platform`                             | OSMO platform (GPU pool)                                   |
+| `--resume`               |                                                | Resume from latest checkpoint                              |
+| `--run-id-override`      |                                                | Resume a specific run by ID                                |
+| `--azure-upload`         |                                                | Mirror checkpoint to Azure ML                              |
+| `--azureml-model-name`   | `groot-model`                                  | Model name in Azure ML registry                            |
+| `--acr-registry`         |                                                | Push checkpoint to ACR as OCI artifact                     |
+| `--image`                | `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel`  | Container image                                            |
+
+### GR00T vs ACT/Diffusion
+
+| Aspect          | ACT/Diffusion                           | GR00T (N1.5 / N1.7)                    |
+|-----------------|-----------------------------------------|----------------------------------------|
+| Dataset source  | HuggingFace Hub or Blob via prefix      | Azure Blob URL (full path)             |
+| Payload         | Base64-encoded training scripts         | Self-contained workflow (clones GR00T) |
+| Container image | `pytorch:2.4.1-cuda12.4-cudnn9-runtime` | `pytorch:2.6.0-cuda12.4-cudnn9-devel`  |
+| GPU requirement | Standard                                | H100 recommended (200Gi ephemeral)     |
+| Logging         | MLflow (real-time)                      | TensorBoard + optional Azure ML mirror |
+| Resume          | Not supported                           | `--resume --run-id-override <id>`      |
+
+### Azure ML Checkpoint Mirror
+
+Upload the final checkpoint and TensorBoard logs to Azure ML after training (works with either `--vla-version`):
+
+```bash
+./training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
+  --vla-version 1.7 \
+  --base-model nvidia/GR00T-N1.7-3B \
+  --data-config example \
+  --modality-config-file training/vla/configs/groot/examples/modality_config.py \
+  --blob-url https://myaccount.blob.core.windows.net/datasets/my-data \
+  --azure-upload \
+  --azureml-model-name my-groot-model \
+  --azure-subscription-id <subscription-id> \
+  --azure-resource-group <resource-group> \
+  --azure-workspace-name <workspace-name>
+```
+
+Azure ML mirror uses `DefaultAzureCredential` (workload identity on AKS). The checkpoint is registered as a new version of the model in the Azure ML model registry.
+
+### Custom Embodiment Data Configs
+
+GR00T requires a data config that maps dataset modalities (video keys, state keys, action keys) to the model's input format. Isaac-GR00T includes built-in configs (e.g., `gr1`, `so100`). Custom configs are injected at runtime via `--data-config-b64`, which base64-encodes a Python class and appends it to `data_config.py` in the Isaac-GR00T repo.
+
+Reference templates live in [`training/vla/configs/groot/examples/`](https://github.com/microsoft/physical-ai-toolchain/blob/main/training/vla/configs/groot/examples/README.md). Copy `data_config.py` (and `modality_config.py` for N1.7+) into `training/vla/configs/groot/` as `<embodiment>_data_config.py`, adapt the keys to your dataset's `meta/modality.json`, and pass `--data-config <embodiment>` — the submission script auto-resolves the matching file.
 
 ## 🔗 Related Documentation
 
