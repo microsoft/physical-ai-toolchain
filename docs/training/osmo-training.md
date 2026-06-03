@@ -3,7 +3,7 @@ sidebar_position: 7
 title: OSMO Training Workflows
 description: Submit Isaac Lab training jobs to NVIDIA OSMO on Azure Kubernetes Service
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-24
+ms.date: 2026-06-03
 ms.topic: how-to
 keywords:
   - osmo
