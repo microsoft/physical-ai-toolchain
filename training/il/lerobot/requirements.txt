@@ -6,7 +6,7 @@ accelerate==1.13.0
     #   lerobot
 aiohappyeyeballs==2.6.2
     # via aiohttp
-aiohttp==3.13.5
+aiohttp==3.14.0
     # via fsspec
 aiosignal==1.4.0
     # via aiohttp
@@ -192,7 +192,7 @@ huggingface-hub==1.16.1
     #   datasets
     #   diffusers
     #   lerobot
-idna==3.16
+idna==3.18
     # via
     #   anyio
     #   httpx
