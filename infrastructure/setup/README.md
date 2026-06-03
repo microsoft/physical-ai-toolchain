@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-03
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -28,7 +28,6 @@ Deployment order:
 2. `./02-deploy-azureml-extension.sh` — AzureML K8s extension, compute attach
 3. `./03-deploy-osmo-control-plane.sh` — OSMO control plane
 4. `./04-deploy-osmo-backend.sh` — OSMO backend services
-5. `./05-deploy-dataviewer.sh` — Dataviewer container build and deploy
 
 ## 📖 Documentation
 
