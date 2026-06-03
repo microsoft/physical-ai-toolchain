@@ -24,7 +24,7 @@ dependencies = [
     # marshmallow held at 3.x because azure-ai-ml==1.33.0 imports symbols that
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
-    "marshmallow==4.3.0",
+    "marshmallow==3.26.2",
     "mlflow-skinny==3.13.0",
     "packaging==26.2",
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
@@ -51,7 +51,7 @@ dependencies = [
     # constrains wrapt below 2.0 and above 1.0, but with prerelease resolution
     # enabled below uv would otherwise pick the 1.17.4 release candidate over
     # 1.17.3 stable.
-    "wrapt==2.2.1",
+    "wrapt==1.17.3",
 ]
 
 [build-system]
