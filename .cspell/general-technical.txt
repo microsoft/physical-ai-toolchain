@@ -500,6 +500,7 @@ grafana
 graphql
 greenfield
 grooming
+groot
 gruntwork
 hadoop
 hardcoded
