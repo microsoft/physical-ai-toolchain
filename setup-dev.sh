@@ -113,18 +113,18 @@ uv sync
 info "Locking dependencies..."
 uv lock
 
-section "IsaacLab Setup"
+section "Isaac Lab Setup"
 
 ISAACLAB_DIR="${SCRIPT_DIR}/external/IsaacLab"
 
 if [[ -d "${ISAACLAB_DIR}" ]]; then
-  info "IsaacLab already cloned at ${ISAACLAB_DIR}"
+  info "Isaac Lab already cloned at ${ISAACLAB_DIR}"
   info "To update, run: cd ${ISAACLAB_DIR} && git pull"
 else
-  info "Cloning IsaacLab for intellisense/Pylance support..."
+  info "Cloning Isaac Lab for intellisense/Pylance support..."
   mkdir -p "${SCRIPT_DIR}/external"
   git clone https://github.com/isaac-sim/IsaacLab.git "${ISAACLAB_DIR}"
-  info "IsaacLab cloned successfully"
+  info "Isaac Lab cloned successfully"
 fi
 
 section "hve-core Check"

@@ -32,7 +32,7 @@ AZUREML ASSET OPTIONS:
 
 TRAINING OPTIONS:
     -w, --job-file PATH           Job YAML template (default: training/rl/workflows/azureml/train.yaml)
-    -t, --task NAME               IsaacLab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
+    -t, --task NAME               Isaac Lab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
     -n, --num-envs COUNT          Number of environments (default: 2048)
     -m, --max-iterations N        Maximum iterations (empty to unset)
     -c, --checkpoint-uri URI      MLflow checkpoint artifact URI
