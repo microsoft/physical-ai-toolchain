@@ -46,6 +46,8 @@ _SYNC_META_BLOBS = {
     "meta/info.json",
     "meta/stats.json",
     "meta/tasks.parquet",
+    "meta/tasks.jsonl",
+    "meta/episodes.jsonl",
 }
 
 
@@ -85,6 +87,8 @@ class BlobDatasetProvider:
         self.sas_token = sas_token
         self._client: BlobServiceClient | None = None
         self._info_cache: dict[str, dict] = {}
+        # Per-dataset cache of episode_index -> {camera -> (chunk, file, from_ts, to_ts)}
+        self._episode_video_cache: dict[str, dict[int, dict[str, tuple[int, int, float, float]]]] = {}
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -141,35 +145,75 @@ class BlobDatasetProvider:
         return result["hdf5"]
 
     async def scan_all_dataset_ids(self) -> dict[str, list[str]]:
-        """Single-pass scan that discovers both LeRobot and HDF5 datasets.
+        """Discover LeRobot and HDF5 datasets via prefix-only enumeration.
 
-        Uses list_blob_names() for performance. Classifies each blob by
-        checking for meta/info.json (LeRobot) or .hdf5 (HDF5 episodes).
+        Walks virtual directories with a '/' delimiter (cost proportional to
+        the number of folders, not blobs) and probes each prefix for a
+        ``meta/info.json`` marker. Prefixes without an info marker but with
+        ``.hdf5`` blobs at that level are classified as HDF5 datasets.
+        Recursion is bounded to 5 segments to match the dataset-id schema.
 
         Returns:
             Dict with 'lerobot' and 'hdf5' keys, each a sorted list of dataset IDs.
         """
         lerobot_ids: set[str] = set()
         hdf5_ids: set[str] = set()
+        max_depth = 5
+
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
-            async for name in container.list_blob_names():
-                parts = name.split("/")
-                if len(parts) >= 3 and parts[-2] == "meta" and parts[-1] == "info.json":
-                    lerobot_ids.add(parts[0])
-                elif name.endswith(".hdf5"):
-                    parent_parts = name.rsplit("/", 1)
-                    if len(parent_parts) == 2:
-                        segments = parent_parts[0].split("/")
-                        if len(segments) <= 5:
-                            hdf5_ids.add("--".join(segments))
+        except Exception as e:
+            logger.warning("Failed to open blob container '%s': %s", self.container_name, e)
+            return {"lerobot": [], "hdf5": []}
+
+        async def _has_info_json(prefix: str) -> bool:
+            try:
+                await container.get_blob_client(f"{prefix}meta/info.json").get_blob_properties()
+                return True
+            except ResourceNotFoundError:
+                return False
+            except Exception as e:
+                logger.warning("info.json probe failed for prefix '%s': %s", prefix, e)
+                return False
+
+        async def _walk(prefix: str, depth: int) -> None:
+            segments = prefix.rstrip("/").split("/") if prefix else []
+            if 1 <= len(segments) <= max_depth and await _has_info_json(prefix):
+                lerobot_ids.add("--".join(segments))
+                return
+
+            if depth >= max_depth:
+                return
+
+            child_prefixes: list[str] = []
+            found_hdf5 = False
+            try:
+                async for item in container.walk_blobs(name_starts_with=prefix, delimiter="/"):
+                    name = getattr(item, "name", None)
+                    if not name:
+                        continue
+                    if name.endswith("/"):
+                        child_prefixes.append(name)
+                    elif name.endswith(".hdf5"):
+                        found_hdf5 = True
+            except Exception as e:
+                logger.warning("Failed to walk blob prefix '%s': %s", prefix, e)
+                return
+
+            if found_hdf5 and 1 <= len(segments) <= max_depth:
+                hdf5_ids.add("--".join(segments))
+                return
+
+            for child in child_prefixes:
+                await _walk(child, depth + 1)
+
+        try:
+            await _walk("", 0)
         except Exception as e:
             logger.warning("Failed to scan blob container '%s': %s", self.container_name, e)
 
-        # Exclude datasets already discovered as LeRobot
         hdf5_ids -= lerobot_ids
-
         return {
             "lerobot": sorted(lerobot_ids),
             "hdf5": sorted(hdf5_ids),
@@ -264,10 +308,10 @@ class BlobDatasetProvider:
         """
         Resolve the blob path for a LeRobot v3 video file.
 
-        Uses the video_path template from meta/info.json when available,
-        falling back to one-episode-per-chunk layout and then
-        chunks_size-based calculation. Scans blob storage as a last
-        resort, matching only the target episode's file index.
+        Looks up the per-episode (chunk_index, file_index) for the requested
+        camera in ``meta/episodes/chunk-*/file-*.parquet`` (LeRobot v3 stores
+        many episodes per concatenated mp4). Falls back to template-based
+        candidates and a directory scan when meta lookup is unavailable.
 
         Args:
             dataset_id: Dataset identifier.
@@ -280,7 +324,23 @@ class BlobDatasetProvider:
         info = await self.get_info_json(dataset_id)
         prefix = self.get_blob_prefix(dataset_id)
 
-        candidates = self._build_video_path_candidates(info, prefix, camera, episode_idx)
+        # Primary path: meta-driven lookup of (chunk_index, file_index)
+        meta_entry = await self._get_episode_video_entry(dataset_id, episode_idx, camera)
+        candidates: list[str] = []
+        if meta_entry is not None and info is not None:
+            chunk_index, file_index, _, _ = meta_entry
+            template = info.get("video_path") or "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"
+            try:
+                templated = template.format(
+                    video_key=camera,
+                    chunk_index=chunk_index,
+                    file_index=file_index,
+                )
+                candidates.append(f"{prefix}/{templated}")
+            except (KeyError, IndexError):
+                pass
+
+        candidates.extend(self._build_video_path_candidates(info, prefix, camera, episode_idx))
 
         for blob_path in candidates:
             props = await self.get_blob_properties(blob_path)
@@ -289,12 +349,13 @@ class BlobDatasetProvider:
 
         # Fallback: scan for the episode-specific file in chunk directories
         file_suffix = f"/file-{episode_idx:03d}.mp4"
+        episode_suffix = f"/episode_{episode_idx:06d}.mp4"
         video_prefix = f"{prefix}/videos/{camera}/"
         try:
             client = await self._get_client()
             container = client.get_container_client(self.container_name)
             async for blob in container.list_blobs(name_starts_with=video_prefix):
-                if blob.name.endswith(file_suffix):
+                if blob.name.endswith(file_suffix) or blob.name.endswith(episode_suffix):
                     return blob.name
         except Exception as e:
             logger.warning(
@@ -305,6 +366,97 @@ class BlobDatasetProvider:
                 e,
             )
         return None
+
+    async def get_episode_video_window(
+        self,
+        dataset_id: str,
+        episode_idx: int,
+        camera: str,
+    ) -> tuple[float, float] | None:
+        """Return (from_timestamp, to_timestamp) for an episode within its concatenated video."""
+        entry = await self._get_episode_video_entry(dataset_id, episode_idx, camera)
+        if entry is None:
+            return None
+        _, _, from_ts, to_ts = entry
+        if to_ts <= from_ts:
+            return None
+        return from_ts, to_ts
+
+    async def _get_episode_video_entry(
+        self,
+        dataset_id: str,
+        episode_idx: int,
+        camera: str,
+    ) -> tuple[int, int, float, float] | None:
+        """Load per-episode video metadata (cached) and return entry for the camera."""
+        cache = self._episode_video_cache.get(dataset_id)
+        if cache is None:
+            cache = await self._load_episode_video_metadata(dataset_id)
+            if cache is None:
+                return None
+            self._episode_video_cache[dataset_id] = cache
+        return cache.get(episode_idx, {}).get(camera)
+
+    async def _load_episode_video_metadata(
+        self,
+        dataset_id: str,
+    ) -> dict[int, dict[str, tuple[int, int, float, float]]] | None:
+        """Download and parse meta/episodes/chunk-*/file-*.parquet for video lookup."""
+        try:
+            import io
+
+            import pyarrow.parquet as pq
+        except ImportError:
+            return None
+
+        prefix = self.get_blob_prefix(dataset_id)
+        meta_prefix = f"{prefix}/meta/episodes/"
+        result: dict[int, dict[str, tuple[int, int, float, float]]] = {}
+
+        try:
+            client = await self._get_client()
+            container = client.get_container_client(self.container_name)
+            async for blob in container.list_blobs(name_starts_with=meta_prefix):
+                if not blob.name.endswith(".parquet"):
+                    continue
+                data = await self._read_blob_bytes(blob.name)
+                if data is None:
+                    continue
+                table = pq.read_table(io.BytesIO(data))
+                cols = table.column_names
+                if "episode_index" not in cols:
+                    continue
+                cameras = sorted(
+                    {c.split("/")[1] for c in cols if c.startswith("videos/") and c.endswith("/chunk_index")}
+                )
+                episodes = table.column("episode_index").to_pylist()
+                for camera in cameras:
+                    chunk_col = f"videos/{camera}/chunk_index"
+                    file_col = f"videos/{camera}/file_index"
+                    from_col = f"videos/{camera}/from_timestamp"
+                    to_col = f"videos/{camera}/to_timestamp"
+                    if not all(c in cols for c in (chunk_col, file_col, from_col, to_col)):
+                        continue
+                    chunks = table.column(chunk_col).to_pylist()
+                    files = table.column(file_col).to_pylist()
+                    froms = table.column(from_col).to_pylist()
+                    tos = table.column(to_col).to_pylist()
+                    for ep, ck, fl, ft, tt in zip(episodes, chunks, files, froms, tos):
+                        result.setdefault(int(ep), {})[camera] = (
+                            int(ck),
+                            int(fl),
+                            float(ft),
+                            float(tt),
+                        )
+        except Exception as e:
+            logger.warning(
+                "Failed to load episode video metadata for %s: %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                e,
+            )
+            return None
+
+        return result or None
 
     @staticmethod
     def _build_video_path_candidates(
@@ -352,6 +504,9 @@ class BlobDatasetProvider:
             chunk_index = episode_idx // chunks_size
             file_index = episode_idx % chunks_size
             candidates.append(f"{prefix}/videos/{camera}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4")
+            # v2/flat layout: videos/{camera}/[chunk-XXX/]episode_{episode_index:06d}.mp4
+            candidates.append(f"{prefix}/videos/{camera}/episode_{episode_idx:06d}.mp4")
+            candidates.append(f"{prefix}/videos/chunk-{chunk_index:03d}/{camera}/episode_{episode_idx:06d}.mp4")
 
         return candidates
 
