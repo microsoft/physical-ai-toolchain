@@ -2,7 +2,11 @@
 name = "robotics-training-rl"
 version = "0.1.0"
 description = "RL training workflow runtime dependencies"
-requires-python = ">=3.11"
+# Pinned to 3.11: the Isaac Lab 2.3.2 container runtime is Python 3.11 and
+# requirements.txt is compiled for 3.11. (Also sidesteps uv universal-resolution
+# conflicts on 3.13+, where ml-dtypes>=0.5.0 forces numpy>=2.1.0 vs the pinned
+# numpy==1.26.4.)
+requires-python = "==3.11.*"
 dependencies = [
     "numpy==1.26.4",
     "azure-core==1.41.0",
