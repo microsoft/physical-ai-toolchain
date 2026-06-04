@@ -338,8 +338,16 @@ class BlobDatasetProvider:
                     file_index=file_index,
                 )
                 candidates.append(f"{prefix}/{templated}")
-            except (KeyError, IndexError):
-                pass
+            except (KeyError, IndexError) as exc:
+                logger.debug(
+                    "Invalid video_path template; skipping templated candidate "
+                    "(dataset_id=%s, episode_idx=%s, camera=%s, template=%r): %s",
+                    dataset_id,
+                    episode_idx,
+                    camera,
+                    template,
+                    exc,
+                )
 
         candidates.extend(self._build_video_path_candidates(info, prefix, camera, episode_idx))
 
