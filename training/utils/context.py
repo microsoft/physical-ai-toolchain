@@ -1,4 +1,4 @@
-"""Azure ML bootstrap helpers for IsaacLab training entrypoints.
+"""Azure ML bootstrap helpers for Isaac Lab training entrypoints.
 
 Provides ``bootstrap_azure_ml`` to initialize an Azure ML workspace
 connection, configure MLflow tracking, and optionally set up Azure
