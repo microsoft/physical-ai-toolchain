@@ -1,7 +1,7 @@
 ---
 description: Configuration reference for topic recording, episode triggers, disk monitoring, and gap detection
 author: Microsoft
-ms.date: 2026-02-20
+ms.date: 2026-06-01
 ms.topic: reference
 ---
 
@@ -237,4 +237,4 @@ The CI/CD pipeline validates that the schema is up-to-date with the pydantic mod
 ## 🔗 Related Documentation
 
 * [LeRobot Integration](../docs/inference/lerobot-inference.md) - Dataset structure and feature mapping
-* [AzureML Validation Job Debugging](../docs/operations/azureml-validation-job-debugging.md) - Training pipeline integration
+* [AzureML Evaluation Job Debugging](../../../docs/evaluation/azureml-evaluation-job-debugging.md) - Training pipeline integration

@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Azure ML Training Workflows
 description: Submit Isaac Lab and LeRobot training jobs to Azure Machine Learning
 author: Microsoft Robotics-AI Team
-ms.date: 2026-05-26
+ms.date: 2026-06-01
 ms.topic: how-to
 keywords:
   - azure ml
@@ -27,7 +27,7 @@ Submit Isaac Lab reinforcement learning and LeRobot behavioral cloning training 
 | Template             | Purpose                    | Submission Script                            |
 |----------------------|----------------------------|----------------------------------------------|
 | `train.yaml`         | Isaac Lab SKRL training    | `scripts/submit-azureml-training.sh`         |
-| `validate.yaml`      | Isaac Lab validation       | `scripts/submit-azureml-validation.sh`       |
+| `isaaclab-evaluation.yaml` | Isaac Lab evaluation       | `scripts/submit-azureml-isaaclab-evaluation.sh` |
 | `lerobot-train.yaml` | LeRobot behavioral cloning | `scripts/submit-azureml-lerobot-training.sh` |
 
 ## ⚙️ Isaac Lab Training Parameters
@@ -111,10 +111,10 @@ Isaac Lab SKRL training:
   --max-iterations 1000
 ```
 
-Isaac Lab validation:
+Isaac Lab evaluation:
 
 ```bash
-./scripts/submit-azureml-validation.sh \
+./scripts/submit-azureml-isaaclab-evaluation.sh \
   --task Isaac-Cartpole-v0 \
   --checkpoint-mode from-trained
 ```
