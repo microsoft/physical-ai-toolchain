@@ -843,9 +843,7 @@ class TestLoadEpisodeVideoMetadataHappyPath(TestCase):
         mock_client.get_container_client.return_value = mock_container
         provider = _build_provider(mock_client)
 
-        with patch.object(
-            type(provider), "_read_blob_bytes", new=AsyncMock(return_value=payload)
-        ):
+        with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=payload)):
             result = asyncio.run(provider._load_episode_video_metadata("org--repo"))
 
         assert result is not None
@@ -871,9 +869,7 @@ class TestLoadEpisodeVideoMetadataHappyPath(TestCase):
         mock_client.get_container_client.return_value = mock_container
         provider = _build_provider(mock_client)
 
-        with patch.object(
-            type(provider), "_read_blob_bytes", new=AsyncMock(return_value=payload)
-        ):
+        with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=payload)):
             # No episode_index column → empty result dict → returned as None.
             assert asyncio.run(provider._load_episode_video_metadata("org--repo")) is None
 
@@ -898,9 +894,7 @@ class TestLoadEpisodeVideoMetadataHappyPath(TestCase):
         mock_client.get_container_client.return_value = mock_container
         provider = _build_provider(mock_client)
 
-        with patch.object(
-            type(provider), "_read_blob_bytes", new=AsyncMock(return_value=payload)
-        ):
+        with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=payload)):
             assert asyncio.run(provider._load_episode_video_metadata("org--repo")) is None
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
@@ -913,9 +907,7 @@ class TestLoadEpisodeVideoMetadataHappyPath(TestCase):
         mock_client.get_container_client.return_value = mock_container
         provider = _build_provider(mock_client)
 
-        with patch.object(
-            type(provider), "_read_blob_bytes", new=AsyncMock(return_value=None)
-        ):
+        with patch.object(type(provider), "_read_blob_bytes", new=AsyncMock(return_value=None)):
             assert asyncio.run(provider._load_episode_video_metadata("org--repo")) is None
 
 
@@ -1042,7 +1034,6 @@ class TestVideoPathCandidatesExtra(TestCase):
         # PR adds episode_suffix-based layouts.
         assert "p/videos/cam0/episode_000012.mp4" in candidates
         assert any(
-            c == "p/videos/chunk-000/cam0/episode_000012.mp4"
-            or c == "p/videos/chunk-012/cam0/episode_000012.mp4"
+            c == "p/videos/chunk-000/cam0/episode_000012.mp4" or c == "p/videos/chunk-012/cam0/episode_000012.mp4"
             for c in candidates
         )

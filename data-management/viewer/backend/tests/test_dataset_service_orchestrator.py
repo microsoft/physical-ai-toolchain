@@ -797,7 +797,7 @@ class TestMaterializeBlobVideo:
         provider = _make_provider()
         provider.stream_video = _stream
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        cache_root = tmp_path / "vcache"
+        cache_root = tmp_path / "video_cache"
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",
             lambda: str(cache_root),
@@ -822,7 +822,7 @@ class TestMaterializeBlobVideo:
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",
-            lambda: str(tmp_path / "vcache"),
+            lambda: str(tmp_path / "video_cache"),
         )
 
         first = await service.materialize_blob_video("ds/v.mp4")
@@ -838,7 +838,7 @@ class TestMaterializeBlobVideo:
         provider = _make_provider()
         provider.stream_video = _stream
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        cache_root = tmp_path / "vcache"
+        cache_root = tmp_path / "video_cache"
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",
             lambda: str(cache_root),
@@ -860,7 +860,7 @@ class TestMaterializeBlobVideo:
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",
-            lambda: str(tmp_path / "vcache"),
+            lambda: str(tmp_path / "video_cache"),
         )
 
         path = await service.materialize_blob_video("ds/no-extension")
@@ -899,9 +899,7 @@ class TestGetFrameImageBlobFallback:
         provider = _make_provider()
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         service._blob_dataset_ids.add("ds")
-        service._datasets["ds"] = DatasetInfo(
-            id="ds", name="ds", total_episodes=1, fps=24.0, features={}, tasks=[]
-        )
+        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=1, fps=24.0, features={}, tasks=[])
         monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
         local = tmp_path / "v.mp4"
         local.write_bytes(b"")
@@ -914,9 +912,7 @@ class TestGetFrameImageBlobFallback:
             assert frame_idx == 7
             return b"JPEG-bytes"
 
-        monkeypatch.setattr(
-            service._lerobot_handler, "_extract_frame_ffmpeg", staticmethod(_ffmpeg)
-        )
+        monkeypatch.setattr(service._lerobot_handler, "_extract_frame_ffmpeg", staticmethod(_ffmpeg))
 
         result = await service.get_frame_image("ds", 0, 7, "cam")
         assert result == b"JPEG-bytes"
@@ -955,27 +951,17 @@ class TestListDatasetsScanResilience:
         assert any("Failed to scan blob datasets" in r.message for r in caplog.records)
 
     async def test_per_dataset_discover_lerobot_error_logged(self, tmp_path, caplog, monkeypatch):
-        provider = _make_provider(
-            scan_all_dataset_ids=AsyncMock(return_value={"lerobot": ["bad-ds"], "hdf5": []})
-        )
+        provider = _make_provider(scan_all_dataset_ids=AsyncMock(return_value={"lerobot": ["bad-ds"], "hdf5": []}))
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        monkeypatch.setattr(
-            service, "_discover_blob_dataset", AsyncMock(side_effect=RuntimeError("nope"))
-        )
+        monkeypatch.setattr(service, "_discover_blob_dataset", AsyncMock(side_effect=RuntimeError("nope")))
         with caplog.at_level("WARNING"):
             await service.list_datasets()
         assert any("Failed to discover blob dataset bad-ds" in r.message for r in caplog.records)
 
     async def test_per_dataset_discover_hdf5_error_logged(self, tmp_path, caplog, monkeypatch):
-        provider = _make_provider(
-            scan_all_dataset_ids=AsyncMock(return_value={"lerobot": [], "hdf5": ["bad-h5"]})
-        )
+        provider = _make_provider(scan_all_dataset_ids=AsyncMock(return_value={"lerobot": [], "hdf5": ["bad-h5"]}))
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        monkeypatch.setattr(
-            service, "_discover_blob_hdf5_dataset", AsyncMock(side_effect=RuntimeError("nope"))
-        )
+        monkeypatch.setattr(service, "_discover_blob_hdf5_dataset", AsyncMock(side_effect=RuntimeError("nope")))
         with caplog.at_level("WARNING"):
             await service.list_datasets()
-        assert any(
-            "Failed to discover blob HDF5 dataset bad-h5" in r.message for r in caplog.records
-        )
+        assert any("Failed to discover blob HDF5 dataset bad-h5" in r.message for r in caplog.records)
