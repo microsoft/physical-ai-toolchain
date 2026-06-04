@@ -860,9 +860,7 @@ class DatasetService:
 
         dataset = self._datasets.get(dataset_id)
         fps = float(dataset.fps) if dataset and dataset.fps else 30.0
-        frame = await asyncio.to_thread(
-            self._lerobot_handler._extract_frame_ffmpeg, str(local_path), frame_idx, fps
-        )
+        frame = await asyncio.to_thread(self._lerobot_handler._extract_frame_ffmpeg, str(local_path), frame_idx, fps)
         if frame is not None:
             return frame
         return await asyncio.to_thread(self._lerobot_handler._extract_frame_cv2, str(local_path), frame_idx)

@@ -1,3 +1,4 @@
+# cspell:ignore ffprobe veryfast
 """
 On-demand video transcoding to a browser-compatible codec.
 

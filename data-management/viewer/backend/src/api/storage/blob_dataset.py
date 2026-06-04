@@ -1,3 +1,4 @@
+# cspell:ignore froms
 """
 Azure Blob Storage provider for dataset file access.
 

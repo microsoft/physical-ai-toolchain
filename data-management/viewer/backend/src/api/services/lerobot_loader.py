@@ -592,11 +592,7 @@ class LeRobotLoader:
                 cols = table.column_names
                 if "episode_index" not in cols:
                     continue
-                cameras = {
-                    c.split("/")[1]
-                    for c in cols
-                    if c.startswith("videos/") and c.endswith("/from_timestamp")
-                }
+                cameras = {c.split("/")[1] for c in cols if c.startswith("videos/") and c.endswith("/from_timestamp")}
                 if not cameras:
                     continue
                 ep_col = table.column("episode_index")

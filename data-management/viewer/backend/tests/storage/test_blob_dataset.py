@@ -157,28 +157,43 @@ class TestScanAllDatasetIds(TestCase):
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     def test_scan_classifies_and_dedupes(self):
-        names = [
-            "org1/repo1/meta/info.json",
-            "org1/repo1/data/chunk-0.parquet",
-            "org2/repo2/meta/info.json",
-            # HDF5 datasets
-            "team/projectA/episode_0.hdf5",
-            "team/projectA/episode_1.hdf5",
-            # HDF5 path under an existing LeRobot org — joined id differs and is kept
-            "org1/repo1/extra/episode_0.hdf5",
-            # Too-deep HDF5 layout (>5 segments) → ignored
-            "a/b/c/d/e/f/episode_0.hdf5",
-        ]
+        _NotFound = type("ResourceNotFoundError", (Exception,), {})
+        # Virtual directory tree (delimiter='/') with info.json markers.
+        info_json_prefixes = {"org1/repo1/", "org2/repo2/"}
+        children = {
+            "": ["org1/", "org2/", "team/"],
+            "org1/": ["org1/repo1/"],
+            "org2/": ["org2/repo2/"],
+            "team/": ["team/projectA/"],
+        }
+        hdf5_files = {"team/projectA/": ["team/projectA/episode_0.hdf5"]}
+
+        def walk_blobs(name_starts_with="", delimiter="/", **kwargs):
+            items = [_make_blob(c) for c in children.get(name_starts_with, [])]
+            items.extend(_make_blob(f) for f in hdf5_files.get(name_starts_with, []))
+            return _AsyncIter(items)
+
+        def get_blob_client(path):
+            blob = MagicMock()
+            marker = "meta/info.json"
+            if path.endswith(marker) and path[: -len(marker)] in info_json_prefixes:
+                blob.get_blob_properties = AsyncMock(return_value=MagicMock())
+            else:
+                blob.get_blob_properties = AsyncMock(side_effect=_NotFound("missing"))
+            return blob
+
         mock_container = MagicMock()
-        mock_container.list_blob_names.return_value = _AsyncIter(names)
+        mock_container.walk_blobs.side_effect = walk_blobs
+        mock_container.get_blob_client.side_effect = get_blob_client
         mock_client = MagicMock()
         mock_client.get_container_client.return_value = mock_container
 
         provider = _build_provider(mock_client)
-        result = asyncio.run(provider.scan_all_dataset_ids())
+        with patch("src.api.storage.blob_dataset.ResourceNotFoundError", _NotFound):
+            result = asyncio.run(provider.scan_all_dataset_ids())
 
-        assert result["lerobot"] == ["org1", "org2"]
-        assert result["hdf5"] == ["org1--repo1--extra", "team--projectA"]
+        assert result["lerobot"] == ["org1--repo1", "org2--repo2"]
+        assert result["hdf5"] == ["team--projectA"]
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
     def test_scan_swallows_outer_exception(self):
@@ -353,6 +368,8 @@ class TestVideoPathCandidates(TestCase):
         assert result == [
             "p/videos/cam0/chunk-005/file-005.mp4",
             "p/videos/cam0/chunk-000/file-005.mp4",
+            "p/videos/cam0/episode_000005.mp4",
+            "p/videos/chunk-000/cam0/episode_000005.mp4",
         ]
 
 
@@ -377,17 +394,83 @@ class TestResolveVideoBlobPath(TestCase):
             "org/repo/videos/cam0/chunk-001/file-005.mp4",
         ]
         mock_container = MagicMock()
-        mock_container.list_blobs.return_value = _AsyncIter(_make_blob(n) for n in names)
+
+        def list_blobs(name_starts_with="", **kwargs):
+            return _AsyncIter(_make_blob(n) for n in names if n.startswith(name_starts_with))
+
+        mock_container.list_blobs.side_effect = list_blobs
         mock_client = MagicMock()
         mock_client.get_container_client.return_value = mock_container
         provider = _build_provider(mock_client)
 
         with (
             patch.object(type(provider), "get_info_json", new=AsyncMock(return_value=None)),
+            patch.object(
+                type(provider),
+                "_get_episode_video_entry",
+                new=AsyncMock(return_value=None),
+            ),
             patch.object(type(provider), "get_blob_properties", new=AsyncMock(return_value=None)),
         ):
             result = asyncio.run(provider.resolve_video_blob_path("org--repo", 5, "cam0"))
             assert result == "org/repo/videos/cam0/chunk-001/file-005.mp4"
+
+
+class TestEpisodeVideoWindow(TestCase):
+    """Per-episode video time-window lookup."""
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    def test_window_returned_from_cache(self):
+        provider = _build_provider(MagicMock())
+        provider._episode_video_cache["org--repo"] = {
+            5: {"cam0": (1, 2, 1.5, 4.25)},
+        }
+        result = asyncio.run(provider.get_episode_video_window("org--repo", 5, "cam0"))
+        assert result == (1.5, 4.25)
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    def test_window_none_when_degenerate(self):
+        provider = _build_provider(MagicMock())
+        provider._episode_video_cache["org--repo"] = {
+            5: {"cam0": (0, 0, 2.0, 2.0)},
+        }
+        assert asyncio.run(provider.get_episode_video_window("org--repo", 5, "cam0")) is None
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    def test_window_none_when_metadata_missing(self):
+        provider = _build_provider(MagicMock())
+        with patch.object(
+            type(provider),
+            "_load_episode_video_metadata",
+            new=AsyncMock(return_value=None),
+        ):
+            assert asyncio.run(provider.get_episode_video_window("org--repo", 0, "cam0")) is None
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    def test_window_none_when_camera_absent(self):
+        provider = _build_provider(MagicMock())
+        provider._episode_video_cache["org--repo"] = {0: {"other": (0, 0, 0.0, 1.0)}}
+        assert asyncio.run(provider.get_episode_video_window("org--repo", 0, "cam0")) is None
+
+
+class TestLoadEpisodeVideoMetadata(TestCase):
+    """Parquet-backed metadata loader."""
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    def test_load_returns_none_on_container_failure(self):
+        mock_client = MagicMock()
+        mock_client.get_container_client.side_effect = RuntimeError("network down")
+        provider = _build_provider(mock_client)
+        assert asyncio.run(provider._load_episode_video_metadata("org--repo")) is None
+
+    @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
+    def test_load_skips_non_parquet_blobs(self):
+        mock_container = MagicMock()
+        mock_container.list_blobs.return_value = _AsyncIter([_make_blob("org/repo/meta/episodes/readme.txt")])
+        mock_client = MagicMock()
+        mock_client.get_container_client.return_value = mock_container
+        provider = _build_provider(mock_client)
+        assert asyncio.run(provider._load_episode_video_metadata("org--repo")) is None
 
 
 class TestStreamVideo(TestCase):
