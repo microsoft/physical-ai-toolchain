@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Contribution Workflow
 description: How to contribute including legal requirements, bug reports, enhancement suggestions, and documentation improvements
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-25
+ms.date: 2026-06-01
 ms.topic: how-to
 keywords:
   - contributing
@@ -190,7 +190,7 @@ Documentation contributions improve the architecture for the entire robotics and
 
 ### High-Value Documentation Contributions
 
-* Deployment troubleshooting guides: Expand [azureml-validation-job-debugging.md](../evaluation/azureml-validation-job-debugging.md) with new scenarios
+* Deployment troubleshooting guides: Expand [azureml-evaluation-job-debugging.md](../evaluation/azureml-evaluation-job-debugging.md) with new scenarios
 * Region/SKU compatibility matrices: Document tested combinations and known limitations
 * Cost optimization strategies: Real-world cost profiles and reduction techniques
 * Network architecture decisions: Guidance on when to use private vs. hybrid vs. public modes

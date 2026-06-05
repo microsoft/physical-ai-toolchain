@@ -9,7 +9,7 @@
     Development environment setup for physical-ai-toolchain.
 .DESCRIPTION
     Verifies required tools, installs uv, sets up Python virtual environment,
-    clones IsaacLab, and checks for hve-core.
+    clones Isaac Lab, and checks for hve-core.
 .PARAMETER DisableVenv
     Skip virtual environment creation; install packages directly.
 .EXAMPLE
@@ -223,22 +223,22 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "uv lock failed (exit code $LASTEXITCODE)"
 }
 
-Write-Section 'IsaacLab Setup'
+Write-Section 'Isaac Lab Setup'
 
 $IsaacLabDir = Join-Path $ScriptDir 'external' 'IsaacLab'
 
 if (Test-Path $IsaacLabDir) {
-    Write-Info "IsaacLab already cloned at $IsaacLabDir"
+    Write-Info "Isaac Lab already cloned at $IsaacLabDir"
     Write-Info "To update, run: cd $IsaacLabDir && git pull"
 }
 else {
-    Write-Info 'Cloning IsaacLab for intellisense/Pylance support...'
+    Write-Info 'Cloning Isaac Lab for intellisense/Pylance support...'
     New-Item -ItemType Directory -Path (Join-Path $ScriptDir 'external') -Force | Out-Null
     git clone 'https://github.com/isaac-sim/IsaacLab.git' $IsaacLabDir
     if ($LASTEXITCODE -ne 0) {
         Write-Error "git clone failed (exit code $LASTEXITCODE)"
     }
-    Write-Info 'IsaacLab cloned successfully'
+    Write-Info 'Isaac Lab cloned successfully'
 }
 
 Write-Section 'hve-core Check'

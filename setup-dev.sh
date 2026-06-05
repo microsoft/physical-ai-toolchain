@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,11 +46,11 @@ section "UV Package Manager Setup"
 
 if ! command -v uv &>/dev/null; then
   info "Installing uv package manager..."
-  UV_VERSION="0.10.9"
+  UV_VERSION="0.7.12"
   UV_ARCH=$(uname -m)
   case "${UV_ARCH}" in
-    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="20d79708222611fa540b5c9ed84f352bcd3937740e51aacc0f8b15b271c57594" ;;
-    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="cc0c5a8573e7d6d78aecb954e0a62b5c0d18217bb81f1e19363b428c57a9962a" ;;
+    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="735891fb553d0be129f3aa39dc8e9c4c49aaa76ec17f7dfb6a732e79a714873a" ;;
+    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="23233d2e950ed8187858350da5c6803b14cbbeaef780382093bb2f2bc4ba1200" ;;
     *) error "Unsupported architecture for uv: ${UV_ARCH}"; exit 1 ;;
   esac
   curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TRIPLE}.tar.gz" -o /tmp/uv.tar.gz
@@ -113,18 +113,18 @@ uv sync
 info "Locking dependencies..."
 uv lock
 
-section "IsaacLab Setup"
+section "Isaac Lab Setup"
 
 ISAACLAB_DIR="${SCRIPT_DIR}/external/IsaacLab"
 
 if [[ -d "${ISAACLAB_DIR}" ]]; then
-  info "IsaacLab already cloned at ${ISAACLAB_DIR}"
+  info "Isaac Lab already cloned at ${ISAACLAB_DIR}"
   info "To update, run: cd ${ISAACLAB_DIR} && git pull"
 else
-  info "Cloning IsaacLab for intellisense/Pylance support..."
+  info "Cloning Isaac Lab for intellisense/Pylance support..."
   mkdir -p "${SCRIPT_DIR}/external"
   git clone https://github.com/isaac-sim/IsaacLab.git "${ISAACLAB_DIR}"
-  info "IsaacLab cloned successfully"
+  info "Isaac Lab cloned successfully"
 fi
 
 section "hve-core Check"

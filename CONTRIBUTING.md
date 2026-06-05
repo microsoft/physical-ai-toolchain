@@ -2,7 +2,7 @@
 title: Contributing
 description: How to contribute to the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-15
+ms.date: 2026-06-01
 ms.topic: how-to
 keywords:
   - contributing
@@ -89,10 +89,10 @@ rm -rf .venv
 
 ### Remove External Dependencies
 
-The setup script clones IsaacLab for IntelliSense support.
+The setup script clones Isaac Lab for IntelliSense support.
 
 ```bash
-# Remove IsaacLab clone
+# Remove Isaac Lab clone
 rm -rf external/IsaacLab
 
 # Remove Node.js linting dependencies (if installed separately via npm install)
