@@ -42,6 +42,20 @@ section "Tool Verification"
 require_tools az terraform kubectl helm jq
 info "All required tools found"
 
+# Portable SHA-256 verifier: GNU sha256sum on Linux/devcontainer; shasum on macOS where coreutils may be absent.
+verify_sha256() {
+  local expected="$1"
+  local file="$2"
+  if command -v sha256sum &>/dev/null; then
+    echo "${expected}  ${file}" | sha256sum -c --quiet -
+  elif command -v shasum &>/dev/null; then
+    echo "${expected}  ${file}" | shasum -a 256 -c --quiet -
+  else
+    error "Neither sha256sum nor shasum available; cannot verify ${file}"
+    exit 1
+  fi
+}
+
 section "UV Package Manager Setup"
 
 if ! command -v uv &>/dev/null; then
@@ -54,7 +68,7 @@ if ! command -v uv &>/dev/null; then
     *) error "Unsupported architecture for uv: ${UV_ARCH}"; exit 1 ;;
   esac
   curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TRIPLE}.tar.gz" -o /tmp/uv.tar.gz
-  echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
+  verify_sha256 "${UV_SHA256}" /tmp/uv.tar.gz
   tar -xzf /tmp/uv.tar.gz -C /tmp
   sudo install -m 0755 "/tmp/uv-${UV_TRIPLE}/uv" /usr/local/bin/uv
   sudo install -m 0755 "/tmp/uv-${UV_TRIPLE}/uvx" /usr/local/bin/uvx
@@ -83,12 +97,51 @@ else
   info "Installing terraform-docs v${TERRAFORM_DOCS_VERSION}..."
   curl -sSLo /tmp/terraform-docs.tar.gz \
     "https://github.com/terraform-docs/terraform-docs/releases/download/v${TERRAFORM_DOCS_VERSION}/terraform-docs-v${TERRAFORM_DOCS_VERSION}-$(uname -s | tr '[:upper:]' '[:lower:]')-${ARCH}.tar.gz"
-  echo "${TERRAFORM_DOCS_SHA256}  /tmp/terraform-docs.tar.gz" | sha256sum -c --quiet -
+  verify_sha256 "${TERRAFORM_DOCS_SHA256}" /tmp/terraform-docs.tar.gz
   tar -xzf /tmp/terraform-docs.tar.gz -C /tmp terraform-docs
   sudo mv /tmp/terraform-docs /usr/local/bin/terraform-docs
   sudo chmod +x /usr/local/bin/terraform-docs
   rm -f /tmp/terraform-docs.tar.gz
   info "terraform-docs: v${TERRAFORM_DOCS_VERSION} (installed)"
+fi
+
+# ===================================================================
+# OSV-Scanner
+# ===================================================================
+section "OSV-Scanner Setup"
+
+OSV_SCANNER_VERSION="2.3.8"
+OSV_OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+OSV_ARCH_RAW=$(uname -m)
+case "${OSV_ARCH_RAW}" in
+  x86_64)        OSV_ARCH="amd64" ;;
+  aarch64|arm64) OSV_ARCH="arm64" ;;
+  *) error "Unsupported architecture for osv-scanner: ${OSV_ARCH_RAW}"; exit 1 ;;
+esac
+
+case "${OSV_OS}_${OSV_ARCH}" in
+  linux_amd64)  OSV_SCANNER_SHA256="bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc" ;;
+  linux_arm64)  OSV_SCANNER_SHA256="8158b18edd2d03b1a30d905ca91b032bc62262167be8f206c27114f08823e27c" ;;
+  darwin_amd64) OSV_SCANNER_SHA256="b8a80a9f14ca4c0cd0fc2d351b28f740da9e6a5b18385ac9f9d083360b5b504e" ;;
+  darwin_arm64) OSV_SCANNER_SHA256="a8cd6507b06239f463a7642430cfd2d154882f150f6e30cdc0653e28dfc34216" ;;
+  *) error "Unsupported OS/arch for osv-scanner: ${OSV_OS}/${OSV_ARCH}"; exit 1 ;;
+esac
+
+OSV_INSTALLED_VERSION=""
+if command -v osv-scanner &>/dev/null; then
+  OSV_INSTALLED_VERSION=$(osv-scanner --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+fi
+
+if [[ "${OSV_INSTALLED_VERSION}" == "${OSV_SCANNER_VERSION}" ]]; then
+  info "osv-scanner: v${OSV_INSTALLED_VERSION}"
+else
+  info "Installing osv-scanner v${OSV_SCANNER_VERSION}..."
+  curl -sSLo /tmp/osv-scanner \
+    "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_${OSV_OS}_${OSV_ARCH}"
+  verify_sha256 "${OSV_SCANNER_SHA256}" /tmp/osv-scanner
+  sudo install -m 0755 /tmp/osv-scanner /usr/local/bin/osv-scanner
+  rm -f /tmp/osv-scanner
+  info "osv-scanner: v${OSV_SCANNER_VERSION} (installed)"
 fi
 
 section "Python Environment Setup"
