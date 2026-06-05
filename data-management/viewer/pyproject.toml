@@ -27,7 +27,7 @@ dev = [
     "httpx==0.28.1",
 ]
 azure = [
-    "aiohttp==3.13.5",
+    "aiohttp==3.14.0",
     "azure-storage-blob==12.29.0",
     "azure-identity==1.25.3",
 ]
@@ -70,6 +70,6 @@ testpaths = ["backend/tests"]
 
 [tool.uv]
 constraint-dependencies = [
-    "pyjwt==2.12.1",
+    "pyjwt==2.13.0",
     "pygments==2.20.0",
 ]
