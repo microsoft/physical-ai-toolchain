@@ -2,7 +2,7 @@
 title: Contributing
 description: How to contribute to the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-15
+ms.date: 2026-06-01
 ms.topic: how-to
 keywords:
   - contributing
@@ -89,10 +89,10 @@ rm -rf .venv
 
 ### Remove External Dependencies
 
-The setup script clones IsaacLab for IntelliSense support.
+The setup script clones Isaac Lab for IntelliSense support.
 
 ```bash
-# Remove IsaacLab clone
+# Remove Isaac Lab clone
 rm -rf external/IsaacLab
 
 # Remove Node.js linting dependencies (if installed separately via npm install)
@@ -145,6 +145,7 @@ Run these commands to validate changes before submitting a PR:
 ```bash
 npm run lint:md        # Markdownlint
 npm run lint:links     # Markdown link validation
+npm run lint:vuln      # OSV-Scanner v2.3.8 dependency vulnerability scan
 npm run spell-check    # cspell
 npm run test:tf        # Terraform module tests (no Azure credentials required)
 ```
@@ -164,6 +165,7 @@ All CI linters enforce warnings-as-errors. PRs that introduce new warnings will 
 | Go (lint:go)         | Errors block      | .golangci.yml                               |
 | ShellCheck (lint:sh) | Warnings + errors | .shellcheckrc                               |
 | Python (lint:py)     | Errors block      | pyproject.toml [tool.ruff]                  |
+| Vulns (lint:vuln)    | Errors block      | osv-scanner.toml                            |
 | Link check           | Errors block      | .markdownlint-cli2.jsonc                    |
 
 To suppress a specific warning locally, use the linter's inline suppression syntax. Do not change CI configuration to suppress warnings globally without team discussion.
