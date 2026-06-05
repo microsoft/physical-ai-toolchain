@@ -170,6 +170,16 @@ class LeRobotFormatHandler:
                     if feat.dtype == "video" and feat_name not in video_urls:
                         video_urls[feat_name] = f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{feat_name}"
 
+            # Resolve per-camera time windows for v3 concatenated videos
+            video_time_windows: dict[str, list[float]] = {}
+            for camera in video_urls:
+                try:
+                    window = loader.get_video_time_window(episode_idx, camera)
+                except Exception:
+                    window = None
+                if window is not None:
+                    video_time_windows[camera] = [float(window[0]), float(window[1])]
+
             return EpisodeData(
                 meta=EpisodeMeta(
                     index=episode_idx,
@@ -178,6 +188,7 @@ class LeRobotFormatHandler:
                     has_annotations=False,  # Set by caller
                 ),
                 video_urls=video_urls,
+                video_time_windows=video_time_windows,
                 cameras=list(video_urls.keys()),
                 trajectory_data=trajectory_data,
             )

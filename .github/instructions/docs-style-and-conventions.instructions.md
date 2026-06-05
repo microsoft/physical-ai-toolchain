@@ -326,6 +326,7 @@ ms.topic: reference
 ```
 
 Required fields: `title`, `description`. Add `ms.date` for versioned content.
+Bump `ms.date` to today's date (YYYY-MM-DD) on every substantive edit.
 
 ## File Naming
 
@@ -333,7 +334,7 @@ Required fields: `title`, `description`. Add `ms.date` for versioned content.
 |------------|-----------------------------|---------------------------------------|
 | README     | `README.md` (uppercase)     | `infrastructure/README.md`                    |
 | Guides     | kebab-case                  | `mlflow-integration.md`               |
-| References | kebab-case with type suffix | `azureml-validation-job-debugging.md` |
+| References | kebab-case with type suffix | `azureml-evaluation-job-debugging.md` |
 
 ## Checklist
 

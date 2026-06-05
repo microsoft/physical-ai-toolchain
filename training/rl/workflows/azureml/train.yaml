@@ -1,4 +1,4 @@
-# IsaacLab Training Job Template
+# Isaac Lab Training Job Template
 #
 # This is a STRUCTURAL TEMPLATE used by submit-azureml-training.sh.
 # Almost all values below are placeholders and will be overridden at submission time.
@@ -20,8 +20,8 @@
 
 $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 type: command
-display_name: IsaacLab Training
-description: IsaacLab SKRL training job with MLflow integration and checkpoint management.
+display_name: Isaac Lab Training
+description: Isaac Lab SKRL training job with MLflow integration and checkpoint management.
 experiment_name: isaaclab-training
 identity:
   type: managed_identity

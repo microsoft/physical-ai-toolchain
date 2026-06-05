@@ -658,6 +658,7 @@ keras
 kerberos
 keyid
 kics
+killpg
 kinect
 kingsway
 kingswaysoft

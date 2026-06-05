@@ -257,10 +257,6 @@ component_management:
         - tests/fuzz_harness.py
         - tests/fuzz-corpus/**
 
-parsers:
-  jacoco:
-    partials_as_hits: true
-
 comment:
   layout: "header, diff, flags, files"
   behavior: default
