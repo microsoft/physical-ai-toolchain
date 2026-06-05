@@ -10,7 +10,7 @@ from fastapi import Header, HTTPException, Query
 from fastapi import Path as PathParam
 from pydantic import BaseModel, model_validator
 
-SAFE_DATASET_ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,254}$"
+SAFE_DATASET_ID_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._\- ]{0,254}$"
 SAFE_CAMERA_NAME_PATTERN = r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$"
 
 _DATASET_ID_RE = re.compile(SAFE_DATASET_ID_PATTERN)
