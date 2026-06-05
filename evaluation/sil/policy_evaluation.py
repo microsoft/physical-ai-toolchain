@@ -1,9 +1,9 @@
-"""Generic IsaacLab policy evaluation.
+"""Generic Isaac Lab policy evaluation.
 
-Evaluates any trained IsaacLab policy with automatic task/framework detection.
+Evaluates any trained Isaac Lab policy with automatic task/framework detection.
 Supports SKRL and RSL-RL frameworks with CLI-based configuration.
 
-The validation job receives model metadata (task, framework, threshold) via CLI
+The evaluation job receives model metadata (task, framework, threshold) via CLI
 arguments that are populated from Azure ML model tags by the submission script.
 This approach follows Azure ML best practices where model metadata is stored in
 model tags/properties rather than separate files.
@@ -17,8 +17,8 @@ Usage:
         --headless
 
 Exit Codes:
-    0 - Validation passed (success_rate >= threshold)
-    1 - Validation failed or error
+    0 - Evaluation passed (success_rate >= threshold)
+    1 - Evaluation failed or error
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ _LOGGER = logging.getLogger("isaaclab.eval")
 
 @dataclass
 class ModelMetadata:
-    """Model metadata for validation configuration.
+    """Model metadata for evaluation configuration.
 
     Metadata is provided via CLI arguments which are populated from Azure ML
     model tags by the submission script. The 'auto' sentinel value indicates
@@ -66,7 +66,7 @@ def load_metadata(
 ) -> ModelMetadata:
     """Create metadata from CLI arguments.
 
-    The submission script (submit-azureml-validation.sh) fetches model tags
+    The submission script (submit-azureml-isaaclab-evaluation.sh) fetches model tags
     from Azure ML and passes them as CLI arguments. The 'auto' sentinel value
     indicates the field should use defaults.
 
@@ -108,7 +108,7 @@ def load_agent(
     Args:
         checkpoint_path: Path to checkpoint file
         framework: Framework type (skrl, rsl_rl)
-        task_id: IsaacLab task identifier
+        task_id: Isaac Lab task identifier
         env: Wrapped environment instance (needed for SKRL Runner)
         device: Torch device string
 
@@ -247,7 +247,7 @@ def evaluate(env: Any, agent: Any, num_episodes: int, framework: str) -> Metrics
     """Run evaluation episodes and collect metrics.
 
     Args:
-        env: IsaacLab environment
+        env: Isaac Lab environment
         agent: Loaded agent instance
         num_episodes: Number of episodes to evaluate
         framework: Framework type for action selection
@@ -345,7 +345,7 @@ def find_checkpoint(model_path: str) -> str:
 def _build_parser() -> argparse.ArgumentParser:
     """Build argument parser for policy evaluation."""
     parser = argparse.ArgumentParser(
-        description="Generic IsaacLab policy evaluation",
+        description="Generic Isaac Lab policy evaluation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(

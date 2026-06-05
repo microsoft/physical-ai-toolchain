@@ -240,3 +240,74 @@ describe('useAnnotationWorkspaceMediaSources adjacent-frame interpolation', () =
     }
   })
 })
+
+describe('useAnnotationWorkspaceMediaSources video time windows', () => {
+  it('returns the [start, end] tuple for the selected camera', () => {
+    const episode: EpisodeData = {
+      ...buildEpisode(['wrist', 'overhead']),
+      videoTimeWindows: { wrist: [1.5, 5.0], overhead: [0, 3.2] },
+    }
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(defaultOptions(episode)))
+
+    expect(result.current.videoWindow).toEqual([1.5, 5.0])
+  })
+
+  it('tracks the camera override when switching cameras', () => {
+    const episode: EpisodeData = {
+      ...buildEpisode(['wrist', 'overhead']),
+      videoTimeWindows: { wrist: [1.5, 5.0], overhead: [0, 3.2] },
+    }
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(defaultOptions(episode)))
+
+    act(() => {
+      result.current.setCameraName('overhead')
+    })
+
+    expect(result.current.videoWindow).toEqual([0, 3.2])
+  })
+
+  it('returns null when the episode has no videoTimeWindows', () => {
+    const episode = buildEpisode(['wrist'])
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(defaultOptions(episode)))
+
+    expect(result.current.videoWindow).toBeNull()
+  })
+
+  it('returns null when the window for the selected camera is missing', () => {
+    const episode: EpisodeData = {
+      ...buildEpisode(['wrist', 'overhead']),
+      videoTimeWindows: { overhead: [0, 3.2] },
+    }
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(defaultOptions(episode)))
+
+    expect(result.current.cameraName).toBe('wrist')
+    expect(result.current.videoWindow).toBeNull()
+  })
+
+  it('returns null when the camera window has the wrong arity', () => {
+    const episode: EpisodeData = {
+      ...buildEpisode(['wrist']),
+      videoTimeWindows: { wrist: [1.5] as unknown as [number, number] },
+    }
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(defaultOptions(episode)))
+
+    expect(result.current.videoWindow).toBeNull()
+  })
+
+  it('always returns the videoUrls map alongside the legacy videoSrc', () => {
+    const episode = buildEpisode(['wrist', 'overhead'])
+
+    const { result } = renderHook(() => useAnnotationWorkspaceMediaSources(defaultOptions(episode)))
+
+    expect(result.current.videoUrls).toEqual({
+      wrist: '/videos/wrist.mp4',
+      overhead: '/videos/overhead.mp4',
+    })
+    expect(result.current.videoSrc).toBe('/videos/wrist.mp4')
+  })
+})

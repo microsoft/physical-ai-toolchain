@@ -27,7 +27,7 @@ dev = [
     "schemathesis==4.21.0",
 ]
 azure = [
-    "aiohttp==3.13.5",
+    "aiohttp==3.14.0",
     "azure-storage-blob==12.29.0",
     "azure-identity==1.25.3",
 ]

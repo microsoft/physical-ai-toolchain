@@ -83,7 +83,7 @@ def upload_to_mlflow(
                 {
                     "task": task,
                     "checkpoint_uri": checkpoint_uri,
-                    "inference_type": "policy_validation",
+                    "inference_type": "policy_evaluation",
                     "onnx_success": str(onnx_success),
                     "jit_success": str(jit_success),
                 }

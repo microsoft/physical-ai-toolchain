@@ -7,10 +7,12 @@ import { useEpisodeStore, usePlaybackControls, useViewerDisplay } from '@/stores
 import { VideoPlayer } from '../VideoPlayer'
 
 const seekToMock = vi.fn()
+const lastPlayerProps: { current: Record<string, unknown> | null } = { current: null }
 
 vi.mock('react-player', () => ({
   __esModule: true,
   default: forwardRef<unknown, Record<string, unknown>>((props, ref) => {
+    lastPlayerProps.current = props
     useImperativeHandle(ref, () => ({
       seekTo: seekToMock,
       getInternalPlayer: () => null,
@@ -119,6 +121,7 @@ function setup(opts: SetupOpts = {}) {
 describe('VideoPlayer', () => {
   beforeEach(() => {
     seekToMock.mockReset()
+    lastPlayerProps.current = null
   })
 
   afterEach(() => {
@@ -206,5 +209,84 @@ describe('VideoPlayer', () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
     })
     expect(togglePlayback).not.toHaveBeenCalled()
+  })
+
+  it('appends an HTML media-fragment hint when videoTimeWindows is present', () => {
+    setup({
+      episode: {
+        videoUrls: { front: 'https://example.com/front.mp4' },
+        videoTimeWindows: { front: [1.5, 3] },
+        meta: { length: 45 },
+        trajectoryData: [],
+      },
+    })
+    render(<VideoPlayer />)
+    const player = screen.getByTestId('react-player')
+    expect(player).toHaveAttribute('data-url', 'https://example.com/front.mp4#t=1.5,3')
+  })
+
+  it('does not append a media-fragment hint when no window is provided', () => {
+    setup()
+    render(<VideoPlayer />)
+    const player = screen.getByTestId('react-player')
+    expect(player).toHaveAttribute('data-url', 'https://example.com/front.mp4')
+  })
+
+  it('stops playback and clamps to the last frame when progress reaches windowEnd', () => {
+    const setCurrentFrame = vi.fn()
+    const togglePlayback = vi.fn()
+    setup({
+      episode: {
+        videoUrls: { front: 'https://example.com/front.mp4' },
+        videoTimeWindows: { front: [1.5, 3] },
+        meta: { length: 45 },
+        trajectoryData: [],
+      },
+      isPlaying: true,
+      setCurrentFrame,
+      togglePlayback,
+    })
+    render(<VideoPlayer />)
+
+    const onProgress = lastPlayerProps.current?.onProgress as
+      | ((state: { playedSeconds: number }) => void)
+      | undefined
+    expect(onProgress).toBeTypeOf('function')
+
+    act(() => {
+      onProgress!({ playedSeconds: 3.0 })
+    })
+
+    expect(seekToMock).toHaveBeenCalledWith(3, 'seconds')
+    expect(setCurrentFrame).toHaveBeenCalledWith(44)
+    expect(togglePlayback).toHaveBeenCalledTimes(1)
+  })
+
+  it('advances the frame from the window-relative offset while playing inside the window', () => {
+    const setCurrentFrame = vi.fn()
+    setup({
+      episode: {
+        videoUrls: { front: 'https://example.com/front.mp4' },
+        videoTimeWindows: { front: [1.5, 3] },
+        meta: { length: 45 },
+        trajectoryData: [],
+      },
+      isPlaying: true,
+      setCurrentFrame,
+    })
+    render(<VideoPlayer />)
+
+    const onProgress = lastPlayerProps.current?.onProgress as
+      | ((state: { playedSeconds: number }) => void)
+      | undefined
+    expect(onProgress).toBeTypeOf('function')
+
+    // fps = meta.length / windowDuration = 45 / 1.5 = 30
+    // playedSeconds 2.0 → episodeTime 0.5 → frame Math.floor(0.5 * 30) = 15.
+    act(() => {
+      onProgress!({ playedSeconds: 2.0 })
+    })
+
+    expect(setCurrentFrame).toHaveBeenLastCalledWith(15)
   })
 })

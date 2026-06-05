@@ -4,7 +4,7 @@ absl-py==2.4.0
     # via tensorboard
 aiohappyeyeballs==2.6.2
     # via aiohttp
-aiohttp==3.13.5
+aiohttp==3.14.0
     # via mlflow
 aiosignal==1.4.0
     # via aiohttp
@@ -162,7 +162,7 @@ h11==0.16.0
     # via uvicorn
 huey==3.0.1
     # via mlflow
-idna==3.17
+idna==3.18
     # via
     #   robotics-training-rl (pyproject.toml)
     #   anyio
