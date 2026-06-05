@@ -162,7 +162,7 @@ h11==0.16.0
     # via uvicorn
 huey==3.0.1
     # via mlflow
-idna==3.17
+idna==3.18
     # via
     #   robotics-training-rl (pyproject.toml)
     #   anyio
