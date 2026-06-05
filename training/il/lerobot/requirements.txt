@@ -6,7 +6,7 @@ accelerate==1.13.0
     #   lerobot
 aiohappyeyeballs==2.6.2
     # via aiohttp
-aiohttp==3.13.5
+aiohttp==3.14.0
     # via fsspec
 aiosignal==1.4.0
     # via aiohttp
@@ -29,7 +29,7 @@ attrs==26.1.0
     #   jsonschema
     #   referencing
     #   rerun-sdk
-av==15.1.0
+av==17.0.1
     # via lerobot
 azure-ai-ml==1.33.0
     # via robotics-training-il (pyproject.toml)
@@ -103,11 +103,11 @@ cloudpickle==3.1.2
     # via
     #   gymnasium
     #   mlflow-skinny
-cmake==4.1.3
+cmake==4.3.2
     # via lerobot
 colorama==0.4.6
     # via azure-ai-ml
-cryptography==46.0.7
+cryptography==48.0.0
     # via
     #   azure-identity
     #   azure-storage-blob
@@ -116,17 +116,17 @@ cryptography==46.0.7
     #   google-auth
     #   msal
     #   pyjwt
-cuda-bindings==12.9.4
+cuda-bindings==13.3.1
     # via torch
 cuda-pathfinder==1.5.5
     # via cuda-bindings
-databricks-sdk==0.112.0
+databricks-sdk==0.114.0
     # via mlflow-skinny
 datasets==4.8.5
     # via
     #   robotics-training-il (pyproject.toml)
     #   lerobot
-deepdiff==8.6.2
+deepdiff==9.1.0
     # via lerobot
 diffusers==0.38.0
     # via
@@ -136,7 +136,7 @@ dill==0.4.1
     # via
     #   datasets
     #   multiprocess
-draccus==0.10.0
+draccus==0.11.5
     # via lerobot
 einops==0.8.2
     # via lerobot
@@ -146,7 +146,7 @@ farama-notifications==0.0.6
     # via gymnasium
 fastapi==0.136.3
     # via mlflow-skinny
-filelock==3.29.0
+filelock==3.29.1
     # via
     #   datasets
     #   diffusers
@@ -156,7 +156,7 @@ frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2026.2.0
+fsspec==2026.4.0
     # via
     #   datasets
     #   huggingface-hub
@@ -185,14 +185,14 @@ httpx==0.28.1
     #   datasets
     #   diffusers
     #   huggingface-hub
-huggingface-hub==1.16.1
+huggingface-hub==1.17.0
     # via
     #   robotics-training-il (pyproject.toml)
     #   accelerate
     #   datasets
     #   diffusers
     #   lerobot
-idna==3.16
+idna==3.18
     # via
     #   anyio
     #   httpx
@@ -202,7 +202,7 @@ imageio==2.37.3
     # via lerobot
 imageio-ffmpeg==0.6.0
     # via imageio
-importlib-metadata==8.7.1
+importlib-metadata==9.0.0
     # via
     #   diffusers
     #   mlflow-skinny
@@ -218,7 +218,7 @@ jinja2==3.1.6
     # via torch
 jsonlines==4.0.0
     # via lerobot
-jsonpickle==4.1.1
+jsonpickle==4.1.2
     # via azureml-mlflow
 jsonschema==4.26.0
     # via azure-ai-ml
@@ -238,14 +238,14 @@ mdurl==0.1.2
     # via markdown-it-py
 mergedeep==1.3.4
     # via draccus
-mlflow-skinny==3.12.0
+mlflow-skinny==3.13.0
     # via
     #   --override (workspace)
     #   robotics-training-il (pyproject.toml)
     #   azureml-mlflow
-mpmath==1.3.0
+mpmath==1.4.1
     # via sympy
-msal==1.36.0
+msal==1.37.0
     # via
     #   azure-identity
     #   msal-extensions
@@ -279,52 +279,52 @@ numpy==2.4.6
     #   pandas
     #   rerun-sdk
     #   torchvision
-nvidia-cublas-cu12==12.8.4.1
+nvidia-cublas-cu12==12.9.2.10
     # via
     #   nvidia-cudnn-cu12
     #   nvidia-cusolver-cu12
     #   torch
-nvidia-cuda-cupti-cu12==12.8.90
+nvidia-cuda-cupti-cu12==12.9.79
     # via torch
-nvidia-cuda-nvrtc-cu12==12.8.93
+nvidia-cuda-nvrtc-cu12==12.9.86
     # via torch
-nvidia-cuda-runtime-cu12==12.8.90
+nvidia-cuda-runtime-cu12==12.9.79
     # via torch
-nvidia-cudnn-cu12==9.10.2.21
+nvidia-cudnn-cu12==9.23.0.39
     # via torch
-nvidia-cufft-cu12==11.3.3.83
+nvidia-cufft-cu12==11.4.1.4
     # via torch
-nvidia-cufile-cu12==1.13.1.3
+nvidia-cufile-cu12==1.14.1.1
     # via torch
-nvidia-curand-cu12==10.3.9.90
+nvidia-curand-cu12==10.3.10.19
     # via torch
-nvidia-cusolver-cu12==11.7.3.90
+nvidia-cusolver-cu12==11.7.5.82
     # via torch
-nvidia-cusparse-cu12==12.5.8.93
+nvidia-cusparse-cu12==12.5.10.65
     # via
     #   nvidia-cusolver-cu12
     #   torch
-nvidia-cusparselt-cu12==0.7.1
+nvidia-cusparselt-cu12==0.8.1
     # via torch
-nvidia-ml-py==13.595.45
+nvidia-ml-py==13.610.43
     # via pynvml
-nvidia-nccl-cu12==2.27.5
+nvidia-nccl-cu12==2.30.4
     # via torch
-nvidia-nvjitlink-cu12==12.8.93
+nvidia-nvjitlink-cu12==12.9.86
     # via
     #   nvidia-cufft-cu12
     #   nvidia-cusolver-cu12
     #   nvidia-cusparse-cu12
     #   torch
-nvidia-nvshmem-cu12==3.4.5
+nvidia-nvshmem-cu12==3.6.5
     # via torch
-nvidia-nvtx-cu12==12.8.90
+nvidia-nvtx-cu12==12.9.79
     # via torch
 oauthlib==3.3.1
     # via requests-oauthlib
 opencv-python-headless==4.13.0.92
     # via lerobot
-opentelemetry-api==1.40.0
+opentelemetry-api==1.42.1
     # via
     #   azure-core-tracing-opentelemetry
     #   azure-monitor-opentelemetry-exporter
@@ -343,7 +343,7 @@ opentelemetry-api==1.40.0
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
-opentelemetry-instrumentation==0.61b0
+opentelemetry-instrumentation==0.63b1
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-dbapi
@@ -356,27 +356,27 @@ opentelemetry-instrumentation==0.61b0
     #   opentelemetry-instrumentation-urllib
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
-opentelemetry-instrumentation-asgi==0.61b0
+opentelemetry-instrumentation-asgi==0.63b1
     # via opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-dbapi==0.61b0
+opentelemetry-instrumentation-dbapi==0.63b1
     # via opentelemetry-instrumentation-psycopg2
-opentelemetry-instrumentation-django==0.61b0
+opentelemetry-instrumentation-django==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-fastapi==0.61b0
+opentelemetry-instrumentation-fastapi==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-flask==0.61b0
+opentelemetry-instrumentation-flask==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-logging==0.61b0
+opentelemetry-instrumentation-logging==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-psycopg2==0.61b0
+opentelemetry-instrumentation-psycopg2==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-requests==0.61b0
+opentelemetry-instrumentation-requests==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib==0.61b0
+opentelemetry-instrumentation-urllib==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-urllib3==0.61b0
+opentelemetry-instrumentation-urllib3==0.63b1
     # via azure-monitor-opentelemetry
-opentelemetry-instrumentation-wsgi==0.61b0
+opentelemetry-instrumentation-wsgi==0.63b1
     # via
     #   opentelemetry-instrumentation-django
     #   opentelemetry-instrumentation-flask
@@ -384,13 +384,13 @@ opentelemetry-proto==1.42.1
     # via mlflow-skinny
 opentelemetry-resource-detector-azure==0.1.5
     # via azure-monitor-opentelemetry
-opentelemetry-sdk==1.40.0
+opentelemetry-sdk==1.42.1
     # via
     #   azure-monitor-opentelemetry
     #   azure-monitor-opentelemetry-exporter
     #   mlflow-skinny
     #   opentelemetry-resource-detector-azure
-opentelemetry-semantic-conventions==0.61b0
+opentelemetry-semantic-conventions==0.63b1
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-asgi
@@ -403,7 +403,7 @@ opentelemetry-semantic-conventions==0.61b0
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
     #   opentelemetry-sdk
-opentelemetry-util-http==0.61b0
+opentelemetry-util-http==0.63b1
     # via
     #   opentelemetry-instrumentation-asgi
     #   opentelemetry-instrumentation-django
@@ -436,13 +436,13 @@ pillow==12.2.0
     #   imageio
     #   rerun-sdk
     #   torchvision
-platformdirs==4.9.6
+platformdirs==4.10.0
     # via wandb
 propcache==0.5.2
     # via
     #   aiohttp
     #   yarl
-protobuf==6.33.6
+protobuf==7.35.0
     # via
     #   databricks-sdk
     #   mlflow-skinny
@@ -471,7 +471,7 @@ pydantic==2.13.4
     #   fastapi
     #   mlflow-skinny
     #   wandb
-pydantic-core==2.46.4
+pydantic-core==2.47.0
     # via pydantic
 pydash==8.0.6
     # via azure-ai-ml
@@ -498,7 +498,7 @@ python-dotenv==1.2.2
     # via mlflow-skinny
 python-xlib==0.33
     # via pynput
-pytz==2025.2
+pytz==2026.2
     # via azureml-mlflow
 pyyaml==6.0.3
     # via
@@ -510,7 +510,7 @@ pyyaml==6.0.3
     #   mlflow-skinny
     #   pyyaml-include
     #   wandb
-pyyaml-include==1.4.1
+pyyaml-include==2.2
     # via draccus
 referencing==0.37.0
     # via
@@ -531,23 +531,23 @@ requests==2.34.2
     #   wandb
 requests-oauthlib==2.0.0
     # via msrest
-rerun-sdk==0.26.2
+rerun-sdk==0.33.0
     # via lerobot
 rich==15.0.0
     # via typer
-rpds-py==0.30.0
+rpds-py==2026.5.1
     # via
     #   jsonschema
     #   referencing
-safetensors==0.8.0rc0
+safetensors==0.8.0rc1
     # via
     #   accelerate
     #   diffusers
-sentry-sdk==2.60.0
+sentry-sdk==2.61.1
     # via
     #   robotics-training-il (pyproject.toml)
     #   wandb
-setuptools==80.10.2
+setuptools==82.0.1
     # via
     #   lerobot
     #   torch
@@ -562,7 +562,7 @@ smmap==5.0.3
     # via gitdb
 sqlparse==0.5.5
     # via mlflow-skinny
-starlette==0.52.1
+starlette==1.2.1
     # via
     #   fastapi
     #   mlflow-skinny
@@ -574,26 +574,26 @@ termcolor==3.3.0
     # via lerobot
 toml==0.10.2
     # via draccus
-torch==2.10.0
+torch==2.11.0
     # via
     #   accelerate
     #   lerobot
     #   torchvision
-torchcodec==0.13.0
+torchcodec==0.14.0
     # via
     #   --override (workspace)
     #   robotics-training-il (pyproject.toml)
     #   lerobot
-torchvision==0.25.0
+torchvision==0.27.0
     # via lerobot
 tqdm==4.67.3
     # via
     #   azure-ai-ml
     #   datasets
     #   huggingface-hub
-triton==3.6.0
+triton==3.7.0
     # via torch
-typer==0.26.2
+typer==0.26.7
     # via huggingface-hub
 typing-extensions==4.15.0
     # via
@@ -633,11 +633,11 @@ urllib3==2.7.0
     #   robotics-training-il (pyproject.toml)
     #   requests
     #   sentry-sdk
-uvicorn==0.48.0
+uvicorn==0.49.0
     # via mlflow-skinny
-wandb==0.24.2
+wandb==0.27.1
     # via lerobot
-wrapt==1.17.3
+wrapt==2.2.1
     # via
     #   robotics-training-il (pyproject.toml)
     #   opentelemetry-instrumentation
