@@ -8,7 +8,7 @@
 export interface DetectionRequest {
   /** Specific frame indices to process. If undefined, processes all frames. */
   frames?: number[]
-  /** Minimum confidence threshold (0.0-1.0, default: 0.25) */
+  /** Minimum confidence threshold (0.0-1.0, default: 0.1) */
   confidence?: number
   /** YOLO model variant (default: yolo11n) */
   model?: 'yolo11n' | 'yolo11s' | 'yolo11m' | 'yolo11l' | 'yolo11x'
