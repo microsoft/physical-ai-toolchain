@@ -9,7 +9,7 @@ dependencies = [
     "azure-storage-blob==12.29.0",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.33.0",
-    "marshmallow==4.3.0",
+    "marshmallow==3.26.2",
     "mlflow==3.13.0",
     "gitpython==3.1.50",
     "idna==3.17",
@@ -31,4 +31,5 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
+override-dependencies = ["starlette==1.0.1"]
 package = false
