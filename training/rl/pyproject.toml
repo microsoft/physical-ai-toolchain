@@ -21,9 +21,9 @@ dependencies = [
     "pyperclip==1.11.0",
     "cryptography==48.0.0",
     "pyjwt==2.13.0",
-    "rsl-rl-lib==5.4.0",
+    "rsl-rl-lib==5.4.1",
     "skrl==2.1.0",
-    "tensordict==0.12.4",
+    "tensordict==0.13.0",
 ]
 
 [build-system]
