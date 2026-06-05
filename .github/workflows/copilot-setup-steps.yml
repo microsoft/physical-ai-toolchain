@@ -42,6 +42,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends shellcheck jq ffmpeg
 
+      - name: Install OSV-Scanner v2.3.8
+        env:
+          OSV_SCANNER_VERSION: 2.3.8
+          OSV_SCANNER_SHA256: bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc
+        run: |
+          curl -sSLo /tmp/osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  /tmp/osv-scanner" | sha256sum -c --quiet -
+          sudo install -m 0755 /tmp/osv-scanner /usr/local/bin/osv-scanner
+          rm -f /tmp/osv-scanner
+          osv-scanner --version
+
       - name: Setup Python 3.12
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
