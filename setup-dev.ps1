@@ -9,7 +9,7 @@
     Development environment setup for physical-ai-toolchain.
 .DESCRIPTION
     Verifies required tools, installs uv, sets up Python virtual environment,
-    clones IsaacLab, and checks for hve-core.
+    clones Isaac Lab, and checks for hve-core.
 .PARAMETER DisableVenv
     Skip virtual environment creation; install packages directly.
 .EXAMPLE
@@ -189,6 +189,57 @@ if (Get-Command terraform-docs -ErrorAction SilentlyContinue) {
     Write-Info "terraform-docs: v$TerraformDocsVersion (installed)"
 }
 
+# ===================================================================
+# OSV-Scanner
+# ===================================================================
+Write-Section 'OSV-Scanner Setup'
+
+$OsvScannerVersion = '2.3.8'
+
+$osvInstalled = $null
+if (Get-Command osv-scanner -ErrorAction SilentlyContinue) {
+    $osvInstalled = (osv-scanner --version 2>&1 | Select-String -Pattern '\d+\.\d+\.\d+' | Select-Object -First 1).Matches.Value
+}
+
+if ($osvInstalled -eq $OsvScannerVersion) {
+    Write-Info "osv-scanner: v$osvInstalled"
+} else {
+    Write-Info "Installing osv-scanner v$OsvScannerVersion..."
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'amd64' }
+    $os = if ($IsLinux) { 'linux' } elseif ($IsMacOS) { 'darwin' } else { 'windows' }
+    $ext = if ($os -eq 'windows') { '.exe' } else { '' }
+    # SHA-256 digests for OSV-Scanner v2.3.8 release assets; keep aligned with setup-dev.sh.
+    $OsvScannerDigests = @{
+        'linux_amd64'   = 'bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc'
+        'linux_arm64'   = '8158b18edd2d03b1a30d905ca91b032bc62262167be8f206c27114f08823e27c'
+        'darwin_amd64'  = 'b8a80a9f14ca4c0cd0fc2d351b28f740da9e6a5b18385ac9f9d083360b5b504e'
+        'darwin_arm64'  = 'a8cd6507b06239f463a7642430cfd2d154882f150f6e30cdc0653e28dfc34216'
+        'windows_amd64' = 'cb04e79dd9698a7bc821bbfdddec916a416d1409fda79c927c509d37d00c9716'
+        'windows_arm64' = '285d1fbcf2c69ab5ee38ae3a850ab46e83f32ef1cd5f3c4c9eb161cc493f6d52'
+    }
+    $digestKey = "${os}_${arch}"
+    $expectedSha = $OsvScannerDigests[$digestKey]
+    if (-not $expectedSha) {
+        Write-Error "Unsupported OS/arch for osv-scanner: $digestKey"
+    }
+    $assetName = "osv-scanner_${os}_${arch}${ext}"
+    $url = "https://github.com/google/osv-scanner/releases/download/v$OsvScannerVersion/$assetName"
+    $dest = Join-Path ([System.IO.Path]::GetTempPath()) "osv-scanner$ext"
+    Invoke-WebRequest -Uri $url -OutFile $dest
+    $actualSha = (Get-FileHash -Path $dest -Algorithm SHA256).Hash.ToLower()
+    if ($actualSha -ne $expectedSha) {
+        Remove-Item $dest -ErrorAction SilentlyContinue
+        Write-Error "osv-scanner SHA-256 mismatch for ${digestKey}: expected $expectedSha, got $actualSha"
+    }
+    if ($os -eq 'windows') {
+        Move-Item $dest (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\osv-scanner.exe') -Force
+    } else {
+        sudo install -m 0755 $dest /usr/local/bin/osv-scanner
+        Remove-Item $dest -ErrorAction SilentlyContinue
+    }
+    Write-Info "osv-scanner: v$OsvScannerVersion (installed)"
+}
+
 Write-Section 'Python Environment Setup'
 
 $PythonVersion = Get-Content (Join-Path $ScriptDir '.python-version') -Raw
@@ -223,22 +274,22 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "uv lock failed (exit code $LASTEXITCODE)"
 }
 
-Write-Section 'IsaacLab Setup'
+Write-Section 'Isaac Lab Setup'
 
 $IsaacLabDir = Join-Path $ScriptDir 'external' 'IsaacLab'
 
 if (Test-Path $IsaacLabDir) {
-    Write-Info "IsaacLab already cloned at $IsaacLabDir"
+    Write-Info "Isaac Lab already cloned at $IsaacLabDir"
     Write-Info "To update, run: cd $IsaacLabDir && git pull"
 }
 else {
-    Write-Info 'Cloning IsaacLab for intellisense/Pylance support...'
+    Write-Info 'Cloning Isaac Lab for intellisense/Pylance support...'
     New-Item -ItemType Directory -Path (Join-Path $ScriptDir 'external') -Force | Out-Null
     git clone 'https://github.com/isaac-sim/IsaacLab.git' $IsaacLabDir
     if ($LASTEXITCODE -ne 0) {
         Write-Error "git clone failed (exit code $LASTEXITCODE)"
     }
-    Write-Info 'IsaacLab cloned successfully'
+    Write-Info 'Isaac Lab cloned successfully'
 }
 
 Write-Section 'hve-core Check'

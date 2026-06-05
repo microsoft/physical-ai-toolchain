@@ -1,7 +1,7 @@
 """Script to play an exported policy (ONNX or TorchScript) in Isaac Sim environment.
 
 This script runs inference using an exported policy model against the same
-simulation environment used for training, enabling validation of the exported
+simulation environment used for training, enabling evaluation of the exported
 model before Azure ML deployment.
 
 Supports both ONNX and TorchScript (JIT) model formats.
@@ -200,7 +200,7 @@ class RslRl3xCompatWrapper:
 
 
 class JitPolicy:
-    """Wrapper for JIT (TorchScript) policy inference compatible with IsaacLab environments."""
+    """Wrapper for JIT (TorchScript) policy inference compatible with Isaac Lab environments."""
 
     def __init__(self, jit_path: str, device: str = "cpu"):
         """Initialize JIT model.
@@ -232,7 +232,7 @@ class JitPolicy:
 
 
 class OnnxPolicy:
-    """Wrapper for ONNX policy inference compatible with IsaacLab environments."""
+    """Wrapper for ONNX policy inference compatible with Isaac Lab environments."""
 
     def __init__(self, onnx_path: str, device: str = "cpu", use_gpu: bool = False):
         """Initialize ONNX inference session.
