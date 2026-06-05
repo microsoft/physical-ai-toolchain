@@ -6,7 +6,7 @@ accelerate==1.13.0
     #   lerobot
 aiohappyeyeballs==2.6.2
     # via aiohttp
-aiohttp==3.13.5
+aiohttp==3.14.0
     # via fsspec
 aiosignal==1.4.0
     # via aiohttp
@@ -562,7 +562,7 @@ smmap==5.0.3
     # via gitdb
 sqlparse==0.5.5
     # via mlflow-skinny
-starlette==0.52.1
+starlette==1.0.1
     # via
     #   fastapi
     #   mlflow-skinny
