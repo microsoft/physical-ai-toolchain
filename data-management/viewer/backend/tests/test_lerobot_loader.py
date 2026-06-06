@@ -771,3 +771,164 @@ class TestV2LayoutDetection:
         loader.base_path = tmp_path
         info = self._info("data/chunk-{chunk_index:03d}/episode_{episode_index:06d}.parquet")
         assert loader._is_v2_layout(info) is False
+
+
+def _write_video_time_window_parquet(
+    base: Path,
+    *,
+    rows: list[dict],
+    chunk_index: int = 0,
+    file_index: int = 0,
+) -> Path:
+    """Build a v3 ``meta/episodes/`` parquet with per-camera video time windows.
+
+    Each row entry is ``{"episode_index": int, "cams": {camera: (from, to)}}``.
+    Cameras may differ between rows; missing values become None.
+    """
+    all_cameras: set[str] = set()
+    for r in rows:
+        all_cameras.update(r["cams"].keys())
+
+    columns: dict[str, list] = {"episode_index": [r["episode_index"] for r in rows]}
+    for camera in sorted(all_cameras):
+        from_key = f"videos/{camera}/from_timestamp"
+        to_key = f"videos/{camera}/to_timestamp"
+        columns[from_key] = []
+        columns[to_key] = []
+        for r in rows:
+            window = r["cams"].get(camera)
+            if window is None:
+                columns[from_key].append(None)
+                columns[to_key].append(None)
+            else:
+                columns[from_key].append(float(window[0]))
+                columns[to_key].append(float(window[1]))
+
+    table = pa.table(columns)
+    out_dir = base / "meta" / "episodes" / f"chunk-{chunk_index:03d}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"file-{file_index:03d}.parquet"
+    pq.write_table(table, out_path)
+    return out_path
+
+
+class TestVideoTimeWindows:
+    """Tests for ``get_video_time_window`` / ``_load_video_time_windows``."""
+
+    def _loader(self, tmp_path):
+        features = _default_features(video_keys=("cam0",))
+        _write_info(tmp_path, total_episodes=2, features=features)
+        return LeRobotLoader(str(tmp_path))
+
+    def test_returns_window_for_episode_and_camera(self, tmp_path):
+        loader = self._loader(tmp_path)
+        _write_video_time_window_parquet(
+            tmp_path,
+            rows=[
+                {"episode_index": 0, "cams": {"cam0": (0.0, 1.5)}},
+                {"episode_index": 1, "cams": {"cam0": (1.5, 3.25)}},
+            ],
+        )
+        assert loader.get_video_time_window(0, "cam0") == (0.0, 1.5)
+        assert loader.get_video_time_window(1, "cam0") == (1.5, 3.25)
+
+    def test_caches_after_first_call(self, tmp_path):
+        loader = self._loader(tmp_path)
+        _write_video_time_window_parquet(
+            tmp_path,
+            rows=[{"episode_index": 0, "cams": {"cam0": (0.0, 2.0)}}],
+        )
+        first = loader.get_video_time_window(0, "cam0")
+        # Mutate the cache to verify a second call reads cached value rather than re-loading.
+        loader._video_time_window_cache[0]["cam0"] = (99.0, 100.0)
+        second = loader.get_video_time_window(0, "cam0")
+        assert first == (0.0, 2.0)
+        assert second == (99.0, 100.0)
+
+    def test_returns_none_for_unknown_episode(self, tmp_path):
+        loader = self._loader(tmp_path)
+        _write_video_time_window_parquet(
+            tmp_path,
+            rows=[{"episode_index": 0, "cams": {"cam0": (0.0, 1.0)}}],
+        )
+        assert loader.get_video_time_window(99, "cam0") is None
+
+    def test_returns_none_for_unknown_camera(self, tmp_path):
+        loader = self._loader(tmp_path)
+        _write_video_time_window_parquet(
+            tmp_path,
+            rows=[{"episode_index": 0, "cams": {"cam0": (0.0, 1.0)}}],
+        )
+        assert loader.get_video_time_window(0, "missing-cam") is None
+
+    def test_returns_none_when_meta_episodes_dir_missing(self, tmp_path):
+        loader = self._loader(tmp_path)
+        assert loader.get_video_time_window(0, "cam0") is None
+
+    def test_returns_none_when_episode_index_column_absent(self, tmp_path):
+        loader = self._loader(tmp_path)
+        out_dir = tmp_path / "meta" / "episodes" / "chunk-000"
+        out_dir.mkdir(parents=True)
+        # Parquet without ``episode_index`` is skipped, leaving an empty cache.
+        table = pa.table({"videos/cam0/from_timestamp": [0.0], "videos/cam0/to_timestamp": [1.0]})
+        pq.write_table(table, out_dir / "file-000.parquet")
+        assert loader.get_video_time_window(0, "cam0") is None
+
+    def test_returns_none_when_no_from_timestamp_columns(self, tmp_path):
+        loader = self._loader(tmp_path)
+        out_dir = tmp_path / "meta" / "episodes" / "chunk-000"
+        out_dir.mkdir(parents=True)
+        table = pa.table({"episode_index": [0], "length": [10]})
+        pq.write_table(table, out_dir / "file-000.parquet")
+        assert loader.get_video_time_window(0, "cam0") is None
+
+    def test_skips_rows_with_null_timestamps(self, tmp_path):
+        loader = self._loader(tmp_path)
+        _write_video_time_window_parquet(
+            tmp_path,
+            rows=[
+                {"episode_index": 0, "cams": {"cam0": None}},
+                {"episode_index": 1, "cams": {"cam0": (1.0, 2.0)}},
+            ],
+        )
+        # Episode 0 has null timestamps → skipped; episode 1 still loads.
+        assert loader.get_video_time_window(0, "cam0") is None
+        assert loader.get_video_time_window(1, "cam0") == (1.0, 2.0)
+
+    def test_merges_windows_across_multiple_chunk_files(self, tmp_path):
+        loader = self._loader(tmp_path)
+        _write_video_time_window_parquet(
+            tmp_path,
+            chunk_index=0,
+            rows=[{"episode_index": 0, "cams": {"cam0": (0.0, 1.0)}}],
+        )
+        _write_video_time_window_parquet(
+            tmp_path,
+            chunk_index=1,
+            rows=[{"episode_index": 5, "cams": {"cam0": (5.0, 6.0)}}],
+        )
+        assert loader.get_video_time_window(0, "cam0") == (0.0, 1.0)
+        assert loader.get_video_time_window(5, "cam0") == (5.0, 6.0)
+
+    def test_ignores_non_chunk_directories(self, tmp_path):
+        loader = self._loader(tmp_path)
+        meta_episodes = tmp_path / "meta" / "episodes"
+        meta_episodes.mkdir(parents=True)
+        # File at the meta/episodes/ root, not inside a chunk directory.
+        (meta_episodes / "stray.parquet").write_bytes(b"not-a-real-parquet")
+        # A non-chunk subdirectory must be skipped.
+        (meta_episodes / "not-a-chunk").mkdir()
+        # And a real chunk directory still yields valid rows.
+        _write_video_time_window_parquet(
+            tmp_path,
+            rows=[{"episode_index": 0, "cams": {"cam0": (0.0, 1.0)}}],
+        )
+        assert loader.get_video_time_window(0, "cam0") == (0.0, 1.0)
+
+    def test_swallows_unreadable_parquet(self, tmp_path):
+        loader = self._loader(tmp_path)
+        bad_dir = tmp_path / "meta" / "episodes" / "chunk-000"
+        bad_dir.mkdir(parents=True)
+        (bad_dir / "file-000.parquet").write_bytes(b"definitely not parquet")
+        # Should warn-and-continue rather than raise.
+        assert loader.get_video_time_window(0, "cam0") is None

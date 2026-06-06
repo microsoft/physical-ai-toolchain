@@ -94,6 +94,7 @@ export function useAnnotationWorkspaceMediaController({
     insertedFrames,
     removedFrames,
     videoSrc: mediaSources.videoSrc,
+    videoWindow: mediaSources.videoWindow,
     onSetCurrentFrame,
     onTogglePlayback,
     onSetFrameWithinPlaybackRange,
