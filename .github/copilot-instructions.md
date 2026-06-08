@@ -42,7 +42,7 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 | `data-pipeline/capture/` | Recording configuration and data capture |
 | `scripts/` | CI/CD scripts, shared libraries, linting, security, and Pester tests |
 | `scripts/lib/` | Cross-domain shared shell and PowerShell libraries |
-| `external/IsaacLab/` | NVIDIA IsaacLab (cloned for IntelliSense only, not built locally) |
+| `external/IsaacLab/` | NVIDIA Isaac Lab (cloned for IntelliSense only, not built locally) |
 | `docs/contributing/` | Architecture, roadmap, style guides, contribution workflow |
 
 * Do not modify files in `external/`
@@ -389,7 +389,7 @@ AzureML runs on Arc-connected AKS clusters via the AzureML Kubernetes extension.
 
 ## Training Pipeline
 
-Training runs in NVIDIA IsaacLab containers on GPU nodes via AzureML or OSMO.
+Training runs in NVIDIA Isaac Lab containers on GPU nodes via AzureML or OSMO.
 
 * Container: `DEFAULT_ISAAC_LAB_IMAGE` from `scripts/lib/common.sh` (currently `nvcr.io/nvidia/isaac-lab:2.3.2`)
   * Python path: `/isaac-sim/kit/python/bin/python3` (NOT system Python)

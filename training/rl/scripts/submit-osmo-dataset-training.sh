@@ -27,7 +27,7 @@ The training folder is uploaded as a versioned OSMO dataset via localpath.
 
 WORKFLOW OPTIONS:
     -w, --workflow PATH           Workflow template (default: training/rl/workflows/osmo/train-dataset.yaml)
-    -t, --task NAME               IsaacLab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
+    -t, --task NAME               Isaac Lab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
     -n, --num-envs COUNT          Number of environments (default: 2048)
     -m, --max-iterations N        Maximum iterations (empty to unset)
     -i, --image IMAGE             Container image (default: ${DEFAULT_ISAAC_LAB_IMAGE})
