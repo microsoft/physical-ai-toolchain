@@ -25,24 +25,24 @@ dependencies = [
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
-    "mlflow-skinny==3.12.0",
+    "mlflow-skinny==3.13.0",
     "packaging==26.2",
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
     "pydantic==2.13.4",
-    "sentry-sdk==2.60.0",
+    "sentry-sdk==2.61.1",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "datasets==4.8.5",
+    "datasets==5.0.0",
     "pyarrow==24.0.0",
-    "huggingface-hub==1.16.1",
+    "huggingface-hub==1.18.0",
     "lerobot==0.5.1",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.13.0",
-    "torchcodec==0.13.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "torchcodec==0.14.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
     "gitpython==3.1.50",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
@@ -51,7 +51,7 @@ dependencies = [
     # constrains wrapt below 2.0 and above 1.0, but with prerelease resolution
     # enabled below uv would otherwise pick the 1.17.4 release candidate over
     # 1.17.3 stable.
-    "wrapt==1.17.3",
+    "wrapt==2.2.1",
 ]
 
 [build-system]
@@ -76,14 +76,14 @@ override-dependencies = [
     # need 12.29.0 for the AzureCliCredential fix shipped in that release.
     "azure-storage-blob==12.29.0",
     # mlflow-skinny: lerobot==0.5.1 has a tighter cap; mirror the direct pin.
-    "mlflow-skinny==3.12.0",
+    "mlflow-skinny==3.13.0",
     # packaging: azureml-mlflow caps below 26.x; mirror the direct pin.
     "packaging==26.2",
     # numpy: lerobot==0.5.1 caps at <2.4; we need 2.4.6 to align with torchcodec.
     "numpy==2.4.6",
     # torchcodec: lerobot==0.5.1 caps below 0.12; 0.13.0 ships the manylinux
     # 2.28 wheel needed by the AzureML CUDA container.
-    "torchcodec==0.13.0",
+    "torchcodec==0.14.0",
 ]
 package = false
 

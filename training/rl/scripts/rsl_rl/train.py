@@ -1,7 +1,7 @@
-"""RSL-RL training orchestration with IsaacLab environments and Azure MLflow integration.
+"""RSL-RL training orchestration with Isaac Lab environments and Azure MLflow integration.
 
 This module provides the main training loop for reinforcement learning agents using
-the RSL-RL library with IsaacLab simulation environments. It handles:
+the RSL-RL library with Isaac Lab simulation environments. It handles:
 - Environment and agent configuration via Hydra
 - Checkpoint loading and model registration
 - MLflow metric logging and artifact tracking
@@ -782,7 +782,7 @@ def main(
                         "algorithm": "PPO",
                         "experiment": agent_cfg.experiment_name,
                         "entrypoint": "scripts/rsl_rl/train.py",
-                        "validated": "false",
+                        "evaluated": "false",
                     },
                     properties={
                         "success_threshold": "0.7",

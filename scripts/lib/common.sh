@@ -103,8 +103,18 @@ pull_and_verify_chart() {
   local chart_ref="$1" version="$2" expected_sha="$3" output_dir="$4"
   mkdir -p "$output_dir"
 
-  helm pull "$chart_ref" --version "$version" --destination "$output_dir" >&2 || \
-    fatal "helm pull failed for $chart_ref $version"
+  helm pull "$chart_ref" --version "$version" --destination "$output_dir" >&2 || {
+    if [[ "$chart_ref" == oci://ghcr.io/* ]]; then
+      error "helm pull failed for $chart_ref $version"
+      error ""
+      error "If the helm error above contains '403' or 'denied', a stale or expired credential may be cached in your Helm registry config."
+      error "Most common fix (works for public packages such as kai-scheduler — restores the anonymous pull path):"
+      error "  helm registry logout ghcr.io"
+      exit 1
+    else
+      fatal "helm pull failed for $chart_ref $version"
+    fi
+  }
 
   local tgz
   tgz=$(find_latest_chart_archive "$output_dir")
