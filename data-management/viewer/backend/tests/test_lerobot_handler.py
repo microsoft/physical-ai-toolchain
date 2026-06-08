@@ -436,6 +436,44 @@ class TestLoadEpisodeSynthetic:
         _inject(h, FakeLoader(raise_on={"load_episode"}))
         assert h.load_episode("ds", 0) is None
 
+    def test_populates_video_time_windows_per_camera(self):
+        from src.api.models.datasources import DatasetInfo, FeatureSchema
+
+        class _WindowedLoader(FakeLoader):
+            def get_video_time_window(self, episode_idx, camera):
+                if camera == "observation.images.cam0":
+                    return (1.0, 2.5)
+                return None
+
+        h = LeRobotFormatHandler()
+        _inject(h, _WindowedLoader())
+        ds_info = DatasetInfo(
+            id="ds",
+            name="ds",
+            total_episodes=1,
+            fps=30.0,
+            features={
+                "observation.images.cam0": FeatureSchema(dtype="video", shape=[480, 640, 3]),
+                "observation.images.blob_only": FeatureSchema(dtype="video", shape=[480, 640, 3]),
+            },
+            tasks=[],
+        )
+        ep = h.load_episode("ds", 0, dataset_info=ds_info)
+        assert ep is not None
+        assert ep.video_time_windows == {"observation.images.cam0": [1.0, 2.5]}
+
+    def test_video_time_window_exception_is_swallowed(self):
+        class _RaisingLoader(FakeLoader):
+            def get_video_time_window(self, episode_idx, camera):
+                raise RuntimeError("blob unreachable")
+
+        h = LeRobotFormatHandler()
+        _inject(h, _RaisingLoader())
+        ep = h.load_episode("ds", 0)
+        assert ep is not None
+        # Loader raised for every camera → no entries populated, but loading itself succeeded.
+        assert ep.video_time_windows == {}
+
 
 class TestGetTrajectorySynthetic:
     def test_no_loader_returns_empty(self):

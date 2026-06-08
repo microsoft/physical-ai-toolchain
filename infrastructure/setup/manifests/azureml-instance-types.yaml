@@ -45,3 +45,72 @@ spec:
       cpu: "8"
       memory: "32Gi"
       nvidia.com/gpu: 1
+---
+# Multi-GPU single-node pods. Pod-level nvidia.com/gpu limit must match the
+# accelerate --num_processes value; the node VM SKU caps the maximum (e.g.,
+# Standard_NC128ds_xl_RTXPRO6000BSE_v6 exposes 4 GPUs per node).
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: gpuspot2
+spec:
+  nodeSelector:
+    accelerator: nvidia
+    kubernetes.azure.com/scalesetpriority: spot
+  resources:
+    requests:
+      cpu: "8"
+      memory: "32Gi"
+    limits:
+      cpu: "16"
+      memory: "64Gi"
+      nvidia.com/gpu: 2
+---
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: gpu2
+spec:
+  nodeSelector:
+    accelerator: nvidia
+  resources:
+    requests:
+      cpu: "8"
+      memory: "32Gi"
+    limits:
+      cpu: "16"
+      memory: "64Gi"
+      nvidia.com/gpu: 2
+---
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: gpuspot4
+spec:
+  nodeSelector:
+    accelerator: nvidia
+    kubernetes.azure.com/scalesetpriority: spot
+  resources:
+    requests:
+      cpu: "16"
+      memory: "64Gi"
+    limits:
+      cpu: "32"
+      memory: "128Gi"
+      nvidia.com/gpu: 4
+---
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: gpu4
+spec:
+  nodeSelector:
+    accelerator: nvidia
+  resources:
+    requests:
+      cpu: "16"
+      memory: "64Gi"
+    limits:
+      cpu: "32"
+      memory: "128Gi"
+      nvidia.com/gpu: 4

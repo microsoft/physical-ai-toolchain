@@ -1,1 +1,1 @@
-"""Training scripts for IsaacLab robotics workflows."""
+"""Training scripts for Isaac Lab robotics workflows."""

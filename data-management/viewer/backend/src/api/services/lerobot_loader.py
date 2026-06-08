@@ -129,6 +129,8 @@ class LeRobotLoader:
         self._info: LeRobotDatasetInfo | None = None
         self._episode_index_cache: dict[int, tuple[int, int]] = {}  # episode -> (chunk, file)
         self._episodes_meta_cache: dict[int, dict[str, Any]] | None = None
+        # episode -> {camera -> (from_timestamp, to_timestamp)} for v3 concatenated videos
+        self._video_time_window_cache: dict[int, dict[str, tuple[float, float]]] | None = None
 
     def _load_info(self) -> LeRobotDatasetInfo:
         """Load and cache dataset info from meta/info.json."""
@@ -552,6 +554,64 @@ class LeRobotLoader:
         if video_full_path.exists():
             return video_full_path
         return None
+
+    def get_video_time_window(self, episode_index: int, camera_key: str) -> tuple[float, float] | None:
+        """Return (from_timestamp, to_timestamp) for an episode within its v3 concatenated video.
+
+        LeRobot v3 packs multiple episodes into a single video file per chunk.
+        The per-episode time window is stored in ``meta/episodes/chunk-*/file-*.parquet``
+        under columns ``videos/{camera}/from_timestamp`` and ``videos/{camera}/to_timestamp``.
+        Returns None when the dataset is v2.x (one episode per file) or the metadata
+        is absent.
+        """
+        cache = self._video_time_window_cache
+        if cache is None:
+            cache = self._load_video_time_windows()
+            self._video_time_window_cache = cache
+        entry = cache.get(episode_index)
+        if entry is None:
+            return None
+        return entry.get(camera_key)
+
+    def _load_video_time_windows(self) -> dict[int, dict[str, tuple[float, float]]]:
+        """Scan ``meta/episodes/`` parquet files for per-episode video time windows."""
+        result: dict[int, dict[str, tuple[float, float]]] = {}
+        meta_episodes_dir = self.base_path / "meta" / "episodes"
+        if not meta_episodes_dir.exists():
+            return result
+
+        for chunk_dir in sorted(meta_episodes_dir.iterdir()):
+            if not chunk_dir.is_dir() or not chunk_dir.name.startswith("chunk-"):
+                continue
+            for parquet_file in sorted(chunk_dir.glob("*.parquet")):
+                try:
+                    table = pq.read_table(parquet_file)
+                except Exception as e:
+                    logger.warning("Failed to read %s: %s", parquet_file, e)
+                    continue
+                cols = table.column_names
+                if "episode_index" not in cols:
+                    continue
+                cameras = {c.split("/")[1] for c in cols if c.startswith("videos/") and c.endswith("/from_timestamp")}
+                if not cameras:
+                    continue
+                ep_col = table.column("episode_index")
+                for camera in cameras:
+                    from_col = f"videos/{camera}/from_timestamp"
+                    to_col = f"videos/{camera}/to_timestamp"
+                    if from_col not in cols or to_col not in cols:
+                        continue
+                    from_arr = table.column(from_col)
+                    to_arr = table.column(to_col)
+                    for i in range(table.num_rows):
+                        try:
+                            ep_idx = int(ep_col[i].as_py())
+                            from_ts = float(from_arr[i].as_py())
+                            to_ts = float(to_arr[i].as_py())
+                        except (TypeError, ValueError):
+                            continue
+                        result.setdefault(ep_idx, {})[camera] = (from_ts, to_ts)
+        return result
 
     def get_cameras(self) -> list[str]:
         """

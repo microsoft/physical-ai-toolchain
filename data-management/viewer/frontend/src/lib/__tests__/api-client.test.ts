@@ -132,6 +132,85 @@ describe('fetchEpisode', () => {
     expect(result).toHaveProperty('videoUrls')
     expect(result).toHaveProperty('trajectoryData')
   })
+
+  it('preserves video_urls camera keys verbatim (no camelCasing)', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        meta: { episode_index: 0 },
+        video_urls: {
+          'observation.images.cam_0': '/v0.mp4',
+          'observation.images.wrist_cam': '/v1.mp4',
+        },
+        trajectory_data: [],
+      }),
+    )
+
+    const result = await fetchEpisode('ds-1', 0)
+    expect(result.videoUrls).toEqual({
+      'observation.images.cam_0': '/v0.mp4',
+      'observation.images.wrist_cam': '/v1.mp4',
+    })
+  })
+
+  it('preserves video_time_windows camera keys and tuple values', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        meta: { episode_index: 0 },
+        video_urls: { 'observation.images.wrist_cam': '/v.mp4' },
+        video_time_windows: {
+          'observation.images.wrist_cam': [1.5, 4.25],
+          'observation.images.overhead.cam': [0, 10],
+        },
+        trajectory_data: [],
+      }),
+    )
+
+    const result = await fetchEpisode('ds-1', 0)
+    expect(result.videoTimeWindows).toEqual({
+      'observation.images.wrist_cam': [1.5, 4.25],
+      'observation.images.overhead.cam': [0, 10],
+    })
+  })
+
+  it('omits videoTimeWindows when the backend payload has no window map', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        meta: { episode_index: 0 },
+        video_urls: { front: '/v.mp4' },
+        trajectory_data: [],
+      }),
+    )
+
+    const result = await fetchEpisode('ds-1', 0)
+    expect(result.videoTimeWindows).toBeUndefined()
+  })
+
+  it('preserves trajectory variable keys with dots and underscores', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        meta: { episode_index: 0 },
+        video_urls: {},
+        trajectory_data: [
+          {
+            timestamp: 0,
+            frame: 0,
+            variables: {
+              'observation.gripper.is_closed': 1,
+              'observation.joint_0.position': 0.42,
+            },
+          },
+        ],
+      }),
+    )
+
+    const result = await fetchEpisode('ds-1', 0)
+    const variables = (result.trajectoryData[0] as unknown as { variables: Record<string, number> })
+      .variables
+    expect(variables).toEqual({
+      'observation.gripper.is_closed': 1,
+      'observation.joint_0.position': 0.42,
+    })
+  })
 })
 
 describe('fetchAnnotations', () => {

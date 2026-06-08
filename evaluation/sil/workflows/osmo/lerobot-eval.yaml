@@ -93,7 +93,7 @@ workflow:
               echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
               exit 1
             fi
-            uv pip install --system --requirement "${LEROBOT_REQUIREMENTS}"
+            uv pip install --no-cache-dir --no-deps --system --requirement "${LEROBOT_REQUIREMENTS}"
 
             # Install MLflow and matplotlib when MLflow tracking is enabled
             if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then

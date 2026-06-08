@@ -48,11 +48,23 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
 
   // Get available cameras from episode data
   const cameras = Object.keys(currentEpisode?.videoUrls ?? {})
-  const videoUrl = currentEpisode?.videoUrls[selectedCamera] ?? ''
+  const baseVideoUrl = currentEpisode?.videoUrls[selectedCamera] ?? ''
+  const videoWindow = currentEpisode?.videoTimeWindows?.[selectedCamera]
+  const windowStart = videoWindow?.[0] ?? 0
+  const windowEnd = videoWindow?.[1]
+  const windowDuration = windowEnd !== undefined ? windowEnd - windowStart : undefined
 
-  // Derive fps from actual video duration to handle metadata mismatches.
+  // Append a media-fragment hint so the browser starts at windowStart and pauses at
+  // windowEnd natively (HTML5 Media Fragments). This is the primary mechanism for
+  // clipping concatenated v3 LeRobot videos; JS-side handlers below are a safety net.
+  const videoUrl =
+    baseVideoUrl && videoWindow ? `${baseVideoUrl}#t=${windowStart},${windowEnd}` : baseVideoUrl
+
+  // Derive fps from the windowed clip duration when available, else from
+  // the full video duration (legacy single-episode-per-file layout).
   const episodeFrameCount = currentEpisode?.meta.length ?? 0
-  const fps = computeEffectiveFps(episodeFrameCount, duration, 30)
+  const effectiveDuration = windowDuration ?? duration
+  const fps = computeEffectiveFps(episodeFrameCount, effectiveDuration, 30)
 
   // Select first camera by default
   useEffect(() => {
@@ -61,8 +73,8 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
     }
   }, [cameras, selectedCamera])
 
-  // Calculate current time from frame
-  const currentTime = currentFrame / fps
+  // Calculate current time from frame (relative to window start)
+  const currentTime = windowStart + currentFrame / fps
 
   // Handle duration update
   const handleDuration = useCallback((dur: number) => {
@@ -73,18 +85,44 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
   const handleProgress = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (state: any) => {
+      // Stop playback when reaching the end of this episode's window
+      if (windowEnd !== undefined && state.playedSeconds >= windowEnd) {
+        if (playerRef.current) {
+          playerRef.current.seekTo(windowEnd, 'seconds')
+        }
+        const lastFrame = Math.max(0, episodeFrameCount - 1)
+        setCurrentFrame(lastFrame)
+        if (isPlaying) {
+          togglePlayback()
+        }
+        return
+      }
       if (isPlaying) {
-        const frame = Math.floor(state.playedSeconds * fps)
-        setCurrentFrame(frame)
+        const frame = Math.floor((state.playedSeconds - windowStart) * fps)
+        setCurrentFrame(Math.max(0, frame))
       }
     },
-    [fps, isPlaying, setCurrentFrame],
+    [episodeFrameCount, fps, isPlaying, setCurrentFrame, togglePlayback, windowEnd, windowStart],
   )
 
-  // Handle ready state
+  // Handle ready state. Do not seek here: react-player re-fires onReady after
+  // each seekTo, which would cause an infinite ready→seek→ready loop.
   const handleReady = useCallback(() => {
     setIsReady(true)
   }, [])
+
+  // When the episode/window changes (videoUrl includes the start timestamp),
+  // seek to the window start. videoUrl is value-stable across renders for the
+  // same episode/camera, so this only fires on actual episode/camera changes.
+  useEffect(() => {
+    if (!playerRef.current || !isReady || !videoUrl) {
+      return
+    }
+    playerRef.current.seekTo(windowStart, 'seconds')
+    // windowStart intentionally omitted: it is captured per videoUrl identity,
+    // and including it would re-seek on unrelated re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoUrl, isReady])
 
   // Seek to frame when currentFrame changes externally
   useEffect(() => {
@@ -99,7 +137,7 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
     if (playerRef.current && isReady && isPlaying) {
       const internalPlayer = playerRef.current.getInternalPlayer()
       if (internalPlayer && typeof internalPlayer.currentTime === 'number') {
-        const targetTime = currentFrame / fps
+        const targetTime = windowStart + currentFrame / fps
         if (Math.abs(internalPlayer.currentTime - targetTime) > 0.5 / fps) {
           playerRef.current.seekTo(targetTime, 'seconds')
         }
@@ -145,8 +183,8 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [currentFrame, setCurrentFrame, togglePlayback])
 
-  // Total frames
-  const totalFrames = Math.floor(duration * fps)
+  // Total frames within this episode's window
+  const totalFrames = episodeFrameCount || Math.floor(effectiveDuration * fps)
 
   if (!currentEpisode) {
     return (
@@ -203,7 +241,7 @@ export function VideoPlayer({ className }: VideoPlayerProps) {
       <PlaybackControls
         currentFrame={currentFrame}
         totalFrames={totalFrames}
-        duration={duration}
+        duration={effectiveDuration}
         fps={fps}
       />
     </div>

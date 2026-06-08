@@ -1,1 +1,1 @@
-"""Azure ML training utilities for IsaacLab robotics workflows."""
+"""Azure ML training utilities for Isaac Lab robotics workflows."""
