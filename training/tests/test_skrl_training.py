@@ -1441,7 +1441,7 @@ class TestRunTraining:
 
         monkeypatch.setattr("builtins.__import__", fake_import)
 
-        with pytest.raises(SystemExit, match="IsaacLab packages are required"):
+        with pytest.raises(SystemExit, match="Isaac Lab packages are required"):
             _MOD.run_training(args=_make_mlflow_args(), hydra_args=[], context=None)
 
     def test_runs_training_success_path(self, mocker: MockerFixture) -> None:

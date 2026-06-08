@@ -18,6 +18,7 @@
 		"sdgcpu",
 		"unstub",
 		"uppercased",
+		"varname",
 		"xticklabels"
 	],
 	"ignorePaths": [

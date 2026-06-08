@@ -1,0 +1,63 @@
+# OSV-Scanner suppression policy — single source of truth.
+#
+# All vulnerability suppressions live in this file (decisions DD-01 / Q1 / Q2 / Q9 in
+# .copilot-tracking/research/2026-05-23/osv-scanner-and-lerobot-torch-research.md).
+# Do NOT add `--ignore` flags to npm scripts, setup-dev scripts, or CI workflows;
+# every workflow and CLI invocation reads this file via `--config osv-scanner.toml`.
+#
+# Each [[IgnoredVulns]] entry MUST include both `reason` and `ignoreUntil`.
+# Each [[PackageOverrides]] entry MUST include both `reason` and `effectiveUntil`.
+# `ignoreUntil` and `effectiveUntil` are TOML local-date literals (unquoted, YYYY-MM-DD).
+#
+# Template:
+#
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# ignoreUntil = 2026-12-31
+# reason = "Upstream fix pending in <package> v<X.Y.Z>; tracked in <issue-link>."
+
+# === Package overrides ===
+#
+# Use [[PackageOverrides]] for findings tied to a specific package+version that
+# are not reachable at runtime (e.g., transitives of test fixtures).
+
+# idna 3.9.0 — transitive of pinned `requests` / `flask` entries in
+# scripts/tests/Fixtures/Pip/ and shared/ci/tests/Fixtures/Pip/. Those files are
+# static test data for Test-DependencyPinning.ps1 and are never installed at
+# runtime. Finding: GHSA-65pc-fj4g-8rjx (fixed in idna 3.15).
+[[PackageOverrides]]
+name = "idna"
+version = "3.9.0"
+ecosystem = "PyPI"
+vulnerability.ignore = true
+effectiveUntil = 2026-06-30
+reason = "Static test-fixture transitive; never installed. Re-evaluate by 2026-06-30 or refresh fixtures."
+
+# === Vulnerability suppressions ===
+
+# starlette < 1.0.1 — affects uv.lock (root), evaluation/uv.lock, and
+# data-management/viewer{,/backend}/uv.lock. Lockfile bumps scheduled for the
+# next Dependabot/Renovate cycle following PR #781.
+[[IgnoredVulns]]
+id = "PYSEC-2026-161"
+ignoreUntil = 2026-06-30
+reason = "starlette < 1.0.1; lockfile refreshes scheduled across viewer, evaluation, and root uv.locks post-#781."
+
+# torch 2.10.0 — no published fix at scan time. Sibling PR #783 bumps
+# training/il and evaluation to torch 2.11.0; data-management/viewer{,/backend}
+# uv.locks remain on 2.10.0 pending a follow-up bump.
+[[IgnoredVulns]]
+id = "PYSEC-2026-139"
+ignoreUntil = 2026-06-30
+reason = "torch 2.10.0; PR #783 covers training/eval stack. Viewer uv.locks scheduled for follow-up bump."
+
+# docusaurus npm transitives — addressed by sibling PR #782 lockfile refresh.
+[[IgnoredVulns]]
+id = "GHSA-q8mj-m7cp-5q26"
+ignoreUntil = 2026-06-30
+reason = "qs < 6.15.2 transitive in docs/docusaurus/package-lock.json; refresh tracked in PR #782."
+
+[[IgnoredVulns]]
+id = "GHSA-w5hq-g745-h8pq"
+ignoreUntil = 2026-06-30
+reason = "uuid < 11.1.1 transitive in docs/docusaurus/package-lock.json; refresh tracked in PR #782."
