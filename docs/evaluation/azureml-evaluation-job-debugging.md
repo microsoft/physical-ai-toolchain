@@ -1,14 +1,14 @@
 ---
-title: AzureML Validation Job Debugging
-sidebar_label: Validation Job Debugging
+title: AzureML Evaluation Job Debugging
+sidebar_label: Evaluation Job Debugging
 sidebar_position: 2
-description: Troubleshooting guide for AzureML validation job failures and common issues.
+description: Troubleshooting guide for AzureML evaluation job failures and common issues.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-12
+ms.date: 2026-06-01
 ms.topic: troubleshooting
 ---
 
-## AzureML Validation Job Debugging Summary
+## AzureML Evaluation Job Debugging Summary
 
 **Date**: December 3, 2025
 **Branch**: `feat/azureml-job-support`
@@ -16,26 +16,26 @@ ms.topic: troubleshooting
 
 ## Objective
 
-Enable policy validation workflow using `osmorobo-validate.sh` to validate trained IsaacLab policies registered in Azure Machine Learning.
+Enable policy evaluation workflow using `osmorobo-validate.sh` to evaluate trained Isaac Lab policies registered in Azure Machine Learning.
 
 ## Original Problem
 
-After successfully training an IsaacLab policy using `osmorobo-submit.sh`, the user attempted to validate the trained policy using `osmorobo-validate.sh`. The validation script submits an AzureML command job that:
+After successfully training an Isaac Lab policy using `osmorobo-submit.sh`, the user attempted to evaluate the trained policy using `osmorobo-validate.sh`. The evaluation script submits an AzureML command job that:
 
 1. Takes a registered model as input (`isaaclab-anymal-latest:2`)
-2. Runs validation episodes using the IsaacLab container
+2. Runs evaluation episodes using the Isaac Lab container
 3. Reports success/failure metrics
 
 ### Initial Error: Invalid YAML Schema
 
-When first submitting the validation job, AzureML rejected the job YAML with schema validation errors:
+When first submitting the evaluation job, AzureML rejected the job YAML with schema validation errors:
 
 ```text
 ValidationError: The value 'string' of input type is not valid for Command job.
 Supported types are ['uri_file', 'uri_folder', 'mlflow_model', 'custom_model', 'mltable', 'triton_model']
 ```
 
-**Cause**: The `isaaclab-validate.yaml` template was using typed literal inputs (`type: string`, `type: integer`) which are valid for AzureML Pipeline jobs but NOT for Command jobs. Command jobs expect literal inputs as simple key-value pairs without type declarations.
+**Cause**: The `isaaclab-evaluation.yaml` template was using typed literal inputs (`type: string`, `type: integer`) which are valid for AzureML Pipeline jobs but NOT for Command jobs. Command jobs expect literal inputs as simple key-value pairs without type declarations.
 
 ### Second Error: Empty String Not Allowed
 
@@ -93,7 +93,7 @@ Also changed model input from `type: mlflow_model` to `type: custom_model` since
 - `task: ""` → `task: auto`
 - `framework: ""` → `framework: auto`
 
-The validation script handles `auto` as "detect from model metadata".
+The evaluation script handles `auto` as "detect from model metadata".
 
 ### Step 3: Investigate Permission Denied Error
 
@@ -241,7 +241,7 @@ azureml_config = {
 
 ### 2. AzureML Job YAML Schema Fixes
 
-#### [workflows/azureml/validate.yaml](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/validate.yaml)
+#### [evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml](https://github.com/microsoft/physical-ai-toolchain/blob/main/evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml)
 
 Fixed input schema to comply with AzureML command job requirements:
 
@@ -358,12 +358,12 @@ cd infrastructure/terraform
 terraform apply -var-file=terraform.tfvars
 ```
 
-**Pros**: Quick, will unblock validation workflow
+**Pros**: Quick, will unblock evaluation workflow
 **Cons**: Reduces security posture (shared keys are less secure than managed identity)
 
 ### Option 2: Use AML SDK for Model Download (Code Change)
 
-Modify `validate.sh` to use Python AzureML SDK to download the model within the container, which can leverage the pod's MSI endpoint:
+Modify `evaluation.sh` to use Python AzureML SDK to download the model within the container, which can leverage the pod's MSI endpoint:
 
 ```python
 from azure.ai.ml import MLClient
@@ -393,17 +393,17 @@ Submit jobs to AzureML managed compute (e.g., `gpu-cluster`) instead of the atta
 
 ## Recommended Next Steps
 
-1. **Immediate**: Implement Option 1 (enable shared key access) to unblock validation testing
+1. **Immediate**: Implement Option 1 (enable shared key access) to unblock evaluation testing
 2. **Short-term**: File Microsoft support ticket for workload identity + AzureML extension issue
 3. **Medium-term**: Implement Option 2 as a more secure long-term solution
 4. **Documentation**: Update deployment docs to note this limitation
 
 ## Files Changed Summary
 
-| File                               | Change Type                                                     |
-|------------------------------------|-----------------------------------------------------------------|
-| `infrastructure/terraform/main.tf` | Added `should_install_extension`, `should_federate_ml_identity` |
-| `workflows/azureml/validate.yaml`  | Fixed input schema, changed mount to download                   |
+| File                                      | Change Type                                                     |
+|-------------------------------------------|-----------------------------------------------------------------|
+| `infrastructure/terraform/main.tf`        | Added `should_install_extension`, `should_federate_ml_identity` |
+| `workflows/azureml/isaaclab-evaluation.yaml`     | Fixed input schema, changed mount to download                   |
 
 ## Related Resources
 

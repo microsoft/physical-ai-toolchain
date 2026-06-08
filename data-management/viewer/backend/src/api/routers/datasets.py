@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from ..models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
 from ..services.dataset_service import DatasetService, get_dataset_service
+from ..services.video_transcode import ensure_browser_compatible
 from ..validation import (
     SAFE_CAMERA_NAME_PATTERN,
     SAFE_DATASET_ID_PATTERN,
@@ -284,6 +285,9 @@ async def get_episode_video(
                 status_code=404,
                 detail=f"Video file not found: {video_path}",
             )
+        # Transcode on demand if the source codec is not browser-compatible
+        # (e.g. mpeg4 / MPEG-4 Part 2). Cached after first request.
+        video_file = await ensure_browser_compatible(video_file)
         suffix = video_file.suffix.lower()
         media_types = {
             ".mp4": "video/mp4",
@@ -299,7 +303,9 @@ async def get_episode_video(
             headers={"Cache-Control": "public, max-age=86400, immutable"},
         )
 
-    # Fall back to blob streaming when local file is unavailable
+    # Fall back to blob storage when local file is unavailable. Blob videos
+    # are downloaded fully to a local cache so on-demand transcoding can run
+    # against a seekable file; FileResponse then provides Range support.
     if service.has_blob_provider():
         blob_path = await service.get_blob_video_path(dataset_id, episode_idx, camera)
         if blob_path is None:
@@ -308,28 +314,31 @@ async def get_episode_video(
                 detail=f"Video not found in blob storage for episode {episode_idx}, camera '{camera}'",
             )
 
-        stream_result = await service.get_blob_video_stream(
-            blob_path,
-            offset=range_values[0],
-            length=range_values[1],
-        )
-        if stream_result is not None:
-            headers, media_type, stream = stream_result
-            status_code = 206 if range_values[0] is not None else 200
-
-            if request.method == "HEAD":
-                return Response(
-                    status_code=status_code,
-                    headers=headers,
-                    media_type=media_type,
-                )
-
-            return StreamingResponse(
-                stream,
-                status_code=status_code,
-                media_type=media_type,
-                headers=headers,
+        local_path = await service.materialize_blob_video(blob_path)
+        if local_path is None:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to download video from blob storage: {blob_path}",
             )
+
+        local_path = await ensure_browser_compatible(local_path)
+        suffix = local_path.suffix.lower()
+        media_types = {
+            ".mp4": "video/mp4",
+            ".webm": "video/webm",
+            ".avi": "video/x-msvideo",
+            ".mov": "video/quicktime",
+        }
+        media_type = media_types.get(suffix, "video/mp4")
+        download_name = f"{dataset_id}_ep{episode_idx}_{camera.replace('.', '_')}{suffix}"
+        return FileResponse(
+            path=str(local_path),
+            media_type=media_type,
+            headers={
+                "Cache-Control": "public, max-age=300, must-revalidate",
+                "Content-Disposition": f'inline; filename="{download_name}"',
+            },
+        )
 
     raise HTTPException(
         status_code=404,

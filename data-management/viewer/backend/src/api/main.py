@@ -141,13 +141,14 @@ async def health_check():
         from .services.dataset_service import get_dataset_service
 
         service = get_dataset_service()
-        if hasattr(service, "base_path"):
+        # In Azure mode the local base_path is irrelevant; treat the blob
+        # provider's presence as the storage health signal.
+        if _config.storage_backend == "azure":
+            checks["storage"] = "healthy" if service._blob_provider is not None else "unhealthy"
+        elif hasattr(service, "base_path"):
             from pathlib import Path as _Path
 
-            if _Path(service.base_path).exists():
-                checks["storage"] = "healthy"
-            else:
-                checks["storage"] = "unhealthy"
+            checks["storage"] = "healthy" if _Path(service.base_path).exists() else "unhealthy"
         else:
             checks["storage"] = "healthy"
     except Exception:
