@@ -16,6 +16,7 @@ import pytest
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
 from src.api.services.dataset_service.service import (
     DatasetService,
+    _normalize_feature_names,
     _validate_dataset_id,
 )
 
@@ -749,3 +750,218 @@ class TestGetDatasetServiceSingleton:
         second = svc_mod.get_dataset_service()
         assert first is second
         assert isinstance(first, DatasetService)
+
+
+class TestNormalizeFeatureNames:
+    def test_returns_none_for_none(self):
+        assert _normalize_feature_names(None) is None
+
+    def test_returns_string_list_unchanged(self):
+        assert _normalize_feature_names(["JOINT_A", "JOINT_B"]) == ["JOINT_A", "JOINT_B"]
+
+    def test_flattens_list_of_lists(self):
+        assert _normalize_feature_names([["JOINT_A", "JOINT_B"], ["JOINT_C"]]) == [
+            "JOINT_A",
+            "JOINT_B",
+            "JOINT_C",
+        ]
+
+    def test_flattens_dict_values(self):
+        result = _normalize_feature_names({"x": "JOINT_A", "y": "JOINT_B"})
+        assert sorted(result) == ["JOINT_A", "JOINT_B"]
+
+    def test_wraps_scalar_in_list(self):
+        assert _normalize_feature_names("only") == ["only"]
+
+    def test_coerces_non_string_items_to_str(self):
+        assert _normalize_feature_names([1, 2.5, True]) == ["1", "2.5", "True"]
+
+    def test_returns_none_for_empty_iterable(self):
+        assert _normalize_feature_names([]) is None
+        assert _normalize_feature_names(()) is None
+
+    def test_flattens_mixed_nested_with_tuples(self):
+        assert _normalize_feature_names([("A", "B"), "C"]) == ["A", "B", "C"]
+
+
+class TestMaterializeBlobVideo:
+    async def test_returns_none_without_blob_provider(self, tmp_path):
+        service = DatasetService(base_path=str(tmp_path))
+        assert await service.materialize_blob_video("anything") is None
+
+    async def test_downloads_and_caches_blob(self, tmp_path, monkeypatch):
+        async def _stream(_path):
+            yield b"chunk-1"
+            yield b"chunk-2"
+
+        provider = _make_provider()
+        provider.stream_video = _stream
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        cache_root = tmp_path / "video_cache"
+        monkeypatch.setattr(
+            "src.api.services.dataset_service.service.tempfile.gettempdir",
+            lambda: str(cache_root),
+        )
+
+        path = await service.materialize_blob_video("ds/videos/cam0/file-000.mp4")
+        assert path is not None
+        assert path.exists()
+        assert path.read_bytes() == b"chunk-1chunk-2"
+        assert path.parent == cache_root / "dvw_video_cache" / "blob"
+        assert path.suffix == ".mp4"
+
+    async def test_second_call_returns_cache_without_streaming(self, tmp_path, monkeypatch):
+        stream_calls = {"n": 0}
+
+        async def _stream(_path):
+            stream_calls["n"] += 1
+            yield b"payload"
+
+        provider = _make_provider()
+        provider.stream_video = _stream
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        monkeypatch.setattr(
+            "src.api.services.dataset_service.service.tempfile.gettempdir",
+            lambda: str(tmp_path / "video_cache"),
+        )
+
+        first = await service.materialize_blob_video("ds/v.mp4")
+        second = await service.materialize_blob_video("ds/v.mp4")
+        assert first == second
+        assert stream_calls["n"] == 1
+
+    async def test_returns_none_and_cleans_up_part_file_on_stream_error(self, tmp_path, monkeypatch):
+        async def _stream(_path):
+            yield b"partial"
+            raise RuntimeError("network died")
+
+        provider = _make_provider()
+        provider.stream_video = _stream
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        cache_root = tmp_path / "video_cache"
+        monkeypatch.setattr(
+            "src.api.services.dataset_service.service.tempfile.gettempdir",
+            lambda: str(cache_root),
+        )
+
+        path = await service.materialize_blob_video("ds/broken.mp4")
+        assert path is None
+        cache_dir = cache_root / "dvw_video_cache" / "blob"
+        assert cache_dir.exists()
+        # No stray .part files left behind.
+        assert not any(p.suffix == ".part" or ".part." in p.name for p in cache_dir.iterdir())
+
+    async def test_default_suffix_when_blob_path_has_no_extension(self, tmp_path, monkeypatch):
+        async def _stream(_path):
+            yield b"x"
+
+        provider = _make_provider()
+        provider.stream_video = _stream
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        monkeypatch.setattr(
+            "src.api.services.dataset_service.service.tempfile.gettempdir",
+            lambda: str(tmp_path / "video_cache"),
+        )
+
+        path = await service.materialize_blob_video("ds/no-extension")
+        assert path is not None
+        assert path.suffix == ".mp4"
+
+
+class TestGetFrameImageBlobFallback:
+    async def test_returns_none_when_no_handler_and_no_blob_provider(self, tmp_path):
+        service = DatasetService(base_path=str(tmp_path))
+        assert await service.get_frame_image("missing", 0, 0, "cam") is None
+
+    async def test_returns_none_when_discovery_fails(self, tmp_path, monkeypatch):
+        provider = _make_provider()
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
+        monkeypatch.setattr(service, "_discover_blob_dataset", AsyncMock(return_value=None))
+        assert await service.get_frame_image("ds", 0, 0, "cam") is None
+
+    async def test_returns_none_when_no_blob_video_path(self, tmp_path, monkeypatch):
+        provider = _make_provider(resolve_video_blob_path=AsyncMock(return_value=None))
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("ds")
+        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
+        assert await service.get_frame_image("ds", 0, 0, "cam") is None
+
+    async def test_returns_none_when_materialize_fails(self, tmp_path, monkeypatch):
+        provider = _make_provider()
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("ds")
+        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
+        monkeypatch.setattr(service, "materialize_blob_video", AsyncMock(return_value=None))
+        assert await service.get_frame_image("ds", 0, 0, "cam") is None
+
+    async def test_returns_ffmpeg_frame_when_available(self, tmp_path, monkeypatch):
+        provider = _make_provider()
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("ds")
+        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=1, fps=24.0, features={}, tasks=[])
+        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
+        local = tmp_path / "v.mp4"
+        local.write_bytes(b"")
+        monkeypatch.setattr(service, "materialize_blob_video", AsyncMock(return_value=local))
+        captured_fps: dict[str, float] = {}
+
+        def _ffmpeg(path, frame_idx, fps):
+            captured_fps["fps"] = fps
+            assert path == str(local)
+            assert frame_idx == 7
+            return b"JPEG-bytes"
+
+        monkeypatch.setattr(service._lerobot_handler, "_extract_frame_ffmpeg", staticmethod(_ffmpeg))
+
+        result = await service.get_frame_image("ds", 0, 7, "cam")
+        assert result == b"JPEG-bytes"
+        assert captured_fps["fps"] == 24.0
+
+    async def test_falls_back_to_cv2_when_ffmpeg_returns_none(self, tmp_path, monkeypatch):
+        provider = _make_provider()
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        service._blob_dataset_ids.add("ds")
+        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
+        local = tmp_path / "v.mp4"
+        local.write_bytes(b"")
+        monkeypatch.setattr(service, "materialize_blob_video", AsyncMock(return_value=local))
+        monkeypatch.setattr(
+            service._lerobot_handler,
+            "_extract_frame_ffmpeg",
+            staticmethod(lambda *_a, **_kw: None),
+        )
+        monkeypatch.setattr(
+            service._lerobot_handler,
+            "_extract_frame_cv2",
+            staticmethod(lambda *_a, **_kw: b"CV2-bytes"),
+        )
+
+        result = await service.get_frame_image("ds", 0, 3, "cam")
+        assert result == b"CV2-bytes"
+
+
+class TestListDatasetsScanResilience:
+    async def test_scan_failure_falls_back_to_local_only(self, tmp_path, caplog):
+        provider = _make_provider(scan_all_dataset_ids=AsyncMock(side_effect=RuntimeError("boom")))
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        with caplog.at_level("WARNING"):
+            result = await service.list_datasets()
+        assert result == []
+        assert any("Failed to scan blob datasets" in r.message for r in caplog.records)
+
+    async def test_per_dataset_discover_lerobot_error_logged(self, tmp_path, caplog, monkeypatch):
+        provider = _make_provider(scan_all_dataset_ids=AsyncMock(return_value={"lerobot": ["bad-ds"], "hdf5": []}))
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        monkeypatch.setattr(service, "_discover_blob_dataset", AsyncMock(side_effect=RuntimeError("nope")))
+        with caplog.at_level("WARNING"):
+            await service.list_datasets()
+        assert any("Failed to discover blob dataset bad-ds" in r.message for r in caplog.records)
+
+    async def test_per_dataset_discover_hdf5_error_logged(self, tmp_path, caplog, monkeypatch):
+        provider = _make_provider(scan_all_dataset_ids=AsyncMock(return_value={"lerobot": [], "hdf5": ["bad-h5"]}))
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        monkeypatch.setattr(service, "_discover_blob_hdf5_dataset", AsyncMock(side_effect=RuntimeError("nope")))
+        with caplog.at_level("WARNING"):
+            await service.list_datasets()
+        assert any("Failed to discover blob HDF5 dataset bad-h5" in r.message for r in caplog.records)

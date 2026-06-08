@@ -30,6 +30,13 @@ interface UseAnnotationWorkspaceVideoSyncOptions {
   insertedFrames: Map<number, FrameInsertion>
   removedFrames: Set<number>
   videoSrc: string | null
+  /**
+   * Optional [start, end] timestamps (seconds) bounding this episode's clip
+   * inside a (possibly concatenated) video file. When provided, all
+   * video-time / frame conversions apply this offset and stop playback at
+   * the window end.
+   */
+  videoWindow?: [number, number] | null
   onSetCurrentFrame: (frame: number) => void
   onTogglePlayback: () => void
   onSetFrameWithinPlaybackRange: (frame: number) => void
@@ -52,6 +59,7 @@ export function useAnnotationWorkspaceVideoSync({
   insertedFrames,
   removedFrames,
   videoSrc,
+  videoWindow = null,
   onSetCurrentFrame,
   onTogglePlayback,
   onSetFrameWithinPlaybackRange,
@@ -79,13 +87,34 @@ export function useAnnotationWorkspaceVideoSync({
   originalFrameIndexRef.current = originalFrameIndex
   playbackSpeedRef.current = playbackSpeed
 
-  const fps = computeEffectiveFps(totalFrames, videoDuration, datasetFps)
+  // When a window is supplied, fps is derived from the windowed clip duration
+  // (so per-episode frame counts map correctly inside a concatenated mp4).
+  const videoOffset = videoWindow ? videoWindow[0] : 0
+  const videoWindowEnd = videoWindow ? videoWindow[1] : null
+  const windowDuration = videoWindow ? Math.max(videoWindow[1] - videoWindow[0], 0) : null
+  const fps = computeEffectiveFps(totalFrames, windowDuration ?? videoDuration, datasetFps)
+
+  // Convert an episode-relative time (seconds, 0 = first frame of episode)
+  // to absolute video time within the (possibly concatenated) source mp4.
+  const toVideoTime = useCallback((episodeTime: number) => episodeTime + videoOffset, [videoOffset])
+
+  // Inverse of toVideoTime — for converting video.currentTime back into the
+  // episode-relative time used by the frame indexer.
+  const toEpisodeTime = useCallback((videoTime: number) => videoTime - videoOffset, [videoOffset])
 
   const ensureVideoPlaybackAtTime = useCallback(
     (video: HTMLVideoElement, targetTime: number) => {
-      const playbackStartTime = Number.isFinite(video.duration)
-        ? Math.max(0, Math.min(targetTime + 0.001, Math.max(video.duration - 0.001, 0)))
-        : Math.max(0, targetTime + 0.001)
+      // targetTime is episode-relative; translate into the source mp4's
+      // timeline before seeking.
+      const absoluteTarget = toVideoTime(targetTime)
+      const upperBound = videoWindowEnd ?? (Number.isFinite(video.duration) ? video.duration : null)
+      const playbackStartTime =
+        upperBound !== null
+          ? Math.max(
+              videoOffset,
+              Math.min(absoluteTarget + 0.001, Math.max(upperBound - 0.001, videoOffset)),
+            )
+          : Math.max(videoOffset, absoluteTarget + 0.001)
 
       if (playbackRetryTimeoutRef.current) {
         clearTimeout(playbackRetryTimeoutRef.current)
@@ -97,7 +126,7 @@ export function useAnnotationWorkspaceVideoSync({
       video.playbackRate = playbackSpeedRef.current
       video.play().catch(() => {})
     },
-    [fps],
+    [toVideoTime, videoOffset, videoWindowEnd],
   )
 
   const seekVideoFrame = useCallback(
@@ -116,8 +145,9 @@ export function useAnnotationWorkspaceVideoSync({
       const targetOriginalFrame = getOriginalIndex(nextFrame, insertedFrames, removedFrames)
       const targetTime = (targetOriginalFrame ?? nextFrame) / fps
 
-      if (Math.abs(video.currentTime - targetTime) > 0.5 / fps) {
-        video.currentTime = targetTime
+      const absoluteTarget = toVideoTime(targetTime)
+      if (Math.abs(video.currentTime - absoluteTarget) > 0.5 / fps) {
+        video.currentTime = absoluteTarget
       }
 
       if (isPlaying) {
@@ -133,6 +163,7 @@ export function useAnnotationWorkspaceVideoSync({
       isPlaying,
       onSetCurrentFrame,
       removedFrames,
+      toVideoTime,
       totalFrames,
     ],
   )
@@ -174,7 +205,7 @@ export function useAnnotationWorkspaceVideoSync({
         totalFrames,
         originalFrameIndexRef.current,
         fps,
-        video.currentTime,
+        toEpisodeTime(video.currentTime),
         playbackRangeStart,
         playbackRangeEnd,
       )
@@ -199,7 +230,7 @@ export function useAnnotationWorkspaceVideoSync({
           ensureVideoPlaybackAtTime(video, action.seekTo)
           break
         case 'play':
-          ensureVideoPlaybackAtTime(video, video.currentTime)
+          ensureVideoPlaybackAtTime(video, toEpisodeTime(video.currentTime))
           break
         case 'pause':
           video.pause()
@@ -216,6 +247,7 @@ export function useAnnotationWorkspaceVideoSync({
       playbackRangeEnd,
       playbackRangeStart,
       shouldLoopPlaybackRange,
+      toEpisodeTime,
       totalFrames,
     ],
   )
@@ -234,6 +266,14 @@ export function useAnnotationWorkspaceVideoSync({
         shouldAutoPlayOnMetadataLoad: shouldAutoPlayOnMetadataLoadRef.current,
       })
 
+      // Seek into this episode's window inside a concatenated source mp4.
+      const initialTime = toVideoTime(
+        (originalFrameIndexRef.current ?? currentFrameRef.current) / fps,
+      )
+      if (Math.abs(video.currentTime - initialTime) > 0.5 / fps) {
+        video.currentTime = initialTime
+      }
+
       if (isPlaying) {
         skipNextPlaybackSyncRef.current = true
         syncVideoElementPlaybackRef.current(video)
@@ -245,7 +285,7 @@ export function useAnnotationWorkspaceVideoSync({
         onTogglePlayback()
       }
     },
-    [isPlaying, onRecordEvent, onTogglePlayback],
+    [fps, isPlaying, onRecordEvent, onTogglePlayback, toVideoTime],
   )
 
   useEffect(() => {
@@ -289,7 +329,8 @@ export function useAnnotationWorkspaceVideoSync({
       const video = videoRef.current
 
       if (video) {
-        const nextFrame = Math.floor(video.currentTime * fps)
+        const episodeTime = toEpisodeTime(video.currentTime)
+        const nextFrame = Math.floor(episodeTime * fps)
         const resolved = resolvePlaybackTick(
           nextFrame,
           totalFrames,
@@ -297,6 +338,19 @@ export function useAnnotationWorkspaceVideoSync({
           shouldLoopPlaybackRange,
         )
         const now = Date.now()
+
+        // Hard stop at the end of this episode's window inside a concatenated mp4
+        if (videoWindowEnd !== null && video.currentTime >= videoWindowEnd - 0.001) {
+          if (shouldLoopPlaybackRange) {
+            video.currentTime = toVideoTime(resolved.frame / fps)
+          } else {
+            video.pause()
+            if (isPlaying) {
+              onTogglePlayback()
+            }
+            return
+          }
+        }
 
         if (video.currentTime !== lastAdvancingVideoTime) {
           lastAdvancingVideoTime = video.currentTime
@@ -344,7 +398,7 @@ export function useAnnotationWorkspaceVideoSync({
             onTogglePlayback()
           }
 
-          video.currentTime = resolved.frame / fps
+          video.currentTime = toVideoTime(resolved.frame / fps)
           video.pause()
           return
         }
@@ -368,7 +422,7 @@ export function useAnnotationWorkspaceVideoSync({
             })
           }
 
-          video.currentTime = resolved.frame / fps
+          video.currentTime = toVideoTime(resolved.frame / fps)
         }
       } else if (!videoSrc) {
         // Frame-only playback using a virtual time clock
@@ -430,8 +484,11 @@ export function useAnnotationWorkspaceVideoSync({
     playbackRangeEnd,
     playbackRangeStart,
     shouldLoopPlaybackRange,
+    toEpisodeTime,
+    toVideoTime,
     totalFrames,
     videoSrc,
+    videoWindowEnd,
   ])
 
   useEffect(() => {
@@ -448,11 +505,11 @@ export function useAnnotationWorkspaceVideoSync({
       return
     }
 
-    const targetTime = (originalFrameIndex ?? currentFrame) / fps
+    const targetTime = toVideoTime((originalFrameIndex ?? currentFrame) / fps)
     if (Math.abs(video.currentTime - targetTime) > 0.5 / fps) {
       video.currentTime = targetTime
     }
-  }, [currentFrame, fps, isPlaying, originalFrameIndex])
+  }, [currentFrame, fps, isPlaying, originalFrameIndex, toVideoTime])
 
   const handleVideoEnded = useCallback(() => {
     onRecordEvent('playback', 'video-ended', {
