@@ -58,6 +58,7 @@ workflow:
           contents: |
             """Download a LeRobot dataset from Azure Blob Storage."""
             import os
+            import pathlib
             from urllib.parse import urlparse
             from azure.storage.blob import ContainerClient
             from azure.identity import DefaultAzureCredential
@@ -80,14 +81,32 @@ workflow:
             endpoint = f"https://{parsed.netloc}"
             sas_token = parsed.query if parsed.query else None
 
+            DATASET_ROOT = pathlib.Path("/data/dataset").resolve()
+            DATASET_ROOT.mkdir(parents=True, exist_ok=True)
+
+            def safe_local_path(blob_name: str, rel: str) -> pathlib.Path | None:
+              # Reject absolute paths and any segment that would escape the root.
+              if rel.startswith("/") or "\\" in rel:
+                print(f"  WARN: skipping unsafe blob path: {blob_name}")
+                return None
+              candidate = (DATASET_ROOT / rel).resolve()
+              try:
+                candidate.relative_to(DATASET_ROOT)
+              except ValueError:
+                print(f"  WARN: skipping blob that escapes dataset root: {blob_name}")
+                return None
+              return candidate
+
             def download_with_client(client: ContainerClient) -> int:
               count = 0
               for blob in client.list_blobs(name_starts_with=prefix):
                 rel = blob.name[len(prefix):].lstrip("/")
                 if not rel:
                   continue
-                local = f"/data/dataset/{rel}"
-                os.makedirs(os.path.dirname(local), exist_ok=True)
+                local = safe_local_path(blob.name, rel)
+                if local is None:
+                  continue
+                local.parent.mkdir(parents=True, exist_ok=True)
                 with open(local, "wb") as f:
                   f.write(client.download_blob(blob).readall())
                 count += 1
