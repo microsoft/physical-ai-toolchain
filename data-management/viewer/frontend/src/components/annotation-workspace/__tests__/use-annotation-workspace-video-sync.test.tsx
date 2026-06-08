@@ -546,3 +546,179 @@ describe('useAnnotationWorkspaceVideoSync', () => {
     expect(pauseMock).not.toHaveBeenCalled()
   })
 })
+
+describe('useAnnotationWorkspaceVideoSync videoWindow', () => {
+  it('seeks into the window start on loadedmetadata when frame is at episode start', () => {
+    const baseProps = {
+      currentFrame: 0,
+      totalFrames: 10,
+      originalFrameIndex: 0,
+      activePlaybackRange: null as [number, number] | null,
+      playbackRangeStart: 0,
+      playbackRangeEnd: 9,
+      isPlaying: false,
+      playbackSpeed: 1,
+      autoPlay: false,
+      autoLoop: false,
+      shouldLoopPlaybackRange: false,
+      datasetFps: 30,
+      insertedFrames: new Map<number, FrameInsertion>(),
+      removedFrames: new Set<number>(),
+      videoSrc: '/videos/concat.mp4',
+      videoWindow: [2.0, 5.0] as [number, number],
+      onSetCurrentFrame: vi.fn(),
+      onTogglePlayback: vi.fn(),
+      onSetFrameWithinPlaybackRange: vi.fn(),
+      onRecordEvent: vi.fn(),
+    }
+
+    const { result } = renderHook((props) => useAnnotationWorkspaceVideoSync(props), {
+      initialProps: baseProps,
+    })
+
+    const video = document.createElement('video')
+    Object.defineProperty(video, 'duration', { configurable: true, value: 60 })
+    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 0 })
+
+    act(() => {
+      result.current.handleLoadedMetadata({
+        currentTarget: video,
+      } as SyntheticEvent<HTMLVideoElement>)
+    })
+
+    expect(video.currentTime).toBeCloseTo(2.0, 5)
+  })
+
+  it('seeks to videoOffset + frame/fps when the current frame is non-zero', () => {
+    // totalFrames=30, windowDuration=3s → fps=10. Frame 6 → 0.6s episode time
+    // → toVideoTime(0.6) = 2.0 + 0.6 = 2.6
+    const baseProps = {
+      currentFrame: 6,
+      totalFrames: 30,
+      originalFrameIndex: 6,
+      activePlaybackRange: null as [number, number] | null,
+      playbackRangeStart: 0,
+      playbackRangeEnd: 29,
+      isPlaying: false,
+      playbackSpeed: 1,
+      autoPlay: false,
+      autoLoop: false,
+      shouldLoopPlaybackRange: false,
+      datasetFps: 30,
+      insertedFrames: new Map<number, FrameInsertion>(),
+      removedFrames: new Set<number>(),
+      videoSrc: '/videos/concat.mp4',
+      videoWindow: [2.0, 5.0] as [number, number],
+      onSetCurrentFrame: vi.fn(),
+      onTogglePlayback: vi.fn(),
+      onSetFrameWithinPlaybackRange: vi.fn(),
+      onRecordEvent: vi.fn(),
+    }
+
+    const { result } = renderHook((props) => useAnnotationWorkspaceVideoSync(props), {
+      initialProps: baseProps,
+    })
+
+    const video = document.createElement('video')
+    Object.defineProperty(video, 'duration', { configurable: true, value: 60 })
+    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 0 })
+
+    act(() => {
+      result.current.handleLoadedMetadata({
+        currentTarget: video,
+      } as SyntheticEvent<HTMLVideoElement>)
+    })
+
+    expect(video.currentTime).toBeCloseTo(2.6, 5)
+  })
+
+  it('seeks to frame/fps without offset when videoWindow is null', () => {
+    // No window → videoOffset=0. videoDuration is updated via useState during the
+    // metadata callback so fps stays at datasetFps on this first sync pass.
+    // Frame 15 → toVideoTime(15/30) = 0.5.
+    const baseProps = {
+      currentFrame: 15,
+      totalFrames: 30,
+      originalFrameIndex: 15,
+      activePlaybackRange: null as [number, number] | null,
+      playbackRangeStart: 0,
+      playbackRangeEnd: 29,
+      isPlaying: false,
+      playbackSpeed: 1,
+      autoPlay: false,
+      autoLoop: false,
+      shouldLoopPlaybackRange: false,
+      datasetFps: 30,
+      insertedFrames: new Map<number, FrameInsertion>(),
+      removedFrames: new Set<number>(),
+      videoSrc: '/videos/single.mp4',
+      videoWindow: null as [number, number] | null,
+      onSetCurrentFrame: vi.fn(),
+      onTogglePlayback: vi.fn(),
+      onSetFrameWithinPlaybackRange: vi.fn(),
+      onRecordEvent: vi.fn(),
+    }
+
+    const { result } = renderHook((props) => useAnnotationWorkspaceVideoSync(props), {
+      initialProps: baseProps,
+    })
+
+    const video = document.createElement('video')
+    Object.defineProperty(video, 'duration', { configurable: true, value: 10 })
+    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 0 })
+
+    act(() => {
+      result.current.handleLoadedMetadata({
+        currentTarget: video,
+      } as SyntheticEvent<HTMLVideoElement>)
+    })
+
+    expect(video.currentTime).toBeCloseTo(0.5, 5)
+  })
+
+  it('translates frame seeks into absolute video time with the window offset', () => {
+    // Frame seeks use the same offset. We confirm via seekVideoFrame() that the
+    // requested frame maps to videoOffset + (frame / fps).
+    const baseProps = {
+      currentFrame: 0,
+      totalFrames: 30,
+      originalFrameIndex: 0,
+      activePlaybackRange: null as [number, number] | null,
+      playbackRangeStart: 0,
+      playbackRangeEnd: 29,
+      isPlaying: false,
+      playbackSpeed: 1,
+      autoPlay: false,
+      autoLoop: false,
+      shouldLoopPlaybackRange: false,
+      datasetFps: 30,
+      insertedFrames: new Map<number, FrameInsertion>(),
+      removedFrames: new Set<number>(),
+      videoSrc: '/videos/concat.mp4',
+      videoWindow: [2.0, 5.0] as [number, number],
+      onSetCurrentFrame: vi.fn(),
+      onTogglePlayback: vi.fn(),
+      onSetFrameWithinPlaybackRange: vi.fn(),
+      onRecordEvent: vi.fn(),
+    }
+
+    const video = document.createElement('video')
+    Object.defineProperty(video, 'duration', { configurable: true, value: 60 })
+    Object.defineProperty(video, 'currentTime', { configurable: true, writable: true, value: 2.0 })
+
+    const { result } = renderHook((props) => useAnnotationWorkspaceVideoSync(props), {
+      initialProps: baseProps,
+    })
+
+    act(() => {
+      Object.defineProperty(result.current.videoRef, 'current', { value: video, writable: true })
+    })
+
+    act(() => {
+      result.current.seekVideoFrame(9, null, true)
+    })
+
+    // fps = 30 / 3 = 10. Frame 9 → 0.9s episode time → 2.9s absolute.
+    expect(video.currentTime).toBeCloseTo(2.9, 5)
+  })
+})

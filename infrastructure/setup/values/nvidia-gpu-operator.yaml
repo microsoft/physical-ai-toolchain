@@ -119,6 +119,10 @@ nodeStatusExporter:
 # Validator
 validator:
   enabled: true
+  # Workaround: GPU Operator chart v25.3.x renders `validator.plugin:` as null
+  # from its empty default env list, which the ClusterPolicy CRD rejects.
+  # Remove when the pinned chart renders an omitted or valid plugin object.
+  plugin: null
   tolerations:
     - key: nvidia.com/gpu
       operator: Exists

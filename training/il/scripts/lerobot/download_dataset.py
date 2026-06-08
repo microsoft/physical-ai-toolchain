@@ -38,8 +38,8 @@ def parse_blob_url(url: str) -> tuple[str, str, str]:
 
     account = parsed.netloc.split(".")[0]
     path_parts = parsed.path.lstrip("/").split("/", 1)
-    if len(path_parts) < 1:
-        raise ValueError(f"Invalid blob URL path: {url}")
+    if not path_parts or not path_parts[0]:
+        raise ValueError(f"Invalid blob URL (missing container): {url}")
 
     container = path_parts[0]
     prefix = path_parts[1] if len(path_parts) > 1 else ""
