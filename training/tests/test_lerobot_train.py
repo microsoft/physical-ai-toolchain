@@ -146,21 +146,98 @@ class TestBuildTrainParams:
             "SAVE_FREQ",
             "VAL_SPLIT",
             "SYSTEM_METRICS",
+            "MIXED_PRECISION",
         ):
             monkeypatch.delenv(var, raising=False)
-        params = _MOD._build_train_params()
+        params = _MOD._build_train_params(num_gpus=1)
         assert params["policy_type"] == "act"
         assert params["training_steps"] == "100000"
         assert params["batch_size"] == "32"
+        assert params["num_gpus"] == "1"
+        assert params["mixed_precision"] == "no"
+        assert params["distributed"] == "false"
+        assert params["effective_batch_size"] == "32"
 
-    def test_env_overrides(self, monkeypatch):
+    def test_multi_gpu_scales_effective_batch_size(self, monkeypatch):
         monkeypatch.setenv("POLICY_TYPE", "diffusion")
         monkeypatch.setenv("TRAINING_STEPS", "50000")
         monkeypatch.setenv("BATCH_SIZE", "64")
-        params = _MOD._build_train_params()
+        monkeypatch.setenv("MIXED_PRECISION", "bf16")
+        params = _MOD._build_train_params(num_gpus=4)
         assert params["policy_type"] == "diffusion"
         assert params["training_steps"] == "50000"
         assert params["batch_size"] == "64"
+        assert params["num_gpus"] == "4"
+        assert params["mixed_precision"] == "bf16"
+        assert params["distributed"] == "true"
+        assert params["effective_batch_size"] == "256"
+
+
+class TestMultiGpuHelpers:
+    def test_detect_num_gpus_no_torch(self, monkeypatch):
+        # Force ImportError when train.py imports torch
+        monkeypatch.setitem(sys.modules, "torch", None)
+        assert _MOD._detect_num_gpus() == 1
+
+    def test_detect_num_gpus_single(self, monkeypatch):
+        torch_stub = ModuleType("torch")
+        torch_stub.cuda = SimpleNamespace(device_count=lambda: 1)
+        monkeypatch.setitem(sys.modules, "torch", torch_stub)
+        assert _MOD._detect_num_gpus() == 1
+
+    def test_detect_num_gpus_multi(self, monkeypatch):
+        torch_stub = ModuleType("torch")
+        torch_stub.cuda = SimpleNamespace(device_count=lambda: 4)
+        monkeypatch.setitem(sys.modules, "torch", torch_stub)
+        assert _MOD._detect_num_gpus() == 4
+
+    def test_detect_num_gpus_floors_at_one(self, monkeypatch):
+        # Defensive: never return 0; downstream callers branch on > 1.
+        torch_stub = ModuleType("torch")
+        torch_stub.cuda = SimpleNamespace(device_count=lambda: 0)
+        monkeypatch.setitem(sys.modules, "torch", torch_stub)
+        assert _MOD._detect_num_gpus() == 1
+
+    def test_read_mixed_precision_default(self, monkeypatch):
+        monkeypatch.delenv("MIXED_PRECISION", raising=False)
+        assert _MOD._read_mixed_precision() == "no"
+
+    def test_read_mixed_precision_invalid(self, monkeypatch):
+        monkeypatch.setenv("MIXED_PRECISION", "int8")
+        with pytest.raises(RuntimeError, match="MIXED_PRECISION must be one of"):
+            _MOD._read_mixed_precision()
+
+    def test_strip_use_amp_space_separated_value(self):
+        # draccus accepts "--flag value" (argparse action='store', no nargs);
+        # both tokens must be dropped or 'value' becomes an orphan positional.
+        cleaned = _MOD._strip_use_amp(["--policy.use_amp", "true", "--keep=me"])
+        assert cleaned == ["--keep=me"]
+
+    def test_strip_use_amp_equals_form(self):
+        cleaned = _MOD._strip_use_amp(["--policy.use_amp=true", "--keep=me"])
+        assert cleaned == ["--keep=me"]
+
+    def test_strip_use_amp_noop(self):
+        cleaned = _MOD._strip_use_amp(["--keep=me", "--steps=10"])
+        assert cleaned == ["--keep=me", "--steps=10"]
+
+    def test_wrap_with_accelerate_rejects_wrong_head(self, monkeypatch):
+        monkeypatch.setattr(_MOD, "_resolve_lerobot_train", lambda: "/v/bin/lerobot-train")
+        with pytest.raises(RuntimeError, match="Expected cmd to start with 'lerobot-train'"):
+            _MOD._wrap_with_accelerate(["python", "-m", "x"], num_gpus=2, mixed_precision="bf16")
+
+    def test_wrap_with_accelerate_prepends_flags(self, monkeypatch):
+        monkeypatch.setattr(_MOD, "_resolve_lerobot_train", lambda: "/v/bin/lerobot-train")
+        wrapped = _MOD._wrap_with_accelerate(["lerobot-train", "--steps=10"], num_gpus=4, mixed_precision="bf16")
+        assert wrapped[:5] == [
+            "accelerate",
+            "launch",
+            "--multi_gpu",
+            "--num_processes=4",
+            "--mixed_precision=bf16",
+        ]
+        assert wrapped[5] == "/v/bin/lerobot-train"
+        assert wrapped[6] == "--steps=10"
 
 
 class _FakePopen:
@@ -169,8 +246,9 @@ class _FakePopen:
         self.stdout = iter(_FakePopen.lines)
         self.returncode = 0
         self.terminated = False
+        self.pid = 12345
 
-    def wait(self):
+    def wait(self, timeout=None):
         return self.returncode
 
     def terminate(self):
@@ -233,13 +311,21 @@ class TestRunTraining:
         def fake_signal(signum, handler):
             captured[signum] = handler
 
+        # Capture os.killpg calls (handler now reaps the whole subprocess group
+        # to clean up accelerate-spawned worker ranks; see train.py).
+        killpg_calls: list[tuple[int, int]] = []
+
+        def fake_killpg(pid, sig):
+            killpg_calls.append((pid, sig))
+
         monkeypatch.setattr(_MOD.subprocess, "Popen", _CapturePopen)
         monkeypatch.setattr(_MOD.signal, "signal", fake_signal)
+        monkeypatch.setattr(_MOD.os, "killpg", fake_killpg)
 
         _MOD.run_training(["lerobot-train"])
         # Invoke the captured SIGTERM handler
         captured[_MOD.signal.SIGTERM](15, None)
-        assert proc_holder[0].terminated is True
+        assert killpg_calls and killpg_calls[0] == (proc_holder[0].pid, _MOD.signal.SIGTERM)
 
 
 class TestMain:
@@ -294,7 +380,7 @@ class TestMain:
 
         captured: dict[str, str] = {}
 
-        def fake_run(cmd, source="x"):
+        def fake_run(cmd, source="x", num_gpus=1):
             captured["source"] = source
             return 0
 
@@ -327,7 +413,7 @@ class TestMain:
         monkeypatch.setenv("DATASET_REPO_ID", "env/ds")
         captured = {}
 
-        def fake_run(cmd, source="x"):
+        def fake_run(cmd, source="x", num_gpus=1):
             captured["cmd"] = cmd
             return 0
 
@@ -343,7 +429,7 @@ class TestMain:
         monkeypatch.setenv("JOB_NAME", "myjob")
         captured = {}
 
-        def fake_run(cmd, source="x"):
+        def fake_run(cmd, source="x", num_gpus=1):
             captured["cmd"] = cmd
             return 0
 

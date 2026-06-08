@@ -9,6 +9,7 @@ Deploy trained robot policies to edge fleets via FluxCD GitOps pipelines, image 
 | `gitops/`         | FluxCD GitOps manifests and configurations         |
 | `gating/`         | Deployment gating service                          |
 | `inference/`      | Inference runtime code for on-device model serving |
+| `setup/`          | Build / sign / attest workflow for inference images |
 | `examples/`       | Example deployment configurations                  |
 | `specifications/` | Domain specification documents                     |
 
@@ -28,3 +29,17 @@ Bootstrap FluxCD on a target cluster:
 ```bash
 fleet-deployment/gitops/bootstrap.sh
 ```
+
+Publish a registered AzureML model as a signed, attested inference image:
+
+```bash
+# 1. build + sign
+fleet-deployment/setup/build-aml-model-image.sh --model-name <model>
+
+# 2. attach SBOM + OpenVEX attestations (run separately; can be repeated)
+fleet-deployment/setup/attest-image.sh \
+  --image <acr>.azurecr.io/<model>@sha256:<digest>
+```
+
+See [setup/README.md](setup/README.md) for the full workflow, base-image
+pinning, and VEX-triage guidance.
