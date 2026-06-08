@@ -27,7 +27,7 @@ dev = [
     "httpx==0.28.1",
 ]
 azure = [
-    "aiohttp==3.14.0",
+    "aiohttp==3.14.1",
     "azure-storage-blob==12.29.0",
     "azure-identity==1.25.3",
 ]
@@ -43,7 +43,7 @@ export = [
     "Pillow==12.2.0",
 ]
 yolo = [
-    "ultralytics==8.4.60",
+    "ultralytics==8.4.61",
     "numpy==2.4.6",
     "Pillow==12.2.0",
 ]
