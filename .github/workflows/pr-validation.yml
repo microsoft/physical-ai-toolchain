@@ -159,7 +159,11 @@ jobs:
       upload-sarif: true
       exclude-paths: 'scripts/tests/Fixtures/**,shared/ci/tests/Fixtures/**'
 
-  # OSV-Scanner: vulnerability scan across manifests using osv-scanner.toml
+  # OSV-Scanner: advisory-only vulnerability scan across manifests using
+  # osv-scanner.toml. The scan step uses continue-on-error so the job always
+  # reports success (green) even when vulnerabilities are found; findings still
+  # surface in the Security tab via SARIF. This job is intentionally excluded
+  # from the pr-validation-summary gate.
   osv-scanner:
     name: OSV-Scanner
     runs-on: ubuntu-latest
@@ -173,6 +177,7 @@ jobs:
           persist-credentials: false
       - name: Run OSV-Scanner
         uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2  # v2.3.8
+        continue-on-error: true
         with:
           # --no-resolve disables transitive resolution; pinned requirements files
           # contain version pins that conflict with transitive constraints, but
