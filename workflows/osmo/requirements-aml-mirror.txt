@@ -8,9 +8,9 @@
 # azureml-mlflow's mlflow<3.0.0 pin, which forces older transitive versions.
 absl-py==2.4.0
     # via tensorboard
-aiohappyeyeballs==2.6.1
+aiohappyeyeballs==2.6.2
     # via aiohttp
-aiohttp==3.13.5
+aiohttp==3.14.1
     # via mlflow
 aiosignal==1.4.0
     # via aiohttp
@@ -29,11 +29,9 @@ attrs==26.1.0
     #   aiohttp
     #   jsonschema
     #   referencing
-azure-ai-ml==1.32.0
+azure-ai-ml==1.33.0
 azure-common==1.1.28
-    # via
-    #   azure-ai-ml
-    #   azureml-mlflow
+    # via azureml-mlflow
 azure-core==1.41.0
     # via
     #   azure-ai-ml
@@ -57,9 +55,9 @@ azure-mgmt-core==1.6.0
     # via
     #   azure-ai-ml
     #   azureml-mlflow
-azure-monitor-opentelemetry==1.8.7
+azure-monitor-opentelemetry==1.8.8
     # via azure-ai-ml
-azure-monitor-opentelemetry-exporter==1.0.0b51
+azure-monitor-opentelemetry-exporter==1.0.0b52
     # via azure-monitor-opentelemetry
 azure-storage-blob==12.19.0
     # via
@@ -68,16 +66,16 @@ azure-storage-blob==12.19.0
     #   azureml-mlflow
 azure-storage-file-datalake==12.14.0
     # via azure-ai-ml
-azure-storage-file-share==12.24.0
+azure-storage-file-share==12.26.0
     # via azure-ai-ml
 azureml-mlflow==1.60.0
 blinker==1.9.0
     # via flask
-cachetools==5.5.2
+cachetools==7.1.4
     # via
     #   mlflow-skinny
     #   mlflow-tracing
-certifi==2026.4.22
+certifi==2026.5.20
     # via
     #   msrest
     #   requests
@@ -85,7 +83,7 @@ cffi==2.0.0
     # via cryptography
 charset-normalizer==3.4.7
     # via requests
-click==8.3.3
+click==8.4.1
     # via
     #   flask
     #   mlflow-skinny
@@ -96,7 +94,7 @@ colorama==0.4.6
     # via azure-ai-ml
 contourpy==1.3.3
     # via matplotlib
-cryptography==46.0.7
+cryptography==48.0.0
     # via
     #   azure-identity
     #   azure-storage-blob
@@ -108,21 +106,21 @@ cryptography==46.0.7
     #   pyjwt
 cycler==0.12.1
     # via matplotlib
-databricks-sdk==0.107.0
+databricks-sdk==0.115.0
     # via
     #   mlflow-skinny
     #   mlflow-tracing
 docker==7.1.0
     # via mlflow
-fastapi==0.136.1
+fastapi==0.136.3
     # via mlflow-skinny
 flask==3.1.3
     # via
     #   flask-cors
     #   mlflow
-flask-cors==6.0.2
+flask-cors==6.0.4
     # via mlflow
-fonttools==4.62.1
+fonttools==4.63.0
     # via matplotlib
 frozenlist==1.8.0
     # via
@@ -131,28 +129,30 @@ frozenlist==1.8.0
 gitdb==4.0.12
     # via gitpython
 gitpython==3.1.50
-    # via mlflow-skinny
-google-auth==2.52.0
+    # via
+    #   -c (workspace)
+    #   mlflow-skinny
+google-auth==2.53.0
     # via databricks-sdk
 graphene==3.4.3
     # via mlflow
-graphql-core==3.2.8
+graphql-core==3.2.11
     # via
     #   graphene
     #   graphql-relay
 graphql-relay==3.2.0
     # via graphene
-greenlet==3.5.0
+greenlet==3.5.1
     # via sqlalchemy
-grpcio==1.80.0
+grpcio==1.81.0
     # via tensorboard
-gunicorn==23.0.0
+gunicorn==26.0.0
     # via mlflow
 h11==0.16.0
     # via uvicorn
-huey==2.6.0
+huey==3.0.1
     # via mlflow
-idna==3.14
+idna==3.18
     # via
     #   anyio
     #   requests
@@ -174,7 +174,7 @@ jinja2==3.1.6
     # via flask
 joblib==1.5.3
     # via scikit-learn
-jsonpickle==4.1.1
+jsonpickle==4.1.2
     # via azureml-mlflow
 jsonschema==4.26.0
     # via azure-ai-ml
@@ -196,14 +196,14 @@ marshmallow==3.26.2
     # via azure-ai-ml
 matplotlib==3.10.9
     # via mlflow
-mlflow==3.12.0
-mlflow-skinny==3.12.0
+mlflow==3.13.0
+mlflow-skinny==3.13.0
     # via
     #   azureml-mlflow
     #   mlflow
-mlflow-tracing==3.12.0
+mlflow-tracing==3.13.0
     # via mlflow
-msal==1.36.0
+msal==1.37.0
     # via
     #   azure-identity
     #   msal-extensions
@@ -217,7 +217,9 @@ multidict==6.7.1
     # via
     #   aiohttp
     #   yarl
-numpy==2.4.4
+narwhals==2.22.1
+    # via scikit-learn
+numpy==2.4.6
     # via
     #   contourpy
     #   matplotlib
@@ -286,7 +288,7 @@ opentelemetry-instrumentation-wsgi==0.61b0
     # via
     #   opentelemetry-instrumentation-django
     #   opentelemetry-instrumentation-flask
-opentelemetry-proto==1.41.1
+opentelemetry-proto==1.42.1
     # via
     #   mlflow-skinny
     #   mlflow-tracing
@@ -322,7 +324,7 @@ opentelemetry-util-http==0.61b0
     #   opentelemetry-instrumentation-urllib
     #   opentelemetry-instrumentation-urllib3
     #   opentelemetry-instrumentation-wsgi
-packaging==24.2
+packaging==26.2
     # via
     #   gunicorn
     #   marshmallow
@@ -356,7 +358,7 @@ protobuf==6.33.6
     #   tensorboard
 psutil==7.2.2
     # via azure-monitor-opentelemetry-exporter
-pyarrow==23.0.1
+pyarrow==24.0.0
     # via mlflow
 pyasn1==0.6.3
     # via pyasn1-modules
@@ -373,7 +375,7 @@ pydantic-core==2.46.4
     # via pydantic
 pydash==8.0.6
     # via azure-ai-ml
-pyjwt==2.12.1
+pyjwt==2.13.0
     # via
     #   azure-ai-ml
     #   msal
@@ -388,7 +390,7 @@ python-dateutil==2.9.0.post0
     #   strictyaml
 python-dotenv==1.2.2
     # via mlflow-skinny
-pytz==2025.2
+pytz==2026.2
     # via
     #   azureml-mlflow
     #   pandas
@@ -400,7 +402,7 @@ referencing==0.37.0
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.33.1
+requests==2.34.2
     # via
     #   azure-core
     #   databricks-sdk
@@ -411,11 +413,11 @@ requests==2.33.1
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via msrest
-rpds-py==0.30.0
+rpds-py==2026.5.1
     # via
     #   jsonschema
     #   referencing
-scikit-learn==1.8.0
+scikit-learn==1.9.0
     # via
     #   mlflow
     #   skops
@@ -432,13 +434,13 @@ skops==0.14.0
     # via mlflow
 smmap==5.0.3
     # via gitdb
-sqlalchemy==2.0.49
+sqlalchemy==2.0.50
     # via
     #   alembic
     #   mlflow
 sqlparse==0.5.5
     # via mlflow-skinny
-starlette==0.52.1
+starlette==1.2.1
     # via
     #   fastapi
     #   mlflow-skinny
@@ -451,10 +453,11 @@ tensorboard-data-server==0.7.2
     # via tensorboard
 threadpoolctl==3.6.0
     # via scikit-learn
-tqdm==4.67.3
+tqdm==4.68.1
     # via azure-ai-ml
 typing-extensions==4.15.0
     # via
+    #   aiohttp
     #   aiosignal
     #   alembic
     #   anyio
@@ -488,9 +491,9 @@ urllib3==2.7.0
     # via
     #   docker
     #   requests
-uvicorn==0.46.0
+uvicorn==0.49.0
     # via mlflow-skinny
-wcwidth==0.7.0
+wcwidth==0.8.1
     # via prettytable
 werkzeug==3.1.8
     # via
@@ -502,7 +505,7 @@ wrapt==1.17.3
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-dbapi
     #   opentelemetry-instrumentation-urllib3
-yarl==1.23.0
+yarl==1.24.2
     # via aiohttp
-zipp==3.23.1
+zipp==4.1.0
     # via importlib-metadata
