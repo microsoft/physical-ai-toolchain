@@ -704,6 +704,7 @@ linktype
 linq
 linting
 linuxvm
+manylinux
 livecache
 liveops
 Llamacpp
