@@ -3,7 +3,7 @@ sidebar_position: 3
 title: "Physical AI Toolchain Roadmap"
 description: "Project roadmap covering documentation, testing, CI/CD, governance, security, and OpenSSF compliance through Q1 2027."
 author: wberry
-ms.date: 2026-02-10
+ms.date: 2026-06-01
 ms.topic: reference
 keywords:
   - roadmap
@@ -177,7 +177,7 @@ Phase 1 migrates existing `deploy/` and `src/` content into the Infrastructure a
 * ~~Migrate existing Terraform IaC from `deploy/001-iac/` into `infrastructure/terraform/`~~ (complete)
 * ~~Migrate existing setup scripts from `deploy/002-setup/` into `infrastructure/setup/`~~ (complete)
 * ~~Reorganize `src/training/` and `src/inference/` into `training/rl/`, `training/il/`, and `training/vla/`~~ (complete)
-* Establish `evaluation/sil/` and `evaluation/hil/` with Isaac Sim-based validation pipelines
+* Establish `evaluation/sil/` and `evaluation/hil/` with Isaac Sim-based evaluation pipelines
 * Create `data-pipeline/` with Azure Arc edge agent setup and ROS 2 episodic capture
 * Create `data-management/` with LeRobot-based episodic data viewer and curation tooling
 * Create `synthetic-data/` with NVIDIA Cosmos Transfer, Predict, and Reason integration
@@ -228,7 +228,7 @@ Q2 2026 (Apr-Jun) — Quality, Governance, Security, and Domain Rollout Phases 1
 ├── Dependencies: Dependency update automation (v0.8.0, due Jun 30)
 ├── Infrastructure: Migrate deploy/ IaC and setup scripts into infrastructure/
 ├── Training: Reorganize src/ into training/rl/, training/il/, training/vla/
-├── Evaluation: Establish SiL and HiL validation pipelines
+├── Evaluation: Establish SiL and HiL evaluation pipelines
 ├── Data Pipeline: Azure Arc edge agents and ROS 2 episodic capture
 ├── Data Management: LeRobot-based episodic data viewer and curation
 ├── Synthetic Data: NVIDIA Cosmos Transfer, Predict, and Reason pipelines
