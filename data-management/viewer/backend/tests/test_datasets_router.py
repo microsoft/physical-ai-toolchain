@@ -287,54 +287,39 @@ class TestGetVideo:
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "video/mp4"
 
-    def test_video_blob_streaming_full(self, client: TestClient, override_service) -> None:
+    def test_video_blob_materialized_file_response(self, client: TestClient, override_service, tmp_path: Path) -> None:
+        video = tmp_path / "blob-ep0.mp4"
+        video.write_bytes(b"chunk-1chunk-2")
         override_service.get_video_file_path = MagicMock(return_value=None)
         override_service.has_blob_provider = MagicMock(return_value=True)
         override_service.get_blob_video_path = AsyncMock(return_value="blob/path/ep0.mp4")
-
-        async def _stream():
-            yield b"chunk-1"
-            yield b"chunk-2"
-
-        override_service.get_blob_video_stream = AsyncMock(
-            return_value=({"Content-Length": "14"}, "video/mp4", _stream())
-        )
+        override_service.materialize_blob_video = AsyncMock(return_value=video)
         resp = client.get("/api/datasets/ds-1/episodes/0/video/il-camera")
         assert resp.status_code == 200
         assert resp.content == b"chunk-1chunk-2"
+        assert resp.headers["content-type"] == "video/mp4"
 
-    def test_video_blob_streaming_range(self, client: TestClient, override_service) -> None:
+    def test_video_blob_materialized_range(self, client: TestClient, override_service, tmp_path: Path) -> None:
+        video = tmp_path / "blob-ep0.mp4"
+        video.write_bytes(b"abcdefghij")
         override_service.get_video_file_path = MagicMock(return_value=None)
         override_service.has_blob_provider = MagicMock(return_value=True)
         override_service.get_blob_video_path = AsyncMock(return_value="blob/path/ep0.mp4")
-
-        async def _stream():
-            yield b"abc"
-
-        override_service.get_blob_video_stream = AsyncMock(
-            return_value=(
-                {"Content-Range": "bytes 0-2/100", "Content-Length": "3"},
-                "video/mp4",
-                _stream(),
-            )
-        )
+        override_service.materialize_blob_video = AsyncMock(return_value=video)
         resp = client.get(
             "/api/datasets/ds-1/episodes/0/video/il-camera",
             headers={"Range": "bytes=0-2"},
         )
         assert resp.status_code == 206
+        assert resp.content == b"abc"
 
-    def test_video_blob_head_returns_no_body(self, client: TestClient, override_service) -> None:
+    def test_video_blob_head_returns_no_body(self, client: TestClient, override_service, tmp_path: Path) -> None:
+        video = tmp_path / "blob-ep0.mp4"
+        video.write_bytes(b"unused-bytes")
         override_service.get_video_file_path = MagicMock(return_value=None)
         override_service.has_blob_provider = MagicMock(return_value=True)
         override_service.get_blob_video_path = AsyncMock(return_value="blob/path/ep0.mp4")
-
-        async def _stream():
-            yield b"unused"
-
-        override_service.get_blob_video_stream = AsyncMock(
-            return_value=({"Content-Length": "10"}, "video/mp4", _stream())
-        )
+        override_service.materialize_blob_video = AsyncMock(return_value=video)
         resp = client.head("/api/datasets/ds-1/episodes/0/video/il-camera")
         assert resp.status_code == 200
         assert resp.content == b""
@@ -353,13 +338,14 @@ class TestGetVideo:
         resp = client.get("/api/datasets/ds-1/episodes/0/video/il-camera")
         assert resp.status_code == 404
 
-    def test_video_blob_stream_none_returns_outer_404(self, client: TestClient, override_service) -> None:
+    def test_video_blob_materialize_failure_returns_502(self, client: TestClient, override_service) -> None:
         override_service.get_video_file_path = MagicMock(return_value=None)
         override_service.has_blob_provider = MagicMock(return_value=True)
         override_service.get_blob_video_path = AsyncMock(return_value="blob/path/ep0.mp4")
-        override_service.get_blob_video_stream = AsyncMock(return_value=None)
+        override_service.materialize_blob_video = AsyncMock(return_value=None)
         resp = client.get("/api/datasets/ds-1/episodes/0/video/il-camera")
-        assert resp.status_code == 404
+        assert resp.status_code == 502
+        assert "blob" in resp.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------

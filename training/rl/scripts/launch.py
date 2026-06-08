@@ -1,4 +1,4 @@
-"""Unified launcher for IsaacLab training and smoke-test workflows."""
+"""Unified launcher for Isaac Lab training and smoke-test workflows."""
 
 from __future__ import annotations
 
@@ -35,9 +35,9 @@ def _optional_str(value_str: str | None) -> str | None:
 
 
 def _parse_args(argv: Sequence[str] | None) -> tuple[argparse.Namespace, list[str]]:
-    parser = argparse.ArgumentParser(description="IsaacLab unified launcher")
+    parser = argparse.ArgumentParser(description="Isaac Lab unified launcher")
     parser.add_argument("--mode", choices=("train", "smoke-test"), default="train", help="Execution mode")
-    parser.add_argument("--task", type=_optional_str, default=None, help="IsaacLab task identifier")
+    parser.add_argument("--task", type=_optional_str, default=None, help="Isaac Lab task identifier")
     parser.add_argument("--num_envs", type=_optional_int, default=None, help="Number of simulated environments")
     parser.add_argument("--max_iterations", type=_optional_int, default=None, help="Maximum policy iterations")
     parser.add_argument("--headless", action="store_true", help="Run without viewer")
@@ -45,7 +45,7 @@ def _parse_args(argv: Sequence[str] | None) -> tuple[argparse.Namespace, list[st
         "--experiment-name",
         type=_optional_str,
         default=None,
-        help="Override Azure ML experiment name. Defaults to the IsaacLab task.",
+        help="Override Azure ML experiment name. Defaults to the Isaac Lab task.",
     )
     parser.add_argument(
         "--disable-mlflow",

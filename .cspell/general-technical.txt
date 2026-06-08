@@ -40,6 +40,7 @@ anydb
 anymal
 aobo
 apis
+apiserver
 app
 apple
 appletalk
@@ -2065,4 +2066,13 @@ reraises
 topcam
 notanum
 fevil
+acrfleetprod
+containerimage
+gsub
+imagetools
+kyverno
+openvex
+pickplace
+rawfile
+spdxjson
 pusht

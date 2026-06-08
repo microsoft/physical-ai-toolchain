@@ -2,7 +2,7 @@
 title: Workflow Templates (AzureML)
 description: Canonical AzureML workflow template reference for training and evaluation jobs.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-01
+ms.date: 2026-06-01
 ms.topic: reference
 keywords:
   - azureml
@@ -20,16 +20,16 @@ in `training/` and `evaluation/`.
 
 | Template             | Purpose                                                   | Source YAML path                                     | Typical submit path                                      |
 |----------------------|-----------------------------------------------------------|------------------------------------------------------|----------------------------------------------------------|
-| `train.yaml`         | IsaacLab RL training job structure                        | `training/rl/workflows/azureml/train.yaml`           | `training/rl/scripts/submit-azureml-training.sh`         |
+| `train.yaml`         | Isaac Lab RL training job structure                        | `training/rl/workflows/azureml/train.yaml`           | `training/rl/scripts/submit-azureml-training.sh`         |
 | `lerobot-train.yaml` | LeRobot behavioral cloning training job structure         | `training/il/workflows/azureml/lerobot-train.yaml`   | `training/il/scripts/submit-azureml-lerobot-training.sh` |
-| `validate.yaml`      | IsaacLab policy validation against registered models      | `evaluation/sil/workflows/azureml/validate.yaml`     | `evaluation/sil/scripts/submit-azureml-validation.sh`    |
+| `isaaclab-evaluation.yaml` | Isaac Lab policy evaluation against registered models      | `evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml` | `evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh` |
 | `lerobot-eval.yaml`  | LeRobot policy evaluation and optional model registration | `evaluation/sil/workflows/azureml/lerobot-eval.yaml` | `evaluation/sil/scripts/submit-azureml-lerobot-eval.sh`  |
 
 ## train.yaml
 
 | Field                            | Details                                                                                                                                                                                                                                                                             |
 |----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Purpose                          | Structural template for IsaacLab RL training submissions in AzureML.                                                                                                                                                                                                                |
+| Purpose                          | Structural template for Isaac Lab RL training submissions in AzureML.                                                                                                                                                                                                                |
 | Source YAML path                 | `training/rl/workflows/azureml/train.yaml`                                                                                                                                                                                                                                          |
 | Primary parameters and overrides | `inputs.task` (`Isaac-Velocity-Rough-Anymal-C-v0`), `inputs.num_envs` (`"2048"`), `inputs.max_iterations` (`"600"`), `inputs.checkpoint_mode` (`from-scratch`), `inputs.checkpoint_uri` (`none`), `inputs.register_checkpoint` (`none`), `inputs.run_azure_smoke_test` (`"false"`). |
 | Typical submit path              | `training/rl/scripts/submit-azureml-training.sh`                                                                                                                                                                                                                                    |
@@ -45,14 +45,14 @@ in `training/` and `evaluation/`.
 | Typical submit path              | `training/il/scripts/submit-azureml-lerobot-training.sh`                                                                                                                                                                                                                                                                          |
 | Usage notes                      | Use script flags for policy source and hyperparameters. Secrets such as HuggingFace tokens are injected at submission time.                                                                                                                                                                                                      |
 
-## validate.yaml
+## isaaclab-evaluation.yaml
 
 | Field                            | Details                                                                                                                                                                                                    |
 |----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Purpose                          | Structural template for IsaacLab validation jobs against registered models.                                                                                                                                |
-| Source YAML path                 | `evaluation/sil/workflows/azureml/validate.yaml`                                                                                                                                                           |
+| Purpose                          | Structural template for Isaac Lab evaluation jobs against registered models.                                                                                                                                |
+| Source YAML path                 | `evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml`                                                                                                                                                   |
 | Primary parameters and overrides | `inputs.trained_model.path` (`azureml:placeholder:1`), `inputs.task` (`auto`), `inputs.framework` (`auto`), `inputs.eval_episodes` (`100`), `inputs.num_envs` (`64`), `inputs.success_threshold` (`-1.0`). |
-| Typical submit path              | `evaluation/sil/scripts/submit-azureml-validation.sh`                                                                                                                                                      |
+| Typical submit path              | `evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh`                                                                                                                                                |
 | Usage notes                      | The script resolves model metadata and passes overrides with `--set`. The template intentionally uses sentinel defaults (`auto`, placeholder paths).                                                       |
 
 ## lerobot-eval.yaml
