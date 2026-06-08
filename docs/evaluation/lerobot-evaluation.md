@@ -3,7 +3,7 @@ sidebar_position: 2
 title: LeRobot ACT Policy Inference
 description: Run a trained ACT policy locally, on OSMO with MLflow plots, or on a UR10E robot via ROS2
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-27
+ms.date: 2026-06-01
 ms.topic: how-to
 keywords:
   - lerobot
@@ -68,7 +68,7 @@ uv pip install lerobot av pyarrow
 
 ### Run Offline Inference
 
-Validate the model against recorded dataset observations:
+Evaluate the model against recorded dataset observations:
 
 ```bash
 python scripts/test-lerobot-inference.py \

@@ -1,0 +1,15 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/microsoft/physical-ai-toolchain/security/vex/inference-base/2026-05-29",
+  "author": "Physical AI Toolchain Security Team",
+  "timestamp": "2026-05-29T00:00:00Z",
+  "version": 1,
+  "_source": {
+    "base_image": "scratch",
+    "digest": null,
+    "source": "fleet-deployment/setup/defaults.conf::DEFAULT_INFERENCE_BASE_IMAGE",
+    "note": "'scratch' is a Docker build-time keyword (no registry image, no digest). Inference images built FROM scratch carry only the model payload layer; there is no OS surface to scan."
+  },
+  "_note": "The inference image uses 'scratch' as its base (no OS, no packages, no executable runtime). The image is a passive model artifact carrier mounted into consumer pods via OCI image volumes (KEP-4639) and is never executed. There is no scannable CVE surface, so this document intentionally contains zero statements. If the base image is ever changed to a runnable distribution, regenerate via scripts/security/generate-vex.sh and triage each statement before committing.",
+  "statements": []
+}

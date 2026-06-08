@@ -79,13 +79,29 @@ export function useAnnotationWorkspaceMediaSources({
     }
   }, [cameras, cameraOverride])
 
-  const videoSrc = useMemo(() => {
-    if (!currentEpisode?.videoUrls || !cameraName) {
+  const videoUrls = useMemo(() => currentEpisode?.videoUrls ?? {}, [currentEpisode?.videoUrls])
+  const videoWindow = useMemo<[number, number] | null>(() => {
+    if (!cameraName) {
       return null
     }
+    const window = currentEpisode?.videoTimeWindows?.[cameraName]
+    if (!window || window.length !== 2) {
+      return null
+    }
+    return [window[0], window[1]]
+  }, [cameraName, currentEpisode?.videoTimeWindows])
 
-    return currentEpisode.videoUrls[cameraName]
-  }, [cameraName, currentEpisode?.videoUrls])
+  // Resolve the streaming URL for the selected camera. videoTimeWindows is a
+  // separate concern (concatenated v3 LeRobot clips need a [start, end] hint),
+  // and is exposed as videoWindow above. v2 LeRobot stores one video per
+  // episode with no window, so requiring a window here would force the player
+  // into the per-frame <img> fallback and make playback stutter.
+  const videoSrc = useMemo<string | null>(() => {
+    if (!cameraName) {
+      return null
+    }
+    return videoUrls[cameraName] ?? null
+  }, [cameraName, videoUrls])
 
   const isInsertedFrame = originalFrameIndex === null
 
@@ -208,5 +224,7 @@ export function useAnnotationWorkspaceMediaSources({
     interpolatedImageUrl,
     isInsertedFrame,
     videoSrc,
+    videoUrls,
+    videoWindow,
   }
 }

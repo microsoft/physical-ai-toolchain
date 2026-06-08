@@ -40,6 +40,7 @@ anydb
 anymal
 aobo
 apis
+apiserver
 app
 apple
 appletalk
@@ -658,6 +659,7 @@ keras
 kerberos
 keyid
 kics
+killpg
 kinect
 kingsway
 kingswaysoft
@@ -2053,4 +2055,13 @@ reraises
 topcam
 notanum
 fevil
+acrfleetprod
+containerimage
+gsub
+imagetools
+kyverno
+openvex
+pickplace
+rawfile
+spdxjson
 pusht
