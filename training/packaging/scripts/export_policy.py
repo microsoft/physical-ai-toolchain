@@ -1,7 +1,7 @@
 """Standalone policy export script for RSL-RL checkpoints.
 
 Exports RSL-RL trained policy checkpoints to JIT (TorchScript) and ONNX formats
-without requiring the full IsaacLab simulator environment.
+without requiring the full Isaac Lab simulator environment.
 
 Auto-detects observation and action dimensions from checkpoint weights.
 """

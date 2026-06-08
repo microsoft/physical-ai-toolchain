@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1.6
+# Model artifact carrier. Mounted into consumer pods via OCI image volumes
+# (KEP-4639). No runtime, no shell, no packages — image is never executed.
+ARG BASE_IMAGE=scratch
+FROM ${BASE_IMAGE}
+
+ARG MODEL_NAME
+ARG MODEL_VERSION
+LABEL azureml.model.name="${MODEL_NAME}"
+LABEL azureml.model.version="${MODEL_VERSION}"
+
+# AML model artifact tree, materialized by build-aml-model-image.sh under ./model/.
+COPY model/ /policy/
