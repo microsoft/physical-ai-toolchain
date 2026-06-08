@@ -1,0 +1,56 @@
+# Test consumer for an AML-model OCI image built by build-aml-model-image.sh.
+# Mounts the scratch model carrier via an OCI image volume (KEP-4639) and
+# prints the materialized /policy tree + a short head of each file so an
+# operator can confirm the end-to-end pull → mount → contents flow.
+#
+# The image volume exposes the IMAGE ROOT filesystem at mountPath. The
+# Dockerfile copies the AML artifact under /policy/.
+#
+# Requires Kubernetes >= 1.33 (ImageVolume beta, default-on) or >= 1.31 with
+# the ImageVolume feature gate enabled. The kubelet must be able to pull
+# the model image from the target ACR (image pull secret or workload identity).
+#
+# Usage:
+#   1. Replace <ACR>.azurecr.io/<repo>@sha256:<digest> below with the image
+#      reference printed by build-aml-model-image.sh.
+#   2. kubectl apply -f fleet-deployment/setup/tests/test-model-image-pod.yaml
+#      kubectl -n inference logs -f pod/test-model-image
+#      kubectl -n inference delete pod test-model-image
+#
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-model-image
+  namespace: inference
+  labels:
+    app.kubernetes.io/name: test-model-image
+    app.kubernetes.io/component: oci-model-flow-check
+spec:
+  restartPolicy: Never
+  imagePullSecrets:
+    - name: acr-pull
+  containers:
+    - name: echo-model
+      image: mcr.microsoft.com/cbl-mariner/busybox:2.0
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          echo "=== /mnt tree ==="
+          find /mnt 2>&1 | sort
+      volumeMounts:
+        - name: model
+          mountPath: /mnt
+          readOnly: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+  volumes:
+    - name: model
+      image:
+        reference: "<ACR>.azurecr.io/<repo>@sha256:<digest>"
+        pullPolicy: IfNotPresent
