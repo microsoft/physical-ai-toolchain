@@ -356,7 +356,7 @@ protobuf==6.33.6
     #   tensorboard
 psutil==7.2.2
     # via azure-monitor-opentelemetry-exporter
-pyarrow==19.0.1
+pyarrow==23.0.1
     # via mlflow
 pyasn1==0.6.3
     # via pyasn1-modules
