@@ -1,0 +1,119 @@
+[project]
+name = "robotics-training-vla"
+version = "0.1.0"
+description = "LeRobot vision-language-action (pi0 / pi0_fast / pi05) workflow runtime dependencies"
+requires-python = ">=3.12"
+# Direct dependencies for the AzureML VLA pi0 training entrypoint. All versions
+# are pinned exactly because requirements.txt is installed with `uv pip install
+# --no-deps` from a compiled lockfile; pip's resolver does NOT run in the
+# container. Regenerate requirements.txt after any change here:
+#   cd training/vla/lerobot
+#   uv pip compile pyproject.toml -o requirements.txt --python-version 3.12 \
+#     --python-platform x86_64-manylinux_2_28
+#
+# This file is a fork of training/il/lerobot/pyproject.toml. The VLA fork
+# differs in two ways:
+#   1. lerobot is installed with the `[pi]` extra, which pulls transformers
+#      and scipy (required by pi0 / pi0_fast / pi05 policy code paths).
+#   2. transformers and scipy are pinned as direct dependencies so they
+#      appear in the compiled lockfile (the IL lockfile excludes them).
+#
+# Keep override-dependencies and other shared pins in sync with IL when
+# bumping lerobot, azureml-mlflow, or any other co-versioned package.
+dependencies = [
+    "numpy==2.4.6",
+    "azure-core==1.41.0",
+    "azure-storage-blob==12.29.0",
+    "azure-identity==1.25.3",
+    "azure-ai-ml==1.33.0",
+    "azureml-mlflow==1.62.0.post2",
+    # azure-ai-ml allows newer prerelease storage clients when prerelease
+    # resolution is enabled for telemetry; keep storage clients on stable rails.
+    "azure-storage-file-datalake==12.24.0",
+    "azure-storage-file-share==12.25.0",
+    # marshmallow held at 3.x because azure-ai-ml==1.33.0 imports symbols that
+    # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
+    # Track azure-ai-ml release notes; bump together when 4.x support lands.
+    "marshmallow==3.26.2",
+    "mlflow-skinny==3.13.0",
+    "packaging==26.2",
+    # Global prerelease resolution would otherwise select pydantic and sentry-sdk
+    # alpha releases; pin stable versions unless a direct dependency requires them.
+    "pydantic==2.13.4",
+    "sentry-sdk==2.61.1",
+    "psutil==7.2.2",
+    "pynvml==13.0.1",
+    "pyperclip==1.11.0",
+    "datasets==5.0.0",
+    "pyarrow==24.0.0",
+    "huggingface-hub==1.18.0",
+    # lerobot[pi] pulls transformers + scipy as transitive extras required by
+    # the pi0 / pi0_fast / pi05 policy implementations. The extra is documented
+    # by upstream lerobot at packages/lerobot/pyproject.toml under
+    # [project.optional-dependencies].pi.
+    "lerobot[pi]==0.5.1",
+    # transformers and scipy pinned explicitly so they land in the lockfile
+    # at known-good versions instead of floating with lerobot[pi]'s range.
+    # transformers 5.3.0 is the first version compatible with the pi0
+    # tokenizer / processor API used in lerobot 0.5.1.
+    "transformers==5.3.0",
+    "scipy==1.16.3",
+    # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
+    # training/il/scripts/lerobot/train.py). Without an explicit pin the version
+    # would track lerobot's transitive range and could drift on dependency bumps.
+    "accelerate==1.13.0",
+    "torchcodec==0.14.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
+    "gitpython==3.1.50",
+    # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
+    "urllib3==2.7.0",
+    # Pin wrapt to the latest stable in the 1.x line. opentelemetry-instrumentation
+    # constrains wrapt below 2.0 and above 1.0, but with prerelease resolution
+    # enabled below uv would otherwise pick the 1.17.4 release candidate over
+    # 1.17.3 stable.
+    "wrapt==2.2.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+# `override-dependencies` forces uv to ignore upstream upper-bound constraints
+# during resolution. Each entry below must repeat a pinned version that also
+# appears in `dependencies` above, otherwise resolution drifts. Remove an
+# override only when the upstream constraint that required it is lifted.
+#
+# WARNING: the override list is tightly coupled to lerobot==0.5.1's published
+# constraints. When bumping lerobot, audit every entry against the new
+# release's pyproject so we neither hide a legitimate upper bound nor leave a
+# stale override in place.
+override-dependencies = [
+    # diffusers: lerobot==0.5.1 pins a range that includes versions vulnerable
+    # to GHSA-98h9-4798-4q5v; force the patched release.
+    "diffusers==0.38.0",
+    # azure-storage-blob: azureml-mlflow==1.62.0.post2 caps below 12.29.0; we
+    # need 12.29.0 for the AzureCliCredential fix shipped in that release.
+    "azure-storage-blob==12.29.0",
+    # mlflow-skinny: lerobot==0.5.1 has a tighter cap; mirror the direct pin.
+    "mlflow-skinny==3.13.0",
+    # packaging: azureml-mlflow caps below 26.x; mirror the direct pin.
+    "packaging==26.2",
+    # numpy: lerobot==0.5.1 caps at <2.4; we need 2.4.6 to align with torchcodec.
+    "numpy==2.4.6",
+    # torchcodec: lerobot==0.5.1 caps below 0.12; 0.13.0 ships the manylinux
+    # 2.28 wheel needed by the AzureML CUDA container.
+    "torchcodec==0.14.0",
+    # datasets: lerobot==0.5.1 caps below 5.0.0; we need 5.0.0 to align with
+    # the Azure storage backend used by the AzureML run output mounts.
+    "datasets==5.0.0",
+]
+package = false
+
+[tool.uv.pip]
+# Required for prerelease transitives pulled by the resolved tree, including
+# Azure/OpenTelemetry instrumentation betas, wrapt release candidates, and
+# safetensors release candidates. After regenerating requirements.txt, audit
+# the full set with:
+#   grep -E '[0-9][ab][0-9]+|rc[0-9]+' requirements.txt
+prerelease = "allow"

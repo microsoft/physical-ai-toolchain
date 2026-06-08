@@ -26,7 +26,7 @@ if [[ ! -e training ]]; then ln -s . training; fi
 apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential >/dev/null 2>&1
 pip install --quiet uv
 
-LEROBOT_REQUIREMENTS="training/il/lerobot/requirements.txt"
+LEROBOT_REQUIREMENTS="${LEROBOT_REQUIREMENTS:-training/il/lerobot/requirements.txt}"
 if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
   echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
   exit 1
