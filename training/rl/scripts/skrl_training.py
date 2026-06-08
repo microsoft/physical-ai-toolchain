@@ -685,7 +685,7 @@ def _finalize_mlflow_run(state: MLflowRunState) -> None:
     try:
         latest_checkpoint_uri = _log_artifacts(mlflow, state.log_dir, state.resume_path)
     except Exception:
-        _LOGGER.warning("MLflow artifact upload failed; checkpoint registration will be skipped")
+        _LOGGER.warning("MLflow artifact upload failed; checkpoint registration will be skipped", exc_info=True)
         latest_checkpoint_uri = None
 
     if state.args and state.args.register_checkpoint and latest_checkpoint_uri:

@@ -22,8 +22,6 @@ import shutil
 import sys
 import tempfile
 
-os.environ.setdefault("AZUREML_ARTIFACTS_DEFAULT_TIMEOUT", "7200")
-
 import mlflow
 from azure.ai.ml import MLClient
 from azure.identity import DefaultAzureCredential
@@ -75,6 +73,8 @@ def main() -> int:
         print(f"aml_mirror: missing env vars: {missing}", file=sys.stderr)
         return 1
 
+    os.environ.setdefault("AZUREML_ARTIFACTS_DEFAULT_TIMEOUT", "7200")
+
     output_dir = pathlib.Path(os.environ["OUTPUT_DIR"])
     if not output_dir.exists():
         print(f"aml_mirror: {output_dir} does not exist", file=sys.stderr)
@@ -114,6 +114,7 @@ def main() -> int:
         )
         if not ckpts:
             print("aml_mirror: no checkpoint-* dirs found", file=sys.stderr)
+            mlflow.end_run(status="FAILED")
             return 1
         final = pathlib.Path(ckpts[-1])
 

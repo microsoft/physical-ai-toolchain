@@ -235,7 +235,7 @@ def _start_run(
         try:
             mlflow_module.log_dict(summary, "smoke-test-summary.json")
         except Exception:
-            _LOGGER.warning("Artifact logging unavailable (MLflow 3.x without azureml-mlflow plugin)")
+            _LOGGER.warning("Artifact logging unavailable (MLflow 3.x without azureml-mlflow plugin)", exc_info=True)
         _LOGGER.info("Smoke test run created with ID %s", run.info.run_id)
         return run.info.run_id
 

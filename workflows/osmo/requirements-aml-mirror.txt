@@ -2,6 +2,10 @@
 #    uv pip compile --python-version 3.11 --no-header -o requirements-aml-mirror.txt
 #
 # Source dependencies: mlflow>=3.9,<4 azureml-mlflow>=1.55 azure-identity>=1.17 azure-ai-ml>=1.20 tbparse>=0.0.8
+#
+# Mirror runtime installs into a fresh venv on OSMO pods, so versions are
+# resolved independently from training/rl/pyproject.toml.  The ceiling is
+# azureml-mlflow's mlflow<3.0.0 pin, which forces older transitive versions.
 absl-py==2.4.0
     # via tensorboard
 aiohappyeyeballs==2.6.1

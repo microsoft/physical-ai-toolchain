@@ -36,8 +36,8 @@ section "Submit Azure ML Replay"
 print_kv "Run ID"     "$run_id"
 print_kv "Model name" "$model_name"
 
-aml_mirror_b64=$(base64 -w0 < "$aml_mirror_script")
-aml_mirror_requirements_b64=$(base64 -w0 < "$aml_mirror_requirements")
+aml_mirror_b64=$(base64 < "$aml_mirror_script" | tr -d '\n')
+aml_mirror_requirements_b64=$(base64 < "$aml_mirror_requirements" | tr -d '\n')
 
 submit_args=(
   workflow submit "$REPO_ROOT/workflows/osmo/replay-azureml.yaml"

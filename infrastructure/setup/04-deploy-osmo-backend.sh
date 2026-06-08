@@ -411,14 +411,14 @@ export ACR_LOGIN_SERVER="$acr_login_server"
 envsubst < "$pod_template_file" > "$CONFIG_DIR/out/pod-template-config.json"
 
 aml_workspace_name=$(tf_get "$tf_output" "azureml_workspace.value.name")
-aml_resource_group=$(tf_get "$tf_output" "resource_group.value.name")
-aml_subscription_id=$(az account show --query id -o tsv)
 
 if [[ "$skip_azureml_pod_template" == "true" ]]; then
   info "AzureML pod-template extension explicitly skipped (--skip-azureml-pod-template)"
 elif [[ -z "$aml_workspace_name" ]]; then
   info "No AzureML workspace in Terraform outputs; skipping pod-template extension"
 else
+  aml_resource_group=$(tf_get "$tf_output" "resource_group.value.name")
+  aml_subscription_id=$(az account show --query id -o tsv)
   section "Configure Azure ML Pod Template (Optional)"
   info "Injecting AzureML metadata into default_user pod template (workspace: $aml_workspace_name)"
 
