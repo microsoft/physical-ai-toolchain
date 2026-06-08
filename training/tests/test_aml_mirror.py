@@ -102,10 +102,33 @@ class TestLogTensorboardMetrics:
         assert _MOD._log_tensorboard_metrics(tmp_path) == 0
 
     def test_logs_metrics_for_each_scalar(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        pd = pytest.importorskip("pandas")
+        rows = [
+            {"tag": "loss", "step": 1, "value": 0.5},
+            {"tag": "loss", "step": 2, "value": 0.3},
+            {"tag": "reward", "step": 1, "value": 1.0},
+        ]
 
-        data = pd.DataFrame({"tag": ["loss", "loss", "reward"], "step": [1, 2, 1], "value": [0.5, 0.3, 1.0]})
-        fake_reader = SimpleNamespace(scalars=data)
+        class _FakeScalars:
+            empty = False
+
+            def __getitem__(self, key: str) -> _FakeScalars:
+                self._key = key
+                return self
+
+            def __eq__(self, other: object) -> _FakeScalars:
+                self._filter_value = other
+                return self
+
+            def unique(self) -> list[str]:
+                return ["loss", "reward"]
+
+            def sort_values(self, _by: str) -> _FakeScalars:
+                return self
+
+            def iterrows(self) -> list[tuple[int, dict[str, object]]]:
+                return [(i, r) for i, r in enumerate(rows) if r["tag"] == self._filter_value]
+
+        fake_reader = SimpleNamespace(scalars=_FakeScalars())
         fake_tbparse = ModuleType("tbparse")
         fake_tbparse.SummaryReader = lambda _path: fake_reader
         monkeypatch.setitem(sys.modules, "tbparse", fake_tbparse)
