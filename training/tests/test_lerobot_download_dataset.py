@@ -86,6 +86,84 @@ class TestDownloadDataset:
         stubs.service_client.get_container_client.assert_called_once_with("cont")
 
 
+class TestDownloadDatasetTraversal:
+    """Path-traversal hardening for download_dataset.
+
+    Originally added in feat/add-azureml-data-assets; lives here so the
+    `pytest.importorskip("pyarrow")` gate above keeps `download_dataset.py`
+    out of the `--cov=training` scope on CI runners that do not install
+    pyarrow.
+    """
+
+    def test_skips_absolute_blob_name(self, monkeypatch, tmp_path, capsys):
+        prefix = "p"
+        blobs = [
+            SimpleNamespace(name=f"{prefix}/safe.parquet"),
+            SimpleNamespace(name=f"{prefix}//etc/passwd"),
+        ]
+        _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"ok")
+
+        result = _MOD.download_dataset(
+            storage_account="acct",
+            storage_container="cont",
+            blob_prefix=prefix,
+            dataset_root=str(tmp_path),
+            dataset_repo_id="user/ds",
+        )
+
+        assert (result / "safe.parquet").read_bytes() == b"ok"
+        assert not (Path("/etc/passwd").exists() and (Path("/etc/passwd").read_bytes() == b"ok"))
+        out = capsys.readouterr().out
+        assert "Skipping unsafe blob name" in out or "Skipping blob outside dest_dir" in out
+
+    def test_skips_dotdot_segments(self, monkeypatch, tmp_path, capsys):
+        prefix = "p"
+        blobs = [
+            SimpleNamespace(name=f"{prefix}/../escape.parquet"),
+            SimpleNamespace(name=f"{prefix}/a/../../escape2.parquet"),
+        ]
+        _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"x")
+
+        result = _MOD.download_dataset(
+            storage_account="acct",
+            storage_container="cont",
+            blob_prefix=prefix,
+            dataset_root=str(tmp_path),
+            dataset_repo_id="user/ds",
+        )
+
+        assert not (tmp_path / "escape.parquet").exists()
+        assert not (tmp_path / "user" / "escape2.parquet").exists()
+        assert list(result.rglob("*.parquet")) == []
+        assert "Skipping unsafe blob name" in capsys.readouterr().out
+
+    def test_skips_blob_resolving_outside_via_symlink(self, monkeypatch, tmp_path, capsys):
+        # Pre-create a symlink inside the dest dir pointing outside it. A naive
+        # implementation that joins paths but does not resolve symlinks would
+        # follow the link and write to the external target.
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        dest_root = tmp_path / "root"
+        dest_root.mkdir()
+        repo_dir = dest_root / "user" / "ds"
+        repo_dir.mkdir(parents=True)
+        (repo_dir / "link").symlink_to(outside)
+
+        blobs = [SimpleNamespace(name="p/link/escaped.parquet")]
+        _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"x")
+
+        _MOD.download_dataset(
+            storage_account="acct",
+            storage_container="cont",
+            blob_prefix="p",
+            dataset_root=str(dest_root),
+            dataset_repo_id="user/ds",
+        )
+
+        assert not (outside / "escaped.parquet").exists()
+        assert "Skipping blob outside dest_dir" in capsys.readouterr().out
+
+
 class TestVerifyDataset:
     def test_returns_none_when_missing(self, tmp_path):
         assert _MOD.verify_dataset(tmp_path) is None
