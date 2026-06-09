@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
@@ -31,9 +31,13 @@ jobs:
           # GHSA-4x5p-f36r-mxxr: mlflow — world-writable temp dir enables race-condition RCE; fixed in 3.4.0; azureml-mlflow constrains mlflow<3.0.0 (CVE-2025-10279)
           # GHSA-hqmj-h5c6-369m: onnx — hub.load() suppresses trust warnings; no fix released; repo uses onnx for model serialization only (CVE-2026-28500)
           # GHSA-7qhf-v65m-g5f3: mlflow — unauthenticated FastAPI job endpoints under /ajax-api/3.0/jobs/*; no upstream fix; server-side only (CVE-2026-0545)
+          # GHSA-46r5-x6jq-v8g6: mlflow — AJAX artifact download authorization bypass; no upstream fix; server-side only, repo uses client only (CVE-2026-33866)
+          # GHSA-fh64-r2vc-xvhr: mlflow — stored XSS via YAML MLmodel artifacts; fixed in 3.11.1; blocked by azureml-mlflow<=3.9.0 ceiling; server-side only (CVE-2026-33865)
           allow-ghsas: >-
             GHSA-wf7f-8fxf-xfxc,
             GHSA-pgqp-8h46-6x4j,
             GHSA-4x5p-f36r-mxxr,
             GHSA-hqmj-h5c6-369m,
-            GHSA-7qhf-v65m-g5f3
+            GHSA-7qhf-v65m-g5f3,
+            GHSA-46r5-x6jq-v8g6,
+            GHSA-fh64-r2vc-xvhr

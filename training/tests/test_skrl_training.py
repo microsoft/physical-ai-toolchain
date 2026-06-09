@@ -994,6 +994,27 @@ class TestFinalizeMlflowRun:
         register.assert_called_once()
         mlflow.end_run.assert_not_called()
 
+    def test_artifact_upload_failure_skips_registration(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        mlflow = MagicMock()
+        register = MagicMock()
+        monkeypatch.setattr(_MOD, "_log_artifacts", MagicMock(side_effect=RuntimeError("upload boom")))
+        monkeypatch.setattr(_MOD, "_register_checkpoint_model", register)
+
+        state = _MOD.MLflowRunState(
+            mlflow=mlflow,
+            log_interval=10,
+            owns_run=True,
+            args=_make_mlflow_args(register_checkpoint="model"),
+            cli_args=_make_cli(),
+            log_dir=tmp_path,
+            resume_path=None,
+        )
+
+        _MOD._finalize_mlflow_run(state)
+
+        register.assert_not_called()
+        mlflow.end_run.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # _execute_training_loop
@@ -1441,7 +1462,7 @@ class TestRunTraining:
 
         monkeypatch.setattr("builtins.__import__", fake_import)
 
-        with pytest.raises(SystemExit, match="IsaacLab packages are required"):
+        with pytest.raises(SystemExit, match="Isaac Lab packages are required"):
             _MOD.run_training(args=_make_mlflow_args(), hydra_args=[], context=None)
 
     def test_runs_training_success_path(self, mocker: MockerFixture) -> None:
