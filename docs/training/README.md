@@ -54,9 +54,9 @@ training/il/scripts/submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_inserti
 
 ## 📚 Related Documentation
 
-- [Deployment Guide](../../infrastructure/setup/README.md) for infrastructure setup
-- [AzureML Workflows](../../workflows/azureml/README.md) for job template reference
-- [OSMO Workflows](../../workflows/osmo/README.md) for workflow template reference
+- [Deployment Guide](../infrastructure/cluster-setup.md) for infrastructure setup
+- [AzureML Workflows](azureml-training.md) for job template reference
+- [OSMO Workflows](osmo-training.md) for workflow template reference
 - [Scripts Reference](../reference/scripts.md) for CLI usage
 
 <!-- markdownlint-disable MD036 -->
