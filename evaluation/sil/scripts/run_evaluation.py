@@ -12,6 +12,79 @@ import torch
 JOINT_NAMES: list[str] = []
 
 
+_EVALUATION_SCHEMA_VERSION = 1
+_VERDICT_PASS = "pass"
+_VERDICT_SKIPPED = "skipped"
+_BASELINE_NONE = "none"
+
+_TOOLCHAIN_TO_VLA_METRIC = {
+    "mse": "action_accuracy_l2",
+    "mae": "action_accuracy_l1",
+    "avg_inference_ms": "inference_latency_p50_ms",
+    "throughput_hz": "throughput_hz",
+}
+
+
+def _write_vla_schema_v1(
+    output_dir: Path,
+    aggregate: dict[str, float],
+    per_episode: list[dict],
+    dataset_repo_id: str,
+    policy_repo_id: str,
+) -> None:
+    """Emit evaluation_schema_version=1 artifacts alongside eval_results.json.
+
+    The toolchain has no gate / threshold / baseline system (governance was
+    explicitly removed during the upstream port), so every metric is emitted
+    with absolute_threshold=inf, absolute_verdict=pass, baseline_value=null,
+    regression_verdict=skipped. metrics.json carries the aggregate verdict;
+    failure_cases.jsonl is empty unless an episode raised a rollout_error
+    during the inference loop.
+    """
+    metrics_payload = {
+        "evaluation_schema_version": _EVALUATION_SCHEMA_VERSION,
+        "aggregate_verdict": _VERDICT_PASS,
+        "baseline_model_version": _BASELINE_NONE,
+        "metrics": [
+            {
+                "name": _TOOLCHAIN_TO_VLA_METRIC.get(toolchain_name, toolchain_name),
+                "value": float(value),
+                "absolute_threshold": float("inf"),
+                "absolute_verdict": _VERDICT_PASS,
+                "baseline_value": None,
+                "regression_pct": 0.0,
+                "regression_verdict": _VERDICT_SKIPPED,
+            }
+            for toolchain_name, value in aggregate.items()
+        ],
+    }
+
+    metrics_path = output_dir / "metrics.json"
+    with open(metrics_path, "w") as f:
+        json.dump(metrics_payload, f, indent=2)
+    print(f"[INFO] VLA schema v1 metrics: {metrics_path}")
+
+    failure_cases_path = output_dir / "failure_cases.jsonl"
+    with open(failure_cases_path, "w") as f:
+        for episode in per_episode:
+            if not episode.get("rollout_error"):
+                continue
+            record = {
+                "evaluation_schema_version": _EVALUATION_SCHEMA_VERSION,
+                "episode_id": str(episode.get("episode", "unknown")),
+                "dataset_id": dataset_repo_id,
+                "dataset_version": "unknown",
+                "domain_category": None,
+                "model_version": policy_repo_id,
+                "artifact_refs": [],
+                "failure_mode": "rollout_error",
+                "metric_values": {k: v for k, v in episode.items() if isinstance(v, (int, float))},
+                "metric_thresholds_violated": [],
+            }
+            f.write(json.dumps(record) + "\n")
+    print(f"[INFO] VLA schema v1 failure cases: {failure_cases_path}")
+
+
 def _setup_matplotlib():
     import matplotlib
 
@@ -431,6 +504,19 @@ def main() -> int:
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\n[INFO] Results saved to: {results_path}")
+
+    _write_vla_schema_v1(
+        output_dir=output_dir,
+        aggregate={
+            "mse": agg_mse,
+            "mae": agg_mae,
+            "avg_inference_ms": agg_inf_ms,
+            "throughput_hz": agg_throughput,
+        },
+        per_episode=all_episode_metrics,
+        dataset_repo_id=dataset_repo_id,
+        policy_repo_id=policy_repo_id,
+    )
 
     if mlflow_enable:
         import mlflow

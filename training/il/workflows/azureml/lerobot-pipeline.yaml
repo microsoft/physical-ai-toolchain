@@ -1,0 +1,143 @@
+# LeRobot Imitation Learning Pipeline (3-step DAG)
+#
+# End-to-end LeRobot IL training pipeline:
+#   preprocess -> train -> evaluate
+#
+# Adapted from an upstream `lerobot_act_train_end_to_end` AzureML Pipeline
+# with Hydra config composition, Fabric lineage, gate signals, candidate-tag
+# patching, and eval-gates-register enforcement removed. The 4-step variant
+# with an opt-in register step lives in lerobot-pipeline-with-register.yaml.
+#
+# This is a STRUCTURAL TEMPLATE used by submit-azureml-lerobot-pipeline.sh.
+# Values below are placeholders and will be overridden at submission time:
+#   - compute_* inputs (one per step) are wired via Terraform outputs
+#   - dataset URI / dataset_repo_id / job_name are command-line arguments
+#   - environment_variables blocks are filled by --set at submission
+#
+# settings.continue_on_step_failure: a step failure stops the pipeline so the
+# downstream step never starts. This is standard AML DAG behavior, NOT an
+# eval-gates-register governance contract.
+
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: lerobot-pipeline
+experiment_name: lerobot-pipeline
+description: >-
+  LeRobot imitation learning pipeline: preprocess -> train -> evaluate.
+  Emits trained checkpoints (uri_folder) and evaluation metrics in
+  evaluation_schema_version=1 format (metrics.json + failure_cases.jsonl)
+  alongside the toolchain's legacy eval_results.json.
+
+settings:
+  default_datastore: azureml:workspaceblobstore
+  continue_on_step_failure: false
+
+inputs:
+  dataset:
+    type: uri_folder
+    description: >-
+      Raw LeRobot dataset asset (e.g. azureml:my-dataset:1). Must contain
+      meta/, data/, and optionally videos/ subfolders.
+  dataset_repo_id:
+    type: string
+    description: >-
+      HuggingFace-style dataset repo id; must match the dataset folder name
+      (e.g. "user/koch-pick-place-5-lego-random-pose").
+  preprocessing_config:
+    type: uri_file
+    optional: true
+    description: >-
+      Optional preprocessing_config.yaml from a previous pipeline run, used
+      to lock down preprocessing parameters across runs.
+  policy_type:
+    type: string
+    default: act
+    description: >-
+      LeRobot policy type forwarded to both train and evaluate steps
+      (act / diffusion / pi0).
+  job_name:
+    type: string
+    default: lerobot-pipeline
+    description: >-
+      Display name used for MLflow run naming and step labels.
+  compute_preprocess:
+    type: string
+    default: azureml:cpu-cluster
+    description: AML compute target for the preprocess step.
+  compute_train:
+    type: string
+    default: azureml:cpu-cluster
+    description: AML compute target for the train step.
+  compute_evaluate:
+    type: string
+    default: azureml:cpu-cluster
+    description: AML compute target for the evaluate step.
+
+outputs:
+  checkpoints:
+    type: uri_folder
+    mode: upload
+    description: Trained checkpoint folder uploaded by the MLflow training wrapper.
+  eval_metrics:
+    type: uri_folder
+    mode: upload
+    description: >-
+      Evaluation artifacts: metrics.json + failure_cases.jsonl (VLA
+      evaluation_schema_version=1), eval_results.json (toolchain legacy),
+      plus trajectory plots.
+
+jobs:
+  preprocess_step:
+    type: command
+    component: ./components/preprocess.yaml
+    compute: ${{parent.inputs.compute_preprocess}}
+    inputs:
+      dataset: ${{parent.inputs.dataset}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      preprocessing_config: ${{parent.inputs.preprocessing_config}}
+
+  train_step:
+    type: command
+    component: ./components/train.yaml
+    compute: ${{parent.inputs.compute_train}}
+    inputs:
+      prepared_dataset: ${{parent.jobs.preprocess_step.outputs.prepared_dataset}}
+      preprocessing_config: ${{parent.jobs.preprocess_step.outputs.preprocessing_config}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      policy_type: ${{parent.inputs.policy_type}}
+      job_name: ${{parent.inputs.job_name}}
+    outputs:
+      checkpoints: ${{parent.outputs.checkpoints}}
+    identity:
+      type: managed_identity
+    environment_variables:
+      AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
+      DATASET_REPO_ID: ${{parent.inputs.dataset_repo_id}}
+      POLICY_TYPE: ${{parent.inputs.policy_type}}
+      JOB_NAME: ${{parent.inputs.job_name}}
+      TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
+
+  evaluate_step:
+    type: command
+    component: ../../../../evaluation/sil/workflows/azureml/components/evaluate.yaml
+    compute: ${{parent.inputs.compute_evaluate}}
+    inputs:
+      model_checkpoint: ${{parent.jobs.train_step.outputs.checkpoints}}
+      prepared_dataset: ${{parent.jobs.preprocess_step.outputs.prepared_dataset}}
+      preprocessing_config: ${{parent.jobs.preprocess_step.outputs.preprocessing_config}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      policy_type: ${{parent.inputs.policy_type}}
+      job_name: ${{parent.inputs.job_name}}
+    outputs:
+      eval_metrics: ${{parent.outputs.eval_metrics}}
+    identity:
+      type: managed_identity
+    environment_variables:
+      AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
+      DATASET_REPO_ID: ${{parent.inputs.dataset_repo_id}}
+      POLICY_TYPE: ${{parent.inputs.policy_type}}
+      JOB_NAME: ${{parent.inputs.job_name}}
+
+tags:
+  pipeline: lerobot-pipeline
+  framework: lerobot
