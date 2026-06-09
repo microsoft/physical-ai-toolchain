@@ -46,6 +46,9 @@ Training jobs submit via AzureML or OSMO. Each approach has dedicated submission
 | RL       | `rl/scripts/submit-azureml-training.sh`         | `rl/scripts/submit-osmo-training.sh`         |
 | IL       | `il/scripts/submit-azureml-lerobot-training.sh` | `il/scripts/submit-osmo-lerobot-training.sh` |
 
+> [!TIP]
+> Mirror completed OSMO runs to Azure ML for model versioning. See [Azure ML Mirror](../infrastructure/setup/README.md#️-azure-ml-mirror-optional) in the cluster setup guide.
+
 ## 📦 Packaging
 
 Trained policies export to ONNX and TensorRT formats via `packaging/scripts/export_policy.py`. See [Packaging Specification](specifications/packaging.specification.md) for details.
