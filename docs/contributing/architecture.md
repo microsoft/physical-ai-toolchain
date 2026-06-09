@@ -2,7 +2,7 @@
 sidebar_position: 2
 title: Repository Architecture
 description: Current state analysis and target architecture for the Physical AI Toolchain, organized around physical AI lifecycle domains with Agent Skill specifications.
-ms.date: 2026-02-24
+ms.date: 2026-06-01
 ms.topic: concept
 ---
 
@@ -122,7 +122,7 @@ A complete example pipeline demonstrates the full path from trained checkpoint t
 
 ### Evaluation
 
-Software-in-the-loop (SiL) and hardware-in-the-loop (HiL) validation pipelines for trained policies. Both approaches use Isaac Sim to emulate the target robot, with the trained policy controlling the simulation.
+Software-in-the-loop (SiL) and hardware-in-the-loop (HiL) evaluation pipelines for trained policies. Both approaches use Isaac Sim to emulate the target robot, with the trained policy controlling the simulation.
 
 | Approach | Infrastructure                                                                                         | Policy Host                     |
 |----------|--------------------------------------------------------------------------------------------------------|---------------------------------|

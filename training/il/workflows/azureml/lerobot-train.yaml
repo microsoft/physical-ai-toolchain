@@ -49,6 +49,12 @@ inputs:
   workspace_name: placeholder
   mlflow_token_refresh_retries: "3"
   mlflow_http_request_timeout: "60"
+  # Single-node multi-GPU is launched in-container via `accelerate launch`.
+  # The number of GPUs is detected at runtime via torch.cuda.device_count();
+  # on AzureML managed AmlCompute that is the cluster VM SKU's GPU count,
+  # on AzureML-on-Kubernetes it is the InstanceType's nvidia.com/gpu request.
+  # No AzureML `distribution:` block is needed in either case.
+  mixed_precision: "no"
 
 command: echo "Command will be set by submission script"
 
@@ -59,7 +65,6 @@ command: echo "Command will be set by submission script"
 environment_variables:
   AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
   TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
-  BLOB_URLS: ${{inputs.blob_urls}}
   # MLFLOW_HTTP_REQUEST_TIMEOUT: <set by script>
 
 outputs:
