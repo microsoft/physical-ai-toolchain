@@ -111,16 +111,41 @@ COCO_CLASSES = [
 ]
 
 
+DEFAULT_OPEN_VOCAB_MODEL = "yolov8s-world"
+_OPEN_VOCAB_PREFIXES: tuple[str, ...] = ("yolov8", "yoloe")
+_OPEN_VOCAB_TOKENS: tuple[str, ...] = ("world", "worldv2", "yoloe")
+
+
+def _is_open_vocab_model(model_name: str) -> bool:
+    name = model_name.lower()
+    if not name.startswith(_OPEN_VOCAB_PREFIXES):
+        return False
+    return any(token in name for token in _OPEN_VOCAB_TOKENS)
+
+
 class DetectionService:
-    """YOLO11 object detection service with caching."""
+    """Object detection service supporting closed-vocabulary YOLO11 and open-vocabulary YOLO-World."""
 
     def __init__(self) -> None:
         self._model: YOLO | None = None
         self._model_name: str = ""
+        self._model_classes: tuple[str, ...] = ()
         self._cache: dict[str, EpisodeDetectionSummary] = {}
 
-    def _get_model(self, model_name: str = "yolo11n") -> "YOLO":
-        """Load or return cached YOLO model."""
+    def _get_model(
+        self,
+        model_name: str = "yolo11n",
+        labels: list[str] | None = None,
+    ) -> "YOLO":
+        """Load or return cached YOLO model.
+
+        When ``labels`` is provided, an open-vocabulary YOLO-World model is selected and its
+        class vocabulary is set to the supplied labels. The default closed-vocabulary model
+        is overridden to ``DEFAULT_OPEN_VOCAB_MODEL`` if a closed-vocab name is passed alongside labels.
+        """
+        if labels and not _is_open_vocab_model(model_name):
+            model_name = DEFAULT_OPEN_VOCAB_MODEL
+
         if self._model is None or self._model_name != model_name:
             try:
                 from ultralytics import YOLO
@@ -128,6 +153,7 @@ class DetectionService:
                 logger.info("Loading YOLO model: %s", model_name.replace("\r", "").replace("\n", ""))
                 self._model = YOLO(f"{model_name}.pt")
                 self._model_name = model_name
+                self._model_classes = ()
                 # Warmup with dummy inference
                 import numpy as np
 
@@ -137,6 +163,19 @@ class DetectionService:
             except ImportError:
                 logger.error("ultralytics not installed. Run: uv sync --extra yolo")
                 raise
+
+        if labels:
+            label_tuple = tuple(labels)
+            if self._model_classes != label_tuple:
+                set_classes = getattr(self._model, "set_classes", None)
+                if set_classes is None:
+                    raise ValueError(
+                        f"Model '{model_name}' does not support open-vocabulary labels; "
+                        "use a YOLO-World variant such as yolov8s-world."
+                    )
+                set_classes(list(label_tuple))
+                self._model_classes = label_tuple
+                logger.info("Set open-vocabulary classes: %d label(s)", len(label_tuple))
         return self._model
 
     def _cache_key(self, dataset_id: str, episode_idx: int) -> str:
@@ -162,11 +201,24 @@ class DetectionService:
         frame_idx: int,
         confidence: float = 0.25,
         model_name: str = "yolo11n",
+        labels: list[str] | None = None,
     ) -> DetectionResult:
-        """Run detection on a single frame."""
+        """Run detection on a single frame.
+
+        When ``labels`` is provided, an open-vocabulary YOLO-World model is used and class
+        names are resolved against the supplied label list rather than the COCO vocabulary.
+        """
         import sys
 
-        model = self._get_model(model_name)
+        model = self._get_model(model_name, labels=labels)
+        # Resolve class-name lookup: the loaded model's `names` is authoritative for both
+        # closed- and open-vocabulary models (YOLO-World updates it via ``set_classes``).
+        model_names = getattr(model, "names", None)
+        class_lookup: dict[int, str] = {}
+        if isinstance(model_names, dict):
+            class_lookup = {int(k): str(v) for k, v in model_names.items()}
+        elif isinstance(model_names, list):
+            class_lookup = {idx: str(name) for idx, name in enumerate(model_names)}
 
         # Load image
         image = Image.open(BytesIO(image_bytes))
@@ -211,7 +263,12 @@ class DetectionService:
 
                 for i in range(len(boxes)):
                     class_id = int(boxes.cls[i].item())
-                    class_name = COCO_CLASSES[class_id] if class_id < len(COCO_CLASSES) else f"class_{class_id}"
+                    if class_id in class_lookup:
+                        class_name = class_lookup[class_id]
+                    elif class_id < len(COCO_CLASSES):
+                        class_name = COCO_CLASSES[class_id]
+                    else:
+                        class_name = f"class_{class_id}"
                     conf = float(boxes.conf[i].item())
                     x1, y1, x2, y2 = boxes.xyxy[i].tolist()
                     detections.append(
@@ -256,6 +313,7 @@ class DetectionService:
         # Determine frames to process
         confidence = request.confidence
         model_name = request.model
+        labels = request.labels
         frames_to_process = request.frames if request.frames else list(range(total_frames))
         print(f"[DETECT] Will process {len(frames_to_process)} frames", file=sys.stderr, flush=True)
 
@@ -288,6 +346,7 @@ class DetectionService:
                     frame_idx,
                     confidence=confidence,
                     model_name=model_name,
+                    labels=labels,
                 )
 
                 if frame_idx == 0:
@@ -305,6 +364,10 @@ class DetectionService:
                         class_counts[det.class_name] = []
                     class_counts[det.class_name].append(det.confidence)
 
+            except ImportError:
+                # Surface missing model dependencies (ultralytics / torch) as a hard
+                # failure instead of silently returning zero detections.
+                raise
             except Exception as e:
                 print(f"[DETECT] Frame {frame_idx}: ERROR {e}", file=sys.stderr, flush=True)
                 logger.warning(

@@ -57,6 +57,27 @@ class AppConfig:
     episode_cache_max_mb: int = 100
     """Max memory budget for the LRU cache in megabytes. 0 means count-only."""
 
+    vlm_judge_enabled: bool = False
+    """Whether the VLM-as-judge router is mounted."""
+
+    vlm_judge_backend: str = "echo"
+    """Backend kind: 'qwen3-vl', 'openai-compat', or 'echo'."""
+
+    vlm_judge_model_id: str = "Qwen/Qwen3-VL-4B-Instruct"
+    """Model identifier for the chosen backend."""
+
+    vlm_judge_base_url: str | None = None
+    """OpenAI-compatible base URL (vLLM, NIM, Azure OpenAI)."""
+
+    vlm_judge_api_key: str | None = None
+    """API key for the OpenAI-compatible backend."""
+
+    vlm_judge_n_frames: int = 12
+    """Number of frames sampled per episode."""
+
+    vlm_judge_cache_dir: str | None = None
+    """Directory for the SHA256-keyed result cache; None disables disk cache."""
+
 
 def load_config(env_path: Path | None = None) -> AppConfig:
     """
@@ -90,6 +111,14 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     episode_cache_capacity = int(os.environ.get("EPISODE_CACHE_CAPACITY", "32"))
     episode_cache_max_mb = int(os.environ.get("EPISODE_CACHE_MAX_MB", "100"))
 
+    vlm_judge_enabled = os.environ.get("VLM_JUDGE_ENABLED", "false").lower() == "true"
+    vlm_judge_backend = os.environ.get("VLM_JUDGE_BACKEND", "echo").lower()
+    vlm_judge_model_id = os.environ.get("VLM_JUDGE_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct")
+    vlm_judge_base_url = os.environ.get("VLM_JUDGE_BASE_URL") or None
+    vlm_judge_api_key = os.environ.get("VLM_JUDGE_API_KEY") or None
+    vlm_judge_n_frames = int(os.environ.get("VLM_JUDGE_N_FRAMES", "12"))
+    vlm_judge_cache_dir = os.environ.get("VLM_JUDGE_CACHE_DIR") or None
+
     return AppConfig(
         storage_backend=storage_backend,
         data_path=data_path,
@@ -102,6 +131,13 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         cors_origins=cors_origins,
         episode_cache_capacity=episode_cache_capacity,
         episode_cache_max_mb=episode_cache_max_mb,
+        vlm_judge_enabled=vlm_judge_enabled,
+        vlm_judge_backend=vlm_judge_backend,
+        vlm_judge_model_id=vlm_judge_model_id,
+        vlm_judge_base_url=vlm_judge_base_url,
+        vlm_judge_api_key=vlm_judge_api_key,
+        vlm_judge_n_frames=vlm_judge_n_frames,
+        vlm_judge_cache_dir=vlm_judge_cache_dir,
     )
 
 

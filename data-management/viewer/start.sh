@@ -155,6 +155,18 @@ start_backend() {
     export DATA_DIR
     log_info "Using DATA_DIR=${DATA_DIR}"
 
+    # When VLM_JUDGE_ENABLED=true, expose the evaluation package to the backend
+    # process so its lazy-import of evaluation.vlm_judge succeeds.
+    if [[ "${VLM_JUDGE_ENABLED:-false}" == "true" ]]; then
+        REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+        if [[ -n "${PYTHONPATH:-}" ]]; then
+            export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/evaluation:${PYTHONPATH}"
+        else
+            export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/evaluation"
+        fi
+        log_info "VLM judge enabled — PYTHONPATH=${PYTHONPATH}"
+    fi
+
     if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
         log_warn "Virtual environment not found at ${BACKEND_DIR}/.venv"
         log_info "Creating virtual environment..."

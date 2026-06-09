@@ -59,7 +59,7 @@ export function DataviewerEpisodeList({
   onSelectEpisode,
   selectedIndex,
 }: DataviewerEpisodeListProps) {
-  const { data: episodes, isLoading, error } = useEpisodes(datasetId, { limit: 100 })
+  const { data: episodes, isLoading, error } = useEpisodes(datasetId, { limit: 1000 })
   const episodeLabels = useLabelStore((state) => state.episodeLabels)
   const filterLabels = useLabelStore((state) => state.filterLabels)
 

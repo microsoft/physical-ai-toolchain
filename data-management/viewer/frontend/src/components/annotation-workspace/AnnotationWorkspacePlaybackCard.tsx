@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 
@@ -14,12 +15,19 @@ import { SpeedControl } from '@/components/playback/SpeedControl'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ViewerDisplayControls } from '@/components/viewer-display'
+import { cn } from '@/lib/utils'
 
 interface AnnotationWorkspacePlaybackCardProps {
   compact?: boolean
   canvasRef: RefObject<HTMLCanvasElement | null>
   videoRef: RefObject<HTMLVideoElement | null>
   videoSrc: string | null
+  /**
+   * Map of camera name -> video URL for every camera in the current episode.
+   * Used to pre-mount a `<video>` element per camera so switching is instant
+   * (parallel preload + persistent decoder pipelines).
+   */
+  videoUrls?: Record<string, string>
   onVideoEnded: () => void
   onLoadedMetadata: (event: SyntheticEvent<HTMLVideoElement>) => void
   displayFilter?: string
@@ -53,6 +61,7 @@ export function AnnotationWorkspacePlaybackCard({
   canvasRef,
   videoRef,
   videoSrc,
+  videoUrls,
   onVideoEnded,
   onLoadedMetadata,
   displayFilter,
@@ -98,6 +107,16 @@ export function AnnotationWorkspacePlaybackCard({
       return
     }
 
+    // With every camera's <video> pre-mounted, the new active video is
+    // typically already loaded (readyState >= HAVE_METADATA) when the user
+    // switches cameras. In that case, skip the loading flicker entirely.
+    const activeVideo = videoRef.current
+    if (activeVideo && activeVideo.readyState >= 1) {
+      setVideoLoaded(true)
+      setShowVideoLoading(false)
+      return
+    }
+
     setVideoLoaded(false)
     setShowVideoLoading(false)
     const timer = setTimeout(() => {
@@ -105,7 +124,7 @@ export function AnnotationWorkspacePlaybackCard({
     }, 200)
 
     return () => clearTimeout(timer)
-  }, [videoSrc])
+  }, [videoSrc, videoRef])
 
   const handleVideoLoadedMetadata = useCallback(
     (event: SyntheticEvent<HTMLVideoElement>) => {
@@ -121,6 +140,40 @@ export function AnnotationWorkspacePlaybackCard({
       setImageLoaded(false)
     }
   }, [episodeBase, videoSrc])
+
+  // Build the list of videos to mount. Pre-mounting every camera's <video>
+  // (with preload="auto") keeps each camera's decode pipeline warm so
+  // switching cameras is effectively instant — no fresh HTTP fetch, no
+  // decoder cold start. Inactive videos are kept mounted but hidden and
+  // never receive play() calls, so they sit on their first frame at zero
+  // CPU cost.
+  const videoEntries = useMemo<Array<{ camera: string; url: string }>>(() => {
+    if (!videoUrls) {
+      return videoSrc && selectedCamera ? [{ camera: selectedCamera, url: videoSrc }] : []
+    }
+    return Object.entries(videoUrls)
+      .filter(([, url]) => Boolean(url))
+      .map(([camera, url]) => ({ camera, url }))
+  }, [selectedCamera, videoSrc, videoUrls])
+
+  // Pause inactive videos when the user switches cameras. We don't restore
+  // playback on the previous camera; the active video resumes from the
+  // current frame via useAnnotationWorkspaceVideoSync.
+  const previousActiveCameraRef = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = previousActiveCameraRef.current
+    if (previous && previous !== selectedCamera) {
+      const inactive = document.querySelector<HTMLVideoElement>(
+        `video[data-camera="${CSS.escape(previous)}"]`,
+      )
+      if (inactive && !inactive.paused) {
+        inactive.pause()
+      }
+    }
+    previousActiveCameraRef.current = selectedCamera ?? null
+  }, [selectedCamera])
+
+  const hasAnyVideo = videoEntries.length > 0
   return (
     <Card className={compact ? 'mx-auto h-full min-h-0 w-full max-w-[44rem]' : 'shrink-0'}>
       <CardContent className={compact ? 'flex h-full min-h-0 flex-col p-3' : 'p-4'}>
@@ -142,18 +195,31 @@ export function AnnotationWorkspacePlaybackCard({
         >
           <canvas ref={canvasRef} className="hidden" />
 
-          {videoSrc ? (
-            <video
-              ref={videoRef}
-              src={videoSrc}
-              onEnded={onVideoEnded}
-              onLoadedMetadata={handleVideoLoadedMetadata}
-              muted
-              playsInline
-              preload="auto"
-              className="max-h-full max-w-full object-contain"
-              style={displayFilter ? { filter: displayFilter } : undefined}
-            />
+          {hasAnyVideo ? (
+            videoEntries.map(({ camera, url }) => {
+              const isActive = camera === selectedCamera
+              return (
+                <video
+                  key={camera}
+                  ref={isActive ? videoRef : null}
+                  data-camera={camera}
+                  src={url}
+                  onEnded={isActive ? onVideoEnded : undefined}
+                  onLoadedMetadata={isActive ? handleVideoLoadedMetadata : undefined}
+                  muted
+                  playsInline
+                  preload="auto"
+                  className={cn(
+                    'absolute inset-0 m-auto max-h-full max-w-full object-contain',
+                    isActive
+                      ? 'z-10 opacity-100'
+                      : 'pointer-events-none z-0 opacity-0',
+                  )}
+                  style={isActive && displayFilter ? { filter: displayFilter } : undefined}
+                  aria-hidden={!isActive}
+                />
+              )
+            })
           ) : isInsertedFrame && interpolatedImageUrl ? (
             <img
               src={interpolatedImageUrl}
@@ -210,31 +276,31 @@ export function AnnotationWorkspacePlaybackCard({
             controls={
               compact
                 ? renderCompactControls({
-                    isPlaying,
-                    onTogglePlayback,
-                    onStepFrame,
-                    playbackSpeed,
-                    onSetPlaybackSpeed,
-                    autoPlay,
-                    onSetAutoPlay,
-                    autoLoop,
-                    onSetAutoLoop,
-                    playbackRangeStart,
-                    onSetFrameWithinPlaybackRange,
-                  })
+                  isPlaying,
+                  onTogglePlayback,
+                  onStepFrame,
+                  playbackSpeed,
+                  onSetPlaybackSpeed,
+                  autoPlay,
+                  onSetAutoPlay,
+                  autoLoop,
+                  onSetAutoLoop,
+                  playbackRangeStart,
+                  onSetFrameWithinPlaybackRange,
+                })
                 : renderDefaultControls({
-                    isPlaying,
-                    onTogglePlayback,
-                    onStepFrame,
-                    playbackSpeed,
-                    onSetPlaybackSpeed,
-                    autoPlay,
-                    onSetAutoPlay,
-                    autoLoop,
-                    onSetAutoLoop,
-                    playbackRangeStart,
-                    onSetFrameWithinPlaybackRange,
-                  })
+                  isPlaying,
+                  onTogglePlayback,
+                  onStepFrame,
+                  playbackSpeed,
+                  onSetPlaybackSpeed,
+                  autoPlay,
+                  onSetAutoPlay,
+                  autoLoop,
+                  onSetAutoLoop,
+                  playbackRangeStart,
+                  onSetFrameWithinPlaybackRange,
+                })
             }
             slider={
               <div className="space-y-1">

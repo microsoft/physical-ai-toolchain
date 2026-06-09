@@ -11,14 +11,19 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ...models.datasources import (
     DatasetInfo,
     EpisodeData,
     EpisodeMeta,
+    FeatureSchema,
     TrajectoryPoint,
 )
-from .base import build_trajectory
+from .base import build_trajectory, build_trajectory_variables
+
+if TYPE_CHECKING:
+    from ..hdf5_loader import HDF5Loader as HDF5LoaderType
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +79,8 @@ def _generate_video(images, output_path: Path, fps: float = 30.0) -> bool:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        if proc.stdin is None:
+            return False
         for i in range(len(images)):
             proc.stdin.write(images[i].tobytes())
         proc.stdin.close()
@@ -95,7 +102,7 @@ def _generate_video_cv2(images, output_path: Path, fps: float = 30.0) -> bool:
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         h, w = images.shape[1], images.shape[2]
-        fourcc = cv2.VideoWriter_fourcc(*"avc1")
+        fourcc = cv2.VideoWriter_fourcc(*"avc1")  # type: ignore[attr-defined]
         writer = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
         for i in range(len(images)):
             writer.write(cv2.cvtColor(images[i], cv2.COLOR_RGB2BGR))
@@ -120,7 +127,7 @@ class HDF5FormatHandler:
     """Handler for HDF5-based episode datasets."""
 
     def __init__(self) -> None:
-        self._loaders: dict[str, HDF5Loader] = {}
+        self._loaders: dict[str, HDF5LoaderType] = {}
 
     @property
     def available(self) -> bool:
@@ -141,7 +148,7 @@ class HDF5FormatHandler:
 
     def get_loader(self, dataset_id: str, dataset_path: Path) -> bool:
         """Get or create an HDF5 loader. Returns True if successful."""
-        if not HDF5_AVAILABLE:
+        if not HDF5_AVAILABLE or HDF5Loader is None:
             return False
 
         if dataset_id in self._loaders:
@@ -156,7 +163,7 @@ class HDF5FormatHandler:
         self._loaders[dataset_id] = HDF5Loader(dataset_path)
         return True
 
-    def _get_loader(self, dataset_id: str) -> HDF5Loader | None:
+    def _get_loader(self, dataset_id: str) -> HDF5LoaderType | None:
         return self._loaders.get(dataset_id)
 
     def has_loader(self, dataset_id: str) -> bool:
@@ -167,7 +174,7 @@ class HDF5FormatHandler:
             return None
 
         loader = self._get_loader(dataset_id)
-        if loader is None:
+        if loader is None or load_single_frame is None:
             return None
 
         episode_count = 0
@@ -237,6 +244,29 @@ class HDF5FormatHandler:
 
         try:
             hdf5_data = loader.load_episode(episode_idx, load_images=False)
+            trajectory_variables, variable_values = build_trajectory_variables(
+                length=hdf5_data.length,
+                feature_values={
+                    "observation.state": hdf5_data.joint_positions,
+                    "action": hdf5_data.actions,
+                    "gripper_state": hdf5_data.gripper_states,
+                },
+                feature_schemas={
+                    "observation.state": FeatureSchema(
+                        dtype="float64",
+                        shape=[hdf5_data.joint_positions.shape[1]],
+                    ),
+                    "action": FeatureSchema(
+                        dtype="float64",
+                        shape=[hdf5_data.actions.shape[1]] if hdf5_data.actions is not None else [],
+                    ),
+                    "gripper_state": FeatureSchema(dtype="float64", shape=[1], names=["gripper_state"]),
+                },
+                feature_kinds={
+                    "observation.state": "state",
+                    "action": "action",
+                },
+            )
 
             trajectory_data = build_trajectory(
                 length=hdf5_data.length,
@@ -245,6 +275,8 @@ class HDF5FormatHandler:
                 joint_velocities=hdf5_data.joint_velocities,
                 end_effector_poses=hdf5_data.end_effector_pose,
                 gripper_states=hdf5_data.gripper_states,
+                trajectory_variables=trajectory_variables,
+                variable_values=variable_values,
                 clamp_gripper=True,
             )
 
@@ -263,6 +295,7 @@ class HDF5FormatHandler:
                 ),
                 video_urls=video_urls,
                 cameras=cameras,
+                trajectory_variables=trajectory_variables,
                 trajectory_data=trajectory_data,
             )
         except Exception as e:
@@ -281,6 +314,29 @@ class HDF5FormatHandler:
 
         try:
             hdf5_data = loader.load_episode(episode_idx, load_images=False)
+            trajectory_variables, variable_values = build_trajectory_variables(
+                length=hdf5_data.length,
+                feature_values={
+                    "observation.state": hdf5_data.joint_positions,
+                    "action": hdf5_data.actions,
+                    "gripper_state": hdf5_data.gripper_states,
+                },
+                feature_schemas={
+                    "observation.state": FeatureSchema(
+                        dtype="float64",
+                        shape=[hdf5_data.joint_positions.shape[1]],
+                    ),
+                    "action": FeatureSchema(
+                        dtype="float64",
+                        shape=[hdf5_data.actions.shape[1]] if hdf5_data.actions is not None else [],
+                    ),
+                    "gripper_state": FeatureSchema(dtype="float64", shape=[1], names=["gripper_state"]),
+                },
+                feature_kinds={
+                    "observation.state": "state",
+                    "action": "action",
+                },
+            )
 
             return build_trajectory(
                 length=hdf5_data.length,
@@ -289,6 +345,8 @@ class HDF5FormatHandler:
                 joint_velocities=hdf5_data.joint_velocities,
                 end_effector_poses=hdf5_data.end_effector_pose,
                 gripper_states=hdf5_data.gripper_states,
+                trajectory_variables=trajectory_variables,
+                variable_values=variable_values,
                 clamp_gripper=True,
             )
         except Exception as e:
@@ -309,12 +367,13 @@ class HDF5FormatHandler:
     ) -> bytes | None:
         """Load a single frame using h5py slice indexing."""
         loader = self._get_loader(dataset_id)
-        if loader is None:
+        frame_loader = load_single_frame
+        if loader is None or frame_loader is None:
             return None
 
         try:
             file_path = loader._find_episode_file(episode_idx)
-            frame = load_single_frame(file_path, camera, frame_idx)
+            frame = frame_loader(file_path, camera, frame_idx)
             if frame is None:
                 return None
             return _encode_jpeg(frame)
@@ -368,12 +427,13 @@ class HDF5FormatHandler:
     def _generate_episode_video(self, dataset_id: str, episode_idx: int, camera: str, cache_path: Path) -> bool:
         """Load HDF5 frames and encode to MP4."""
         loader = self._get_loader(dataset_id)
-        if loader is None:
+        frame_loader = load_all_frames
+        if loader is None or frame_loader is None:
             return False
 
         try:
             file_path = loader._find_episode_file(episode_idx)
-            images = load_all_frames(file_path, camera)
+            images = frame_loader(file_path, camera)
             if images is None or len(images) == 0:
                 return False
 

@@ -194,6 +194,17 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     expect(graphPanel).toContainElement(screen.getByText('Trajectory Plot'))
   })
 
+  it('renders a taller trajectory plot in the graph panel', () => {
+    render(<AnnotationWorkspace />)
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /trajectory viewer/i }), {
+      button: 0,
+      ctrlKey: false,
+    })
+
+    expect(screen.getByTestId('trajectory-plot').className).toContain('h-[320px]')
+  })
+
   it('clears a draft graph selection when Escape is pressed', () => {
     render(<AnnotationWorkspace />)
 

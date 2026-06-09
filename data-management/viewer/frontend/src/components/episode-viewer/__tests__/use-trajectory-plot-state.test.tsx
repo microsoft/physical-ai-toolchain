@@ -66,4 +66,45 @@ describe('useTrajectoryPlotState', () => {
     expect(result.current.isNormalizationDisabled).toBe(true)
     expect(result.current.chartData[0]?.joint_1).toBe(0.1)
   })
+
+  it('removes state and action prefixes from named trajectory labels', () => {
+    useEpisodeStore.getState().setCurrentEpisode({
+      meta: { index: 0, length: 1, taskIndex: 0, hasAnnotations: false },
+      videoUrls: {},
+      cameras: [],
+      trajectoryVariables: [
+        {
+          key: 'observation.state[0]',
+          label: 'State: shoulder_pan_joint',
+          source: 'observation.state',
+          kind: 'state',
+        },
+        {
+          key: 'action[0]',
+          label: 'Action: target_shoulder_pan_joint',
+          source: 'action',
+          kind: 'action',
+        },
+      ],
+      trajectoryData: [
+        {
+          frame: 0,
+          timestamp: 0,
+          jointPositions: [0],
+          jointVelocities: [0],
+          endEffectorPose: [],
+          gripperState: 0,
+          variables: {
+            'observation.state[0]': 0,
+            'action[0]': 1,
+          },
+        },
+      ],
+    })
+
+    const { result } = renderHook(() => useTrajectoryPlotState({}))
+
+    expect(result.current.resolveLabel(0)).toBe('shoulder_pan_joint')
+    expect(result.current.resolveLabel(1)).toBe('target_shoulder_pan_joint')
+  })
 })

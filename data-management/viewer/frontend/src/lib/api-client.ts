@@ -14,6 +14,9 @@ import type {
   EpisodeAnnotationFile,
   EpisodeData,
   EpisodeMeta,
+  VlmJudgeResult,
+  VlmJudgeRunOptions,
+  VlmJudgeStatus,
 } from '@/types'
 
 import { getAuthHeaders } from './auth-headers'
@@ -386,4 +389,50 @@ export async function warmCache(datasetId: string, count = 5): Promise<void> {
     method: 'POST',
     headers: await mutationHeaders(),
   })
+}
+
+// ============================================================================
+// VLM-as-Judge API
+// ============================================================================
+
+/**
+ * Fetch any cached VLM-judge result for an episode without running inference.
+ *
+ * Returns ``{enabled: false}`` when the backend has not been configured with
+ * ``VLM_JUDGE_ENABLED=true``; consumers should hide the panel in that case.
+ */
+export async function fetchVlmJudgeStatus(
+  datasetId: string,
+  episodeIndex: number,
+): Promise<VlmJudgeStatus> {
+  const response = await fetch(
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`,
+    { headers: await requestHeaders() },
+  )
+  const data = await handleResponse<unknown>(response)
+  return transformKeys<VlmJudgeStatus>(data)
+}
+
+/**
+ * Run the VLM judge on an episode (cache-first unless ``force`` is true).
+ */
+export async function runVlmJudge(
+  datasetId: string,
+  episodeIndex: number,
+  options: VlmJudgeRunOptions = {},
+): Promise<VlmJudgeResult> {
+  const response = await fetch(
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await mutationHeaders()) },
+      body: JSON.stringify({
+        instruction: options.instruction,
+        views: options.views,
+        force: options.force ?? false,
+      }),
+    },
+  )
+  const data = await handleResponse<unknown>(response)
+  return transformKeys<VlmJudgeResult>(data)
 }

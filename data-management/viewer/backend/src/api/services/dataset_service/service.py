@@ -365,8 +365,12 @@ class DatasetService:
             else:
                 headers["Content-Length"] = str(total_size)
 
+        blob_provider = self._blob_provider
+        if blob_provider is None:
+            return None
+
         async def _stream():
-            async for chunk in self._blob_provider.stream_video(blob_path, offset=offset, length=length):
+            async for chunk in blob_provider.stream_video(blob_path, offset=offset, length=length):
                 yield chunk
 
         return headers, media_type, _stream()
@@ -895,6 +899,9 @@ class DatasetService:
 
     def _upload_video_to_blob(self, dataset_id: str, episode_idx: int, camera: str, cache_path: Path) -> None:
         """Upload a generated video to blob storage for caching."""
+        if self._blob_provider is None:
+            return
+
         try:
             loop = asyncio.new_event_loop()
             loop.run_until_complete(self._blob_provider.upload_video(dataset_id, camera, episode_idx, cache_path))
