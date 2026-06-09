@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Training Guide
 description: Training workflows, experiment tracking, and ML pipeline documentation for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-03
 ms.topic: overview
 keywords:
   - training
@@ -18,12 +18,14 @@ Training documentation for reinforcement learning with Isaac Lab and behavioral 
 
 ## 📖 Training Guides
 
-| Guide                                         | Description                                                          |
-|-----------------------------------------------|----------------------------------------------------------------------|
-| [Isaac Lab Training](isaac-lab-training.md)   | RL training with SKRL and RSL-RL backends on Azure ML and OSMO       |
-| [LeRobot Training](lerobot-training.md)       | Behavioral cloning with ACT and Diffusion policies                   |
-| [Experiment Tracking](experiment-tracking.md) | MLflow setup, model registration, checkpoint flows                  |
-| [MLflow Integration](mlflow-integration.md)   | SKRL metric logging internals, metric filtering, and troubleshooting |
+| Guide                                             | Description                                                          |
+|---------------------------------------------------|----------------------------------------------------------------------|
+| [Azure ML Training](azureml-training.md)          | Submit Isaac Lab and LeRobot training jobs to Azure ML               |
+| [Experiment Tracking](experiment-tracking.md)     | MLflow setup, model registration, checkpoint flows                   |
+| [Isaac Lab Training](isaac-lab-training.md)       | RL training with SKRL and RSL-RL backends on Azure ML and OSMO       |
+| [LeRobot Training](lerobot-training.md)           | Behavioral cloning with ACT and Diffusion policies                   |
+| [MLflow Integration](mlflow-integration.md)       | SKRL metric logging internals, metric filtering, and troubleshooting |
+| [OSMO Training](osmo-training.md)                 | Submit distributed Isaac Lab training jobs through NVIDIA OSMO       |
 
 ## ⚖️ Platform Comparison
 
@@ -41,20 +43,20 @@ Training documentation for reinforcement learning with Isaac Lab and behavioral 
 Isaac Lab RL training on Azure ML:
 
 ```bash
-./scripts/submit-azureml-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
+training/rl/scripts/submit-azureml-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
 ```
 
 LeRobot behavioral cloning on OSMO:
 
 ```bash
-./scripts/submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
+training/il/scripts/submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 ```
 
 ## 📚 Related Documentation
 
-- [Deployment Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md) for infrastructure setup
-- [AzureML Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/README.md) for job template reference
-- [OSMO Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/osmo/README.md) for workflow template reference
+- [Deployment Guide](../../infrastructure/setup/README.md) for infrastructure setup
+- [AzureML Workflows](../../workflows/azureml/README.md) for job template reference
+- [OSMO Workflows](../../workflows/osmo/README.md) for workflow template reference
 - [Scripts Reference](../reference/scripts.md) for CLI usage
 
 <!-- markdownlint-disable MD036 -->

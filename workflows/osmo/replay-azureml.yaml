@@ -1,0 +1,32 @@
+workflow:
+  name: "{{workflow_name}}"
+  resources:
+    default: { cpu: 4, memory: 8Gi, storage: 4Gi, gpu: 0 }
+  timeout: { exec_timeout: 6h, queue_timeout: 1h }
+  tasks:
+    - name: mirror
+      image: "{{image}}"
+      command: ["bash"]
+      args: ["-lc", "set -euo pipefail; echo \"$AML_MIRROR_B64\" | base64 -d > /tmp/aml_mirror.py; echo \"$AML_MIRROR_REQUIREMENTS_B64\" | base64 -d > /tmp/requirements-aml-mirror.txt; pip install --quiet -r /tmp/requirements-aml-mirror.txt && python /tmp/aml_mirror.py"]
+      environment:
+        OUTPUT_DIR: "{{output_base}}/{{run_id}}"
+        RUN_ID: "{{run_id}}-replay"
+        REPLAY_RUN_ID: "{{run_id}}"
+        AZUREML_MODEL_NAME: "{{model_name}}"
+        PYTHONUNBUFFERED: "1"
+        AML_MIRROR_B64: "{{aml_mirror_b64}}"
+        AML_MIRROR_REQUIREMENTS_B64: "{{aml_mirror_requirements_b64}}"
+        TRAINING_FRAMEWORK: "{{ training_framework }}"
+        AZURE_SUBSCRIPTION_ID: "{{ azure_subscription_id }}"
+        AZURE_RESOURCE_GROUP: "{{ azure_resource_group }}"
+        AZUREML_WORKSPACE_NAME: "{{ azureml_workspace_name }}"
+
+default-values:
+  workflow_name: replay-azureml
+  run_id: ""
+  model_name: ""
+  output_base: /outputs
+  image: python:3.11-slim
+  aml_mirror_b64: ""
+  aml_mirror_requirements_b64: ""
+  training_framework: "lerobot"
