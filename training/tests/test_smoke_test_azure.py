@@ -286,6 +286,17 @@ class TestStartRun:
         params = {c.args[0]: c.args[1] for c in mlflow.log_param.call_args_list}
         assert params["storage_container"] == "not-configured"
 
+    def test_log_dict_failure_still_returns_run_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        mlflow = MagicMock()
+        mlflow.start_run.return_value = _RunCtx("run-ok")
+        mlflow.log_dict.side_effect = Exception("artifact upload failed")
+        monkeypatch.setattr(_MOD, "_load_mlflow", lambda: mlflow)
+        ctx = _AzureMLContext(workspace_name="ws", storage=_AzureStorageContext("ckpts"))
+        args = _MOD._parse_args([])
+        run_id = _MOD._start_run(ctx, args, {}, {})
+        assert run_id == "run-ok"
+        mlflow.log_metric.assert_called_once()
+
 
 class TestMain:
     def _patch_common(self, monkeypatch: pytest.MonkeyPatch, **overrides) -> MagicMock:
