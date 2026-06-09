@@ -2,7 +2,7 @@
 title: Prerequisites
 description: Azure subscription initialization and resource provider registration
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-03
 ms.topic: how-to
 keywords:
   - prerequisites
@@ -29,7 +29,7 @@ source az-sub-init.sh
 
 ## ➡️ Next Step
 
-Proceed to [Infrastructure as Code](../001-iac/).
+Proceed to [Infrastructure as Code](../README.md).
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
