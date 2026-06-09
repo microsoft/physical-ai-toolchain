@@ -463,6 +463,9 @@ venv/
 .hypothesis/
 **/out/*
 .copilot-tracking/
+
+# Local scanner output (Trivy/Grype via scripts/security/generate-vex.sh)
+.scan/
 dependency-pinning-artifacts/*
 !dependency-pinning-artifacts/README.md
 

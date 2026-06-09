@@ -40,6 +40,7 @@ anydb
 anymal
 aobo
 apis
+apiserver
 app
 apple
 appletalk
@@ -1742,6 +1743,15 @@ mycontainer
 myjob
 notanum
 fevil
+acrfleetprod
+containerimage
+gsub
+imagetools
+kyverno
+openvex
+pickplace
+rawfile
+spdxjson
 pusht
 reraises
 ThinLinc
