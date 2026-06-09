@@ -30,6 +30,3 @@ default-values:
   aml_mirror_b64: ""
   aml_mirror_requirements_b64: ""
   training_framework: "lerobot"
-  azure_subscription_id: ""
-  azure_resource_group: ""
-  azureml_workspace_name: ""
