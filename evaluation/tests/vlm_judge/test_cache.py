@@ -77,8 +77,9 @@ class TestJudgeCache:
             judge_model="echo",
             prompt_version="v1",
         )
-        # Manually corrupt the cache entry
+        # Manually corrupt the cache entry (dir is created lazily on first put)
         path = tmp_path / "cache" / f"{key}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("not json")
         assert cache.get(key) is None
 

@@ -24,8 +24,6 @@ class JudgeCache:
 
     def __init__(self, root: Path | None) -> None:
         self._root = Path(root) if root is not None else None
-        if self._root is not None:
-            self._root.mkdir(parents=True, exist_ok=True)
 
     @property
     def enabled(self) -> bool:
@@ -66,6 +64,7 @@ class JudgeCache:
     def put(self, key: str, payload: dict[str, Any]) -> None:
         if self._root is None:
             return
+        self._root.mkdir(parents=True, exist_ok=True)
         path = self._path_for(key)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, sort_keys=True))

@@ -93,22 +93,26 @@ class JudgeService:
         from_s: float | None = None,
         to_s: float | None = None,
         force: bool = False,
+        cache_dir: Path | None = None,
     ) -> JudgeResult:
         """Score a single episode given one or more view MP4 paths.
 
         ``from_s`` / ``to_s`` slice an episode out of a chunked v3.0 video.
         When ``force`` is ``False`` and a cache entry exists, returns the
-        cached result without invoking the backend.
+        cached result without invoking the backend. ``cache_dir`` overrides the
+        service-level cache for this call so the dataviewer can store judgments
+        beside the dataset being evaluated.
         """
-        cache_key = self._cache.key(
+        cache = self.cache_for(cache_dir)
+        cache_key = cache.key(
             video_paths=video_paths,
             instruction=instruction,
             judge_model=self.model_id,
             prompt_version=PROMPT_VERSION,
             agent_config=self._config.agent,
         )
-        if not force and self._cache.enabled:
-            cached = self._cache.get(cache_key)
+        if not force and cache.enabled:
+            cached = cache.get(cache_key)
             if cached is not None:
                 _LOGGER.info("Cache hit for %s (%s)", episode_id, cache_key[:12])
                 return _result_from_dict(cached)
@@ -120,8 +124,19 @@ class JudgeService:
             instruction=instruction,
             frames=frames,
         )
-        self._cache.put(cache_key, result.to_dict())
+        cache.put(cache_key, result.to_dict())
         return result
+
+    def cache_for(self, cache_dir: Path | None = None) -> JudgeCache:
+        """Return a cache rooted at ``cache_dir`` or the service-level default.
+
+        The dataviewer passes a per-dataset directory so judgments live beside
+        the episodes they describe; the CLI and policy-eval pipeline pass
+        ``None`` and reuse the shared ``cache_dir`` from config.
+        """
+        if cache_dir is None:
+            return self._cache
+        return JudgeCache(cache_dir)
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -117,14 +117,15 @@ async def get_episode_judgment(
     if record is None:
         raise HTTPException(status_code=404, detail=f"Episode {episode_idx} not found")
 
-    cache_key = judge_service._cache.key(
+    cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id))
+    cache_key = cache.key(
         video_paths=record.video_paths,
         instruction=record.instruction,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
         agent_config=judge_service.config.agent,
     )
-    cached_payload = judge_service._cache.get(cache_key)
+    cached_payload = cache.get(cache_key)
     return JudgeStatus(
         enabled=True,
         cached=cached_payload is not None,
@@ -167,14 +168,15 @@ async def run_episode_judgment(
         )
 
     # Detect cache hit before invoking the backend so we can flag it on the wire.
-    cache_key = judge_service._cache.key(
+    cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id))
+    cache_key = cache.key(
         video_paths=record.video_paths,
         instruction=instruction,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
         agent_config=judge_service.config.agent,
     )
-    was_cached = not payload.force and judge_service._cache.get(cache_key) is not None
+    was_cached = not payload.force and cache.get(cache_key) is not None
 
     try:
         result = judge_service.judge_episode(
@@ -184,6 +186,7 @@ async def run_episode_judgment(
             from_s=record.from_timestamp,
             to_s=record.to_timestamp,
             force=payload.force,
+            cache_dir=_judge_cache_dir(service, dataset_id),
         )
     except FileNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
@@ -212,15 +215,7 @@ def _resolve_episode(
     """Return the matching ``EpisodeRecord`` or ``None`` if not found."""
     from evaluation.vlm_judge.dataset import iter_episodes
 
-    base_path = getattr(service, "base_path", None)
-    if not base_path:
-        raise HTTPException(
-            status_code=503,
-            detail="VLM judge requires a local dataset path (base_path)",
-        )
-    # Dataset IDs use '--' as a separator that maps to nested directories on disk
-    # (e.g. "hybrid-hack--session_xyz" -> "hybrid-hack/session_xyz").
-    dataset_root = Path(base_path) / dataset_id_to_blob_prefix(dataset_id)
+    dataset_root = _dataset_root(service, dataset_id)
     if not dataset_root.exists():
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
 
@@ -235,6 +230,28 @@ def _resolve_episode(
     except (FileNotFoundError, ValueError) as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     return None
+
+
+def _dataset_root(service: DatasetService, dataset_id: str) -> Path:
+    """Resolve the on-disk root of ``dataset_id`` under the local data dir."""
+    base_path = getattr(service, "base_path", None)
+    if not base_path:
+        raise HTTPException(
+            status_code=503,
+            detail="VLM judge requires a local dataset path (base_path)",
+        )
+    # Dataset IDs use '--' as a separator that maps to nested directories on disk
+    # (e.g. "hybrid-hack--session_xyz" -> "hybrid-hack/session_xyz").
+    return Path(base_path) / dataset_id_to_blob_prefix(dataset_id)
+
+
+def _judge_cache_dir(service: DatasetService, dataset_id: str) -> Path:
+    """Per-dataset judgment cache, stored beside the dataset's annotations.
+
+    Results live under ``<dataset>/annotations/vlm_judge/`` so they travel with
+    the dataset and are reused on subsequent runs over the same episode.
+    """
+    return _dataset_root(service, dataset_id) / "annotations" / "vlm_judge"
 
 
 def _prompt_version() -> str:
