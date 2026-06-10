@@ -243,6 +243,73 @@ Switch from inline payload to dataset folder injection. Upload files as an OSMO 
 
 Convert all template expressions to Jinja syntax. For variable substitution, use `{{ env_var }}` patterns.
 
+### OSMO workflow fails during CreateGroup with Exit Code 3002
+
+**Cause:** OSMO asks Kubernetes to create workflow pods during the CreateGroup phase. Kubernetes calls the KAI Scheduler binder admission webhooks before admitting those pods. If the API server cannot verify the binder webhook TLS certificate, pod admission fails before the training container starts, and OSMO reports `Exit Code: 3002`.
+
+The characteristic Kubernetes error includes `failed calling webhook "binder.run.ai"`, `binder.kai-scheduler.svc`, and an x509 message such as `certificate signed by unknown authority` or `parent certificate cannot sign this kind of certificate`. The `unknown field "spec.env"` warning can appear in the same response but is not the admission blocker.
+
+The KAI Scheduler chart (`v0.5.5`) refreshes `binder-webhook-tls-secret` on every install but does not reliably keep the `MutatingWebhookConfiguration` / `ValidatingWebhookConfiguration` `caBundle` in sync with the freshly minted leaf. On upgrade the API server can be left trusting a stale CA while the binder service serves a different leaf. In a degenerate case, `caBundle` references a self-signed cert (`binder.kai-scheduler.svc-ca`) that does not sign the served leaf at all.
+
+A secondary failure mode is binder pods caching an old mounted certificate after a chart upgrade. Tracked as [#794](https://github.com/microsoft/physical-ai-toolchain/issues/794).
+
+**Diagnostics:**
+
+Compare the leaf certificate served by the binder Secret against the `caBundle` advertised on the webhook configs — they must match.
+
+```bash
+kubectl -n kai-scheduler get secret binder-webhook-tls-secret \
+  -o jsonpath='{.data.tls\.crt}' | base64 --decode |
+  openssl x509 -noout -subject -fingerprint -sha256
+
+kubectl get mutatingwebhookconfiguration kai-binder \
+  -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | base64 --decode |
+  openssl x509 -noout -subject -fingerprint -sha256
+
+kubectl run kai-binder-webhook-tls-check --image=registry.k8s.io/pause:3.10 \
+  --restart=Never --dry-run=server -o yaml
+```
+
+The dry-run admission probe is the definitive test: it exercises the binder webhook path without creating a pod and surfaces the exact x509 failure the API server sees. If the two fingerprints differ, the cluster is in the drift state described above; the probe will report `x509: certificate signed by unknown authority`.
+
+**Resolution:**
+
+Repair both failure modes manually with the following sequence. Each step is idempotent and safe to re-run on a live cluster.
+
+First, force binder pods to re-read the mounted certificate (sufficient when only the cached cert is stale):
+
+```bash
+kubectl -n kai-scheduler rollout restart deployment/binder
+kubectl -n kai-scheduler rollout status deployment/binder --timeout=180s
+```
+
+Re-run the admission probe above. If the x509 error persists, the Secret and the webhook `caBundle` are out of sync. Sync the `caBundle` on both webhook configs to the leaf certificate currently in the Secret, then restart binder:
+
+```bash
+leaf_b64=$(kubectl -n kai-scheduler get secret binder-webhook-tls-secret \
+  -o jsonpath='{.data.tls\.crt}')
+[[ -n "$leaf_b64" ]] || { echo "binder-webhook-tls-secret has no tls.crt" >&2; exit 1; }
+
+for kind in mutatingwebhookconfiguration validatingwebhookconfiguration; do
+  kubectl get "$kind" kai-binder -o json |
+    jq --arg ca "$leaf_b64" '.webhooks |= map(.clientConfig.caBundle = $ca)' |
+    kubectl replace -f -
+done
+
+kubectl -n kai-scheduler rollout restart deployment/binder
+kubectl -n kai-scheduler rollout status deployment/binder --timeout=180s
+```
+
+If the webhook configs themselves are corrupted (for example, `caBundle` references a self-signed cert that does not match any leaf), delete them and re-run `infrastructure/setup/01-deploy-robotics-charts.sh` to let the chart recreate them. The post-install sync block above then aligns the freshly minted Secret with the recreated configs:
+
+```bash
+for kind in mutatingwebhookconfiguration validatingwebhookconfiguration; do
+  kubectl delete "$kind" kai-binder --ignore-not-found
+done
+
+infrastructure/setup/01-deploy-robotics-charts.sh
+```
+
 ### KAI scheduler rejects multi-GPU job
 
 **Cause:** Coscheduling (gang-scheduling) requirements are not met. Either insufficient GPU resources or the PodGroup configuration is missing.
@@ -261,6 +328,32 @@ Convert all template expressions to Jinja syntax. For variable substitution, use
 
 1. List available datasets: `osmo config list DATASET`.
 2. Verify the dataset name and version in the workflow environment variables match a published dataset.
+
+### LeRobot training fails with PyTorch shared memory allocation error
+
+**Cause:** PyTorch DataLoader workers use `/dev/shm` to collate batches across worker processes. Kubernetes pods inherit the container runtime default shared-memory mount unless the pod spec overrides it, and that default is too small for image-heavy LeRobot batches. The failure occurs after OSMO creates the pod and after training starts, so it is not an OSMO `CreateGroup`, KAI, or webhook TLS issue.
+
+Characteristic log line:
+
+```text
+RuntimeError: unable to allocate shared memory(shm) for file </torch_...>: Success (0)
+```
+
+**Resolution:**
+
+OSMO mounts `/dev/shm` according to the `POD_TEMPLATE` config registered on the control plane at deploy time, with `USER_SHM_SIZE` rendered from the pool config (default `8Gi`). The mount applies only to pods created *after* the config is registered — restarting the training pod is not enough; a stuck workflow must be cancelled and resubmitted.
+
+Verify the live cluster matches the deploy script's intent:
+
+```bash
+osmo config get POD_TEMPLATE --output yaml | grep -A 3 dshm
+kubectl get pod <pod> -n osmo-workflows -o jsonpath='{.spec.volumes[?(@.name=="dshm")].emptyDir.sizeLimit}'
+kubectl get pod <pod> -n osmo-workflows -o jsonpath='{.spec.containers[?(@.name!="osmo-ctrl")].volumeMounts[?(@.mountPath=="/dev/shm")].name}'
+```
+
+If the `POD_TEMPLATE` is missing the `dshm` mount, the registered config drifted from `infrastructure/setup/config/pod-template-config.template.json`; re-run `infrastructure/setup/04-deploy-osmo-backend.sh` to republish it. If the config is correct but a running pod lacks the mount, that pod predates the config update — cancel the workflow and submit a new one.
+
+If new pods still exhaust `/dev/shm` with `USER_SHM_SIZE=8Gi`, raise `USER_SHM_SIZE` in `infrastructure/setup/config/pool-config.template.json` (16Gi is a safe ceiling for image-heavy ACT/Diffusion datasets), re-run `04-deploy-osmo-backend.sh`, and resubmit. Reducing `--batch-size` or `dataloader.num_workers` is the workaround when raising the mount is not an option.
 
 ### OSMO workflow pods stuck in Pending
 

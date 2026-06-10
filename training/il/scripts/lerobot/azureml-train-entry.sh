@@ -5,13 +5,6 @@ set -euo pipefail
 
 echo "=== LeRobot AzureML Training ==="
 
-# Disable PEP 668 externally-managed-environment restriction in PyTorch 2.4.1+ containers.
-# Gated on AZUREML_RUN_ID so local subprocess test invocations cannot delete
-# system files on the developer machine.
-if [[ -n "${AZUREML_RUN_ID:-}" ]]; then
-  rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED 2>/dev/null || true
-fi
-
 # wandb is a transitive dependency of lerobot==0.4.4 (hard pin in upstream
 # pyproject.toml). Setting WANDB_MODE=disabled prevents the client from
 # initializing or making network calls; logging goes to MLflow / Azure ML only.
@@ -24,7 +17,10 @@ if [[ ! -e training ]]; then ln -s . training; fi
 
 # Install runtime dependencies from pre-compiled requirements
 apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential >/dev/null 2>&1
-pip install --quiet uv
+# --break-system-packages bypasses PEP 668 (externally-managed-environment)
+# enforced by Debian-packaged Python in PyTorch 2.4.1+ containers. Safe here
+# because the container is ephemeral and isolated from any host system Python.
+pip install --quiet --break-system-packages uv
 
 LEROBOT_REQUIREMENTS="training/il/lerobot/requirements.txt"
 if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
@@ -140,9 +136,12 @@ if [[ ${asset_count} -gt 0 && ${#asset_paths[@]} -ne ${asset_count} ]]; then
   exit 1
 fi
 
-# Collect blob-downloaded datasets.
+# Collect blob-downloaded datasets. Delegate the decision to the canonical
+# Python helper so whitespace, pretty-printed JSON, and [""] / [null] payloads
+# agree with download_dataset.prepare_dataset() instead of being routed into
+# the blob branch only to crash on parse.
 blob_paths=()
-if [[ -n "${BLOB_URLS:-}" ]] && [[ "${BLOB_URLS}" != "[]" ]] && [[ "${BLOB_URLS}" != "{}" ]]; then
+if python3 -c 'from training.il.scripts.lerobot._env import has_blob_urls; raise SystemExit(0 if has_blob_urls() else 1)'; then
   echo "Downloading datasets from Azure Blob Storage..."
   python3 -m training.il.scripts.lerobot.download_dataset
   FULL_DATASET_PATH="${DATASET_ROOT:-/workspace/data}/${DATASET_REPO_ID}"

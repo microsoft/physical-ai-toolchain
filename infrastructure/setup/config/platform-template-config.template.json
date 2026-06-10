@@ -5,7 +5,15 @@
             "nodeSelector": {
                 "node.kubernetes.io/instance-type": ""
             },
-            "volumes": [],
+            "volumes": [
+                {
+                    "name": "dshm",
+                    "emptyDir": {
+                        "medium": "Memory",
+                        "sizeLimit": "{{USER_SHM_SIZE}}"
+                    }
+                }
+            ],
             "initContainers": [],
             "env": []
         }

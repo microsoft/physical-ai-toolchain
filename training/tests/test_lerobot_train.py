@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
@@ -259,7 +260,6 @@ class TestRunTraining:
     def test_parses_log_lines_and_uploads(self, monkeypatch, fake_mlflow, fake_checkpoints, tmp_path):
         monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
         monkeypatch.setenv("SYSTEM_METRICS", "false")
-        monkeypatch.delenv("STORAGE_ACCOUNT", raising=False)
 
         _FakePopen.lines = [
             "step:200 smpl:2K ep:4 epch:0.31 loss:6.938 grdn:155.563 lr:1.0e-05 updt_s:0.324 data_s:0.011\n",
@@ -327,6 +327,28 @@ class TestRunTraining:
         captured[_MOD.signal.SIGTERM](15, None)
         assert killpg_calls and killpg_calls[0] == (proc_holder[0].pid, _MOD.signal.SIGTERM)
 
+    def test_blob_urls_set_lineage_tags(self, monkeypatch, fake_mlflow, fake_checkpoints, tmp_path):
+        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+        monkeypatch.setenv("SYSTEM_METRICS", "false")
+        monkeypatch.setenv("DATASET_REPO_ID", "dataset")
+        monkeypatch.setenv(
+            "BLOB_URLS",
+            json.dumps(
+                [
+                    "https://acct.blob.core.windows.net/datasets/pusht",
+                    "https://acct.blob.core.windows.net/datasets/pusht-val",
+                ]
+            ),
+        )
+
+        _FakePopen.lines = []
+        monkeypatch.setattr(_MOD.subprocess, "Popen", _FakePopen)
+        monkeypatch.setattr(_MOD.signal, "signal", lambda *a, **k: None)
+
+        assert _MOD.run_training(["lerobot-train"], source="osmo-azure-blob-training") == 0
+        tags = fake_mlflow.set_tags.call_args.args[0]
+        assert tags["dataset.source"] == "azure-blob"
+
 
 class TestMain:
     def _setup(self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap):
@@ -361,8 +383,8 @@ class TestMain:
 
     def test_loads_mlflow_config_from_tmp(self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap):
         self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.delenv("AZUREML_RUN_ID", raising=False)
         monkeypatch.setattr(_MOD.sys, "argv", ["train.py"])
-        monkeypatch.setenv("STORAGE_ACCOUNT", "my-acct")
 
         cfg_path = tmp_path / "mlflow_config.env"
         cfg_path.write_text("FOO_KEY=bar\nINVALID_LINE\n")
@@ -375,8 +397,23 @@ class TestMain:
             return real_path_cls(arg)
 
         monkeypatch.setattr(_MOD, "Path", fake_path)
-        _MOD.main()
+        captured: dict[str, str] = {}
+
+        def fake_run(cmd, source="x", num_gpus=1):
+            captured["source"] = source
+            return 0
+
+        monkeypatch.setattr(_MOD, "run_training", fake_run)
+        rc = _MOD.main()
+        assert rc == 0
         assert _MOD.os.environ.get("FOO_KEY") == "bar"
+        assert captured["source"] == "osmo-lerobot-hf"
+
+    def test_blob_urls_use_blob_source_tag(self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap):
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.delenv("AZUREML_RUN_ID", raising=False)
+        monkeypatch.setattr(_MOD.sys, "argv", ["train.py"])
+        monkeypatch.setenv("BLOB_URLS", json.dumps(["https://acct.blob.core.windows.net/datasets/pusht"]))
 
         captured: dict[str, str] = {}
 
@@ -387,7 +424,44 @@ class TestMain:
         monkeypatch.setattr(_MOD, "run_training", fake_run)
         rc = _MOD.main()
         assert rc == 0
-        assert captured["source"] == "osmo-azure-data-training"
+        assert captured["source"] == "osmo-lerobot-blob"
+
+    def test_azureml_run_id_uses_azureml_source_tag(
+        self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap
+    ):
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.setattr(_MOD.sys, "argv", ["train.py"])
+        monkeypatch.setenv("AZUREML_RUN_ID", "OfflineRun_12345")
+
+        captured: dict[str, str] = {}
+
+        def fake_run(cmd, source="x", num_gpus=1):
+            captured["source"] = source
+            return 0
+
+        monkeypatch.setattr(_MOD, "run_training", fake_run)
+        rc = _MOD.main()
+        assert rc == 0
+        assert captured["source"] == "azureml-lerobot-hf"
+
+    def test_azureml_run_id_with_blob_urls_uses_azureml_blob_source_tag(
+        self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap
+    ):
+        self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
+        monkeypatch.setattr(_MOD.sys, "argv", ["train.py"])
+        monkeypatch.setenv("AZUREML_RUN_ID", "OfflineRun_12345")
+        monkeypatch.setenv("BLOB_URLS", json.dumps(["https://acct.blob.core.windows.net/datasets/pusht"]))
+
+        captured: dict[str, str] = {}
+
+        def fake_run(cmd, source="x", num_gpus=1):
+            captured["source"] = source
+            return 0
+
+        monkeypatch.setattr(_MOD, "run_training", fake_run)
+        rc = _MOD.main()
+        assert rc == 0
+        assert captured["source"] == "azureml-lerobot-blob"
 
     def test_cli_args_skip_env_overrides(self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap):
         self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
