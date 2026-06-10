@@ -2,7 +2,7 @@
 title: Cluster Automation
 description: Azure Automation Account for scheduled cluster operations and runbooks
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-03
 ms.topic: reference
 keywords:
   - automation
