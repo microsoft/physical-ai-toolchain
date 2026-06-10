@@ -13,14 +13,14 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy==2.4.6",
     "azure-core==1.41.0",
-    "azure-storage-blob==12.29.0",
+    "azure-storage-blob==12.30.0",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.33.0",
     "azureml-mlflow==1.62.0.post2",
     # azure-ai-ml allows newer prerelease storage clients when prerelease
     # resolution is enabled for telemetry; keep storage clients on stable rails.
-    "azure-storage-file-datalake==12.24.0",
-    "azure-storage-file-share==12.25.0",
+    "azure-storage-file-datalake==12.25.0",
+    "azure-storage-file-share==12.26.0",
     # marshmallow held at 3.x because azure-ai-ml==1.33.0 imports symbols that
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
@@ -30,7 +30,7 @@ dependencies = [
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
     "pydantic==2.13.4",
-    "sentry-sdk==2.61.1",
+    "sentry-sdk==2.62.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
@@ -55,7 +55,7 @@ dependencies = [
     # cuda-bindings: torch==2.11.0 depends on cuda-bindings but does not cap it;
     # unconstrained resolution picks 13.x which requires libcudart.so.13 (CUDA 13).
     # The cu12 torch wheels only ship CUDA 12 runtime, so pin to 12.x.
-    "cuda-bindings==12.9.0",
+    "cuda-bindings==13.3.1",
 ]
 
 [build-system]
@@ -78,7 +78,7 @@ override-dependencies = [
     "diffusers==0.38.0",
     # azure-storage-blob: azureml-mlflow==1.62.0.post2 caps below 12.29.0; we
     # need 12.29.0 for the AzureCliCredential fix shipped in that release.
-    "azure-storage-blob==12.29.0",
+    "azure-storage-blob==12.30.0",
     # mlflow-skinny: lerobot==0.5.1 has a tighter cap; mirror the direct pin.
     "mlflow-skinny==3.13.0",
     # packaging: azureml-mlflow caps below 26.x; mirror the direct pin.
@@ -90,7 +90,7 @@ override-dependencies = [
     "torchcodec==0.14.0",
     # cuda-bindings: torch==2.11.0 adds an uncapped dependency; 13.x requires
     # libcudart.so.13 but the cu12 wheels only bundle CUDA 12 runtime.
-    "cuda-bindings==12.9.0",
+    "cuda-bindings==13.3.1",
     # datasets: lerobot==0.5.1 caps at <5.0.0; 5.0.0 is needed for Parquet
     # performance improvements and compatibility with newer pyarrow.
     "datasets==5.0.0",
