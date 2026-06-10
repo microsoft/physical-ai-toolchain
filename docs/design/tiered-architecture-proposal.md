@@ -1,10 +1,10 @@
 # Physical AI Toolchain — Tiered Architecture Proposal
 
-**Date:** June 9th, 2026
-**Author:** David White
-**Status:** Draft for socialization and feedback
-**Scope:** Architecture and on-ramp framing for [microsoft/physical-ai-toolchain](https://github.com/microsoft/physical-ai-toolchain)
-**Type:** Proposal — not yet adopted
+- **Date:** June 9th, 2026
+- **Author:** David White
+- **Status:** Draft for socialization and feedback
+- **Scope:** Architecture and on-ramp framing for [microsoft/physical-ai-toolchain](https://github.com/microsoft/physical-ai-toolchain)
+- **Type:** Proposal — not yet adopted
 
 ---
 
