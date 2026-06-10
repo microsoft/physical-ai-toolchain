@@ -1,35 +1,53 @@
 # Synthetic Data
 
-Synthetic data generation (SDG) pipelines leveraging NVIDIA Cosmos world foundation models. Transforms simulation outputs into photorealistic training data, predicts future environment states, and reasons over generated data for quality curation.
+Synthetic data generation (SDG) pipelines leveraging NVIDIA Cosmos family of models.
+
+The synthetic data generation skills are installed from
+ [Nvidia Skills Catalog](https://github.com/NVIDIA/skills).
 
 ## 📂 Directory Structure
 
 | Directory            | Purpose                                              |
 |----------------------|------------------------------------------------------|
-| `workflows/osmo/`    | OSMO workflow definitions for Cosmos SDG jobs        |
-| `workflows/azureml/` | AzureML job definitions for Cosmos SDG jobs          |
-| `cosmos/transfer/`   | Cosmos Transfer 2.5 sim-to-real image transformation |
-| `cosmos/predict/`    | Cosmos Predict 2.5 future frame prediction           |
-| `cosmos/reason/`     | Cosmos Reason 2 data curation and quality assessment |
-| `cosmos/configs/`    | Model-specific configuration templates               |
-| `examples/`          | SDG pipeline examples and reference configurations   |
-| `specifications/`    | Domain specifications for agent skills               |
+| `.claude/skills/`    | Skills for synthetic data generation scenarios       |
+| `.agents/skills`     | Points to .agent/skills                              |
+| `.codex/skills`      | Points to .agent/skills                              |
+| `CLAUDE.md`          | Global agent instruction                             |
+| `AGENTS.md`          | Points to CLAUDE.md                                  |
 
 ## Quick Start
 
-> This domain is under active development. Placeholder files define the planned structure and integration points.
+This folder currently supports the following workflows directly mapped from
+ [Nvidia Physical AI Data Factory bluepring](https://github.com/NVIDIA/physical-ai-data-factory):
 
-The SDG pipeline chains three NVIDIA Cosmos capabilities:
+1. **Defect Image Generation (DIG)**
+2. **Video Data Augmentation (VDA)**
 
-1. **Cosmos Transfer** — Convert simulation-rendered frames into photorealistic images
-2. **Cosmos Predict** — Generate plausible future frames from current observations
-3. **Cosmos Reason** — Assess and curate generated data for training quality
+### Prerequisit
 
-## External References
+1. A OSMO 6.3 cluster on Azure with enough GPU to run the target workflow.
 
-| Resource               | URL                                            |
-|------------------------|------------------------------------------------|
-| NVIDIA Cosmos Platform | <https://developer.nvidia.com/cosmos>          |
-| Cosmos Transfer 2.5    | <https://github.com/NVIDIA/Cosmos-Transfer2.5> |
-| Cosmos Predict 2.5     | <https://github.com/NVIDIA/Cosmos-Predict2.5>  |
-| Cosmos Cookbook        | <https://github.com/NVIDIA/Cosmos-Cookbook>    |
+### Sample prompts to get oriented
+
+```md
+I'm interested in Video Data Augmentation,
+- what kind of compute infra do I need?
+- what do I need to provide as input data and config?
+- what kind of augmentation can you do?
+```
+
+```md
+I'm interested in Defect Image Generation,
+- what kind of compute infra do I need?
+- what do I need to provide as input data and config?
+- what kind of image generation can you do?
+```
+
+### Sample prompts to start the workflows
+
+```md
+Here's my input video of a robot performing pick and place in a warehouse:
+ /path/to/input or azureml://path/to/input.
+Augment it with a warehouse background with clutters, people, and
+direct sunlight from the ceiling.
+```
