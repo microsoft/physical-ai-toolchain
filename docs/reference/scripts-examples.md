@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Script Examples
 description: Detailed submission examples for OSMO dataset training, LeRobot behavioral cloning, inference evaluation, AzureML training, and end-to-end pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-08
+ms.date: 2026-06-10
 ms.topic: reference
 keywords:
   - examples
