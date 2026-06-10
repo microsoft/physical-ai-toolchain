@@ -3,7 +3,7 @@ sidebar_position: 6
 title: MLflow Integration for SKRL Training
 description: Metric logging integration for SKRL agent training during Isaac Lab runs using monkey-patching
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-03
 ms.topic: reference
 keywords:
   - mlflow
@@ -13,7 +13,7 @@ keywords:
   - isaac lab
 ---
 
-The training pipeline uses monkey-patching to wrap the agent's `_update` method, intercepting training updates to extract and log metrics to MLflow. This approach provides comprehensive experiment tracking without modifying the underlying SKRL agent implementation or training code.
+The training pipeline uses monkey-patching to wrap the agent's `update` method, intercepting training updates to extract and log metrics to MLflow. This approach provides comprehensive experiment tracking without modifying the underlying SKRL agent implementation or training code.
 
 ## Available Metrics
 
@@ -60,13 +60,29 @@ For metrics with multiple values (tensors or arrays), the integration extracts s
 * `metric_name/min` - Minimum value
 * `metric_name/max` - Maximum value
 
+### System Metrics
+
+System resource metrics are collected via psutil and pynvml with a `system/` prefix:
+
+* `system/cpu_utilization_percentage` - CPU utilization
+* `system/memory_used_megabytes` - Memory in use
+* `system/memory_percent` - Memory usage as a percentage
+* `system/memory_available_megabytes` - Available memory
+* `system/gpu_{i}_utilization_percentage` - Per-GPU utilization
+* `system/gpu_{i}_memory_percent` - Per-GPU memory usage as a percentage
+* `system/gpu_{i}_memory_used_megabytes` - Per-GPU memory in use
+* `system/gpu_{i}_power_watts` - Per-GPU power draw
+* `system/disk_used_gigabytes` - Disk space in use
+* `system/disk_percent` - Disk usage as a percentage
+* `system/disk_available_gigabytes` - Available disk space
+
 ### Custom Metrics
 
 All entries in `agent.tracking_data` are automatically extracted, supporting algorithm-specific metrics from PPO, SAC, TD3, DDPG, A2C, and other SKRL implementations.
 
 ## Implementation Details
 
-The integration uses the `create_mlflow_logging_wrapper` function from `skrl_mlflow_agent` module to create a closure that wraps the agent's `_update` method. The wrapper is applied after the SKRL Runner is instantiated but before training begins.
+The integration uses the `create_mlflow_logging_wrapper` function from `skrl_mlflow_agent` module to create a closure that wraps the agent's `update` method. The wrapper is applied after the SKRL Runner is instantiated but before training begins.
 
 ### Configuration Parameters
 
@@ -76,6 +92,7 @@ The integration uses the `create_mlflow_logging_wrapper` function from `skrl_mlf
   * When None, all available metrics are logged
   * Use a set of strings to only log specific metrics
   * Useful for reducing MLflow API load in production environments
+* `collect_gpu_metrics` - Enable GPU metrics collection via pynvml (default: True)
 
 ### Logging Interval
 
@@ -105,7 +122,7 @@ wrapper_func = create_mlflow_logging_wrapper(
     mlflow_module=mlflow,
     metric_filter=basic_metrics,
 )
-runner.agent._update = wrapper_func
+runner.agent.update = wrapper_func
 ```
 
 ```python
@@ -122,7 +139,7 @@ wrapper_func = create_mlflow_logging_wrapper(
     mlflow_module=mlflow,
     metric_filter=optimization_metrics,
 )
-runner.agent._update = wrapper_func
+runner.agent.update = wrapper_func
 ```
 
 ## Usage Examples
@@ -148,7 +165,7 @@ with mlflow.start_run():
         metric_filter=None,
     )
 
-    runner.agent._update = wrapper_func
+    runner.agent.update = wrapper_func
     runner.run()
 ```
 
@@ -186,7 +203,7 @@ wrapper_func = create_mlflow_logging_wrapper(
     mlflow_module=mlflow,
     metric_filter=production_metrics,
 )
-runner.agent._update = wrapper_func
+runner.agent.update = wrapper_func
 ```
 
 ## Integration with Isaac Lab
@@ -209,7 +226,7 @@ The training script handles MLflow setup and monkey-patching automatically. To c
 Training runs complete but no metrics appear in MLflow.
 
 1. **MLflow not configured** - Verify `mlflow.set_tracking_uri()` is called with the correct Azure ML workspace URI and authentication is valid.
-2. **Monkey-patching not applied** - Ensure `create_mlflow_logging_wrapper` is called after Runner instantiation and `runner.agent._update` is replaced before `runner.run()`.
+2. **Monkey-patching not applied** - Ensure `create_mlflow_logging_wrapper` is called after Runner instantiation and `runner.agent.update` is replaced before `runner.run()`.
 3. **Short training runs** - Training updates occur after rollouts complete. Very short runs may finish before metrics are captured.
 4. **Empty tracking data** - Agent `tracking_data` may not populate until after the first rollout. If using `metric_filter`, verify the filter set contains matching metric names.
 
@@ -226,7 +243,7 @@ Some expected metrics are not logged while others are.
 `AttributeError: Agent must have 'tracking_data' attribute`
 
 1. **Incompatible agent** - Ensure the agent is a SKRL agent with `tracking_data`. Verify SKRL version compatibility.
-2. **Timing** - Apply monkey-patch after Runner instantiation. Verify `runner.agent` and `runner.agent._update` exist before replacement.
+2. **Timing** - Apply monkey-patch after Runner instantiation. Verify `runner.agent` and `runner.agent.update` exist before replacement.
 
 ### High MLflow API Load
 
@@ -234,11 +251,11 @@ Training slows down due to excessive MLflow API calls.
 
 1. Increase logging interval with `--mlflow_log_interval 100` or higher.
 2. Use `metric_filter` to log only essential metrics.
-3. The integration already batches metrics per training update. Enable asynchronous MLflow logging if available.
+3. The integration already batches metrics per training update and uses asynchronous MLflow logging by default.
 
 ### Metric Extraction Warnings
 
-Log messages like `"Failed to extract or log metrics at step X"` indicate transient data structure changes or incompatible metric types. Occasional warnings are harmless. For persistent warnings, check the exception details and modify `_extract_from_value()` in `skrl_mlflow_agent.py` for specific metric types.
+Log messages like `"Failed to log metrics at timestep X"` indicate transient data structure changes or incompatible metric types. Occasional warnings are harmless. For persistent warnings, check the exception details and modify `_extract_from_value()` in `training/utils/metrics.py` for specific metric types.
 
 **Possible Causes:**
 
@@ -257,7 +274,7 @@ Log messages like `"Failed to extract or log metrics at step X"` indicate transi
    * Determine if the failed metric is critical
 
 2. Add custom extraction logic
-   * Modify `_extract_from_value()` in `skrl_mlflow_agent.py` for specific metric types
+   * Modify `_extract_from_value()` in `training/utils/metrics.py` for specific metric types
    * Contribute improvements back to the integration module
 
 ### Empty Metrics Dictionary
