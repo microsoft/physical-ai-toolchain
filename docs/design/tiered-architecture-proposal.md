@@ -136,14 +136,14 @@ Goal G is fully achievable at Tiers 0 through 2 without any Kubernetes, Arc, or 
 Each tier carries a stable ID (`T0`–`T5`) and a stage name. The IDs are canonical and are used for every boundary and graduation reference; the names are the user-facing labels.
 
 ```text
-T0  Dev               Laptop + 1 robot          edge: none               cloud: none
-T1  Lab               Shared GPU + few robots   edge: shared disk        cloud: Blob (+ optional AzureML/MLflow)
-T2  Pilot             Single site, at scale     edge: none (manual)      cloud: AzureML + registry + MLflow
-T3  Single-Site Prod  Single-site declarative   edge: local k3s + Flux   cloud: same as T2 (no Arc)
+T0  Dev         Laptop + 1 robot          edge: none               cloud: none
+T1  Lab         Shared GPU + few robots   edge: shared disk        cloud: Blob (+ optional AzureML/MLflow)
+T2  Pilot       Single site, at scale     edge: none (manual)      cloud: AzureML + registry + MLflow
+T3  Production  Single-site declarative   edge: local k3s + Flux   cloud: same as T2 (no Arc)
 ─────────────────────────────────────────────────────────────────── multi-site boundary (Arc)
-T4  Multi-Site Prod   Multi-site delivery       edge: Arc + AKS + Flux   cloud: + connectivity/identity
+T4  Scale       Multi-site delivery       edge: Arc + AKS + Flux   cloud: + connectivity/identity
 ─────────────────────────────────────────────────────────────────── management boundary
-T5  Fleet Ops         Fleet management          edge: + IoT Operations   cloud: + Fabric RTI + drift/retraining
+T5  Operate     Fleet management          edge: + IoT Operations   cloud: + Fabric RTI + drift/retraining
 ```
 
 T0–T2 satisfy Goal G with manual deployment. T3 adds single-site declarative deployment (local k3s + Flux) **without Arc** — proving GitOps does not require a cloud fleet control plane. T4 is the **multi-site delivery control plane terminus**, where Arc becomes necessary as the cross-site reachability and identity broker. T5 is the fleet-management layer, marked deferred and over-advertised relative to its implementation.
@@ -204,7 +204,7 @@ The tier where cloud training genuinely becomes the default rather than an optio
 
 **Graduate when:** the number of robots or the update cadence makes hand-updating each robot error-prone, and version skew across robots becomes a real problem — but all robots are still at one reachable site.
 
-### T3 — Single-Site Prod. Local k3s + Flux, no Arc
+### T3 — Production. Local k3s + Flux, no Arc
 
 The tier that proves declarative, GitOps-style deployment does **not** require
 Azure Arc.
@@ -227,7 +227,7 @@ because there is only one site and you can reach it directly.
 
 **Graduate when:** robots span multiple sites, or sites become unreachable from a single operator network — the point at which a cross-site reachability and identity broker becomes genuinely necessary.
 
-### T4 — Multi-Site Prod. Multi-site delivery control plane
+### T4 — Scale. Multi-site delivery control plane
 
 The legitimate top of the necessary ladder. This is the "communication and delivery" plane: getting validated policies onto robots across sites you cannot directly reach, safely. The defining difference from T3 is **multiple sites** — which is exactly what makes Arc necessary, as the cross-site reachability and identity broker that single-site k3s did not need.
 
@@ -244,7 +244,7 @@ The legitimate top of the necessary ladder. This is the "communication and deliv
 
 **Graduate when:** the operator explicitly wants production signals to drive retraining and fleet-wide health analytics — a deliberate decision, not an automatic consequence of scale.
 
-### T5 — Fleet Ops. Fleet management. Deferred
+### T5 — Operate. Fleet management. Deferred
 
 The aspirational layer. Drift detection, automated retraining triggers, aggregate telemetry, and health analytics.
 
@@ -279,7 +279,7 @@ The deploy scripts, Terraform modules, and training code do not need to change t
 
 ## 7. Open Questions for Socialization
 
-1. **Default tier in docs.** Should the README and Quick Start default to T0 (Dev), with T2 (Pilot) as the "recommended production" path and T3–T5 (Single-Site Prod, Multi-Site Prod, Fleet Ops) clearly marked advanced? Do the stage names — Dev, Lab, Pilot, Single-Site Prod, Multi-Site Prod, Fleet Ops — read correctly, and is pairing each name with its `T#` ID the right convention (stable IDs for boundary references, names for user-facing labels)?
+1. **Default tier in docs.** Should the README and Quick Start default to T0 (Dev), with T2 (Pilot) as the "recommended production" path and T3–T5 (Production, Scale, Operate) clearly marked advanced? Do the stage names — Dev, Lab, Pilot, Production, Scale, Operate — read correctly, and is pairing each name with its `T#` ID the right convention (stable IDs for boundary references, names for user-facing labels)?
 2. **Fleet vocabulary.** Does the repository adopt "delivery control plane" and "fleet management" as distinct named concepts, retiring the unqualified word "fleet"?
 3. **Roadmap honesty.** How explicitly should placeholder domains be labeled in user-facing docs versus contributor docs?
 4. **Scope of Goal G.** Is the single-task capture → train → validate → run loop the right anchor goal, or should the reference goal include synthetic data augmentation?
