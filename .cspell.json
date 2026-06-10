@@ -9,6 +9,7 @@
 	"words": [
 		"envaccount",
 		"envcontainer",
+		"misattributed",
 		"myacct",
 		"mycontainer",
 		"noseparator",
@@ -16,6 +17,7 @@
 		"prio",
 		"refetches",
 		"sdgcpu",
+		"unbuilt",
 		"unstub",
 		"uppercased",
 		"varname",
