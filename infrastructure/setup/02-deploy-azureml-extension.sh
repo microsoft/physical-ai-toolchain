@@ -23,6 +23,21 @@ OPTIONS:
     -t, --tf-dir DIR          Terraform directory (default: $DEFAULT_TF_DIR)
     --compute-name NAME       Compute target name (default: k8s-<suffix>)
     --fast-prod               Set cluster purpose to FastProd with HA inference router
+    --enforce-resource-validation
+                              Enforce aml-operator resource validation (default: disabled).
+                              Disabled is required for scale-to-zero GPU node pools; otherwise
+                              the operator refuses jobs whose InstanceType exceeds the largest
+                              currently-Ready node, blocking the autoscaler from ever scaling
+                              the pool up. Enable only on fixed-capacity clusters where you
+                              want misconfigured InstanceTypes to fail fast at submission.
+    --enforce-volcano-capacity-check
+                              Re-enable Volcano's enqueue-time capacity check (default: disabled).
+                              Disabled is required for scale-from-zero GPU node pools; otherwise
+                              the volcano-scheduler's overcommit/proportion plugins refuse to
+                              enqueue PodGroups whose requests exceed currently-Ready cluster
+                              capacity, blocking the AKS autoscaler from ever seeing a Pending
+                              Pod. Enable only on multi-tenant clusters where queue-level
+                              capacity fairness must be enforced at submit time.
     --skip-attach             Skip attaching cluster as compute target
     --skip-instance-types     Skip creating GPU instance types
     --config-preview          Print configuration and exit
@@ -42,20 +57,24 @@ inference_ha="false"
 allow_insecure="true"
 install_volcano="true"
 install_prom_op="false"
+skip_resource_validation="true"
+enforce_volcano_capacity_check=false
 skip_attach=false
 skip_instance_types=false
 config_preview=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -h|--help)             show_help; exit 0 ;;
-    -t|--tf-dir)           tf_dir="$2"; shift 2 ;;
-    --compute-name)        compute_name="$2"; shift 2 ;;
-    --fast-prod)           cluster_purpose="FastProd"; inference_ha="true"; allow_insecure="false"; shift ;;
-    --skip-attach)         skip_attach=true; shift ;;
-    --skip-instance-types) skip_instance_types=true; shift ;;
-    --config-preview)      config_preview=true; shift ;;
-    *)                     fatal "Unknown option: $1" ;;
+    -h|--help)                       show_help; exit 0 ;;
+    -t|--tf-dir)                     tf_dir="$2"; shift 2 ;;
+    --compute-name)                  compute_name="$2"; shift 2 ;;
+    --fast-prod)                     cluster_purpose="FastProd"; inference_ha="true"; allow_insecure="false"; shift ;;
+    --enforce-resource-validation)   skip_resource_validation="false"; shift ;;
+    --enforce-volcano-capacity-check) enforce_volcano_capacity_check=true; shift ;;
+    --skip-attach)                   skip_attach=true; shift ;;
+    --skip-instance-types)           skip_instance_types=true; shift ;;
+    --config-preview)                config_preview=true; shift ;;
+    *)                               fatal "Unknown option: $1" ;;
   esac
 done
 
@@ -91,6 +110,8 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Extension Name" "$extension_name"
   print_kv "Compute Name" "$compute_name"
   print_kv "Cluster Purpose" "$cluster_purpose"
+  print_kv "Skip Resource Validation" "$skip_resource_validation"
+  print_kv "Enforce Volcano Capacity Check" "$enforce_volcano_capacity_check"
   print_kv "ML Workspace" "${ml_workspace:-<not configured>}"
   print_kv "ML Identity" "${ml_identity_name:-<not configured>}"
   exit 0
@@ -125,6 +146,7 @@ export ALLOW_INSECURE_CONNECTIONS="$allow_insecure"
 export CLUSTER_PURPOSE="$cluster_purpose"
 export INSTALL_VOLCANO="$install_volcano"
 export INSTALL_PROM_OP="$install_prom_op"
+export SKIP_RESOURCE_VALIDATION="$skip_resource_validation"
 
 envsubst < "$config_template" > "$CONFIG_DIR/out/azureml-aks-config.json"
 
@@ -144,6 +166,51 @@ else
     --release-train stable \
     --config-file "$CONFIG_DIR/out/azureml-aks-config.json"
   sleep 30
+fi
+
+#------------------------------------------------------------------------------
+# Configure Volcano Scheduler for Scale-from-Zero
+#------------------------------------------------------------------------------
+# The AzureML extension ships a Volcano config whose enqueue-time overcommit
+# and proportion plugins block PodGroups whose requests exceed currently-Ready
+# cluster capacity. That deadlocks scale-from-zero GPU pools because the Pod
+# is never created, so the AKS autoscaler never sees a Pending Pod. Replace
+# the configmap with a permissive enqueue config (proportion/overcommit
+# removed; gang scheduling preserved at allocate) and restart the scheduler.
+# Opt out with --enforce-volcano-capacity-check on multi-tenant clusters.
+
+if [[ "$install_volcano" == "true" && "$enforce_volcano_capacity_check" == "false" ]]; then
+  section "Configure Volcano Scheduler for Scale-from-Zero"
+
+  volcano_cfg_src="$MANIFESTS_DIR/volcano-scheduler-config-scale-from-zero.conf"
+  [[ -f "$volcano_cfg_src" ]] || fatal "Volcano scheduler config not found: $volcano_cfg_src"
+
+  info "Waiting for volcano-scheduler-configmap to exist..."
+  retries=30
+  while ! kubectl get cm -n "$NS_AZUREML" volcano-scheduler-configmap &>/dev/null; do
+    (( --retries > 0 )) || fatal "volcano-scheduler-configmap did not appear within 5 minutes; cannot deliver scale-from-zero"
+    sleep 10
+  done
+
+  info "Applying scale-from-zero Volcano scheduler config (server-side apply, field-manager=hex-azureml-volcano-patch)..."
+  # Server-side apply with a dedicated field manager + --force-conflicts:
+  # registers ownership of data.volcano-scheduler.conf so subsequent
+  # Helm-driven extension upgrades observe a conflict and leave our patch in
+  # place instead of silently reverting it. Other fields (labels, annotations,
+  # Helm metadata) stay owned by the AzureML extension Helm release.
+  kubectl create configmap volcano-scheduler-configmap \
+    -n "$NS_AZUREML" \
+    --from-file=volcano-scheduler.conf="$volcano_cfg_src" \
+    --dry-run=client -o yaml \
+    | kubectl apply --server-side --field-manager=hex-azureml-volcano-patch --force-conflicts -f -
+
+  if kubectl get deploy -n "$NS_AZUREML" volcano-scheduler &>/dev/null; then
+    info "Restarting volcano-scheduler to pick up new config..."
+    kubectl rollout restart -n "$NS_AZUREML" deploy/volcano-scheduler
+    kubectl rollout status -n "$NS_AZUREML" deploy/volcano-scheduler --timeout=2m
+  else
+    warn "volcano-scheduler deployment not found; configmap will be picked up on next start"
+  fi
 fi
 
 #------------------------------------------------------------------------------
@@ -221,6 +288,8 @@ print_kv "Cluster" "$cluster"
 print_kv "Extension" "$extension_name"
 print_kv "Compute" "$compute_name"
 print_kv "Purpose" "$cluster_purpose"
+print_kv "Skip Resource Validation" "$skip_resource_validation"
+print_kv "Enforce Volcano Capacity Check" "$enforce_volcano_capacity_check"
 print_kv "ML Workspace" "${ml_workspace:-<not configured>}"
 echo
 kubectl get pods -n "$NS_AZUREML" --no-headers 2>/dev/null | head -5 || true

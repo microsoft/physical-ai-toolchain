@@ -15,7 +15,7 @@ keywords:
   - training
 ---
 
-LeRobot behavioral cloning training for ACT and Diffusion policy architectures. Training runs on Azure ML and OSMO platforms using HuggingFace Hub datasets with MLflow experiment tracking on Azure ML.
+LeRobot behavioral cloning training for ACT and Diffusion policy architectures. Training runs on Azure ML and OSMO platforms using HuggingFace Hub, Azure Blob, and AzureML data asset sources (Azure ML only), with MLflow experiment tracking.
 
 ## 📋 Prerequisites
 
@@ -89,27 +89,28 @@ Select the architecture with `--policy-type`:
 
 ## ⚖️ Platform Selection
 
-| Aspect              | Azure ML                       | OSMO                                    |
-|---------------------|--------------------------------|-----------------------------------------|
-| Submission          | `az ml job create`             | `osmo workflow submit`                  |
-| Experiment tracking | MLflow (managed)               | MLflow (Azure ML backend)               |
-| Credential handling | Azure ML environment variables | `osmo credential set` injection         |
-| Dataset delivery    | HuggingFace Hub or Azure Blob  | Hub download or OSMO bucket mount       |
-| Pipeline support    | Manual multi-step              | `run-lerobot-pipeline.sh` orchestration |
+| Aspect              | Azure ML                                            | OSMO                                      |
+|---------------------|-----------------------------------------------------|-------------------------------------------|
+| Submission          | `az ml job create`                                  | `osmo workflow submit`                    |
+| Experiment tracking | MLflow (managed)                                    | MLflow (Azure ML backend)                 |
+| Credential handling | Azure ML environment variables                      | `osmo credential set` injection           |
+| Dataset delivery    | HuggingFace Hub, Azure Blob, or AzureML data assets | HuggingFace Hub or direct Azure Blob URLs |
+| Pipeline support    | Manual multi-step                                   | `run-lerobot-pipeline.sh` orchestration   |
 
 ## ⚙️ Training Configuration
 
-| Parameter           | Default                                         | Description                            |
-|---------------------|-------------------------------------------------|----------------------------------------|
-| `--dataset-repo-id` | (required)                                      | HuggingFace dataset repository         |
-| `--policy-type`     | `act`                                           | Policy: `act`, `diffusion`, or `groot` |
-| `--job-name`        | `lerobot-act-training`                          | Job identifier                         |
-| `--image`           | `pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime` | Container image                        |
-| `--training-steps`  | (LeRobot default)                               | Total training iterations              |
-| `--batch-size`      | (LeRobot default)                               | Training batch size                    |
-| `--save-freq`       | `5000`                                          | Checkpoint save frequency              |
-| `--policy-repo-id`  | (none)                                          | Pre-trained policy for fine-tuning     |
-| `--init-from-policy-model` | (none)                                   | Warm-start from a previously registered AzureML model (`azureml:NAME:VERSION`); mutually exclusive with `--policy-repo-id`. **AzureML only.** |
+| Parameter                  | Default                                              | Description                                                                           |
+|----------------------------|------------------------------------------------------|---------------------------------------------------------------------------------------|
+| `--dataset-repo-id`        | Required for HuggingFace; `dataset` for Blob sources | HuggingFace dataset repository or logical local dataset name                      |
+| `--blob-url`               | (none)                                               | Direct Azure Blob dataset URL; repeat for multiple sources                            |
+| `--policy-type`            | `act`                                                | Policy: `act`, `diffusion`                                               , or `groot` |
+| `--job-name`               | `lerobot-act-training`                               | Job identifier                                                                        |
+| `--image`                  | `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime`     | Container image                                                                       |
+| `--training-steps`         | `100000`                                             | Total training iterations                                                             |
+| `--batch-size`             | `32`                                                 | Training batch size                                                                   |
+| `--save-freq`              | `5000`                                               | Checkpoint save frequency                                                             |
+| `--policy-repo-id`         | (none)                                               | Pre-trained policy for fine-tuning                                                    |
+| `--init-from-policy-model` | (none)                                               | Warm-start from a registered AzureML model (`azureml:NAME:VERSION`); AzureML only |
 
 ### Fine-Tuning from Existing Policy
 
@@ -166,19 +167,20 @@ Azure ML uses workspace-managed identity. Set environment variables for custom c
 
 ### MLflow (Azure ML Managed)
 
-Azure ML training uses MLflow automatically. Enable MLflow on OSMO with:
+Azure ML training uses workspace MLflow automatically. OSMO LeRobot workflows log to the same Azure ML workspace resolved from Terraform outputs or the `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, and `AZUREML_WORKSPACE_NAME` environment variables.
 
-```bash
-./scripts/submit-osmo-lerobot-training.sh \
-  -d user/dataset \
-  --mlflow-enable
-```
+Both submission scripts pin `policy.push_to_hub=false`. Checkpoints are registered to the Azure ML model registry when `--register-checkpoint NAME` is passed; HuggingFace Hub upload is never used.
 
 See [Experiment Tracking](experiment-tracking.md) for platform comparison and configuration details.
 
 ## 💾 Dataset Workflows
 
-Four strategies for dataset delivery: HuggingFace Hub (download at runtime), OSMO bucket mounting, Azure Blob Storage with managed identity, or AzureML Data Assets with native mount.
+Supported dataset delivery differs by platform.
+
+| Platform | Supported sources                                                                                     |
+|----------|-------------------------------------------------------------------------------------------------------|
+| OSMO     | HuggingFace Hub or Azure Blob                                                                         |
+| Azure ML | HuggingFace Hub, direct Azure Blob URLs, AzureML data assets, or combined Blob and data asset sources |
 
 ### HuggingFace Hub (Default)
 
@@ -189,19 +191,27 @@ LeRobot downloads datasets from HuggingFace Hub at runtime. Specify datasets wit
   -d lerobot/aloha_sim_insertion_human
 ```
 
-### OSMO Dataset Mount
+### Azure Blob Storage (OSMO)
 
-Mount datasets from OSMO buckets backed by Azure Blob Storage:
+Train from direct Azure Blob URLs using OSMO workload identity. Blob submissions do not require a HuggingFace dataset repository; the script defaults the local dataset ID to `dataset`.
 
 ```bash
 ./scripts/submit-osmo-lerobot-training.sh \
-  -w workflows/osmo/lerobot-train-dataset.yaml \
-  -d user/fallback-dataset \
-  --dataset-bucket my-bucket \
-  --dataset-name my-lerobot-data
+  --blob-url "https://mystorageaccount.blob.core.windows.net/training/pusht" \
+  -r pusht-model
 ```
 
-Falls back to HuggingFace Hub download when no dataset mount is available.
+Use multiple `--blob-url` values to merge compatible datasets before training:
+
+```bash
+./scripts/submit-osmo-lerobot-training.sh \
+  --blob-url "https://account1.blob.core.windows.net/train/set1" \
+  --blob-url "https://account2.blob.core.windows.net/train/set2" \
+  -r merged-pusht-model
+```
+
+> [!IMPORTANT]
+> OSMO accepts plain HTTPS Azure Blob URLs only. OSMO authenticates with its workload identity; grant that identity `Storage Blob Data Reader`, `Storage Blob Data Contributor`, or `Storage Blob Data Owner` on each storage account or container. AzureML data asset identifiers, datastore URIs, ADLS Gen2 URLs, Azure Files, OneLake, local paths, fragments, and any query string (including SAS tokens) are rejected.
 
 ### Azure Blob Storage (AzureML)
 
@@ -221,14 +231,14 @@ Combine datasets from different containers or storage accounts:
 
 ```bash
 ./scripts/submit-azureml-lerobot-training.sh \
-  --blob-url "https://account1.blob.core.windows.net/train/pusht" \
-  --blob-url "https://account2.blob.core.windows.net/val/pusht" \
+  --blob-url "https://account1.blob.core.windows.net/train/set1" \
+  --blob-url "https://account1.blob.core.windows.net/train/set2" \
   -r merged-pusht-model
 ```
 
 LeRobot automatically validates dataset compatibility and merges them before training.
 
-### AzureML Data Asset (Native Mount)
+### AzureML Data Asset (Native Mount, AzureML only)
 
 Use registered AzureML data assets, mounted read-only into the training container via AzureML's native `ro_mount` mechanism. No download step is required — datasets are available immediately at a FUSE mount path.
 
@@ -249,7 +259,7 @@ Multiple data assets can be merged:
 
 The data asset URI must be version-pinned (`azureml:NAME:VERSION` or the full ARM path `azureml://.../data/NAME/versions/VERSION`). Shorthands like `@latest` are rejected to keep runs reproducible.
 
-### Combined Sources
+### Combined Sources (AzureML only)
 
 Data assets and blob URLs can be combined. All sources are merged automatically via `lerobot-edit-dataset`:
 
