@@ -13,6 +13,8 @@
 # registers a ModalityConfig under EmbodimentTag.NEW_EMBODIMENT.
 ###############################################################################
 
+from __future__ import annotations
+
 from gr00t.configs.data.embodiment_configs import register_modality_config
 from gr00t.data.embodiment_tags import EmbodimentTag
 from gr00t.data.types import ModalityConfig

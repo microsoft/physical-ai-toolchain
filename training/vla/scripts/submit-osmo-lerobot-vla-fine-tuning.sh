@@ -229,6 +229,7 @@ esac
 
 [[ -z "$base_model" ]] && fatal "--base-model is required"
 [[ -z "$data_config" ]] && fatal "--data-config is required"
+[[ -z "$blob_url" ]] && fatal "--blob-url is required (no dataset source configured)"
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
 
 # Auto-resolve data config Python file from training/vla/configs/groot/ when the

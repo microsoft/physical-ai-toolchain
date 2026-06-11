@@ -29,7 +29,7 @@ workflow:
       args: ["/tmp/train.sh"]
       environment:
         BLOB_URL: "{{blob_url}}"
-        DATASET_PATH: "/data/dataset"
+        DATASET_PATH: "{{dataset_path}}"
         OUTPUT_ROOT: "/outputs"
         DATA_CONFIG: "{{data_config}}"
         BASE_MODEL: "{{base_model}}"
@@ -81,7 +81,7 @@ workflow:
             endpoint = f"https://{parsed.netloc}"
             sas_token = parsed.query if parsed.query else None
 
-            DATASET_ROOT = pathlib.Path("/data/dataset").resolve()
+            DATASET_ROOT = pathlib.Path(os.environ.get("DATASET_PATH", "/data/dataset")).resolve()
             DATASET_ROOT.mkdir(parents=True, exist_ok=True)
 
             def safe_local_path(blob_name: str, rel: str) -> pathlib.Path | None:
@@ -119,7 +119,7 @@ workflow:
             if sas_token:
               sas_client = ContainerClient(endpoint, container, credential=sas_token)
               count = download_with_client(sas_client)
-              print(f"Downloaded {count} files to /data/dataset/ using SAS token")
+              print(f"Downloaded {count} files to {DATASET_ROOT}/ using SAS token")
               raise SystemExit(0)
 
             cred_client = None
@@ -132,7 +132,7 @@ workflow:
             if cred_client is not None:
               try:
                 count = download_with_client(cred_client)
-                print(f"Downloaded {count} files to /data/dataset/")
+                print(f"Downloaded {count} files to {DATASET_ROOT}/")
                 raise SystemExit(0)
               except HttpResponseError as err:
                 if getattr(err, "error_code", None) not in {"AuthorizationFailure", "AuthenticationFailed"}:
@@ -141,7 +141,7 @@ workflow:
 
             anon_client = ContainerClient(endpoint, container)
             count = download_with_client(anon_client)
-            print(f"Downloaded {count} files to /data/dataset/")
+            print(f"Downloaded {count} files to {DATASET_ROOT}/")
         - path: /tmp/mlflow_log.py
           contents: |
             """Mirror an OSMO training run to Azure ML.
@@ -527,7 +527,8 @@ workflow:
                 az acr login --name "${ACR_REGISTRY}" 2>/dev/null || {
                 echo "  az acr login unavailable; authenticating oras via workload identity token"
                 ACR_REFRESH=$(python3 -c "import requests; from azure.identity import DefaultAzureCredential; aad=DefaultAzureCredential().get_token('https://management.azure.com/.default').token; r=requests.post('https://${ACR_HOST}/oauth2/exchange', data={'grant_type':'access_token','service':'${ACR_HOST}','access_token':aad}); r.raise_for_status(); print(r.json()['refresh_token'])")
-                oras login "${ACR_HOST}" --username 00000000-0000-0000-0000-000000000000 --password "${ACR_REFRESH}"
+                printf '%s' "${ACR_REFRESH}" | oras login "${ACR_HOST}" --username 00000000-0000-0000-0000-000000000000 --password-stdin
+                unset ACR_REFRESH
               }
 
               FINAL_CKPT="$(ls -1d ${OUTPUT_DIR}/checkpoint-* 2>/dev/null | sort -t- -k2 -n | tail -1 || true)"
@@ -562,6 +563,7 @@ default-values:
   gpu: 1
   platform: h100gpu_platform
   blob_url: ""
+  dataset_path: "/data/dataset"
   data_config: ""
   data_config_b64: ""
   modality_config_b64: ""
