@@ -31,6 +31,11 @@ from ..validation import (
 if TYPE_CHECKING:
     from ..storage.blob_dataset import BlobDatasetProvider
 
+try:
+    from azure.storage.blob import ContentSettings
+except ImportError:
+    ContentSettings = None
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -142,16 +147,15 @@ class BlobLabelStorage:
 
     async def save(self, dataset_id: str, labels_file: DatasetLabelsFile) -> None:
         try:
-            from azure.storage.blob import ContentSettings
-
             client = await self._provider._get_client()
             container = client.get_container_client(self._provider.container_name)
             blob_client = container.get_blob_client(self._blob_path(dataset_id))
             content = json.dumps(labels_file.model_dump(), indent=2).encode("utf-8")
+            content_settings = ContentSettings(content_type="application/json") if ContentSettings is not None else None
             await blob_client.upload_blob(
                 content,
                 overwrite=True,
-                content_settings=ContentSettings(content_type="application/json"),
+                content_settings=content_settings,
             )
         except Exception as e:
             logger.error(
@@ -169,7 +173,7 @@ def _create_label_storage(
     """Create label storage backend based on config."""
     if storage_backend == "azure" and blob_provider is not None:
         return BlobLabelStorage(blob_provider)
-    return LocalLabelStorage(os.environ.get("HMI_DATA_PATH", "./data"))
+    return LocalLabelStorage(os.environ.get("DATA_DIR", "./data"))
 
 
 _label_storage: LabelStorage | None = None
@@ -192,7 +196,7 @@ def _get_label_storage() -> LabelStorage:
 
 
 def _get_base_path() -> str:
-    return os.environ.get("HMI_DATA_PATH", "./data")
+    return os.environ.get("DATA_DIR", "./data")
 
 
 def _labels_path_for_base(dataset_id: str, base_path: str) -> Path:

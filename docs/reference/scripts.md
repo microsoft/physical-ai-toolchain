@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Script Reference
 description: Submission script inventory, CLI arguments, variable reference, and configuration for AzureML and OSMO training and inference pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-08
+ms.date: 2026-06-01
 ms.topic: reference
 keywords:
   - scripts
@@ -14,7 +14,7 @@ keywords:
   - variables
 ---
 
-Inventory of submission scripts for training, validation, and inference workflows on Azure ML and OSMO platforms. Each entry includes CLI arguments, environment variable overrides, and Terraform output resolution.
+Inventory of submission scripts for training, evaluation, and inference workflows on Azure ML and OSMO platforms. Each entry includes CLI arguments, environment variable overrides, and Terraform output resolution.
 
 > [!NOTE]
 > For detailed submission examples, see [Script Examples](scripts-examples.md).
@@ -24,7 +24,7 @@ Inventory of submission scripts for training, validation, and inference workflow
 | Script                               | Purpose                                             | Platform |
 |--------------------------------------|-----------------------------------------------------|----------|
 | `submit-azureml-training.sh`         | Package code and submit Azure ML training job       | Azure ML |
-| `submit-azureml-validation.sh`       | Submit model validation job                         | Azure ML |
+| `submit-azureml-isaaclab-evaluation.sh` | Submit Isaac Lab policy evaluation job               | Azure ML |
 | `submit-azureml-lerobot-training.sh` | Submit LeRobot training to Azure ML                 | Azure ML |
 | `submit-osmo-training.sh`            | Package code and submit OSMO workflow (base64)      | OSMO     |
 | `submit-osmo-dataset-training.sh`    | Submit OSMO workflow using dataset folder injection | OSMO     |
@@ -49,6 +49,10 @@ Scripts auto-detect Azure context from Terraform outputs in `infrastructure/terr
 # LeRobot behavioral cloning (OSMO)
 ./submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
+# LeRobot behavioral cloning from Azure Blob (OSMO)
+./submit-osmo-lerobot-training.sh \
+  --blob-url https://account.blob.core.windows.net/datasets/pusht
+
 # LeRobot behavioral cloning (Azure ML)
 ./submit-azureml-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
@@ -61,8 +65,8 @@ Scripts auto-detect Azure context from Terraform outputs in `infrastructure/terr
   --policy-repo-id user/my-policy \
   -r my-model
 
-# Validation (requires registered model)
-./submit-azureml-validation.sh --model-name anymal-c-velocity --model-version 1
+# Evaluation (requires registered model)
+./submit-azureml-isaaclab-evaluation.sh --model-name anymal-c-velocity --model-version 1
 ```
 
 ## Prerequisites
@@ -84,16 +88,19 @@ Script-specific tools:
 
 Values resolve in order: **CLI arguments → environment variables → Terraform outputs** (when applicable).
 
+> [!NOTE]
+> Isaac Lab image defaults come from `scripts/lib/common.sh` (`DEFAULT_ISAAC_LAB_IMAGE_VERSION` and `DEFAULT_ISAAC_LAB_IMAGE`). OSMO workflow YAML image literals are direct-workflow fallbacks and should stay in sync with those shared defaults.
+
 ### `submit-azureml-training.sh`
 
 | Option                         | Default                            | Description                                     | Source                                  |
 |--------------------------------|------------------------------------|-------------------------------------------------|-----------------------------------------|
 | `--environment-name`           | `isaaclab-training-env`            | AzureML environment name                        | CLI                                     |
-| `--environment-version`        | `2.3.2`                            | AzureML environment version                     | CLI                                     |
-| `--image` / `-i`               | `nvcr.io/nvidia/isaac-lab:2.3.2`   | Container image                                 | CLI                                     |
+| `--environment-version`        | `DEFAULT_ISAAC_LAB_IMAGE_VERSION` (`2.3.2`) | AzureML environment version                     | CLI                                     |
+| `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                 | CLI                                     |
 | `--assets-only`                | `false`                            | Register environment without submitting a job   | CLI                                     |
 | `--job-file` / `-w`            | `workflows/azureml/train.yaml`     | Job YAML template                               | CLI                                     |
-| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | IsaacLab task                                   | `TASK`                                  |
+| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task                                   | `TASK`                                  |
 | `--num-envs` / `-n`            | `2048`                             | Number of parallel environments                 | `NUM_ENVS`                              |
 | `--max-iterations` / `-m`      | unset                              | Max iterations (empty to unset)                 | `MAX_ITERATIONS`                        |
 | `--checkpoint-uri` / `-c`      | unset                              | MLflow checkpoint artifact URI                  | `CHECKPOINT_URI`                        |
@@ -126,15 +133,15 @@ Example:
   --stream
 ```
 
-### `submit-azureml-validation.sh`
+### `submit-azureml-isaaclab-evaluation.sh`
 
 | Option                  | Default                            | Description                                      | Source                        |
 |-------------------------|------------------------------------|--------------------------------------------------|-------------------------------|
 | `--model-name`          | derived from task                  | Azure ML model name                              | CLI                           |
 | `--model-version`       | `latest`                           | Azure ML model version                           | CLI                           |
 | `--environment-name`    | `isaaclab-training-env`            | AzureML environment name                         | CLI                           |
-| `--environment-version` | `2.3.2`                            | AzureML environment version                      | CLI                           |
-| `--image`               | `nvcr.io/nvidia/isaac-lab:2.3.2`   | Container image                                  | CLI                           |
+| `--environment-version` | `DEFAULT_ISAAC_LAB_IMAGE_VERSION` (`2.3.2`) | AzureML environment version                      | CLI                           |
+| `--image`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                  | CLI                           |
 | `--task`                | `Isaac-Velocity-Rough-Anymal-C-v0` | Override task ID                                 | `TASK`                        |
 | `--framework`           | unset                              | Override framework                               | CLI                           |
 | `--eval-episodes`       | `100`                              | Evaluation episodes                              | CLI                           |
@@ -142,7 +149,7 @@ Example:
 | `--success-threshold`   | unset                              | Success threshold (defaults from model metadata) | CLI                           |
 | `--headless`            | `true`                             | Run headless                                     | CLI                           |
 | `--gui`                 | `false`                            | Disable headless mode                            | CLI                           |
-| `--job-file`            | `workflows/azureml/validate.yaml`  | Job YAML template                                | CLI                           |
+| `--job-file`            | `workflows/azureml/isaaclab-evaluation.yaml` | Job YAML template                                | CLI                           |
 | `--compute`             | from TF                            | Compute target override                          | `AZUREML_COMPUTE` / TF        |
 | `--instance-type`       | `gpuspot`                          | Instance type                                    | CLI                           |
 | `--experiment-name`     | unset                              | Experiment name override                         | CLI                           |
@@ -155,7 +162,7 @@ Example:
 Example:
 
 ```bash
-./submit-azureml-validation.sh \
+./submit-azureml-isaaclab-evaluation.sh \
   --model-name anymal-c-velocity \
   --model-version 1 \
   --stream
@@ -166,10 +173,10 @@ Example:
 | Option                         | Default                            | Description                                      | Source                        |
 |--------------------------------|------------------------------------|--------------------------------------------------|-------------------------------|
 | `--workflow` / `-w`            | `workflows/osmo/train.yaml`        | Workflow template                                | CLI                           |
-| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | IsaacLab task                                    | `TASK`                        |
+| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task                                    | `TASK`                        |
 | `--num-envs` / `-n`            | `2048`                             | Number of parallel environments                  | `NUM_ENVS`                    |
 | `--max-iterations` / `-m`      | unset                              | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
-| `--image` / `-i`               | `nvcr.io/nvidia/isaac-lab:2.3.2`   | Container image                                  | `IMAGE`                       |
+| `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                  | `IMAGE`                       |
 | `--payload-root` / `-p`        | `/workspace/isaac_payload`         | Runtime extraction root                          | `PAYLOAD_ROOT`                |
 | `--backend` / `-b`             | `skrl`                             | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
 | `--checkpoint-uri` / `-c`      | unset                              | MLflow checkpoint artifact URI                   | `CHECKPOINT_URI`              |
@@ -197,10 +204,10 @@ Example:
 | Option                         | Default                             | Description                                      | Source                        |
 |--------------------------------|-------------------------------------|--------------------------------------------------|-------------------------------|
 | `--workflow` / `-w`            | `workflows/osmo/train-dataset.yaml` | Workflow template                                | CLI                           |
-| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0`  | IsaacLab task                                    | `TASK`                        |
+| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0`  | Isaac Lab task                                    | `TASK`                        |
 | `--num-envs` / `-n`            | `2048`                              | Number of parallel environments                  | `NUM_ENVS`                    |
 | `--max-iterations` / `-m`      | unset                               | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
-| `--image` / `-i`               | `nvcr.io/nvidia/isaac-lab:2.3.2`    | Container image                                  | `IMAGE`                       |
+| `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                  | `IMAGE`                       |
 | `--backend` / `-b`             | `skrl`                              | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
 | `--dataset-bucket`             | `training`                          | OSMO bucket name                                 | `OSMO_DATASET_BUCKET`         |
 | `--dataset-name`               | `training-code`                     | Dataset name (auto-versioned)                    | `OSMO_DATASET_NAME`           |
@@ -232,7 +239,7 @@ Scripts resolve values in order: CLI arguments → environment variables → Ter
 | `AZURE_SUBSCRIPTION_ID`  | Azure subscription               |
 | `AZURE_RESOURCE_GROUP`   | Resource group name              |
 | `AZUREML_WORKSPACE_NAME` | ML workspace name                |
-| `TASK`                   | IsaacLab task name               |
+| `TASK`                   | Isaac Lab task name               |
 | `NUM_ENVS`               | Number of parallel environments  |
 | `OSMO_DATASET_BUCKET`    | Dataset bucket for OSMO training |
 | `OSMO_DATASET_NAME`      | Dataset name for OSMO training   |

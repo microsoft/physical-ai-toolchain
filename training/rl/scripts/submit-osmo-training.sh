@@ -16,17 +16,17 @@ read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 #------------------------------------------------------------------------------
 
 show_help() {
-  cat << 'EOF'
+  cat << EOF
 Usage: submit-osmo-training.sh [OPTIONS] [-- osmo-submit-flags]
 
 Package training/rl/, encode as base64, and submit an OSMO workflow.
 
 WORKFLOW OPTIONS:
     -w, --workflow PATH           Workflow template (default: training/rl/workflows/osmo/train.yaml)
-    -t, --task NAME               IsaacLab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
+    -t, --task NAME               Isaac Lab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
     -n, --num-envs COUNT          Number of environments (default: 2048)
     -m, --max-iterations N        Maximum iterations (empty to unset)
-    -i, --image IMAGE             Container image (default: nvcr.io/nvidia/isaac-lab:2.3.2)
+    -i, --image IMAGE             Container image (default: ${DEFAULT_ISAAC_LAB_IMAGE})
     -p, --payload-root DIR        Runtime extraction root (default: /workspace/isaac_payload)
     -b, --backend BACKEND         Training backend: skrl (default), rsl_rl
 
@@ -91,7 +91,7 @@ workflow="$REPO_ROOT/training/rl/workflows/osmo/train.yaml"
 task="${TASK:-Isaac-Velocity-Rough-Anymal-C-v0}"
 num_envs="${NUM_ENVS:-2048}"
 max_iterations="${MAX_ITERATIONS:-}"
-image="${IMAGE:-nvcr.io/nvidia/isaac-lab:2.3.2}"
+image="${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}"
 payload_root="${PAYLOAD_ROOT:-/workspace/isaac_payload}"
 backend="${TRAINING_BACKEND:-skrl}"
 
@@ -206,6 +206,7 @@ rm -f "$ARCHIVE_PATH" "$B64_PATH"
   -x "**/__pycache__/*" \
   -x "*.pyc" \
   -x "*.pyo" \
+  -x "**/.venv/*" \
   -x "**/.pytest_cache/*" \
   -x "**/.mypy_cache/*" \
   -x "**/*.egg-info/*") || fatal "Failed to create training archive"

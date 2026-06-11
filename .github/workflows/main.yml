@@ -157,6 +157,16 @@ jobs:
       contents: read
       id-token: write
 
+  # Evaluation domain pytest execution
+  evaluation-pytests:
+    name: Evaluation Pytest
+    uses: ./.github/workflows/evaluation-pytests.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Fuzz regression via deterministic corpus-based tests
   fuzz-regression-tests:
     name: Fuzz Regression Tests
@@ -268,6 +278,7 @@ jobs:
       - pytest-inference
       - dataviewer-frontend-tests
       - dataviewer-backend-pytests
+      - evaluation-pytests
       - python-lint
       - terraform-lint
       - terraform-validation
@@ -295,7 +306,7 @@ jobs:
     steps:
       - name: Generate GitHub App Token
         id: app-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  # v3.1.1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -315,7 +326,7 @@ jobs:
 
       - name: Checkout release PR branch
         if: ${{ steps.release.outputs.prs_created == 'true' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
           token: ${{ steps.app-token.outputs.token }}
@@ -323,7 +334,7 @@ jobs:
 
       - name: Setup uv
         if: ${{ steps.release.outputs.prs_created == 'true' }}
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
 
       - name: Regenerate uv.lock
         if: ${{ steps.release.outputs.prs_created == 'true' }}
@@ -343,9 +354,31 @@ jobs:
           git commit -m "chore: regenerate uv.lock"
           git push
 
+      - name: Stamp ms.date in CHANGELOG.md
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          $today = [datetime]::UtcNow.ToString('yyyy-MM-dd')
+          $path = 'CHANGELOG.md'
+          $content = Get-Content -Raw -LiteralPath $path
+          $updated = [regex]::Replace($content, '(?m)^ms\.date:\s.*$', "ms.date: $today")
+          if ($updated -ceq $content) {
+            Write-Host "CHANGELOG.md ms.date already set to $today"
+            exit 0
+          }
+          Set-Content -LiteralPath $path -Value $updated -NoNewline -Encoding utf8NoBOM
+          & git config user.name 'github-actions[bot]'
+          & git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          & git remote set-url origin "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git"
+          & git add $path
+          & git commit -m 'chore: stamp ms.date in CHANGELOG.md'
+          & git push
+
       - name: Checkout default branch for tag signing
         if: ${{ steps.release.outputs.release_created == 'true' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
@@ -439,7 +472,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout dependency manifests
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           sparse-checkout: |
             .syft.yaml
@@ -499,7 +532,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
 
       - name: Download dependency SBOM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -710,7 +743,7 @@ jobs:
     steps:
       - name: Generate GitHub App Token
         id: app-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  # v3.1.1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

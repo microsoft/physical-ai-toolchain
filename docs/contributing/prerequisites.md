@@ -28,7 +28,7 @@ Install these tools before contributing:
 | TFLint         | 0.61.0          | <https://github.com/terraform-linters/tflint>                         |
 | Azure CLI      | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>             |
 | kubectl        | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
-| Helm           | 3.16            | <https://helm.sh/docs/intro/install/>                                 |
+| Helm           | 4.0             | <https://helm.sh/docs/intro/install/>                                 |
 | Node.js/npm    | 20+ LTS         | <https://nodejs.org/>                                                 |
 | Python         | 3.12+           | <https://www.python.org/downloads/>                                   |
 | shellcheck     | 0.10+           | <https://www.shellcheck.net/>                                         |
@@ -38,7 +38,11 @@ Install these tools before contributing:
 | Docker         | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit) |
 | OSMO CLI       | latest          | <https://developer.nvidia.com/osmo>                                   |
 | terraform-docs | 0.21.0          | <https://github.com/terraform-docs/terraform-docs/releases>           |
+| OSV-Scanner    | 2.3.8           | <https://github.com/google/osv-scanner/releases/tag/v2.3.8> (installed automatically by `setup-dev.sh` / `setup-dev.ps1`) |
 | hve-core       | latest          | <https://github.com/microsoft/hve-core>                               |
+
+> [!NOTE]
+> GitHub Copilot Coding Agent runs in a separate cloud GitHub Actions environment provisioned by [.github/workflows/copilot-setup-steps.yml](../../.github/workflows/copilot-setup-steps.yml). When you bump a language runtime or test runner version locally (devcontainer or this list), update the matching pin in that workflow so cloud-agent sessions stay aligned.
 
 ## Azure Access Requirements
 
@@ -149,9 +153,49 @@ osmo --version
 # terraform-docs
 terraform-docs --version  # >= 0.21.0
 
+# OSV-Scanner (dependency vulnerability scanner)
+osv-scanner --version  # == 2.3.8 (pinned; installed by setup-dev scripts)
+
 # hve-core (VS Code extension — verify via extensions list)
 code --list-extensions | grep -i hve-core
 ```
+
+### TFLint Local Setup
+
+Install TFLint v0.61.0 or newer before changing Terraform modules:
+
+```bash
+# macOS
+brew install tflint
+
+# Linux
+curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+```
+
+```powershell
+# Windows (Chocolatey)
+choco install tflint
+
+# Windows (Scoop)
+scoop install tflint
+```
+
+Initialize the repository TFLint plugins once from the repository root. This downloads the Azure provider
+ruleset declared in `.tflint.hcl`:
+
+```bash
+tflint --init
+```
+
+Then run the project wrapper before pushing Terraform changes:
+
+```bash
+npm run lint:tf
+```
+
+The wrapper runs TFLint recursively against `infrastructure/terraform/` with the shared `.tflint.hcl`
+configuration. A VS Code TFLint extension is optional for inline diagnostics, but the CLI setup above remains
+the required validation path.
 
 ### Validation Commands
 
@@ -169,6 +213,7 @@ terraform init
 terraform validate
 
 # Lint Terraform configurations (required for infrastructure changes)
+tflint --init  # first time only, installs plugins from .tflint.hcl
 tflint --recursive infrastructure/terraform/
 ```
 
@@ -187,6 +232,10 @@ npm run lint:go
 
 # Test Go modules (required for Go changes)
 npm run test:go
+
+# Contract tests (validates Terraform outputs against Go struct — requires terraform-docs)
+# Run after adding/removing/renaming Terraform outputs
+./infrastructure/terraform/e2e/run-contract-tests.sh
 ```
 
 **Documentation:**

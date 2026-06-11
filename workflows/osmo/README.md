@@ -24,7 +24,7 @@ and `evaluation/sil/workflows/osmo/`.
 Use script-based submission from:
 
 * `training/rl/scripts/submit-osmo-training.sh`
-* `training/il/scripts/submit-osmo-dataset-training.sh`
+* `training/rl/scripts/submit-osmo-dataset-training.sh`
 * `training/il/scripts/submit-osmo-lerobot-training.sh`
 * `evaluation/sil/scripts/submit-osmo-eval.sh`
 * `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`

@@ -89,7 +89,7 @@ terraform init && terraform apply -var-file=terraform.tfvars
 | `should_deploy_monitor_workspace`     | Deploy Azure Monitor Workspace for Prometheus metrics     | `true`  |
 | `should_deploy_ampls`                 | Deploy Azure Monitor Private Link Scope and endpoint      | `true`  |
 | `should_deploy_dce`                   | Deploy Data Collection Endpoint for observability         | `true`  |
-| `should_deploy_aml_compute`           | Deploy AzureML managed GPU compute cluster                | `false` |
+| `aml_compute_clusters`                | AzureML managed compute clusters keyed by cluster name    | `{}`    |
 | `should_include_aks_dns_zone`         | Include AKS private DNS zone in core DNS zones            | `true`  |
 
 ### Network Configuration Modes

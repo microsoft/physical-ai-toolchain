@@ -2,11 +2,60 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 EXIT_SUCCESS = 0
+EXIT_FAILURE = 1
+_AZUREML_TAG_VALUE_MAX_LENGTH = 256
+
+# Bounded retry policy for the Azure ML model-registry SDK call. The call runs
+# inline in the training loop, so total worst-case delay is capped at
+# ~initial * (2^attempts - 1) seconds. Tests override these via monkeypatch.
+_AML_REGISTER_MAX_ATTEMPTS = 3
+_AML_REGISTER_INITIAL_BACKOFF_S = 1.0
+
+
+def _json_hash(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _bounded_tag_value(value: str) -> str:
+    if len(value) <= _AZUREML_TAG_VALUE_MAX_LENGTH:
+        return value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+    suffix = f"...sha256:{digest}"
+    return f"{value[: _AZUREML_TAG_VALUE_MAX_LENGTH - len(suffix)]}{suffix}"
+
+
+def _source_list_tag(values: list[str], plural: str) -> str:
+    if len(values) == 1:
+        return _bounded_tag_value(values[0])
+    return f"{len(values)} {plural}; sha256:{_json_hash(values)[:16]}"
+
+
+def _parse_with_diagnostic(raw: str, var_name: str) -> list[str]:
+    """Parse a JSON-array env var, emitting a diagnostic on malformed JSON.
+
+    Wraps :func:`parse_url_list_env` to preserve the operator-facing message
+    that previously distinguished malformed payloads from legitimately empty
+    ones; the library helper itself stays silent.
+    """
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as exc:
+        print(f"[AzureML] Failed to parse {var_name}: {exc}. Falling back to other dataset source metadata.")
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item.strip() for item in parsed if isinstance(item, str) and item.strip()]
 
 
 def _get_aml_client() -> Any | None:
@@ -39,6 +88,30 @@ def _get_aml_client() -> Any | None:
     except Exception as exc:
         print(f"[AzureML] Failed to create MLClient: {exc}")
         return None
+
+
+def _create_model_with_retry(client: Any, model: Any, checkpoint_name: str) -> Any:
+    """Call ``client.models.create_or_update`` with bounded exponential backoff.
+
+    Retries any exception up to ``_AML_REGISTER_MAX_ATTEMPTS`` total attempts,
+    sleeping ``_AML_REGISTER_INITIAL_BACKOFF_S`` seconds and doubling between
+    attempts. The final attempt runs after the retry loop so its outcome —
+    success or exception — is the function's outcome with no implicit
+    fall-through.
+    """
+    backoff = _AML_REGISTER_INITIAL_BACKOFF_S
+    for attempt in range(1, _AML_REGISTER_MAX_ATTEMPTS):
+        try:
+            return client.models.create_or_update(model)
+        except Exception as exc:
+            print(
+                f"[AzureML] Registration attempt {attempt}/{_AML_REGISTER_MAX_ATTEMPTS} "
+                f"failed for {checkpoint_name}: {exc}; retrying in {backoff:.1f}s"
+            )
+            if backoff > 0:
+                time.sleep(backoff)
+            backoff *= 2
+    return client.models.create_or_update(model)
 
 
 def _register_model_via_aml(
@@ -74,21 +147,125 @@ def _register_model_via_aml(
         register_name = os.environ.get("REGISTER_CHECKPOINT", "") or job_name
         model_name = register_name.replace("_", "-")
 
+        # Lineage metadata: dataset -> job -> model. Tags stay intentionally
+        # small for AzureML metadata limits; full URI lists are written into the
+        # registered model artifact directory as azureml_lineage.json.
+        #
+        # Dataset env-var conventions:
+        #   1. Blob submissions: BLOB_URLS (JSON array of canonical
+        #      https://<account>.blob.core.windows.net/<container>/<prefix> URLs).
+        #   2. AzureML data asset submissions: DATASET_ASSETS.
+        #   3. HuggingFace fallback: DATASET_REPO_ID alone.
+        dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")
+        blob_urls_json = os.environ.get("BLOB_URLS", "")
+        dataset_assets_json = os.environ.get("DATASET_ASSETS", "")
+        azureml_run_id = os.environ.get("AZUREML_RUN_ID", "") or os.environ.get("MLFLOW_RUN_ID", "")
+        mlflow_run_id = os.environ.get("MLFLOW_RUN_ID", "")
+        experiment_id = os.environ.get("MLFLOW_EXPERIMENT_ID", "")
+
+        dataset_uri = ""
+        dataset_source_kind = ""
+
+        # parse_url_list_env tolerates whitespace and pretty-printed JSON, and
+        # filters empty / non-string entries. The local wrapper preserves the
+        # operator-facing diagnostic on malformed payloads.
+        dataset_assets = _parse_with_diagnostic(dataset_assets_json, "DATASET_ASSETS")
+        if dataset_assets:
+            dataset_uri = dataset_assets[0] if len(dataset_assets) == 1 else " ".join(dataset_assets)
+            dataset_source_kind = "azureml-data-asset"
+
+        blob_urls = _parse_with_diagnostic(blob_urls_json, "BLOB_URLS")
+        if blob_urls and not dataset_uri:
+            dataset_uri = blob_urls[0] if len(blob_urls) == 1 else " ".join(blob_urls)
+            dataset_source_kind = "azure-blob"
+
+        # Combined case: both data assets and blob URLs present.
+        if dataset_assets and blob_urls:
+            all_uris = dataset_assets + blob_urls
+            dataset_uri = " ".join(all_uris)
+            dataset_source_kind = "mixed"
+
+        if not dataset_uri and dataset_repo_id:
+            dataset_uri = f"hf://{dataset_repo_id}"
+            dataset_source_kind = "huggingface"
+
+        lineage_uris = dataset_assets + blob_urls
+        if not lineage_uris and dataset_uri:
+            lineage_uris = [dataset_uri]
+        lineage_hash = _json_hash(lineage_uris) if lineage_uris else ""
+        lineage_summary = dataset_uri
+        if len(lineage_uris) > 1:
+            lineage_summary = (
+                f"{dataset_source_kind}: {len(dataset_assets)} data asset(s), "
+                f"{len(blob_urls)} blob URL(s); sha256:{lineage_hash[:16]}"
+            )
+
+        lineage = {
+            "dataset_source": dataset_source_kind or None,
+            "dataset_uri": dataset_uri or None,
+            "dataset_summary": lineage_summary or None,
+            "dataset_assets": dataset_assets,
+            "blob_urls": blob_urls,
+            "dataset_repo_id": dataset_repo_id or None,
+            "azureml_run_id": azureml_run_id or None,
+            "mlflow_run_id": mlflow_run_id or None,
+            "mlflow_experiment_id": experiment_id or None,
+        }
+        lineage_path = checkpoint_path / "azureml_lineage.json"
+        lineage_path.write_text(json.dumps(lineage, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+        description_lines = [
+            f"LeRobot {policy_type} policy",
+            f"Job: {job_name} (checkpoint {checkpoint_name})",
+            "Lineage artifact: azureml_lineage.json",
+        ]
+        if lineage_summary:
+            description_lines.append(f"Dataset: {_bounded_tag_value(lineage_summary)}")
+        if azureml_run_id:
+            description_lines.append(f"AML run: {azureml_run_id}")
+        description = "\n".join(description_lines)
+
+        tags = {
+            "framework": "lerobot",
+            "policy_type": policy_type,
+            "job_name": job_name,
+            "checkpoint": checkpoint_name,
+            "source": source,
+        }
+        if dataset_source_kind:
+            tags["dataset_source"] = dataset_source_kind
+        if lineage_summary:
+            tags["dataset_uri"] = _bounded_tag_value(lineage_summary)
+        if lineage_hash:
+            tags["dataset_lineage_sha256"] = lineage_hash
+            tags["dataset_uri_count"] = str(len(lineage_uris))
+        if dataset_repo_id:
+            tags["dataset_repo_id"] = _bounded_tag_value(dataset_repo_id)
+        if blob_urls:
+            tags["blob_url_count"] = str(len(blob_urls))
+            tags["blob_urls"] = _source_list_tag(blob_urls, "blob URLs")
+        if dataset_assets:
+            tags["dataset_asset_count"] = str(len(dataset_assets))
+            tags["dataset_assets"] = _source_list_tag(dataset_assets, "data assets")
+        if azureml_run_id:
+            tags["azureml_run_id"] = _bounded_tag_value(azureml_run_id)
+        if mlflow_run_id:
+            tags["mlflow_run_id"] = _bounded_tag_value(mlflow_run_id)
+        if experiment_id:
+            tags["mlflow_experiment_id"] = _bounded_tag_value(experiment_id)
+        tags = {key: _bounded_tag_value(str(value)) for key, value in tags.items()}
+
         model = Model(
             path=str(checkpoint_path),
             name=model_name,
-            description=f"LeRobot {policy_type} policy from job: {job_name} (checkpoint {checkpoint_name})",
+            description=description,
             type=AssetTypes.CUSTOM_MODEL,
-            tags={
-                "framework": "lerobot",
-                "policy_type": policy_type,
-                "job_name": job_name,
-                "checkpoint": checkpoint_name,
-                "source": source,
-            },
+            tags=tags,
         )
-        registered = client.models.create_or_update(model)
+        registered = _create_model_with_retry(client, model, checkpoint_name)
         print(f"[AzureML] Registered: {registered.name} v{registered.version} ({checkpoint_name})")
+        if lineage_summary:
+            print(f"[AzureML] Lineage: {lineage_summary} -> {job_name} -> {registered.name}:v{registered.version}")
         return True
     except Exception as exc:
         print(f"[AzureML] Failed to register checkpoint {checkpoint_name}: {exc}")
@@ -126,10 +303,16 @@ def upload_new_checkpoints(
                     mlflow.log_artifacts(str(pretrained_dir), artifact_path)
                     mlflow.set_tag(f"checkpoint_{ckpt_dir.name}_artifact", artifact_path)
                 except Exception as exc:
-                    print(f"[MLflow] Failed to log artifacts for {ckpt_dir.name}: {exc}")
+                    print(f"[MLflow] Failed to log artifacts for {ckpt_dir.name}: {exc}; dropping MLflow artifact")
 
+                # Intermediate checkpoints are disposable: drop on failure and
+                # move on. The next checkpoint will be at least as good, and the
+                # canonical final registration is handled by
+                # ``register_final_checkpoint`` (which propagates a non-zero
+                # exit code on failure).
+                if not _register_model_via_aml(pretrained_dir, ckpt_dir.name, source=source):
+                    print(f"[AzureML] Registration failed for {ckpt_dir.name}; dropping checkpoint")
                 uploaded.add(ckpt_dir.name)
-                _register_model_via_aml(pretrained_dir, ckpt_dir.name, source=source)
 
 
 def register_final_checkpoint() -> int:
@@ -171,42 +354,7 @@ def register_final_checkpoint() -> int:
     print(f"[INFO] Registering checkpoint from: {checkpoint_path}")
     print(f"[INFO] Model name: {register_name}")
 
-    _register_model_via_aml(checkpoint_path, checkpoint_name, source="osmo-workflow")
-
-    return EXIT_SUCCESS
-
-
-def upload_checkpoints_to_azure_ml() -> int:
-    """Upload all checkpoints to Azure ML model registry.
-
-    Used as a post-training step to register any checkpoints that weren't
-    uploaded during training.
-
-    Returns:
-        Exit code (0 on success).
-    """
-    output_dir = Path(os.environ.get("OUTPUT_DIR", "/workspace/outputs/train"))
-    checkpoints_dir = output_dir / "checkpoints"
-    if not checkpoints_dir.exists():
-        print("[AzureML] No checkpoints directory found, skipping upload")
-        return EXIT_SUCCESS
-
-    uploaded = 0
-    for ckpt_dir in sorted(checkpoints_dir.iterdir()):
-        if not ckpt_dir.is_dir():
-            continue
-        pretrained = ckpt_dir / "pretrained_model"
-        checkpoint_path = pretrained if pretrained.exists() else ckpt_dir
-
-        if not (checkpoint_path / "model.safetensors").exists():
-            continue
-
-        if _register_model_via_aml(checkpoint_path, ckpt_dir.name, source="osmo-lerobot-training"):
-            uploaded += 1
-
-    if uploaded == 0:
-        print("[AzureML] No valid checkpoints found to upload")
-    else:
-        print(f"[AzureML] Uploaded {uploaded} checkpoint(s) to Azure ML")
+    if not _register_model_via_aml(checkpoint_path, checkpoint_name, source="osmo-workflow"):
+        return EXIT_FAILURE
 
     return EXIT_SUCCESS

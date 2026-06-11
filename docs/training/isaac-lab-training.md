@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Isaac Lab Training
 description: Reinforcement learning training with SKRL and RSL-RL backends on Azure ML and OSMO platforms
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-03
 ms.topic: how-to
 keywords:
   - isaac lab
@@ -79,7 +79,7 @@ Core parameters shared across platforms:
 | `--task`           | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task identifier            |
 | `--num-envs`       | `2048`                             | Parallel simulation environments     |
 | `--max-iterations` | (unset)                            | Training iteration limit             |
-| `--image`          | `nvcr.io/nvidia/isaac-lab:2.2.0`   | Container image                      |
+| `--image`          | `nvcr.io/nvidia/isaac-lab:2.3.2`   | Container image                      |
 | `--backend`        | `skrl`                             | Training backend: `skrl` or `rsl_rl` |
 | `--headless`       | `true`                             | Disable rendering                    |
 
@@ -155,7 +155,7 @@ The script stages files to exclude `__pycache__` and build artifacts via `.amlig
 
 ## 🔗 Related Documentation
 
-- [Experiment Tracking](experiment-tracking.md) for MLflow and WANDB setup
+- [Experiment Tracking](experiment-tracking.md) for MLflow setup
 - [MLflow Integration](mlflow-integration.md) for SKRL metric logging internals
 - [AzureML Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/README.md) for job template reference
 - [OSMO Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/osmo/README.md) for workflow template reference

@@ -165,6 +165,14 @@ output "data_lake_storage_account" {
   } : null
 }
 
+output "datasets_container" {
+  description = "Datasets container on the data lake storage account. Null when data lake is disabled"
+  value = var.should_create_data_lake_storage ? {
+    id   = azurerm_storage_container.datasets[0].id
+    name = azurerm_storage_container.datasets[0].name
+  } : null
+}
+
 output "data_lake_storage_account_access" {
   description = "Data lake storage account access credentials. Null when data lake is disabled"
   value = var.should_create_data_lake_storage ? {
@@ -198,12 +206,14 @@ output "ml_workload_identity" {
   }
 }
 
-output "aml_compute_cluster" {
-  description = "AzureML managed compute cluster. Null when compute deployment is disabled"
-  value = try({
-    id   = azurerm_machine_learning_compute_cluster.gpu[0].id
-    name = azurerm_machine_learning_compute_cluster.gpu[0].name
-  }, null)
+output "aml_compute_clusters" {
+  description = "AzureML managed compute clusters keyed by cluster name. Empty when no clusters are configured"
+  value = {
+    for cluster_name, cluster in azurerm_machine_learning_compute_cluster.gpu : cluster_name => {
+      id   = cluster.id
+      name = cluster.name
+    }
+  }
 }
 
 /*

@@ -2,7 +2,7 @@
 title: Contributing
 description: How to contribute to the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-15
+ms.date: 2026-06-01
 ms.topic: how-to
 keywords:
   - contributing
@@ -89,10 +89,10 @@ rm -rf .venv
 
 ### Remove External Dependencies
 
-The setup script clones IsaacLab for IntelliSense support.
+The setup script clones Isaac Lab for IntelliSense support.
 
 ```bash
-# Remove IsaacLab clone
+# Remove Isaac Lab clone
 rm -rf external/IsaacLab
 
 # Remove Node.js linting dependencies (if installed separately via npm install)
@@ -145,6 +145,7 @@ Run these commands to validate changes before submitting a PR:
 ```bash
 npm run lint:md        # Markdownlint
 npm run lint:links     # Markdown link validation
+npm run lint:vuln      # OSV-Scanner v2.3.8 dependency vulnerability scan
 npm run spell-check    # cspell
 npm run test:tf        # Terraform module tests (no Azure credentials required)
 ```
@@ -164,6 +165,7 @@ All CI linters enforce warnings-as-errors. PRs that introduce new warnings will 
 | Go (lint:go)         | Errors block      | .golangci.yml                               |
 | ShellCheck (lint:sh) | Warnings + errors | .shellcheckrc                               |
 | Python (lint:py)     | Errors block      | pyproject.toml [tool.ruff]                  |
+| Vulns (lint:vuln)    | Errors block      | osv-scanner.toml                            |
 | Link check           | Errors block      | .markdownlint-cli2.jsonc                    |
 
 To suppress a specific warning locally, use the linter's inline suppression syntax. Do not change CI configuration to suppress warnings globally without team discussion.
@@ -378,9 +380,10 @@ Reviewers verify regression tests are included. Compliance is tracked over time 
 
 ### Running Tests
 
-Tests are split into four component suites that mirror the CI workflows
-(`pytest-training`, `pytest-dm-tools`, `pytest-data-pipeline`, `pytest-inference`).
-Run a single component locally:
+Tests are split into seven pytest component suites that mirror the CI
+`pytest-*` flags (`pytest-training`, `pytest-dm-tools`,
+`pytest-data-pipeline`, `pytest-inference`, `pytest-dataviewer`,
+`pytest-evaluation`, `pytest-fuzz`). Run a single component locally:
 
 ```bash
 # Training (training/tests)
@@ -394,10 +397,23 @@ uv run pytest data-pipeline/capture/tests -v
 
 # Fleet deployment inference (fleet-deployment/inference/tests)
 uv run pytest fleet-deployment/inference/tests -v
+
+# Dataviewer backend (data-management/viewer/backend, run from that dir)
+cd data-management/viewer/backend && uv run pytest -v
+
+# Evaluation (evaluation/, run from that dir)
+cd evaluation && uv run pytest -v
+
+# Fuzz / regression (tests/, run from repo root)
+uv run pytest tests/ -v
 ```
 
-Run every component in one invocation (uses the `testpaths` configured in
-`pyproject.toml`):
+Run the four root-discovered suites (`tests`, `training/tests`,
+`data-management/tools/tests`, `fleet-deployment/inference/tests`) in one
+invocation (uses the `testpaths` configured in root `pyproject.toml`).
+Dataviewer backend and evaluation run from their own project directories
+(each has its own `pyproject.toml`) and are not picked up by the root
+discovery:
 
 ```bash
 uv run pytest
@@ -412,8 +428,10 @@ uv run pytest training/tests -v \
   --cov-report=xml:logs/coverage-training.xml
 ```
 
-Substitute the component path and `--cov` target for the other three suites
-(`data-management/tools`, `data-pipeline/capture`, `fleet-deployment/inference`).
+Substitute the component path and `--cov` target for the pytest component
+suite you are validating. Codecov tracks pytest uploads by flag, but only the
+named project statuses in `codecov.yml` are top-level project gates;
+`pytest-fuzz` is advisory and `terraform` uploads test results only.
 
 ### Test Organization
 
@@ -450,19 +468,37 @@ Coverage thresholds increase with each milestone:
 | v0.5.0    | 60%              |
 | v0.6.0    | 80%              |
 
-These coverage levels are contribution targets for local test runs. CI enforcement of coverage thresholds is planned for a future milestone.
+CI enforces coverage on every PR through Codecov. The top-level project gates
+are the named `pester`, `pytest-training`, `pytest-dm-tools`,
+`pytest-data-pipeline`, `pytest-inference`, `pytest-dataviewer`, and
+`pytest-evaluation` statuses, each targeting 80%. The default aggregate
+project status and aggregate patch status are disabled; component-level
+project and patch statuses still apply through
+`component_management.default_rules.statuses`. `pytest-fuzz`, `vitest-*`,
+`terraform`, and `go` uploads remain tracked but are not top-level project
+gates. Local `uv run pytest` emits an advisory `--cov-fail-under=0` report;
+Codecov flag uploads remain authoritative for PR coverage gates.
 
 ### Configuration
 
 Pytest is centrally configured in the root `pyproject.toml` under
 `[tool.pytest.ini_options]`. The `testpaths` entry enumerates the four
-component test directories (`tests`, `training/tests`,
+root-discovered component test directories (`tests`, `training/tests`,
 `data-management/tools/tests`, `fleet-deployment/inference/tests`) so
-`uv run pytest` with no arguments discovers every suite. Default
-options applied to every run include `-m "not e2e"`, `--strict-markers`,
-`--strict-config`, and a JUnit XML report written to
-`logs/pytest-results.xml`. When adding tests, place them under one
-of the configured component directories so they are picked up by both local
+`uv run pytest` with no arguments discovers every suite served from the
+repository root. The dataviewer backend (`data-management/viewer/backend`),
+evaluation (`evaluation/`), and data-pipeline capture
+(`data-pipeline/capture`) suites have their own `pyproject.toml` and run
+from their respective directories; the matching CI flags
+(`pytest-dataviewer`, `pytest-evaluation`, `pytest-data-pipeline`) are
+defined per-workflow rather than via root discovery. Default options
+applied to every root run include `-m "not e2e"`, `--strict-markers`,
+`--strict-config`, a JUnit XML report at `logs/pytest-results.xml`, and
+advisory coverage reports (`--cov=training`, `--cov=data-management/tools`,
+`--cov=fleet-deployment/inference`, `--cov=tests`,
+`--cov-report=xml:logs/coverage-root.xml`, `--cov-fail-under=0`). When
+adding tests, place them under one of the configured component directories
+(or the matching per-domain project) so they are picked up by both local
 runs and the matching CI workflow.
 
 ### Shell and Infrastructure Tests

@@ -33,6 +33,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _normalize_feature_names(raw: Any) -> list[str] | None:
+    """Coerce a feature ``names`` value into ``list[str]``.
+
+    Some LeRobot ``info.json`` files store names as a list-of-lists
+    (e.g. ``[["JOINT_A", "JOINT_B"]]``) or as a dict keyed by axis. Flatten
+    nested sequences and stringify scalars so the schema validates.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        raw = list(raw.values())
+    if not isinstance(raw, list | tuple):
+        return [str(raw)]
+    flat: list[str] = []
+    for item in raw:
+        if isinstance(item, list | tuple):
+            flat.extend(str(x) for x in item)
+        else:
+            flat.append(str(item))
+    return flat or None
+
+
 def _validate_dataset_id(dataset_id: str) -> str:
     """Validate and return a safe dataset identifier. Raises ValueError on traversal attempts."""
     if "\\" in dataset_id or "/" in dataset_id:
@@ -66,7 +88,7 @@ class DatasetService:
         episode_cache_max_mb: int = 100,
     ):
         if base_path is None:
-            base_path = os.environ.get("HMI_DATA_PATH", "./data")
+            base_path = os.environ.get("DATA_DIR", "./data")
         self.base_path = base_path
         self._datasets: dict[str, DatasetInfo] = {}
         if storage_adapter is not None:
@@ -79,6 +101,11 @@ class DatasetService:
         self._blob_synced: dict[str, Path] = {}
         self._blob_hdf5_synced: dict[str, Path] = {}
         self._blob_meta_synced: dict[str, Path] = {}
+        # Per-blob locks to serialize concurrent video materialization for the same blob.
+        # Without this, parallel range requests race on the shared .part file and the
+        # loser's tmp.replace(target) raises FileNotFoundError after the winner renames it.
+        self._blob_video_locks: dict[str, asyncio.Lock] = {}
+        self._blob_video_locks_guard = asyncio.Lock()
 
         # Format handlers (ordered by priority — LeRobot checked first)
         self._lerobot_handler = LeRobotFormatHandler()
@@ -248,6 +275,7 @@ class DatasetService:
             features[name] = FeatureSchema(
                 dtype=feat.get("dtype", "unknown"),
                 shape=feat.get("shape", []),
+                names=_normalize_feature_names(feat.get("names")),
             )
 
         dataset_info = DatasetInfo(
@@ -267,6 +295,45 @@ class DatasetService:
         if self._blob_provider is None:
             return None
         return await self._blob_provider.resolve_video_blob_path(dataset_id, episode_idx, camera)
+
+    async def materialize_blob_video(self, blob_path: str) -> Path | None:
+        """Download a blob video fully to a local cache file and return the path.
+
+        Cached by blob path; subsequent calls return the existing file without
+        re-downloading. Required because on-demand transcoding needs a seekable
+        local file rather than a one-shot byte stream.
+        """
+        if self._blob_provider is None:
+            return None
+
+        cache_dir = Path(tempfile.gettempdir()) / "dvw_video_cache" / "blob"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        import hashlib
+
+        key = hashlib.sha1(blob_path.encode("utf-8")).hexdigest()
+        suffix = Path(blob_path).suffix or ".mp4"
+        target = cache_dir / f"{key}{suffix}"
+        if target.exists() and target.stat().st_size > 0:
+            return target
+
+        async with self._blob_video_locks_guard:
+            lock = self._blob_video_locks.setdefault(key, asyncio.Lock())
+
+        async with lock:
+            # Re-check after acquiring the lock; a concurrent caller may have just finished.
+            if target.exists() and target.stat().st_size > 0:
+                return target
+            tmp = target.with_suffix(target.suffix + f".{os.getpid()}.part")
+            try:
+                with tmp.open("wb") as fh:
+                    async for chunk in self._blob_provider.stream_video(blob_path):
+                        fh.write(chunk)
+                tmp.replace(target)
+            except Exception as exc:
+                logger.warning("Failed to materialize blob video '%s': %s", blob_path, exc)
+                tmp.unlink(missing_ok=True)
+                return None
+        return target
 
     async def get_blob_video_stream(
         self,
@@ -389,14 +456,23 @@ class DatasetService:
         if self._blob_provider is not None:
             try:
                 scan = await self._blob_provider.scan_all_dataset_ids()
-                for dataset_id in scan.get("lerobot", []):
-                    if dataset_id not in self._datasets:
-                        await self._discover_blob_dataset(dataset_id)
-                for dataset_id in scan.get("hdf5", []):
-                    if dataset_id not in self._datasets:
-                        await self._discover_blob_hdf5_dataset(dataset_id)
             except Exception as e:
                 logger.warning("Failed to scan blob datasets: %s", e)
+                scan = {}
+            for dataset_id in scan.get("lerobot", []):
+                if dataset_id in self._datasets:
+                    continue
+                try:
+                    await self._discover_blob_dataset(dataset_id)
+                except Exception as e:
+                    logger.warning("Failed to discover blob dataset %s: %s", dataset_id, e)
+            for dataset_id in scan.get("hdf5", []):
+                if dataset_id in self._datasets:
+                    continue
+                try:
+                    await self._discover_blob_hdf5_dataset(dataset_id)
+                except Exception as e:
+                    logger.warning("Failed to discover blob HDF5 dataset %s: %s", dataset_id, e)
 
         base = Path(self.base_path)
         if not base.exists():
@@ -652,11 +728,13 @@ class DatasetService:
         # Clean up completed tasks
         self._prefetch_tasks = {t for t in self._prefetch_tasks if not t.done()}
 
+        coro = _prefetch()
         try:
-            task = asyncio.create_task(_prefetch())
+            task = asyncio.create_task(coro)
             self._prefetch_tasks.add(task)
             task.add_done_callback(self._prefetch_tasks.discard)
         except RuntimeError as error:
+            coro.close()
             logger.debug("Skipping episode prefetch for episode %d: %s", int(episode_idx), error)
 
     def is_safe_video_path(self, video_path: str) -> bool:
@@ -738,14 +816,54 @@ class DatasetService:
         return current
 
     async def get_frame_image(self, dataset_id: str, episode_idx: int, frame_idx: int, camera: str) -> bytes | None:
-        """Get a single frame image from an episode."""
+        """Get a single frame image from an episode.
+
+        When no local video is available (blob-only datasets, or local
+        datasets that only carry meta/), falls back to materializing the
+        episode video from blob storage and extracting the frame.
+        """
         result = self._try_handlers(dataset_id, "get_frame_image", episode_idx, frame_idx, camera)
-        if result is None:
+        if result is not None:
+            return result
+
+        if self._blob_provider is None:
             logger.warning(
                 "No loader found for dataset %s",
                 dataset_id.replace("\r", "").replace("\n", ""),
             )
-        return result
+            return None
+
+        # Ensure the dataset is registered as blob-backed so downstream
+        # blob lookups (info.json cache, video index) succeed.
+        if dataset_id not in self._blob_dataset_ids:
+            discovered = await self._discover_blob_dataset(dataset_id)
+            if discovered is None:
+                logger.warning(
+                    "No loader and no blob dataset for %s",
+                    dataset_id.replace("\r", "").replace("\n", ""),
+                )
+                return None
+
+        blob_path = await self.get_blob_video_path(dataset_id, episode_idx, camera)
+        if blob_path is None:
+            logger.warning(
+                "No blob video found for dataset %s ep %d camera %s",
+                dataset_id.replace("\r", "").replace("\n", ""),
+                int(episode_idx),
+                camera.replace("\r", "").replace("\n", ""),
+            )
+            return None
+
+        local_path = await self.materialize_blob_video(blob_path)
+        if local_path is None:
+            return None
+
+        dataset = self._datasets.get(dataset_id)
+        fps = float(dataset.fps) if dataset and dataset.fps else 30.0
+        frame = await asyncio.to_thread(self._lerobot_handler._extract_frame_ffmpeg, str(local_path), frame_idx, fps)
+        if frame is not None:
+            return frame
+        return await asyncio.to_thread(self._lerobot_handler._extract_frame_cv2, str(local_path), frame_idx)
 
     async def get_episode_cameras(self, dataset_id: str, episode_idx: int) -> list[str]:
         """Get list of available cameras for an episode."""
@@ -799,7 +917,7 @@ def get_dataset_service() -> DatasetService:
     Get the global dataset service instance.
 
     On first call, reads application config and creates the appropriate
-    storage adapter and optional BlobDatasetProvider based on HMI_STORAGE_BACKEND.
+    storage adapter and optional BlobDatasetProvider based on STORAGE_BACKEND.
 
     Returns:
         DatasetService singleton.

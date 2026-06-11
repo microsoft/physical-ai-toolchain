@@ -1,4 +1,4 @@
-"""Azure ML bootstrap helpers for IsaacLab training entrypoints.
+"""Azure ML bootstrap helpers for Isaac Lab training entrypoints.
 
 Provides ``bootstrap_azure_ml`` to initialize an Azure ML workspace
 connection, configure MLflow tracking, and optionally set up Azure
@@ -358,6 +358,10 @@ def bootstrap_azure_ml(
     if not tracking_uri:
         raise AzureConfigError("Azure ML workspace does not expose an MLflow tracking URI")
 
+    # azureml-mlflow plugin handles azureml:// URIs with DefaultAzureCredential
+    # (workload identity supported via AZURE_FEDERATED_TOKEN_FILE).
+    # MLFLOW_REGISTRY_URI=file:///dev/null (set in workflow env) prevents registry
+    # validation failures during set_experiment().
     try:
         mlflow.set_tracking_uri(tracking_uri)
         if experiment_name:

@@ -24,7 +24,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
@@ -34,7 +34,7 @@ jobs:
           python-version: '3.12'
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
@@ -43,7 +43,7 @@ jobs:
         run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Run pytest with coverage
-        run: uv run pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing
+        run: uv run pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=90
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && always() }}
@@ -55,7 +55,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: ${{ inputs.code-coverage && always() }}
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           files: logs/coverage-dataviewer.xml
           use_oidc: true

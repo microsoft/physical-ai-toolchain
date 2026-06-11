@@ -14,7 +14,8 @@ override_data {
 }
 
 variables {
-  current_user_oid = "00000000-0000-0000-0000-000000000001"
+  current_user_oid                   = "00000000-0000-0000-0000-000000000001"
+  aml_managed_network_isolation_mode = "Disabled"
 }
 
 run "setup" {
@@ -83,10 +84,10 @@ run "verify_defaults" {
     error_message = "Redis should NOT be created by default"
   }
 
-  // AML Compute NOT deployed by default
+  // AML Compute map is empty by default
   assert {
     condition     = length(azurerm_machine_learning_compute_cluster.gpu) == 0
-    error_message = "AML compute cluster should NOT be created by default"
+    error_message = "AML compute clusters should NOT be created by default"
   }
 
   // AML diagnostic logs NOT enabled by default

@@ -1,7 +1,7 @@
-"""SKRL training orchestration with IsaacLab environments and Azure MLflow integration.
+"""SKRL training orchestration with Isaac Lab environments and Azure MLflow integration.
 
 This module provides the main training loop for reinforcement learning agents using
-the SKRL library with IsaacLab simulation environments. It handles:
+the SKRL library with Isaac Lab simulation environments. It handles:
 - Environment and agent configuration via Hydra
 - Checkpoint loading and model registration
 - MLflow metric logging and artifact tracking
@@ -18,10 +18,11 @@ import random
 import shutil
 import sys
 import time
+import traceback
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -80,9 +81,9 @@ def _parse_mlflow_log_interval(interval_arg: str, rollouts: int) -> int:
 
 
 def _build_parser(app_launcher_cls: Any) -> argparse.ArgumentParser:
-    """Build argument parser for SKRL training with IsaacLab launcher args."""
-    parser = argparse.ArgumentParser(description="Train IsaacLab SKRL policies")
-    parser.add_argument("--task", type=str, default=None, help="IsaacLab task identifier")
+    """Build argument parser for SKRL training with Isaac Lab launcher args."""
+    parser = argparse.ArgumentParser(description="Train Isaac Lab SKRL policies")
+    parser.add_argument("--task", type=str, default=None, help="Isaac Lab task identifier")
     parser.add_argument("--agent", type=str, default=None, help="Override agent configuration entry point")
     parser.add_argument(
         "--algorithm",
@@ -121,9 +122,15 @@ def _build_parser(app_launcher_cls: Any) -> argparse.ArgumentParser:
 
 
 def _sync_checkpoint_output(checkpoint_dir: Path) -> None:
-    """Copy checkpoints into AzureML outputs when TRAINING_CHECKPOINT_OUTPUT is set."""
+    """Copy ``checkpoint_dir`` into ``$AZURE_ML_OUTPUT_CHECKPOINTS`` if set.
 
-    target = os.environ.get("TRAINING_CHECKPOINT_OUTPUT")
+    Azure ML exports ``AZURE_ML_OUTPUT_<NAME>`` for each ``uri_folder`` output
+    declared on the job; whatever the training process writes into that
+    directory is uploaded to the named output's blob path at job end. No-op
+    when the env var is unset (e.g., local runs).
+    """
+
+    target = os.environ.get("AZURE_ML_OUTPUT_CHECKPOINTS")
     if not target or not checkpoint_dir.exists():
         return
 
@@ -157,7 +164,7 @@ def _prepare_log_paths(agent_cfg: dict[str, Any], cli_args: argparse.Namespace) 
     """
     experiment_cfg = agent_cfg.setdefault("agent", {}).setdefault("experiment", {})
     root_path = Path(experiment_cfg.get("directory") or Path("logs") / "skrl").resolve()
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H-%M-%S")
     algorithm_label = (cli_args.algorithm or "rl").lower()
     run_name = f"{timestamp}_{algorithm_label}_{cli_args.ml_framework}"
     custom_name = experiment_cfg.get("experiment_name")
@@ -257,7 +264,7 @@ def _register_checkpoint_model(
         model_name: Target Azure ML model name.
         checkpoint_uri: MLflow URI for the checkpoint artifact.
         checkpoint_mode: Checkpoint mode metadata tag.
-        task: IsaacLab task identifier for tagging.
+        task: Isaac Lab task identifier for tagging.
         algorithm: RL algorithm (e.g., PPO, IPPO) for tagging.
     """
     if context is None:
@@ -272,7 +279,7 @@ def _register_checkpoint_model(
     tags = {
         "checkpoint_mode": checkpoint_mode or "from-scratch",
         "framework": "skrl",
-        "validated": "false",
+        "evaluated": "false",
     }
     if task:
         tags["task"] = task
@@ -288,7 +295,7 @@ def _register_checkpoint_model(
             name=model_name,
             path=checkpoint_uri,
             type="custom_model",
-            description="IsaacLab SKRL checkpoint artifact",
+            description="Isaac Lab SKRL checkpoint artifact",
             tags=tags,
             properties=properties,
         )
@@ -307,7 +314,7 @@ def _resolve_env_count(env_cfg: Any) -> int | None:
 
 
 def _resolve_checkpoint(retrieve_file_path: Any, checkpoint: str | None) -> str | None:
-    """Resolve checkpoint location via IsaacLab asset resolver.
+    """Resolve checkpoint location via Isaac Lab asset resolver.
 
     Args:
         retrieve_file_path: Callable resolving checkpoint identifiers to absolute paths.
@@ -486,7 +493,7 @@ def _validate_gym_registry(task: str | None, gym_module: Any) -> None:
 
 
 def _create_gym_environment(task: str, env_cfg: Any, is_video_enabled: bool, gym_module: Any) -> Any:
-    """Instantiate the IsaacLab task environment."""
+    """Instantiate the Isaac Lab task environment."""
 
     render_mode = "rgb_array" if is_video_enabled else None
     return gym_module.make(task, cfg=env_cfg, render_mode=render_mode)
@@ -682,7 +689,11 @@ def _finalize_mlflow_run(state: MLflowRunState) -> None:
     mlflow = state.mlflow
     mlflow.set_tag("training_outcome", state.outcome)
 
-    latest_checkpoint_uri = _log_artifacts(mlflow, state.log_dir, state.resume_path)
+    try:
+        latest_checkpoint_uri = _log_artifacts(mlflow, state.log_dir, state.resume_path)
+    except Exception:
+        _LOGGER.warning("MLflow artifact upload failed; checkpoint registration will be skipped", exc_info=True)
+        latest_checkpoint_uri = None
 
     if state.args and state.args.register_checkpoint and latest_checkpoint_uri:
         _register_checkpoint_model(
@@ -768,7 +779,7 @@ def _prepare_cli_arguments(
 def _initialize_simulation(
     app_launcher_cls: Any, cli_args: argparse.Namespace, unparsed_args: Sequence[str]
 ) -> tuple[Any, Any]:
-    """Launch IsaacLab simulation application using parsed arguments."""
+    """Launch Isaac Lab simulation application using parsed arguments."""
 
     sys.argv = [sys.argv[0], *list(unparsed_args)]
     app_launcher = app_launcher_cls(cli_args)
@@ -783,7 +794,7 @@ def _load_training_modules(
     cli_args: argparse.Namespace,
     context: AzureMLContext | None,
 ) -> TrainingModules:
-    """Import IsaacLab, SKRL, and optional MLflow modules."""
+    """Import Isaac Lab, SKRL, and optional MLflow modules."""
 
     import gymnasium as gym_module
     import isaaclab_tasks  # noqa: F401
@@ -837,9 +848,26 @@ def _load_training_modules(
 def _close_simulation(simulation_app: Any | None) -> None:
     """Exit the process; Kit's shutdown hangs on vGPU nodes.
 
-    See docs/gpu-configuration.md § "Isaac Sim 4.x Shutdown Fix".
+    Preserves a non-zero exit code when an exception is in flight so AzureML
+    reports the job as Failed instead of Completed. Mirrors Python's own
+    ``SystemExit`` semantics: ``None`` exit code is treated as 0, integer codes
+    pass through (including ``bool``), and any other value (e.g. a message
+    string) maps to 1. See docs/gpu-configuration.md § "Isaac Sim 4.x Shutdown
+    Fix".
     """
-    os._exit(0)
+    exc = sys.exc_info()[1]
+    if isinstance(exc, SystemExit):
+        if exc.code is None:
+            code = 0
+        elif isinstance(exc.code, int):
+            code = int(exc.code)
+        else:
+            code = 1
+    elif exc is not None:
+        code = 1
+    else:
+        code = 0
+    os._exit(code)
 
 
 def _build_run_descriptor(
@@ -948,19 +976,21 @@ def _run_hydra_training(
     app_launcher: Any,
     modules: TrainingModules,
 ) -> None:
-    """Execute hydra-configured IsaacLab training launch."""
+    """Execute hydra-configured Isaac Lab training launch."""
     if cli_args.seed == -1:
         cli_args.seed = random.randint(0, 10000)
 
     agent_entry = _get_agent_config_entry_point(cli_args)
     _LOGGER.info("Starting training: task=%s, seed=%s", cli_args.task, cli_args.seed)
 
+    _launch_failure: dict[str, BaseException] = {}
+
     @modules.hydra_task_config(cli_args.task, agent_entry)
     def _launch(env_cfg, agent_cfg):
-        state = _prepare_launch_state(env_cfg, agent_cfg, cli_args, app_launcher, modules)
-        env = _instantiate_environment(env_cfg, cli_args, modules, state.log_dir)
-
+        env = None
         try:
+            state = _prepare_launch_state(env_cfg, agent_cfg, cli_args, app_launcher, modules)
+            env = _instantiate_environment(env_cfg, cli_args, modules, state.log_dir)
             runner = _initialize_runner(env, state, modules)
             _run_training_with_mlflow(
                 runner=runner,
@@ -971,11 +1001,24 @@ def _run_hydra_training(
                 context=context,
                 modules=modules,
             )
+        except BaseException as exc:
+            # Hydra suppresses the traceback and returns cleanly unless HYDRA_FULL_ERROR=1
+            # was set before the @hydra.main decorator ran. Capture the exception here and
+            # re-raise outside the decorator so AzureML reports the job as Failed. Skip
+            # clean SystemExit(0)/SystemExit(None) so deliberate exits stay successful.
+            if isinstance(exc, SystemExit) and (exc.code is None or exc.code == 0):
+                raise
+            _LOGGER.error("Training failed:\n%s", traceback.format_exc())
+            _launch_failure["exc"] = exc
+            raise
         finally:
             prepare_for_shutdown()
-            env.close()
+            if env is not None:
+                env.close()
 
     _launch()
+    if "exc" in _launch_failure:
+        raise SystemExit(1) from _launch_failure["exc"]
 
 
 def _run_training_with_mlflow(
@@ -1029,20 +1072,20 @@ def run_training(
     hydra_args: Sequence[str],
     context: AzureMLContext | None,
 ) -> None:
-    """Execute SKRL training with IsaacLab environment and optional Azure ML tracking.
+    """Execute SKRL training with Isaac Lab environment and optional Azure ML tracking.
 
     Args:
         args: Parsed launch arguments including checkpoint behavior.
-        hydra_args: Sequence of Hydra overrides to forward to IsaacLab launcher.
+        hydra_args: Sequence of Hydra overrides to forward to Isaac Lab launcher.
         context: Azure ML context enabling MLflow tracking and model registration.
 
     Raises:
-        SystemExit: If IsaacLab dependencies are missing or task is unavailable.
+        SystemExit: If Isaac Lab dependencies are missing or task is unavailable.
     """
     try:
         from isaaclab.app import AppLauncher
     except ImportError as exc:
-        raise SystemExit("IsaacLab packages are required for SKRL training") from exc
+        raise SystemExit("Isaac Lab packages are required for SKRL training") from exc
 
     parser = _build_parser(AppLauncher)
     cli_args, unparsed_args = _prepare_cli_arguments(parser, args, hydra_args)

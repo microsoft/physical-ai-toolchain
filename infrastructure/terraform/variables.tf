@@ -411,6 +411,7 @@ variable "node_pools" {
       vm_size                    = "Standard_NV36ads_A10_v5"
       subnet_address_prefixes    = ["10.0.7.0/24"]
       node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
+      node_labels                = { accelerator = "nvidia" }
       gpu_driver                 = "Install"
       priority                   = "Spot"
       should_enable_auto_scaling = true
@@ -446,6 +447,12 @@ variable "should_enable_public_network_access" {
   type        = bool
   description = "Whether to enable public network access to the Azure ML workspace"
   default     = true
+}
+
+variable "should_enable_storage_shared_access_key" {
+  type        = bool
+  description = "Whether to enable Shared Key (SAS token) authorization for the storage account. When false, all requests must use Azure AD authentication (RBAC)"
+  default     = false
 }
 
 variable "should_enable_microsoft_defender" {
@@ -486,37 +493,78 @@ variable "should_deploy_dce" {
  * AzureML Compute Configuration - Optional
  */
 
+variable "should_deploy_aks" {
+  type        = bool
+  description = "Whether to deploy AKS cluster (SiL module). Set to false for AzureML managed compute only"
+  default     = true
+}
+
 variable "should_enable_aml_diagnostic_logs" {
   type        = bool
   description = "Whether to enable AML workspace diagnostic logs in Log Analytics"
   default     = false
 }
 
-variable "should_deploy_aml_compute" {
-  type        = bool
-  description = "Whether to deploy an AzureML managed compute cluster for GPU workloads"
-  default     = false
+variable "aml_managed_network_isolation_mode" {
+  type        = string
+  description = "AzureML workspace managed network isolation mode. This is independent from should_enable_private_endpoint and governs the AzureML workspace managed network only"
+  default     = "AllowOnlyApprovedOutbound"
+
+  validation {
+    condition     = contains(["Disabled", "AllowInternetOutbound", "AllowOnlyApprovedOutbound"], var.aml_managed_network_isolation_mode)
+    error_message = "aml_managed_network_isolation_mode must be one of: Disabled, AllowInternetOutbound, AllowOnlyApprovedOutbound"
+  }
 }
 
-variable "aml_compute_config" {
-  type = object({
-    vm_size               = string
-    vm_priority           = string
-    min_node_count        = number
-    max_node_count        = number
-    scale_down_after_idle = optional(string, "PT5M")
-    cluster_name          = optional(string, "gpu-cluster")
-    subnet_id             = optional(string)
-  })
-  description = "AzureML managed compute cluster configuration including VM size, priority, scaling, and optional subnet placement"
-  default = {
-    vm_size               = "Standard_NC4as_T4_v3"
-    vm_priority           = "LowPriority"
-    min_node_count        = 0
-    max_node_count        = 1
-    scale_down_after_idle = "PT5M"
-    cluster_name          = "gpu-cluster"
-    subnet_id             = null
+variable "aml_compute_clusters" {
+  type = map(object({
+    vm_size                   = string
+    vm_priority               = string
+    min_node_count            = optional(number, 0)
+    max_node_count            = optional(number, 1)
+    scale_down_after_idle     = optional(string, "PT5M")
+    subnet_id                 = optional(string)
+    node_public_ip_enabled    = optional(bool)
+    ssh_public_access_enabled = optional(bool)
+    identity_type             = optional(string)
+    location                  = optional(string)
+  }))
+  description = "AzureML managed compute clusters keyed by Azure ML compute cluster name. Empty map deploys no clusters."
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for cluster_name, _ in var.aml_compute_clusters : can(regex("^[A-Za-z0-9][A-Za-z0-9-]{0,22}[A-Za-z0-9]$", cluster_name))
+    ])
+    error_message = "aml_compute_clusters keys must be 2-24 characters, start and end with an alphanumeric character, and contain only letters, numbers, and hyphens."
+  }
+
+  validation {
+    condition = alltrue([
+      for _, cluster in var.aml_compute_clusters : contains(["Dedicated", "LowPriority"], cluster.vm_priority)
+    ])
+    error_message = "aml_compute_clusters vm_priority values must be either Dedicated or LowPriority."
+  }
+
+  validation {
+    condition = alltrue([
+      for _, cluster in var.aml_compute_clusters : cluster.min_node_count >= 0 && cluster.max_node_count >= 0 && cluster.min_node_count <= cluster.max_node_count
+    ])
+    error_message = "aml_compute_clusters min_node_count and max_node_count must be greater than or equal to 0, and min_node_count must be less than or equal to max_node_count."
+  }
+
+  validation {
+    condition = alltrue([
+      for _, cluster in var.aml_compute_clusters : cluster.identity_type == null || contains(["SystemAssigned", "UserAssigned"], cluster.identity_type)
+    ])
+    error_message = "aml_compute_clusters identity_type values must be either SystemAssigned or UserAssigned."
+  }
+
+  validation {
+    condition = alltrue([
+      for _, cluster in var.aml_compute_clusters : can(regex("^PT([0-9]+H([0-9]+M)?([0-9]+S)?|[0-9]+M([0-9]+S)?|[0-9]+S)$", cluster.scale_down_after_idle))
+    ])
+    error_message = "aml_compute_clusters scale_down_after_idle must be an ISO 8601 time duration, such as PT30S, PT5M, PT1H, or PT1H30M."
   }
 }
 
@@ -528,6 +576,40 @@ variable "should_include_aks_dns_zone" {
   type        = bool
   description = "Whether to include the AKS private DNS zone in core DNS zones"
   default     = true
+}
+
+/*
+ * Conversion Pipeline Configuration - Optional
+ *
+ * The conversion pipeline module is opt-in. When should_deploy_conversion_pipeline
+ * is false (default), no conversion-pipeline resources are created and the
+ * conversion_pipeline_config object's fields go unused. When true, the module
+ * provisions an Event Grid system topic + subscription on the platform-owned
+ * data-lake account, an in-account dead-letter container, the Microsoft Fabric
+ * capacity + workspace, and Fabric SP RBAC. Durable storage (raw -> converted)
+ * lives on the platform module's data-lake account; should_create_data_lake_storage
+ * must be true (enforced by a precondition on the conversion-pipeline module).
+ */
+
+variable "should_deploy_conversion_pipeline" {
+  type        = bool
+  description = "Whether to deploy the conversion-pipeline module (raw -> converted ingest with Event Grid + Fabric)"
+  default     = false
+}
+
+variable "conversion_pipeline_config" {
+  type = object({
+    should_enable_event_grid_dead_letter = optional(bool, true)
+    raw_blob_suffix_filters              = optional(list(string), [".bag", ".bag.zst", ".mcap"])
+    conversion_subscriber_url            = optional(string, null)
+    should_create_fabric_capacity        = optional(bool, true)
+    should_create_fabric_workspace       = optional(bool, true)
+    fabric_capacity_sku                  = optional(string, "F2")
+    fabric_admin_members                 = optional(list(string), [])
+    fabric_workspace_sp_object_id        = optional(string, null)
+  })
+  description = "Conversion pipeline module configuration. Only consumed when should_deploy_conversion_pipeline is true"
+  default     = {}
 }
 
 // ============================================================

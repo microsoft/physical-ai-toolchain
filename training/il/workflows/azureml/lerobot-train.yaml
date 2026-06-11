@@ -12,7 +12,7 @@
 # This file defines:
 # - The job structure and schema
 # - Input/output specifications
-# - Environment variable mappings for HuggingFace and logging
+# - Environment variable mappings for the Azure Blob dataset source and logging
 # - Identity configuration for Azure ML model registration
 #
 # To submit a job, use submit-azureml-lerobot-training.sh with appropriate flags.
@@ -41,39 +41,31 @@ inputs:
   batch_size: none
   eval_freq: none
   save_freq: "5000"
-  wandb_enable: "true"
-  wandb_project: lerobot-training
   register_checkpoint: none
+  blob_urls: '[]'
+  dataset_root: /workspace/data
   subscription_id: placeholder
   resource_group: placeholder
   workspace_name: placeholder
   mlflow_token_refresh_retries: "3"
   mlflow_http_request_timeout: "60"
+  # Single-node multi-GPU is launched in-container via `accelerate launch`.
+  # The number of GPUs is detected at runtime via torch.cuda.device_count();
+  # on AzureML managed AmlCompute that is the cluster VM SKU's GPU count,
+  # on AzureML-on-Kubernetes it is the InstanceType's nvidia.com/gpu request.
+  # No AzureML `distribution:` block is needed in either case.
+  mixed_precision: "no"
 
 command: echo "Command will be set by submission script"
 
+# Static env vars only. Every training-related env var is set by
+# submit-azureml-lerobot-training.sh via --set environment_variables.X=Y flags
+# because the AzureML K8s extension does not substitute ${{inputs.X}} template
+# refs at runtime. The same constraint applies to ${{outputs.X}} — do NOT add
+# templated output env vars here; training reads $AZURE_ML_OUTPUT_<NAME>
+# directly from the runtime.
 environment_variables:
-  DATASET_REPO_ID: ${{inputs.dataset_repo_id}}
-  POLICY_TYPE: ${{inputs.policy_type}}
-  JOB_NAME: ${{inputs.job_name}}
-  OUTPUT_DIR: ${{inputs.output_dir}}
-  POLICY_REPO_ID: ${{inputs.policy_repo_id}}
-  LEROBOT_VERSION: ${{inputs.lerobot_version}}
-  TRAINING_STEPS: ${{inputs.training_steps}}
-  BATCH_SIZE: ${{inputs.batch_size}}
-  EVAL_FREQ: ${{inputs.eval_freq}}
-  SAVE_FREQ: ${{inputs.save_freq}}
-  WANDB_ENABLE: ${{inputs.wandb_enable}}
-  WANDB_PROJECT: ${{inputs.wandb_project}}
-  REGISTER_CHECKPOINT: ${{inputs.register_checkpoint}}
-  TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
-  # The following are set by submit-azureml-lerobot-training.sh via --set flags
-  # AZURE_SUBSCRIPTION_ID: <set by script>
-  # AZURE_RESOURCE_GROUP: <set by script>
-  # AZUREML_WORKSPACE_NAME: <set by script>
-  # HF_TOKEN: <set by script via env secret>
-  # WANDB_API_KEY: <set by script via env secret>
-  # MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: <set by script>
+  AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
   # MLFLOW_HTTP_REQUEST_TIMEOUT: <set by script>
 
 outputs:

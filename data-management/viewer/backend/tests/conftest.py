@@ -1,11 +1,38 @@
 """Pytest configuration and shared fixtures for integration tests."""
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
+
+
+def make_asgi_request(
+    method: str = "POST",
+    path: str = "/api/x",
+    headers: dict[str, str] | None = None,
+) -> Request:
+    """Build a minimal Starlette `Request` for unit-testing dependency callables."""
+    raw_headers = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
+    scope = {
+        "type": "http",
+        "method": method,
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": raw_headers,
+        "client": ("127.0.0.1", 1234),
+        "app": FastAPI(),
+        "scheme": "http",
+        "server": ("testserver", 80),
+    }
+    return Request(scope)
+
 
 # Load .env from the backend directory so TEST_DATASET_ID and other
 # settings can be configured without hardcoding.
@@ -44,15 +71,15 @@ def test_dataset_id():
 
 @pytest.fixture
 def client(test_dataset_path):
-    """Create a FastAPI test client with HMI_DATA_PATH pointing to the real dataset."""
-    os.environ["HMI_DATA_PATH"] = test_dataset_path
+    """Create a FastAPI test client with DATA_DIR pointing to the real dataset."""
+    os.environ["DATA_DIR"] = test_dataset_path
 
     import src.api.config as config_mod
     import src.api.services.annotation_service as ann_mod
     import src.api.services.dataset_service as ds_mod
 
     # Reset all singletons so each test gets a fresh service instance that
-    # re-reads the current HMI_DATA_PATH from the environment.
+    # re-reads the current DATA_DIR from the environment.
     config_mod._app_config = None
     ds_mod._dataset_service = None
     ann_mod._annotation_service = None

@@ -112,9 +112,30 @@ vi.mock('@/components/annotation-panel', () => ({
       </button>
     </div>
   ),
+  LanguageInstructionWidget: () => <div>Language Instructions</div>,
 }))
 
 vi.mock('@/components/episode-viewer', () => ({
+  CameraSelector: (props: Record<string, unknown>) => {
+    const cameraProps = props as {
+      cameras?: string[]
+      selectedCamera?: string
+      onSelectCamera?: (camera: string) => void
+    }
+    return (
+      <select
+        aria-label="Camera"
+        value={cameraProps.selectedCamera ?? ''}
+        onChange={(event) => cameraProps.onSelectCamera?.(event.target.value)}
+      >
+        {(cameraProps.cameras ?? []).map((camera) => (
+          <option key={camera} value={camera}>
+            {camera}
+          </option>
+        ))}
+      </select>
+    )
+  },
   TrajectoryPlot: (props: Record<string, unknown>) => {
     const plotProps = props as {
       selectedRange?: [number, number] | null

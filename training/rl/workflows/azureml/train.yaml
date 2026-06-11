@@ -1,4 +1,4 @@
-# IsaacLab Training Job Template
+# Isaac Lab Training Job Template
 #
 # This is a STRUCTURAL TEMPLATE used by submit-azureml-training.sh.
 # Almost all values below are placeholders and will be overridden at submission time.
@@ -20,8 +20,8 @@
 
 $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 type: command
-display_name: IsaacLab Training
-description: IsaacLab SKRL training job with MLflow integration and checkpoint management.
+display_name: Isaac Lab Training
+description: Isaac Lab SKRL training job with MLflow integration and checkpoint management.
 experiment_name: isaaclab-training
 identity:
   type: managed_identity
@@ -54,7 +54,11 @@ environment_variables:
   PYTHON: /workspace/isaaclab/isaaclab.sh -p
   ACCEPT_EULA: "Y"
   PRIVACY_CONSENT: "Y"
+  HYDRA_FULL_ERROR: "1"
   TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
+  # Do NOT add ${{outputs.X}} env vars here — Azure ML does not substitute
+  # template expressions inside environment_variables (only inside command).
+  # Training reads $AZURE_ML_OUTPUT_<NAME> directly from the runtime.
   # The following are set by submit-azureml-training.sh via --set flags
   # AZURE_SUBSCRIPTION_ID: <set by script>
   # AZURE_RESOURCE_GROUP: <set by script>

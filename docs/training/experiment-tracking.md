@@ -1,19 +1,18 @@
 ---
 sidebar_position: 3
 title: Experiment Tracking
-description: MLflow and WANDB experiment tracking configuration for training workflows on Azure ML and OSMO
+description: MLflow experiment tracking configuration for training workflows on Azure ML and OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-03
 ms.topic: how-to
 keywords:
   - mlflow
-  - wandb
   - experiment tracking
   - model registration
   - checkpoints
 ---
 
-Experiment tracking for Isaac Lab and LeRobot training workflows. Azure ML provides managed MLflow tracking. OSMO supports both WANDB (default for LeRobot) and MLflow (via Azure ML backend).
+Experiment tracking for Isaac Lab and LeRobot training workflows. Azure ML provides managed MLflow tracking on both platforms (Azure ML directly, OSMO via the Azure ML backend).
 
 ## 📊 MLflow Tracking
 
@@ -36,15 +35,12 @@ See [MLflow Integration](mlflow-integration.md) for SKRL metric categories, filt
 
 ### LeRobot
 
-Enable MLflow for LeRobot on OSMO:
+MLflow is enabled automatically for LeRobot training on both OSMO and Azure ML. Submit an OSMO training job:
 
 ```bash
-./scripts/submit-osmo-lerobot-training.sh \
-  -d user/dataset \
-  --mlflow-enable
+training/il/scripts/submit-osmo-lerobot-training.sh \
+  -d user/dataset
 ```
-
-Azure ML LeRobot submissions use MLflow automatically.
 
 ### MLflow Configuration
 
@@ -53,36 +49,7 @@ Azure ML LeRobot submissions use MLflow automatically.
 | `--mlflow-token-retries` | `3`     | MLflow token refresh retry count  | `MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES` |
 | `--mlflow-http-timeout`  | `60`    | MLflow HTTP request timeout (sec) | `MLFLOW_HTTP_REQUEST_TIMEOUT`           |
 
-## 📈 WANDB Integration
-
-WANDB is the default experiment tracker for LeRobot workflows on OSMO. Tracks training loss, evaluation metrics, and model outputs.
-
-### Credential Setup
-
-```bash
-# Set WANDB API key (required)
-osmo credential set wandb_api_key --generic --value "..."
-
-# Set HuggingFace token (required for private datasets)
-osmo credential set hf_token --generic --value "hf_..."
-```
-
-### Enable and Disable
-
-WANDB is enabled by default on OSMO LeRobot workflows:
-
-```bash
-# Explicitly enable (default)
-./scripts/submit-osmo-lerobot-training.sh -d user/dataset --wandb-enable
-
-# Disable WANDB
-./scripts/submit-osmo-lerobot-training.sh -d user/dataset --wandb-disable
-
-# Use MLflow instead
-./scripts/submit-osmo-lerobot-training.sh -d user/dataset --mlflow-enable
-```
-
-## 📦 Model Registration
+## Model Registration
 
 Training scripts register model checkpoints to Azure ML automatically at completion.
 
@@ -98,15 +65,15 @@ Training scripts register model checkpoints to Azure ML automatically at complet
 
 ```bash
 # Isaac Lab: custom model name
-./scripts/submit-azureml-training.sh \
+training/rl/scripts/submit-azureml-training.sh \
   --register-checkpoint my-anymal-model
 
 # Isaac Lab: skip registration
-./scripts/submit-osmo-training.sh \
+training/rl/scripts/submit-osmo-training.sh \
   --skip-register-checkpoint
 
-# LeRobot: register after inference
-./scripts/submit-osmo-lerobot-inference.sh \
+# LeRobot: register after evaluation
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/trained-policy \
   -r my-evaluated-model
 ```
@@ -125,23 +92,22 @@ huggingface-cli download user/trained-policy --local-dir ./checkpoint
 
 ## 🔄 Checkpoint Workflows
 
-Training supports four checkpoint initialization modes:
+Training supports three checkpoint initialization modes:
 
-| Mode           | Weights | Optimizer | Counters | Use Case                         |
-|----------------|---------|-----------|----------|----------------------------------|
-| `from-scratch` | Random  | Fresh     | Reset    | Initial training                 |
-| `warm-start`   | Loaded  | Fresh     | Reset    | Transfer learning                |
-| `resume`       | Loaded  | Loaded    | Loaded   | Continue interrupted training    |
-| `fresh`        | Random  | Fresh     | Reset    | Architecture-only initialization |
+| Mode           | Weights | Optimizer | Counters | Use Case                      |
+|----------------|---------|-----------|----------|-------------------------------|
+| `from-scratch` | Random  | Fresh     | Reset    | Initial training              |
+| `warm-start`   | Loaded  | Fresh     | Reset    | Transfer learning             |
+| `resume`       | Loaded  | Loaded    | Loaded   | Continue interrupted training |
 
 ```bash
 # Resume training from MLflow artifact
-./scripts/submit-azureml-training.sh \
+training/rl/scripts/submit-azureml-training.sh \
   --checkpoint-uri "runs:/abc123/checkpoint" \
   --checkpoint-mode resume
 
 # Warm-start from registered model
-./scripts/submit-osmo-training.sh \
+training/rl/scripts/submit-osmo-training.sh \
   --checkpoint-uri "models:/anymal-c-velocity/1" \
   --checkpoint-mode warm-start
 ```

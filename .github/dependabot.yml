@@ -36,17 +36,71 @@ updates:
       prefix: "chore"
       include: "scope"
 
-  # Python dependencies for training
-  - package-ecosystem: "pip"
+  # Python dependencies for data-pipeline (arc/capture tooling)
+  - package-ecosystem: "uv"
+    directory: "/data-pipeline"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      data-pipeline-dependencies:
+        patterns:
+          - "*"
+    labels:
+      - "dependencies"
+      - "python"
+      - "data-pipeline"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Python dependencies for training (RL)
+  - package-ecosystem: "uv"
     directory: "/training/rl"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
     groups:
-      training-dependencies:
+      training-dependencies:           # name preserved (used by PR #498 reviewer workflow)
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "marshmallow"
+        versions: [">=4.0.0"]          # azure-ai-ml<2 transitive cap; matches /evaluation rule
+    labels:
+      - "dependencies"
+      - "python"
+      - "training"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Python dependencies for imitation learning (LeRobot)
+  - package-ecosystem: "uv"
+    directory: "/training/il/lerobot"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      lerobot-dependencies:            # name preserved (used by PR #498 reviewer workflow)
+        patterns:
+          - "*"
+    # Upper-bound caps mirror /evaluation because training/il/lerobot/pyproject.toml
+    # uses [tool.uv] override-dependencies to pin marshmallow==3.26.2, numpy 2.2.6,
+    # packaging 25.0, and torch>=2.11.0,<2.12.0. Without these ignores, Dependabot
+    # opens weekly PRs proposing versions the resolver forces back to the pins.
+    ignore:
+      - dependency-name: "marshmallow"
+        versions: [">=4.0.0"]
+      - dependency-name: "torch"
+        versions: [">=2.12.0"]         # matches pin torch>=2.11.0,<2.12.0
+      - dependency-name: "numpy"
+        versions: [">=2.3.0"]
+      - dependency-name: "packaging"
+        versions: [">=26.0"]
     labels:
       - "dependencies"
       - "python"
@@ -56,19 +110,52 @@ updates:
       include: "scope"
 
   # Python dependencies for evaluation
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/evaluation"
     schedule:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 5
     groups:
-      inference-dependencies:
+      inference-dependencies:          # name preserved (used by PR #498 reviewer workflow)
         patterns:
           - "*"
+    # Upper-bound caps from azure-ai-ml<2 and lerobot<0.6 transitive constraints.
+    # Revisit when those packages release versions that lift the caps.
+    ignore:
+      - dependency-name: "marshmallow"
+        versions: [">=4.0.0"]
+      - dependency-name: "torch"
+        versions: [">=2.12.0"]         # re-anchored: pin is now torch>=2.11.0,<2.12.0
+      - dependency-name: "numpy"
+        versions: [">=2.3.0"]
+      - dependency-name: "packaging"
+        versions: [">=26.0"]
     labels:
       - "dependencies"
       - "python"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Python dependencies pinned for the SIL evaluation Docker image
+  - package-ecosystem: "pip"
+    directory: "/evaluation/sil/docker"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      lerobot-eval-image-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "torch"
+        versions: [">=2.12.0"]
+    labels:
+      - "dependencies"
+      - "python"
+      - "evaluation"
     commit-message:
       prefix: "chore"
       include: "scope"
@@ -140,6 +227,12 @@ updates:
       github-actions:
         patterns:
           - "*"
+        exclude-patterns:
+          - "github/gh-aw-actions/*"
+    # gh-aw-actions SHAs are managed by the gh-aw compiler (lock files).
+    # Dependabot must not bump them independently.
+    ignore:
+      - dependency-name: "github/gh-aw-actions/*"
     labels:
       - "dependencies"
       - "github-actions"

@@ -9,10 +9,20 @@
 	"words": [
 		"envaccount",
 		"envcontainer",
+		"misattributed",
+		"mlruns",
 		"myacct",
 		"mycontainer",
 		"noseparator",
 		"preds",
+		"prio",
+		"refetches",
+		"sdgcpu",
+		"trackio",
+		"unbuilt",
+		"unstub",
+		"uppercased",
+		"varname",
 		"xticklabels"
 	],
 	"ignorePaths": [

@@ -1,0 +1,190 @@
+# Copilot Setup Steps
+# Provisions the toolchain and per-surface dependency closures for GitHub
+# Copilot cloud coding agent sessions. The single `copilot-setup-steps` job
+# is consumed by Copilot before each agent session; this workflow also runs
+# on self-changes and weekly to detect toolchain drift.
+#
+# Reference:
+# https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/customize-the-agent-environment
+---
+name: Copilot Setup Steps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  # Weekly drift check: surfaces broken action SHAs, yanked packages, or
+  # registry outages on a Monday morning instead of mid-Copilot-session.
+  schedule:
+    - cron: '17 9 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Install apt packages (shellcheck, jq, ffmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck jq ffmpeg
+
+      - name: Install OSV-Scanner v2.3.8
+        env:
+          OSV_SCANNER_VERSION: 2.3.8
+          OSV_SCANNER_SHA256: bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc
+        run: |
+          curl -sSLo /tmp/osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  /tmp/osv-scanner" | sha256sum -c --quiet -
+          sudo install -m 0755 /tmp/osv-scanner /usr/local/bin/osv-scanner
+          rm -f /tmp/osv-scanner
+          osv-scanner --version
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+
+      - name: Setup Node.js (frontend pin)
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version-file: data-management/viewer/frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            data-management/viewer/frontend/package-lock.json
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version-file: infrastructure/terraform/e2e/go.mod
+          cache-dependency-path: infrastructure/terraform/e2e/go.mod
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@b480b8fcdaa6f2c577f8e4fa799e89e756bb7c93  # v6.2.2
+
+      - name: Install gh-aw CLI extension
+        run: gh extension install github/gh-aw
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Bootstrap the microsoft/hve-core RPI persona for the cloud-agent
+      # `Physical-AI RPI` umbrella. This step runs outside the cloud-agent
+      # firewall (per the customize-the-agent-firewall docs) so it can fetch
+      # raw.githubusercontent.com content that the agent itself cannot reach.
+      # The umbrella agent reads `_audit.md` at session start and fails fast
+      # with a PR comment if these files are missing.
+      #
+      # UPSTREAM_REF is pinned to a reviewed release SHA to defend against a
+      # malicious or breaking change landing on `main`. To upgrade, pick a
+      # SHA from a published release at
+      # https://github.com/microsoft/hve-core/releases, update the comment
+      # below to the matching tag, and verify the worker still resolves the
+      # expected subagents on a feature branch before merging.
+      - name: Bootstrap hve-core RPI persona
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_REPO: microsoft/hve-core
+          # microsoft/hve-core release: hve-core-v3.2.2 (2026-03-23)
+          UPSTREAM_REF: e69486a5f809ede45c63c0a31358c12912bd5168
+          UPSTREAM_SUBAGENTS_PATH: .github/agents/hve-core/subagents
+          UPSTREAM_UMBRELLA_PATH: .github/agents/hve-core/rpi-agent.agent.md
+          DEST_DIR: .copilot-tracking/upstream/hve-core-rpi
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${DEST_DIR}/subagents"
+
+          sha="$(gh api "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_REF}" --jq .sha)"
+          if [ -z "${sha}" ]; then
+            echo "Failed to resolve ${UPSTREAM_REPO}@${UPSTREAM_REF} SHA" >&2
+            exit 1
+          fi
+
+          echo "Resolved ${UPSTREAM_REPO}@${UPSTREAM_REF} -> ${sha}"
+
+          umbrella_url="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${sha}/${UPSTREAM_UMBRELLA_PATH}"
+          curl -fsSL "${umbrella_url}" -o "${DEST_DIR}/rpi-agent.agent.md"
+
+          mapfile -t subagent_names < <(
+            gh api "repos/${UPSTREAM_REPO}/contents/${UPSTREAM_SUBAGENTS_PATH}?ref=${sha}" \
+              --jq '.[] | select(.type=="file") | select(.name | endswith(".agent.md")) | .name'
+          )
+
+          if [ "${#subagent_names[@]}" -eq 0 ]; then
+            echo "No subagents discovered under ${UPSTREAM_REPO}@${sha}:${UPSTREAM_SUBAGENTS_PATH}" >&2
+            exit 1
+          fi
+
+          for name in "${subagent_names[@]}"; do
+            url="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${sha}/${UPSTREAM_SUBAGENTS_PATH}/${name}"
+            curl -fsSL "${url}" -o "${DEST_DIR}/subagents/${name}"
+          done
+
+          {
+            echo "# hve-core RPI bootstrap audit"
+            echo
+            echo "- upstream: ${UPSTREAM_REPO}"
+            echo "- requested-ref: ${UPSTREAM_REF}"
+            echo "- resolved-sha: ${sha}"
+            echo "- resolved-at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- umbrella: rpi-agent.agent.md"
+            echo "- subagents:"
+            for name in "${subagent_names[@]}"; do
+              echo "  - ${name}"
+            done
+          } > "${DEST_DIR}/_audit.md"
+
+          echo "Bootstrap complete:"
+          ls -la "${DEST_DIR}" "${DEST_DIR}/subagents"
+
+      - name: Install PowerShell modules (Pester 5.7.1, powershell-yaml)
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
+          Install-Module -Name powershell-yaml -Force -SkipPublisherCheck -Scope CurrentUser
+
+      - name: Install root Node tooling (markdownlint, cspell, table-formatter, link-check)
+        run: npm ci
+
+      - name: Presync root Python dev group
+        run: uv sync --group dev
+
+      - name: Presync dataviewer backend Python (dev + analysis + hdf5 + export + auth)
+        working-directory: data-management/viewer/backend
+        run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+
+      - name: Presync evaluation Python dev group
+        working-directory: evaluation
+        run: uv sync --only-group dev
+
+      - name: Presync dataviewer frontend
+        working-directory: data-management/viewer/frontend
+        run: npm ci
+
+      - name: Presync Go modules (terraform e2e)
+        working-directory: infrastructure/terraform/e2e
+        run: go mod download

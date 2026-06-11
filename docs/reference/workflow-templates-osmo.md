@@ -2,7 +2,7 @@
 title: Workflow Templates (OSMO)
 description: Canonical OSMO workflow template reference for training and evaluation jobs.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-01
+ms.date: 2026-06-01
 ms.topic: reference
 keywords:
   - osmo
@@ -20,10 +20,10 @@ legacy naming.
 
 | Template             | Purpose                                            | Source YAML path                                  | Typical submit path                                   |
 |----------------------|----------------------------------------------------|---------------------------------------------------|-------------------------------------------------------|
-| `train.yaml`         | IsaacLab RL training with inline payload archive   | `training/rl/workflows/osmo/train.yaml`           | `training/rl/scripts/submit-osmo-training.sh`         |
-| `train-dataset.yaml` | IsaacLab RL training with dataset folder injection | `training/il/workflows/osmo/train-dataset.yaml`   | `training/il/scripts/submit-osmo-dataset-training.sh` |
+| `train.yaml`         | Isaac Lab RL training with inline payload archive   | `training/rl/workflows/osmo/train.yaml`           | `training/rl/scripts/submit-osmo-training.sh`         |
+| `train-dataset.yaml` | Isaac Lab RL training with dataset folder injection | `training/rl/workflows/osmo/train-dataset.yaml`   | `training/rl/scripts/submit-osmo-dataset-training.sh` |
 | `lerobot-train.yaml` | LeRobot ACT or Diffusion training workflow         | `training/il/workflows/osmo/lerobot-train.yaml`   | `training/il/scripts/submit-osmo-lerobot-training.sh` |
-| `eval.yaml`          | IsaacLab checkpoint evaluation workflow            | `evaluation/sil/workflows/osmo/eval.yaml`         | `evaluation/sil/scripts/submit-osmo-eval.sh`          |
+| `eval.yaml`          | Isaac Lab checkpoint evaluation workflow            | `evaluation/sil/workflows/osmo/eval.yaml`         | `evaluation/sil/scripts/submit-osmo-eval.sh`          |
 | `lerobot-eval.yaml`  | LeRobot policy evaluation workflow                 | `evaluation/sil/workflows/osmo/lerobot-eval.yaml` | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`  |
 
 ## train.yaml
@@ -41,9 +41,9 @@ legacy naming.
 | Field                            | Details                                                                                                                                                                                                                                                                                         |
 |----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Purpose                          | OSMO RL training that mounts training code from an uploaded dataset path.                                                                                                                                                                                                                       |
-| Source YAML path                 | `training/il/workflows/osmo/train-dataset.yaml`                                                                                                                                                                                                                                                 |
+| Source YAML path                 | `training/rl/workflows/osmo/train-dataset.yaml`                                                                                                                                                                                                                                                 |
 | Primary parameters and overrides | `default-values.dataset_bucket` (`training`), `default-values.dataset_name` (`training-code`), `default-values.task` (`Isaac-Velocity-Rough-Anymal-C-v0`), `default-values.num_envs` (`"2048"`), `default-values.checkpoint_mode` (`from-scratch`), `default-values.training_backend` (`skrl`). |
-| Typical submit path              | `training/il/scripts/submit-osmo-dataset-training.sh`                                                                                                                                                                                                                                           |
+| Typical submit path              | `training/rl/scripts/submit-osmo-dataset-training.sh`                                                                                                                                                                                                                                           |
 | Usage notes                      | Use when payload size or reuse favors dataset-based delivery. The script stages and uploads training sources before submission.                                                                                                                                                                 |
 
 ## lerobot-train.yaml
@@ -60,7 +60,7 @@ legacy naming.
 
 | Field                            | Details                                                                                                                                                                                                                                        |
 |----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Purpose                          | OSMO IsaacLab checkpoint evaluation for policy export and validation.                                                                                                                                                                          |
+| Purpose                          | OSMO Isaac Lab checkpoint evaluation for policy export and rollout scoring.                                                                                                                                                                     |
 | Source YAML path                 | `evaluation/sil/workflows/osmo/eval.yaml`                                                                                                                                                                                                      |
 | Primary parameters and overrides | `default-values.task` (`Isaac-Ant-v0`), `default-values.num_envs` (`"4"`), `default-values.max_steps` (`"500"`), `default-values.video_length` (`"200"`), `default-values.checkpoint_uri` (empty), `default-values.inference_format` (`both`). |
 | Typical submit path              | `evaluation/sil/scripts/submit-osmo-eval.sh`                                                                                                                                                                                                   |

@@ -53,7 +53,7 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 | **Edge Data Capture**           | ROS 2 demonstration recording on Jetson with chunking, compression, and cloud upload                        |
 | **Cloud Data Pipeline**         | Automated ROS-to-LeRobot conversion, quality validation, and event-driven orchestration                     |
 | **Training Infrastructure**     | OSMO + Azure ML integration for scalable RL and IL training with experiment tracking                        |
-| **Model Evaluation**            | Offline replay evaluation, Isaac Sim validation, and evaluation dashboards                                  |
+| **Model Evaluation**            | Offline replay evaluation, Isaac Sim evaluation, and evaluation dashboards                                  |
 | **Model Deployment**            | ONNX/TensorRT conversion, container packaging, and GitOps-based edge deployment                             |
 | **Agentic Workflows**           | Instruction-driven agents that orchestrate data collection, training, evaluation, and deployment end-to-end |
 | **Hybrid Architecture**         | Azure Arc, air-gapped training support, and MQTT telemetry for connected and disconnected sites             |
@@ -124,7 +124,7 @@ The toolchain includes agent-driven automation that collapses multi-stage physic
 | Sample data collection | Configure Isaac Sim scenes and collect synthetic demonstration datasets            |
 | RL pipeline execution  | Set up Isaac Lab tasks, launch OSMO training jobs, and track experiments in MLflow |
 | IL pipeline execution  | Convert demonstration data to LeRobot format, run imitation learning training      |
-| Policy evaluation      | Execute offline replay and simulation-based validation against success criteria    |
+| Policy evaluation      | Execute offline replay and simulation-based evaluation against success criteria    |
 | Deployment promotion   | Convert checkpoints, package containers, and push to edge via GitOps               |
 
 Agents operate within the same security boundaries, managed identities, and RBAC controls as manual workflows. All agent actions are logged and auditable.

@@ -21,7 +21,7 @@ Deploy NVIDIA GPU Operator and KAI Scheduler to an AKS cluster.
 OPTIONS:
     -h, --help               Show this help message
     -t, --tf-dir DIR         Terraform directory (default: $DEFAULT_TF_DIR)
-    --gpu-version VERSION    GPU Operator version (default: latest Helm chart)
+    --gpu-version VERSION    GPU Operator version (default: $GPU_OPERATOR_VERSION)
     --kai-version VERSION    KAI Scheduler version (default: $KAI_SCHEDULER_VERSION)
     --skip-gpu-operator      Skip GPU Operator installation
     --skip-kai-scheduler     Skip KAI Scheduler installation
@@ -38,7 +38,6 @@ EOF
 # Defaults
 tf_dir="$SCRIPT_DIR/$DEFAULT_TF_DIR"
 gpu_version="$GPU_OPERATOR_VERSION"
-gpu_version_explicit=false
 kai_version="$KAI_SCHEDULER_VERSION"
 skip_gpu=false
 skip_kai=false
@@ -49,7 +48,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)             show_help; exit 0 ;;
     -t|--tf-dir)           tf_dir="$2"; shift 2 ;;
-    --gpu-version)         gpu_version="$2"; gpu_version_explicit=true; shift 2 ;;
+    --gpu-version)         gpu_version="$2"; shift 2 ;;
     --kai-version)         kai_version="$2"; shift 2 ;;
     --skip-gpu-operator)   skip_gpu=true; shift ;;
     --skip-kai-scheduler)  skip_kai=true; shift ;;
@@ -60,16 +59,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_tools az terraform kubectl helm jq
-
-resolve_latest_gpu_operator_version() {
-  helm repo add nvidia "$HELM_REPO_GPU_OPERATOR" >/dev/null 2>&1 || true
-  helm repo update >/dev/null 2>&1
-
-  latest_chart_version=$(helm search repo nvidia/gpu-operator --versions -o json | jq -r '.[0].version // empty')
-  [[ -n "$latest_chart_version" ]] || fatal "Unable to determine latest GPU Operator chart version"
-
-  echo "v${latest_chart_version#v}"
-}
 
 #------------------------------------------------------------------------------
 # Gather Configuration
@@ -109,11 +98,6 @@ BANNER
   else
     info "Public Rekor consent acknowledged via --accept-public-rekor"
   fi
-fi
-
-if [[ "$skip_gpu" == "false" && "$gpu_version_explicit" == "false" ]]; then
-  info "Resolving latest GPU Operator chart version from Helm repo..."
-  gpu_version="$(resolve_latest_gpu_operator_version)"
 fi
 
 if [[ "$config_preview" == "true" ]]; then
@@ -158,9 +142,9 @@ if [[ "$skip_gpu" == "false" ]]; then
   helm repo add nvidia "$HELM_REPO_GPU_OPERATOR" >/dev/null 2>&1 || true
   helm repo update >/dev/null 2>&1
 
-  gpu_chart_args=( nvidia/gpu-operator --version "${gpu_version#v}" )
+  gpu_chart_args=( nvidia/gpu-operator --version "$gpu_version" )
   if [[ -n "${GPU_OPERATOR_CHART_SHA256:-}" ]]; then
-    gpu_tgz=$(pull_and_verify_chart "nvidia/gpu-operator" "${gpu_version#v}" "$GPU_OPERATOR_CHART_SHA256" "$(mktemp -d)")
+    gpu_tgz=$(pull_and_verify_chart "nvidia/gpu-operator" "$gpu_version" "$GPU_OPERATOR_CHART_SHA256" "$(mktemp -d)")
     gpu_chart_args=( "$gpu_tgz" )
   fi
 

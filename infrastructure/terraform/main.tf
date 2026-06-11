@@ -92,6 +92,7 @@ module "platform" {
   // Feature flags
   should_enable_private_endpoint          = var.should_enable_private_endpoint
   should_enable_public_network_access     = var.should_enable_public_network_access
+  should_enable_storage_shared_access_key = var.should_enable_storage_shared_access_key
   should_add_current_user_key_vault_admin = var.should_add_current_user_key_vault_admin
   should_add_current_user_storage_blob    = var.should_add_current_user_storage_blob
   should_enable_purge_protection          = var.should_enable_purge_protection
@@ -136,20 +137,21 @@ module "platform" {
   should_deploy_dce               = var.should_deploy_dce
 
   // AzureML compute
-  should_enable_aml_diagnostic_logs = var.should_enable_aml_diagnostic_logs
-  should_deploy_aml_compute         = var.should_deploy_aml_compute
-  aml_compute_config                = var.aml_compute_config
+  should_enable_aml_diagnostic_logs  = var.should_enable_aml_diagnostic_logs
+  aml_compute_clusters               = var.aml_compute_clusters
+  aml_managed_network_isolation_mode = var.aml_managed_network_isolation_mode
 
   // DNS zone flags
   should_include_aks_dns_zone = var.should_include_aks_dns_zone
 }
 
 // ============================================================
-// SiL Module - AKS + AzureML Extension
+// SiL Module - AKS + AzureML Extension (Optional)
 // ============================================================
 
 module "sil" {
   source = "./modules/sil"
+  count  = var.should_deploy_aks ? 1 : 0
 
   depends_on = [module.platform]
 
@@ -208,6 +210,58 @@ module "sil" {
 
   // Feature flags
   should_enable_private_endpoint = var.should_enable_private_endpoint
+}
+
+// ============================================================
+// Conversion Pipeline Module - Raw -> Converted Ingest
+// ============================================================
+
+// Precondition guard: the conversion pipeline reuses the platform-owned
+// data-lake account, so the platform must provision it. Module call blocks
+// do not support `lifecycle.precondition` directly, so the check lives on a
+// terraform_data resource that the module depends on.
+resource "terraform_data" "conversion_pipeline_precondition" {
+  count = var.should_deploy_conversion_pipeline ? 1 : 0
+
+  lifecycle {
+    precondition {
+      condition     = var.should_create_data_lake_storage
+      error_message = "should_deploy_conversion_pipeline = true requires should_create_data_lake_storage = true (the conversion pipeline reuses the platform stdl... account)."
+    }
+  }
+}
+
+module "conversion_pipeline" {
+  source = "./modules/conversion-pipeline"
+  count  = var.should_deploy_conversion_pipeline ? 1 : 0
+
+  depends_on = [
+    module.platform,
+    terraform_data.conversion_pipeline_precondition,
+  ]
+
+  // Core variables
+  environment     = var.environment
+  resource_prefix = var.resource_prefix
+  instance        = var.instance
+  location        = var.location
+  resource_group  = local.resource_group
+
+  // Dependencies from platform module (typed objects)
+  data_lake_storage_account = module.platform.data_lake_storage_account
+  datasets_container        = module.platform.datasets_container
+
+  // Event Grid
+  should_enable_event_grid_dead_letter = var.conversion_pipeline_config.should_enable_event_grid_dead_letter
+  raw_blob_suffix_filters              = var.conversion_pipeline_config.raw_blob_suffix_filters
+  conversion_subscriber_url            = var.conversion_pipeline_config.conversion_subscriber_url
+
+  // Fabric
+  should_create_fabric_capacity  = var.conversion_pipeline_config.should_create_fabric_capacity
+  should_create_fabric_workspace = var.conversion_pipeline_config.should_create_fabric_workspace
+  fabric_capacity_sku            = var.conversion_pipeline_config.fabric_capacity_sku
+  fabric_admin_members           = var.conversion_pipeline_config.fabric_admin_members
+  fabric_workspace_sp_object_id  = var.conversion_pipeline_config.fabric_workspace_sp_object_id
 }
 
 // ============================================================

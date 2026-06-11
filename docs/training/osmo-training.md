@@ -3,7 +3,7 @@ sidebar_position: 7
 title: OSMO Training Workflows
 description: Submit Isaac Lab training jobs to NVIDIA OSMO on Azure Kubernetes Service
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-24
+ms.date: 2026-06-03
 ms.topic: how-to
 keywords:
   - osmo
@@ -25,12 +25,12 @@ Submit distributed Isaac Lab training jobs through NVIDIA OSMO workflow orchestr
 
 ## 📦 Available Templates
 
-| Template             | Purpose                             | Submission Script                          |
-|----------------------|-------------------------------------|--------------------------------------------|
-| `train.yaml`         | Isaac Lab training (base64 inline)  | `scripts/submit-osmo-training.sh`          |
-| `train-dataset.yaml` | Isaac Lab training (dataset upload) | `scripts/submit-osmo-dataset-training.sh`  |
-| `lerobot-train.yaml` | LeRobot behavioral cloning          | `scripts/submit-osmo-lerobot-training.sh`  |
-| `lerobot-infer.yaml` | LeRobot inference/evaluation        | `scripts/submit-osmo-lerobot-inference.sh` |
+| Template             | Purpose                             | Submission Script                                           |
+|----------------------|-------------------------------------|-------------------------------------------------------------|
+| `train.yaml`         | Isaac Lab training (base64 inline)  | `training/rl/scripts/submit-osmo-training.sh`               |
+| `train-dataset.yaml` | Isaac Lab training (dataset upload) | `training/rl/scripts/submit-osmo-dataset-training.sh`       |
+| `lerobot-train.yaml` | LeRobot behavioral cloning          | `training/il/scripts/submit-osmo-lerobot-training.sh`       |
+| `lerobot-eval.yaml`  | LeRobot inference/evaluation        | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`        |
 
 ## ⚙️ Workflow Comparison
 
@@ -61,10 +61,10 @@ Multi-GPU distributed training with KAI Scheduler / Volcano integration, automat
 
 ```bash
 # Default configuration from Terraform outputs
-./scripts/submit-osmo-training.sh
+./training/rl/scripts/submit-osmo-training.sh
 
 # Override parameters
-./scripts/submit-osmo-training.sh \
+./training/rl/scripts/submit-osmo-training.sh \
   --azure-subscription-id "your-subscription-id" \
   --azure-resource-group "rg-custom"
 ```
@@ -85,10 +85,10 @@ Dataset folder injection via OSMO bucket system instead of base64-encoded archiv
 
 ```bash
 # Default configuration
-./scripts/submit-osmo-dataset-training.sh
+./training/rl/scripts/submit-osmo-dataset-training.sh
 
 # Custom dataset bucket
-./scripts/submit-osmo-dataset-training.sh \
+./training/rl/scripts/submit-osmo-dataset-training.sh \
   --dataset-bucket custom-bucket \
   --dataset-name my-training-code
 ```
@@ -99,8 +99,7 @@ Dataset folder injection via OSMO bucket system instead of base64-encoded archiv
 |-------------------------|-------------------------------------------|
 | `AZURE_SUBSCRIPTION_ID` | Azure subscription ID                     |
 | `AZURE_RESOURCE_GROUP`  | Resource group name                       |
-| `WORKFLOW_TEMPLATE`     | Path to workflow template                 |
-| `OSMO_CONFIG_DIR`       | OSMO configuration directory              |
+| `AZUREML_WORKSPACE_NAME`| Azure ML workspace name                   |
 | `OSMO_DATASET_BUCKET`   | Dataset bucket name (default: `training`) |
 | `OSMO_DATASET_NAME`     | Dataset name (default: `training-code`)   |
 
@@ -156,15 +155,15 @@ Access the OSMO UI dashboard:
 
 ```bash
 # Isaac Lab training with defaults
-./scripts/submit-osmo-training.sh
+./training/rl/scripts/submit-osmo-training.sh
 
 # Isaac Lab training with custom parameters
-./scripts/submit-osmo-training.sh \
+./training/rl/scripts/submit-osmo-training.sh \
   --task Isaac-Cartpole-v0 \
   --num-envs 512
 
 # Dataset-based training
-./scripts/submit-osmo-dataset-training.sh \
+./training/rl/scripts/submit-osmo-dataset-training.sh \
   --dataset-bucket training \
   --dataset-name my-code
 ```

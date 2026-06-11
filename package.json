@@ -1,6 +1,6 @@
 {
   "name": "physical-ai-toolchain",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "private": true,
   "engines": {
     "node": ">=24"
@@ -19,6 +19,7 @@
     "lint:yaml": "pwsh -File scripts/linting/Invoke-YamlLint.ps1",
     "lint:tf": "pwsh -File scripts/linting/Invoke-TFLint.ps1",
     "lint:tf:validate": "pwsh -File scripts/linting/Invoke-TerraformValidation.ps1",
+    "lint:vuln": "osv-scanner --config osv-scanner.toml .",
     "lint:all": "npm run lint:md && npm run lint:ps && npm run lint:links && npm run lint:yaml && npm run lint:tf && npm run lint:go && npm run lint:sh && npm run lint:py",
     "format:tables": "markdown-table-formatter \"**/*.md\"",
     "test:ps": "pwsh -File ./scripts/tests/Invoke-PesterTests.ps1",
@@ -32,9 +33,9 @@
     "docs:generate:tf": "pwsh -File scripts/Update-TerraformDocs.ps1"
   },
   "devDependencies": {
-    "cspell": "10.0.0",
+    "cspell": "10.0.1",
     "husky": "9.1.7",
-    "lint-staged": "16.4.0",
+    "lint-staged": "17.0.7",
     "markdown-link-check": "3.14.2",
     "markdown-table-formatter": "1.7.0",
     "markdownlint-cli2": "0.22.1"

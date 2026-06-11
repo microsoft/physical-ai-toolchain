@@ -1,0 +1,78 @@
+// =============================================================================
+// Staging Environment
+// =============================================================================
+// Production-shaped (private networking, HA backend) but right-sized for
+// pre-production validation. Smaller GPU footprint and F8 Fabric capacity.
+// =============================================================================
+
+// Core Configuration
+environment     = "staging"
+location        = "westus3"
+resource_prefix = "roboticsstg"
+instance        = "001"
+
+// Resource Group
+should_create_resource_group = true
+
+// AKS System Node Pool
+system_node_pool_vm_size    = "Standard_D8ds_v5"
+system_node_pool_node_count = 2
+
+// Single GPU pool with dedicated subnet
+node_pools = {
+  rtxprogpu = {
+    vm_size                    = "Standard_NC128ds_xl_RTXPRO6000BSE_v6"
+    subnet_address_prefixes    = ["10.0.7.0/24"]
+    node_taints                = ["nvidia.com/gpu:NoSchedule"]
+    gpu_driver                 = "None"
+    node_labels = {
+      "nvidia.com/gpu.deploy.driver" = "false"
+    }
+    priority                   = "Regular"
+    should_enable_auto_scaling = true
+    min_count                  = 1
+    max_count                  = 2
+    zones                      = []
+  }
+}
+
+// OSMO Backend Services with HA
+should_deploy_postgresql = true
+should_deploy_redis      = true
+
+// PostgreSQL HA
+postgresql_sku_name = "GP_Standard_D2s_v3"
+postgresql_high_availability = {
+  should_enable             = true
+  standby_availability_zone = "2"
+}
+
+// Redis HA
+should_enable_redis_high_availability = true
+
+// Network Security — Full Private
+should_enable_private_endpoint    = true
+should_enable_private_aks_cluster = true
+
+should_enable_public_network_access     = false
+should_add_current_user_key_vault_admin = true
+should_enable_microsoft_defender        = true
+should_enable_purge_protection          = false
+
+// =============================================================================
+// Conversion Pipeline (Optional)
+// =============================================================================
+// Pre-production posture: F8 capacity. The conversion pipeline reuses the
+// platform stdl... data-lake account, so should_create_data_lake_storage must
+// be true whenever should_deploy_conversion_pipeline is true (enforced by a
+// root-level precondition).
+// =============================================================================
+
+should_deploy_conversion_pipeline = false
+should_create_data_lake_storage   = true
+conversion_pipeline_config = {
+  should_create_fabric_capacity        = true
+  should_create_fabric_workspace       = true
+  fabric_capacity_sku                  = "F8"
+  should_enable_event_grid_dead_letter = true
+}

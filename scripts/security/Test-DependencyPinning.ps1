@@ -864,7 +864,7 @@ function Export-ComplianceReport {
                                     locations  = @(@{
                                             physicalLocation = @{
                                                 artifactLocation = @{ uri = $_.File }
-                                                region           = @{ startLine = $_.Line }
+                                                region           = @{ startLine = [Math]::Max(1, [int]$_.Line) }
                                             }
                                         })
                                     properties = @{

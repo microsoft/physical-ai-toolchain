@@ -12,14 +12,14 @@ Active — primary training approach.
 |-----------------|-------------------------------------------------------------------|
 | SKRL            | Primary RL framework for PPO-based policy training                |
 | RSL-RL          | Alternative RL framework for legged locomotion                    |
-| Isaac Lab 2.3.2 | NVIDIA simulation environment (`nvcr.io/nvidia/isaac-lab:2.3.2`)  |
+| Isaac Lab       | NVIDIA simulation environment (default image from `scripts/lib/common.sh`) |
 | MLflow          | Experiment tracking with monkey-patched agent metric interception |
 
 ## Runtime Environment
 
 | Setting   | Value                                                            |
 |-----------|------------------------------------------------------------------|
-| Container | `nvcr.io/nvidia/isaac-lab:2.3.2`                                 |
+| Container | `DEFAULT_ISAAC_LAB_IMAGE` from `scripts/lib/common.sh` (`nvcr.io/nvidia/isaac-lab:2.3.2`) |
 | Python    | `/isaac-sim/kit/python/bin/python3` via `isaaclab.sh -p` wrapper |
 | numpy     | `>=1.26.0,<2.0.0` (ABI compatibility with Isaac Sim)             |
 | EULA      | `ACCEPT_EULA=Y`, `PRIVACY_CONSENT=Y` required                    |
@@ -34,4 +34,4 @@ Active — primary training approach.
 
 ## Checkpoint Flow
 
-Training writes checkpoints to local filesystem. The `TRAINING_CHECKPOINT_OUTPUT` environment variable controls the output path. AzureML uploads checkpoints as `uri_folder` artifacts.
+Training writes checkpoints to the local filesystem and mirrors them at job exit into the directory named by `$AZURE_ML_OUTPUT_CHECKPOINTS`. Azure ML uploads the contents to the job's `checkpoints` `uri_folder` output, from where downstream pipeline jobs can consume them as a typed input.

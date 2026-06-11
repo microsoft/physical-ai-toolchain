@@ -19,20 +19,20 @@ read_terraform_outputs "$REPO_ROOT/infrastructure/terraform" 2>/dev/null || true
 #------------------------------------------------------------------------------
 
 show_help() {
-  cat << 'EOF'
+  cat << EOF
 Usage: submit-azureml-training.sh [OPTIONS] [-- az-ml-job-flags]
 
 Submit an Azure ML training job with argument parity to the OSMO workflow.
 
 AZUREML ASSET OPTIONS:
     --environment-name NAME       AzureML environment name (default: isaaclab-training-env)
-    --environment-version VER     Environment version (default: 2.3.2)
-    --image IMAGE                 Container image (default: nvcr.io/nvidia/isaac-lab:2.3.2)
+    --environment-version VER     Environment version (default: ${DEFAULT_ISAAC_LAB_IMAGE_VERSION})
+    --image IMAGE                 Container image (default: ${DEFAULT_ISAAC_LAB_IMAGE})
     --assets-only                 Register environment without submitting job
 
 TRAINING OPTIONS:
     -w, --job-file PATH           Job YAML template (default: training/rl/workflows/azureml/train.yaml)
-    -t, --task NAME               IsaacLab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
+    -t, --task NAME               Isaac Lab task (default: Isaac-Velocity-Rough-Anymal-C-v0)
     -n, --num-envs COUNT          Number of environments (default: 2048)
     -m, --max-iterations N        Maximum iterations (empty to unset)
     -c, --checkpoint-uri URI      MLflow checkpoint artifact URI
@@ -133,8 +133,8 @@ run_smoke_test() {
 #------------------------------------------------------------------------------
 
 environment_name="isaaclab-training-env"
-environment_version="2.3.2"
-image="nvcr.io/nvidia/isaac-lab:2.3.2"
+environment_version="${ENVIRONMENT_VERSION:-$DEFAULT_ISAAC_LAB_IMAGE_VERSION}"
+image="${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}"
 assets_only=false
 
 job_file="$REPO_ROOT/training/rl/workflows/azureml/train.yaml"

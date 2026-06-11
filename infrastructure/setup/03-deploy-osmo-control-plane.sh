@@ -302,9 +302,13 @@ fi
 section "Deploy OSMO Charts"
 
 # Build common helm args
+# --force-conflicts: HPA controllers take ownership of .spec.replicas after the
+# first install, so subsequent SSA upgrades (Helm 4 default) would otherwise
+# fail. Helm wins the field once; HPA reclaims it within seconds.
 base_helm_args=(
   --version "$chart_version"
   --namespace "$NS_OSMO_CONTROL_PLANE"
+  --force-conflicts
   --set-string "global.osmoImageTag=$image_version"
 )
 [[ "$use_acr" == "true" ]] && base_helm_args+=(--set "global.osmoImageLocation=${acr_login_server}/osmo")

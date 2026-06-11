@@ -1,18 +1,19 @@
 # Your First LeRobot Training Job
 
-Submit a LeRobot behavioral cloning training job to OSMO using a HuggingFace dataset and verify that the trained policy appears in Azure ML. By the end of this recipe, you will have a trained ACT policy for the ALOHA sim insertion task.
+Submit a LeRobot behavioral cloning training job to OSMO using a HuggingFace or Azure Blob dataset and verify that the trained policy appears in Azure ML. By the end of this recipe, you will have a trained ACT policy for the ALOHA sim insertion task.
 
 > [!NOTE]
 > This recipe requires deployed infrastructure with OSMO running. Complete the [Quickstart](../../getting-started/quickstart.md) first.
 
 ## 📋 Prerequisites
 
-| Requirement    | Details                                             |
-|----------------|-----------------------------------------------------|
-| Infrastructure | Azure resources deployed via Terraform              |
-| OSMO           | Control plane and backend running                   |
-| VPN            | Connected to private cluster (if using private AKS) |
-| Azure CLI      | Authenticated (`az login`)                          |
+| Requirement    | Details                                                                    |
+|----------------|----------------------------------------------------------------------------|
+| Infrastructure | Azure resources deployed via Terraform                                     |
+| OSMO           | Control plane and backend running                                          |
+| VPN            | Connected to private cluster (if using private AKS)                        |
+| Azure CLI      | Authenticated (`az login`)                                                 |
+| Blob access    | OSMO workload identity has a Blob data role when using Azure Blob datasets |
 
 ## 🚀 Steps
 
@@ -53,18 +54,14 @@ Customize training hyperparameters:
 
 ### Step 3: Train with data from Azure Blob Storage
 
-Use `--from-blob` when your dataset is in Azure Storage instead of HuggingFace:
+Use `--blob-url` when your dataset is in Azure Storage instead of HuggingFace:
 
 ```bash
 ./submit-osmo-lerobot-training.sh \
-  -d my-org/my-dataset \
-  --from-blob \
-  --storage-account <your-storage-account> \
-  --storage-container datasets \
-  --blob-prefix my-dataset/v1
+  --blob-url https://<your-storage-account>.blob.core.windows.net/datasets/my-dataset/v1
 ```
 
-The script downloads the dataset from Blob Storage using managed identity credentials before training starts.
+The workflow downloads the dataset with managed identity credentials before training starts. Grant Blob data access to the OSMO workload identity before submitting private datasets.
 
 ### Step 4: Monitor training progress
 
@@ -110,17 +107,17 @@ The recipe succeeded when:
 
 ## ⚙️ Configuration Reference
 
-| Parameter               | Default    | Description                                |
-|-------------------------|------------|--------------------------------------------|
-| `-d, --dataset-repo-id` | (required) | HuggingFace dataset repository             |
-| `--policy-type`         | `act`      | Policy architecture (`act` or `diffusion`) |
-| `--training-steps`      | `100000`   | Total training iterations                  |
-| `--batch-size`          | `32`       | Training batch size                        |
-| `--learning-rate`       | `1e-4`     | Optimizer learning rate                    |
-| `--save-freq`           | `5000`     | Checkpoint save frequency                  |
-| `--val-split`           | `0.1`      | Validation split ratio                     |
-| `--from-blob`           | (disabled) | Use Azure Blob Storage as data source      |
-| `--register-checkpoint` | (none)     | Model name for Azure ML registration       |
+| Parameter                  | Default                                              | Description                                                                                         |
+|----------------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `-d, --dataset-repo-id`    | Required for HuggingFace; `dataset` for Blob sources | HuggingFace dataset repository or logical local dataset name                                        |
+| `--blob-url`               | (none)                                               | Direct Azure Blob dataset URL; repeatable                                                           |
+| `--policy-type`            | `act`                                                | Policy architecture (`act` or `diffusion`)                                                          |
+| `--training-steps`         | `100000`                                             | Total training iterations                                                                           |
+| `--batch-size`             | `32`                                                 | Training batch size                                                                                 |
+| `--learning-rate`          | `1e-4`                                               | Optimizer learning rate                                                                             |
+| `--save-freq`              | `5000`                                               | Checkpoint save frequency                                                                           |
+| `--register-checkpoint`    | (none)                                               | Model name for Azure ML registration                                                                |
+| `--init-from-policy-model` | (none)                                               | Warm-start from a registered AzureML model (`azureml:NAME:VERSION`); AzureML submission script only |
 
 See [Scripts Reference](../../reference/scripts.md) for the full parameter table.
 

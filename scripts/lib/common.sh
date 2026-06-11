@@ -13,6 +13,11 @@ if [[ -f "$_env_local" ]]; then
 fi
 unset _common_sh_dir _env_local
 
+# Shared container defaults for training and evaluation submission scripts.
+DEFAULT_ISAAC_LAB_IMAGE_VERSION="${DEFAULT_ISAAC_LAB_IMAGE_VERSION:-2.3.2}"
+DEFAULT_ISAAC_LAB_IMAGE="${DEFAULT_ISAAC_LAB_IMAGE:-nvcr.io/nvidia/isaac-lab:${DEFAULT_ISAAC_LAB_IMAGE_VERSION}}"
+export DEFAULT_ISAAC_LAB_IMAGE_VERSION DEFAULT_ISAAC_LAB_IMAGE
+
 # Logging functions with color support (NO_COLOR standard: https://no-color.org)
 if [[ -z "${NO_COLOR+x}" ]]; then
   info()  { printf '\033[1;34m[INFO]\033[0m  %s\n' "$*"; }
@@ -32,6 +37,31 @@ require_tools() {
     command -v "$tool" &>/dev/null || missing+=("$tool")
   done
   [[ ${#missing[@]} -eq 0 ]] || fatal "Missing required tools: ${missing[*]}"
+}
+
+find_latest_chart_archive() {
+  local output_dir="$1"
+  local latest="" chart_archive
+
+  while IFS= read -r -d '' chart_archive; do
+    if [[ -z "$latest" || "$chart_archive" -nt "$latest" ]]; then
+      latest="$chart_archive"
+    fi
+  done < <(find "$output_dir" -maxdepth 1 -type f -name '*.tgz' -print0)
+
+  echo "$latest"
+}
+
+calculate_sha256() {
+  local file="$1"
+
+  if command -v sha256sum &>/dev/null; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum &>/dev/null; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  else
+    fatal "Missing required tool: sha256sum or shasum"
+  fi
 }
 
 # Activate local OSMO development CLI wrapper
@@ -64,28 +94,39 @@ require_az_extension() {
 # Pull a Helm chart and optionally verify its SHA256 hash.
 # Usage: pull_and_verify_chart <chart_ref> <version> <expected_sha256> <output_dir>
 #   chart_ref     — repo/chart name or oci:// URI
-#   version       — chart version (without leading 'v')
+#   version       — exact chart version passed to helm pull
 #   expected_sha256 — expected SHA256 digest; empty string skips verification
 #   output_dir    — directory to store the downloaded .tgz
 # Prints the path to the downloaded .tgz on stdout.
+# Stdout is the return channel; send diagnostics to stderr.
 pull_and_verify_chart() {
   local chart_ref="$1" version="$2" expected_sha="$3" output_dir="$4"
   mkdir -p "$output_dir"
 
-  helm pull "$chart_ref" --version "$version" --destination "$output_dir" || \
-    fatal "helm pull failed for $chart_ref $version"
+  helm pull "$chart_ref" --version "$version" --destination "$output_dir" >&2 || {
+    if [[ "$chart_ref" == oci://ghcr.io/* ]]; then
+      error "helm pull failed for $chart_ref $version"
+      error ""
+      error "If the helm error above contains '403' or 'denied', a stale or expired credential may be cached in your Helm registry config."
+      error "Most common fix (works for public packages such as kai-scheduler — restores the anonymous pull path):"
+      error "  helm registry logout ghcr.io"
+      exit 1
+    else
+      fatal "helm pull failed for $chart_ref $version"
+    fi
+  }
 
   local tgz
-  tgz=$(find "$output_dir" -maxdepth 1 -name '*.tgz' -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)
+  tgz=$(find_latest_chart_archive "$output_dir")
   [[ -n "$tgz" ]] || fatal "No .tgz found in $output_dir after helm pull"
 
   if [[ -n "$expected_sha" ]]; then
     local actual_sha
-    actual_sha=$(sha256sum "$tgz" | awk '{print $1}')
+    actual_sha=$(calculate_sha256 "$tgz")
     if [[ "$actual_sha" != "$expected_sha" ]]; then
       fatal "SHA256 mismatch for $tgz: expected=$expected_sha actual=$actual_sha. Run scripts/update-chart-hashes.sh to update pinned hashes."
     fi
-    info "Chart hash verified: $tgz ($actual_sha)"
+    info "Chart hash verified: $tgz ($actual_sha)" >&2
   else
     warn "No expected hash provided for $chart_ref $version — skipping verification. Run scripts/update-chart-hashes.sh to generate and pin a hash."
   fi
@@ -116,7 +157,8 @@ tf_get() {
 # Require a terraform output value (fatal if missing)
 tf_require() {
   local json="${1:?json required}" key="${2:?key required}"
-  local description="${3:-$key}"
+  local description
+  description="${3:-$key}"
   local val
   val=$(tf_get "$json" "$key")
   [[ -n "$val" ]] || fatal "$description not found in terraform outputs"
@@ -125,9 +167,16 @@ tf_require() {
 
 # Connect to AKS cluster
 connect_aks() {
-  local rg="${1:?resource group required}" name="${2:?cluster name required}"
+  local rg="${1:?resource group required}" name="${2:?cluster name required}" context_name
   info "Connecting to AKS cluster $name..."
   az aks get-credentials --resource-group "$rg" --name "$name" --overwrite-existing
+  # AAD-managed clusters (especially with disableLocalAccounts=true) require kubelogin
+  # to exchange Azure CLI tokens for the cluster API. Convert idempotently when available.
+  if command -v kubelogin >/dev/null 2>&1; then
+    context_name=$(kubectl config current-context 2>/dev/null || true)
+    [[ -n "$context_name" ]] || fatal "Could not determine current kubeconfig context after az aks get-credentials"
+    kubelogin convert-kubeconfig --context "$context_name" -l azurecli >/dev/null
+  fi
   verify_cluster_connectivity
 }
 

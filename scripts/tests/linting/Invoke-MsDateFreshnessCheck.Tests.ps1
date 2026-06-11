@@ -96,9 +96,9 @@ Describe 'Get-MarkdownFiles' -Tag 'Unit' {
             $files.Name | Should -Not -Contain 'notes.md'
         }
 
-        It 'Excludes CHANGELOG.md' {
+        It 'Includes CHANGELOG.md' {
             $files = @(Get-MarkdownFiles -SearchPaths @('.'))
-            $files.Name | Should -Not -Contain 'CHANGELOG.md'
+            $files.Name | Should -Contain 'CHANGELOG.md'
         }
 
         It 'Includes non-excluded files' {
@@ -157,6 +157,19 @@ Describe 'Get-MarkdownFiles' -Tag 'Unit' {
 
             $files = @(Get-MarkdownFiles -SearchPaths @('.') -ChangedOnly -Base 'origin/main')
             $files | Should -BeNullOrEmpty
+        }
+
+        It 'Includes CHANGELOG.md when only changed file' {
+            New-Item -ItemType File -Path 'CHANGELOG.md' -Force | Out-Null
+
+            Mock git {
+                $global:LASTEXITCODE = 0
+                return @('CHANGELOG.md')
+            } -ModuleName 'LintingHelpers' -ParameterFilter { $args[0] -eq 'diff' }
+
+            $files = @(Get-MarkdownFiles -SearchPaths @('.') -ChangedOnly -Base 'origin/main')
+            $files | Should -HaveCount 1
+            $files[0] | Should -Be 'CHANGELOG.md'
         }
     }
 

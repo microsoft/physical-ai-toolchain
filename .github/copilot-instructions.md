@@ -42,7 +42,7 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 | `data-pipeline/capture/` | Recording configuration and data capture |
 | `scripts/` | CI/CD scripts, shared libraries, linting, security, and Pester tests |
 | `scripts/lib/` | Cross-domain shared shell and PowerShell libraries |
-| `external/IsaacLab/` | NVIDIA IsaacLab (cloned for IntelliSense only, not built locally) |
+| `external/IsaacLab/` | NVIDIA Isaac Lab (cloned for IntelliSense only, not built locally) |
 | `docs/contributing/` | Architecture, roadmap, style guides, contribution workflow |
 
 * Do not modify files in `external/`
@@ -295,6 +295,33 @@ Detailed rules in `.github/instructions/docs-style-and-conventions.instructions.
 * Numbered lists only for sequential content
 * Code blocks: always specify language
 
+## Coding Agent Environment
+
+GitHub Copilot Coding Agent runs in a cloud GitHub Actions environment, separate from the local devcontainer. The `.github/workflows/copilot-setup-steps.yml` workflow pre-installs tools so the cloud agent can author code, run linters, and execute tests with the same capabilities a local contributor has in `.devcontainer/devcontainer.json`.
+
+The cloud-agent workflow does NOT install: `actionlint` (devcontainer-only, used for `npm run lint:yaml`), `golangci-lint`, `terraform-docs`, `osmo`, `ngc`, Azure CLI, kubectl, helm, k9s. These are Azure-deployment or local-validation tools the agent does not need to author or test code.
+
+The cloud-agent workflow installs `gh aw` (GitHub Agentic Workflows CLI) without version pinning. The latest stable release is installed at session start because `gh aw` maintains backward compatibility with older compiled workflows, lock files embed their `compiler_version` for auditability, and the extension releases multiple times per week making pinning impractical.
+
+### Environment Synchronization
+
+Treat `.github/workflows/copilot-setup-steps.yml` and `.devcontainer/devcontainer.json` as paired environments. When changing toolchain versions in either file, evaluate whether the other needs the same change:
+
+* Language runtimes (Python, Node, Go, Terraform) MUST stay aligned — drift causes "works locally, fails in agent" bugs.
+* Test runners (Pester, pytest, vitest) MUST stay aligned for the same reason.
+* Azure-deployment tools (`az`, `kubectl`, `helm`, OSMO, NGC) live in the devcontainer only.
+* Lint-only tools may live in either or both depending on whether the agent invokes the linter.
+
+The weekly `copilot-setup-steps.yml` cron and `Test-BinaryFreshness.ps1` weekly run together surface upstream drift across both surfaces.
+
+### Cloud-Agent RPI Wrapper
+
+The `Bootstrap hve-core RPI persona` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the latest `microsoft/hve-core@main` `rpi-agent.agent.md` plus every `subagents/*.agent.md` into `.copilot-tracking/upstream/hve-core-rpi/`.
+
+The `Physical-AI RPI` umbrella (`.github/agents/physical-ai-rpi.agent.md`) and its hidden generic worker (`.github/agents/physical-ai-rpi-worker.agent.md`) read those files at session start. The worker resolves a `persona: <stem>` dispatch parameter to a workspace path under `.copilot-tracking/upstream/hve-core-rpi/subagents/`, so new upstream personas auto-onboard via the next bootstrap with no change in this repo.
+
+See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the full umbrella/worker rationale.
+
 ## Git Workflow
 
 Full specification in `.github/instructions/commit-message.instructions.md`.
@@ -362,9 +389,9 @@ AzureML runs on Arc-connected AKS clusters via the AzureML Kubernetes extension.
 
 ## Training Pipeline
 
-Training runs in NVIDIA IsaacLab containers on GPU nodes via AzureML or OSMO.
+Training runs in NVIDIA Isaac Lab containers on GPU nodes via AzureML or OSMO.
 
-* Container: `nvcr.io/nvidia/isaac-lab:2.3.2`
+* Container: `DEFAULT_ISAAC_LAB_IMAGE` from `scripts/lib/common.sh` (currently `nvcr.io/nvidia/isaac-lab:2.3.2`)
   * Python path: `/isaac-sim/kit/python/bin/python3` (NOT system Python)
   * `PYTHON` env var: set to `/workspace/isaaclab/isaaclab.sh -p` (wrapper activating correct conda env)
 * EULA acceptance: all jobs MUST set `ACCEPT_EULA: "Y"` and `PRIVACY_CONSENT: "Y"`
@@ -375,7 +402,7 @@ Training runs in NVIDIA IsaacLab containers on GPU nodes via AzureML or OSMO.
 * Behavioral cloning: LeRobot (ACT/Diffusion policies), runtime-installed via `uv pip` in AzureML container
 * MLflow: monkey-patches `agent._update` for metric interception
   * Logging intervals: `step`, `balanced` (default, every 10 steps), `rollout`, or custom integer
-* Checkpoint flow: training writes to local FS → `TRAINING_CHECKPOINT_OUTPUT` env var → AzureML uploads as `uri_folder`
+* Checkpoint flow: training writes to local FS → mirrored into `$AZURE_ML_OUTPUT_CHECKPOINTS` at job exit → AzureML uploads as `uri_folder`
 
 ## GPU Configuration
 
@@ -397,9 +424,9 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | File Type | Validation Commands |
 | --- | --- |
 | `*.md` | `npm run lint:md`, `npm run spell-check`, `npm run format:tables` |
-| `*.tf`, `*.tfvars` | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan` |
+| `*.tf`, `*.tfvars` | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan`, `npm run test:go` (output contract) |
 | `*.tftest.hcl` | `npm run test:tf`, `cd infrastructure/terraform/modules/<name> && terraform test` or `cd infrastructure/terraform && terraform test` |
-| `*.go` | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`) |
+| `*.go` | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`), `./infrastructure/terraform/e2e/run-contract-tests.sh` (Terraform output contract, requires `terraform-docs`) |
 | `*.sh` | `shellcheck <file>` |
 | `*.ps1` | `npm run lint:ps` |
 | `*.yml` (GitHub Actions) | `npm run lint:yaml` |
@@ -421,6 +448,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 Terraform validation is per-directory — each deployment directory has its own provider configuration and state:
 
+* Run `tflint --init` once from the repository root before the first local `npm run lint:tf` run; this installs the Azure provider ruleset declared in `.tflint.hcl`
 * `npm run lint:tf` — TFLint recursive linting across all directories
 * `npm run lint:tf:validate` — `terraform fmt -check -recursive` + `terraform init -backend=false && terraform validate` per deployment directory (`.`, `vpn/`, `dns/`, `automation/`)
 * `terraform plan -var-file=terraform.tfvars` — validates configuration against provider APIs (requires `source infrastructure/terraform/prerequisites/az-sub-init.sh` first)
@@ -445,7 +473,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 * Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
 * Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main)
 * Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)
-* Codecov: `pytest` and `pester` flags, 80-100% range, carryforward enabled
+* Codecov: 12+ flags including `pytest-*`, `vitest`/`vitest-*`, `pester`, `go`, `terraform`; 80-100% range; carryforward enabled; OIDC tokenless upload via `codecov/codecov-action@v6`
 
 ## Contributing References
 
