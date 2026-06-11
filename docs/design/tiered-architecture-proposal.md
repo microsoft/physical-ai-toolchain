@@ -129,7 +129,7 @@ Each tier states the minimum infrastructure to reach a concrete goal:
 
 > **Goal G:** Capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot — the full loop, one task. Fleet management is explicitly out of scope of Goal G.
 
-Goal G is fully achievable at Tiers 0 through 2 without any Kubernetes, Arc, or fleet infrastructure.
+Goal G is fully achievable at Tiers 0 through 2 without any Kubernetes, Arc, or fleet infrastructure. Data augmentation and fleet-management autonomy are modeled as separate optional axes (see [Cross-Cutting Axis: Tiered Data Augmentation](#cross-cutting-axis-tiered-data-augmentation) and [The Autonomy Ladder](#the-autonomy-ladder-t50t53)), not steps in the Goal G loop.
 
 ### Tier Ladder Overview
 
@@ -162,10 +162,14 @@ The honest floor for Goal G.
 | Move data | `cp` or `rsync` from robot to laptop. |
 | Curate | Dataviewer in `local` mode on the laptop. |
 | Train | `train.py` on a laptop or workstation GPU. |
+| Track | File-backed MLflow (`file:./mlruns`, no server) or trackio — a local process, no service to stand up. |
 | Validate | `run-local-lerobot-eval.py` / `play.py` locally. |
 | Run on robot | The ACT inference node as a plain process or container. No Flux, no gating, no GitOps. |
 
 **Edge infra:** ROS 2 and Docker only. **Cloud infra:** none.
+
+> [!NOTE]
+> Experiment tracking belongs at T0, not as a collaboration perk. Goal G includes *validate*, and a success number you cannot reproduce, compare across runs, or use to attribute a regression is an anecdote, not a result — doubly so in the high-variance world of RL and IL. File-backed MLflow and trackio run as local processes with no server, so tracking stays inside the zero-cloud, zero-Kubernetes floor. Tracking as a *hosted server* plus a *model registry* is a separate, later concern (T2).
 
 This tier exists in the code today and is undocumented. Surfacing it is the highest-leverage change in this proposal.
 
@@ -181,7 +185,7 @@ The small-lab and integrator tier. The first cloud resource added is a single st
 | Move data | `azcopy` or `az storage blob upload-batch` to one Blob container. | + Blob storage |
 | Curate | Dataviewer in `azure` mode against that container (managed identity or SAS). | viewer → cloud |
 | Train | Local shared GPU box, or first optional reach to AzureML on saturation. | optional cloud GPU |
-| Track | MLflow becomes worthwhile with multiple runs or collaborators. | + tracking |
+| Track | Local file-backed tracking (carried from T0) optionally promoted to a shared MLflow server once a team needs shared run history. | optional hosted tracking |
 | Run on robot | Plain container per robot; hand-update 2–3 robots via `docker pull`. | unchanged |
 
 **Edge infra:** shared disk. **Cloud infra:** one storage account, optionally AzureML and MLflow. No Kubernetes, no Arc, no Flux.
@@ -254,10 +258,59 @@ The aspirational layer. Drift detection, automated retraining triggers, aggregat
 | Analytics | Microsoft Fabric Real-Time Intelligence, Grafana | placeholder |
 | Drift and retraining | Drift detection, retraining triggers, closed loop | placeholder |
 
-**Status:** mostly unimplemented (0 Python files, 4 placeholders in `fleet-intelligence`). This tier should be documented as a roadmap direction, with explicit human-in-the-loop gating recommended over fully autonomous retraining.
+**Status:** mostly unimplemented (0 Python files, 4 placeholders in `fleet-intelligence`). This tier should be documented as a roadmap direction, with explicit human-in-the-loop gating recommended over fully autonomous retraining. It decomposes into an ordered autonomy ladder rather than a single leap.
+
+### The Autonomy Ladder (T5.0–T5.3)
+
+"Fleet management" is not a single leap. Treating it as one repeats the all-or-nothing
+framing this proposal argues against everywhere else. The closed loop decomposes into four
+ordered stages of increasing decision authority. Each is a legitimate stopping point, and the
+deferral is honest only when the intermediate stages are named: three of the four are unbuilt
+today (modulo an ad-hoc experiment by the team on Hex).
+
+| Stage | Name | Decision authority | Status |
+|---|---|---|---|
+| T5.0 | Gated retraining | Humans trigger retraining; the system surfaces signals only. | not built |
+| T5.1 | Human-in-the-loop / active learning | The system proposes what to retrain on and when; a human approves each cycle. | ad-hoc (Hex) |
+| T5.2 | Continual learning | The system retrains on a schedule or trigger; a human reviews before deployment. | not built |
+| T5.3 | Autonomous closed-loop | The system detects drift, retrains, gates, and deploys without human approval. | not built |
+
+> [!IMPORTANT]
+> Autonomy is a **different axis** from T0–T4. T0–T4 scale on *infrastructure reach* (sites,
+> GPU, collaboration); T5.0–T5.3 scale on *decision authority / loop closure*. They are
+> orthogonal: a single-site T3 operator can sit at T5.0, and a multi-site T4 operator can remain
+> fully manual. The autonomy stages are not "more infrastructure to buy" \u2014 they are how much of
+> the retraining decision a human delegates.
+
+The foot-gun warning below applies with increasing force up the ladder; T5.3 should remain a
+roadmap direction, not a near-term target.
 
 > [!WARNING]
-> Fully autonomous retraining on production data is a foot-gun: a legitimate distribution change can cause the loop to bake current degraded behavior into the next dataset. Drift detection also needs statistical power that only exists at fleet scale. T5 should default to human-supervised, not closed-loop.
+> Fully autonomous retraining on production data is a foot-gun: a legitimate distribution change can cause the loop to bake current degraded behavior into the next dataset. Drift detection also needs statistical power that only exists at fleet scale. T5 should default to human-supervised (T5.0–T5.1), not closed-loop.
+
+### Cross-Cutting Axis: Tiered Data Augmentation
+
+Data scarcity is unavoidable in physical AI, so the toolchain needs an augmentation story \u2014 but
+today the only documented path is the full Cosmos/SDG pipeline, which is the *aspirational ceiling*
+that T0\u2013T2 users cannot realistically operate. This is the same all-or-nothing trap as the rest of
+the architecture: a heavyweight ceiling with no documented low or middle rung. Augmentation should
+therefore be a **tiered, optional axis**, recommended when data is scarce \u2014 not a baseline step and
+explicitly **not part of Goal G** (folding it into the anchor goal would undermine the "this is the
+honest minimal floor" argument).
+
+| Stage | Approach | Where it runs |
+|---|---|---|
+| A0 | Classical CV augmentation (crops, jitter, blur, photometric/geometric transforms) | Local, CPU, no model |
+| A1 | Local small-VLM generation (e.g. via vLLM locally at T0, or Azure AI Foundry at T1) | Local GPU or hosted endpoint |
+| A2 | Full Cosmos / SDG world-foundation-model pipeline | Cloud, GPU cluster |
+
+> [!NOTE]
+> Unlike the documentation-and-packaging changes elsewhere in this proposal, the A0\u2013A1 rungs are
+> **net-new code**: `synthetic-data` ships 0 Python files and 2 placeholders today. Classical
+> augmentation, local-VLM generation, and the accompanying experiments and guidance are a
+> near-term *build* item, not a re-framing of existing artifacts. Naming them here is what gives
+> the augmentation axis the credibility the toolchain currently lacks; delivering A0\u2013A1 is a
+> separate, scoped workstream.
 
 ---
 
@@ -271,9 +324,11 @@ This proposal is primarily documentation and packaging, not a code rewrite.
 | Restructure the architecture doc around T0–T5 | Low–medium | Reframes the on-ramp; sets correct expectations |
 | Split "fleet" into delivery (T4) and management (T5) language | Low | Lets multi-site users adopt delivery without management |
 | Mark T5 components explicitly as roadmap | Low | Stops the unbuilt ceiling from reading as a floor |
+| Name the T5.0–T5.3 autonomy ladder | Low — documentation only | Turns the deferral into a roadmap instead of a cliff |
 | Add per-tier quick-starts | Medium | Gives each audience a concrete entry point |
+| Implement A0–A1 data augmentation (classical CV, local-VLM) | Medium — **net-new code** | Closes the credibility gap; the only build item in this list |
 
-The deploy scripts, Terraform modules, and training code do not need to change to support this. The tiers describe *which subset* of existing infrastructure a user adopts, and in what order.
+The deploy scripts, Terraform modules, and training code do not need to change to support the tier model itself. The tiers describe *which subset* of existing infrastructure a user adopts, and in what order. The one exception is the A0–A1 augmentation rungs, which are an explicit new workstream rather than a re-framing of shipped artifacts.
 
 ---
 
@@ -282,7 +337,7 @@ The deploy scripts, Terraform modules, and training code do not need to change t
 1. **Default tier in docs.** Should the README and Quick Start default to T0 (Dev), with T2 (Pilot) as the "recommended production" path and T3–T5 (Production, Scale, Operate) clearly marked advanced? Do the stage names — Dev, Lab, Pilot, Production, Scale, Operate — read correctly, and is pairing each name with its `T#` ID the right convention (stable IDs for boundary references, names for user-facing labels)?
 2. **Fleet vocabulary.** Does the repository adopt "delivery control plane" and "fleet management" as distinct named concepts, retiring the unqualified word "fleet"?
 3. **Roadmap honesty.** How explicitly should placeholder domains be labeled in user-facing docs versus contributor docs?
-4. **Scope of Goal G.** Is the single-task capture → train → validate → run loop the right anchor goal, or should the reference goal include synthetic data augmentation?
+4. **Scope of Goal G.** The proposal keeps the single-task capture → train → validate → run loop as the anchor goal and models data augmentation as a separate optional axis (A0–A2) rather than folding it into Goal G. Is keeping the floor minimal — with augmentation recommended only when data is scarce — the right call, or should augmentation be part of the reference loop?
 
 ---
 
