@@ -402,7 +402,7 @@ Training runs in NVIDIA Isaac Lab containers on GPU nodes via AzureML or OSMO.
 * Behavioral cloning: LeRobot (ACT/Diffusion policies), runtime-installed via `uv pip` in AzureML container
 * MLflow: monkey-patches `agent._update` for metric interception
   * Logging intervals: `step`, `balanced` (default, every 10 steps), `rollout`, or custom integer
-* Checkpoint flow: training writes to local FS → `TRAINING_CHECKPOINT_OUTPUT` env var → AzureML uploads as `uri_folder`
+* Checkpoint flow: training writes to local FS → mirrored into `$AZURE_ML_OUTPUT_CHECKPOINTS` at job exit → AzureML uploads as `uri_folder`
 
 ## GPU Configuration
 

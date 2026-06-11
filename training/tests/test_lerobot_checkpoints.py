@@ -15,6 +15,12 @@ _MOD = load_training_module(
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_register_backoff(monkeypatch):
+    """Skip real sleeps inside the AML registration retry loop in all tests."""
+    monkeypatch.setattr(_MOD, "_AML_REGISTER_INITIAL_BACKOFF_S", 0)
+
+
 @pytest.fixture
 def azure_env(monkeypatch):
     monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", "sub-1")
@@ -116,6 +122,17 @@ class TestRegisterModelViaAml:
     def test_handles_registration_exception(self, azure_env, fake_azure_modules, tmp_path):
         fake_azure_modules.models.create_or_update.side_effect = RuntimeError("api fail")
         assert _MOD._register_model_via_aml(tmp_path, "ckpt-003") is False
+        # Bounded retry: exhausts all attempts before returning False.
+        assert fake_azure_modules.models.create_or_update.call_count == _MOD._AML_REGISTER_MAX_ATTEMPTS
+
+    def test_retries_then_succeeds(self, azure_env, fake_azure_modules, tmp_path):
+        # First call raises a transient error, second call succeeds.
+        fake_azure_modules.models.create_or_update.side_effect = [
+            RuntimeError("503 transient"),
+            fake_azure_modules.registered,
+        ]
+        assert _MOD._register_model_via_aml(tmp_path, "ckpt-004") is True
+        assert fake_azure_modules.models.create_or_update.call_count == 2
 
 
 class TestUploadNewCheckpoints:
@@ -151,16 +168,31 @@ class TestUploadNewCheckpoints:
         assert uploaded == set()
         fake_azure_modules.mlflow.log_artifacts.assert_not_called()
 
-    def test_handles_log_artifacts_exception(self, azure_env, fake_azure_modules, tmp_path):
+    def test_mlflow_failure_drops_and_continues(self, azure_env, fake_azure_modules, tmp_path):
         ckpt = tmp_path / "checkpoints" / "005000" / "pretrained_model"
         ckpt.mkdir(parents=True)
         (ckpt / "model.safetensors").write_bytes(b"x")
         fake_azure_modules.mlflow.log_artifacts.side_effect = RuntimeError("nope")
         uploaded: set[str] = set()
         _MOD.upload_new_checkpoints(MagicMock(), tmp_path, uploaded)
-        # Still adds to uploaded and attempts AML registration
+        # MLflow failure is logged but does not block AML registration, and
+        # the checkpoint is marked uploaded so we do not retry across cycles.
         assert "005000" in uploaded
         fake_azure_modules.models.create_or_update.assert_called_once()
+
+    def test_aml_failure_drops_checkpoint(self, azure_env, fake_azure_modules, tmp_path):
+        ckpt = tmp_path / "checkpoints" / "005000" / "pretrained_model"
+        ckpt.mkdir(parents=True)
+        (ckpt / "model.safetensors").write_bytes(b"x")
+        fake_azure_modules.models.create_or_update.side_effect = RuntimeError("503")
+        uploaded: set[str] = set()
+        _MOD.upload_new_checkpoints(MagicMock(), tmp_path, uploaded)
+        # AML failure (after exhausting in-cycle retries) drops the
+        # intermediate checkpoint and marks it uploaded so we do not retry
+        # across cycles. The canonical final checkpoint registration is
+        # handled by register_final_checkpoint with its own exit code.
+        assert "005000" in uploaded
+        assert fake_azure_modules.models.create_or_update.call_count == _MOD._AML_REGISTER_MAX_ATTEMPTS
 
 
 class TestRegisterFinalCheckpoint:
@@ -202,34 +234,3 @@ class TestRegisterFinalCheckpoint:
         (tmp_path / "checkpoints" / "001000").mkdir(parents=True)
         assert _MOD.register_final_checkpoint() == _MOD.EXIT_SUCCESS
         fake_azure_modules.models.create_or_update.assert_called_once()
-
-
-class TestUploadCheckpointsToAzureMl:
-    def test_no_checkpoints_dir(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
-        assert _MOD.upload_checkpoints_to_azure_ml() == _MOD.EXIT_SUCCESS
-
-    def test_uploads_valid_checkpoints(self, azure_env, fake_azure_modules, tmp_path, monkeypatch):
-        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
-        # Valid: pretrained_model with model.safetensors
-        ck1 = tmp_path / "checkpoints" / "001000" / "pretrained_model"
-        ck1.mkdir(parents=True)
-        (ck1 / "model.safetensors").write_bytes(b"x")
-        # Valid: model.safetensors directly in ckpt dir (no pretrained subdir)
-        ck2 = tmp_path / "checkpoints" / "002000"
-        ck2.mkdir(parents=True)
-        (ck2 / "model.safetensors").write_bytes(b"x")
-        # Invalid: no model.safetensors
-        ck3 = tmp_path / "checkpoints" / "003000"
-        ck3.mkdir(parents=True)
-        # Non-dir entry
-        (tmp_path / "checkpoints" / "stray.txt").write_text("hi")
-
-        assert _MOD.upload_checkpoints_to_azure_ml() == _MOD.EXIT_SUCCESS
-        assert fake_azure_modules.models.create_or_update.call_count == 2
-
-    def test_no_valid_checkpoints(self, azure_env, fake_azure_modules, tmp_path, monkeypatch):
-        monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
-        (tmp_path / "checkpoints" / "001000").mkdir(parents=True)  # no safetensors
-        assert _MOD.upload_checkpoints_to_azure_ml() == _MOD.EXIT_SUCCESS
-        fake_azure_modules.models.create_or_update.assert_not_called()

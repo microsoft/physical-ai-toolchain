@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Azure ML Training Workflows
 description: Submit Isaac Lab and LeRobot training jobs to Azure Machine Learning
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-01
+ms.date: 2026-06-02
 ms.topic: how-to
 keywords:
   - azure ml
@@ -141,6 +141,64 @@ Specify the checkpoint mode with `--checkpoint-mode`:
   --checkpoint-mode from-trained \
   --task Isaac-Cartpole-v0
 ```
+
+## 🛌 Scale-from-zero GPU Pools
+
+GPU node pools in this stack default to `min_count = 0` so idle Spot capacity is released. Three unrelated defaults must be overridden for jobs to actually start when the target pool is at zero; all three are applied automatically by the deploy scripts, but the rationale matters when troubleshooting.
+
+### `aml-operator` resource validation
+
+The Azure ML Kubernetes extension installs `aml-operator`, which runs a pre-flight check on every submitted `AmlJob`:
+
+> Does the requested `InstanceType` fit inside the largest currently-Ready node?
+
+With the chart default `amloperator.skipResourceValidation: false`, the operator fails the job immediately with `Code: 9` ("Invalid instance type. The instance type defined resource requirement has exceeded the node size") whenever the target GPU pool is at zero. No Pod is created, kube-scheduler is never invoked, and the cluster autoscaler never observes a pending Pod to scale up against.
+
+Result: a permanent deadlock — you cannot submit the job that would cause the GPU resource to become available.
+
+`02-deploy-azureml-extension.sh` sets the flag to `true` by default. Override with `--enforce-resource-validation` on fixed-capacity clusters where you want misconfigured InstanceTypes to fail fast at submission rather than producing Pods stuck in `Pending`.
+
+Trade-off when enabled (the default): a typo in an `InstanceType` (e.g. `nvidia.com/gpu: 8` on a 4-GPU SKU) manifests as `FailedScheduling` events on a long-Pending Pod instead of an immediate job failure. Diagnose with `kubectl describe pod`.
+
+### Static `accelerator=nvidia` node label
+
+The InstanceTypes installed by `02-deploy-azureml-extension.sh` (`gpuspot`, `gpu`, `gpuspot2`, …) select on `accelerator: nvidia`. That label is normally applied at runtime by NFD / GPU Operator on already-running GPU nodes. When the pool is at zero, the cluster autoscaler builds a synthetic node template from **static** AKS-side labels only (transmitted to it via VMSS tags) and never sees `accelerator=nvidia` — so it concludes that scaling the pool up would not satisfy the pending Pod, and refuses.
+
+The fix is to declare the label statically on every GPU pool via Terraform:
+
+```hcl
+node_labels = {
+  accelerator = "nvidia"
+}
+```
+
+Already wired into the default `gpu` pool in `infrastructure/terraform/variables.tf` and `infrastructure/terraform/modules/sil/variables.tf`. Any custom GPU pool added via `node_pools` in `terraform.tfvars` must include the same label. NFD and the static label coexist without conflict.
+
+### Volcano enqueue-time capacity gate
+
+The Azure ML extension installs Volcano with `overcommit` and `proportion` plugins in the third tier of its scheduler config. Both implement Volcano's `JobEnqueueable` interface and gate the `enqueue` action against currently-Ready cluster capacity (`proportion`: `requested ≤ queue.Allocated + queue.Free`; `overcommit`: `requested ≤ total × overcommit-factor`).
+
+On a cluster whose GPU pools sit at `count = 0`, the GPU capacity term is `0 × 1.2 = 0`, so every GPU PodGroup fails enqueue and stays in phase `Pending` forever. Because Volcano only creates the underlying Pod once the PodGroup reaches `Inqueue`, no Pending Pod ever appears in kube-scheduler's queue — and without a Pending Pod, the AKS cluster autoscaler has nothing to scale up against.
+
+`02-deploy-azureml-extension.sh` patches `volcano-scheduler-configmap` with [`infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf`](../../infrastructure/setup/manifests/volcano-scheduler-config-scale-from-zero.conf) (both plugins removed from tier 3) and restarts `volcano-scheduler` after extension install. Gang scheduling is preserved because the `gang` plugin still gates the `allocate` action — multi-pod jobs continue to wait for `minAvailable` before any task starts.
+
+Override with `--enforce-volcano-capacity-check` on multi-tenant clusters where queue-level capacity fairness must be enforced at submit time. Scale-from-zero will then be impossible without keeping at least one GPU node warm (`min_count ≥ 1`).
+
+### Verifying scale-up
+
+```bash
+# Submit a job, then watch the autoscaler decision.
+kubectl -n kube-system get cm cluster-autoscaler-status -o jsonpath='{.data.status}' | head
+# Expected progression:
+#   scaleUp.status: NoActivity -> InProgress
+#   nodeGroups[aks-<pool>-vmss].cloudProviderTarget: 0 -> 1
+```
+
+If `scaleUp.status` stays `NoActivity` after submission, walk the three layers in order:
+
+1. `kubectl -n azureml logs deploy/aml-operator` — look for `"resource validation failed"` (operator layer).
+2. `kubectl get podgroup -n azureml` — phase `Pending` with `Unschedulable: resource in cluster is overused` is the Volcano enqueue gate.
+3. `kubectl describe pod -n azureml <worker>` — `FailedScheduling: 0/N nodes are available, ... node(s) didn't match Pod's node affinity/selector` is the missing-label layer.
 
 ## 📚 Related Documentation
 

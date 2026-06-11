@@ -12,7 +12,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+_DOWNLOAD_MAX_CONCURRENCY = 4
 
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
@@ -106,9 +109,25 @@ def download_dataset(
 
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(local_path, "wb") as f:
-            stream = container_client.download_blob(blob.name)
-            f.write(stream.readall())
+        # Stream blob to a sibling tmp file then atomically rename. readall() buffers
+        # the entire blob in RAM and OOM-kills the container for multi-GB MP4 episodes;
+        # readinto() streams in chunks. Tmp file lives in the same directory so
+        # os.replace() is atomic (cross-filesystem rename degrades to copy+unlink).
+        tmp_fd, tmp_name = tempfile.mkstemp(prefix=local_path.name + ".", suffix=".tmp", dir=local_path.parent)
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(tmp_fd, "wb") as f:
+                stream = container_client.download_blob(
+                    blob.name,
+                    max_concurrency=_DOWNLOAD_MAX_CONCURRENCY,
+                    validate_content=True,
+                )
+                written = stream.readinto(f)
+            if blob.size is not None and written != blob.size:
+                raise RuntimeError(f"Short read for {blob.name}: wrote {written} bytes, expected {blob.size}")
+            os.replace(tmp_path, local_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
         downloaded += 1
 
     print(f"Downloaded {downloaded} files to {dest_dir}")
@@ -725,11 +744,14 @@ def _parse_env_config() -> tuple[Path, str, list[str]]:
         raise ValueError(f"DATASET_REPO_ID escapes DATASET_ROOT: {repo_id!r}")
 
     try:
-        urls = json.loads(raw_urls)
+        parsed = json.loads(raw_urls)
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid BLOB_URLS JSON: {e}") from e
-    if not isinstance(urls, list) or not urls:
-        raise ValueError("BLOB_URLS must be a non-empty JSON array")
+    if not isinstance(parsed, list):
+        raise ValueError("BLOB_URLS must be a JSON array")
+    urls = [u.strip() for u in parsed if isinstance(u, str) and u.strip()]
+    if not urls:
+        raise ValueError("BLOB_URLS must be a non-empty JSON array of URL strings")
 
     return dataset_root, repo_id, urls
 
