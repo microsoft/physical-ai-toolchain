@@ -21,18 +21,28 @@ to entry.
 This proposal reframes the architecture around **graduated adoption tiers**. Each tier states the minimum edge and cloud infrastructure required to reach a concrete goal, and each tier is a legitimate stopping point. Users adopt only the infrastructure their scale actually demands, and the heaviest components become opt-in additions rather than baseline prerequisites.
 
 The proposal also corrects a framing problem: the repository bundles two distinct concerns under the
-word **"fleet."** One is a *delivery and connectivity control plane* (get a validated policy onto robots
-across sites you cannot directly reach). The other is *fleet management cognition* (drift detection,
-automated retraining, aggregate telemetry analytics). The first is legitimate and necessary at multi-site
-scale. The second is largely unimplemented and over-advertised. Separating them lets a multi-site
-operator adopt the delivery plane without inheriting the speculative management layer.
+word **"fleet."** One is *fleet delivery* — a delivery and connectivity control plane that gets a
+validated policy onto robots across sites you cannot directly reach. The other is *fleet intelligence*
+— the cognition layer (drift detection, automated retraining, aggregate telemetry analytics). The first
+is legitimate and necessary at multi-site scale. The second is largely unimplemented and over-advertised.
+Separating them lets a multi-site operator adopt fleet delivery without inheriting the speculative
+intelligence layer.
+
+> [!IMPORTANT]
+> In this repository, **"fleet" refers exclusively to a fleet of robots.** It never refers to
+> Kubernetes clusters, nor to Azure Kubernetes Fleet Manager — a distinct Azure product for managing a
+> fleet of *clusters*, not robots. Cluster-level concerns are always described as "clusters" or
+> "sites," never "fleets." This proposal deliberately avoids the bare phrase "fleet management"
+> because the Kubernetes ecosystem (Azure Kubernetes Fleet Manager, FluxCD, Argo, Rancher Fleet) uses
+> it for the cluster *delivery/placement* concern; qualifying every use as **fleet delivery** (T4) or
+> **fleet intelligence** (T5) keeps the meaning anchored to robots and avoids the collision.
 
 ### What This Proposal Argues
 
 1. The barrier to entry is a **documentation and sequencing problem**, not a fundamental property of the architecture. The code already supports a low-friction path; the docs do not describe it.
 2. Adoption should be modeled as **six tiers (T0–T5)** keyed to operator reach, GPU availability, collaboration, and site count — not robot count.
-3. The word **"fleet"** conflates a necessary *delivery control plane* with a speculative *management layer*. These should be separate tiers.
-4. The maturity evidence supports drawing the line where we propose: the implemented core is infrastructure, training, data management, and evaluation. The fleet-management cognition is mostly placeholder.
+3. The word **"fleet"** conflates a necessary *fleet delivery* control plane with a speculative *fleet intelligence* layer. These should be separate tiers.
+4. The maturity evidence supports drawing the line where we propose: the implemented core is infrastructure, training, data management, and evaluation. The fleet intelligence cognition is mostly placeholder.
 
 ---
 
@@ -92,23 +102,23 @@ The capability to start small is present in the code. It is simply undocumented 
 
 ---
 
-## 3. Reframing "Fleet": Delivery Plane vs. Management Layer
+## 3. Reframing "Fleet": Fleet Delivery vs. Fleet Intelligence
 
 The strongest objection to the current architecture is not "Arc and AKS are unnecessary." At multi-site scale they are genuinely needed. The objection is that the repository welds two different concerns together under one word.
 
 | Concern | What it is | Repository domain | Maturity |
 |---|---|---|---|
-| Delivery control plane | Multi-site connectivity, declarative delivery, safe-swap gating | `fleet-deployment` | 1 Python file, 5 placeholders |
-| Fleet management | Drift detection, retraining triggers, aggregate telemetry analytics | `fleet-intelligence` | 0 Python files, 4 placeholders |
+| Fleet delivery (control plane) | Multi-site connectivity, declarative delivery, safe-swap gating | `fleet-deployment` | 1 Python file, 5 placeholders |
+| Fleet intelligence | Drift detection, retraining triggers, aggregate telemetry analytics | `fleet-intelligence` | 0 Python files, 4 placeholders |
 
-The **delivery control plane** is transport. Across sites you do not control, you need a reachability and identity broker (Arc), a runtime (AKS), and a delivery mechanism (FluxCD). This is, in effect, a `git push` that survives bad networks and locked-down sites, with a safety gate before a policy swaps on a physical arm. It is legitimate and necessary once an operator spans multiple sites.
+The **fleet delivery** control plane is transport. Across sites you do not control, you need a reachability and identity broker (Arc), a runtime (AKS), and a delivery mechanism (FluxCD). This is, in effect, a `git push` that survives bad networks and locked-down sites, with a safety gate before a policy swaps on a physical arm. It is legitimate and necessary once an operator spans multiple sites, and aligns with how the Kubernetes ecosystem treats "fleet" — a delivery and reconciliation concern.
 
-The **fleet management layer** is cognition. Observing many robots, detecting aggregate degradation, and closing the retraining loop is the part that earns the word "fleet" — and it is the unbuilt, over-advertised part.
+The **fleet intelligence** layer is cognition. Observing many robots, detecting aggregate degradation, and closing the retraining loop is the data-science layer over the robot fleet — and it is the unbuilt, over-advertised part.
 
 > [!IMPORTANT]
-> Separating these is what lets a multi-site operator adopt the necessary delivery plane **without** inheriting the speculative management layer. The repository's single word "fleet" makes the necessary inseparable from the speculative. Unbundling the word is the core architectural move of this proposal.
+> Separating these is what lets a multi-site operator adopt the necessary fleet delivery plane **without** inheriting the speculative fleet intelligence layer. The repository's single word "fleet" makes the necessary inseparable from the speculative. Unbundling the word — and qualifying it as *delivery* vs. *intelligence* — is the core architectural move of this proposal.
 
-One honest caveat: the split is real but porous. The gating service is a *decision* (approve a safe deployment window), so a small amount of cognition already lives in the delivery plane, and a multi-site delivery plane inevitably records per-site desired state, which is the seed of management. The tiers below treat gating as part of delivery and draw the management boundary at drift/retraining/analytics.
+One honest caveat: the split is real but porous. The gating service is a *decision* (approve a safe deployment window), so a small amount of cognition already lives in the delivery plane, and a multi-site delivery plane inevitably records per-site desired state, which is the seed of intelligence. The tiers below treat gating as part of delivery and draw the intelligence boundary at drift/retraining/analytics.
 
 ---
 
@@ -127,9 +137,9 @@ Robot count correlates with these but does not cause them. Three identical robot
 
 Each tier states the minimum infrastructure to reach a concrete goal:
 
-> **Goal G:** Capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot — the full loop, one task. Fleet management is explicitly out of scope of Goal G.
+> **Goal G:** Capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot — the full loop, one task. Fleet intelligence is explicitly out of scope of Goal G.
 
-Goal G is fully achievable at Tiers 0 through 2 without any Kubernetes, Arc, or fleet infrastructure. Data augmentation and fleet-management autonomy are modeled as separate optional axes (see [Cross-Cutting Axis: Tiered Data Augmentation](#cross-cutting-axis-tiered-data-augmentation) and [The Autonomy Ladder](#the-autonomy-ladder-t50t53)), not steps in the Goal G loop.
+Goal G is fully achievable at Tiers 0 through 2 without any Kubernetes, Arc, or fleet infrastructure. Data augmentation and fleet-intelligence autonomy are modeled as separate optional axes (see [Cross-Cutting Axis: Tiered Data Augmentation](#cross-cutting-axis-tiered-data-augmentation) and [The Autonomy Ladder](#the-autonomy-ladder-t50t53)), not steps in the Goal G loop.
 
 ### Tier Ladder Overview
 
@@ -142,11 +152,11 @@ T2  Pilot       Single site, at scale     edge: none (manual)      cloud: AzureM
 T3  Production  Single-site declarative   edge: local k3s + Flux   cloud: same as T2 (no Arc)
 ─────────────────────────────────────────────────────────────────── multi-site boundary (Arc)
 T4  Scale       Multi-site delivery       edge: Arc + AKS + Flux   cloud: + connectivity/identity
-─────────────────────────────────────────────────────────────────── management boundary
-T5  Operate     Fleet management          edge: + IoT Operations   cloud: + Fabric RTI + drift/retraining
+───────────────────────────────────────────────────────────── intelligence boundary
+T5  Operate     Fleet intelligence        edge: + IoT Operations   cloud: + Fabric RTI + drift/retraining
 ```
 
-T0–T2 satisfy Goal G with manual deployment. T3 adds single-site declarative deployment (local k3s + Flux) **without Arc** — proving GitOps does not require a cloud fleet control plane. T4 is the **multi-site delivery control plane terminus**, where Arc becomes necessary as the cross-site reachability and identity broker. T5 is the fleet-management layer, marked deferred and over-advertised relative to its implementation.
+T0–T2 satisfy Goal G with manual deployment. T3 adds single-site declarative deployment (local k3s + Flux) **without Arc** — proving GitOps does not require a cloud fleet control plane. T4 is the **multi-site fleet delivery terminus**, where Arc becomes necessary as the cross-site reachability and identity broker. T5 is the fleet intelligence layer, marked deferred and over-advertised relative to its implementation.
 
 ---
 
@@ -231,9 +241,9 @@ because there is only one site and you can reach it directly.
 
 **Graduate when:** robots span multiple sites, or sites become unreachable from a single operator network — the point at which a cross-site reachability and identity broker becomes genuinely necessary.
 
-### T4 — Scale. Multi-site delivery control plane
+### T4 — Scale. Multi-site fleet delivery
 
-The legitimate top of the necessary ladder. This is the "communication and delivery" plane: getting validated policies onto robots across sites you cannot directly reach, safely. The defining difference from T3 is **multiple sites** — which is exactly what makes Arc necessary, as the cross-site reachability and identity broker that single-site k3s did not need.
+The legitimate top of the necessary ladder. This is the fleet delivery control plane: getting validated policies onto robots across sites you cannot directly reach, safely. The defining difference from T3 is **multiple sites** — which is exactly what makes Arc necessary, as the cross-site reachability and identity broker that single-site k3s did not need.
 
 | Concern | Implementation |
 |---|---|
@@ -242,13 +252,13 @@ The legitimate top of the necessary ladder. This is the "communication and deliv
 | Delivery | FluxCD GitOps; per-site desired state recorded in Git. |
 | Safe swap | Gating service approves deployment windows before a policy swaps on hardware. |
 
-**Explicitly excluded at T4:** drift detection, automated retraining, aggregate telemetry analytics. This tier delivers and gates; it does not manage.
+**Explicitly excluded at T4:** drift detection, automated retraining, aggregate telemetry analytics. This tier delivers and gates; it does not run fleet intelligence.
 
 **Edge infra:** Arc + AKS/Flux + gating. **Cloud infra:** connectivity, identity, registry.
 
 **Graduate when:** the operator explicitly wants production signals to drive retraining and fleet-wide health analytics — a deliberate decision, not an automatic consequence of scale.
 
-### T5 — Operate. Fleet management. Deferred
+### T5 — Operate. Fleet intelligence. Deferred
 
 The aspirational layer. Drift detection, automated retraining triggers, aggregate telemetry, and health analytics.
 
@@ -262,7 +272,7 @@ The aspirational layer. Drift detection, automated retraining triggers, aggregat
 
 ### The Autonomy Ladder (T5.0–T5.3)
 
-"Fleet management" is not a single leap. Treating it as one repeats the all-or-nothing
+Fleet intelligence is not a single leap. Treating it as one repeats the all-or-nothing
 framing this proposal argues against everywhere else. The closed loop decomposes into four
 ordered stages of increasing decision authority. Each is a legitimate stopping point, and the
 deferral is honest only when the intermediate stages are named: three of the four are unbuilt
@@ -322,7 +332,7 @@ This proposal is primarily documentation and packaging, not a code rewrite.
 |---|---|---|
 | Document T0 as the sanctioned starting path | Low — code already supports it | Removes the perceived barrier directly |
 | Restructure the architecture doc around T0–T5 | Low–medium | Reframes the on-ramp; sets correct expectations |
-| Split "fleet" into delivery (T4) and management (T5) language | Low | Lets multi-site users adopt delivery without management |
+| Split "fleet" into fleet delivery (T4) and fleet intelligence (T5) language, reserving "fleet" for robots | Low | Lets multi-site users adopt delivery without intelligence; ends the Azure Kubernetes Fleet Manager naming collision |
 | Mark T5 components explicitly as roadmap | Low | Stops the unbuilt ceiling from reading as a floor |
 | Name the T5.0–T5.3 autonomy ladder | Low — documentation only | Turns the deferral into a roadmap instead of a cliff |
 | Add per-tier quick-starts | Medium | Gives each audience a concrete entry point |
@@ -335,7 +345,7 @@ The deploy scripts, Terraform modules, and training code do not need to change t
 ## 7. Open Questions for Socialization
 
 1. **Default tier in docs.** Should the README and Quick Start default to T0 (Dev), with T2 (Pilot) as the "recommended production" path and T3–T5 (Production, Scale, Operate) clearly marked advanced? Do the stage names — Dev, Lab, Pilot, Production, Scale, Operate — read correctly, and is pairing each name with its `T#` ID the right convention (stable IDs for boundary references, names for user-facing labels)?
-2. **Fleet vocabulary.** Does the repository adopt "delivery control plane" and "fleet management" as distinct named concepts, retiring the unqualified word "fleet"?
+2. **Fleet vocabulary.** Does the repository adopt **fleet delivery** (T4 control plane) and **fleet intelligence** (T5 cognition) as distinct named concepts, reserve the word "fleet" exclusively for a fleet of robots, and retire the bare phrase "fleet management" (which collides with Azure Kubernetes Fleet Manager and the Kubernetes ecosystem's delivery-oriented use of "fleet")?
 3. **Roadmap honesty.** How explicitly should placeholder domains be labeled in user-facing docs versus contributor docs?
 4. **Scope of Goal G.** The proposal keeps the single-task capture → train → validate → run loop as the anchor goal and models data augmentation as a separate optional axis (A0–A2) rather than folding it into Goal G. Is keeping the floor minimal — with augmentation recommended only when data is scarce — the right call, or should augmentation be part of the reference loop?
 
@@ -343,44 +353,10 @@ The deploy scripts, Terraform modules, and training code do not need to change t
 
 ## 8. Summary
 
-The toolchain is strong where it is built and over-advertised where it is not. The barrier to entry is the result of presenting an aspirational, multi-site, fleet-managed ceiling as the required floor. The fix is to:
+The toolchain is strong where it is built and over-advertised where it is not. The barrier to entry is the result of presenting an aspirational, multi-site, fleet-intelligence ceiling as the required floor. The fix is to:
 
 1. Surface the **already-working local path** (T0) as the sanctioned starting point.
 2. Model adoption as **graduated tiers** keyed to reach, GPU, collaboration, and site count.
-3. **Unbundle "fleet"** into a necessary delivery control plane (T4) and a deferred management layer (T5).
+3. **Unbundle "fleet"** into a necessary fleet delivery control plane (T4) and a deferred fleet intelligence layer (T5).
 
 This lowers the on-ramp without removing any capability, and it aligns the documented architecture with what the code actually delivers today.
-
----
-
-## Appendix A — Future Direction: Tier-Aware Scaffolding CLI
-
-> [!NOTE]
-> This appendix is **speculative and explicitly out of scope** for the core proposal. The deliverable above is the tier model and its documentation; it stands on its own and requires no new tooling. This idea is recorded only because the tiers make it a natural next step, not because the proposal depends on it.
-
-Once adoption is modeled as discrete, composable tiers, a tier-aware scaffolding CLI becomes a straightforward way to operationalize the on-ramp. The pattern is well established — `terraform init`, `flux bootstrap`, `gh`, and `az` all ask a small set of questions and scaffold the appropriate configuration.
-
-A `pat init`-style command could ask a handful of questions that map directly to the tier axes:
-
-- How many sites? (one vs. many → T3 boundary vs. T4)
-- Is there a local GPU, or should training run in the cloud? (T0/T1 vs. T2)
-- One person or a team? (local checkpoints vs. registry + MLflow)
-- How many robots, and how often are they updated? (manual vs. declarative deployment)
-
-From those answers it would resolve a tier and scaffold the matching subset of the **existing** deploy scripts, Terraform, and configuration — the same artifacts a user would otherwise assemble by hand.
-
-### Design Constraint: Transparency, Not a Black Box
-
-A scaffolding CLI must not re-create the opacity this proposal argues against. A wizard that silently provisions hidden infrastructure would *lower* friction while *raising* the conceptual barrier — the user could not see what was stood up, could not learn the tiers, and would be stranded inside generated configuration they did not write when something broke.
-
-To avoid this, the CLI should **generate visible, editable artifacts** rather than execute a hidden runtime:
-
-- Emit the actual scripts, Terraform, and config files into the user's working tree, then let them review and run them.
-- Print the resolved tier and the reasoning, so the questions are a teaching tool, not a curtain.
-- Treat generation and execution as separate steps, so a user can inspect before applying.
-
-Under those constraints the CLI reinforces the proposal's goal — approachability through understanding — rather than substituting convenience for comprehension.
-
-### Why This Is Feasible
-
-This is tractable **because** the tiers define discrete, composable infrastructure sets with explicit graduation triggers. Without the tier model, "scaffold the right thing" has no well-defined target; with it, each tier is already a named, bounded subset of existing artifacts. The CLI would compose what the repository already ships — not introduce a new control plane of its own.
