@@ -93,16 +93,18 @@ Render the review body as markdown in this order:
 
 ## Validation Signal
 
-The agent runs via `workflow_run` AFTER the `PR Validation` orchestrator
-has reached a terminal conclusion. The deterministic CI signal is therefore
-always final — there is no `pending` or `in_progress:*` state to handle.
-Do not invoke `uv`, `pytest`, `npm ci`, `terraform`, or `go` from the bash
-tool — those binaries live on the host runner and are not visible inside
-the AWF firewall sandbox.
+A maintainer invokes the agent on demand by commenting `/aw-dependabot-review`
+on a Dependabot PR, so `PR Validation` may have already finished, still be
+running, or not have started for the current head SHA. The workflow's resolver
+step looks up the latest `PR Validation` run for the PR head SHA and injects its
+conclusion as `PR_VALIDATION_CONCLUSION` (one of `success`, `failure`,
+`cancelled`, `timed_out`, `neutral`, `skipped`, `action_required`, or `unknown`).
+Treat `unknown` as "no terminal CI signal yet" — note it in the review body and
+recommend re-running the command once `PR Validation` completes, rather than
+asserting a clean result. Do not invoke `uv`, `pytest`, `npm ci`, `terraform`,
+or `go` from the bash tool — those binaries live on the host runner and are not
+visible inside the AWF firewall sandbox.
 
-The orchestrator's overall conclusion is injected into the prompt as
-`PR_VALIDATION_CONCLUSION` (one of `success`, `failure`, `cancelled`,
-`timed_out`, `neutral`, `skipped`, `action_required`, or `unknown`).
 The list of failing per-surface check-runs (JSON array of
 `{name, html_url, conclusion}`) is injected as `PR_VALIDATION_FAILING_CHECKS`.
 Read both directly from the environment. Do NOT call
@@ -175,15 +177,15 @@ review body with three parts:
    violation, peer-dep conflict, breaking-changelog quote), prepend
    `⚠️ Maintainer review recommended` to the top of the review body once.
 
-If `PR_VALIDATION_CONCLUSION` is `neutral`, `skipped`, or `unknown`, or if
-`PR_DEPENDABOT_SKIP_REASON == 'pr-resolution-failed'`, prepend the caution
-banner described in Verdict Adjustment and keep the verdict at `COMMENT`.
+If `PR_VALIDATION_CONCLUSION` is `neutral`, `skipped`, or `unknown`, prepend the
+caution banner described in Verdict Adjustment and keep the verdict at `COMMENT`.
 
 ### Verdict Adjustment
 
-Map every terminal conclusion explicitly. Under `workflow_run`,
-`PR_VALIDATION_CONCLUSION` is always final — there are no `pending` or
-`in_progress:*` branches to consider.
+Map every conclusion explicitly. Because a maintainer can invoke the review
+before `PR Validation` finishes, `PR_VALIDATION_CONCLUSION == unknown` is a
+reachable state and MUST be handled as "no terminal CI signal yet" rather than
+treated as a failure.
 
 * `PR_VALIDATION_CONCLUSION == success` AND no static check raises a
   concern AND no sticky high-risk trigger fires → verdict MAY upgrade
@@ -194,8 +196,7 @@ Map every terminal conclusion explicitly. Under `workflow_run`,
   `PR_VALIDATION_FAILING_CHECKS` (`name` plus `html_url`). Do NOT skip
   enrichment — maintainers rely on the advisory output to triage which
   package in a grouped PR caused the failure.
-* `PR_VALIDATION_CONCLUSION ∈ {neutral, skipped, unknown}` OR
-  `PR_DEPENDABOT_SKIP_REASON == 'pr-resolution-failed'` → verdict stays
+* `PR_VALIDATION_CONCLUSION ∈ {neutral, skipped, unknown}` → verdict stays
   at `COMMENT`. Prepend the banner
   `> [!CAUTION]`
   `> Deterministic CI signal unavailable (\`{conclusion}\`); review is advisory only.`

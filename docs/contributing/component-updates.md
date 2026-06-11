@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Updating External Components
 description: Process for identifying, updating, and vetting reused externally-maintained components
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-04
+ms.date: 2026-06-10
 ms.topic: how-to
 keywords:
   - component-updates
@@ -55,14 +55,14 @@ Dependabot opens PRs weekly on Monday for covered ecosystems. Configuration live
 | terraform      | `/infrastructure/terraform/dns` | None                    | Weekly, Monday |
 | github-actions | `/`                             | `github-actions`        | Weekly, Monday |
 
-PR flow: Dependabot opens PR → CI runs (dependency-review, pinning-scan, CodeQL, linters) → advisory reviewer agent posts a GHSA/OSV-enriched risk summary → maintainer reviews changelog and test results → merge.
+PR flow: Dependabot opens PR → CI runs (dependency-review, pinning-scan, CodeQL, linters) → a maintainer comments `/aw-dependabot-review` to request the advisory reviewer agent, which posts a GHSA/OSV-enriched risk summary → maintainer reviews changelog and test results → merge.
 
 > [!NOTE]
 > Dependabot does not cover Helm charts, container images, or 2 additional Terraform directories (`vpn/`, `automation/`). These require manual updates.
 
 ### Advisory Reviewer Agent
 
-An agentic workflow at [.github/workflows/aw-dependabot-pr-review.md](pathname://../../.github/workflows/aw-dependabot-pr-review.md) triggers on every Dependabot PR and posts a single review with the verdict `APPROVE` or `COMMENT`. It never emits `REQUEST_CHANGES` and never blocks a merge.
+An agentic workflow at [.github/workflows/aw-dependabot-pr-review.md](pathname://../../.github/workflows/aw-dependabot-pr-review.md) runs on demand when a maintainer comments `/aw-dependabot-review` on a Dependabot PR, then posts a single review with the verdict `APPROVE` or `COMMENT`. It never emits `REQUEST_CHANGES` and never blocks a merge. The slash-command trigger ensures gh-aw's role gate evaluates the maintainer who invoked it rather than `dependabot[bot]`, which lacks the required role.
 
 The reviewer enriches each update with:
 
