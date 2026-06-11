@@ -61,10 +61,11 @@ command: echo "Command will be set by submission script"
 # Static env vars only. Every training-related env var is set by
 # submit-azureml-lerobot-training.sh via --set environment_variables.X=Y flags
 # because the AzureML K8s extension does not substitute ${{inputs.X}} template
-# refs at runtime.
+# refs at runtime. The same constraint applies to ${{outputs.X}} — do NOT add
+# templated output env vars here; training reads $AZURE_ML_OUTPUT_<NAME>
+# directly from the runtime.
 environment_variables:
   AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
-  TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
   # MLFLOW_HTTP_REQUEST_TIMEOUT: <set by script>
 
 outputs:

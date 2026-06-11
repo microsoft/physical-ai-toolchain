@@ -411,6 +411,7 @@ variable "node_pools" {
       vm_size                    = "Standard_NV36ads_A10_v5"
       subnet_address_prefixes    = ["10.0.7.0/24"]
       node_taints                = ["nvidia.com/gpu:NoSchedule", "kubernetes.azure.com/scalesetpriority=spot:NoSchedule"]
+      node_labels                = { accelerator = "nvidia" }
       gpu_driver                 = "Install"
       priority                   = "Spot"
       should_enable_auto_scaling = true

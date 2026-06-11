@@ -34,4 +34,4 @@ Active — primary training approach.
 
 ## Checkpoint Flow
 
-Training writes checkpoints to local filesystem. The `TRAINING_CHECKPOINT_OUTPUT` environment variable controls the output path. AzureML uploads checkpoints as `uri_folder` artifacts.
+Training writes checkpoints to the local filesystem and mirrors them at job exit into the directory named by `$AZURE_ML_OUTPUT_CHECKPOINTS`. Azure ML uploads the contents to the job's `checkpoints` `uri_folder` output, from where downstream pipeline jobs can consume them as a typed input.
