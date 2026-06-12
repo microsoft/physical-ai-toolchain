@@ -5,6 +5,7 @@
 # fallback via --hf-dataset). Reuses the policy-agnostic IL training entry script
 # (training/il/scripts/lerobot/azureml-train-entry.sh) with a VLA-specific
 # requirements lockfile injected via LEROBOT_REQUIREMENTS.
+# cspell:ignore alreadyexists
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
