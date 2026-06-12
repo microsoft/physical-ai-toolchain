@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Release Verification
 description: Verify release artifact provenance and SBOM attestations for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-07
+ms.date: 2026-06-12
 ms.topic: reference
 ---
 

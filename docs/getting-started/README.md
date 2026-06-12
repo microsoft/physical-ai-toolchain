@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Getting Started
 description: Entry point for deploying the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-22
+ms.date: 2026-06-12
 ms.topic: overview
 keywords:
   - getting-started

@@ -3,7 +3,7 @@ sidebar_position: 7
 title: VPN Gateway Configuration
 description: Point-to-site and site-to-site VPN setup for private AKS cluster access
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-22
+ms.date: 2026-06-12
 ms.topic: how-to
 keywords:
   - vpn

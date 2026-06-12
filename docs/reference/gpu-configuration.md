@@ -4,7 +4,7 @@ sidebar_label: GPU Configuration
 sidebar_position: 1
 description: GPU driver and operator configuration for H100 and RTX PRO 6000 nodes.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-12
 ms.topic: concept
 ---
 

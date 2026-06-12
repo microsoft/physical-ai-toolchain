@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Chunking and Compression Configuration
 description: Configure bag chunking thresholds and zstd compression for ROS 2 edge recording on Jetson devices
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-26
+ms.date: 2026-06-12
 ms.topic: reference
 keywords:
   - chunking

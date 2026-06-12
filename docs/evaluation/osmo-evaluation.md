@@ -3,7 +3,7 @@ sidebar_position: 3
 title: OSMO Inference Workflows
 description: Execute trained robotics policy inference using NVIDIA OSMO with Isaac Lab and LeRobot frameworks
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-24
+ms.date: 2026-06-12
 ms.topic: how-to
 keywords:
   - OSMO

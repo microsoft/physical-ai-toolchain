@@ -3,7 +3,7 @@ sidebar_position: 10
 title: Cleanup and Destroy
 description: Remove cluster components, destroy Azure infrastructure, and clean up development environment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-22
+ms.date: 2026-06-12
 ms.topic: how-to
 keywords:
   - cleanup

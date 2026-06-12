@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Documentation Maintenance Policy
 description: Update triggers, ownership, review criteria, freshness policy, and release lifecycle for project documentation
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-09
+ms.date: 2026-06-12
 ms.topic: reference
 keywords:
   - documentation

@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Workflow Permissions
 description: GitHub Actions permission scopes and OSSF Scorecard Token-Permissions exception rationale
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-22
+ms.date: 2026-06-12
 ms.topic: reference
 keywords:
   - security

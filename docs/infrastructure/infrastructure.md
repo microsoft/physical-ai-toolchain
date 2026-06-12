@@ -4,7 +4,7 @@ title: Infrastructure Deployment
 slug: infrastructure-deployment
 description: Terraform configuration and deployment for AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-02
+ms.date: 2026-06-12
 ms.topic: how-to
 keywords:
   - terraform

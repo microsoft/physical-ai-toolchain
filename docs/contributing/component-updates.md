@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Updating External Components
 description: Process for identifying, updating, and vetting reused externally-maintained components
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-04
+ms.date: 2026-06-12
 ms.topic: how-to
 keywords:
   - component-updates

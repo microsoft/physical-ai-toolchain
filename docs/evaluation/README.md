@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Evaluation Guide
 description: Evaluate trained robotics policies in simulation and on physical hardware using Azure ML and NVIDIA OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-14
+ms.date: 2026-06-12
 ms.topic: overview
 keywords:
   - evaluation
