@@ -28,7 +28,8 @@ Related components live outside this directory:
 dataset (uri_folder)
        │
        ▼
-preprocess_step ──▶ prepared_dataset + preprocessing_config
+preprocess_step ──▶ prepared_dataset (uri_folder, layout: {repo_id}/meta/, {repo_id}/data/, …)
+       │       └──▶ preprocessing_config (uri_folder, audit artifact)
        │
        ▼
 train_step ──▶ checkpoints (uri_folder, MLflow-tracked)
@@ -78,12 +79,25 @@ training/il/scripts/submit-azureml-lerobot-pipeline.sh \
 
 ### Direct submission (without the wrapper script)
 
+> [!IMPORTANT]
+> The `train_step` and `evaluate_step` consume their `dataset_repo_id` via the
+> step-level `environment_variables` block (`DATASET_REPO_ID`, `POLICY_TYPE`,
+> `JOB_NAME`, `TRAINING_CHECKPOINT_OUTPUT`) defined in the pipeline YAML, not
+> through component inputs. Direct `az ml job create` invocations rewrite the
+> top-level `inputs.*`, but those step-level env vars are NOT auto-derived
+> from pipeline inputs. Prefer `training/il/scripts/submit-azureml-lerobot-pipeline.sh`,
+> which renders a temporary YAML with all step-level env vars patched.
+> When invoking `az ml job create` directly, also patch the relevant
+> `jobs.<step>.environment_variables` entries to match your inputs.
+
 ```bash
 az ml job create \
   --file training/il/workflows/azureml/lerobot-pipeline.yaml \
   --set inputs.dataset=azureml:my-dataset:1 \
   --set inputs.dataset_repo_id=user/my-dataset \
-  --set inputs.compute_train=azureml:gpu-cluster
+  --set inputs.compute_train=azureml:gpu-cluster \
+  --set jobs.train_step.environment_variables.DATASET_REPO_ID=user/my-dataset \
+  --set jobs.evaluate_step.environment_variables.DATASET_REPO_ID=user/my-dataset
 ```
 
 ## 🧩 Pipeline Inputs
@@ -92,14 +106,14 @@ az ml job create \
 |------------------------|--------------|----------|-------------------------------------------------------------------|
 | `dataset`              | `uri_folder` | Yes      | Raw LeRobot dataset asset (must contain `meta/`, `data/`)         |
 | `dataset_repo_id`      | `string`     | Yes      | HuggingFace-style repo id; must match dataset folder name         |
-| `preprocessing_config` | `uri_file`   | No       | Locked preprocessing config from a previous run (reproducibility) |
+| `preprocessing_config` | `uri_file`   | No       | Locked preprocessing config from a previous run (preprocess input only; not consumed by train/evaluate) |
 | `policy_type`          | `string`     | No       | `act` (default), `diffusion`, or `pi0`                            |
 | `job_name`             | `string`     | No       | Display label for MLflow run naming                               |
 | `compute_preprocess`   | `string`     | No       | AML compute target for `preprocess_step`                          |
 | `compute_train`        | `string`     | No       | AML compute target for `train_step`                               |
 | `compute_evaluate`     | `string`     | No       | AML compute target for `evaluate_step`                            |
 | `compute_register`     | `string`     | No       | AML compute target for `register_step` (4-step variant only)      |
-| `register_model_name`  | `string`     | No       | AML Model Registry name (4-step variant only)                     |
+| `register_model_name`  | `string`     | No       | AML Model Registry name (4-step variant only; required by submission script — fails fast on empty) |
 
 ## 📤 Pipeline Outputs
 
