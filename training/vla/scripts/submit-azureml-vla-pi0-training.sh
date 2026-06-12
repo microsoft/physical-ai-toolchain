@@ -61,7 +61,13 @@ TRAINING OPTIONS:
     -p, --policy-type TYPE        Policy architecture: pi0, pi0_fast, pi05 (default: pi0)
     -j, --job-name NAME           Job identifier (default: vla-pi0-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
-        --policy-repo-id ID       Pre-trained policy for fine-tuning (HuggingFace repo)
+        --policy-repo-id ID       HuggingFace Hub repo_id forwarded to lerobot as
+                                  policy.repo_id. lerobot uses this for hub-push
+                                  naming and checkpoint metadata; the entry script
+                                  passes --policy.push_to_hub=false so no upload
+                                  occurs. To warm-start from an existing AzureML-
+                                  registered model use --init-from-policy-model
+                                  instead.
         --init-from-policy-model URI
                                   Warm-start weights from a previously registered AzureML
                                   model. Accepted forms:
@@ -74,7 +80,12 @@ TRAINING OPTIONS:
                                   Mutually exclusive with --policy-repo-id.
         --lerobot-version VER     Specific LeRobot version or "latest" (default: latest)
         --lerobot-requirements PATH
-                                  Override compiled requirements lockfile path
+                                  Override compiled requirements lockfile, given as
+                                  a repo-relative path (e.g.
+                                  training/vla/lerobot/requirements.txt). The
+                                  lockfile must live inside training/ so it ships
+                                  to the container via the code asset; absolute
+                                  paths are rejected.
                                   (default: training/vla/lerobot/requirements.txt)
 
 TRAINING HYPERPARAMETERS:
@@ -91,17 +102,18 @@ AZURE CONTEXT:
         --resource-group NAME     Azure resource group
         --workspace-name NAME     Azure ML workspace
         --compute TARGET          Compute target override
-        --instance-type NAME      Instance type (default: gpu). pi0 (~3B params)
-                                  does NOT fit reliably on spot instances; default
-                                  uses on-demand GPU. Only honoured on AzureML-on-
-                                  Kubernetes compute. On AzureML managed AmlCompute
-                                  the script detects the compute type and drops the
-                                  flag (GPU count visible to the job container comes
-                                  from the cluster's VM SKU). The training wrapper
-                                  auto-detects the visible GPU count via
-                                  torch.cuda.device_count() on both paths and
-                                  enables Accelerate multi-GPU launch when N>1.
-                                  Shipped multi-GPU Kubernetes types:
+        --instance-type NAME      Instance type for AzureML-on-Kubernetes compute
+                                  (default: gpu). pi0 (~3B params) does NOT fit
+                                  reliably on spot instances; default uses on-
+                                  demand GPU. The value is forwarded to the job
+                                  as resources.instance_type whenever non-empty.
+                                  On AzureML managed AmlCompute the cluster's
+                                  VM SKU determines GPU count, so pass
+                                  --instance-type '' to omit the field. The
+                                  training wrapper auto-detects the visible GPU
+                                  count via torch.cuda.device_count() on both
+                                  paths and enables Accelerate multi-GPU launch
+                                  when N>1. Shipped multi-GPU Kubernetes types:
                                   gpu2/gpuspot2, gpu4/gpuspot4 (see
                                   infrastructure/setup/manifests/azureml-instance-types.yaml).
         --mixed-precision MODE    Accelerate mixed-precision mode (no|fp16|bf16);
@@ -181,8 +193,9 @@ ensure_ml_extension() {
 
 register_environment() {
   local name="$1" version="$2" image="$3" rg="$4" ws="$5" sub="$6"
-  local env_file
+  local env_file create_log status
   env_file=$(mktemp)
+  create_log=$(mktemp)
 
   cat >"$env_file" <<EOF
 \$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
@@ -192,12 +205,37 @@ image: $image
 EOF
 
   info "Publishing AzureML environment ${name}:${version}"
+  set +e
   az ml environment create --file "$env_file" \
     --name "$name" --version "$version" \
     --resource-group "$rg" --workspace-name "$ws" \
-    --subscription "$sub" >/dev/null 2>&1 || \
-    warn "Environment ${name}:${version} already exists or registration failed; continuing"
+    --subscription "$sub" >"$create_log" 2>&1
+  status=$?
+  set -e
+
   rm -f "$env_file"
+
+  if [[ $status -eq 0 ]]; then
+    rm -f "$create_log"
+    return 0
+  fi
+
+  # AzureML environment versions are immutable; the CLI returns an
+  # "already exists" / "AlreadyExists" / HTTP 409 error when re-registering
+  # an existing version. Treat that as success since the existing artifact
+  # is what subsequent commands will reference. Surface any other failure
+  # (auth, quota, network, schema) so the caller can stop before submitting
+  # a job that would fail at runtime.
+  if grep -qiE 'already exists|alreadyexists|http 409|status code: ?409' "$create_log"; then
+    warn "Environment ${name}:${version} already exists; reusing existing version"
+    rm -f "$create_log"
+    return 0
+  fi
+
+  error "Failed to publish AzureML environment ${name}:${version}"
+  cat "$create_log" >&2
+  rm -f "$create_log"
+  return 1
 }
 
 render_job_file_with_mounted_inputs() {
@@ -433,6 +471,11 @@ fi
 # Resolve the compiled lockfile against the repo so a missing file is caught
 # locally before submission. The path injected into the container is left
 # repo-relative — the entry script's symlink restores the training/ prefix.
+case "$lerobot_requirements" in
+  /*)
+    fatal "--lerobot-requirements must be a repo-relative path (got: $lerobot_requirements). The value is forwarded into the training container via LEROBOT_REQUIREMENTS and resolved against the mounted code snapshot — absolute host paths do not exist there."
+    ;;
+esac
 _lockfile_local="$REPO_ROOT/$lerobot_requirements"
 [[ -f "$_lockfile_local" ]] || fatal \
   "--lerobot-requirements: lockfile not found at $_lockfile_local. Run 'cd training/vla/lerobot && uv pip compile pyproject.toml -o requirements.txt --python-version 3.12 --python-platform x86_64-manylinux_2_28' to regenerate."

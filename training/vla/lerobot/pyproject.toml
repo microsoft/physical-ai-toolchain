@@ -37,10 +37,12 @@ dependencies = [
     "marshmallow==3.26.2",
     "mlflow-skinny==3.13.0",
     "packaging==26.2",
-    # Global prerelease resolution would otherwise select pydantic and sentry-sdk
-    # alpha releases; pin stable versions unless a direct dependency requires them.
+    # Global prerelease resolution would otherwise select pydantic, sentry-sdk,
+    # and hf-xet alpha/dev releases; pin stable versions unless a direct
+    # dependency requires them.
     "pydantic==2.13.4",
     "sentry-sdk==2.61.1",
+    "hf-xet==1.5.1",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
