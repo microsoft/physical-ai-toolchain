@@ -20,7 +20,7 @@ _BASELINE_NONE = "none"
 _TOOLCHAIN_TO_VLA_METRIC = {
     "mse": "action_accuracy_l2",
     "mae": "action_accuracy_l1",
-    "avg_inference_ms": "inference_latency_p50_ms",
+    "avg_inference_ms": "inference_latency_mean_ms",
     "throughput_hz": "throughput_hz",
 }
 

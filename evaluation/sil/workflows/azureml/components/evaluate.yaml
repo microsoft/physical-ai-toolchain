@@ -33,10 +33,6 @@ inputs:
     type: uri_folder
     optional: true
     description: Dataset prepared by the preprocess step (or mounted directly).
-  preprocessing_config:
-    type: uri_folder
-    optional: true
-    description: Preprocessing config emitted by the preprocess step.
   dataset_repo_id:
     type: string
     description: HuggingFace-style dataset repo id (set as DATASET_REPO_ID at the step level).
@@ -64,7 +60,10 @@ environment: azureml:lerobot-inference-env:latest
 #   model_checkpoint    -> POLICY_REPO_ID (local checkpoint dir; from_pretrained
 #                          accepts a local path identically to a HF repo id)
 #   prepared_dataset    -> DATASET_DIR (optional; if unset, falls back to
-#                          DATASET_REPO_ID HF download path)
+#                          DATASET_REPO_ID HF download path). preprocess.py
+#                          writes the dataset to "{output}/{repo_id}/", so the
+#                          bridge appends DATASET_REPO_ID to land at the
+#                          directory containing meta/info.json.
 #   outputs.eval_metrics -> OUTPUT_DIR (where metrics.json + failure_cases.jsonl
 #                          + eval_results.json + plots are written)
 command: >-
@@ -72,7 +71,11 @@ command: >-
   set -euo pipefail;
   export POLICY_REPO_ID="$AZURE_ML_INPUT_model_checkpoint";
   if [[ -n "${AZURE_ML_INPUT_prepared_dataset:-}" ]]; then
-    export DATASET_DIR="$AZURE_ML_INPUT_prepared_dataset";
+    : "${DATASET_REPO_ID:?DATASET_REPO_ID required when prepared_dataset is provided}";
+    case "$DATASET_REPO_ID" in
+      /*|*..*) echo "DATASET_REPO_ID must be relative (no /, no ..): $DATASET_REPO_ID" >&2; exit 1 ;;
+    esac;
+    export DATASET_DIR="$AZURE_ML_INPUT_prepared_dataset/$DATASET_REPO_ID";
     echo "[BRIDGE] DATASET_DIR=$DATASET_DIR";
   fi;
   export OUTPUT_DIR="$AZURE_ML_OUTPUT_eval_metrics";
