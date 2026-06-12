@@ -8,6 +8,7 @@ stubbing them in ``sys.modules``.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -96,12 +97,12 @@ class TestBuildParser:
 
 class TestSyncCheckpointOutput:
     def test_no_target_does_nothing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("TRAINING_CHECKPOINT_OUTPUT", raising=False)
+        monkeypatch.delenv("AZURE_ML_OUTPUT_CHECKPOINTS", raising=False)
         # Should silently return without error.
         _MOD._sync_checkpoint_output(tmp_path / "missing")
 
     def test_missing_source_does_nothing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("TRAINING_CHECKPOINT_OUTPUT", str(tmp_path / "out"))
+        monkeypatch.setenv("AZURE_ML_OUTPUT_CHECKPOINTS", str(tmp_path / "out"))
         _MOD._sync_checkpoint_output(tmp_path / "does_not_exist")
         assert not (tmp_path / "out").exists()
 
@@ -110,7 +111,7 @@ class TestSyncCheckpointOutput:
         src.mkdir()
         (src / "ckpt.pt").write_text("data")
         dest = tmp_path / "out"
-        monkeypatch.setenv("TRAINING_CHECKPOINT_OUTPUT", str(dest))
+        monkeypatch.setenv("AZURE_ML_OUTPUT_CHECKPOINTS", str(dest))
 
         _MOD._sync_checkpoint_output(src)
 
@@ -123,7 +124,7 @@ class TestSyncCheckpointOutput:
         dest = tmp_path / "out"
         dest.mkdir()
         (dest / "stale.pt").write_text("stale")
-        monkeypatch.setenv("TRAINING_CHECKPOINT_OUTPUT", str(dest))
+        monkeypatch.setenv("AZURE_ML_OUTPUT_CHECKPOINTS", str(dest))
 
         _MOD._sync_checkpoint_output(src)
 
@@ -133,7 +134,7 @@ class TestSyncCheckpointOutput:
     def test_swallows_copy_errors(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         src = tmp_path / "checkpoints"
         src.mkdir()
-        monkeypatch.setenv("TRAINING_CHECKPOINT_OUTPUT", str(tmp_path / "out"))
+        monkeypatch.setenv("AZURE_ML_OUTPUT_CHECKPOINTS", str(tmp_path / "out"))
         monkeypatch.setattr(_MOD.shutil, "copytree", MagicMock(side_effect=OSError("denied")))
         # Should not raise.
         _MOD._sync_checkpoint_output(src)
@@ -994,6 +995,27 @@ class TestFinalizeMlflowRun:
         register.assert_called_once()
         mlflow.end_run.assert_not_called()
 
+    def test_artifact_upload_failure_skips_registration(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        mlflow = MagicMock()
+        register = MagicMock()
+        monkeypatch.setattr(_MOD, "_log_artifacts", MagicMock(side_effect=RuntimeError("upload boom")))
+        monkeypatch.setattr(_MOD, "_register_checkpoint_model", register)
+
+        state = _MOD.MLflowRunState(
+            mlflow=mlflow,
+            log_interval=10,
+            owns_run=True,
+            args=_make_mlflow_args(register_checkpoint="model"),
+            cli_args=_make_cli(),
+            log_dir=tmp_path,
+            resume_path=None,
+        )
+
+        _MOD._finalize_mlflow_run(state)
+
+        register.assert_not_called()
+        mlflow.end_run.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # _execute_training_loop
@@ -1203,6 +1225,70 @@ class TestCloseSimulation:
         monkeypatch.setattr(_MOD.os, "_exit", lambda code: called.append(code))
         _MOD._close_simulation(None)
         assert called == [0]
+
+    def test_preserves_system_exit_integer_code(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        called: list[int] = []
+        monkeypatch.setattr(_MOD.os, "_exit", lambda code: called.append(code))
+        try:
+            raise SystemExit(7)
+        except SystemExit:
+            _MOD._close_simulation(None)
+        assert called == [7]
+
+    def test_maps_non_integer_system_exit_to_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        called: list[int] = []
+        monkeypatch.setattr(_MOD.os, "_exit", lambda code: called.append(code))
+        try:
+            raise SystemExit("boom")
+        except SystemExit:
+            _MOD._close_simulation(None)
+        assert called == [1]
+
+    def test_maps_active_exception_to_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        called: list[int] = []
+        monkeypatch.setattr(_MOD.os, "_exit", lambda code: called.append(code))
+        try:
+            raise RuntimeError("training crashed")
+        except RuntimeError:
+            _MOD._close_simulation(None)
+        assert called == [1]
+
+    def test_bare_system_exit_maps_to_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        called: list[int] = []
+        monkeypatch.setattr(_MOD.os, "_exit", lambda code: called.append(code))
+        try:
+            raise SystemExit()
+        except SystemExit:
+            _MOD._close_simulation(None)
+        assert called == [0]
+
+    def test_explicit_system_exit_zero_maps_to_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        called: list[int] = []
+        monkeypatch.setattr(_MOD.os, "_exit", lambda code: called.append(code))
+        try:
+            raise SystemExit(0)
+        except SystemExit:
+            _MOD._close_simulation(None)
+        assert called == [0]
+
+    def test_exception_propagating_through_finally(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Locks the call-site contract: a SystemExit propagating through the
+        ``finally`` block in ``run_training`` is observable via ``sys.exc_info()``
+        even with no enclosing ``except``. If this ever stopped holding,
+        ``_close_simulation`` would silently exit 0 and mask a failed job.
+        """
+        called: list[int] = []
+        monkeypatch.setattr(_MOD.os, "_exit", lambda code: called.append(code))
+
+        def run() -> None:
+            try:
+                raise SystemExit(1)
+            finally:
+                _MOD._close_simulation(None)
+
+        with contextlib.suppress(SystemExit):
+            run()
+        assert called == [1]
 
 
 # ---------------------------------------------------------------------------
@@ -1423,6 +1509,212 @@ class TestRunHydraTraining:
         )
         prepare_shutdown.assert_called_once()
         env.close.assert_called_once()
+
+    def test_reraises_system_exit_when_launch_fails(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        env_cfg = SimpleNamespace()
+        agent_cfg = {"agent": {}}
+        env = SimpleNamespace(close=mocker.MagicMock())
+
+        def hydra_task_config(task: str, agent_entry: str):
+            # Mirror Hydra's default behavior: swallow exceptions raised inside the
+            # decorated function so that _run_hydra_training's _launch_failure dict
+            # is the only path that surfaces the error.
+            def decorate(func):
+                def invoke() -> None:
+                    with contextlib.suppress(BaseException):
+                        func(env_cfg, agent_cfg)
+
+                return invoke
+
+            return decorate
+
+        modules = _make_training_modules(hydra_task_config=hydra_task_config)
+        state = _MOD.LaunchState(agent_dict={}, random_seed=1, rollouts=1, log_dir=tmp_path, resume_path=None)
+        mocker.patch.object(_MOD, "_prepare_launch_state", return_value=state)
+        mocker.patch.object(_MOD, "_instantiate_environment", return_value=env)
+        mocker.patch.object(_MOD, "_initialize_runner", return_value=SimpleNamespace())
+        mocker.patch.object(
+            _MOD,
+            "_run_training_with_mlflow",
+            side_effect=RuntimeError("training crashed"),
+        )
+        prepare_shutdown = mocker.patch.object(_MOD, "prepare_for_shutdown")
+        logger_error = mocker.patch.object(_MOD._LOGGER, "error")
+        cli = _make_cli(seed=1)
+        cli.agent = None
+
+        with pytest.raises(SystemExit) as excinfo:
+            _MOD._run_hydra_training(
+                args=_make_mlflow_args(),
+                cli_args=cli,
+                context=None,
+                app_launcher=SimpleNamespace(),
+                modules=modules,
+            )
+
+        assert excinfo.value.code == 1
+        prepare_shutdown.assert_called_once()
+        env.close.assert_called_once()
+        logger_error.assert_called_once()
+        log_args = logger_error.call_args.args
+        assert log_args[0] == "Training failed:\n%s"
+        assert "RuntimeError" in log_args[1]
+        assert "training crashed" in log_args[1]
+
+    def test_reraises_system_exit_when_setup_phase_fails(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        """Failures in `_prepare_launch_state` must surface as SystemExit.
+
+        `_prepare_launch_state` runs inside Hydra's swallow scope, so any crash
+        during setup (env-cfg validation, log-dir creation, etc.) must be
+        captured and re-raised by `_run_hydra_training` for AzureML to report
+        Failed. The hydra stub captures everything escaping the decorated
+        function so the assertions can prove that only the original
+        `ValueError` exits the wrapper — an `AttributeError` here would
+        indicate the `env is not None` guard in `finally` was bypassed.
+        """
+        env_cfg = SimpleNamespace()
+        agent_cfg = {"agent": {}}
+        captured: list[ValueError] = []
+
+        def hydra_task_config(task: str, agent_entry: str):
+            def decorate(func):
+                def invoke() -> None:
+                    try:
+                        func(env_cfg, agent_cfg)
+                    except ValueError as exc:
+                        captured.append(exc)
+
+                return invoke
+
+            return decorate
+
+        modules = _make_training_modules(hydra_task_config=hydra_task_config)
+        mocker.patch.object(
+            _MOD,
+            "_prepare_launch_state",
+            side_effect=ValueError("invalid env_cfg"),
+        )
+        instantiate_env = mocker.patch.object(_MOD, "_instantiate_environment")
+        prepare_shutdown = mocker.patch.object(_MOD, "prepare_for_shutdown")
+        logger_error = mocker.patch.object(_MOD._LOGGER, "error")
+        cli = _make_cli(seed=1)
+        cli.agent = None
+
+        with pytest.raises(SystemExit) as excinfo:
+            _MOD._run_hydra_training(
+                args=_make_mlflow_args(),
+                cli_args=cli,
+                context=None,
+                app_launcher=SimpleNamespace(),
+                modules=modules,
+            )
+
+        assert excinfo.value.code == 1
+        assert isinstance(excinfo.value.__cause__, ValueError)
+        instantiate_env.assert_not_called()
+        prepare_shutdown.assert_called_once()
+        logger_error.assert_called_once()
+        assert len(captured) == 1
+        assert isinstance(captured[0], ValueError)
+
+    def test_reraises_system_exit_when_env_instantiation_fails(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        """Failures in `_instantiate_environment` must surface as SystemExit.
+
+        The `finally` block must skip `env.close()` because env was never
+        bound. The captured-exception harness asserts the only object
+        escaping `_launch` is the original `RuntimeError`; an
+        `AttributeError` would indicate `None.close()` was called.
+        """
+        env_cfg = SimpleNamespace()
+        agent_cfg = {"agent": {}}
+        captured: list[RuntimeError] = []
+
+        def hydra_task_config(task: str, agent_entry: str):
+            def decorate(func):
+                def invoke() -> None:
+                    try:
+                        func(env_cfg, agent_cfg)
+                    except RuntimeError as exc:
+                        captured.append(exc)
+
+                return invoke
+
+            return decorate
+
+        modules = _make_training_modules(hydra_task_config=hydra_task_config)
+        state = _MOD.LaunchState(agent_dict={}, random_seed=1, rollouts=1, log_dir=tmp_path, resume_path=None)
+        mocker.patch.object(_MOD, "_prepare_launch_state", return_value=state)
+        mocker.patch.object(
+            _MOD,
+            "_instantiate_environment",
+            side_effect=RuntimeError("gym registration failed"),
+        )
+        init_runner = mocker.patch.object(_MOD, "_initialize_runner")
+        prepare_shutdown = mocker.patch.object(_MOD, "prepare_for_shutdown")
+        cli = _make_cli(seed=1)
+        cli.agent = None
+
+        with pytest.raises(SystemExit) as excinfo:
+            _MOD._run_hydra_training(
+                args=_make_mlflow_args(),
+                cli_args=cli,
+                context=None,
+                app_launcher=SimpleNamespace(),
+                modules=modules,
+            )
+
+        assert excinfo.value.code == 1
+        assert isinstance(excinfo.value.__cause__, RuntimeError)
+        init_runner.assert_not_called()
+        prepare_shutdown.assert_called_once()
+        assert len(captured) == 1
+        assert isinstance(captured[0], RuntimeError)
+
+    def test_clean_system_exit_zero_is_not_treated_as_failure(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        """A deliberate `sys.exit(0)` inside training must propagate as success.
+
+        The wrapper catches `BaseException` for diagnostics, so it must explicitly
+        skip clean `SystemExit(0)` / bare `sys.exit()` to avoid reclassifying a
+        deliberate clean exit as a failure.
+        """
+        env_cfg = SimpleNamespace()
+        agent_cfg = {"agent": {}}
+        env = SimpleNamespace(close=mocker.MagicMock())
+
+        def hydra_task_config(task: str, agent_entry: str):
+            def decorate(func):
+                def invoke() -> None:
+                    with contextlib.suppress(SystemExit):
+                        func(env_cfg, agent_cfg)
+
+                return invoke
+
+            return decorate
+
+        modules = _make_training_modules(hydra_task_config=hydra_task_config)
+        state = _MOD.LaunchState(agent_dict={}, random_seed=1, rollouts=1, log_dir=tmp_path, resume_path=None)
+        mocker.patch.object(_MOD, "_prepare_launch_state", return_value=state)
+        mocker.patch.object(_MOD, "_instantiate_environment", return_value=env)
+        mocker.patch.object(_MOD, "_initialize_runner", return_value=SimpleNamespace())
+        mocker.patch.object(
+            _MOD,
+            "_run_training_with_mlflow",
+            side_effect=SystemExit(0),
+        )
+        logger_error = mocker.patch.object(_MOD._LOGGER, "error")
+        cli = _make_cli(seed=1)
+        cli.agent = None
+
+        _MOD._run_hydra_training(
+            args=_make_mlflow_args(),
+            cli_args=cli,
+            context=None,
+            app_launcher=SimpleNamespace(),
+            modules=modules,
+        )
+
+        env.close.assert_called_once()
+        logger_error.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

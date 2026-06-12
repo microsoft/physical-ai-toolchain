@@ -19,6 +19,7 @@
         "USER_CPU": 1,
         "USER_GPU": 0,
         "USER_MEMORY": "1Gi",
+        "USER_SHM_SIZE": "8Gi",
         "USER_STORAGE": "1Gi"
     },
     "common_resource_validations": [

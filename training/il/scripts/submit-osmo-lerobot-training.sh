@@ -31,23 +31,18 @@ Usage: submit-osmo-lerobot-training.sh [OPTIONS] [-- osmo-submit-flags]
 Submit a LeRobot behavioral cloning training workflow to OSMO.
 Supports ACT and Diffusion policy architectures with Azure ML MLflow logging.
 
-REQUIRED:
-    -d, --dataset-repo-id ID     HuggingFace dataset repository (e.g., user/dataset)
-
-DATA SOURCE:
-        --from-blob               Use Azure Blob Storage as data source
-        --storage-account NAME    Azure Storage account name
-        --storage-container NAME  Blob container name (default: datasets)
-        --blob-prefix PREFIX      Blob path prefix for dataset
+DATA SOURCE (mutually exclusive — provide exactly one):
+    -d, --dataset-repo-id ID      HuggingFace dataset repository.
+        --blob-url URL            Azure Blob dataset URL (repeatable). Uses OSMO workload identity for authentication.
 
 TRAINING OPTIONS:
     -w, --workflow PATH           Workflow template (default: training/il/workflows/osmo/lerobot-train.yaml)
     -p, --policy-type TYPE        Policy architecture: act, diffusion (default: act)
     -j, --job-name NAME           Job identifier (default: lerobot-act-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
-    -i, --image IMAGE             Container image (default: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime)
+    -i, --image IMAGE             Container image (default: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime)
         --policy-repo-id ID       Pre-trained policy for fine-tuning (HuggingFace repo)
-        --lerobot-version VER     Specific LeRobot version or "latest" (default: latest)
+        --lerobot-version VER     Specific LeRobot version
 
 TRAINING HYPERPARAMETERS:
         --training-steps N        Total training iterations (default: 100000)
@@ -82,7 +77,7 @@ Values resolved: CLI > Environment variables > Terraform outputs
 Additional arguments after -- are forwarded to osmo workflow submit.
 
 EXAMPLES:
-    # ACT training with MLflow logging (defaults)
+    # ACT training from HuggingFace Hub
     submit-osmo-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
 
     # Diffusion policy with custom learning rate
@@ -99,15 +94,24 @@ EXAMPLES:
       --batch-size 16 \
       --training-steps 50000
 
-    # Train from Azure Blob Storage without validation split
+    # Train from Azure Blob Storage
     submit-osmo-lerobot-training.sh \
-      -d hve-robo/hve-robo-cell \
-      --from-blob \
-      --storage-account stosmorbt3dev001 \
-      --blob-prefix hve-robo/hve-robo-cell \
+      --blob-url https://stosmorbt3dev001.blob.core.windows.net/datasets/hve-robo/hve-robo-cell \
       --no-val-split \
       -r my-act-model
 EOF
+}
+
+#------------------------------------------------------------------------------
+# Helpers
+#------------------------------------------------------------------------------
+
+json_array() {
+  python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@"
+}
+
+validate_blob_urls() {
+  python3 "$REPO_ROOT/training/il/scripts/lerobot/_validate_blob_urls.py" "$@"
 }
 
 #------------------------------------------------------------------------------
@@ -119,14 +123,13 @@ dataset_repo_id="${DATASET_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 job_name="${JOB_NAME:-lerobot-act-training}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
-image="${IMAGE:-pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime}"
+image="${IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime}"
 policy_repo_id="${POLICY_REPO_ID:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
-
-from_blob=false
-storage_account="${BLOB_STORAGE_ACCOUNT:-${AZURE_STORAGE_ACCOUNT_NAME:-}}"
-storage_container="${BLOB_STORAGE_CONTAINER:-datasets}"
-blob_prefix="${BLOB_PREFIX:-}"
+dataset_root="${DATASET_ROOT:-/workspace/data}"
+blob_urls=()
+blob_urls_json="[]"
+blob_source_count=0
 
 training_steps="${TRAINING_STEPS:-100000}"
 batch_size="${BATCH_SIZE:-32}"
@@ -145,6 +148,9 @@ register_checkpoint="${REGISTER_CHECKPOINT:-}"
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
+azure_authority_host="${AZURE_AUTHORITY_HOST:-https://login.microsoftonline.com}"
+mlflow_retries="${MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES:-3}"
+mlflow_timeout="${MLFLOW_HTTP_REQUEST_TIMEOUT:-60}"
 
 TMP_DIR="$SCRIPT_DIR/.tmp"
 ARCHIVE_PATH="$TMP_DIR/osmo-lerobot-training.zip"
@@ -164,16 +170,13 @@ while [[ $# -gt 0 ]]; do
     -h|--help)                    show_help; exit 0 ;;
     -w|--workflow)                workflow="$2"; shift 2 ;;
     -d|--dataset|--dataset-repo-id) dataset_repo_id="$2"; shift 2 ;;
+    --blob-url)                   blob_urls+=("$2"); shift 2 ;;
     -p|--policy|--policy-type)    policy_type="$2"; shift 2 ;;
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
     -i|--image)                   image="$2"; shift 2 ;;
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
     --lerobot-version)            lerobot_version="$2"; shift 2 ;;
-    --from-blob)                  from_blob=true; shift ;;
-    --storage-account)            storage_account="$2"; shift 2 ;;
-    --storage-container)          storage_container="$2"; shift 2 ;;
-    --blob-prefix)                blob_prefix="$2"; shift 2 ;;
     --steps|--training-steps)     training_steps="$2"; shift 2 ;;
     --batch-size)                 batch_size="$2"; shift 2 ;;
     --learning-rate)              learning_rate="$2"; shift 2 ;;
@@ -191,7 +194,7 @@ while [[ $# -gt 0 ]]; do
     --use-local-osmo)             use_local_osmo=true; shift ;;
     --config-preview)             config_preview=true; shift ;;
     --)                           shift; forward_args=("$@"); break ;;
-    *)                            forward_args+=("$1"); shift ;;
+    *)                            fatal "Unknown option: $1" ;;
   esac
 done
 
@@ -201,15 +204,25 @@ done
 
 [[ "$use_local_osmo" == "true" ]] && activate_local_osmo
 
-require_tools osmo zip base64
+require_tools osmo zip base64 python3
 
-[[ -z "$dataset_repo_id" ]] && fatal "--dataset-repo-id is required"
 [[ -d "$REPO_ROOT/training/il" ]] || fatal "Directory training/il not found"
 
-# Validate blob parameters when --from-blob is specified
-if [[ "$from_blob" == "true" ]]; then
-  [[ -z "$storage_account" ]] && fatal "--storage-account is required with --from-blob"
-  [[ -z "$blob_prefix" ]] && blob_prefix="$dataset_repo_id"
+if [[ ${#blob_urls[@]} -gt 0 && -n "$dataset_repo_id" ]]; then
+  fatal "--dataset-repo-id and --blob-url are mutually exclusive."
+fi
+
+if [[ "$dataset_repo_id" == azureml:* || "$dataset_repo_id" == azureml://* ]]; then
+  fatal "--dataset-repo-id is for HuggingFace repositories, not AzureML data assets. Resolve the asset to a direct --blob-url for OSMO."
+fi
+
+if [[ ${#blob_urls[@]} -gt 0 ]]; then
+  dataset_repo_id="dataset"
+  validate_blob_urls "${blob_urls[@]}"
+  blob_urls_json=$(json_array "${blob_urls[@]}")
+  blob_source_count="${#blob_urls[@]}"
+elif [[ -z "$dataset_repo_id" ]]; then
+  fatal "No dataset source specified. Use --dataset-repo-id for HuggingFace Hub, or provide one or more --blob-url sources."
 fi
 
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
@@ -227,18 +240,20 @@ esac
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
+  print_kv "Source Mode" "$([[ $blob_source_count -gt 0 ]] && echo 'azure-blob' || echo 'huggingface')"
   print_kv "Dataset" "$dataset_repo_id"
   print_kv "Policy Type" "$policy_type"
   print_kv "Job Name" "$job_name"
   print_kv "Image" "$image"
   print_kv "Output Dir" "$output_dir"
+  print_kv "Dataset Root" "$dataset_root"
   print_kv "Training Steps" "$training_steps"
   print_kv "Batch Size" "$batch_size"
   print_kv "Learning Rate" "$learning_rate"
   print_kv "Save Freq" "$save_freq"
   print_kv "Val Split" "$val_split"
   print_kv "System Metrics" "$system_metrics"
-  [[ "$from_blob" == "true" ]] && print_kv "Blob Source" "$storage_account/$storage_container/$blob_prefix"
+  [[ $blob_source_count -gt 0 ]] && print_kv "Blob URL Count" "$blob_source_count"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
   print_kv "Subscription" "$subscription_id"
   print_kv "Resource Group" "$resource_group"
@@ -289,6 +304,8 @@ submit_args=(
   "encoded_archive=$encoded_payload"
   "payload_root=$payload_root"
   "dataset_repo_id=$dataset_repo_id"
+  "dataset_root=$dataset_root"
+  "blob_urls=$blob_urls_json"
   "policy_type=$policy_type"
   "job_name=$job_name"
   "output_dir=$output_dir"
@@ -299,9 +316,9 @@ submit_args=(
   "save_freq=$save_freq"
   "val_split=$val_split"
   "system_metrics=$system_metrics"
-  "storage_account=$storage_account"
-  "storage_container=$storage_container"
-  "blob_prefix=$blob_prefix"
+  "azure_authority_host=$azure_authority_host"
+  "mlflow_token_refresh_retries=$mlflow_retries"
+  "mlflow_http_request_timeout=$mlflow_timeout"
 )
 
 [[ -n "$policy_repo_id" ]]      && submit_args+=("policy_repo_id=$policy_repo_id")
@@ -332,7 +349,7 @@ info "  Learning Rate: $learning_rate"
 info "  Val Split: $val_split"
 info "  System Metrics: $system_metrics"
 info "  Payload: ${archive_size} bytes"
-[[ "$from_blob" == "true" ]] && info "  Data Source: Azure Blob ($storage_account/$storage_container/$blob_prefix)"
+[[ $blob_source_count -gt 0 ]] && info "  Data Source: Azure Blob URLs ($blob_source_count)"
 [[ -n "$policy_repo_id" ]] && info "  Fine-tune from: $policy_repo_id"
 [[ -n "$register_checkpoint" ]] && info "  Register model: $register_checkpoint"
 
@@ -341,8 +358,11 @@ osmo "${submit_args[@]}" || fatal "Failed to submit workflow"
 #------------------------------------------------------------------------------
 # Summary
 #------------------------------------------------------------------------------
+
 section "Deployment Summary"
 print_kv "Dataset" "$dataset_repo_id"
+print_kv "Source Mode" "$([[ $blob_source_count -gt 0 ]] && echo 'azure-blob' || echo 'huggingface')"
+print_kv "Blob URLs" "$blob_source_count"
 print_kv "Policy Type" "$policy_type"
 print_kv "Job Name" "$job_name"
 print_kv "Image" "$image"

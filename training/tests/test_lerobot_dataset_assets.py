@@ -93,9 +93,6 @@ def _clear_lineage_env(monkeypatch):
         "DATASET_REPO_ID",
         "BLOB_URLS",
         "DATASET_ASSETS",
-        "STORAGE_ACCOUNT",
-        "STORAGE_CONTAINER",
-        "BLOB_PREFIX",
         "AZUREML_RUN_ID",
         "MLFLOW_RUN_ID",
         "MLFLOW_EXPERIMENT_ID",
@@ -211,6 +208,80 @@ class TestRegisterModelLineage:
         assert tags["dataset_source"] == "huggingface"
         assert "dataset_assets" not in tags
 
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '[""]',
+            '[" "]',
+            "[null]",
+            '[null, ""]',
+            "[\n]",
+        ],
+    )
+    def test_dataset_assets_with_only_empty_entries_falls_back_to_hf(
+        self, azure_env, fake_azure_modules, monkeypatch, tmp_path, raw
+    ):
+        """Lists that contain no real URIs must not be treated as a data-asset run."""
+        _clear_lineage_env(monkeypatch)
+        monkeypatch.setenv("DATASET_ASSETS", raw)
+        monkeypatch.setenv("DATASET_REPO_ID", "user/ds")
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "m")
+
+        _CHECKPOINTS._register_model_via_aml(tmp_path, "ckpt-001")
+        tags = fake_azure_modules.model_cls.call_args.kwargs["tags"]
+        assert tags["dataset_source"] == "huggingface"
+        assert "dataset_assets" not in tags
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '[""]',
+            '[" "]',
+            "[null]",
+            "[\n]",
+        ],
+    )
+    def test_blob_urls_with_only_empty_entries_falls_back_to_hf(
+        self, azure_env, fake_azure_modules, monkeypatch, tmp_path, raw
+    ):
+        _clear_lineage_env(monkeypatch)
+        monkeypatch.setenv("BLOB_URLS", raw)
+        monkeypatch.setenv("DATASET_REPO_ID", "user/ds")
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "m")
+
+        _CHECKPOINTS._register_model_via_aml(tmp_path, "ckpt-001")
+        tags = fake_azure_modules.model_cls.call_args.kwargs["tags"]
+        assert tags["dataset_source"] == "huggingface"
+        assert "blob_urls" not in tags
+
+    def test_blob_urls_mixed_valid_and_empty_drops_empty(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
+        _clear_lineage_env(monkeypatch)
+        monkeypatch.setenv(
+            "BLOB_URLS",
+            json.dumps(["", "https://acct.blob.core.windows.net/cont/prefix", "  "]),
+        )
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "m")
+
+        _CHECKPOINTS._register_model_via_aml(tmp_path, "ckpt-001")
+        tags = fake_azure_modules.model_cls.call_args.kwargs["tags"]
+        assert tags["dataset_source"] == "azure-blob"
+        assert tags["blob_url_count"] == "1"
+        lineage = json.loads((tmp_path / "azureml_lineage.json").read_text())
+        assert lineage["blob_urls"] == ["https://acct.blob.core.windows.net/cont/prefix"]
+
+    def test_pretty_printed_blob_urls_are_parsed(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
+        _clear_lineage_env(monkeypatch)
+        monkeypatch.setenv(
+            "BLOB_URLS",
+            '[\n  "https://acct.blob.core.windows.net/cont/prefix"\n]',
+        )
+        monkeypatch.setenv("REGISTER_CHECKPOINT", "m")
+
+        _CHECKPOINTS._register_model_via_aml(tmp_path, "ckpt-001")
+        tags = fake_azure_modules.model_cls.call_args.kwargs["tags"]
+        assert tags["dataset_source"] == "azure-blob"
+        assert tags["blob_url_count"] == "1"
+
     def test_long_uri_lists_fit_azureml_tag_limit(self, azure_env, fake_azure_modules, monkeypatch, tmp_path):
         _clear_lineage_env(monkeypatch)
         assets = [
@@ -245,6 +316,10 @@ _ENTRY_SCRIPT = _REPO_ROOT / "training/il/scripts/lerobot/azureml-train-entry.sh
 # makes during the argument-parse / validate phase (`extension show`,
 # `environment create`). Tests that drive a full submission pass their own,
 # richer stub via env_extra["PATH"], which is honored by _run_submit_job.
+# Also stub `terraform` so `read_terraform_outputs` returns 1 regardless of any
+# real `infrastructure/terraform/terraform.tfstate` present in the developer's
+# workspace — without this, Terraform-derived defaults (compute, workspace, etc.)
+# leak into the test and mask validation-failure assertions.
 @pytest.fixture(scope="module", autouse=True)
 def _stub_az_on_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     bin_dir = tmp_path_factory.mktemp("az-stub-bin")
@@ -258,6 +333,9 @@ def _stub_az_on_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
         encoding="utf-8",
     )
     az.chmod(0o755)
+    terraform = bin_dir / "terraform"
+    terraform.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    terraform.chmod(0o755)
     original_path = os.environ.get("PATH", "")
     os.environ["PATH"] = f"{bin_dir}{os.pathsep}{original_path}"
     try:
@@ -275,6 +353,10 @@ def _run_submit(*args: str, env_extra: dict[str, str] | None = None) -> subproce
             "AZUREML_WORKSPACE_NAME": "ws",
         }
     )
+    # Drop any AZUREML_COMPUTE inherited from the developer's shell so it does not
+    # supply a default the test is trying to assert is missing — pairs with the
+    # `terraform` stub above, which suppresses the same leak from tfstate.
+    env.pop("AZUREML_COMPUTE", None)
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -295,6 +377,9 @@ def _run_submit_job(*args: str, env_extra: dict[str, str]) -> subprocess.Complet
             "AZUREML_WORKSPACE_NAME": "ws",
         }
     )
+    # See _run_submit: strip inherited AZUREML_COMPUTE so callers control compute
+    # exclusively via env_extra, mirroring the `terraform` stub's role.
+    env.pop("AZUREML_COMPUTE", None)
     env.update(env_extra)
     return subprocess.run(
         ["bash", str(_SUBMIT_SCRIPT), *args],

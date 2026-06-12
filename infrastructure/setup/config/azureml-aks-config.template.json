@@ -6,6 +6,7 @@
   "allowInsecureConnections": "${ALLOW_INSECURE_CONNECTIONS}",
   "internalLoadBalancerProvider": "azure",
   "clusterPurpose": "${CLUSTER_PURPOSE}",
+  "amloperator.skipResourceValidation": "${SKIP_RESOURCE_VALIDATION}",
   "installNvidiaDevicePlugin": "false",
   "installDcgmExporter": "false",
   "installVolcano": "${INSTALL_VOLCANO}",

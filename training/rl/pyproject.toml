@@ -2,28 +2,37 @@
 name = "robotics-training-rl"
 version = "0.1.0"
 description = "RL training workflow runtime dependencies"
-requires-python = ">=3.12"
+# Pinned to 3.11: the Isaac Lab 2.3.2 container runtime is Python 3.11 and
+# requirements.txt is compiled for 3.11. (Also sidesteps uv universal-resolution
+# conflicts on 3.13+, where ml-dtypes>=0.5.0 forces numpy>=2.1.0 vs the pinned
+# numpy==1.26.4.)
+requires-python = "==3.11.*"
 dependencies = [
-    "numpy==2.4.6",
+    "numpy==1.26.4",
     "azure-core==1.41.0",
-    "azure-storage-blob==12.29.0",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.33.0",
-    "marshmallow==3.26.2",
-    "mlflow==3.13.0",
+    "azureml-mlflow==1.62.0.post2",
+    "azure-storage-blob==12.29.0",
+    "mlflow-skinny==3.12.0",
     "gitpython==3.1.50",
     "idna==3.18",
+    "jsonpickle==4.1.1",
     "mako==1.3.12",
     "urllib3==2.7.0",
-    "packaging==26.2",
+    "packaging==25.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "cryptography==48.0.0",
+    "cryptography==46.0.7",
     "pyjwt==2.13.0",
     "rsl-rl-lib==5.4.1",
     "skrl==2.1.0",
-    "tensordict==0.13.0",
+    "tensordict==0.12.4",
+    # marshmallow held at 3.x because azure-ai-ml==1.33.0 imports symbols that
+    # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
+    # Mirror the IL pipeline; bump together with azure-ai-ml.
+    "marshmallow==3.26.2",
 ]
 
 [build-system]
@@ -31,5 +40,22 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-override-dependencies = ["starlette==1.0.1"]
+# `override-dependencies` forces uv to ignore upstream upper-bound constraints
+# during resolution. Each entry below must repeat a pinned version that also
+# appears in `dependencies` above, otherwise resolution drifts. Remove an
+# override only when the upstream constraint that required it is lifted.
+override-dependencies = [
+    # mlflow-skinny: azureml-mlflow==1.62.0.post2 caps below 3.9.0; 3.12.0 is
+    # validated in production by the IL training pipeline against the same
+    # AzureML tracking endpoint. Mirror the direct pin.
+    "mlflow-skinny==3.12.0",
+    # azure-storage-blob: azureml-mlflow==1.62.0.post2 caps below 12.29.0; we
+    # need 12.29.0 for the download_blob retry-on-ServiceResponseError fix
+    # (critical for long-running checkpoint uploads). Mirror the direct pin
+    # and the IL pipeline.
+    "azure-storage-blob==12.29.0",
+    # starlette: mlflow-skinny pulls starlette transitively; upstream pin may
+    # lag behind security fixes. Override to ensure patched version.
+    "starlette==1.0.1",
+]
 package = false

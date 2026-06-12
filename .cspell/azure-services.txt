@@ -1,4 +1,5 @@
 AADSSH
+abfss
 ACMRT
 acrpull
 acsa
@@ -64,6 +65,7 @@ Eventhouse
 eventhub
 functionalization
 keyvault
+kubelogin
 MLflow
 nodepool
 onedrive
@@ -78,3 +80,4 @@ southeastasia
 storageaccountendpoint
 wasbs
 westus
+workspaceblobstore

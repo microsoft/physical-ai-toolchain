@@ -18,6 +18,7 @@ import random
 import shutil
 import sys
 import time
+import traceback
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -121,9 +122,15 @@ def _build_parser(app_launcher_cls: Any) -> argparse.ArgumentParser:
 
 
 def _sync_checkpoint_output(checkpoint_dir: Path) -> None:
-    """Copy checkpoints into AzureML outputs when TRAINING_CHECKPOINT_OUTPUT is set."""
+    """Copy ``checkpoint_dir`` into ``$AZURE_ML_OUTPUT_CHECKPOINTS`` if set.
 
-    target = os.environ.get("TRAINING_CHECKPOINT_OUTPUT")
+    Azure ML exports ``AZURE_ML_OUTPUT_<NAME>`` for each ``uri_folder`` output
+    declared on the job; whatever the training process writes into that
+    directory is uploaded to the named output's blob path at job end. No-op
+    when the env var is unset (e.g., local runs).
+    """
+
+    target = os.environ.get("AZURE_ML_OUTPUT_CHECKPOINTS")
     if not target or not checkpoint_dir.exists():
         return
 
@@ -682,7 +689,11 @@ def _finalize_mlflow_run(state: MLflowRunState) -> None:
     mlflow = state.mlflow
     mlflow.set_tag("training_outcome", state.outcome)
 
-    latest_checkpoint_uri = _log_artifacts(mlflow, state.log_dir, state.resume_path)
+    try:
+        latest_checkpoint_uri = _log_artifacts(mlflow, state.log_dir, state.resume_path)
+    except Exception:
+        _LOGGER.warning("MLflow artifact upload failed; checkpoint registration will be skipped", exc_info=True)
+        latest_checkpoint_uri = None
 
     if state.args and state.args.register_checkpoint and latest_checkpoint_uri:
         _register_checkpoint_model(
@@ -837,9 +848,26 @@ def _load_training_modules(
 def _close_simulation(simulation_app: Any | None) -> None:
     """Exit the process; Kit's shutdown hangs on vGPU nodes.
 
-    See docs/gpu-configuration.md § "Isaac Sim 4.x Shutdown Fix".
+    Preserves a non-zero exit code when an exception is in flight so AzureML
+    reports the job as Failed instead of Completed. Mirrors Python's own
+    ``SystemExit`` semantics: ``None`` exit code is treated as 0, integer codes
+    pass through (including ``bool``), and any other value (e.g. a message
+    string) maps to 1. See docs/gpu-configuration.md § "Isaac Sim 4.x Shutdown
+    Fix".
     """
-    os._exit(0)
+    exc = sys.exc_info()[1]
+    if isinstance(exc, SystemExit):
+        if exc.code is None:
+            code = 0
+        elif isinstance(exc.code, int):
+            code = int(exc.code)
+        else:
+            code = 1
+    elif exc is not None:
+        code = 1
+    else:
+        code = 0
+    os._exit(code)
 
 
 def _build_run_descriptor(
@@ -955,12 +983,14 @@ def _run_hydra_training(
     agent_entry = _get_agent_config_entry_point(cli_args)
     _LOGGER.info("Starting training: task=%s, seed=%s", cli_args.task, cli_args.seed)
 
+    _launch_failure: dict[str, BaseException] = {}
+
     @modules.hydra_task_config(cli_args.task, agent_entry)
     def _launch(env_cfg, agent_cfg):
-        state = _prepare_launch_state(env_cfg, agent_cfg, cli_args, app_launcher, modules)
-        env = _instantiate_environment(env_cfg, cli_args, modules, state.log_dir)
-
+        env = None
         try:
+            state = _prepare_launch_state(env_cfg, agent_cfg, cli_args, app_launcher, modules)
+            env = _instantiate_environment(env_cfg, cli_args, modules, state.log_dir)
             runner = _initialize_runner(env, state, modules)
             _run_training_with_mlflow(
                 runner=runner,
@@ -971,11 +1001,24 @@ def _run_hydra_training(
                 context=context,
                 modules=modules,
             )
+        except BaseException as exc:
+            # Hydra suppresses the traceback and returns cleanly unless HYDRA_FULL_ERROR=1
+            # was set before the @hydra.main decorator ran. Capture the exception here and
+            # re-raise outside the decorator so AzureML reports the job as Failed. Skip
+            # clean SystemExit(0)/SystemExit(None) so deliberate exits stay successful.
+            if isinstance(exc, SystemExit) and (exc.code is None or exc.code == 0):
+                raise
+            _LOGGER.error("Training failed:\n%s", traceback.format_exc())
+            _launch_failure["exc"] = exc
+            raise
         finally:
             prepare_for_shutdown()
-            env.close()
+            if env is not None:
+                env.close()
 
     _launch()
+    if "exc" in _launch_failure:
+        raise SystemExit(1) from _launch_failure["exc"]
 
 
 def _run_training_with_mlflow(
