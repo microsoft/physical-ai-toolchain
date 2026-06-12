@@ -1,0 +1,135 @@
+# Notation/AKV signing-key rotation
+# Rotates the AKV-backed Notation signing key on a 90-day cadence by creating a
+# new key version. The runbook at docs/runbooks/notation-key-rotation.md drives
+# the post-rotation steps (publish updated trust policy, refresh Kyverno
+# attestor, archive prior version).
+
+name: Notation Key Rotation (AKV)
+
+on:
+  schedule:
+    # Every 90 days at 06:00 UTC (1st day of every third month)
+    - cron: "0 6 1 */3 *"
+  workflow_dispatch:
+    inputs:
+      key_vault_name:
+        description: 'AKV name holding the Notation signing key.'
+        required: true
+        type: string
+      key_name:
+        description: 'AKV key name to rotate.'
+        required: true
+        type: string
+      dry_run:
+        description: 'Print intended actions without creating a new key version.'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rotate:
+    name: Create new AKV key version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    env:
+      KEY_VAULT_NAME: ${{ inputs.key_vault_name || vars.NOTATION_AKV_NAME }}
+      KEY_NAME: ${{ inputs.key_name || vars.NOTATION_AKV_KEY_NAME }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          if [[ -z "${KEY_VAULT_NAME}" || -z "${KEY_NAME}" ]]; then
+            echo "::error::KEY_VAULT_NAME and KEY_NAME must be provided via inputs or repository variables (NOTATION_AKV_NAME, NOTATION_AKV_KEY_NAME)."
+            exit 1
+          fi
+
+      - name: Azure login (OIDC)
+        uses: Azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve current key version
+        id: current
+        run: |
+          set -euo pipefail
+          current=$(az keyvault key show \
+            --vault-name "${KEY_VAULT_NAME}" \
+            --name "${KEY_NAME}" \
+            --query 'key.kid' -o tsv)
+          echo "previous_kid=${current}" >> "$GITHUB_OUTPUT"
+          echo "Current key id: ${current}"
+
+      - name: Create new key version
+        id: rotate
+        if: env.DRY_RUN != 'true'
+        run: |
+          set -euo pipefail
+          new_kid=$(az keyvault key rotate \
+            --vault-name "${KEY_VAULT_NAME}" \
+            --name "${KEY_NAME}" \
+            --query 'key.kid' -o tsv)
+          echo "new_kid=${new_kid}" >> "$GITHUB_OUTPUT"
+          echo "Rotated to: ${new_kid}"
+
+      - name: Dry-run summary
+        if: env.DRY_RUN == 'true'
+        env:
+          PREVIOUS_KID: ${{ steps.current.outputs.previous_kid }}
+        run: |
+          echo "DRY RUN: would rotate ${KEY_VAULT_NAME}/${KEY_NAME} (current ${PREVIOUS_KID})."
+
+      - name: Open rotation tracking issue
+        if: env.DRY_RUN != 'true'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          PREVIOUS_KID: ${{ steps.current.outputs.previous_kid }}
+          NEW_KID: ${{ steps.rotate.outputs.new_kid }}
+        with:
+          script: |
+            const previous = process.env.PREVIOUS_KID;
+            const next = process.env.NEW_KID;
+            const title = `Notation key rotated: ${process.env.KEY_NAME}`;
+            const body = [
+              `Automated 90-day rotation of AKV key \`${process.env.KEY_VAULT_NAME}/${process.env.KEY_NAME}\`.`,
+              '',
+              `- Previous version: \`${previous}\``,
+              `- New version: \`${next}\``,
+              '',
+              'Follow [docs/runbooks/notation-key-rotation.md](../blob/main/docs/runbooks/notation-key-rotation.md) to:',
+              '',
+              '1. Update the Kyverno notation `ClusterPolicy` trust anchor.',
+              '2. Refresh Flux trusted-root distribution.',
+              '3. Re-sign in-flight images or schedule re-publish.',
+              '4. Archive the prior key version after the grace window.'
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['security', 'supply-chain', 'rotation']
+            });

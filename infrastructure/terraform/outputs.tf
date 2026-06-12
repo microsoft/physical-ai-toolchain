@@ -225,3 +225,37 @@ output "conversion_pipeline_fabric_capacity" {
   description = "Conversion pipeline Microsoft Fabric capacity. Null when capacity is reused or pipeline is disabled."
   value       = try(module.conversion_pipeline[0].fabric_capacity, null)
 }
+
+// ============================================================
+// Container Supply-Chain Security
+// ============================================================
+
+output "github_oidc_client_id" {
+  description = "Client ID of the federated GitHub OIDC user-assigned managed identity (null when signing_mode = none)."
+  value       = try(module.github_oidc[0].client_id, null)
+}
+
+output "github_oidc_tenant_id" {
+  description = "Tenant ID of the federated GitHub OIDC user-assigned managed identity (null when signing_mode = none)."
+  value       = try(module.github_oidc[0].tenant_id, null)
+}
+
+output "notation_signing_key_versionless_id" {
+  description = "Versionless Key Vault key ID used for Notation signing (null when signing_mode != notation)."
+  value       = try(module.notation_akv[0].signing_key_versionless_id, null)
+}
+
+output "notation_signer_uami_client_id" {
+  description = "Client ID of the Notation signer workload identity (null when signing_mode != notation)."
+  value       = try(module.notation_akv[0].uami_client_id, null)
+}
+
+output "sigstore_mirror_url" {
+  description = "Base URL of the air-gapped Sigstore TUF mirror (null when not deployed)."
+  value       = try(module.sigstore_mirror[0].mirror_url, null)
+}
+
+output "arc_runners_namespace" {
+  description = "Kubernetes namespace hosting the GitHub Actions Runner Controller scale set (null when signing_mode = none)."
+  value       = try(module.arc_runners[0].namespace, null)
+}

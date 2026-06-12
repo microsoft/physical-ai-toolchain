@@ -1,0 +1,66 @@
+# Test-only rendered variant of fleet-deployment/.../kyverno-sigstore-policy.yaml
+# with the Flux postBuild placeholder ${ACR_LOGIN_SERVER} resolved to a fixture
+# value (acrtest.azurecr.io). The Kyverno CLI does not run Flux substitutions,
+# so we validate dual-rule scope-guard semantics against this rendered copy.
+# Production deploys consume the original (templated) policy.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-images-sigstore
+spec:
+  background: true
+  failurePolicy: Fail
+  rules:
+    - name: require-signed-images-acr
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - osmo-workflows
+                - azureml
+                - dataviewer
+                - "fleet-*"
+      verifyImages:
+        - imageReferences:
+            - "acrtest.azurecr.io/*"
+          failureAction: Enforce
+          required: true
+          verifyDigest: true
+          mutateDigest: true
+          useCache: true
+          cosignOCI11: true
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://github.com/microsoft/physical-ai-toolchain/.github/workflows/container-publish.yml@refs/heads/main"
+                    subjectRegExp: "^https://github\\.com/microsoft/physical-ai-toolchain/\\.github/workflows/container-publish\\.yml@refs/(heads/main|tags/v.+)$"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: "https://rekor.sigstore.dev"
+    - name: audit-all-other-images
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "*"
+          skipImageReferences:
+            - "acrtest.azurecr.io/*"
+          failureAction: Audit
+          required: false
+          verifyDigest: false
+          mutateDigest: false
+          useCache: true
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subjectRegExp: ".*"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: "https://rekor.sigstore.dev"

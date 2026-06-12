@@ -168,8 +168,11 @@ case "$mode" in
     if [[ "$skip_sbom" != "true" ]]; then
       section "Attach SBOM (oras, spdx+json)"
       # Notation has no native attestation primitive; SBOM rides as a referrer.
+      # --disable-path-validation: the SBOM is frequently an absolute mktemp path
+      # (syft-generated default); oras rejects absolute file references otherwise.
       oras attach \
         --artifact-type application/vnd.spdx+json \
+        --disable-path-validation \
         "$image" \
         "$sbom_file:application/spdx+json"
     fi

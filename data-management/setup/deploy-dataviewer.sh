@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Build and deploy the dataviewer application to Azure Container Apps
+# Deploy signed dataviewer images to Azure Container Apps.
+#
+# This script does NOT build images. Images are built and signed by the
+# container-publish.yml GitHub Actions workflow. Operators must supply the
+# signed image digests, which are verified locally via
+# scripts/security/verify-image.sh before any container app is updated.
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,67 +14,119 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=defaults.conf
 source "$SCRIPT_DIR/defaults.conf"
 
+VERIFY_SCRIPT="$REPO_ROOT/scripts/security/verify-image.sh"
+
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Build and deploy the dataviewer application to Azure Container Apps.
+Deploy signed dataviewer images to Azure Container Apps. Image digests are
+verified with cosign or notation before any update is applied.
 
 OPTIONS:
-    -h, --help               Show this help message
-    -t, --tf-dir DIR         Terraform directory (default: $DEFAULT_TF_DIR)
-    --tag TAG                Image tag (default: auto-generated from git SHA)
-    --skip-build             Skip container image builds (use existing images)
-    --skip-update            Skip container app update (build images only)
-    --skip-backend           Skip backend build/deploy
-    --skip-frontend          Skip frontend build/deploy
-    --config-preview         Print configuration and exit
+    -h, --help                   Show this help message
+    -t, --tf-dir DIR             Terraform directory (default: $DEFAULT_TF_DIR)
+    --backend-digest DIGEST      Backend image digest (sha256:...) — required unless --skip-backend
+    --frontend-digest DIGEST     Frontend image digest (sha256:...) — required unless --skip-frontend
+    --verify-mode MODE           sigstore | notation | auto (default: auto)
+    --offline                    Pass --offline to verify-image.sh (uses --trusted-root bundle)
+    --trusted-root PATH          Sigstore trusted-root JSON for offline verification
+    --policy-file PATH           Notation trust policy file
+    --accept-public-rekor        Acknowledge that online Sigstore verification publishes
+                                 signer identity + image digest to the public Rekor log
+    --skip-backend               Skip backend deploy
+    --skip-frontend              Skip frontend deploy
+    --skip-update                Verify digests only; do not update container apps
+    --config-preview             Print configuration and exit without contacting Azure
 
-When building images, the tag defaults to 'sha-<git-short-hash>' for unique
-revisions. Use --tag to override, or --skip-build to reference existing images.
+Image digests are produced by the container-publish.yml workflow. Use the
+"sha256:..." value emitted by that workflow's signing step.
 
 EXAMPLES:
-    $(basename "$0")
-    $(basename "$0") --tag v0.1.0
-    $(basename "$0") --skip-build
-    $(basename "$0") --skip-frontend --tag sha-abc1234
+    $(basename "$0") \\
+        --backend-digest sha256:abc... --frontend-digest sha256:def...
+
+    $(basename "$0") --offline --trusted-root ./trusted-root.json \\
+        --backend-digest sha256:abc... --skip-frontend
 EOF
 }
 
 # Defaults
 tf_dir="$SCRIPT_DIR/$DEFAULT_TF_DIR"
-image_tag="$DATAVIEWER_IMAGE_TAG"
-tag_explicit=false
-skip_build=false
-skip_update=false
+backend_digest=""
+frontend_digest=""
+verify_mode="auto"
+offline=false
+trusted_root=""
+policy_file=""
+accept_public_rekor=false
 skip_backend=false
 skip_frontend=false
+skip_update=false
 config_preview=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -h|--help)           show_help; exit 0 ;;
-    -t|--tf-dir)         tf_dir="$2"; shift 2 ;;
-    --tag)               image_tag="$2"; tag_explicit=true; shift 2 ;;
-    --skip-build)        skip_build=true; shift ;;
-    --skip-update)       skip_update=true; shift ;;
-    --skip-backend)      skip_backend=true; shift ;;
-    --skip-frontend)     skip_frontend=true; shift ;;
-    --config-preview)    config_preview=true; shift ;;
-    *)                   fatal "Unknown option: $1" ;;
+    -h|--help)             show_help; exit 0 ;;
+    -t|--tf-dir)           tf_dir="$2"; shift 2 ;;
+    --backend-digest)      backend_digest="$2"; shift 2 ;;
+    --frontend-digest)     frontend_digest="$2"; shift 2 ;;
+    --verify-mode)         verify_mode="$2"; shift 2 ;;
+    --offline)             offline=true; shift ;;
+    --trusted-root)        trusted_root="$2"; shift 2 ;;
+    --policy-file)         policy_file="$2"; shift 2 ;;
+    --accept-public-rekor) accept_public_rekor=true; shift ;;
+    --skip-backend)        skip_backend=true; shift ;;
+    --skip-frontend)       skip_frontend=true; shift ;;
+    --skip-update)         skip_update=true; shift ;;
+    --config-preview)      config_preview=true; shift ;;
+    *)                     fatal "Unknown option: $1" ;;
   esac
 done
 
 require_tools az terraform jq
 
-# Auto-generate a unique image tag when building and no explicit --tag provided.
-# Uses git short SHA for traceability; falls back to timestamp outside a git repo.
-if [[ "$tag_explicit" == "false" && "$skip_build" == "false" ]]; then
-  if git_sha=$(git rev-parse --short HEAD 2>/dev/null); then
-    image_tag="sha-${git_sha}"
-  else
-    image_tag="build-$(date -u +%Y%m%d%H%M%S)"
+# Validate digest format only when the corresponding component is in scope.
+validate_digest() {
+  local label="$1" value="$2"
+  if [[ -z "$value" ]]; then
+    fatal "$label digest is required (use --${label,,}-digest sha256:...)"
   fi
+  if [[ ! "$value" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+    fatal "$label digest must match sha256:<64 hex chars> (got: $value)"
+  fi
+}
+
+if [[ "$skip_backend" == "false" ]]; then
+  validate_digest "Backend" "$backend_digest"
+fi
+if [[ "$skip_frontend" == "false" ]]; then
+  validate_digest "Frontend" "$frontend_digest"
+fi
+
+case "$verify_mode" in
+  sigstore|notation|auto) ;;
+  *) fatal "--verify-mode must be one of: sigstore, notation, auto (got: $verify_mode)" ;;
+esac
+
+# Config preview: print CLI-resolved configuration and exit before any
+# terraform-state read or Azure call. Terraform outputs are intentionally
+# omitted here because preview must work in isolated environments.
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration (preview)"
+  print_kv "Terraform Dir" "$tf_dir"
+  print_kv "Backend Digest" "${skip_backend:+<skipped>}${skip_backend:-$backend_digest}"
+  print_kv "Frontend Digest" "${skip_frontend:+<skipped>}${skip_frontend:-$frontend_digest}"
+  print_kv "Verify Mode" "$verify_mode"
+  print_kv "Offline" "$offline"
+  print_kv "Trusted Root" "${trusted_root:-<none>}"
+  print_kv "Policy File" "${policy_file:-<none>}"
+  print_kv "Public Rekor Consent" "$accept_public_rekor"
+  print_kv "Skip Backend" "$skip_backend"
+  print_kv "Skip Frontend" "$skip_frontend"
+  print_kv "Skip Update" "$skip_update"
+  info "Config preview mode — exiting without contacting terraform or Azure."
+  exit 0
 fi
 
 #------------------------------------------------------------------------------
@@ -83,7 +140,6 @@ rg=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
 acr_name=$(tf_require "$tf_output" "container_registry.value.name" "ACR name")
 acr_login_server=$(tf_require "$tf_output" "container_registry.value.login_server" "ACR login server")
 
-# Verify dataviewer is deployed
 dataviewer_deployed=$(tf_get "$tf_output" "dataviewer.value" "")
 if [[ -z "$dataviewer_deployed" || "$dataviewer_deployed" == "null" ]]; then
   fatal "Dataviewer is not deployed. Set should_deploy_dataviewer=true in terraform.tfvars and run terraform apply first."
@@ -94,7 +150,6 @@ frontend_app=$(tf_require "$tf_output" "dataviewer.value.frontend.name" "Fronten
 identity_id=$(tf_require "$tf_output" "dataviewer.value.identity.id" "Managed identity resource ID")
 frontend_url=$(tf_get "$tf_output" "dataviewer.value.frontend.url" "")
 
-# Entra ID auth configuration (empty when should_deploy_auth=false)
 entra_client_id=$(tf_get "$tf_output" "dataviewer.value.entra_id.client_id" "")
 entra_tenant_id=$(tf_get "$tf_output" "dataviewer.value.entra_id.tenant_id" "")
 auth_enabled=false
@@ -102,8 +157,10 @@ if [[ -n "$entra_client_id" && "$entra_client_id" != "null" ]]; then
   auth_enabled=true
 fi
 
-backend_image="${acr_login_server}/${DATAVIEWER_BACKEND_IMAGE}:${image_tag}"
-frontend_image="${acr_login_server}/${DATAVIEWER_FRONTEND_IMAGE}:${image_tag}"
+backend_repo="${acr_login_server}/${DATAVIEWER_BACKEND_IMAGE}"
+frontend_repo="${acr_login_server}/${DATAVIEWER_FRONTEND_IMAGE}"
+backend_image="${backend_repo}@${backend_digest}"
+frontend_image="${frontend_repo}@${frontend_digest}"
 
 #------------------------------------------------------------------------------
 # Configuration Preview
@@ -112,27 +169,49 @@ frontend_image="${acr_login_server}/${DATAVIEWER_FRONTEND_IMAGE}:${image_tag}"
 section "Configuration"
 print_kv "Resource Group" "$rg"
 print_kv "ACR" "$acr_name"
-print_kv "Image Tag" "$image_tag"
-if [[ "$tag_explicit" == "true" ]]; then
-  tag_source="explicit (--tag)"
-elif [[ "$skip_build" == "true" ]]; then
-  tag_source="default (skip-build)"
-else
-  tag_source="auto-generated"
-fi
-print_kv "Tag Source" "$tag_source"
-print_kv "Backend Image" "$backend_image"
-print_kv "Frontend Image" "$frontend_image"
+print_kv "Backend Image" "${skip_backend:+<skipped>}${skip_backend:-$backend_image}"
+print_kv "Frontend Image" "${skip_frontend:+<skipped>}${skip_frontend:-$frontend_image}"
 print_kv "Backend App" "$backend_app"
 print_kv "Frontend App" "$frontend_app"
 print_kv "Identity" "${identity_id##*/}"
-print_kv "Skip Build" "$skip_build"
+print_kv "Verify Mode" "$verify_mode"
+print_kv "Offline" "$offline"
+print_kv "Trusted Root" "${trusted_root:-<none>}"
+print_kv "Policy File" "${policy_file:-<none>}"
+print_kv "Public Rekor Consent" "$accept_public_rekor"
 print_kv "Skip Update" "$skip_update"
 print_kv "Auth Enabled" "$auth_enabled"
 
-if [[ "$config_preview" == "true" ]]; then
-  info "Config preview mode — exiting without changes."
-  exit 0
+#------------------------------------------------------------------------------
+# Verify Image Signatures
+#
+# Refuses to deploy any image that fails signature verification. Wraps
+# scripts/security/verify-image.sh; failures abort before any az call.
+#------------------------------------------------------------------------------
+
+if [[ ! -x "$VERIFY_SCRIPT" ]]; then
+  fatal "verify-image.sh not found or not executable: $VERIFY_SCRIPT"
+fi
+
+verify_signed_digest() {
+  local label="$1" image_ref="$2"
+  section "Verifying $label Signature"
+  info "Verifying $image_ref"
+  local args=(--image "$image_ref" --mode "$verify_mode")
+  [[ "$offline" == "true" ]] && args+=(--offline)
+  [[ -n "$trusted_root" ]] && args+=(--trusted-root "$trusted_root")
+  [[ -n "$policy_file" ]] && args+=(--policy-file "$policy_file")
+  [[ "$accept_public_rekor" == "true" ]] && args+=(--accept-public-rekor)
+  if ! "$VERIFY_SCRIPT" "${args[@]}"; then
+    fatal "$label image signature verification failed; refusing to deploy $image_ref"
+  fi
+}
+
+if [[ "$skip_backend" == "false" ]]; then
+  verify_signed_digest "Backend" "$backend_image"
+fi
+if [[ "$skip_frontend" == "false" ]]; then
+  verify_signed_digest "Frontend" "$frontend_image"
 fi
 
 #------------------------------------------------------------------------------
@@ -164,45 +243,7 @@ if [[ "$skip_update" == "false" ]]; then
 fi
 
 #------------------------------------------------------------------------------
-# Build Container Images
-#------------------------------------------------------------------------------
-
-SRC_DIR="$SCRIPT_DIR/../viewer"
-
-if [[ "$skip_build" == "false" ]]; then
-
-  if [[ "$skip_backend" == "false" ]]; then
-    section "Building Backend Image"
-    info "Building $backend_image..."
-    az acr build \
-      --registry "$acr_name" \
-      --image "${DATAVIEWER_BACKEND_IMAGE}:${image_tag}" \
-      --file "$SRC_DIR/backend/Dockerfile" \
-      "$SRC_DIR/backend/"
-  fi
-
-  if [[ "$skip_frontend" == "false" ]]; then
-    section "Building Frontend Image"
-    info "Building $frontend_image..."
-
-    build_args=()
-    if [[ "$auth_enabled" == "true" ]]; then
-      build_args+=(--build-arg "VITE_AZURE_CLIENT_ID=${entra_client_id}")
-      build_args+=(--build-arg "VITE_AZURE_TENANT_ID=${entra_tenant_id}")
-      info "Entra ID auth enabled — injecting MSAL build args"
-    fi
-
-    az acr build \
-      --registry "$acr_name" \
-      --image "${DATAVIEWER_FRONTEND_IMAGE}:${image_tag}" \
-      ${build_args[@]+"${build_args[@]}"} \
-      --file "$SRC_DIR/frontend/Dockerfile" \
-      "$SRC_DIR/frontend/"
-  fi
-fi
-
-#------------------------------------------------------------------------------
-# Update Container Apps
+# Update Container Apps (immutable digest references)
 #------------------------------------------------------------------------------
 
 if [[ "$skip_update" == "false" ]]; then
@@ -246,7 +287,6 @@ if [[ "$auth_enabled" == "true" && "$skip_update" == "false" ]]; then
 
   section "Configuring Easy Auth on Frontend"
 
-  # Create client secret for server-directed OAuth flow
   info "Creating client secret for Easy Auth..."
   client_secret=$(az ad app credential reset \
     --id "$entra_client_id" \
@@ -254,13 +294,11 @@ if [[ "$auth_enabled" == "true" && "$skip_update" == "false" ]]; then
     --years 2 \
     --query password -o tsv)
 
-  # Enable ID token issuance (required for Easy Auth)
   info "Enabling ID token issuance..."
   az ad app update --id "$entra_client_id" \
     --enable-id-token-issuance true \
     --output none
 
-  # Add web redirect URI for Easy Auth callback
   frontend_fqdn=$(az containerapp show \
     --name "$frontend_app" \
     --resource-group "$rg" \
@@ -271,7 +309,6 @@ if [[ "$auth_enabled" == "true" && "$skip_update" == "false" ]]; then
     --web-redirect-uris "https://${frontend_fqdn}/.auth/login/aad/callback" \
     --output none
 
-  # Configure Easy Auth identity provider
   info "Configuring Easy Auth Microsoft provider..."
   az containerapp auth microsoft update \
     --name "$frontend_app" \
@@ -282,7 +319,6 @@ if [[ "$auth_enabled" == "true" && "$skip_update" == "false" ]]; then
     --yes \
     --output none
 
-  # Require authentication for all requests
   info "Setting unauthenticated client action to RedirectToLoginPage..."
   az containerapp auth update \
     --name "$frontend_app" \
@@ -320,12 +356,12 @@ fi
 #------------------------------------------------------------------------------
 
 section "Deployment Summary"
-print_kv "Backend Image" "$backend_image"
-print_kv "Frontend Image" "$frontend_image"
+print_kv "Backend Image" "${skip_backend:+<skipped>}${skip_backend:-$backend_image}"
+print_kv "Frontend Image" "${skip_frontend:+<skipped>}${skip_frontend:-$frontend_image}"
 print_kv "Backend App" "$backend_app"
 print_kv "Frontend App" "$frontend_app"
-print_kv "Image Tag" "$image_tag"
-print_kv "Build" "$([[ "$skip_build" == "true" ]] && echo 'Skipped' || echo 'Complete')"
+print_kv "Verify Mode" "$verify_mode"
+print_kv "Offline" "$offline"
 print_kv "Update" "$([[ "$skip_update" == "true" ]] && echo 'Skipped' || echo 'Complete')"
 print_kv "Easy Auth" "$([[ "$auth_enabled" == "true" ]] && echo 'Configured' || echo 'Disabled')"
 [[ -n "$frontend_url" ]] && print_kv "Frontend URL" "$frontend_url"

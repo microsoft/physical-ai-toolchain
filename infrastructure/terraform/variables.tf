@@ -611,3 +611,55 @@ variable "conversion_pipeline_config" {
   description = "Conversion pipeline module configuration. Only consumed when should_deploy_conversion_pipeline is true"
   default     = {}
 }
+
+// ============================================================
+// Container Supply-Chain Security
+// ============================================================
+
+variable "signing_mode" {
+  type        = string
+  description = "Container signing mode: sigstore (keyless OIDC), notation (AKV HSM), or none."
+  default     = "sigstore"
+
+  validation {
+    condition     = contains(["sigstore", "notation", "none"], var.signing_mode)
+    error_message = "signing_mode must be one of: sigstore, notation, none."
+  }
+}
+
+variable "should_deploy_sigstore_mirror" {
+  type        = bool
+  description = "Whether to deploy an in-cluster Sigstore mirror (Fulcio/Rekor) instead of the public good instance."
+  default     = false
+}
+
+variable "github_repository_owner" {
+  type        = string
+  description = "GitHub org/user that owns the repository (used for federated identity subjects)."
+  default     = "microsoft"
+}
+
+variable "github_repository_name" {
+  type        = string
+  description = "GitHub repository name (used for federated identity subjects)."
+  default     = "physical-ai-toolchain"
+}
+
+variable "github_app_id" {
+  type        = string
+  description = "GitHub App ID for ARC runner controller authentication. Required when signing_mode != none."
+  default     = null
+}
+
+variable "github_app_installation_id" {
+  type        = string
+  description = "GitHub App installation ID for ARC runner controller. Required when signing_mode != none."
+  default     = null
+}
+
+variable "github_app_private_key_secret_id" {
+  type        = string
+  description = "Key Vault secret ID containing the GitHub App private key (PEM). Required when signing_mode != none."
+  default     = null
+  sensitive   = true
+}

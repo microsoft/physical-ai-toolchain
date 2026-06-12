@@ -1,0 +1,59 @@
+# Test resources for the dual-rule scope-guard policy.
+# Each Pod represents a real admission scenario; image refs are deliberately
+# crafted to land in either Rule 1 (ACR scope, enforce) or Rule 2 (everything
+# else, audit-only). The third-party fixture is the explicit validation of
+# the user's scope-guard requirement: unsigned non-project containers must
+# be allowed to deploy.
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: signed-pod
+  namespace: osmo-workflows
+spec:
+  containers:
+    - name: app
+      image: acrtest.azurecr.io/dataviewer-backend:v1.0.0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unsigned-acr-pod
+  namespace: osmo-workflows
+spec:
+  containers:
+    - name: app
+      image: acrtest.azurecr.io/dataviewer-backend:unsigned
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wrong-identity-pod
+  namespace: osmo-workflows
+spec:
+  containers:
+    - name: app
+      image: acrtest.azurecr.io/dataviewer-backend:wrong-identity
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: missing-attestation-pod
+  namespace: osmo-workflows
+spec:
+  containers:
+    - name: app
+      image: acrtest.azurecr.io/dataviewer-backend:no-attestation
+---
+# Scope-guard validation: third-party unsigned image in a non-project
+# namespace must NOT be blocked. Rule 1 skips (not ACR scope); Rule 2
+# audits only (Audit mode, no enforcement).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: third-party-unsigned-pod
+  namespace: default
+spec:
+  containers:
+    - name: nginx
+      image: docker.io/library/nginx:1.25

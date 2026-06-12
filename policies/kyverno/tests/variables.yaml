@@ -1,0 +1,12 @@
+# Substitution values for the kyverno-test fixtures. These mirror the
+# Flux postBuild substitutions used in production:
+#   - ACR_LOGIN_SERVER         -> resolves the project image-registry scope
+#   - NOTATION_TRUST_IDENTITY  -> pinned trusted identity for Notary policy
+#   - NOTATION_TRUST_CERT_CHAIN_PEM -> AKV-rooted trust chain (placeholder)
+globalValues:
+  ACR_LOGIN_SERVER: acrtest.azurecr.io
+  NOTATION_TRUST_IDENTITY: "x509.subject:CN=physical-ai-toolchain"
+  NOTATION_TRUST_CERT_CHAIN_PEM: |-
+    -----BEGIN CERTIFICATE-----
+    MIIB...placeholder-test-fixture-only...AAA=
+    -----END CERTIFICATE-----

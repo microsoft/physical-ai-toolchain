@@ -1770,3 +1770,18 @@ vsmagent
 vsmserver
 WEBACCESS
 WEBADM
+
+# Container signing & supply chain
+airgapped
+cosign
+exploitability
+kyverno
+openvex
+vexctl
+fulcio
+helmrelease
+helmrepository
+bitnami
+acrtest
+MIIB
+clusterpolicy

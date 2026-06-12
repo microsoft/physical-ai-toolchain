@@ -2,22 +2,16 @@
 // Validates output presence and nullability when features are disabled
 
 mock_provider "azurerm" {
-  override_during = plan
 }
 mock_provider "azuread" {
-  override_during = plan
 }
 mock_provider "azapi" {
-  override_during = plan
 }
 mock_provider "msgraph" {
-  override_during = plan
 }
 mock_provider "tls" {
-  override_during = plan
 }
 mock_provider "random" {
-  override_during = plan
 }
 
 override_data {
@@ -47,6 +41,13 @@ override_module {
     aks_oidc_issuer_url   = "https://westus3.oic.prod-aks.azure.com/00000000-0000-0000-0000-000000000000/"
     gpu_node_pool_subnets = {}
     node_pools            = {}
+    aks_kube_config = {
+      host                   = "https://aks.example"
+      cluster_ca_certificate = ""
+      client_certificate     = ""
+      client_key             = ""
+      kube_config_raw        = ""
+    }
   }
 }
 

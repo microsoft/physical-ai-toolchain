@@ -1,0 +1,159 @@
+name: Container Build Verify
+
+# Reusable workflow that builds container images locally (no push) and signs/verifies them
+# with an ephemeral cosign key. Provides PR-time validation that Dockerfiles build cleanly
+# and that the signing toolchain is functional before any image is published to a registry.
+
+on:
+  workflow_call:
+    inputs:
+      dockerfiles:
+        description: 'Newline-separated list of Dockerfile paths to build. When empty, all Dockerfile* files in the repository are discovered.'
+        required: false
+        type: string
+        default: ''
+      context_path:
+        description: 'Build context path. When empty, the directory containing each Dockerfile is used.'
+        required: false
+        type: string
+        default: ''
+      build_args:
+        description: 'Newline-separated list of KEY=VALUE build arguments forwarded to docker buildx.'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  discover:
+    name: Discover Dockerfiles
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.collect.outputs.matrix }}
+      count: ${{ steps.collect.outputs.count }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Collect Dockerfile matrix
+        id: collect
+        env:
+          INPUT_DOCKERFILES: ${{ inputs.dockerfiles }}
+          INPUT_CONTEXT: ${{ inputs.context_path }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${INPUT_DOCKERFILES}" ]]; then
+            mapfile -t files < <(printf '%s\n' "${INPUT_DOCKERFILES}" | sed '/^[[:space:]]*$/d')
+          else
+            mapfile -t files < <(find . -type f \( -name 'Dockerfile' -o -name 'Dockerfile.*' \) \
+              -not -path './external/*' -not -path './node_modules/*' -not -path './.git/*' | sort)
+          fi
+
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "matrix={\"include\":[]}" >> "$GITHUB_OUTPUT"
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          json='{"include":['
+          first=1
+          for f in "${files[@]}"; do
+            f="${f#./}"
+            if [[ -n "${INPUT_CONTEXT}" ]]; then
+              ctx="${INPUT_CONTEXT}"
+            else
+              ctx="$(dirname "$f")"
+            fi
+            name="$(echo "$f" | tr '/.' '--')"
+            if [[ $first -eq 0 ]]; then json+=','; fi
+            json+="{\"dockerfile\":\"$f\",\"context\":\"$ctx\",\"name\":\"$name\"}"
+            first=0
+          done
+          json+=']}'
+
+          echo "matrix=$json" >> "$GITHUB_OUTPUT"
+          echo "count=${#files[@]}" >> "$GITHUB_OUTPUT"
+
+  build-verify:
+    name: Build and verify ${{ matrix.name }}
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Build image (load to local daemon)
+        id: build
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: false
+          load: true
+          tags: localhost/build-verify/${{ matrix.name }}:${{ github.sha }}
+          build-args: ${{ inputs.build_args }}
+
+      - name: Resolve image digest
+        id: digest
+        env:
+          IMAGE_REF: localhost/build-verify/${{ matrix.name }}:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          digest="$(docker image inspect "${IMAGE_REF}" --format '{{index .Id}}')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Resolved digest: ${digest}"
+
+      - name: Generate ephemeral cosign key pair
+        env:
+          COSIGN_PASSWORD: ''
+        run: |
+          set -euo pipefail
+          cd /tmp
+          cosign generate-key-pair
+          mv cosign.key ephemeral.key
+          mv cosign.pub ephemeral.pub
+
+      - name: Sign image with ephemeral key
+        env:
+          COSIGN_PASSWORD: ''
+          IMAGE_REF: localhost/build-verify/${{ matrix.name }}@${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes --key /tmp/ephemeral.key --tlog-upload=false "${IMAGE_REF}"
+
+      - name: Verify image with ephemeral key
+        env:
+          IMAGE_REF: localhost/build-verify/${{ matrix.name }}@${{ steps.digest.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify --key /tmp/ephemeral.pub --insecure-ignore-tlog=true "${IMAGE_REF}"
+
+      - name: Cleanup ephemeral key material
+        if: always()
+        run: |
+          rm -f /tmp/ephemeral.key /tmp/ephemeral.pub

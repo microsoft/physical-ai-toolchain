@@ -196,6 +196,16 @@ git tag -v v1.0.0
 
 This repository uses Sigstore `gitsign` keyless signing for release tags. For tag signing policy and maintainer guidance, see [CONTRIBUTING.md](CONTRIBUTING.md#release-tag-signing).
 
+## Verifying Container Images
+
+All container images published by this repository are signed and carry SPDX, SLSA, CycloneDX, and OpenVEX attestations. Verify by digest before pulling into a fleet:
+
+```bash
+./scripts/security/verify-image.sh myacr.azurecr.io/<repo>@sha256:<digest>
+```
+
+Cosign keyless is the default; the Notation + Azure Key Vault variant is available via `SIGNING_MODE=notation`. See [Container Image Signing](docs/security/container-signing.md) for the dual-mode architecture and admission posture.
+
 ## Roadmap
 
 See the [project roadmap](docs/contributing/ROADMAP.md) for priorities, timelines, and success metrics.

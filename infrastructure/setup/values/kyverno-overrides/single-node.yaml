@@ -1,0 +1,24 @@
+# Single-node override - merged on top of values/kyverno.yaml when the
+# cluster has fewer than 3 worker nodes. Pass with:
+#   helm install ... -f values/kyverno.yaml \
+#                    -f values/kyverno-overrides/single-node.yaml
+
+admissionController:
+  replicas: 1
+  podDisruptionBudget:
+    enabled: false
+
+backgroundController:
+  replicas: 1
+  podDisruptionBudget:
+    enabled: false
+
+cleanupController:
+  replicas: 1
+  podDisruptionBudget:
+    enabled: false
+
+reportsController:
+  replicas: 1
+  podDisruptionBudget:
+    enabled: false

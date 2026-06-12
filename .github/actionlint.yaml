@@ -4,6 +4,11 @@ config-variables:
   - RELEASE_APP_ID
   - gh_aw_model_agent_copilot
   - gh_aw_model_detection_copilot
+  - signing_mode
+  - acr_registry_hostname
+  - notation_akv_key_id
+  - NOTATION_AKV_NAME
+  - NOTATION_AKV_KEY_NAME
 
 # Path-specific configurations for generated lock files.
 # Lock files are produced by `gh aw compile` and contain shell scripts
