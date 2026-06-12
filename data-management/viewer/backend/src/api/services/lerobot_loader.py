@@ -767,9 +767,7 @@ class LeRobotLoader:
             return video_full_path
         return None
 
-    def _lookup_video_location(
-        self, episode_index: int, camera_key: str
-    ) -> tuple[int, int] | None:
+    def _lookup_video_location(self, episode_index: int, camera_key: str) -> tuple[int, int] | None:
         """Read per-episode video chunk/file indices from meta/episodes parquet.
 
         Returns ``(chunk_index, file_index)`` for the given camera, or None
@@ -799,9 +797,7 @@ class LeRobotLoader:
                         continue
                     return int(row.column(chunk_col)[0].as_py()), int(row.column(file_col)[0].as_py())
                 except Exception as exc:
-                    logger.warning(
-                        "Failed to read video location from %s: %s", parquet_file, type(exc).__name__
-                    )
+                    logger.warning("Failed to read video location from %s: %s", parquet_file, type(exc).__name__)
 
         return None
 
