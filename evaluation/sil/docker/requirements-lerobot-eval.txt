@@ -6,4 +6,4 @@ azure-ai-ml==1.33.0
 matplotlib==3.10.9
 azureml-mlflow==1.62.0.post2
 mlflow==3.13.0
-av==17.0.1
+av==17.1.0
