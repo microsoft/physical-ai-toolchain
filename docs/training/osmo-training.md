@@ -25,12 +25,13 @@ Submit distributed Isaac Lab training jobs through NVIDIA OSMO workflow orchestr
 
 ## 📦 Available Templates
 
-| Template             | Purpose                             | Submission Script                                           |
-|----------------------|-------------------------------------|-------------------------------------------------------------|
-| `train.yaml`         | Isaac Lab training (base64 inline)  | `training/rl/scripts/submit-osmo-training.sh`               |
-| `train-dataset.yaml` | Isaac Lab training (dataset upload) | `training/rl/scripts/submit-osmo-dataset-training.sh`       |
-| `lerobot-train.yaml` | LeRobot behavioral cloning          | `training/il/scripts/submit-osmo-lerobot-training.sh`       |
-| `lerobot-eval.yaml`  | LeRobot inference/evaluation        | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`        |
+| Template             | Purpose                             | Submission Script                                                     |
+|----------------------|-------------------------------------|-----------------------------------------------------------------------|
+| `train.yaml`         | Isaac Lab training (base64 inline)  | `training/rl/scripts/submit-osmo-training.sh`                         |
+| `train-dataset.yaml` | Isaac Lab training (dataset upload) | `training/rl/scripts/submit-osmo-dataset-training.sh`                 |
+| `lerobot-train.yaml` | LeRobot behavioral cloning          | `training/il/scripts/submit-osmo-lerobot-training.sh`                 |
+| `groot-train.yaml`   | GR00T-N1.5 / N1.7 fine-tuning (VLA) | `vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh` |
+| `lerobot-eval.yaml`  | LeRobot inference/evaluation        | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`                  |
 
 ## ⚙️ Workflow Comparison
 
@@ -92,6 +93,64 @@ Dataset folder injection via OSMO bucket system instead of base64-encoded archiv
   --dataset-bucket custom-bucket \
   --dataset-name my-training-code
 ```
+
+## 🤖 GR00T VLA Fine-Tuning
+
+Fine-tune NVIDIA Isaac-GR00T (N1.5 or N1.7) on a LeRobot dataset hosted in Azure Blob Storage. The submission script selects the GR00T codebase ref and the matching config injection path based on `--vla-version`.
+
+| Version | Config path                                  | Auto-resolved from `--data-config`                      |
+|---------|----------------------------------------------|---------------------------------------------------------|
+| N1.5    | `--data-config-file` (appended at runtime)   | `training/vla/configs/groot/${name}_data_config.py`     |
+| N1.7    | `--modality-config-file` (loaded at runtime) | `training/vla/configs/groot/${name}_modality_config.py` |
+
+Reference templates for both versions live in [`training/vla/configs/groot/examples/`](https://github.com/microsoft/physical-ai-toolchain/blob/main/training/vla/configs/groot/examples/README.md).
+
+### Submit GR00T-N1.5
+
+```bash
+./training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
+  --job-name groot-n15-example \
+  --vla-version 1.5 \
+  --base-model nvidia/GR00T-N1.5-3B \
+  --data-config example \
+  --data-config-file training/vla/configs/groot/examples/data_config.py \
+  --blob-url https://<account>.blob.core.windows.net/<container>/<dataset> \
+  --max-steps 500 \
+  --batch-size 4
+```
+
+### Submit GR00T-N1.7
+
+```bash
+./training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
+  --job-name groot-n17-example \
+  --vla-version 1.7 \
+  --base-model nvidia/GR00T-N1.7-3B \
+  --data-config example \
+  --modality-config-file training/vla/configs/groot/examples/modality_config.py \
+  --blob-url https://<account>.blob.core.windows.net/<container>/<dataset> \
+  --max-steps 500 \
+  --batch-size 4
+```
+
+When `--vla-version 1.7` is set the script auto-resolves `${name}_modality_config.py` from `training/vla/configs/groot/`; pass `--modality-config-file` explicitly to override.
+
+### Optional: Mirror checkpoint to ACR
+
+Append `--acr-registry <name>` to push the final checkpoint as an OCI artifact tagged `run-<timestamp>-step<N>` under `models/groot`:
+
+```bash
+./training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
+  --vla-version 1.7 \
+  --base-model nvidia/GR00T-N1.7-3B \
+  --data-config example \
+  --modality-config-file training/vla/configs/groot/examples/modality_config.py \
+  --blob-url https://<account>.blob.core.windows.net/<container>/<dataset> \
+  --acr-registry <acr-name> \
+  --acr-model-repo models/groot
+```
+
+See [LeRobot Training — GR00T VLA Fine-Tuning](lerobot-training.md#-gr00t-vla-fine-tuning) for the full parameter table and Azure ML mirror workflow.
 
 ## 🔧 Environment Variables
 

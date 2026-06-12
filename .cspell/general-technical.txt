@@ -503,6 +503,7 @@ grafana
 graphql
 greenfield
 grooming
+groot
 gruntwork
 hadoop
 hardcoded
@@ -1674,6 +1675,16 @@ ueks
 unnormalization
 updt
 zstd
+acrdev
+eeuo
+gpustat
+libsm
+libvulkan
+libxext
+libxrender
+noheader
+PYTHONUNBUFFERED
+torchcodec
 
 # Matplotlib / plotting API terms
 axhline
