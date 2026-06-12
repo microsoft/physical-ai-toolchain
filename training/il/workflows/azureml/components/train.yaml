@@ -28,10 +28,6 @@ inputs:
     type: uri_folder
     optional: true
     description: Dataset prepared by the preprocess step (or mounted directly).
-  preprocessing_config:
-    type: uri_folder
-    optional: true
-    description: Preprocessing config emitted by the preprocess step.
   dataset_repo_id:
     type: string
     description: HuggingFace-style dataset repo id (set as DATASET_REPO_ID at the step level).
@@ -56,6 +52,12 @@ environment: azureml:lerobot-training-env:latest
 # without modification. When `prepared_dataset` is not provided (e.g. when the
 # Component is invoked standalone with DATASET_ASSET_COUNT and DATASET_ASSETS
 # set externally), the bridge is a no-op.
+#
+# train.py writes checkpoints under the OUTPUT_DIR env var (defaulting to
+# /workspace/outputs/train when unset). The MLflow uploader then mirrors
+# OUTPUT_DIR/checkpoints/ into AZURE_ML_OUTPUT_checkpoints at job exit. Without
+# this bridge, checkpoints would land at the default local path and never
+# reach the AzureML `checkpoints` output URI.
 command: >-
   bash -c '
   set -euo pipefail;
@@ -64,4 +66,6 @@ command: >-
     export DATASET_ASSET_COUNT=1;
     echo "[BRIDGE] Wired prepared_dataset -> AZURE_ML_INPUT_dataset_asset_0=$AZURE_ML_INPUT_dataset_asset_0";
   fi;
+  export OUTPUT_DIR="${AZURE_ML_OUTPUT_checkpoints:-/workspace/outputs/train}";
+  echo "[BRIDGE] OUTPUT_DIR=$OUTPUT_DIR";
   bash training/il/scripts/lerobot/azureml-train-entry.sh'

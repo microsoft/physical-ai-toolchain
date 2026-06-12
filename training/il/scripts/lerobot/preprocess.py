@@ -126,18 +126,31 @@ def prepare_dataset(
 
     Args:
         dataset_input: AzureML-mounted dataset directory.
-        dataset_repo_id: Dataset identifier for LeRobot.
+        dataset_repo_id: Dataset identifier for LeRobot. Must be a relative
+            path with no absolute prefix or ``..`` components.
         output_dir: Output directory where the prepared layout is created.
 
     Returns:
         The ``root`` path to pass to LeRobot (i.e. the parent of the
         copied dataset directory).
 
+    Raises:
+        ValueError: If ``dataset_repo_id`` is empty, absolute, contains
+            ``..``, or would escape ``output_dir`` after resolution.
+
     """
     import shutil
 
+    if not dataset_repo_id:
+        raise ValueError("dataset_repo_id is required")
+    if dataset_repo_id.startswith("/") or ".." in dataset_repo_id:
+        raise ValueError(f"dataset_repo_id must be relative (no '/' or '..'): {dataset_repo_id!r}")
+
     output_dir.mkdir(parents=True, exist_ok=True)
     dataset_dest = output_dir / dataset_repo_id
+
+    if not dataset_dest.resolve().is_relative_to(output_dir.resolve()):
+        raise ValueError(f"dataset_repo_id escapes output_dir after resolution: {dataset_repo_id!r}")
 
     if dataset_dest.exists():
         shutil.rmtree(dataset_dest)

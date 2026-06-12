@@ -61,8 +61,10 @@ inputs:
     type: string
     default: lerobot-policy
     description: >-
-      AML Model Registry name used by the register step. Pass empty string
-      to skip registration (the step still runs as a no-op).
+      AML Model Registry name used by the register step. Required by the
+      submission script (submit-azureml-lerobot-pipeline.sh fails fast when
+      empty); the register step always runs and writes the model into the
+      AML Model Registry.
   compute_preprocess:
     type: string
     default: azureml:cpu-cluster
@@ -100,7 +102,6 @@ jobs:
     compute: ${{parent.inputs.compute_train}}
     inputs:
       prepared_dataset: ${{parent.jobs.preprocess_step.outputs.prepared_dataset}}
-      preprocessing_config: ${{parent.jobs.preprocess_step.outputs.preprocessing_config}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
       policy_type: ${{parent.inputs.policy_type}}
       job_name: ${{parent.inputs.job_name}}
@@ -122,7 +123,6 @@ jobs:
     inputs:
       model_checkpoint: ${{parent.jobs.train_step.outputs.checkpoints}}
       prepared_dataset: ${{parent.jobs.preprocess_step.outputs.prepared_dataset}}
-      preprocessing_config: ${{parent.jobs.preprocess_step.outputs.preprocessing_config}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
       policy_type: ${{parent.inputs.policy_type}}
       job_name: ${{parent.inputs.job_name}}

@@ -102,7 +102,6 @@ jobs:
     compute: ${{parent.inputs.compute_train}}
     inputs:
       prepared_dataset: ${{parent.jobs.preprocess_step.outputs.prepared_dataset}}
-      preprocessing_config: ${{parent.jobs.preprocess_step.outputs.preprocessing_config}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
       policy_type: ${{parent.inputs.policy_type}}
       job_name: ${{parent.inputs.job_name}}
@@ -124,7 +123,6 @@ jobs:
     inputs:
       model_checkpoint: ${{parent.jobs.train_step.outputs.checkpoints}}
       prepared_dataset: ${{parent.jobs.preprocess_step.outputs.prepared_dataset}}
-      preprocessing_config: ${{parent.jobs.preprocess_step.outputs.preprocessing_config}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
       policy_type: ${{parent.inputs.policy_type}}
       job_name: ${{parent.inputs.job_name}}
