@@ -22,7 +22,7 @@ apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential >/dev/nu
 # because the container is ephemeral and isolated from any host system Python.
 pip install --quiet --break-system-packages uv
 
-LEROBOT_REQUIREMENTS="training/il/lerobot/requirements.txt"
+LEROBOT_REQUIREMENTS="${LEROBOT_REQUIREMENTS:-training/il/lerobot/requirements.txt}"
 if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
   echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
   exit 1
