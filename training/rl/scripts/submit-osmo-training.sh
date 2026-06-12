@@ -206,6 +206,7 @@ rm -f "$ARCHIVE_PATH" "$B64_PATH"
   -x "**/__pycache__/*" \
   -x "*.pyc" \
   -x "*.pyo" \
+  -x "**/.venv/*" \
   -x "**/.pytest_cache/*" \
   -x "**/.mypy_cache/*" \
   -x "**/*.egg-info/*") || fatal "Failed to create training archive"

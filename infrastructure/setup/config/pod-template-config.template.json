@@ -42,6 +42,12 @@
             "containers": [
                 {
                     "name": "{{USER_CONTAINER_NAME}}",
+                    "volumeMounts": [
+                        {
+                            "name": "dshm",
+                            "mountPath": "/dev/shm"
+                        }
+                    ],
                     "resources": {
                         "limits": {
                             "cpu": "{{USER_CPU}}",

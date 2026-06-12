@@ -22,6 +22,15 @@ REQUIRED_PARAMS = (
     "distributed",
     "num_envs",
 )
+_LEROBOT_REQUIRED_METRICS = (
+    "train/loss",
+    "train/learning_rate",
+)
+_LEROBOT_REQUIRED_PARAMS = (
+    "policy_type",
+    "num_gpus",
+    "distributed",
+)
 
 
 @dataclass(frozen=True)
@@ -105,6 +114,8 @@ def _assert_run_has_expected_tracking(
     *,
     run_id: str,
     experiment_name: str,
+    required_metrics: tuple[str, ...] = REQUIRED_METRICS,
+    required_params: tuple[str, ...] = REQUIRED_PARAMS,
 ) -> MLflowTrackingResult:
     client = _mlflow_client(aml_workspace)
     run = client.get_run(run_id)
@@ -119,21 +130,21 @@ def _assert_run_has_expected_tracking(
     metrics = run.data.metrics
     params = run.data.params
 
-    missing_metrics = [name for name in REQUIRED_METRICS if name not in metrics]
+    missing_metrics = [name for name in required_metrics if name not in metrics]
     if missing_metrics:
         raise AssertionError(
             f"MLflow run {run_id!r} was missing metrics {missing_metrics}; available metrics: {sorted(metrics)}"
         )
 
-    missing_params = [name for name in REQUIRED_PARAMS if name not in params or params[name] == ""]
+    missing_params = [name for name in required_params if name not in params or params[name] == ""]
     if missing_params:
         raise AssertionError(
             f"MLflow run {run_id!r} was missing params {missing_params}; available params: {sorted(params)}"
         )
 
     return MLflowTrackingResult(
-        metrics={name: metrics[name] for name in REQUIRED_METRICS},
-        params={name: params[name] for name in REQUIRED_PARAMS},
+        metrics={name: metrics[name] for name in required_metrics},
+        params={name: params[name] for name in required_params},
         tags=run.data.tags,
     )
 
@@ -147,6 +158,19 @@ def assert_aml_job_has_mlflow_tracking(job: AzureMLJob, aml_workspace: AzureMLWo
     rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
     rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
     log_e2e(f"AzureML MLflow tracking passed: metrics=[{rendered_metrics}] params=[{rendered_params}]")
+
+
+def assert_aml_lerobot_job_has_mlflow_tracking(job: AzureMLJob, aml_workspace: AzureMLWorkspace) -> None:
+    tracking = _assert_run_has_expected_tracking(
+        aml_workspace,
+        run_id=job.name,
+        experiment_name=job.experiment_name,
+        required_metrics=_LEROBOT_REQUIRED_METRICS,
+        required_params=_LEROBOT_REQUIRED_PARAMS,
+    )
+    rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
+    rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
+    log_e2e(f"AzureML LeRobot MLflow tracking passed: metrics=[{rendered_metrics}] params=[{rendered_params}]")
 
 
 def assert_osmo_workflow_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspace: AzureMLWorkspace) -> None:
