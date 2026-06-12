@@ -1,0 +1,158 @@
+# LeRobot Imitation Learning Pipeline (4-step DAG, opt-in register)
+#
+# End-to-end LeRobot IL training pipeline:
+#   preprocess -> train -> evaluate -> register
+#
+# This is the opt-in 4-step variant of lerobot-pipeline.yaml that adds an
+# AzureML Model Registry registration step. The register step takes a hard
+# DAG dependency on evaluate's eval_metrics output, so a non-zero evaluate
+# exit (combined with settings.continue_on_step_failure: false) stops the
+# pipeline BEFORE register starts.
+#
+# This is INTENTIONALLY a different file (not a flag in the base pipeline)
+# because AML pipelines do not support conditional step execution and we
+# want the 3-step variant to remain the default opt-out path. The 3-step
+# variant is the default; this 4-step variant is opt-in via the
+# --with-register flag in submit-azureml-lerobot-pipeline.sh.
+#
+# NOTE: The eval_metrics --> register dependency here is a structural DAG
+# wiring only. The toolchain does NOT enforce eval-gates-register as a
+# governance contract (that contract is engagement-specific and is
+# explicitly out of scope per the port plan). The register step always
+# runs as long as evaluate exits zero. There is no metric-threshold
+# verdict that blocks registration.
+
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: lerobot-pipeline-with-register
+experiment_name: lerobot-pipeline
+description: >-
+  LeRobot imitation learning pipeline with opt-in AML Model Registry
+  registration: preprocess -> train -> evaluate -> register. Register
+  takes a DAG dependency on evaluate.eval_metrics so an evaluate failure
+  stops the pipeline before register runs.
+
+settings:
+  default_datastore: azureml:workspaceblobstore
+  continue_on_step_failure: false
+
+inputs:
+  dataset:
+    type: uri_folder
+    description: >-
+      Raw LeRobot dataset asset (e.g. azureml:my-dataset:1). Must contain
+      meta/, data/, and optionally videos/ subfolders.
+  dataset_repo_id:
+    type: string
+    description: >-
+      HuggingFace-style dataset repo id; must match the dataset folder name.
+  preprocessing_config:
+    type: uri_file
+    optional: true
+    description: >-
+      Optional preprocessing_config.yaml from a previous pipeline run.
+  policy_type:
+    type: string
+    default: act
+  job_name:
+    type: string
+    default: lerobot-pipeline
+  register_model_name:
+    type: string
+    default: lerobot-policy
+    description: >-
+      AML Model Registry name used by the register step. Required by the
+      submission script (submit-azureml-lerobot-pipeline.sh fails fast when
+      empty); the register step always runs and writes the model into the
+      AML Model Registry.
+  compute_preprocess:
+    type: string
+    default: azureml:cpu-cluster
+  compute_train:
+    type: string
+    default: azureml:cpu-cluster
+  compute_evaluate:
+    type: string
+    default: azureml:cpu-cluster
+  compute_register:
+    type: string
+    default: azureml:cpu-cluster
+
+outputs:
+  checkpoints:
+    type: uri_folder
+    mode: upload
+  eval_metrics:
+    type: uri_folder
+    mode: upload
+
+jobs:
+  preprocess_step:
+    type: command
+    component: ./components/preprocess.yaml
+    compute: ${{parent.inputs.compute_preprocess}}
+    inputs:
+      dataset: ${{parent.inputs.dataset}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      preprocessing_config: ${{parent.inputs.preprocessing_config}}
+
+  train_step:
+    type: command
+    component: ./components/train.yaml
+    compute: ${{parent.inputs.compute_train}}
+    inputs:
+      prepared_dataset: ${{parent.jobs.preprocess_step.outputs.prepared_dataset}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      policy_type: ${{parent.inputs.policy_type}}
+      job_name: ${{parent.inputs.job_name}}
+    outputs:
+      checkpoints: ${{parent.outputs.checkpoints}}
+    identity:
+      type: managed_identity
+    environment_variables:
+      AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
+      DATASET_REPO_ID: ${{parent.inputs.dataset_repo_id}}
+      POLICY_TYPE: ${{parent.inputs.policy_type}}
+      JOB_NAME: ${{parent.inputs.job_name}}
+      TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
+
+  evaluate_step:
+    type: command
+    component: ../../../../evaluation/sil/workflows/azureml/components/evaluate.yaml
+    compute: ${{parent.inputs.compute_evaluate}}
+    inputs:
+      model_checkpoint: ${{parent.jobs.train_step.outputs.checkpoints}}
+      prepared_dataset: ${{parent.jobs.preprocess_step.outputs.prepared_dataset}}
+      dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
+      policy_type: ${{parent.inputs.policy_type}}
+      job_name: ${{parent.inputs.job_name}}
+    outputs:
+      eval_metrics: ${{parent.outputs.eval_metrics}}
+    identity:
+      type: managed_identity
+    environment_variables:
+      AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
+      DATASET_REPO_ID: ${{parent.inputs.dataset_repo_id}}
+      POLICY_TYPE: ${{parent.inputs.policy_type}}
+      JOB_NAME: ${{parent.inputs.job_name}}
+
+  register_step:
+    type: command
+    component: ../../../../workflows/azureml/components/register.yaml
+    compute: ${{parent.inputs.compute_register}}
+    inputs:
+      model_checkpoint: ${{parent.jobs.train_step.outputs.checkpoints}}
+      # DAG dependency: this binding has no effect on register_model.py
+      # behaviour, but it makes AML schedule register AFTER evaluate.
+      eval_metrics: ${{parent.jobs.evaluate_step.outputs.eval_metrics}}
+    identity:
+      type: managed_identity
+    environment_variables:
+      AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
+      REGISTER_MODEL: ${{parent.inputs.register_model_name}}
+      POLICY_TYPE: ${{parent.inputs.policy_type}}
+      JOB_NAME: ${{parent.inputs.job_name}}
+
+tags:
+  pipeline: lerobot-pipeline-with-register
+  framework: lerobot
