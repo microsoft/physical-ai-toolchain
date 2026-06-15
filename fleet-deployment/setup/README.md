@@ -4,15 +4,15 @@ Build, sign, and attest inference container images for the robot fleet.
 
 ## 📋 Prerequisites
 
-| Tool          | Purpose                                      | Required for                  |
-|---------------|----------------------------------------------|-------------------------------|
-| `az` CLI      | Azure auth, `az ml`, `az acr login`          | All steps                     |
-| `docker` (with `buildx`) | Local image build + push to ACR   | Build                         |
-| `jq`          | Terraform output parsing, buildx metadata    | Build                         |
-| `cosign` ≥2.2 | Image signing + attestation                  | `sigstore` mode               |
-| `syft`        | SBOM generation                              | Attest (unless `--skip-sbom`) |
-| `notation` ≥1.1 + `notation-azure-kv` ≥1.1 | AKV-backed image signing | `notation` mode |
-| `oras` ≥1.2   | SBOM upload as OCI referrer                  | `notation` mode               |
+| Tool                                       | Purpose                                   | Required for                  |
+|--------------------------------------------|-------------------------------------------|-------------------------------|
+| `az` CLI                                   | Azure auth, `az ml`, `az acr login`       | All steps                     |
+| `docker` (with `buildx`)                   | Local image build + push to ACR           | Build                         |
+| `jq`                                       | Terraform output parsing, buildx metadata | Build                         |
+| `cosign` ≥2.2                              | Image signing + attestation               | `sigstore` mode               |
+| `syft`                                     | SBOM generation                           | Attest (unless `--skip-sbom`) |
+| `notation` ≥1.1 + `notation-azure-kv` ≥1.1 | AKV-backed image signing                  | `notation` mode               |
+| `oras` ≥1.2                                | SBOM upload as OCI referrer               | `notation` mode               |
 
 Run `az login` against every Entra tenant you need (AML tenant, ACR tenant,
 AKV tenant). Cross-tenant flows require a session in each.
@@ -23,12 +23,12 @@ that blocks large baked-in models does not apply.
 
 ## 📂 Files
 
-| File                       | Purpose                                                         |
-|----------------------------|-----------------------------------------------------------------|
-| `build-aml-model-image.sh` | Download AML model, `docker buildx build --push`, sign image, self-verify |
-| `attest-image.sh`          | Attach SBOM + OpenVEX attestations to an already-built image    |
-| `Dockerfile.inference`     | `scratch` carrier: `COPY model/` only — no runtime, mounted via OCI image volume |
-| `defaults.conf`            | Centralized defaults consumed by both scripts                   |
+| File                              | Purpose                                                                                  |
+|-----------------------------------|------------------------------------------------------------------------------------------|
+| `build-aml-model-image.sh`        | Download AML model, `docker buildx build --push`, sign image, self-verify                |
+| `attest-image.sh`                 | Attach SBOM + OpenVEX attestations to an already-built image                             |
+| `Dockerfile.inference`            | `scratch` carrier: `COPY model/` only — no runtime, mounted via OCI image volume         |
+| `defaults.conf`                   | Centralized defaults consumed by both scripts                                            |
 | `tests/test-model-image-pod.yaml` | Smoke-test pod that mounts a built model image via OCI image volume and lists `/policy/` |
 
 ## 🚀 Quick Start
@@ -71,11 +71,11 @@ Build and attest are decoupled on purpose:
 
 ## 🔐 Signing Modes (`--verify-mode`)
 
-| Mode       | Signature                       | SBOM (via `attest-image.sh`)        | VEX (via `attest-image.sh`) |
-|------------|---------------------------------|-------------------------------------|-----------------------------|
-| `sigstore` | `cosign sign` (keyless OIDC)    | `cosign attest --type spdxjson`     | `cosign attest --type openvex` |
-| `notation` | `notation sign` (AKV-backed)    | `oras attach` as OCI referrer       | _not supported_             |
-| `none`     | _no signature_                  | _attest refuses `--mode none`_      | _n/a_                       |
+| Mode       | Signature                    | SBOM (via `attest-image.sh`)    | VEX (via `attest-image.sh`)    |
+|------------|------------------------------|---------------------------------|--------------------------------|
+| `sigstore` | `cosign sign` (keyless OIDC) | `cosign attest --type spdxjson` | `cosign attest --type openvex` |
+| `notation` | `notation sign` (AKV-backed) | `oras attach` as OCI referrer   | _not supported_                |
+| `none`     | _no signature_               | _attest refuses `--mode none`_  | _n/a_                          |
 
 Use `none` only for local development. Kyverno-enforcing clusters will reject
 unsigned images.
@@ -86,12 +86,12 @@ unsigned images.
 is the committed VEX document for the pinned base image. Every CVE statement
 must carry one of:
 
-| `status`              | When to use                                                          |
-|-----------------------|----------------------------------------------------------------------|
+| `status`              | When to use                                                                                 |
+|-----------------------|---------------------------------------------------------------------------------------------|
 | `not_affected`        | CVE present in a package we ship, but our usage path is not reachable. Add `justification`. |
-| `affected`            | Exploitable. Add `action_statement` (e.g. "upgrade to 2.4").         |
-| `fixed`               | Patched in this digest.                                              |
-| `under_investigation` | Triage pending. **Not accepted by strict Kyverno policies.**         |
+| `affected`            | Exploitable. Add `action_statement` (e.g. "upgrade to 2.4").                                |
+| `fixed`               | Patched in this digest.                                                                     |
+| `under_investigation` | Triage pending. **Not accepted by strict Kyverno policies.**                                |
 
 Refresh the VEX whenever:
 
@@ -129,15 +129,15 @@ for on-node inference), bump the base intentionally:
 
 ## 🔧 Common Overrides
 
-| Override                                  | Effect                                            |
-|-------------------------------------------|---------------------------------------------------|
-| `--tf-dir none`                           | Skip Terraform discovery; values from flags/env only |
-| `--model-version 7`                       | Build a specific AML model version (default: `latest`) |
-| `--image-tag 7-sha-abc1234`               | Override the auto-derived tag                     |
-| `--verify-mode notation` + `--akv-key-id` | Use AKV-backed Notation signing instead of sigstore |
-| `--acr-name`/`--acr-tenant`/`--acr-subscription` | Required in cross-tenant or no-Terraform mode |
-| `INFERENCE_BASE_IMAGE=…` env var          | One-off base override without editing `defaults.conf` |
-| `--skip-sbom` / `--skip-vex`              | Selective attestation refresh                     |
+| Override                                         | Effect                                                 |
+|--------------------------------------------------|--------------------------------------------------------|
+| `--tf-dir none`                                  | Skip Terraform discovery; values from flags/env only   |
+| `--model-version 7`                              | Build a specific AML model version (default: `latest`) |
+| `--image-tag 7-sha-abc1234`                      | Override the auto-derived tag                          |
+| `--verify-mode notation` + `--akv-key-id`        | Use AKV-backed Notation signing instead of sigstore    |
+| `--acr-name`/`--acr-tenant`/`--acr-subscription` | Required in cross-tenant or no-Terraform mode          |
+| `INFERENCE_BASE_IMAGE=…` env var                 | One-off base override without editing `defaults.conf`  |
+| `--skip-sbom` / `--skip-vex`                     | Selective attestation refresh                          |
 
 Per-value resolution order: **Terraform output → CLI flag → `DEFAULT_*` env var
 → `defaults.conf` literal → fatal**.
@@ -166,14 +166,14 @@ sudo k3s kubectl get --raw /metrics | grep kubernetes_feature_enabled | grep Ima
 
 ## 🔍 Troubleshooting
 
-| Symptom                                                    | Likely cause                                                              |
-|------------------------------------------------------------|---------------------------------------------------------------------------|
-| `Subscription '…' (tenant …) not in az session for …`      | Missing `az login --tenant <id>` for that tenant                          |
-| `--akv-key-id (or DEFAULT_AKV_KEY_URI) is required …`      | `notation` mode without an AKV key URI                                    |
-| `Unexpected digest shape from az acr repository show`      | ACR returned no manifest — usually a transient ACR Tasks failure          |
-| `VEX file not present at '…' — skipping OpenVEX`           | Wrong `--vex-file` path or VEX not committed                              |
-| `verify-image.sh not present (PR #592 not merged yet)`     | Expected until [PR #592](https://github.com/microsoft/physical-ai-toolchain/pull/592) lands |
-| Sigstore signing locally rejected by Kyverno on cluster    | Signed with developer Entra identity; production builds must run in CI    |
+| Symptom                                                 | Likely cause                                                                                |
+|---------------------------------------------------------|---------------------------------------------------------------------------------------------|
+| `Subscription '…' (tenant …) not in az session for …`   | Missing `az login --tenant <id>` for that tenant                                            |
+| `--akv-key-id (or DEFAULT_AKV_KEY_URI) is required …`   | `notation` mode without an AKV key URI                                                      |
+| `Unexpected digest shape from az acr repository show`   | ACR returned no manifest — usually a transient ACR Tasks failure                            |
+| `VEX file not present at '…' — skipping OpenVEX`        | Wrong `--vex-file` path or VEX not committed                                                |
+| `verify-image.sh not present (PR #592 not merged yet)`  | Expected until [PR #592](https://github.com/microsoft/physical-ai-toolchain/pull/592) lands |
+| Sigstore signing locally rejected by Kyverno on cluster | Signed with developer Entra identity; production builds must run in CI                      |
 
 ## 🧹 Model Image Cleanup on Cluster Nodes
 
@@ -184,11 +184,11 @@ and runs per-node.
 
 Kubelet image GC is driven by three flags:
 
-| Flag                          | Default | Purpose                                           |
-|-------------------------------|---------|---------------------------------------------------|
-| `--image-gc-high-threshold`   | `85`    | Disk usage % that triggers GC                     |
-| `--image-gc-low-threshold`    | `80`    | GC removes unused images until disk drops to this |
-| `--image-maximum-gc-age`      | `0`     | Max age of unused images before GC (e.g. `168h`)  |
+| Flag                        | Default | Purpose                                           |
+|-----------------------------|---------|---------------------------------------------------|
+| `--image-gc-high-threshold` | `85`    | Disk usage % that triggers GC                     |
+| `--image-gc-low-threshold`  | `80`    | GC removes unused images until disk drops to this |
+| `--image-maximum-gc-age`    | `0`     | Max age of unused images before GC (e.g. `168h`)  |
 
 Edge nodes baking multi-gigabyte models should tighten the thresholds and
 cap age. For k3s, set kubelet args in the install:

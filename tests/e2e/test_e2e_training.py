@@ -9,8 +9,11 @@ To run these:
 # All e2e tests
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py
 
-# Only AML e2e test
+# Only AML RL e2e test
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py::test_aml_rl_training_e2e
+
+# Only AML IL (LeRobot) e2e test
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py::test_aml_il_training_e2e
 
 # Only OSMO e2e test
 uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py::test_osmo_rl_training_e2e
@@ -29,6 +32,7 @@ from tests.e2e._aml import (
     assert_job_has_checkpoint,
     assert_job_snapshot_contains_only_training,
     cancel_aml_job,
+    submit_aml_lerobot_training,
     submit_aml_training,
     wait_until_aml_completed,
     wait_until_aml_started,
@@ -36,6 +40,7 @@ from tests.e2e._aml import (
 from tests.e2e._common import log_e2e
 from tests.e2e._mlflow import (
     assert_aml_job_has_mlflow_tracking,
+    assert_aml_lerobot_job_has_mlflow_tracking,
     assert_osmo_workflow_has_mlflow_tracking,
 )
 from tests.e2e._osmo import (
@@ -73,8 +78,41 @@ def test_aml_rl_training_e2e(
     log_e2e("Validating AzureML MLflow tracking")
     assert_aml_job_has_mlflow_tracking(job, aml_workspace)
     log_e2e("Validating AzureML checkpoint output")
-    assert_job_has_checkpoint(job, repo_root)
+    assert_job_has_checkpoint(job)
     log_e2e("AzureML RL e2e test finished successfully")
+
+
+@pytest.mark.e2e
+@pytest.mark.usefixtures("aml_compute_target")
+def test_aml_il_training_e2e(
+    request: pytest.FixtureRequest,
+    aml_workspace: AzureMLWorkspace,
+    repo_root: Path,
+) -> None:
+    log_e2e("Starting AzureML IL (LeRobot) e2e test")
+    job = submit_aml_lerobot_training(
+        repo_root,
+        aml_workspace,
+        dataset_repo_id="lerobot/pusht",
+        policy_type="act",
+        training_steps=10,
+        save_freq=5,
+        batch_size=8,
+        log_freq=1,
+    )
+    request.addfinalizer(lambda: cancel_aml_job(job, repo_root))
+
+    log_e2e(f"Waiting for AzureML LeRobot job {job.name} to start")
+    wait_until_aml_started(job, repo_root, timeout_minutes=15, poll_interval_seconds=30)
+    log_e2e(f"Waiting for AzureML LeRobot job {job.name} to complete")
+    wait_until_aml_completed(job, repo_root, timeout_minutes=30, poll_interval_seconds=30)
+    log_e2e("Validating AzureML LeRobot uploaded code snapshot")
+    assert_job_snapshot_contains_only_training(job, repo_root)
+    log_e2e("Validating AzureML LeRobot MLflow tracking")
+    assert_aml_lerobot_job_has_mlflow_tracking(job, aml_workspace)
+    log_e2e("Validating AzureML LeRobot checkpoint output")
+    assert_job_has_checkpoint(job)
+    log_e2e("AzureML LeRobot e2e test finished successfully")
 
 
 @pytest.mark.e2e

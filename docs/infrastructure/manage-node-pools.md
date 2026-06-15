@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Manage Node Pools
 description: Add, remove, and resize AKS node pools on an existing cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-05-12
+ms.date: 2026-06-02
 ms.topic: how-to
 keywords:
   - node-pools
@@ -218,6 +218,7 @@ Faster but disruptive. Use only when no workloads are running on the pool, or wh
 - **OSMO flag parity.** Pass the same flags you used for the initial `04-deploy-osmo-backend.sh` run (for example, `--use-acr`, `--use-access-keys`). Omitting them reverts the backend to defaults.
 - **Spot constraints.** Azure rejects `upgrade_settings` for Spot pools; the Terraform module already handles this. `eviction_policy` applies only when `priority = "Spot"`.
 - **Autoscaling.** `min_count = 0` is allowed; the pool scales up on demand from pending pods. KAI/Volcano coscheduling requires whole-pool capacity for gang-scheduled jobs.
+- **Scale-from-zero for AzureML.** GPU pools used by AzureML jobs must declare `node_labels = { accelerator = "nvidia" }`. Without this static label, the cluster autoscaler cannot prove a from-zero scale-up would satisfy AzureML InstanceTypes that select on `accelerator: nvidia`, and refuses to scale. See [Azure ML Training Workflows — Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools).
 - **Script 03 is not affected.** Only `04-deploy-osmo-backend.sh` reads pool data. `03-deploy-osmo-control-plane.sh` does not need to be rerun for pool changes.
 
 ## 🔗 Related
