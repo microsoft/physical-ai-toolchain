@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-22
+ms.date: 2026-06-12
 ms.topic: overview
 keywords:
   - security
