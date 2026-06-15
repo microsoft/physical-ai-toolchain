@@ -87,33 +87,33 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 
 #### S-1: OSMO API Authentication Disabled
 
-| Field            | Value                                                                                   |
-|------------------|-----------------------------------------------------------------------------------------|
-| Threat           | OSMO API server deploys with `auth.enabled: false`, allowing unauthenticated gRPC calls |
-| Affected Assets  | OSMO control plane, backend pods                                                        |
-| Trust Boundary   | TB-7                                                                                    |
-| Likelihood       | High                                                                                    |
-| Impact           | High                                                                                    |
-| Risk Rating      | High                                                                                    |
-| Current Controls | Cluster-internal networking only; namespace isolation                                   |
+| Field            | Value                                                                                                                                      |
+|------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| Threat           | OSMO API server deploys with `auth.enabled: false`, allowing unauthenticated gRPC calls                                                    |
+| Affected Assets  | OSMO control plane, backend pods                                                                                                           |
+| Trust Boundary   | TB-7                                                                                                                                       |
+| Likelihood       | High                                                                                                                                       |
+| Impact           | High                                                                                                                                       |
+| Risk Rating      | High                                                                                                                                       |
+| Current Controls | Cluster-internal networking only; namespace isolation                                                                                      |
 | Evidence         | `infrastructure/setup/values/osmo-control-plane.yaml` sets `osmoauth.enabled: false`, `oauth2Proxy.enabled: false`, `authz.enabled: false` |
-| Status           | Open                                                                                    |
-| Remediation      | Enable OSMO auth when vendor provides production-ready auth configuration               |
+| Status           | Open                                                                                                                                       |
+| Remediation      | Enable OSMO auth when vendor provides production-ready auth configuration                                                                  |
 
 #### S-2: PostgreSQL Shared Admin Identity
 
-| Field            | Value                                                                              |
-|------------------|------------------------------------------------------------------------------------|
-| Threat           | PostgreSQL uses a single `psqladmin` identity for all OSMO database operations     |
-| Affected Assets  | Azure Database for PostgreSQL, OSMO metadata                                       |
-| Trust Boundary   | TB-3                                                                               |
-| Likelihood       | Medium                                                                             |
-| Impact           | Medium                                                                             |
-| Risk Rating      | Medium                                                                             |
-| Current Controls | VNet integration; private endpoint; Key Vault–stored credentials                   |
+| Field            | Value                                                                                   |
+|------------------|-----------------------------------------------------------------------------------------|
+| Threat           | PostgreSQL uses a single `psqladmin` identity for all OSMO database operations          |
+| Affected Assets  | Azure Database for PostgreSQL, OSMO metadata                                            |
+| Trust Boundary   | TB-3                                                                                    |
+| Likelihood       | Medium                                                                                  |
+| Impact           | Medium                                                                                  |
+| Risk Rating      | Medium                                                                                  |
+| Current Controls | VNet integration; private endpoint; Key Vault–stored credentials                        |
 | Evidence         | `infrastructure/terraform/modules/platform/postgresql.tf` configures single admin login |
-| Status           | Accepted                                                                           |
-| Rationale        | Single-purpose database serving only OSMO; network isolation limits exposure       |
+| Status           | Accepted                                                                                |
+| Rationale        | Single-purpose database serving only OSMO; network isolation limits exposure            |
 
 ### Tampering
 
@@ -166,17 +166,17 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 
 #### R-1: Training Debug Logging Captures Credentials
 
-| Field            | Value                                                                                    |
-|------------------|------------------------------------------------------------------------------------------|
-| Threat           | Training scripts log `AZURE_*` environment variables at debug verbosity, exposing tokens |
-| Affected Assets  | Training pod logs, Log Analytics workspace                                               |
-| Trust Boundary   | TB-8                                                                                     |
-| Likelihood       | Medium                                                                                   |
-| Impact           | Medium                                                                                   |
-| Risk Rating      | Medium                                                                                   |
-| Current Controls | Debug logging disabled by default; Log Analytics RBAC                                    |
-| Evidence         | `training/utils/` modules previously included debug-level credential logging (code refactored) |
-| Status           | Resolved                                                                                        |
+| Field            | Value                                                                                                  |
+|------------------|--------------------------------------------------------------------------------------------------------|
+| Threat           | Training scripts log `AZURE_*` environment variables at debug verbosity, exposing tokens               |
+| Affected Assets  | Training pod logs, Log Analytics workspace                                                             |
+| Trust Boundary   | TB-8                                                                                                   |
+| Likelihood       | Medium                                                                                                 |
+| Impact           | Medium                                                                                                 |
+| Risk Rating      | Medium                                                                                                 |
+| Current Controls | Debug logging disabled by default; Log Analytics RBAC                                                  |
+| Evidence         | `training/utils/` modules previously included debug-level credential logging (code refactored)         |
+| Status           | Resolved                                                                                               |
 | Remediation      | Credential logging removed during `training/utils/` refactor; `env.py` no longer logs `AZURE_*` values |
 
 ### Information Disclosure
@@ -243,18 +243,18 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 
 #### I-5: Training Environment Variable Debug Logging
 
-| Field            | Value                                                                                          |
-|------------------|------------------------------------------------------------------------------------------------|
-| Threat           | Training utility modules log environment variables containing Azure credentials at debug level |
-| Affected Assets  | Pod logs, Log Analytics workspace                                                              |
-| Trust Boundary   | TB-8                                                                                           |
-| Likelihood       | Medium                                                                                         |
-| Impact           | Medium                                                                                         |
-| Risk Rating      | Medium                                                                                         |
-| Current Controls | Debug logging off by default; RBAC on Log Analytics                                            |
+| Field            | Value                                                                                           |
+|------------------|-------------------------------------------------------------------------------------------------|
+| Threat           | Training utility modules log environment variables containing Azure credentials at debug level  |
+| Affected Assets  | Pod logs, Log Analytics workspace                                                               |
+| Trust Boundary   | TB-8                                                                                            |
+| Likelihood       | Medium                                                                                          |
+| Impact           | Medium                                                                                          |
+| Risk Rating      | Medium                                                                                          |
+| Current Controls | Debug logging off by default; RBAC on Log Analytics                                             |
 | Evidence         | `training/utils/env.py` (previously `training/rl/utils/env.py`) no longer logs `AZURE_*` values |
-| Status           | Resolved                                                                                          |
-| Remediation      | Credential logging removed during `training/utils/` refactor                                      |
+| Status           | Resolved                                                                                        |
+| Remediation      | Credential logging removed during `training/utils/` refactor                                    |
 
 ### Denial of Service
 
@@ -384,17 +384,17 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 
 Goal Structuring Notation (GSN) elements supporting the security posture claim.
 
-| Element | Statement                                                                                             |
-|---------|-------------------------------------------------------------------------------------------------------|
-| G0      | The architecture provides adequate security controls for an IaC reference architecture                |
-| G1      | Authentication uses managed identities and workload federation, eliminating password-based access     |
-| G2      | Secrets are stored in Azure Key Vault with RBAC authorization and synced via CSI driver               |
-| G3      | Network access is restricted to private endpoints, VPN, and NSG-controlled subnets                    |
-| G4      | Supply chain integrity is maintained through SHA-pinned actions and dependency review                 |
+| Element | Statement                                                                                                         |
+|---------|-------------------------------------------------------------------------------------------------------------------|
+| G0      | The architecture provides adequate security controls for an IaC reference architecture                            |
+| G1      | Authentication uses managed identities and workload federation, eliminating password-based access                 |
+| G2      | Secrets are stored in Azure Key Vault with RBAC authorization and synced via CSI driver                           |
+| G3      | Network access is restricted to private endpoints, VPN, and NSG-controlled subnets                                |
+| G4      | Supply chain integrity is maintained through SHA-pinned actions and dependency review                             |
 | E1      | 19 STRIDE threats identified; 7 Accepted with compensating controls, 2 Resolved, 10 Open with remediation roadmap |
-| E2      | OpenSSF Passing ~85%; 25 Silver criteria assessed (5 Met, 5 Delegated, 13 N/A, 1 Gap)                 |
-| A1      | Deployer follows `docs/operations/security-guide.md` hardening checklist                              |
-| A2      | OSMO vendor provides auth/rate-limiting enablement path in future releases                            |
+| E2      | OpenSSF Passing ~85%; 25 Silver criteria assessed (5 Met, 5 Delegated, 13 N/A, 1 Gap)                             |
+| A1      | Deployer follows `docs/operations/security-guide.md` hardening checklist                                          |
+| A2      | OSMO vendor provides auth/rate-limiting enablement path in future releases                                        |
 
 ## Remediation Roadmap
 
