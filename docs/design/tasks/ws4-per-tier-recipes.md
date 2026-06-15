@@ -18,7 +18,7 @@ edit `docs/docusaurus/sidebars.js`.
 
 ## Tasks
 
-1. Author a T0 quick-start recipe that walks the full Goal G loop with zero cloud and zero Kubernetes,
+1. Author a T0 quick-start recipe that walks the full Goal: Full Training Lifecycle loop with zero cloud and zero Kubernetes,
    referencing the existing local code paths:
    - Train: `training/il/scripts/lerobot/train.py` (runtime CUDA detection).
    - Evaluate: `evaluation/sil/scripts/run-local-lerobot-eval.py` and `play.py`.

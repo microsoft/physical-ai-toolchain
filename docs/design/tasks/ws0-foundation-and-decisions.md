@@ -31,7 +31,7 @@ downstream wording is finalized.
 | 1 | Default tier in README/Quick Start (T0 default, T2 recommended-production, T3–T5 advanced?). Confirm stage names (Dev, Lab, Pilot, Production, Scale, Operate) and the `T#` + name pairing convention. | Recorded decision + naming table    |
 | 2 | Adopt "fleet delivery" (T4) and "fleet intelligence" (T5) as named concepts; reserve "fleet" for robots; retire bare "fleet management".                                                               | Vocabulary rules in `tier-model.md` |
 | 3 | How explicitly to label placeholder domains in user-facing vs. contributor docs.                                                                                                                       | Roadmap-honesty labeling guidance   |
-| 4 | Keep Goal G minimal with augmentation as a separate optional axis (A0–A2), or fold augmentation into Goal G.                                                                                           | Recorded decision                   |
+| 4 | Keep Goal: Full Training Lifecycle minimal with augmentation as a separate optional axis (A0–A2), or fold augmentation into Goal: Full Training Lifecycle.                                                                                           | Recorded decision                   |
 
 ## Tasks
 

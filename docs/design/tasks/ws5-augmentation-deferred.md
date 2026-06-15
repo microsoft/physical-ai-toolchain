@@ -24,10 +24,10 @@ A2 is out of scope here; this workstream targets the A0 and A1 rungs.
 
 - It is a build item, not a re-framing of shipped artifacts, so it carries code, tests, and dependency
   risk the documentation workstreams do not.
-- The proposal explicitly excludes augmentation from Goal G (the minimal floor argument), so it must
+- The proposal explicitly excludes augmentation from Goal: Full Training Lifecycle (the minimal floor argument), so it must
   not gate or expand the T0 on-ramp work in WS3/WS4.
 - It can begin only after the augmentation axis (A0–A2) and its placement relative to the tiers are
-  ratified — captured in the WS0 decision on Goal G scope.
+  ratified — captured in the WS0 decision on Goal: Full Training Lifecycle scope.
 
 ## Suggested Future Sub-Tasks
 
@@ -51,4 +51,4 @@ When picked up, this workstream can itself be parallelized:
 ## Out of Scope
 
 - A2 Cosmos/SDG pipeline implementation.
-- Folding augmentation into Goal G or the T0 on-ramp.
+- Folding augmentation into Goal: Full Training Lifecycle or the T0 on-ramp.

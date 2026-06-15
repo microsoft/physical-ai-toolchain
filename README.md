@@ -37,11 +37,39 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 <!-- -->
 
 > [!TIP]
-> **Get started in under 2 hours.** By the end of the [Quickstart Guide](docs/getting-started/quickstart.md), you will have:
->
-> - A pick-and-place RL policy trained in Isaac Lab on Azure GPU compute
-> - Experiment metrics and checkpoints tracked in MLflow
-> - A containerized model deployed to a Jetson device via GitOps
+> **Start on a laptop, not in the cloud.** The default starting path (T0 — Dev) closes the full capture → train → validate → run loop on **one laptop and one robot**, with **zero cloud and zero Kubernetes**. Cloud, Kubernetes, Arc, and fleet components are tier-gated additions you adopt only when your scale demands them — not prerequisites. See [Start on a Laptop (T0 — Dev)](#-start-on-a-laptop-t0--dev) below.
+
+## 🛫 Start on a Laptop (T0 — Dev)
+
+Adoption is modeled as six graduated tiers (T0–T5). Each tier states the minimum edge and cloud infrastructure required to reach **Goal: Full Training Lifecycle** — capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot — and **each tier is a legitimate stopping point**. You adopt only the infrastructure your scale actually demands; the heavy components are opt-in additions, not a baseline you must stand up first.
+
+**T0 — Dev is the default starting path.** One laptop, one robot, and the full loop:
+
+- **Capture** — ROS 2 bag recording to local disk. No Arc, no ACSA, no PVC.
+- **Move data** — `cp` or `rsync` from robot to laptop.
+- **Curate** — the dataviewer in `local` mode on the laptop.
+- **Train** — `lerobot-train` on the laptop, CPU or a local GPU.
+- **Track** — training writes checkpoints and logs to local disk; hosted tracking enters at T2.
+- **Validate** — `run-local-lerobot-eval.py` / `play.py` locally.
+- **Run on robot** — the inference node as a plain process or container. No Flux, no gating, no GitOps.
+
+**Edge infra:** ROS 2 and Docker only. **Cloud infra:** none.
+
+| Tier                | When to use it                                                             | Quick start                                                            |
+|---------------------|----------------------------------------------------------------------------|------------------------------------------------------------------------|
+| **T0 — Dev** ⭐      | Default. One laptop, one robot — zero cloud, zero Kubernetes.              | [Tier 0 — Dev recipe](docs/recipes/tier-0-dev/README.md)               |
+| **T1 — Lab**        | One site, a few robots, a shared GPU box. First cloud: storage.            | [Tier 1 — Lab recipe](docs/recipes/tier-1-lab/README.md)               |
+| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.         | [Tier 2 — Pilot recipe](docs/recipes/tier-2-pilot/README.md)           |
+| **T3 — Production** | Advanced. Single-site declarative deployment (local k3s + Flux, no Arc).   | [Tier 3 — Production recipe](docs/recipes/tier-3-production/README.md) |
+| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc as reachability broker.       | [Tier 4 — Scale recipe](docs/recipes/tier-4-scale/README.md)           |
+| **T5 — Operate**    | Roadmap. **Fleet intelligence** — drift/retraining (mostly unimplemented). | [Tier 5 — Operate recipe](docs/recipes/tier-5-operate/README.md)       |
+
+⭐ default · ✅ recommended production
+
+Cloud training, model registries, Kubernetes (k3s/AKS), Azure Arc, and the fleet delivery/intelligence planes enter the picture only at the tier where they earn their keep. Pick your tier in [Getting Started → Choose Your Tier](docs/getting-started/README.md#choose-your-tier), read the tier-by-tier infrastructure boundaries in the [Architecture Overview](docs/contributing/architecture.md), and consult the canonical [Tier Model](docs/design/tier-model.md) for the authoritative tier table and vocabulary.
+
+> [!NOTE]
+> **Roadmap honesty.** T5 (Operate / fleet intelligence) is a roadmap direction, not shipped capability — the `fleet-intelligence` domain ships ~0 Python files and a handful of placeholder specs. Treat T5 as a direction of travel, not a feature you can turn on today.
 
 ## What's Inside
 
@@ -76,7 +104,9 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 ./setup-dev.sh
 ```
 
-The setup script installs Python 3.12 via [uv](https://docs.astral.sh/uv/), creates a virtual environment, and installs training dependencies. Follow the [Quickstart Guide](docs/getting-started/quickstart.md) for the full deployment walkthrough.
+The setup script installs Python 3.12 via [uv](https://docs.astral.sh/uv/), creates a virtual environment, and installs training dependencies. This is all the default path (T0 — Dev) needs: train, track, and validate locally on a laptop GPU with no Azure subscription.
+
+Follow the [Quickstart Guide](docs/getting-started/quickstart.md) for the default local-first walkthrough, then [Choose Your Tier](docs/getting-started/README.md#choose-your-tier) when you are ready to graduate to cloud training (T2 — Pilot) or beyond. The cloud, Kubernetes, and fleet steps are opt-in additions layered onto this working local baseline.
 
 ## Documentation
 
@@ -93,18 +123,18 @@ Full documentation is available in the [docs/](docs/README.md) directory.
 
 ## Architecture
 
-This toolchain integrates:
+The architecture is organized as graduated tiers (T0–T5): each component enters at the tier where it earns its keep, rather than as a baseline prerequisite. The default path (T0 — Dev) needs only the local components; everything below is an opt-in addition.
 
-- **NVIDIA OSMO** — Workflow orchestration and job scheduling
 - **NVIDIA Isaac Sim & Isaac Lab** — Physics simulation and RL task environments
 - **NVIDIA Jetson** — Edge inference and demonstration data capture
-- **Azure Machine Learning** — Experiment tracking and model management
-- **Azure Kubernetes Service** — Software in the Loop (SIL) training
-- **Azure Arc for Kubernetes** — Hardware in the Loop (HIL) training and edge fleet management
-- **Azure Storage** — Persistent data and checkpoint storage
-- **Azure Event Grid & Fabric** — Event-driven data pipeline orchestration
+- **Azure Storage** — Cloud data and checkpoint storage (opt-in from T1 — Lab)
+- **Azure Machine Learning** — Cloud training, experiment tracking, and model registry (default from T2 — Pilot)
+- **NVIDIA OSMO** — Workflow orchestration and job scheduling (T2 — Pilot)
+- **Local k3s + FluxCD** — Single-site declarative GitOps deployment, no Arc required (T3 — Production)
+- **Azure Arc + AKS** — Cross-site reachability and identity broker for multi-site **fleet delivery** (T4 — Scale)
+- **Azure IoT Operations & Fabric** — Telemetry aggregation and **fleet intelligence** (T5 — Operate, roadmap)
 
-See [Architecture Overview](docs/contributing/architecture.md) for the full design.
+See the [Architecture Overview](docs/contributing/architecture.md) for the per-tier infrastructure boundaries and the canonical [Tier Model](docs/design/tier-model.md) for the authoritative tier table.
 
 ## Agentic Workflows
 

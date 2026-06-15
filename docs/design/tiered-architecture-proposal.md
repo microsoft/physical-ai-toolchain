@@ -2,9 +2,9 @@
 
 - **Date:** June 9th, 2026
 - **Author:** David White
-- **Status:** Draft for socialization and feedback
+- **Status:** Adopted — decisions resolved (see [Resolved Decisions](#resolved-decisions))
 - **Scope:** Architecture and on-ramp framing for [microsoft/physical-ai-toolchain](https://github.com/microsoft/physical-ai-toolchain)
-- **Type:** Proposal — not yet adopted
+- **Type:** Adopted architecture decision
 
 ---
 
@@ -83,7 +83,7 @@ A file-level survey of the eight domains separates shipped code from aspirationa
 | `fleet-deployment`   | 1      | 1     | 0         | 5                 |
 | `fleet-intelligence` | 0      | 4     | 0         | 4                 |
 
-The implemented center of gravity is **infrastructure provisioning plus training, data management, and evaluation tooling.** The two domains that carry the "fleet" identity — `fleet-deployment` and `fleet-intelligence` — hold **one Python file between them and nine placeholder specifications.** The headline identity of the project is its least-built region.
+The implemented center of gravity is **infrastructure provisioning plus training, data management, and evaluation tooling.** The two domains that carry the "fleet" identity — `fleet-deployment` and `fleet-intelligence` — hold **one Python file between them and seven placeholder specifications.** The headline identity of the project is its least-built region.
 
 Two consequences follow:
 
@@ -137,9 +137,9 @@ Robot count correlates with these but does not cause them. Three identical robot
 
 Each tier states the minimum infrastructure to reach a concrete goal:
 
-> **Goal G:** Capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot — the full loop, one task. Fleet intelligence is explicitly out of scope of Goal G.
+> **Goal: Full Training Lifecycle:** Capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot — the full loop, one task. Fleet intelligence is explicitly out of scope of Goal: Full Training Lifecycle.
 
-Goal G is fully achievable at Tiers 0 through 2 without any Kubernetes, Arc, or fleet infrastructure. Data augmentation and fleet-intelligence autonomy are modeled as separate optional axes (see [Cross-Cutting Axis: Tiered Data Augmentation](#cross-cutting-axis-tiered-data-augmentation) and [The Autonomy Ladder](#the-autonomy-ladder-t50t53)), not steps in the Goal G loop.
+Goal: Full Training Lifecycle is fully achievable at Tiers 0 through 2 without any Kubernetes, Arc, or fleet infrastructure. Data augmentation and fleet-intelligence autonomy are modeled as separate optional axes (see [Cross-Cutting Axis: Tiered Data Augmentation](#cross-cutting-axis-tiered-data-augmentation) and [The Autonomy Ladder](#the-autonomy-ladder-t50t53)), not steps in the Goal: Full Training Lifecycle loop.
 
 ### Tier Ladder Overview
 
@@ -156,7 +156,7 @@ T4  Scale       Multi-site delivery       edge: Arc + AKS + Flux   cloud: + conn
 T5  Operate     Fleet intelligence        edge: + IoT Operations   cloud: + Fabric RTI + drift/retraining
 ```
 
-T0–T2 satisfy Goal G with manual deployment. T3 adds single-site declarative deployment (local k3s + Flux) **without Arc** — proving GitOps does not require a cloud fleet control plane. T4 is the **multi-site fleet delivery terminus**, where Arc becomes necessary as the cross-site reachability and identity broker. T5 is the fleet intelligence layer, marked deferred and over-advertised relative to its implementation.
+T0–T2 satisfy Goal: Full Training Lifecycle with manual deployment. T3 adds single-site declarative deployment (local k3s + Flux) **without Arc** — proving GitOps does not require a cloud fleet control plane. T4 is the **multi-site fleet delivery terminus**, where Arc becomes necessary as the cross-site reachability and identity broker. T5 is the fleet intelligence layer, marked deferred and over-advertised relative to its implementation.
 
 ---
 
@@ -164,7 +164,7 @@ T0–T2 satisfy Goal G with manual deployment. T3 adds single-site declarative d
 
 ### T0 — Dev. One robot, one laptop. No cloud, no Kubernetes
 
-The honest floor for Goal G.
+The honest floor for Goal: Full Training Lifecycle.
 
 | Concern      | Implementation                                                                                        |
 |--------------|-------------------------------------------------------------------------------------------------------|
@@ -179,7 +179,7 @@ The honest floor for Goal G.
 **Edge infra:** ROS 2 and Docker only. **Cloud infra:** none.
 
 > [!NOTE]
-> Experiment tracking belongs at T0, not as a collaboration perk. Goal G includes *validate*, and a success number you cannot reproduce, compare across runs, or use to attribute a regression is an anecdote, not a result — doubly so in the high-variance world of RL and IL. File-backed MLflow and trackio run as local processes with no server, so tracking stays inside the zero-cloud, zero-Kubernetes floor. Tracking as a *hosted server* plus a *model registry* is a separate, later concern (T2).
+> Experiment tracking belongs at T0, not as a collaboration perk. Goal: Full Training Lifecycle includes *validate*, and a success number you cannot reproduce, compare across runs, or use to attribute a regression is an anecdote, not a result — doubly so in the high-variance world of RL and IL. File-backed MLflow and trackio run as local processes with no server, so tracking stays inside the zero-cloud, zero-Kubernetes floor. Tracking as a *hosted server* plus a *model registry* is a separate, later concern (T2).
 
 This tier exists in the code today and is undocumented. Surfacing it is the highest-leverage change in this proposal.
 
@@ -289,7 +289,7 @@ today (modulo an ad-hoc experiment by the team on Hex).
 > Autonomy is a **different axis** from T0–T4. T0–T4 scale on *infrastructure reach* (sites,
 > GPU, collaboration); T5.0–T5.3 scale on *decision authority / loop closure*. They are
 > orthogonal: a single-site T3 operator can sit at T5.0, and a multi-site T4 operator can remain
-> fully manual. The autonomy stages are not "more infrastructure to buy" \u2014 they are how much of
+> fully manual. The autonomy stages are not "more infrastructure to buy" — they are how much of
 > the retraining decision a human delegates.
 
 The foot-gun warning below applies with increasing force up the ladder; T5.3 should remain a
@@ -300,12 +300,12 @@ roadmap direction, not a near-term target.
 
 ### Cross-Cutting Axis: Tiered Data Augmentation
 
-Data scarcity is unavoidable in physical AI, so the toolchain needs an augmentation story \u2014 but
+Data scarcity is unavoidable in physical AI, so the toolchain needs an augmentation story — but
 today the only documented path is the full Cosmos/SDG pipeline, which is the *aspirational ceiling*
-that T0\u2013T2 users cannot realistically operate. This is the same all-or-nothing trap as the rest of
+that T0–T2 users cannot realistically operate. This is the same all-or-nothing trap as the rest of
 the architecture: a heavyweight ceiling with no documented low or middle rung. Augmentation should
-therefore be a **tiered, optional axis**, recommended when data is scarce \u2014 not a baseline step and
-explicitly **not part of Goal G** (folding it into the anchor goal would undermine the "this is the
+therefore be a **tiered, optional axis**, recommended when data is scarce — not a baseline step and
+explicitly **not part of Goal: Full Training Lifecycle** (folding it into the anchor goal would undermine the "this is the
 honest minimal floor" argument).
 
 | Stage | Approach                                                                            | Where it runs                |
@@ -315,11 +315,11 @@ honest minimal floor" argument).
 | A2    | Full Cosmos / SDG world-foundation-model pipeline                                   | Cloud, GPU cluster           |
 
 > [!NOTE]
-> Unlike the documentation-and-packaging changes elsewhere in this proposal, the A0\u2013A1 rungs are
+> Unlike the documentation-and-packaging changes elsewhere in this proposal, the A0–A1 rungs are
 > **net-new code**: `synthetic-data` ships 0 Python files and 2 placeholders today. Classical
 > augmentation, local-VLM generation, and the accompanying experiments and guidance are a
 > near-term *build* item, not a re-framing of existing artifacts. Naming them here is what gives
-> the augmentation axis the credibility the toolchain currently lacks; delivering A0\u2013A1 is a
+> the augmentation axis the credibility the toolchain currently lacks; delivering A0–A1 is a
 > separate, scoped workstream.
 
 ---
@@ -347,7 +347,19 @@ The deploy scripts, Terraform modules, and training code do not need to change t
 1. **Default tier in docs.** Should the README and Quick Start default to T0 (Dev), with T2 (Pilot) as the "recommended production" path and T3–T5 (Production, Scale, Operate) clearly marked advanced? Do the stage names — Dev, Lab, Pilot, Production, Scale, Operate — read correctly, and is pairing each name with its `T#` ID the right convention (stable IDs for boundary references, names for user-facing labels)?
 2. **Fleet vocabulary.** Does the repository adopt **fleet delivery** (T4 control plane) and **fleet intelligence** (T5 cognition) as distinct named concepts, reserve the word "fleet" exclusively for a fleet of robots, and retire the bare phrase "fleet management" (which collides with Azure Kubernetes Fleet Manager and the Kubernetes ecosystem's delivery-oriented use of "fleet")?
 3. **Roadmap honesty.** How explicitly should placeholder domains be labeled in user-facing docs versus contributor docs?
-4. **Scope of Goal G.** The proposal keeps the single-task capture → train → validate → run loop as the anchor goal and models data augmentation as a separate optional axis (A0–A2) rather than folding it into Goal G. Is keeping the floor minimal — with augmentation recommended only when data is scarce — the right call, or should augmentation be part of the reference loop?
+4. **Scope of Goal: Full Training Lifecycle.** The proposal keeps the single-task capture → train → validate → run loop as the anchor goal and models data augmentation as a separate optional axis (A0–A2) rather than folding it into Goal: Full Training Lifecycle. Is keeping the floor minimal — with augmentation recommended only when data is scarce — the right call, or should augmentation be part of the reference loop?
+
+### Resolved Decisions
+
+The four questions above were socialized and resolved as follows. The canonical definitions live in
+[tier-model.md](tier-model.md); downstream documentation cites that file rather than this section.
+
+| # | Decision                                                                                                                                                                                                                                     | Rationale                                                                                                                           |
+|---|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | **Adopted.** T0 (Dev) is the documented default; T2 (Pilot) is the recommended-production path; T3–T5 (Production, Scale, Operate) are advanced. Stage names pair with `T#` IDs — IDs for boundary references, names for user-facing labels. | Surfaces the already-working local path as the sanctioned floor and gives every tier a stable, linkable identifier.                 |
+| 2 | **Adopted.** "Fleet delivery" (T4) and "fleet intelligence" (T5) become distinct named concepts; "fleet" refers only to robots; the bare phrase "fleet management" is retired.                                                               | Removes the Azure Kubernetes Fleet Manager collision and lets a multi-site operator adopt delivery without inheriting intelligence. |
+| 3 | **Adopted.** Placeholder/roadmap status is labeled explicitly in both contributor and user-facing docs, most prominently in user-facing docs.                                                                                                | Aligns the documented capability with what the code actually ships and prevents over-advertising the T5 layer.                      |
+| 4 | **Adopted.** Goal: Full Training Lifecycle stays the minimal single-task loop; data augmentation remains a separate optional axis (A0–A2) recommended only when data is scarce. The A0–A1 build is deferred.                                                        | Keeps the on-ramp floor minimal and prevents augmentation work from gating the T0 path.                                             |
 
 ---
 

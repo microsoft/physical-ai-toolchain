@@ -1,0 +1,8 @@
+{
+  "label": "T3 — Production (advanced)",
+  "position": 4,
+  "link": {
+    "type": "generated-index",
+    "description": "T3 — Production: single-site declarative deployment with local k3s and FluxCD, no Azure Arc."
+  }
+}
