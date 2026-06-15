@@ -8,22 +8,22 @@ Active — primary training approach.
 
 ## Components
 
-| Component       | Description                                                       |
-|-----------------|-------------------------------------------------------------------|
-| SKRL            | Primary RL framework for PPO-based policy training                |
-| RSL-RL          | Alternative RL framework for legged locomotion                    |
-| Isaac Lab       | NVIDIA simulation environment (default image from `scripts/lib/common.sh`) |
-| MLflow          | Experiment tracking with monkey-patched agent metric interception |
+| Component | Description                                                                |
+|-----------|----------------------------------------------------------------------------|
+| SKRL      | Primary RL framework for PPO-based policy training                         |
+| RSL-RL    | Alternative RL framework for legged locomotion                             |
+| Isaac Lab | NVIDIA simulation environment (default image from `scripts/lib/common.sh`) |
+| MLflow    | Experiment tracking with monkey-patched agent metric interception          |
 
 ## Runtime Environment
 
-| Setting   | Value                                                            |
-|-----------|------------------------------------------------------------------|
+| Setting   | Value                                                                                     |
+|-----------|-------------------------------------------------------------------------------------------|
 | Container | `DEFAULT_ISAAC_LAB_IMAGE` from `scripts/lib/common.sh` (`nvcr.io/nvidia/isaac-lab:2.3.2`) |
-| Python    | `/isaac-sim/kit/python/bin/python3` via `isaaclab.sh -p` wrapper |
-| numpy     | `>=1.26.0,<2.0.0` (ABI compatibility with Isaac Sim)             |
-| EULA      | `ACCEPT_EULA=Y`, `PRIVACY_CONSENT=Y` required                    |
-| Vulkan    | `NVIDIA_DRIVER_CAPABILITIES=all`                                 |
+| Python    | `/isaac-sim/kit/python/bin/python3` via `isaaclab.sh -p` wrapper                          |
+| numpy     | `>=1.26.0,<2.0.0` (ABI compatibility with Isaac Sim)                                      |
+| EULA      | `ACCEPT_EULA=Y`, `PRIVACY_CONSENT=Y` required                                             |
+| Vulkan    | `NVIDIA_DRIVER_CAPABILITIES=all`                                                          |
 
 ## Submission Paths
 

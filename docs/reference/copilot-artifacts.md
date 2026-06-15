@@ -93,13 +93,13 @@ Implement → Review workflow from `microsoft/hve-core` inside cloud-agent
 sessions for this repository. The umbrella is picker-visible; the worker
 is hidden and reachable only via the umbrella's `agent` tool fan-out.
 
-| Property | Umbrella (`physical-ai-rpi`)                                       | Worker (`physical-ai-rpi-worker`)                                |
-|----------|--------------------------------------------------------------------|------------------------------------------------------------------|
-| Target   | `github-copilot` (cloud-agent only)                                | `github-copilot` (cloud-agent only)                              |
-| Picker   | Visible (`user-invocable: true`, default)                          | Hidden (`user-invocable: false`, `disable-model-invocation: true`) |
-| Tools    | `read`, `edit`, `search`, `bash`, `agent`, `github/*` write tools  | `read`, `edit`, `search`, `bash`, read-only `github/*`           |
-| Role     | Orchestrator: bootstrap verification, RPI procedure, persistence   | Content-neutral executor: adopts upstream persona by name        |
-| Persists | Posts full phase artifacts as PR comments and maintains an "RPI Artifact Index" in the PR description | None (umbrella owns PR comments and PR description) |
+| Property | Umbrella (`physical-ai-rpi`)                                                                          | Worker (`physical-ai-rpi-worker`)                                  |
+|----------|-------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
+| Target   | `github-copilot` (cloud-agent only)                                                                   | `github-copilot` (cloud-agent only)                                |
+| Picker   | Visible (`user-invocable: true`, default)                                                             | Hidden (`user-invocable: false`, `disable-model-invocation: true`) |
+| Tools    | `read`, `edit`, `search`, `bash`, `agent`, `github/*` write tools                                     | `read`, `edit`, `search`, `bash`, read-only `github/*`             |
+| Role     | Orchestrator: bootstrap verification, RPI procedure, persistence                                      | Content-neutral executor: adopts upstream persona by name          |
+| Persists | Posts full phase artifacts as PR comments and maintains an "RPI Artifact Index" in the PR description | None (umbrella owns PR comments and PR description)                |
 
 The two-agent split exists because cloud-agent surface constraints cannot
 be satisfied with a single profile:
