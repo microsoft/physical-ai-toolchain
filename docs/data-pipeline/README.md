@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Data Pipeline
 description: Robot-to-cloud data capture, recording configuration, and Arc agent setup for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-14
+ms.date: 2026-06-12
 ms.topic: overview
 keywords:
   - data pipeline
