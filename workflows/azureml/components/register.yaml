@@ -1,0 +1,51 @@
+# LeRobot Register Component (Pipeline, OPT-IN)
+#
+# Wraps workflows/azureml/scripts/register_model.py as an AzureML
+# CommandComponent for opt-in use inside lerobot-pipeline-with-register.yaml.
+# The main lerobot-pipeline.yaml DAG (preprocess → train → evaluate) does NOT
+# include this step; eval-gates-register is an engagement-specific governance
+# contract and is out of scope for the OSS port.
+#
+# register_model.py reads model artifacts from $OUTPUT_DIR/model_artifacts.
+# The train Component uploads checkpoints directly to ${{outputs.checkpoints}}
+# (no model_artifacts/ subdir), so this wrapper stages the input into the
+# layout register_model.py expects via a temporary OUTPUT_DIR. eval_metrics
+# is an optional input that expresses the DAG data dependency on the evaluate
+# step without being consumed by the registration logic.
+#
+# Compute and environment_variables (REGISTER_MODEL, POLICY_TYPE, JOB_NAME,
+# AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZUREML_WORKSPACE_NAME) are
+# set at the parent pipeline job step.
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+name: lerobot_register
+display_name: LeRobot Register Model
+version: "1"
+description: >-
+  Register a trained LeRobot policy checkpoint to the Azure ML Model Registry.
+  Opt-in: include in lerobot-pipeline-with-register.yaml only.
+
+code: ../../scripts
+
+inputs:
+  model_checkpoint:
+    type: uri_folder
+    description: Trained checkpoint folder produced by the train step.
+  eval_metrics:
+    type: uri_folder
+    optional: true
+    description: >-
+      Evaluation output from the evaluate step. Not consumed by the
+      registration logic — present only to express the DAG data dependency.
+
+environment: azureml:lerobot-inference-env:latest
+
+command: >-
+  bash -c '
+  set -euo pipefail;
+  STAGING_DIR="$(mktemp -d)";
+  mkdir -p "$STAGING_DIR/model_artifacts";
+  cp -r "${{inputs.model_checkpoint}}"/. "$STAGING_DIR/model_artifacts/";
+  export OUTPUT_DIR="$STAGING_DIR";
+  python register_model.py'
