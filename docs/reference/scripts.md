@@ -21,16 +21,16 @@ Inventory of submission scripts for training, evaluation, and inference workflow
 
 ## Submission Scripts
 
-| Script                               | Purpose                                             | Platform |
-|--------------------------------------|-----------------------------------------------------|----------|
-| `submit-azureml-training.sh`         | Package code and submit Azure ML training job       | Azure ML |
-| `submit-azureml-isaaclab-evaluation.sh` | Submit Isaac Lab policy evaluation job               | Azure ML |
-| `submit-azureml-lerobot-training.sh` | Submit LeRobot training to Azure ML                 | Azure ML |
-| `submit-osmo-training.sh`            | Package code and submit OSMO workflow (base64)      | OSMO     |
-| `submit-osmo-dataset-training.sh`    | Submit OSMO workflow using dataset folder injection | OSMO     |
-| `submit-osmo-lerobot-training.sh`    | Submit LeRobot behavioral cloning training          | OSMO     |
-| `submit-osmo-lerobot-inference.sh`   | Submit LeRobot inference/evaluation                 | OSMO     |
-| `run-lerobot-pipeline.sh`            | End-to-end train → evaluate → register pipeline     | OSMO     |
+| Script                                  | Purpose                                             | Platform |
+|-----------------------------------------|-----------------------------------------------------|----------|
+| `submit-azureml-training.sh`            | Package code and submit Azure ML training job       | Azure ML |
+| `submit-azureml-isaaclab-evaluation.sh` | Submit Isaac Lab policy evaluation job              | Azure ML |
+| `submit-azureml-lerobot-training.sh`    | Submit LeRobot training to Azure ML                 | Azure ML |
+| `submit-osmo-training.sh`               | Package code and submit OSMO workflow (base64)      | OSMO     |
+| `submit-osmo-dataset-training.sh`       | Submit OSMO workflow using dataset folder injection | OSMO     |
+| `submit-osmo-lerobot-training.sh`       | Submit LeRobot behavioral cloning training          | OSMO     |
+| `submit-osmo-lerobot-inference.sh`      | Submit LeRobot inference/evaluation                 | OSMO     |
+| `run-lerobot-pipeline.sh`               | End-to-end train → evaluate → register pipeline     | OSMO     |
 
 ## Quick Start
 
@@ -93,36 +93,36 @@ Values resolve in order: **CLI arguments → environment variables → Terraform
 
 ### `submit-azureml-training.sh`
 
-| Option                         | Default                            | Description                                     | Source                                  |
-|--------------------------------|------------------------------------|-------------------------------------------------|-----------------------------------------|
-| `--environment-name`           | `isaaclab-training-env`            | AzureML environment name                        | CLI                                     |
-| `--environment-version`        | `DEFAULT_ISAAC_LAB_IMAGE_VERSION` (`2.3.2`) | AzureML environment version                     | CLI                                     |
+| Option                         | Default                                                      | Description                                     | Source                                  |
+|--------------------------------|--------------------------------------------------------------|-------------------------------------------------|-----------------------------------------|
+| `--environment-name`           | `isaaclab-training-env`                                      | AzureML environment name                        | CLI                                     |
+| `--environment-version`        | `DEFAULT_ISAAC_LAB_IMAGE_VERSION` (`2.3.2`)                  | AzureML environment version                     | CLI                                     |
 | `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                 | CLI                                     |
-| `--assets-only`                | `false`                            | Register environment without submitting a job   | CLI                                     |
-| `--job-file` / `-w`            | `workflows/azureml/train.yaml`     | Job YAML template                               | CLI                                     |
-| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task                                   | `TASK`                                  |
-| `--num-envs` / `-n`            | `2048`                             | Number of parallel environments                 | `NUM_ENVS`                              |
-| `--max-iterations` / `-m`      | unset                              | Max iterations (empty to unset)                 | `MAX_ITERATIONS`                        |
-| `--checkpoint-uri` / `-c`      | unset                              | MLflow checkpoint artifact URI                  | `CHECKPOINT_URI`                        |
-| `--checkpoint-mode` / `-M`     | `from-scratch`                     | `from-scratch`, `warm-start`, `resume`, `fresh` | `CHECKPOINT_MODE`                       |
-| `--register-checkpoint` / `-r` | derived from task                  | Model name for checkpoint registration          | `REGISTER_CHECKPOINT`                   |
-| `--skip-register-checkpoint`   | `false`                            | Skip automatic model registration               | CLI                                     |
-| `--headless`                   | `true`                             | Force headless rendering                        | CLI                                     |
-| `--gui` / `--no-headless`      | `false`                            | Disable headless mode                           | CLI                                     |
-| `--run-smoke-test` / `-s`      | `false`                            | Run Azure connectivity smoke test before submit | `RUN_AZURE_SMOKE_TEST`                  |
-| `--mode`                       | `train`                            | Execution mode                                  | CLI                                     |
-| `--subscription-id`            | from TF                            | Azure subscription ID                           | `AZURE_SUBSCRIPTION_ID` / TF            |
-| `--resource-group`             | from TF                            | Azure resource group                            | `AZURE_RESOURCE_GROUP` / TF             |
-| `--workspace-name`             | from TF                            | Azure ML workspace                              | `AZUREML_WORKSPACE_NAME` / TF           |
-| `--compute`                    | from TF                            | Compute target override                         | `AZUREML_COMPUTE` / TF                  |
-| `--instance-type`              | `gpuspot`                          | Instance type                                   | CLI                                     |
-| `--experiment-name`            | unset                              | Experiment name override                        | CLI                                     |
-| `--job-name`                   | unset                              | Job name override                               | CLI                                     |
-| `--display-name`               | unset                              | Display name override                           | CLI                                     |
-| `--stream`                     | `false`                            | Stream logs after submission                    | CLI                                     |
-| `--mlflow-token-retries`       | `3`                                | MLflow token refresh retries                    | `MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES` |
-| `--mlflow-http-timeout`        | `60`                               | MLflow HTTP request timeout (seconds)           | `MLFLOW_HTTP_REQUEST_TIMEOUT`           |
-| `--`                           | n/a                                | Forward remaining args to `az ml job create`    | CLI                                     |
+| `--assets-only`                | `false`                                                      | Register environment without submitting a job   | CLI                                     |
+| `--job-file` / `-w`            | `workflows/azureml/train.yaml`                               | Job YAML template                               | CLI                                     |
+| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0`                           | Isaac Lab task                                  | `TASK`                                  |
+| `--num-envs` / `-n`            | `2048`                                                       | Number of parallel environments                 | `NUM_ENVS`                              |
+| `--max-iterations` / `-m`      | unset                                                        | Max iterations (empty to unset)                 | `MAX_ITERATIONS`                        |
+| `--checkpoint-uri` / `-c`      | unset                                                        | MLflow checkpoint artifact URI                  | `CHECKPOINT_URI`                        |
+| `--checkpoint-mode` / `-M`     | `from-scratch`                                               | `from-scratch`, `warm-start`, `resume`, `fresh` | `CHECKPOINT_MODE`                       |
+| `--register-checkpoint` / `-r` | derived from task                                            | Model name for checkpoint registration          | `REGISTER_CHECKPOINT`                   |
+| `--skip-register-checkpoint`   | `false`                                                      | Skip automatic model registration               | CLI                                     |
+| `--headless`                   | `true`                                                       | Force headless rendering                        | CLI                                     |
+| `--gui` / `--no-headless`      | `false`                                                      | Disable headless mode                           | CLI                                     |
+| `--run-smoke-test` / `-s`      | `false`                                                      | Run Azure connectivity smoke test before submit | `RUN_AZURE_SMOKE_TEST`                  |
+| `--mode`                       | `train`                                                      | Execution mode                                  | CLI                                     |
+| `--subscription-id`            | from TF                                                      | Azure subscription ID                           | `AZURE_SUBSCRIPTION_ID` / TF            |
+| `--resource-group`             | from TF                                                      | Azure resource group                            | `AZURE_RESOURCE_GROUP` / TF             |
+| `--workspace-name`             | from TF                                                      | Azure ML workspace                              | `AZUREML_WORKSPACE_NAME` / TF           |
+| `--compute`                    | from TF                                                      | Compute target override                         | `AZUREML_COMPUTE` / TF                  |
+| `--instance-type`              | `gpuspot`                                                    | Instance type                                   | CLI                                     |
+| `--experiment-name`            | unset                                                        | Experiment name override                        | CLI                                     |
+| `--job-name`                   | unset                                                        | Job name override                               | CLI                                     |
+| `--display-name`               | unset                                                        | Display name override                           | CLI                                     |
+| `--stream`                     | `false`                                                      | Stream logs after submission                    | CLI                                     |
+| `--mlflow-token-retries`       | `3`                                                          | MLflow token refresh retries                    | `MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES` |
+| `--mlflow-http-timeout`        | `60`                                                         | MLflow HTTP request timeout (seconds)           | `MLFLOW_HTTP_REQUEST_TIMEOUT`           |
+| `--`                           | n/a                                                          | Forward remaining args to `az ml job create`    | CLI                                     |
 
 Example:
 
@@ -135,29 +135,29 @@ Example:
 
 ### `submit-azureml-isaaclab-evaluation.sh`
 
-| Option                  | Default                            | Description                                      | Source                        |
-|-------------------------|------------------------------------|--------------------------------------------------|-------------------------------|
-| `--model-name`          | derived from task                  | Azure ML model name                              | CLI                           |
-| `--model-version`       | `latest`                           | Azure ML model version                           | CLI                           |
-| `--environment-name`    | `isaaclab-training-env`            | AzureML environment name                         | CLI                           |
-| `--environment-version` | `DEFAULT_ISAAC_LAB_IMAGE_VERSION` (`2.3.2`) | AzureML environment version                      | CLI                           |
+| Option                  | Default                                                      | Description                                      | Source                        |
+|-------------------------|--------------------------------------------------------------|--------------------------------------------------|-------------------------------|
+| `--model-name`          | derived from task                                            | Azure ML model name                              | CLI                           |
+| `--model-version`       | `latest`                                                     | Azure ML model version                           | CLI                           |
+| `--environment-name`    | `isaaclab-training-env`                                      | AzureML environment name                         | CLI                           |
+| `--environment-version` | `DEFAULT_ISAAC_LAB_IMAGE_VERSION` (`2.3.2`)                  | AzureML environment version                      | CLI                           |
 | `--image`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                  | CLI                           |
-| `--task`                | `Isaac-Velocity-Rough-Anymal-C-v0` | Override task ID                                 | `TASK`                        |
-| `--framework`           | unset                              | Override framework                               | CLI                           |
-| `--eval-episodes`       | `100`                              | Evaluation episodes                              | CLI                           |
-| `--num-envs`            | `64`                               | Parallel environments                            | CLI                           |
-| `--success-threshold`   | unset                              | Success threshold (defaults from model metadata) | CLI                           |
-| `--headless`            | `true`                             | Run headless                                     | CLI                           |
-| `--gui`                 | `false`                            | Disable headless mode                            | CLI                           |
-| `--job-file`            | `workflows/azureml/isaaclab-evaluation.yaml` | Job YAML template                                | CLI                           |
-| `--compute`             | from TF                            | Compute target override                          | `AZUREML_COMPUTE` / TF        |
-| `--instance-type`       | `gpuspot`                          | Instance type                                    | CLI                           |
-| `--experiment-name`     | unset                              | Experiment name override                         | CLI                           |
-| `--job-name`            | unset                              | Job name override                                | CLI                           |
-| `--stream`              | `false`                            | Stream logs after submission                     | CLI                           |
-| `--subscription-id`     | from TF                            | Azure subscription ID                            | `AZURE_SUBSCRIPTION_ID` / TF  |
-| `--resource-group`      | from TF                            | Azure resource group                             | `AZURE_RESOURCE_GROUP` / TF   |
-| `--workspace-name`      | from TF                            | Azure ML workspace                               | `AZUREML_WORKSPACE_NAME` / TF |
+| `--task`                | `Isaac-Velocity-Rough-Anymal-C-v0`                           | Override task ID                                 | `TASK`                        |
+| `--framework`           | unset                                                        | Override framework                               | CLI                           |
+| `--eval-episodes`       | `100`                                                        | Evaluation episodes                              | CLI                           |
+| `--num-envs`            | `64`                                                         | Parallel environments                            | CLI                           |
+| `--success-threshold`   | unset                                                        | Success threshold (defaults from model metadata) | CLI                           |
+| `--headless`            | `true`                                                       | Run headless                                     | CLI                           |
+| `--gui`                 | `false`                                                      | Disable headless mode                            | CLI                           |
+| `--job-file`            | `workflows/azureml/isaaclab-evaluation.yaml`                 | Job YAML template                                | CLI                           |
+| `--compute`             | from TF                                                      | Compute target override                          | `AZUREML_COMPUTE` / TF        |
+| `--instance-type`       | `gpuspot`                                                    | Instance type                                    | CLI                           |
+| `--experiment-name`     | unset                                                        | Experiment name override                         | CLI                           |
+| `--job-name`            | unset                                                        | Job name override                                | CLI                           |
+| `--stream`              | `false`                                                      | Stream logs after submission                     | CLI                           |
+| `--subscription-id`     | from TF                                                      | Azure subscription ID                            | `AZURE_SUBSCRIPTION_ID` / TF  |
+| `--resource-group`      | from TF                                                      | Azure resource group                             | `AZURE_RESOURCE_GROUP` / TF   |
+| `--workspace-name`      | from TF                                                      | Azure ML workspace                               | `AZUREML_WORKSPACE_NAME` / TF |
 
 Example:
 
@@ -170,25 +170,25 @@ Example:
 
 ### `submit-osmo-training.sh` (base64 payload)
 
-| Option                         | Default                            | Description                                      | Source                        |
-|--------------------------------|------------------------------------|--------------------------------------------------|-------------------------------|
-| `--workflow` / `-w`            | `workflows/osmo/train.yaml`        | Workflow template                                | CLI                           |
-| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task                                    | `TASK`                        |
-| `--num-envs` / `-n`            | `2048`                             | Number of parallel environments                  | `NUM_ENVS`                    |
-| `--max-iterations` / `-m`      | unset                              | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
+| Option                         | Default                                                      | Description                                      | Source                        |
+|--------------------------------|--------------------------------------------------------------|--------------------------------------------------|-------------------------------|
+| `--workflow` / `-w`            | `workflows/osmo/train.yaml`                                  | Workflow template                                | CLI                           |
+| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0`                           | Isaac Lab task                                   | `TASK`                        |
+| `--num-envs` / `-n`            | `2048`                                                       | Number of parallel environments                  | `NUM_ENVS`                    |
+| `--max-iterations` / `-m`      | unset                                                        | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
 | `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                  | `IMAGE`                       |
-| `--payload-root` / `-p`        | `/workspace/isaac_payload`         | Runtime extraction root                          | `PAYLOAD_ROOT`                |
-| `--backend` / `-b`             | `skrl`                             | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
-| `--checkpoint-uri` / `-c`      | unset                              | MLflow checkpoint artifact URI                   | `CHECKPOINT_URI`              |
-| `--checkpoint-mode` / `-M`     | `from-scratch`                     | `from-scratch`, `warm-start`, `resume`, `fresh`  | `CHECKPOINT_MODE`             |
-| `--register-checkpoint` / `-r` | derived from task                  | Model name for checkpoint registration           | `REGISTER_CHECKPOINT`         |
-| `--skip-register-checkpoint`   | `false`                            | Skip automatic model registration                | CLI                           |
-| `--sleep-after-unpack`         | unset                              | Sleep seconds post-unpack (debug)                | `SLEEP_AFTER_UNPACK`          |
-| `--run-smoke-test` / `-s`      | `false`                            | Enable Azure connectivity smoke test             | `RUN_AZURE_SMOKE_TEST`        |
-| `--azure-subscription-id`      | from TF                            | Azure subscription ID                            | `AZURE_SUBSCRIPTION_ID` / TF  |
-| `--azure-resource-group`       | from TF                            | Azure resource group                             | `AZURE_RESOURCE_GROUP` / TF   |
-| `--azure-workspace-name`       | from TF                            | Azure ML workspace                               | `AZUREML_WORKSPACE_NAME` / TF |
-| `--`                           | n/a                                | Forward remaining args to `osmo workflow submit` | CLI                           |
+| `--payload-root` / `-p`        | `/workspace/isaac_payload`                                   | Runtime extraction root                          | `PAYLOAD_ROOT`                |
+| `--backend` / `-b`             | `skrl`                                                       | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
+| `--checkpoint-uri` / `-c`      | unset                                                        | MLflow checkpoint artifact URI                   | `CHECKPOINT_URI`              |
+| `--checkpoint-mode` / `-M`     | `from-scratch`                                               | `from-scratch`, `warm-start`, `resume`, `fresh`  | `CHECKPOINT_MODE`             |
+| `--register-checkpoint` / `-r` | derived from task                                            | Model name for checkpoint registration           | `REGISTER_CHECKPOINT`         |
+| `--skip-register-checkpoint`   | `false`                                                      | Skip automatic model registration                | CLI                           |
+| `--sleep-after-unpack`         | unset                                                        | Sleep seconds post-unpack (debug)                | `SLEEP_AFTER_UNPACK`          |
+| `--run-smoke-test` / `-s`      | `false`                                                      | Enable Azure connectivity smoke test             | `RUN_AZURE_SMOKE_TEST`        |
+| `--azure-subscription-id`      | from TF                                                      | Azure subscription ID                            | `AZURE_SUBSCRIPTION_ID` / TF  |
+| `--azure-resource-group`       | from TF                                                      | Azure resource group                             | `AZURE_RESOURCE_GROUP` / TF   |
+| `--azure-workspace-name`       | from TF                                                      | Azure ML workspace                               | `AZUREML_WORKSPACE_NAME` / TF |
+| `--`                           | n/a                                                          | Forward remaining args to `osmo workflow submit` | CLI                           |
 
 Example:
 
@@ -201,26 +201,26 @@ Example:
 
 ### `submit-osmo-dataset-training.sh` (dataset injection)
 
-| Option                         | Default                             | Description                                      | Source                        |
-|--------------------------------|-------------------------------------|--------------------------------------------------|-------------------------------|
-| `--workflow` / `-w`            | `workflows/osmo/train-dataset.yaml` | Workflow template                                | CLI                           |
-| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0`  | Isaac Lab task                                    | `TASK`                        |
-| `--num-envs` / `-n`            | `2048`                              | Number of parallel environments                  | `NUM_ENVS`                    |
-| `--max-iterations` / `-m`      | unset                               | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
+| Option                         | Default                                                      | Description                                      | Source                        |
+|--------------------------------|--------------------------------------------------------------|--------------------------------------------------|-------------------------------|
+| `--workflow` / `-w`            | `workflows/osmo/train-dataset.yaml`                          | Workflow template                                | CLI                           |
+| `--task` / `-t`                | `Isaac-Velocity-Rough-Anymal-C-v0`                           | Isaac Lab task                                   | `TASK`                        |
+| `--num-envs` / `-n`            | `2048`                                                       | Number of parallel environments                  | `NUM_ENVS`                    |
+| `--max-iterations` / `-m`      | unset                                                        | Max iterations (empty to unset)                  | `MAX_ITERATIONS`              |
 | `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                  | `IMAGE`                       |
-| `--backend` / `-b`             | `skrl`                              | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
-| `--dataset-bucket`             | `training`                          | OSMO bucket name                                 | `OSMO_DATASET_BUCKET`         |
-| `--dataset-name`               | `training-code`                     | Dataset name (auto-versioned)                    | `OSMO_DATASET_NAME`           |
-| `--training-path`              | `training/`                         | Local path to upload                             | `TRAINING_PATH`               |
-| `--checkpoint-uri` / `-c`      | unset                               | MLflow checkpoint artifact URI                   | `CHECKPOINT_URI`              |
-| `--checkpoint-mode` / `-M`     | `from-scratch`                      | `from-scratch`, `warm-start`, `resume`, `fresh`  | `CHECKPOINT_MODE`             |
-| `--register-checkpoint` / `-r` | derived from task                   | Model name for checkpoint registration           | `REGISTER_CHECKPOINT`         |
-| `--skip-register-checkpoint`   | `false`                             | Skip automatic model registration                | CLI                           |
-| `--run-smoke-test` / `-s`      | `false`                             | Enable Azure connectivity smoke test             | `RUN_AZURE_SMOKE_TEST`        |
-| `--azure-subscription-id`      | from TF                             | Azure subscription ID                            | `AZURE_SUBSCRIPTION_ID` / TF  |
-| `--azure-resource-group`       | from TF                             | Azure resource group                             | `AZURE_RESOURCE_GROUP` / TF   |
-| `--azure-workspace-name`       | from TF                             | Azure ML workspace                               | `AZUREML_WORKSPACE_NAME` / TF |
-| `--`                           | n/a                                 | Forward remaining args to `osmo workflow submit` | CLI                           |
+| `--backend` / `-b`             | `skrl`                                                       | Training backend: `skrl` (default), `rsl_rl`     | `TRAINING_BACKEND`            |
+| `--dataset-bucket`             | `training`                                                   | OSMO bucket name                                 | `OSMO_DATASET_BUCKET`         |
+| `--dataset-name`               | `training-code`                                              | Dataset name (auto-versioned)                    | `OSMO_DATASET_NAME`           |
+| `--training-path`              | `training/`                                                  | Local path to upload                             | `TRAINING_PATH`               |
+| `--checkpoint-uri` / `-c`      | unset                                                        | MLflow checkpoint artifact URI                   | `CHECKPOINT_URI`              |
+| `--checkpoint-mode` / `-M`     | `from-scratch`                                               | `from-scratch`, `warm-start`, `resume`, `fresh`  | `CHECKPOINT_MODE`             |
+| `--register-checkpoint` / `-r` | derived from task                                            | Model name for checkpoint registration           | `REGISTER_CHECKPOINT`         |
+| `--skip-register-checkpoint`   | `false`                                                      | Skip automatic model registration                | CLI                           |
+| `--run-smoke-test` / `-s`      | `false`                                                      | Enable Azure connectivity smoke test             | `RUN_AZURE_SMOKE_TEST`        |
+| `--azure-subscription-id`      | from TF                                                      | Azure subscription ID                            | `AZURE_SUBSCRIPTION_ID` / TF  |
+| `--azure-resource-group`       | from TF                                                      | Azure resource group                             | `AZURE_RESOURCE_GROUP` / TF   |
+| `--azure-workspace-name`       | from TF                                                      | Azure ML workspace                               | `AZUREML_WORKSPACE_NAME` / TF |
+| `--`                           | n/a                                                          | Forward remaining args to `osmo workflow submit` | CLI                           |
 
 Example:
 
@@ -239,7 +239,7 @@ Scripts resolve values in order: CLI arguments → environment variables → Ter
 | `AZURE_SUBSCRIPTION_ID`  | Azure subscription               |
 | `AZURE_RESOURCE_GROUP`   | Resource group name              |
 | `AZUREML_WORKSPACE_NAME` | ML workspace name                |
-| `TASK`                   | Isaac Lab task name               |
+| `TASK`                   | Isaac Lab task name              |
 | `NUM_ENVS`               | Number of parallel environments  |
 | `OSMO_DATASET_BUCKET`    | Dataset bucket for OSMO training |
 | `OSMO_DATASET_NAME`      | Dataset name for OSMO training   |
