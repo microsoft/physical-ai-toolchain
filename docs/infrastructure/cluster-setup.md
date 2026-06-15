@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Cluster Setup
 description: Kubernetes service deployment, AzureML extension, and OSMO platform configuration
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-22
+ms.date: 2026-05-29
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -62,6 +62,11 @@ kubectl cluster-info
 # - AzureML: ./02-deploy-azureml-extension.sh
 # - OSMO:    ./03-deploy-osmo-control-plane.sh && ./04-deploy-osmo-backend.sh
 ```
+
+> [!IMPORTANT]
+> **Do not re-run `03-deploy-osmo-control-plane.sh` against a Postgres database that already holds OSMO state from a previous AKS cluster.** Script 03 mints a fresh Master Encryption Key on every run; the new key cannot decrypt rows wrapped by the previous one, and OSMO will fail with `jwcrypto` `InvalidJWEData` / `InvalidTag` errors on login and on workflow submission.
+>
+> If you destroyed and re-created AKS while preserving the Postgres flexible server, first drop and re-create the `osmo` database (or `TRUNCATE` the `configs`, `credential`, `ueks`, and `backends` tables) before running script 03 again.
 
 ## 🔐 Deployment Scenarios
 

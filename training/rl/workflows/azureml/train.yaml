@@ -54,7 +54,11 @@ environment_variables:
   PYTHON: /workspace/isaaclab/isaaclab.sh -p
   ACCEPT_EULA: "Y"
   PRIVACY_CONSENT: "Y"
+  HYDRA_FULL_ERROR: "1"
   TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
+  # Do NOT add ${{outputs.X}} env vars here — Azure ML does not substitute
+  # template expressions inside environment_variables (only inside command).
+  # Training reads $AZURE_ML_OUTPUT_<NAME> directly from the runtime.
   # The following are set by submit-azureml-training.sh via --set flags
   # AZURE_SUBSCRIPTION_ID: <set by script>
   # AZURE_RESOURCE_GROUP: <set by script>

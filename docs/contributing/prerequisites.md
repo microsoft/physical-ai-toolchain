@@ -28,7 +28,7 @@ Install these tools before contributing:
 | TFLint         | 0.61.0          | <https://github.com/terraform-linters/tflint>                         |
 | Azure CLI      | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>             |
 | kubectl        | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                             |
-| Helm           | 3.16            | <https://helm.sh/docs/intro/install/>                                 |
+| Helm           | 4.0             | <https://helm.sh/docs/intro/install/>                                 |
 | Node.js/npm    | 20+ LTS         | <https://nodejs.org/>                                                 |
 | Python         | 3.12+           | <https://www.python.org/downloads/>                                   |
 | shellcheck     | 0.10+           | <https://www.shellcheck.net/>                                         |

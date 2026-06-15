@@ -40,14 +40,12 @@ huggingface-cli download \
 ### Step 2b: Download from Azure Blob Storage
 
 > [!NOTE]
-> Steps 2b and 3 are only required for **local** usage. When training via OSMO, the `submit-osmo-lerobot-training.sh` script automatically downloads the dataset when the `--from-blob` argument is used.
+> Steps 2b and 3 are only required for **local** usage. When training via OSMO, the `submit-osmo-lerobot-training.sh` script automatically downloads the dataset when `--blob-url` is used.
 
 For datasets stored in Azure, use the download utility. Create a `.env` file in `training/il/scripts/lerobot/` with the required environment variables:
 
 ```bash
-STORAGE_ACCOUNT=<your-storage-account>
-STORAGE_CONTAINER=datasets
-BLOB_PREFIX=my-dataset/v1
+BLOB_URLS='["https://<your-storage-account>.blob.core.windows.net/datasets/my-dataset/v1"]'
 DATASET_ROOT=./datasets
 DATASET_REPO_ID=my-org/my-dataset
 ```
@@ -131,7 +129,7 @@ Open `http://localhost:5173` in a browser. The viewer provides episode browsing,
 
 ### Step 6: Connect to training
 
-With the dataset validated, submit a training job using the dataset path or repository ID:
+With the dataset validated, submit a training job using the repository ID or direct Azure Blob URL:
 
 ```bash
 # From HuggingFace (dataset downloaded on-the-fly by the training container)
@@ -140,10 +138,7 @@ cd training/il/scripts
 
 # From Azure Blob (dataset downloaded at job start)
 ./submit-osmo-lerobot-training.sh \
-  -d my-org/my-dataset \
-  --from-blob \
-  --storage-account <your-storage-account> \
-  --blob-prefix my-dataset/v1
+  --blob-url https://<your-storage-account>.blob.core.windows.net/datasets/my-dataset/v1
 ```
 
 See [Your First LeRobot Training Job](../training/your-first-lerobot-training-job.md) for the full training recipe.
@@ -161,13 +156,11 @@ The recipe succeeded when:
 
 `download_dataset.py` environment variables:
 
-| Variable            | Required | Default           | Description                               |
-|---------------------|----------|-------------------|-------------------------------------------|
-| `STORAGE_ACCOUNT`   | yes      | —                 | Azure Storage account name                |
-| `STORAGE_CONTAINER` | no       | `datasets`        | Blob container name                       |
-| `BLOB_PREFIX`       | yes      | —                 | Blob path prefix for dataset files        |
-| `DATASET_ROOT`      | no       | `/workspace/data` | Local root directory for datasets         |
-| `DATASET_REPO_ID`   | yes      | —                 | Dataset identifier (e.g., `user/dataset`) |
+| Variable          | Required | Default           | Description                                    |
+|-------------------|----------|-------------------|------------------------------------------------|
+| `BLOB_URLS`       | yes      | —                 | Non-empty JSON array of direct Azure Blob URLs |
+| `DATASET_ROOT`    | no       | `/workspace/data` | Local root directory for datasets              |
+| `DATASET_REPO_ID` | yes      | —                 | Dataset identifier relative to `DATASET_ROOT`  |
 
 ## 🔗 Related Recipes
 

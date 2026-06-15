@@ -46,7 +46,6 @@ TRAINING OPTIONS:
         --save-freq N             Checkpoint save frequency (default: 5000)
 
 LOGGING OPTIONS:
-        --mlflow-enable           Enable Azure ML MLflow logging
         --experiment-name NAME    MLflow experiment name
 
 INFERENCE OPTIONS:
@@ -94,7 +93,6 @@ EXAMPLES:
       -d user/my-dataset \
       --policy-repo-id user/my-policy \
       -p diffusion \
-      --mlflow-enable \
       --training-steps 100000 \
       -r my-diffusion-model
 EOF
@@ -114,7 +112,6 @@ training_steps="${TRAINING_STEPS:-}"
 batch_size="${BATCH_SIZE:-}"
 save_freq="${SAVE_FREQ:-5000}"
 
-mlflow_enable="${MLFLOW_ENABLE:-false}"
 experiment_name="${EXPERIMENT_NAME:-}"
 
 eval_episodes="${EVAL_EPISODES:-10}"
@@ -150,7 +147,6 @@ while [[ $# -gt 0 ]]; do
     --training-steps)             training_steps="$2"; shift 2 ;;
     --batch-size)                 batch_size="$2"; shift 2 ;;
     --save-freq)                  save_freq="$2"; shift 2 ;;
-    --mlflow-enable)              mlflow_enable="true"; shift ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --eval-episodes)              eval_episodes="$2"; shift 2 ;;
     --skip-inference)             skip_inference=true; shift ;;
@@ -187,11 +183,9 @@ case "$policy_type" in
   *) fatal "Unsupported policy type: $policy_type (use: act, diffusion)" ;;
 esac
 
-if [[ "$mlflow_enable" == "true" || -n "$register_model" ]]; then
-  [[ -z "$subscription_id" ]] && fatal "Azure subscription ID required for MLflow/registration"
-  [[ -z "$resource_group" ]] && fatal "Azure resource group required for MLflow/registration"
-  [[ -z "$workspace_name" ]] && fatal "Azure ML workspace name required for MLflow/registration"
-fi
+[[ -z "$subscription_id" ]] && fatal "Azure subscription ID required for MLflow/registration"
+[[ -z "$resource_group" ]] && fatal "Azure resource group required for MLflow/registration"
+[[ -z "$workspace_name" ]] && fatal "Azure ML workspace name required for MLflow/registration"
 
 train_job_name="${job_name}-train"
 eval_job_name="${job_name}-eval"
@@ -207,7 +201,6 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Batch Size" "${batch_size:-<default>}"
   print_kv "Save Freq" "$save_freq"
   print_kv "Eval Episodes" "$eval_episodes"
-  print_kv "MLflow" "$mlflow_enable"
   print_kv "Skip Inference" "$skip_inference"
   print_kv "Skip Wait" "$skip_wait"
   print_kv "Poll Interval" "${poll_interval}s"
@@ -239,8 +232,6 @@ train_args=(
 [[ -n "$training_steps" ]]   && train_args+=(--training-steps "$training_steps")
 [[ -n "$batch_size" ]]       && train_args+=(--batch-size "$batch_size")
 [[ -n "$experiment_name" ]]  && train_args+=(--experiment-name "$experiment_name")
-
-[[ "$mlflow_enable" == "true" ]] && train_args+=(--mlflow-enable)
 
 if [[ "$skip_register" == "false" && -n "$register_model" ]]; then
   train_args+=(--register-checkpoint "$register_model")
