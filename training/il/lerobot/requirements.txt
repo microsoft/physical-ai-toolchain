@@ -118,7 +118,7 @@ cryptography==49.0.0
     #   google-auth
     #   msal
     #   pyjwt
-cuda-bindings==13.3.1
+cuda-bindings==12.9.0
     # via
     #   --override (workspace)
     #   robotics-training-il (pyproject.toml)
