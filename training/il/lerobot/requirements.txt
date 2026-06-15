@@ -573,7 +573,7 @@ termcolor==3.3.0
     # via lerobot
 toml==0.10.2
     # via draccus
-torch==2.10.0
+torch==2.11.0
     # via
     #   accelerate
     #   lerobot
