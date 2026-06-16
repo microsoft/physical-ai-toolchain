@@ -1,0 +1,56 @@
+# LeRobot Preprocess Component (Pipeline)
+#
+# Validates and prepares a LeRobot dataset for downstream training/evaluation
+# steps in the lerobot-pipeline DAG. Adapted from an upstream source with
+# Hydra config composition, Fabric lineage, and gate signals removed.
+#
+# Implementation: training/il/scripts/lerobot/preprocess.py + data_config.py
+#
+# Compute and environment_variables are set at the parent pipeline job step,
+# not in this Component, because the AzureML Kubernetes extension does not
+# substitute ${{inputs.X}} template refs at runtime — they must be passed
+# either as command-line args (here) or as env vars resolved at submission
+# time.
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+name: lerobot_data_preprocess
+display_name: LeRobot Data Preprocess
+version: "1"
+description: >-
+  Validate a LeRobot dataset, prepare its on-disk layout for training, and
+  emit a preprocessing_config artifact downstream steps can consume.
+
+code: ../../../scripts/lerobot
+
+inputs:
+  dataset:
+    type: uri_folder
+    description: Raw LeRobot dataset (uri_folder with meta/, data/, optional videos/).
+  dataset_repo_id:
+    type: string
+    description: Logical repo id for the dataset (e.g. user/dataset-name).
+  preprocessing_config:
+    type: uri_file
+    optional: true
+    description: Optional preprocessing_config.yaml from a previous pipeline run.
+
+outputs:
+  prepared_dataset:
+    type: uri_folder
+    description: Dataset layout ready for the train step (preprocessing.yaml + metadata.json + payload).
+    mode: upload
+  preprocessing_config:
+    type: uri_folder
+    description: Effective preprocessing configuration emitted for downstream consumers.
+    mode: upload
+
+environment: azureml:lerobot-training-env:latest
+
+command: >-
+  python preprocess.py
+  --dataset_input ${{inputs.dataset}}
+  --dataset_repo_id ${{inputs.dataset_repo_id}}
+  --output_dataset ${{outputs.prepared_dataset}}
+  --output_config ${{outputs.preprocessing_config}}
+  $[[--preprocessing_config ${{inputs.preprocessing_config}}]]

@@ -25,12 +25,12 @@ Submit distributed Isaac Lab training jobs through NVIDIA OSMO workflow orchestr
 
 ## 📦 Available Templates
 
-| Template             | Purpose                             | Submission Script                                           |
-|----------------------|-------------------------------------|-------------------------------------------------------------|
-| `train.yaml`         | Isaac Lab training (base64 inline)  | `training/rl/scripts/submit-osmo-training.sh`               |
-| `train-dataset.yaml` | Isaac Lab training (dataset upload) | `training/rl/scripts/submit-osmo-dataset-training.sh`       |
-| `lerobot-train.yaml` | LeRobot behavioral cloning          | `training/il/scripts/submit-osmo-lerobot-training.sh`       |
-| `lerobot-eval.yaml`  | LeRobot inference/evaluation        | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`        |
+| Template             | Purpose                             | Submission Script                                     |
+|----------------------|-------------------------------------|-------------------------------------------------------|
+| `train.yaml`         | Isaac Lab training (base64 inline)  | `training/rl/scripts/submit-osmo-training.sh`         |
+| `train-dataset.yaml` | Isaac Lab training (dataset upload) | `training/rl/scripts/submit-osmo-dataset-training.sh` |
+| `lerobot-train.yaml` | LeRobot behavioral cloning          | `training/il/scripts/submit-osmo-lerobot-training.sh` |
+| `lerobot-eval.yaml`  | LeRobot inference/evaluation        | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`  |
 
 ## ⚙️ Workflow Comparison
 
@@ -95,13 +95,13 @@ Dataset folder injection via OSMO bucket system instead of base64-encoded archiv
 
 ## 🔧 Environment Variables
 
-| Variable                | Description                               |
-|-------------------------|-------------------------------------------|
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID                     |
-| `AZURE_RESOURCE_GROUP`  | Resource group name                       |
-| `AZUREML_WORKSPACE_NAME`| Azure ML workspace name                   |
-| `OSMO_DATASET_BUCKET`   | Dataset bucket name (default: `training`) |
-| `OSMO_DATASET_NAME`     | Dataset name (default: `training-code`)   |
+| Variable                 | Description                               |
+|--------------------------|-------------------------------------------|
+| `AZURE_SUBSCRIPTION_ID`  | Azure subscription ID                     |
+| `AZURE_RESOURCE_GROUP`   | Resource group name                       |
+| `AZUREML_WORKSPACE_NAME` | Azure ML workspace name                   |
+| `OSMO_DATASET_BUCKET`    | Dataset bucket name (default: `training`) |
+| `OSMO_DATASET_NAME`      | Dataset name (default: `training-code`)   |
 
 ## 🔌 Accessing OSMO
 

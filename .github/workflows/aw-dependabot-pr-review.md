@@ -3,18 +3,12 @@ name: AW Dependabot PR Review
 description: Advisory agentic review of Dependabot dependency update PRs for physical-ai-toolchain
 engine: copilot
 timeout-minutes: 15
-if: >
-  github.event.workflow_run.event == 'pull_request' &&
-  github.event.workflow_run.actor.login == 'dependabot[bot]' &&
-  contains(fromJSON('["success","failure","cancelled","timed_out","neutral","skipped","action_required"]'),
-    github.event.workflow_run.conclusion)
 on:
-  workflow_run:
-    workflows: ["PR Validation"]
-    types: [completed]
-    branches: ["dependabot/**"]
+  slash_command:
+    name: aw-dependabot-review
+    events: [pull_request_comment]
 concurrency:
-  job-discriminator: ${{ github.event.workflow_run.head_sha }}
+  job-discriminator: ${{ github.event.issue.number }}
 permissions:
   contents: read
   pull-requests: read
@@ -65,53 +59,22 @@ steps:
     uses: terraform-linters/setup-tflint@b480b8fcdaa6f2c577f8e4fa799e89e756bb7c93 # v6.2.2
     with:
       tflint_version: latest
-  - name: Resolve Dependabot PR context from workflow_run
+  - name: Resolve Dependabot PR context from slash command
     id: resolve-pr
     uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
     with:
       script: |
-        const run = context.payload.workflow_run;
-        if (!run) {
-          core.setFailed('workflow_run payload missing');
-          return;
-        }
-        if (run.event !== 'pull_request') {
-          core.exportVariable('PR_DEPENDABOT_SKIP_REASON', 'not-a-pr-run');
+        const issue = context.payload.issue;
+        if (!issue || !issue.pull_request) {
+          core.exportVariable('PR_DEPENDABOT_SKIP_REASON', 'not-a-pull-request');
           return;
         }
 
-        let pr = (run.pull_requests || [])[0];
-        if (!pr) {
-          // Fork PRs do not appear in workflow_run.pull_requests; fall back to search.
-          // Filter to open Dependabot PRs with the exact head SHA to avoid ambiguity
-          // when Dependabot opens several PRs in the same batch.
-          const q = `repo:${context.repo.owner}/${context.repo.repo} is:pr is:open author:app/dependabot sha:${run.head_sha}`;
-          const { data } = await github.rest.search.issuesAndPullRequests({ q });
-          const matches = (data.items || []).filter(i =>
-            i.user.login === 'dependabot[bot]' && i.state === 'open');
-          if (matches.length === 0) {
-            core.exportVariable('PR_DEPENDABOT_SKIP_REASON', 'pr-resolution-failed');
-            return;
-          }
-          if (matches.length > 1) {
-            core.setFailed(`Ambiguous PR resolution: ${matches.length} open Dependabot PRs match SHA ${run.head_sha}`);
-            return;
-          }
-          const { data: full } = await github.rest.pulls.get({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            pull_number: matches[0].number,
-          });
-          pr = full;
-        } else {
-          // Hydrate the full PR object so fields like `body` and `draft` are reliable.
-          const { data: full } = await github.rest.pulls.get({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            pull_number: pr.number,
-          });
-          pr = full;
-        }
+        const { data: pr } = await github.rest.pulls.get({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          pull_number: issue.number,
+        });
 
         if (pr.user.login !== 'dependabot[bot]') {
           core.exportVariable('PR_DEPENDABOT_SKIP_REASON', 'not-dependabot');
@@ -129,10 +92,33 @@ steps:
         core.exportVariable('PR_AUTHOR', pr.user.login);
         core.exportVariable('PR_HEAD_SHA', pr.head.sha);
 
-        // PR Validation conclusion comes directly from the triggering workflow_run payload;
-        // it is always final under `types: [completed]`.
-        core.exportVariable('PR_VALIDATION_CONCLUSION', run.conclusion);
-        core.exportVariable('PR_VALIDATION_RUN_URL', run.html_url || '');
+        // Hydrate Dependabot enrichment input from REST so the agent does not depend on
+        // the integrity-filtered MCP read of the PR body.
+        core.exportVariable('PR_BODY', pr.body || '');
+
+        // The slash command carries no workflow_run payload, so look up the latest
+        // `PR Validation` run for the PR head SHA to anchor the advisory on CI signal.
+        let prValidationConclusion = 'unknown';
+        let prValidationRunUrl = '';
+        try {
+          const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            head_sha: pr.head.sha,
+            per_page: 100,
+          });
+          const prValidation = runs
+            .filter(r => r.name === 'PR Validation')
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+          if (prValidation) {
+            prValidationConclusion = prValidation.conclusion || prValidation.status || 'unknown';
+            prValidationRunUrl = prValidation.html_url || '';
+          }
+        } catch (err) {
+          core.warning(`Failed to resolve PR Validation run: ${err.message}`);
+        }
+        core.exportVariable('PR_VALIDATION_CONCLUSION', prValidationConclusion);
+        core.exportVariable('PR_VALIDATION_RUN_URL', prValidationRunUrl);
 
         // Resolve per-surface check-runs ONCE here so the persona does not re-walk them.
         // Paginate to avoid silently missing checks when the matrix grows beyond a single page.
@@ -153,11 +139,7 @@ steps:
         }
         core.exportVariable('PR_VALIDATION_FAILING_CHECKS', JSON.stringify(failing));
 
-        // Hydrate Dependabot enrichment input from REST so the agent does not depend on
-        // the integrity-filtered MCP read of the PR body.
-        core.exportVariable('PR_BODY', pr.body || '');
-
-        core.info(`Resolved PR #${pr.number} (${pr.title}); PR Validation conclusion: ${run.conclusion}; failing checks: ${failing.length}`);
+        core.info(`Resolved PR #${pr.number} (${pr.title}); PR Validation conclusion: ${prValidationConclusion}; failing checks: ${failing.length}`);
 tools:
   github:
     toolsets: [context, repos, pull_requests]
@@ -190,32 +172,28 @@ imports:
 
 # Dependabot PR Review
 
-Advisory-only review of Dependabot-authored pull requests in microsoft/physical-ai-toolchain. The agent classifies risk, enriches findings with GHSA/OSV/NVD intel and release notes, anchors validation on the deterministic `PR Validation` orchestrator that triggered this run, and posts a single review plus targeted inline comments. It never blocks merges.
+Advisory-only review of Dependabot-authored pull requests in microsoft/physical-ai-toolchain. The agent classifies risk, enriches findings with GHSA/OSV/NVD intel and release notes, anchors validation on the deterministic `PR Validation` orchestrator run for the PR head, and posts a single review plus targeted inline comments. It never blocks merges.
 
 ## Trigger Posture
 
-This workflow runs via `workflow_run` after the `PR Validation` orchestrator completes on a Dependabot
-PR's head branch (`dependabot/**`) for a `pull_request` event. The `branches:` filter on `workflow_run`
-matches the *triggering run's `head_branch`*, not its base — using `main` here would silently never fire
-for Dependabot PRs (regression observed in #583, fixed in #584; do not change without re-reading those).
-Because `workflow_run` evaluates the workflow file from the default branch, the
-agent step always uses the trusted, merged definition rather than fork content. The gh-aw compiler
-auto-injects fork-PR exclusion and a `repository.id` guard into the lock file. The workflow-level
-`if:` short-circuits any non-PR triggering event, any PR not authored by `dependabot[bot]` (gated on
-`workflow_run.actor.login`), and any non-terminal conclusion before the resolver runs. The resolver then
-reads the orchestrator's terminal conclusion directly from `context.payload.workflow_run.conclusion`,
-which under `types: [completed]` is always one of `success`, `failure`, `cancelled`, `timed_out`,
-`neutral`, `skipped`, or `action_required`.
+A maintainer invokes this workflow on demand by commenting `/aw-dependabot-review` on a Dependabot
+pull request. The `slash_command` trigger restricts activation to PR comments (`pull_request_comment`),
+and gh-aw's role gate evaluates the *commenter* against the default `admin`/`maintainer`/`write`
+allowlist — so only a trusted maintainer can start a run. This sidesteps the prior `workflow_run`
+posture, where the triggering actor was `dependabot[bot]` (permission `none`) and every run silently
+skipped at the role gate.
 
-The resolver step exports `PR Validation`'s final conclusion directly from
-`context.payload.workflow_run.conclusion` (no separate `listWorkflowRunsForRepo` call), then enumerates
-per-surface check-runs once via `checks.listForRef` so the agent never has to walk the checks API itself.
-The `checks: read` permission grants exactly that scope and nothing more. The agent runs without a
-working tree — all PR context comes from REST APIs in the resolver. Do not add a checkout step; the
-compiler-generated "Checkout PR branch" step in the lock file is permanently skipped under
-`workflow_run` because neither `github.event.pull_request` nor `github.event.issue.pull_request` is set.
-The agent must never attempt to run validation tooling (`uv`, `pytest`, `npm ci`, `terraform`, `go`)
-from the bash tool because those binaries are not visible inside the AWF firewall sandbox.
+Because the comment fires on the default-branch workflow definition, the agent step always uses the
+trusted, merged definition rather than fork content. The resolver reads the PR number from
+`context.payload.issue.number`, hydrates the full PR via `pulls.get`, and short-circuits via a skip
+reason when the PR is not authored by `dependabot[bot]` or is a draft. The slash command carries no
+workflow_run payload, so the resolver looks up the latest `PR Validation` run for the PR head SHA via
+`actions.listWorkflowRunsForRepo` (requiring `actions: read`) to anchor the advisory on CI signal, then
+enumerates per-surface check-runs once via `checks.listForRef` so the agent never has to walk the checks
+API itself. The `checks: read` permission grants exactly that scope and nothing more. All PR context
+comes from REST APIs in the resolver. The agent must never attempt to run validation tooling (`uv`,
+`pytest`, `npm ci`, `terraform`, `go`) from the bash tool because those binaries are not visible inside
+the AWF firewall sandbox.
 
 The resolver step exports these environment variables for the agent to read:
 
@@ -225,7 +203,7 @@ The resolver step exports these environment variables for the agent to read:
 * `PR_VALIDATION_RUN_URL` — direct link to the `PR Validation` run
 * `PR_VALIDATION_FAILING_CHECKS` — JSON array of `{name, html_url, conclusion}` for non-success/non-neutral/non-skipped check-runs on `PR_HEAD_SHA`
 * `PR_BODY` — the PR body, hydrated server-side so enrichment does not depend on the integrity-filtered MCP read
-* `PR_DEPENDABOT_SKIP_REASON` (optional) — set when the resolver determined the trigger should be skipped (`not-a-pr-run`, `pr-resolution-failed`, `not-dependabot`, `draft`)
+* `PR_DEPENDABOT_SKIP_REASON` (optional) — set when the resolver determined the trigger should be skipped (`not-a-pull-request`, `not-dependabot`, `draft`)
 
 When `PR_DEPENDABOT_SKIP_REASON` is set, emit a `noop` with the reason as the rationale and stop.
 
@@ -250,7 +228,7 @@ The full reviewer persona, risk rubric, ecosystem-specific checks, and enrichmen
 ## Step-by-Step
 
 1. **Resolve context.** Read `PR_NUMBER`, `PR_HEAD_SHA`, `PR_VALIDATION_CONCLUSION`, `PR_VALIDATION_RUN_URL`, `PR_VALIDATION_FAILING_CHECKS`, and `PR_BODY` from the environment. If `PR_DEPENDABOT_SKIP_REASON` is set, emit `noop` and stop.
-2. **Read CI signal.** Treat `PR_VALIDATION_CONCLUSION` as the final, non-stale conclusion. Parse `PR_VALIDATION_FAILING_CHECKS` (JSON) for the list of failing per-surface check-runs. Do NOT call `checks.listForRef` or `commits/{sha}/check-runs` — the resolver already did.
+2. **Read CI signal.** Treat `PR_VALIDATION_CONCLUSION` as the latest `PR Validation` conclusion for `PR_HEAD_SHA`; it is `unknown` when no run exists yet or the run is still in progress. Parse `PR_VALIDATION_FAILING_CHECKS` (JSON) for the list of failing per-surface check-runs. Do NOT call `checks.listForRef` or `commits/{sha}/check-runs` — the resolver already did.
 3. **Parse.** Read `PR_BODY` plus the file diff. Extract package name, ecosystem, old/new versions, `GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}` and `CVE-\d{4}-\d{4,7}` identifiers from the Dependabot body.
 4. **Enrich.** Query GHSA (preferred), fall back to OSV (`api.osv.dev`) and NVD (`services.nvd.nist.gov`) for severity, affected ranges, and fixed versions. Fetch release notes or changelog via the relevant package registry (npm, PyPI, Go module proxy, Terraform registry).
 5. **Classify.** Apply the persona's per-surface rubric. Flag ABI-sensitive pins (for example `numpy >=1.26.0,<2.0.0` in Isaac Sim training), pre-1.0 bumps, major version jumps, and missing upstream advisories.
