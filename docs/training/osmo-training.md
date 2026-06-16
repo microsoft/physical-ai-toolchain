@@ -154,13 +154,13 @@ See [LeRobot Training — GR00T VLA Fine-Tuning](lerobot-training.md#-gr00t-vla-
 
 ## 🔧 Environment Variables
 
-| Variable                | Description                               |
-|-------------------------|-------------------------------------------|
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID                     |
-| `AZURE_RESOURCE_GROUP`  | Resource group name                       |
-| `AZUREML_WORKSPACE_NAME`| Azure ML workspace name                   |
-| `OSMO_DATASET_BUCKET`   | Dataset bucket name (default: `training`) |
-| `OSMO_DATASET_NAME`     | Dataset name (default: `training-code`)   |
+| Variable                 | Description                               |
+|--------------------------|-------------------------------------------|
+| `AZURE_SUBSCRIPTION_ID`  | Azure subscription ID                     |
+| `AZURE_RESOURCE_GROUP`   | Resource group name                       |
+| `AZUREML_WORKSPACE_NAME` | Azure ML workspace name                   |
+| `OSMO_DATASET_BUCKET`    | Dataset bucket name (default: `training`) |
+| `OSMO_DATASET_NAME`      | Dataset name (default: `training-code`)   |
 
 ## 🔌 Accessing OSMO
 

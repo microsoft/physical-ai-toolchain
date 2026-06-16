@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Synthetic Data
 description: Generate photorealistic training data from simulation using NVIDIA Cosmos world foundation models
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-14
+ms.date: 2026-06-12
 ms.topic: overview
 keywords:
   - synthetic data

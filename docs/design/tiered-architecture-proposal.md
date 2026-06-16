@@ -52,10 +52,10 @@ The current architecture documentation foregrounds the maximal configuration. It
 
 The practical consequence: a user evaluating the toolkit perceives the cost of entry as the sum of **every** moving part, on both the edge and the cloud:
 
-| Surface | Components the docs imply are required |
-|---|---|
-| Edge | Arc-enabled Kubernetes (K3s or AKS Edge Essentials), ACSA extension, cert-manager, IngestSubvolume CRD, FluxCD, ROS 2 recording service, gating service, IoT Operations MQTT broker |
-| Cloud | AKS, AzureML workspace, Azure Storage, Container Registry, Key Vault, managed identity, Event Hubs, Microsoft Fabric Real-Time Intelligence, Grafana, point-to-site VPN |
+| Surface | Components the docs imply are required                                                                                                                                              |
+|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Edge    | Arc-enabled Kubernetes (K3s or AKS Edge Essentials), ACSA extension, cert-manager, IngestSubvolume CRD, FluxCD, ROS 2 recording service, gating service, IoT Operations MQTT broker |
+| Cloud   | AKS, AzureML workspace, Azure Storage, Container Registry, Key Vault, managed identity, Event Hubs, Microsoft Fabric Real-Time Intelligence, Grafana, point-to-site VPN             |
 
 Even with the repository's deploy scripts, the perceived setup is a long, ordered sequence of installations and credential wiring across two environments before the first useful result. The "private AKS by default" network model compounds this: a VPN must exist before any `kubectl` command runs.
 
@@ -72,16 +72,16 @@ Even with the repository's deploy scripts, the perceived setup is a long, ordere
 
 A file-level survey of the eight domains separates shipped code from aspirational specification. The signal is unambiguous.
 
-| Domain | Python | Shell | Terraform | Placeholder specs |
-|---|---|---|---|---|
-| `infrastructure` | 0 | 18 | 80 | 0 |
-| `data-management` | 49 | 2 | 0 | 0 |
-| `training` | 23 | 8 | 0 | 0 |
-| `evaluation` | 15 | 7 | 0 | 0 |
-| `data-pipeline` | 3 | 1 | 0 | 0 |
-| `synthetic-data` | 0 | 0 | 0 | 2 |
-| `fleet-deployment` | 1 | 1 | 0 | 5 |
-| `fleet-intelligence` | 0 | 4 | 0 | 4 |
+| Domain               | Python | Shell | Terraform | Placeholder specs |
+|----------------------|--------|-------|-----------|-------------------|
+| `infrastructure`     | 0      | 18    | 80        | 0                 |
+| `data-management`    | 49     | 2     | 0         | 0                 |
+| `training`           | 23     | 8     | 0         | 0                 |
+| `evaluation`         | 15     | 7     | 0         | 0                 |
+| `data-pipeline`      | 3      | 1     | 0         | 0                 |
+| `synthetic-data`     | 0      | 0     | 0         | 2                 |
+| `fleet-deployment`   | 1      | 1     | 0         | 5                 |
+| `fleet-intelligence` | 0      | 4     | 0         | 4                 |
 
 The implemented center of gravity is **infrastructure provisioning plus training, data management, and evaluation tooling.** The two domains that carry the "fleet" identity — `fleet-deployment` and `fleet-intelligence` — hold **one Python file between them and nine placeholder specifications.** The headline identity of the project is its least-built region.
 
@@ -106,10 +106,10 @@ The capability to start small is present in the code. It is simply undocumented 
 
 The strongest objection to the current architecture is not "Arc and AKS are unnecessary." At multi-site scale they are genuinely needed. The objection is that the repository welds two different concerns together under one word.
 
-| Concern | What it is | Repository domain | Maturity |
-|---|---|---|---|
-| Fleet delivery (control plane) | Multi-site connectivity, declarative delivery, safe-swap gating | `fleet-deployment` | 1 Python file, 5 placeholders |
-| Fleet intelligence | Drift detection, retraining triggers, aggregate telemetry analytics | `fleet-intelligence` | 0 Python files, 4 placeholders |
+| Concern                        | What it is                                                          | Repository domain    | Maturity                       |
+|--------------------------------|---------------------------------------------------------------------|----------------------|--------------------------------|
+| Fleet delivery (control plane) | Multi-site connectivity, declarative delivery, safe-swap gating     | `fleet-deployment`   | 1 Python file, 5 placeholders  |
+| Fleet intelligence             | Drift detection, retraining triggers, aggregate telemetry analytics | `fleet-intelligence` | 0 Python files, 4 placeholders |
 
 The **fleet delivery** control plane is transport. Across sites you do not control, you need a reachability and identity broker (Arc), a runtime (AKS), and a delivery mechanism (FluxCD). This is, in effect, a `git push` that survives bad networks and locked-down sites, with a safety gate before a policy swaps on a physical arm. It is legitimate and necessary once an operator spans multiple sites, and aligns with how the Kubernetes ecosystem treats "fleet" — a delivery and reconciliation concern.
 
@@ -166,15 +166,15 @@ T0–T2 satisfy Goal G with manual deployment. T3 adds single-site declarative d
 
 The honest floor for Goal G.
 
-| Concern | Implementation |
-|---|---|
-| Capture | ROS 2 bag recording to local disk on the robot or laptop. No Arc, no ACSA, no PVC. |
-| Move data | `cp` or `rsync` from robot to laptop. |
-| Curate | Dataviewer in `local` mode on the laptop. |
-| Train | `train.py` on a laptop or workstation GPU. |
-| Track | File-backed MLflow (`file:./mlruns`, no server) or trackio — a local process, no service to stand up. |
-| Validate | `run-local-lerobot-eval.py` / `play.py` locally. |
-| Run on robot | The ACT inference node as a plain process or container. No Flux, no gating, no GitOps. |
+| Concern      | Implementation                                                                                        |
+|--------------|-------------------------------------------------------------------------------------------------------|
+| Capture      | ROS 2 bag recording to local disk on the robot or laptop. No Arc, no ACSA, no PVC.                    |
+| Move data    | `cp` or `rsync` from robot to laptop.                                                                 |
+| Curate       | Dataviewer in `local` mode on the laptop.                                                             |
+| Train        | `train.py` on a laptop or workstation GPU.                                                            |
+| Track        | File-backed MLflow (`file:./mlruns`, no server) or trackio — a local process, no service to stand up. |
+| Validate     | `run-local-lerobot-eval.py` / `play.py` locally.                                                      |
+| Run on robot | The ACT inference node as a plain process or container. No Flux, no gating, no GitOps.                |
 
 **Edge infra:** ROS 2 and Docker only. **Cloud infra:** none.
 
@@ -189,14 +189,14 @@ This tier exists in the code today and is undocumented. Surfacing it is the high
 
 The small-lab and integrator tier. The first cloud resource added is a single storage account.
 
-| Concern | Implementation | Delta from T0 |
-|---|---|---|
-| Capture | ROS 2 recording to shared NFS/SMB, or each robot `rsync`s up. | shared disk |
-| Move data | `azcopy` or `az storage blob upload-batch` to one Blob container. | + Blob storage |
-| Curate | Dataviewer in `azure` mode against that container (managed identity or SAS). | viewer → cloud |
-| Train | Local shared GPU box, or first optional reach to AzureML on saturation. | optional cloud GPU |
-| Track | Local file-backed tracking (carried from T0) optionally promoted to a shared MLflow server once a team needs shared run history. | optional hosted tracking |
-| Run on robot | Plain container per robot; hand-update 2–3 robots via `docker pull`. | unchanged |
+| Concern      | Implementation                                                                                                                   | Delta from T0            |
+|--------------|----------------------------------------------------------------------------------------------------------------------------------|--------------------------|
+| Capture      | ROS 2 recording to shared NFS/SMB, or each robot `rsync`s up.                                                                    | shared disk              |
+| Move data    | `azcopy` or `az storage blob upload-batch` to one Blob container.                                                                | + Blob storage           |
+| Curate       | Dataviewer in `azure` mode against that container (managed identity or SAS).                                                     | viewer → cloud           |
+| Train        | Local shared GPU box, or first optional reach to AzureML on saturation.                                                          | optional cloud GPU       |
+| Track        | Local file-backed tracking (carried from T0) optionally promoted to a shared MLflow server once a team needs shared run history. | optional hosted tracking |
+| Run on robot | Plain container per robot; hand-update 2–3 robots via `docker pull`.                                                             | unchanged                |
 
 **Edge infra:** shared disk. **Cloud infra:** one storage account, optionally AzureML and MLflow. No Kubernetes, no Arc, no Flux.
 
@@ -206,13 +206,13 @@ The small-lab and integrator tier. The first cloud resource added is a single st
 
 The tier where cloud training genuinely becomes the default rather than an option.
 
-| Concern | Implementation | Delta from T1 |
-|---|---|---|
-| Train | AzureML or OSMO as default: multi-GPU, queued jobs, multiple people, VLA scale. | cloud GPU standard |
-| Registry | Model registry and versioning become load-bearing. | + registry |
-| Curate | Dataviewer deployed as a shared web app rather than localhost. | hosted viewer |
-| Capture | ACSA optional if disk pressure or unattended recording warrants it. | optional ACSA |
-| Run on robot | Manual `docker pull` per robot. Hand-updating a handful of reachable robots is still tractable. | unchanged |
+| Concern      | Implementation                                                                                  | Delta from T1      |
+|--------------|-------------------------------------------------------------------------------------------------|--------------------|
+| Train        | AzureML or OSMO as default: multi-GPU, queued jobs, multiple people, VLA scale.                 | cloud GPU standard |
+| Registry     | Model registry and versioning become load-bearing.                                              | + registry         |
+| Curate       | Dataviewer deployed as a shared web app rather than localhost.                                  | hosted viewer      |
+| Capture      | ACSA optional if disk pressure or unattended recording warrants it.                             | optional ACSA      |
+| Run on robot | Manual `docker pull` per robot. Hand-updating a handful of reachable robots is still tractable. | unchanged          |
 
 **Edge infra:** none beyond Docker. **Cloud infra:** AzureML workspace, storage, registry, MLflow. Still no Kubernetes, no Arc, no fleet plane.
 
@@ -227,13 +227,13 @@ version skew, but all reachable from a single operator network. A single local k
 FluxCD reconciles every robot to a Git-declared desired state. Arc is unnecessary precisely
 because there is only one site and you can reach it directly.
 
-| Concern | Implementation |
-|---|---|
-| Runtime | A single local k3s node (a ~60 MB binary) at the site. |
-| Delivery | FluxCD reconciles robots to Git-declared desired state; rollback is a Git revert. |
-| Version control | Git becomes the single source of truth for which robot runs which policy. |
-| Safe swap | Optional gating before a policy swaps on hardware. |
-| Train and curate | Same as T2 (AzureML, registry, MLflow, hosted viewer). |
+| Concern          | Implementation                                                                    |
+|------------------|-----------------------------------------------------------------------------------|
+| Runtime          | A single local k3s node (a ~60 MB binary) at the site.                            |
+| Delivery         | FluxCD reconciles robots to Git-declared desired state; rollback is a Git revert. |
+| Version control  | Git becomes the single source of truth for which robot runs which policy.         |
+| Safe swap        | Optional gating before a policy swaps on hardware.                                |
+| Train and curate | Same as T2 (AzureML, registry, MLflow, hosted viewer).                            |
 
 **Why this is a full tier, not a footnote:** it isolates the single most misattributed cost in the whole architecture. The expensive part of the "fleet" stack was never running Kubernetes at the edge — single-node k3s idles near zero. The expensive part is the cloud-side control plane (Arc enrollment, identity, policy). T3 delivers GitOps deployment automation while paying none of that. It is the decoupling that makes the entire middle of the ladder honest.
 
@@ -245,12 +245,12 @@ because there is only one site and you can reach it directly.
 
 The legitimate top of the necessary ladder. This is the fleet delivery control plane: getting validated policies onto robots across sites you cannot directly reach, safely. The defining difference from T3 is **multiple sites** — which is exactly what makes Arc necessary, as the cross-site reachability and identity broker that single-site k3s did not need.
 
-| Concern | Implementation |
-|---|---|
-| Connectivity and identity | Azure Arc as the reachability and identity broker across sites. |
-| Runtime | AKS or Arc-enabled Kubernetes at each site. |
-| Delivery | FluxCD GitOps; per-site desired state recorded in Git. |
-| Safe swap | Gating service approves deployment windows before a policy swaps on hardware. |
+| Concern                   | Implementation                                                                |
+|---------------------------|-------------------------------------------------------------------------------|
+| Connectivity and identity | Azure Arc as the reachability and identity broker across sites.               |
+| Runtime                   | AKS or Arc-enabled Kubernetes at each site.                                   |
+| Delivery                  | FluxCD GitOps; per-site desired state recorded in Git.                        |
+| Safe swap                 | Gating service approves deployment windows before a policy swaps on hardware. |
 
 **Explicitly excluded at T4:** drift detection, automated retraining, aggregate telemetry analytics. This tier delivers and gates; it does not run fleet intelligence.
 
@@ -262,10 +262,10 @@ The legitimate top of the necessary ladder. This is the fleet delivery control p
 
 The aspirational layer. Drift detection, automated retraining triggers, aggregate telemetry, and health analytics.
 
-| Concern | Implementation | Status |
-|---|---|---|
-| Edge telemetry | Azure IoT Operations MQTT aggregation | placeholder |
-| Analytics | Microsoft Fabric Real-Time Intelligence, Grafana | placeholder |
+| Concern              | Implementation                                    | Status      |
+|----------------------|---------------------------------------------------|-------------|
+| Edge telemetry       | Azure IoT Operations MQTT aggregation             | placeholder |
+| Analytics            | Microsoft Fabric Real-Time Intelligence, Grafana  | placeholder |
 | Drift and retraining | Drift detection, retraining triggers, closed loop | placeholder |
 
 **Status:** mostly unimplemented (0 Python files, 4 placeholders in `fleet-intelligence`). This tier should be documented as a roadmap direction, with explicit human-in-the-loop gating recommended over fully autonomous retraining. It decomposes into an ordered autonomy ladder rather than a single leap.
@@ -278,12 +278,12 @@ ordered stages of increasing decision authority. Each is a legitimate stopping p
 deferral is honest only when the intermediate stages are named: three of the four are unbuilt
 today (modulo an ad-hoc experiment by the team on Hex).
 
-| Stage | Name | Decision authority | Status |
-|---|---|---|---|
-| T5.0 | Gated retraining | Humans trigger retraining; the system surfaces signals only. | not built |
-| T5.1 | Human-in-the-loop / active learning | The system proposes what to retrain on and when; a human approves each cycle. | ad-hoc (Hex) |
-| T5.2 | Continual learning | The system retrains on a schedule or trigger; a human reviews before deployment. | not built |
-| T5.3 | Autonomous closed-loop | The system detects drift, retrains, gates, and deploys without human approval. | not built |
+| Stage | Name                                | Decision authority                                                               | Status       |
+|-------|-------------------------------------|----------------------------------------------------------------------------------|--------------|
+| T5.0  | Gated retraining                    | Humans trigger retraining; the system surfaces signals only.                     | not built    |
+| T5.1  | Human-in-the-loop / active learning | The system proposes what to retrain on and when; a human approves each cycle.    | ad-hoc (Hex) |
+| T5.2  | Continual learning                  | The system retrains on a schedule or trigger; a human reviews before deployment. | not built    |
+| T5.3  | Autonomous closed-loop              | The system detects drift, retrains, gates, and deploys without human approval.   | not built    |
 
 > [!IMPORTANT]
 > Autonomy is a **different axis** from T0–T4. T0–T4 scale on *infrastructure reach* (sites,
@@ -308,11 +308,11 @@ therefore be a **tiered, optional axis**, recommended when data is scarce \u2014
 explicitly **not part of Goal G** (folding it into the anchor goal would undermine the "this is the
 honest minimal floor" argument).
 
-| Stage | Approach | Where it runs |
-|---|---|---|
-| A0 | Classical CV augmentation (crops, jitter, blur, photometric/geometric transforms) | Local, CPU, no model |
-| A1 | Local small-VLM generation (e.g. via vLLM locally at T0, or Azure AI Foundry at T1) | Local GPU or hosted endpoint |
-| A2 | Full Cosmos / SDG world-foundation-model pipeline | Cloud, GPU cluster |
+| Stage | Approach                                                                            | Where it runs                |
+|-------|-------------------------------------------------------------------------------------|------------------------------|
+| A0    | Classical CV augmentation (crops, jitter, blur, photometric/geometric transforms)   | Local, CPU, no model         |
+| A1    | Local small-VLM generation (e.g. via vLLM locally at T0, or Azure AI Foundry at T1) | Local GPU or hosted endpoint |
+| A2    | Full Cosmos / SDG world-foundation-model pipeline                                   | Cloud, GPU cluster           |
 
 > [!NOTE]
 > Unlike the documentation-and-packaging changes elsewhere in this proposal, the A0\u2013A1 rungs are
@@ -328,15 +328,15 @@ honest minimal floor" argument).
 
 This proposal is primarily documentation and packaging, not a code rewrite.
 
-| Change | Effort | Impact |
-|---|---|---|
-| Document T0 as the sanctioned starting path | Low — code already supports it | Removes the perceived barrier directly |
-| Restructure the architecture doc around T0–T5 | Low–medium | Reframes the on-ramp; sets correct expectations |
-| Split "fleet" into fleet delivery (T4) and fleet intelligence (T5) language, reserving "fleet" for robots | Low | Lets multi-site users adopt delivery without intelligence; ends the Azure Kubernetes Fleet Manager naming collision |
-| Mark T5 components explicitly as roadmap | Low | Stops the unbuilt ceiling from reading as a floor |
-| Name the T5.0–T5.3 autonomy ladder | Low — documentation only | Turns the deferral into a roadmap instead of a cliff |
-| Add per-tier quick-starts | Medium | Gives each audience a concrete entry point |
-| Implement A0–A1 data augmentation (classical CV, local-VLM) | Medium — **net-new code** | Closes the credibility gap; the only build item in this list |
+| Change                                                                                                    | Effort                         | Impact                                                                                                              |
+|-----------------------------------------------------------------------------------------------------------|--------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| Document T0 as the sanctioned starting path                                                               | Low — code already supports it | Removes the perceived barrier directly                                                                              |
+| Restructure the architecture doc around T0–T5                                                             | Low–medium                     | Reframes the on-ramp; sets correct expectations                                                                     |
+| Split "fleet" into fleet delivery (T4) and fleet intelligence (T5) language, reserving "fleet" for robots | Low                            | Lets multi-site users adopt delivery without intelligence; ends the Azure Kubernetes Fleet Manager naming collision |
+| Mark T5 components explicitly as roadmap                                                                  | Low                            | Stops the unbuilt ceiling from reading as a floor                                                                   |
+| Name the T5.0–T5.3 autonomy ladder                                                                        | Low — documentation only       | Turns the deferral into a roadmap instead of a cliff                                                                |
+| Add per-tier quick-starts                                                                                 | Medium                         | Gives each audience a concrete entry point                                                                          |
+| Implement A0–A1 data augmentation (classical CV, local-VLM)                                               | Medium — **net-new code**      | Closes the credibility gap; the only build item in this list                                                        |
 
 The deploy scripts, Terraform modules, and training code do not need to change to support the tier model itself. The tiers describe *which subset* of existing infrastructure a user adopts, and in what order. The one exception is the A0–A1 augmentation rungs, which are an explicit new workstream rather than a re-framing of shipped artifacts.
 

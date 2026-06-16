@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Cluster Operations and Troubleshooting
 description: Accessing OSMO, troubleshooting common issues, and optional deployment scripts
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-22
+ms.date: 2026-06-12
 ms.topic: reference
 keywords:
   - troubleshooting
@@ -157,11 +157,11 @@ kubectl describe sa osmo-service -n osmo-control-plane
 
 ## 🧩 Optional Scripts
 
-| Script                                    | Purpose                                                 |
-|-------------------------------------------|---------------------------------------------------------|
-| `optional/deploy-volcano-scheduler.sh`    | Volcano (alternative to KAI)                            |
-| `optional/uninstall-volcano-scheduler.sh` | Uninstall Volcano scheduler                             |
-| `optional/add-user-to-platform.sh`        | Add user to OSMO platform                               |
+| Script                                    | Purpose                      |
+|-------------------------------------------|------------------------------|
+| `optional/deploy-volcano-scheduler.sh`    | Volcano (alternative to KAI) |
+| `optional/uninstall-volcano-scheduler.sh` | Uninstall Volcano scheduler  |
+| `optional/add-user-to-platform.sh`        | Add user to OSMO platform    |
 
 For adding, removing, or resizing AKS node pools on a running cluster, see [Manage Node Pools](manage-node-pools.md).
 

@@ -32,7 +32,7 @@ jobs:
 
       - name: Run Checkov
         id: checkov
-        uses: bridgecrewio/checkov-action@dfb51aed1b783289b0d3f255028e7a88d5e8caa1 # v12.3105.0
+        uses: bridgecrewio/checkov-action@fa9edf8f0a491c59a924ea6accd5bdcf07752cff # v12.3107.0
         continue-on-error: ${{ inputs.soft-fail }}
         with:
           directory: ${{ inputs.working-directory }}
