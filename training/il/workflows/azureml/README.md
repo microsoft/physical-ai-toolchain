@@ -102,18 +102,18 @@ az ml job create \
 
 ## 🧩 Pipeline Inputs
 
-| Input                  | Type         | Required | Description                                                       |
-|------------------------|--------------|----------|-------------------------------------------------------------------|
-| `dataset`              | `uri_folder` | Yes      | Raw LeRobot dataset asset (must contain `meta/`, `data/`)         |
-| `dataset_repo_id`      | `string`     | Yes      | HuggingFace-style repo id; must match dataset folder name         |
+| Input                  | Type         | Required | Description                                                                                             |
+|------------------------|--------------|----------|---------------------------------------------------------------------------------------------------------|
+| `dataset`              | `uri_folder` | Yes      | Raw LeRobot dataset asset (must contain `meta/`, `data/`)                                               |
+| `dataset_repo_id`      | `string`     | Yes      | HuggingFace-style repo id; must match dataset folder name                                               |
 | `preprocessing_config` | `uri_file`   | No       | Locked preprocessing config from a previous run (preprocess input only; not consumed by train/evaluate) |
-| `policy_type`          | `string`     | No       | `act` (default), `diffusion`, or `pi0`                            |
-| `job_name`             | `string`     | No       | Display label for MLflow run naming                               |
-| `compute_preprocess`   | `string`     | No       | AML compute target for `preprocess_step`                          |
-| `compute_train`        | `string`     | No       | AML compute target for `train_step`                               |
-| `compute_evaluate`     | `string`     | No       | AML compute target for `evaluate_step`                            |
-| `compute_register`     | `string`     | No       | AML compute target for `register_step` (4-step variant only)      |
-| `register_model_name`  | `string`     | No       | AML Model Registry name (4-step variant only; required by submission script — fails fast on empty) |
+| `policy_type`          | `string`     | No       | `act` (default), `diffusion`, or `pi0`                                                                  |
+| `job_name`             | `string`     | No       | Display label for MLflow run naming                                                                     |
+| `compute_preprocess`   | `string`     | No       | AML compute target for `preprocess_step`                                                                |
+| `compute_train`        | `string`     | No       | AML compute target for `train_step`                                                                     |
+| `compute_evaluate`     | `string`     | No       | AML compute target for `evaluate_step`                                                                  |
+| `compute_register`     | `string`     | No       | AML compute target for `register_step` (4-step variant only)                                            |
+| `register_model_name`  | `string`     | No       | AML Model Registry name (4-step variant only; required by submission script — fails fast on empty)      |
 
 ## 📤 Pipeline Outputs
 
