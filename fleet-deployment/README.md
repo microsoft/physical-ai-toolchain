@@ -4,14 +4,14 @@ Deploy trained robot policies to edge fleets via FluxCD GitOps pipelines, image 
 
 ## 📂 Directory Structure
 
-| Directory         | Purpose                                            |
-|-------------------|----------------------------------------------------|
-| `gitops/`         | FluxCD GitOps manifests and configurations         |
-| `gating/`         | Deployment gating service                          |
-| `inference/`      | Inference runtime code for on-device model serving |
+| Directory         | Purpose                                             |
+|-------------------|-----------------------------------------------------|
+| `gitops/`         | FluxCD GitOps manifests and configurations          |
+| `gating/`         | Deployment gating service                           |
+| `inference/`      | Inference runtime code for on-device model serving  |
 | `setup/`          | Build / sign / attest workflow for inference images |
-| `examples/`       | Example deployment configurations                  |
-| `specifications/` | Domain specification documents                     |
+| `examples/`       | Example deployment configurations                   |
+| `specifications/` | Domain specification documents                      |
 
 ## Overview
 

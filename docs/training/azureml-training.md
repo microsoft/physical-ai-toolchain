@@ -24,11 +24,11 @@ Submit Isaac Lab reinforcement learning and LeRobot behavioral cloning training 
 
 ## 📦 Available Templates
 
-| Template             | Purpose                    | Submission Script                            |
-|----------------------|----------------------------|----------------------------------------------|
-| `train.yaml`         | Isaac Lab SKRL training    | `scripts/submit-azureml-training.sh`         |
+| Template                   | Purpose                    | Submission Script                               |
+|----------------------------|----------------------------|-------------------------------------------------|
+| `train.yaml`               | Isaac Lab SKRL training    | `scripts/submit-azureml-training.sh`            |
 | `isaaclab-evaluation.yaml` | Isaac Lab evaluation       | `scripts/submit-azureml-isaaclab-evaluation.sh` |
-| `lerobot-train.yaml` | LeRobot behavioral cloning | `scripts/submit-azureml-lerobot-training.sh` |
+| `lerobot-train.yaml`       | LeRobot behavioral cloning | `scripts/submit-azureml-lerobot-training.sh`    |
 
 ## ⚙️ Isaac Lab Training Parameters
 
