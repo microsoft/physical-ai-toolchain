@@ -5,10 +5,8 @@ set -o errexit -o nounset
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"
 # shellcheck source=../../scripts/lib/common.sh
-# shellcheck disable=SC1091
 source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=defaults.conf
-# shellcheck disable=SC1091
 source "$SCRIPT_DIR/defaults.conf"
 
 ARC_DIR="$SCRIPT_DIR/../arc"
