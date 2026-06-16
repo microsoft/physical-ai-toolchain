@@ -81,7 +81,7 @@ cloudpickle==3.1.2
     #   tensordict
 colorama==0.4.6
     # via azure-ai-ml
-cryptography==46.0.7
+cryptography==48.0.1
     # via
     #   robotics-training-rl (pyproject.toml)
     #   azure-identity
