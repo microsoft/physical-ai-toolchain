@@ -209,8 +209,8 @@ When `PR_DEPENDABOT_SKIP_REASON` is set, emit a `noop` with the reason as the ra
 
 ## Posture
 
-* **Advisory only.** Submit exactly one review with `event: APPROVE` or `event: COMMENT`. `REQUEST_CHANGES` is forbidden.
-* **High-risk findings** surface as a `⚠️ Maintainer review recommended` banner in the review body; the verdict still stays on the `APPROVE` / `COMMENT` allowlist.
+* **Advisory only.** Submit exactly one review with `event: COMMENT`. `APPROVE` and `REQUEST_CHANGES` are forbidden — the `GITHUB_TOKEN` identity cannot approve PRs, and approval must come from a human reviewer.
+* **High-risk findings** surface as a `⚠️ Maintainer review recommended` banner in the review body; the GitHub review event still stays `COMMENT`.
 * **Scope.** Only Dependabot pull requests that touch declared dependency manifests (npm, uv/pip, Go modules, Terraform, Docker). All other diffs are out of scope.
 
 ## Gating
@@ -232,8 +232,8 @@ The full reviewer persona, risk rubric, ecosystem-specific checks, and enrichmen
 3. **Parse.** Read `PR_BODY` plus the file diff. Extract package name, ecosystem, old/new versions, `GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}` and `CVE-\d{4}-\d{4,7}` identifiers from the Dependabot body.
 4. **Enrich.** Query GHSA (preferred), fall back to OSV (`api.osv.dev`) and NVD (`services.nvd.nist.gov`) for severity, affected ranges, and fixed versions. Fetch release notes or changelog via the relevant package registry (npm, PyPI, Go module proxy, Terraform registry).
 5. **Classify.** Apply the persona's per-surface rubric. Flag ABI-sensitive pins (for example `numpy >=1.26.0,<2.0.0` in Isaac Sim training), pre-1.0 bumps, major version jumps, and missing upstream advisories.
-6. **Review.** Post up to five inline `create-pull-request-review-comment` entries for specific risks, up to two `add-comment` status updates on the resolved PR, and exactly one `submit-pull-request-review` with `APPROVE` or `COMMENT`.
-   When `PR_VALIDATION_CONCLUSION` is anything other than `success`, the verdict MUST be `COMMENT` and the body MUST quote each entry from `PR_VALIDATION_FAILING_CHECKS` (`name` plus `html_url`).
+6. **Review.** Post up to five inline `create-pull-request-review-comment` entries for specific risks, up to two `add-comment` status updates on the resolved PR, and exactly one `submit-pull-request-review` with `event: COMMENT`. The body's advisory recommendation (`Safe to merge` vs. `Maintainer review recommended`) is informational text only and never maps to an `APPROVE` event.
+   When `PR_VALIDATION_CONCLUSION` is anything other than `success`, the advisory recommendation MUST read `Maintainer review recommended` and the body MUST quote each entry from `PR_VALIDATION_FAILING_CHECKS` (`name` plus `html_url`).
    Never skip enrichment on red CI — maintainers rely on advisory output to triage which package in a grouped PR caused the failure.
 
 Keep comments factual and concise. Cite the advisory identifier, affected versions, and the Dependabot PR URL.
