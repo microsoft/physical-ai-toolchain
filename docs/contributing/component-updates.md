@@ -105,6 +105,22 @@ Helm chart versions are centralized in `infrastructure/setup/defaults.conf`.
 4. Test a training workflow with the new image
 5. Submit PR with migration notes from the NVIDIA release changelog
 
+### Python requirements.txt
+
+The `requirements.txt` files in `training/rl/` and `training/il/lerobot/` must be manually regenerated if their respective `pyproject.toml` files change. 
+
+1. **For RL training (`training/rl/`):**
+   ```bash
+   cd training/rl
+   uv pip compile pyproject.toml -o requirements.txt --python-version 3.11 --python-platform manylinux_2_28_x86_64
+   ```
+
+2. **For IL/LeRobot training (`training/il/lerobot/`):**
+   ```bash
+   cd training/il/lerobot
+   uv pip compile pyproject.toml -o requirements.txt --python-version 3.12 --python-platform manylinux_2_28_x86_64
+   ```
+
 ### Terraform Providers
 
 For directories not covered by Dependabot (`vpn/`, `automation/`):
@@ -142,6 +158,7 @@ These workflows validate dependency update PRs automatically.
 | Workflow                      | Purpose                            | Scope              |
 |-------------------------------|------------------------------------|--------------------|
 | `dependency-review.yml`       | Block moderate+ vulnerabilities    | All dependency PRs |
+| `dependency-lock-check.yml`   | Enforce lockfile freshness         | Python changes     |
 | `dependency-pinning-scan.yml` | Enforce 95% SHA pinning compliance | GitHub Actions     |
 | `codeql-analysis.yml`         | Static analysis for Python code    | Python changes     |
 | `scorecard.yml`               | OpenSSF Scorecard assessment       | Repository-wide    |

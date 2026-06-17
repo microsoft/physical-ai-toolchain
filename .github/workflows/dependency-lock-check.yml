@@ -1,0 +1,98 @@
+name: Dependency Lock Check
+
+on:
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Whether to continue on dependency lock issues'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dependency-lock-check:
+    name: Dependency Lock Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Check rl requirements.txt
+        id: rl-reqs
+        run: |
+          cd training/rl
+          uv pip compile pyproject.toml -o requirements.txt --python-version 3.11 --python-platform manylinux_2_28_x86_64
+          if ! git diff --exit-code requirements.txt; then
+            echo "RL_REQS_FAILED=true" >> $GITHUB_ENV
+          fi
+        continue-on-error: true
+
+      - name: Check il/lerobot requirements.txt
+        id: il-reqs
+        run: |
+          cd training/il/lerobot
+          uv pip compile pyproject.toml -o requirements.txt --python-version 3.12 --python-platform manylinux_2_28_x86_64
+          if ! git diff --exit-code requirements.txt; then
+            echo "IL_REQS_FAILED=true" >> $GITHUB_ENV
+          fi
+        continue-on-error: true
+
+      - name: Check uv.lock projects
+        id: uv-locks
+        run: |
+          failed=false
+          for project in . data-management/viewer data-management/viewer/backend data-pipeline evaluation; do
+            echo "Checking uv.lock in $project"
+            if ! (cd $project && uv lock --check); then
+              failed=true
+            fi
+          done
+          if [ "$failed" = true ]; then
+            echo "UV_LOCKS_FAILED=true" >> $GITHUB_ENV
+          fi
+        continue-on-error: true
+
+      - name: Add job summary
+        if: always()
+        run: |
+          echo "## Dependency Lock Check Results" >> $GITHUB_STEP_SUMMARY
+          failed=false
+          
+          if [ "$RL_REQS_FAILED" = "true" ]; then
+            echo "❌ \`training/rl/requirements.txt\` is out of date. Run \`uv pip compile pyproject.toml -o requirements.txt --python-version 3.11 --python-platform manylinux_2_28_x86_64\` in \`training/rl/\`." >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+          
+          if [ "$IL_REQS_FAILED" = "true" ]; then
+            echo "❌ \`training/il/lerobot/requirements.txt\` is out of date. Run \`uv pip compile pyproject.toml -o requirements.txt --python-version 3.12 --python-platform manylinux_2_28_x86_64\` in \`training/il/lerobot/\`." >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+          
+          if [ "$UV_LOCKS_FAILED" = "true" ]; then
+            echo "❌ One or more \`uv.lock\` files are out of date. Run \`uv lock\` in the respective directories." >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+          
+          if [ "$failed" = "false" ]; then
+            echo "✅ All dependency locks and requirements are up to date." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail job if issues found
+        if: (env.RL_REQS_FAILED == 'true' || env.IL_REQS_FAILED == 'true' || env.UV_LOCKS_FAILED == 'true') && !inputs.soft-fail
+        run: |
+          echo "::error::Dependency lock check failed. See step summary for details."
+          exit 1

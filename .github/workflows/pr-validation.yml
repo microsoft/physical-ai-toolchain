@@ -148,6 +148,15 @@ jobs:
       contents: read
       pull-requests: write
 
+  # Dependency lock file consistency check
+  dependency-lock-check:
+    name: Dependency Lock Check
+    uses: ./.github/workflows/dependency-lock-check.yml
+    with:
+      soft-fail: false
+    permissions:
+      contents: read
+
   # SHA pinning compliance for GitHub Actions and dependencies
   dependency-pinning:
     name: Dependency Pinning
@@ -426,6 +435,7 @@ jobs:
       - link-lang-check
       - markdown-link-check
       - dependency-review
+      - dependency-lock-check
       - dependency-pinning
       - pester-tests
       - dataviewer-frontend-tests
