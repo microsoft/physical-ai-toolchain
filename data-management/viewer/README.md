@@ -86,6 +86,24 @@ Expected blob structure:
 | `FRONTEND_PORT`                      | `5173`          | Dev server port                                                |
 | `CORS_ORIGINS`                       | localhost ports | Comma-separated allowed CORS origins                           |
 
+### VLM-as-Judge (optional)
+
+The viewer can score episodes with a vision-language-model judge, reusing the
+`evaluation.vlm_judge` harness. The router mounts only when `VLM_JUDGE_ENABLED=true`;
+the frontend's JudgePanel auto-hides when the backend reports the judge is disabled.
+Enable it via `start.sh` (which exports the `evaluation` package onto `PYTHONPATH`)
+or by exporting `PYTHONPATH` to the repository root before launching the backend.
+
+| Variable              | Default                     | Description                                                       |
+|-----------------------|-----------------------------|-------------------------------------------------------------------|
+| `VLM_JUDGE_ENABLED`   | `false`                     | Mount the `/judge` router                                         |
+| `VLM_JUDGE_BACKEND`   | `echo`                      | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo` |
+| `VLM_JUDGE_MODEL_ID`  | `Qwen/Qwen3-VL-4B-Instruct` | HF model id or remote model name                                  |
+| `VLM_JUDGE_BASE_URL`  | —                           | OpenAI-compatible server URL (`openai-compat` only)              |
+| `VLM_JUDGE_API_KEY`   | —                           | Bearer token for the remote backend                              |
+| `VLM_JUDGE_N_FRAMES`  | `12`                        | Frames sampled per episode                                       |
+| `VLM_JUDGE_CACHE_DIR` | —                           | Fallback judgment cache; the viewer caches per dataset under `annotations/vlm_judge/` |
+
 ## 🔒 Authentication with Entra ID
 
 The application supports Microsoft Entra ID (Azure AD) authentication for public-facing deployments. When auth is disabled (the default for local development), all requests bypass authentication. When enabled, the frontend uses MSAL.js to acquire tokens via PKCE, and the backend validates JWT tokens against the Entra ID JWKS endpoint.

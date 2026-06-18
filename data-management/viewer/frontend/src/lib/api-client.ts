@@ -395,11 +395,23 @@ export async function warmCache(datasetId: string, count = 5): Promise<void> {
 // VLM-as-Judge API
 // ============================================================================
 
+/** Status returned to the panel when the judge router is not mounted. */
+const VLM_JUDGE_DISABLED: VlmJudgeStatus = {
+  enabled: false,
+  cached: false,
+  judgeModel: null,
+  promptVersion: null,
+  cacheKey: null,
+  result: null,
+}
+
 /**
  * Fetch any cached VLM-judge result for an episode without running inference.
  *
  * Returns ``{enabled: false}`` when the backend has not been configured with
- * ``VLM_JUDGE_ENABLED=true``; consumers should hide the panel in that case.
+ * ``VLM_JUDGE_ENABLED=true`` — in that case the router is not mounted and the
+ * endpoint responds with 404, which we map to the disabled status so the panel
+ * hides cleanly instead of surfacing a spurious error.
  */
 export async function fetchVlmJudgeStatus(
   datasetId: string,
@@ -409,6 +421,7 @@ export async function fetchVlmJudgeStatus(
     `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`,
     { headers: await requestHeaders() },
   )
+  if (response.status === 404) return VLM_JUDGE_DISABLED
   const data = await handleResponse<unknown>(response)
   return transformKeys<VlmJudgeStatus>(data)
 }
