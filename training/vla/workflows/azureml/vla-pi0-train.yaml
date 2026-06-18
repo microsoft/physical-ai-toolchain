@@ -1,0 +1,75 @@
+# LeRobot VLA pi0 Training Job Template
+#
+# This is a STRUCTURAL TEMPLATE used by submit-azureml-vla-pi0-training.sh.
+# Values below are placeholders and will be overridden at submission time.
+#
+# The script is responsible for:
+# - Setting the environment (VLA pi0 PyTorch image with lerobot[pi])
+# - Setting compute target
+# - Building the command with all training parameters
+# - Setting all input values (dataset, policy type, Azure context, etc.)
+# - Injecting LEROBOT_REQUIREMENTS to point at training/vla/lerobot/requirements.txt
+#
+# This file defines:
+# - The job structure and schema
+# - Input/output specifications
+# - Environment variable mappings for the Azure Blob dataset source and logging
+# - Identity configuration for Azure ML model registration
+#
+# To submit a job, use submit-azureml-vla-pi0-training.sh with appropriate flags.
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: LeRobot VLA pi0 Training
+description: LeRobot vision-language-action training (pi0/pi0_fast/pi05) with MLflow integration and checkpoint registration.
+experiment_name: vla-pi0-training
+identity:
+  type: managed_identity
+
+# All values below are placeholders and will be overridden by submit-azureml-vla-pi0-training.sh
+code: .
+environment: azureml:vla-pi0-training-env:latest
+compute: azureml:cpu-cluster
+
+inputs:
+  dataset_repo_id: none
+  policy_type: pi0
+  job_name: vla-pi0-training
+  output_dir: /workspace/outputs/train
+  policy_repo_id: none
+  lerobot_version: none
+  training_steps: none
+  batch_size: none
+  eval_freq: none
+  save_freq: "5000"
+  register_checkpoint: none
+  blob_urls: '[]'
+  dataset_root: /workspace/data
+  subscription_id: placeholder
+  resource_group: placeholder
+  workspace_name: placeholder
+  mlflow_token_refresh_retries: "3"
+  mlflow_http_request_timeout: "60"
+  # Single-node multi-GPU is launched in-container via `accelerate launch`.
+  # The number of GPUs is detected at runtime via torch.cuda.device_count();
+  # on AzureML managed AmlCompute that is the cluster VM SKU's GPU count,
+  # on AzureML-on-Kubernetes it is the InstanceType's nvidia.com/gpu request.
+  # No AzureML `distribution:` block is needed in either case.
+  mixed_precision: bf16
+
+command: echo "Command will be set by submission script"
+
+# Static env vars only. Every training-related env var is set by
+# submit-azureml-vla-pi0-training.sh via --set environment_variables.X=Y flags
+# because the AzureML K8s extension does not substitute ${{inputs.X}} template
+# refs at runtime.
+environment_variables:
+  AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
+  TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
+  # LEROBOT_REQUIREMENTS: <set by script to training/vla/lerobot/requirements.txt>
+  # MLFLOW_HTTP_REQUEST_TIMEOUT: <set by script>
+
+outputs:
+  checkpoints:
+    type: uri_folder
+    mode: upload
