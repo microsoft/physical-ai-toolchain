@@ -468,12 +468,12 @@ jobs:
     name: Generate Dependency SBOM
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: write
     steps:
       - name: Checkout dependency manifests
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
+          persist-credentials: false
           sparse-checkout: |
             .syft.yaml
             package.json
@@ -504,11 +504,28 @@ jobs:
           artifact-name: ''
           dependency-snapshot: true
 
+      - name: Generate dependency SBOM (CycloneDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          config: .syft.yaml
+          output-file: dependencies.cdx.json
+          artifact-name: ''
+          dependency-snapshot: true
+          upload-artifact: false
+
       - name: Upload dependency SBOM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: sbom-dependencies
           path: dependencies.spdx.json
+
+      - name: Upload dependency SBOM (CycloneDX) artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: sbom-dependencies-cdx
+          path: dependencies.cdx.json
 
       - name: Upload dependency SBOM to release
         env:
@@ -517,6 +534,7 @@ jobs:
         run: |
           gh release upload "${TAG}" \
             dependencies.spdx.json \
+            dependencies.cdx.json \
             --clobber
         shell: bash
 
@@ -533,6 +551,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
 
       - name: Download dependency SBOM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -545,6 +565,24 @@ jobs:
         run: git archive --format=tar.gz --prefix="${TAG}/" HEAD -o "source-${TAG}.tar.gz"
         shell: bash
 
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+
+      - name: Build release wheel
+        run: uv build --wheel --out-dir dist
+        shell: bash
+
+      - name: Sign release wheel (keyless Sigstore)
+        run: |
+          python -m pip install sigstore==4.3.0
+          sigstore sign dist/*.whl
+        shell: bash
+
       - name: Generate SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
         with:
@@ -553,11 +591,26 @@ jobs:
           output-file: sbom.spdx.json
           artifact-name: ''
 
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          artifact-name: ''
+          upload-artifact: false
+
       - name: Attest build provenance
         id: attest
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
         with:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
+
+      - name: Attest wheel build provenance
+        id: attest-wheel
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
+        with:
+          subject-path: dist/*.whl
 
       - name: Attest SBOM
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
@@ -571,13 +624,23 @@ jobs:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
           sbom-path: dependencies.spdx.json
 
+      - name: Attest SBOM (CycloneDX)
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        with:
+          subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
+          sbom-path: sbom.cdx.json
+
       - name: Create signing artifacts for Scorecard detection
         env:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+          WHEEL_BUNDLE_PATH: ${{ steps.attest-wheel.outputs.bundle-path }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
+          set -euo pipefail
           cp "${BUNDLE_PATH}" "source-${TAG}.sigstore.json"
           jq -c '.dsseEnvelope' "${BUNDLE_PATH}" > "source-${TAG}.intoto.jsonl"
+          cp "${WHEEL_BUNDLE_PATH}" "wheels-${TAG}.sigstore.json"
+          jq -c '.dsseEnvelope' "${WHEEL_BUNDLE_PATH}" > "wheels-${TAG}.intoto.jsonl"
         shell: bash
 
       - name: Upload release assets
@@ -588,8 +651,13 @@ jobs:
           gh release upload "${TAG}" \
             "source-${TAG}.tar.gz" \
             sbom.spdx.json \
+            sbom.cdx.json \
             "source-${TAG}.sigstore.json" \
             "source-${TAG}.intoto.jsonl" \
+            "wheels-${TAG}.sigstore.json" \
+            "wheels-${TAG}.intoto.jsonl" \
+            dist/*.whl \
+            dist/*.sigstore.json \
             --clobber
         shell: bash
 
@@ -718,6 +786,13 @@ jobs:
 
           # Verify SBOM attestation
           gh attestation verify source-TAG_PLACEHOLDER.tar.gz --repo microsoft/physical-ai-toolchain --predicate-type https://spdx.dev/Document
+
+          # Download and verify the signed wheel (identity ends @refs/heads/main: the pipeline runs on push to main)
+          gh release download TAG_PLACEHOLDER --repo microsoft/physical-ai-toolchain --pattern '*.whl' --pattern '*.whl.sigstore.json'
+          sigstore verify identity *.whl --bundle *.whl.sigstore.json --cert-identity 'https://github.com/microsoft/physical-ai-toolchain/.github/workflows/main.yml@refs/heads/main' --cert-oidc-issuer 'https://token.actions.githubusercontent.com'
+
+          # Download the CycloneDX SBOMs (SPDX equivalents also attached)
+          gh release download TAG_PLACEHOLDER --repo microsoft/physical-ai-toolchain --pattern 'sbom.cdx.json' --pattern 'dependencies.cdx.json'
           ```
 
           EOF
