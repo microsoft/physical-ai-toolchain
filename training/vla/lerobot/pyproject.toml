@@ -60,6 +60,13 @@ dependencies = [
     # tokenizer / processor API used in lerobot 0.5.1.
     "transformers==5.3.0",
     "scipy==1.16.3",
+    # safetensors and tokenizers pinned to stable releases to avoid uv's
+    # prerelease resolver landing on `0.8.0rc1` / `0.23.0rc0` from the
+    # transitive ranges of accelerate / lerobot / transformers. Required
+    # because [tool.uv].prerelease = "allow" is on (for Azure / OpenTelemetry
+    # betas) and unpinned safetensors/tokenizers would otherwise drift to RCs.
+    "safetensors==0.8.0",
+    "tokenizers==0.23.1",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
@@ -69,10 +76,9 @@ dependencies = [
     "gitpython==3.1.50",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
-    # Pin wrapt to the latest stable in the 1.x line. opentelemetry-instrumentation
-    # constrains wrapt below 2.0 and above 1.0, but with prerelease resolution
-    # enabled below uv would otherwise pick the 1.17.4 release candidate over
-    # 1.17.3 stable.
+    # Pin wrapt explicitly to 2.2.1. opentelemetry-instrumentation now accepts
+    # wrapt>=1.0,<3.0, so the 2.x line is in range; the explicit pin prevents
+    # the prerelease resolver from selecting a stray 2.x release candidate.
     "wrapt==2.2.1",
 ]
 
@@ -109,13 +115,31 @@ override-dependencies = [
     # datasets: lerobot==0.5.1 caps below 5.0.0; we need 5.0.0 to align with
     # the Azure storage backend used by the AzureML run output mounts.
     "datasets==5.0.0",
+    # tokenizers: transformers==5.3.0 caps at <=0.23.0, but PyPI has no stable
+    # 0.23.0 release — only 0.23.0rc0 — and the only stable in the 0.23.x line
+    # is 0.23.1. Override the upstream cap to land on stable 0.23.1 (minor
+    # patch, ABI-compatible) rather than the RC.
+    "tokenizers==0.23.1",
 ]
 package = false
 
 [tool.uv.pip]
-# Required for prerelease transitives pulled by the resolved tree, including
-# Azure/OpenTelemetry instrumentation betas, wrapt release candidates, and
-# safetensors release candidates. After regenerating requirements.txt, audit
-# the full set with:
-#   grep -E '[0-9][ab][0-9]+|rc[0-9]+' requirements.txt
+# Required for prerelease transitives that we intentionally accept in the
+# resolved tree. After regenerating requirements.txt, audit the full set with:
+#   grep -E '==[0-9]+\.[0-9]+(\.[0-9]+)?(a|b|rc)[0-9]+' requirements.txt
+# Expected (and only) prerelease pins after audit:
+#   - msal==1.38.0rc1 — no stable 1.38.x has shipped yet; the 1.38 line ships
+#     the AzureCliCredential / msal-extensions cache fix our azure-identity
+#     dependency chain requires. Downgrading to msal 1.37.x reintroduces the
+#     stale-token bug we hit before.
+#   - opentelemetry-instrumentation-* `*b1` betas (e.g. 0.63b1) plus
+#     opentelemetry-semantic-conventions / opentelemetry-util-http — the
+#     OpenTelemetry Python contrib instrumentation packages remain on
+#     beta releases upstream; no stable builds are available.
+#   - azure-core-tracing-opentelemetry==1.0.0b13 and
+#     azure-monitor-opentelemetry-exporter==1.0.0b45 — both packages have
+#     never published a 1.0.0 GA release; the beta line is the only option.
+# Anything else that surfaces here (wrapt rc, safetensors rc, tokenizers rc,
+# pydantic alpha, etc.) is a regression — add a direct pin to dependencies
+# above to override it.
 prerelease = "allow"

@@ -103,18 +103,32 @@ AZURE CONTEXT:
         --resource-group NAME     Azure resource group
         --workspace-name NAME     Azure ML workspace
         --compute TARGET          Compute target override
+        --hf-token TOKEN          HuggingFace access token forwarded to the
+                                  container as HF_TOKEN (default: $HF_TOKEN if
+                                  set). Required for pi0 training when the
+                                  policy initializes from the gated
+                                  google/paligemma-3b-pt-224 backbone (i.e.
+                                  unless --init-from-policy-model points at an
+                                  already-materialized checkpoint). Also used
+                                  on the HuggingFace Hub dataset path.
         --instance-type NAME      Instance type for AzureML-on-Kubernetes compute
-                                  (default: gpu). pi0 (~3B params) does NOT fit
-                                  reliably on spot instances; default uses on-
-                                  demand GPU. The value is forwarded to the job
-                                  as resources.instance_type whenever non-empty.
-                                  On AzureML managed AmlCompute the cluster's
-                                  VM SKU determines GPU count, so pass
-                                  --instance-type '' to omit the field. The
-                                  training wrapper auto-detects the visible GPU
-                                  count via torch.cuda.device_count() on both
-                                  paths and enables Accelerate multi-GPU launch
-                                  when N>1. Shipped multi-GPU Kubernetes types:
+                                  (default: gpu). pi0 full fine-tuning (~3B
+                                  params + paligemma backbone) needs a high-
+                                  memory GPU; 40 GB+ HBM (A100/H100-class) is
+                                  recommended. On smaller GPUs (e.g. 24 GB),
+                                  pass --policy.train_expert_only=true via the
+                                  trailing `--` forwarding to freeze the VLM
+                                  backbone and train only the action expert,
+                                  which fits in less memory. The value is
+                                  forwarded to the job as resources.instance_type
+                                  whenever non-empty. On AzureML managed
+                                  AmlCompute the cluster's VM SKU determines GPU
+                                  count, so pass --instance-type '' to omit
+                                  the field. The training wrapper auto-detects
+                                  the visible GPU count via
+                                  torch.cuda.device_count() on both paths and
+                                  enables Accelerate multi-GPU launch when N>1.
+                                  Shipped multi-GPU Kubernetes types:
                                   gpu2/gpuspot2, gpu4/gpuspot4 (see
                                   infrastructure/setup/manifests/azureml-instance-types.yaml).
         --mixed-precision MODE    Accelerate mixed-precision mode (no|fp16|bf16);
@@ -323,6 +337,7 @@ mlflow_timeout="${MLFLOW_HTTP_REQUEST_TIMEOUT:-60}"
 compute="${AZUREML_COMPUTE:-$(get_compute_target)}"
 instance_type="gpu"
 mixed_precision="${MIXED_PRECISION:-bf16}"
+hf_token="${HF_TOKEN:-}"
 experiment_name=""
 display_name=""
 stream_logs=false
@@ -366,6 +381,7 @@ while [[ $# -gt 0 ]]; do
     --compute)                    compute="$2"; shift 2 ;;
     --instance-type)              instance_type="$2"; shift 2 ;;
     --mixed-precision)            mixed_precision="$2"; shift 2 ;;
+    --hf-token)                   hf_token="$2"; shift 2 ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
     --stream)                     stream_logs=true; shift ;;
@@ -509,6 +525,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Compute" "${compute:-<not set>}"
   print_kv "Instance Type" "$instance_type"
   print_kv "Mixed Precision" "$mixed_precision"
+  print_kv "HF Token" "$([[ -n "$hf_token" ]] && echo '<set>' || echo '<none>')"
   print_kv "Environment" "${environment_name}:${environment_version}"
   print_kv "Requirements" "$lerobot_requirements"
   exit 0
@@ -642,6 +659,7 @@ az_args+=(
 [[ -n "$batch_size" ]]          && az_args+=(--set "environment_variables.BATCH_SIZE=$batch_size")
 [[ -n "$eval_freq" ]]           && az_args+=(--set "environment_variables.EVAL_FREQ=$eval_freq")
 [[ -n "$register_checkpoint" ]] && az_args+=(--set "environment_variables.REGISTER_CHECKPOINT=$register_checkpoint")
+[[ -n "$hf_token" ]] && az_args+=(--set "environment_variables.HF_TOKEN=$hf_token")
 
 if [[ ${#dataset_assets[@]} -gt 0 ]]; then
   dataset_assets_json=$(python3 -c "import json; import sys; print(json.dumps(sys.argv[1:]))" "${dataset_assets[@]}")

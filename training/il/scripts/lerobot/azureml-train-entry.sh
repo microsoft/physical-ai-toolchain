@@ -46,6 +46,18 @@ uv venv --python 3.12 "${LEROBOT_VENV}"
 source "${LEROBOT_VENV}/bin/activate"
 uv pip install --no-cache-dir --no-deps --requirement "${LEROBOT_REQUIREMENTS}"
 
+# HuggingFace login: must run before any code path that pulls gated models or
+# datasets from the Hub. pi0 reaches the Hub during policy init to download the
+# google/paligemma-3b-pt-224 backbone, which is gated, so logging in only on
+# the "no mounted assets" branch (the original placement) breaks the
+# blob-storage and data-asset paths where datasets are local but the backbone
+# is still pulled. Lift the login here so it runs once per container whenever
+# the caller forwards HF_TOKEN, before train.py is invoked. No-op for callers
+# that don't set HF_TOKEN.
+if [[ -n "${HF_TOKEN:-}" ]]; then
+  python3 -c "import os; from huggingface_hub import login; login(token=os.environ['HF_TOKEN'], add_to_git_credential=False)"
+fi
+
 # Build args forwarded to the MLflow training wrapper. Only flags whose values
 # are not derivable from environment variables go here. The wrapper at
 # training.il.scripts.lerobot.train invokes lerobot-train, parses metrics from
@@ -168,9 +180,6 @@ if [[ ${total_sources} -eq 0 ]]; then
     echo "ERROR: no dataset_asset_*, no blob URLs, and DATASET_REPO_ID is empty." >&2
     echo "Pass --dataset-asset, --blob-url, or --dataset-repo-id to submit-azureml-lerobot-training.sh." >&2
     exit 1
-  fi
-  if [[ -n "${HF_TOKEN:-}" ]]; then
-    python3 -c "import os; from huggingface_hub import login; login(token=os.environ['HF_TOKEN'], add_to_git_credential=False)"
   fi
   # video_backend=pyav avoids torchcodec's dynamic-link dependency on
   # libnvrtc.so (shipped as a pip wheel whose lib/ is not on LD_LIBRARY_PATH

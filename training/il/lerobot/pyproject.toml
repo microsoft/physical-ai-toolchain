@@ -47,10 +47,9 @@ dependencies = [
     "gitpython==3.1.50",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
-    # Pin wrapt to the latest stable in the 1.x line. opentelemetry-instrumentation
-    # constrains wrapt below 2.0 and above 1.0, but with prerelease resolution
-    # enabled below uv would otherwise pick the 1.17.4 release candidate over
-    # 1.17.3 stable.
+    # Pin wrapt explicitly to 2.2.1. opentelemetry-instrumentation now accepts
+    # wrapt>=1.0,<3.0, so the 2.x line is in range; the explicit pin prevents
+    # the prerelease resolver from selecting a stray 2.x release candidate.
     "wrapt==2.2.1",
     # cuda-bindings: torch==2.11.0 depends on cuda-bindings but does not cap it;
     # unconstrained resolution picks 13.x which requires libcudart.so.13 (CUDA 13).

@@ -547,8 +547,9 @@ rpds-py==2026.5.1
     # via
     #   jsonschema
     #   referencing
-safetensors==0.8.0rc1
+safetensors==0.8.0
     # via
+    #   robotics-training-vla (pyproject.toml)
     #   accelerate
     #   diffusers
     #   transformers
@@ -585,8 +586,11 @@ sympy==1.14.0
     # via torch
 termcolor==3.3.0
     # via lerobot
-tokenizers==0.23.0rc0
-    # via transformers
+tokenizers==0.23.1
+    # via
+    #   --override (workspace)
+    #   robotics-training-vla (pyproject.toml)
+    #   transformers
 toml==0.10.2
     # via draccus
 torch==2.10.0
