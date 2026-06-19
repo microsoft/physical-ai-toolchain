@@ -1182,6 +1182,7 @@ scalability
 scalesetpriority
 scenario
 schedules
+schedulingshard
 schemathesis
 schwinn
 scikit

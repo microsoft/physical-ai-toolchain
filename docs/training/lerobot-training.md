@@ -149,7 +149,7 @@ OSMO injects credentials at workflow runtime:
 
 ```bash
 # HuggingFace token (required for private datasets)
-osmo credential set hf_token --generic --value "hf_..."
+osmo credential set huggingface --type GENERIC --payload hf_token="hf_..."
 ```
 
 ### Azure ML Credentials

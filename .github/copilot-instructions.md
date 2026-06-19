@@ -361,8 +361,7 @@ OSMO is an external orchestration platform for multi-cluster Kubernetes workload
 * Two payload strategies:
   * Base64-encoded archive: ~1MB limit, embedded in workflow YAML
   * Dataset folder injection: unlimited size, versioned, folder name in workflow env vars
-* Config types: SERVICE, WORKFLOW, DATASET, BACKEND, POOL, POD_TEMPLATE, RESOURCE_VALIDATION, BACKEND_TEST, ROLE
-* Apply config: `osmo config update <TYPE> [name] --file <path>`
+* Configuration mode: ConfigMap; all config is in Helm values files
 * Namespace layout:
   * `osmo-control-plane` — service components
   * `osmo-operator` — backend operator
@@ -371,6 +370,7 @@ OSMO is an external orchestration platform for multi-cluster Kubernetes workload
 * `oauth2Proxy.enabled: false` REQUIRED in Helm values when no OIDC provider is configured
 * Prerelease mode: `OSMO_USE_PRERELEASE=true` switches both chart and image versions
 * Service URL exposed via AzureML ingress controller internal load balancer
+* Storage: workload identity only — credential shape `azure://<account>/<container>`
 
 ## AzureML Integration
 

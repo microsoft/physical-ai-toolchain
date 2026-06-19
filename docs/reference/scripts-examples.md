@@ -160,7 +160,7 @@ The `run-lerobot-pipeline.sh` script orchestrates the full LeRobot lifecycle: tr
 | Stage | Action                                | Script Used                        |
 |-------|---------------------------------------|------------------------------------|
 | 1     | Submit training workflow              | `submit-osmo-lerobot-training.sh`  |
-| 2     | Poll workflow status until completion | `osmo workflow status`             |
+| 2     | Poll workflow status until completion | `osmo workflow query`              |
 | 3     | Submit inference/evaluation workflow  | `submit-osmo-lerobot-inference.sh` |
 
 ### Pipeline Examples

@@ -3,7 +3,7 @@ sidebar_position: 2
 title: "Quickstart: Clone to First Training Job"
 description: Deploy infrastructure and submit your first robotics training job in 9 steps
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-15
+ms.date: 2026-06-10
 ms.topic: tutorial
 keywords:
   - quickstart
@@ -169,25 +169,11 @@ kubectl get pods -n gpu-operator
 
 ## Step 7: Deploy OSMO Components
 
-Deploy the OSMO control plane and backend using Access Keys authentication.
+Deploy the OSMO control plane and backend.
 
 ```bash
-bash 03-deploy-osmo-control-plane.sh --config-preview
-bash 03-deploy-osmo-control-plane.sh
-```
-
-> [!IMPORTANT]
-> When running from a **devcontainer or codespace**, the OSMO service URL is an internal load balancer IP only reachable from within the AKS VNet. Set up a port-forward before running the backend script:
->
-> ```bash
-> kubectl port-forward svc/osmo-service -n osmo-control-plane 8080:80 &
-> ```
->
-> Then pass `--service-url http://localhost:8080` to both scripts 03 and 04. The scripts detect unreachable URLs and print this guidance automatically.
-
-```bash
-bash 04-deploy-osmo-backend.sh --use-access-keys --service-url http://localhost:8080 --config-preview
-bash 04-deploy-osmo-backend.sh --use-access-keys --service-url http://localhost:8080
+bash 03-deploy-osmo.sh --config-preview
+bash 03-deploy-osmo.sh
 ```
 
 Verify OSMO pods:
@@ -197,7 +183,21 @@ kubectl get pods -n osmo-control-plane
 kubectl get pods -n osmo-operator
 ```
 
-## Step 8: Submit First Training Job
+## Step 8: Connect to OSMO
+
+The OSMO CLI requires an authenticated session before submitting workflows. Start a port-forward and login:
+
+```bash
+kubectl port-forward svc/osmo-gateway 9000:80 -n osmo-control-plane &
+
+osmo login http://localhost:9000 --method=dev --username=admin
+osmo profile set pool default
+osmo version
+```
+
+See [OSMO Training — Connection Methods](../training/osmo-training.md#-connection-methods) for alternative access options (internal load balancer, ingress).
+
+## Step 9: Submit First Training Job
 
 Submit a training job from the repository root:
 
@@ -207,7 +207,7 @@ bash training/rl/scripts/submit-osmo-training.sh
 
 Scripts auto-detect configuration from Terraform outputs. Override values with CLI arguments or environment variables as needed. See [Scripts Reference](../reference/scripts.md) for all submission options.
 
-## Step 9: Verify Results
+## Step 10: Verify Results
 
 Confirm the training job is running:
 

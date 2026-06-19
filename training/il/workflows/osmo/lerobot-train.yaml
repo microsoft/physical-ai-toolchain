@@ -8,6 +8,7 @@ workflow:
       cpu: 8
       memory: 48Gi
       storage: 80Gi
+      platform: gpu_platform
   tasks:
     - name: lerobot-train
       image: "{{ image }}"
@@ -18,6 +19,7 @@ workflow:
         huggingface:
           HF_TOKEN: hf_token
       environment:
+        GIT_PYTHON_REFRESH: "quiet"
         NVIDIA_DRIVER_CAPABILITIES: "all"
         DATASET_REPO_ID: "{{ dataset_repo_id }}"
         DATASET_ROOT: "{{ dataset_root }}"
