@@ -23,7 +23,7 @@ from ...models.datasources import (
 )
 from ...storage import LocalStorageAdapter, StorageAdapter
 from ..episode_cache import EpisodeCache
-from .base import DatasetFormatHandler
+from .base import DatasetFormatHandler, normalize_feature_names
 from .hdf5_handler import HDF5FormatHandler
 from .lerobot_handler import LEROBOT_AVAILABLE, LeRobotFormatHandler
 
@@ -31,28 +31,6 @@ if TYPE_CHECKING:
     from ...storage.blob_dataset import BlobDatasetProvider
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_feature_names(raw: Any) -> list[str] | None:
-    """Coerce a feature ``names`` value into ``list[str]``.
-
-    Some LeRobot ``info.json`` files store names as a list-of-lists
-    (e.g. ``[["JOINT_A", "JOINT_B"]]``) or as a dict keyed by axis. Flatten
-    nested sequences and stringify scalars so the schema validates.
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, dict):
-        raw = list(raw.values())
-    if not isinstance(raw, list | tuple):
-        return [str(raw)]
-    flat: list[str] = []
-    for item in raw:
-        if isinstance(item, list | tuple):
-            flat.extend(str(x) for x in item)
-        else:
-            flat.append(str(item))
-    return flat or None
 
 
 def _validate_dataset_id(dataset_id: str) -> str:
@@ -275,7 +253,7 @@ class DatasetService:
             features[name] = FeatureSchema(
                 dtype=feat.get("dtype", "unknown"),
                 shape=feat.get("shape", []),
-                names=_normalize_feature_names(feat.get("names")),
+                names=normalize_feature_names(feat.get("names")),
             )
 
         dataset_info = DatasetInfo(

@@ -38,6 +38,29 @@ _FEATURE_KIND_LABELS = {
 }
 
 
+def normalize_feature_names(raw: Any) -> list[str] | None:
+    """Coerce a feature ``names`` value into ``list[str]``.
+
+    Some LeRobot ``info.json`` files store names as a list-of-lists
+    (e.g. ``[["JOINT_A", "JOINT_B"]]``) or as a dict keyed by axis. Flatten
+    nested sequences and stringify scalars so ``FeatureSchema`` validates
+    instead of raising and dropping the dataset.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        raw = list(raw.values())
+    if not isinstance(raw, list | tuple):
+        return [str(raw)]
+    flat: list[str] = []
+    for item in raw:
+        if isinstance(item, list | tuple):
+            flat.extend(str(x) for x in item)
+        else:
+            flat.append(str(item))
+    return flat or None
+
+
 def _schema_value(schema: FeatureSchema | Mapping[str, Any] | None, key: str) -> Any:
     if schema is None:
         return None

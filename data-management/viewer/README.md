@@ -88,11 +88,64 @@ Expected blob structure:
 
 ### VLM-as-Judge (optional)
 
-The viewer can score episodes with a vision-language-model judge, reusing the
+The viewer can score episodes with a vision-language-model (VLM) judge, reusing the
 `evaluation.vlm_judge` harness. The router mounts only when `VLM_JUDGE_ENABLED=true`;
 the frontend's JudgePanel auto-hides when the backend reports the judge is disabled.
-Enable it via `start.sh` (which exports the `evaluation` package onto `PYTHONPATH`)
-or by exporting `PYTHONPATH` to the repository root before launching the backend.
+
+#### What it does
+
+For the selected episode, the judge watches a handful of sampled video frames and
+answers, in plain language, *"did the robot accomplish the task?"* It produces four
+things, shown in the **VLM Judge** card on the trajectory tab:
+
+- **Outcome** — `SUCCESS`, `FAILURE`, or `Inconclusive`, with a confidence percentage.
+  The model is asked the same multiple-choice question several times and the answers
+  are voted on, so confidence reflects how consistently it agreed with itself.
+- **Process reward** — a per-frame "how far along is the task" progress bar (0–100%)
+  plus a single `VOC` score summarizing how steadily progress increased over time.
+- **Milestones** — named sub-steps (e.g. *approach object*, *grasp object*) marked
+  complete or incomplete, each with the frame range and a short justification.
+- **Failure mode** — when the outcome is `FAILURE`, a short category describing what
+  went wrong (e.g. *missed grasp*).
+
+#### How to use it
+
+1. Enable the judge and start the viewer with `./start.sh` (it exports the
+   `evaluation` package onto `PYTHONPATH` automatically):
+
+   ```bash
+   VLM_JUDGE_ENABLED=true VLM_JUDGE_BACKEND=qwen3-vl ./start.sh
+   ```
+
+2. Open a dataset, select an episode, and switch to the **Trajectory** tab.
+3. Click **Run judge**. The first run invokes the model; results are cached per
+   dataset under `annotations/vlm_judge/`, so re-opening the episode is instant.
+   Use **Re-evaluate** / **Force fresh** to ignore the cache and run again.
+
+> [!NOTE]
+> The default `echo` backend returns deterministic placeholder judgments (no model
+> is loaded). It exists to verify the wiring end-to-end and for tests — switch to
+> `qwen3-vl` (local GPU) or `openai-compat` (a remote vLLM/NIM/Azure OpenAI server)
+> for real scores.
+
+#### "Run judge" vs. "Language instruction"
+
+The judge always scores the episode against a **task instruction** — the natural-language
+goal for the episode, such as *"Grab orange and place into plate"*. That goal is the
+same text shown in the viewer's **Language Instruction** panel, read from the dataset's
+metadata. In short:
+
+- **Language Instruction** = *what the robot was asked to do* (the goal the judge grades against).
+- **Run judge** = *grade this episode against that goal* and report the outcome, progress,
+  milestones, and any failure mode.
+
+If the dataset has no task instruction, **Run judge** returns an error (HTTP 422) asking
+for one to be supplied.
+
+#### Settings
+
+Enable the judge via `start.sh`, or by exporting `PYTHONPATH` to the repository root
+before launching the backend.
 
 | Variable              | Default                     | Description                                                       |
 |-----------------------|-----------------------------|-------------------------------------------------------------------|

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TaskInfo, TrajectoryPoint
-from .base import build_trajectory, build_trajectory_variables
+from .base import build_trajectory, build_trajectory_variables, normalize_feature_names
 
 if TYPE_CHECKING:
     from ..lerobot_loader import LeRobotLoader as LeRobotLoaderType
@@ -123,7 +123,7 @@ class LeRobotFormatHandler:
                 features[name] = FeatureSchema(
                     dtype=feat.get("dtype", "unknown"),
                     shape=feat.get("shape", []),
-                    names=feat.get("names"),
+                    names=normalize_feature_names(feat.get("names")),
                 )
 
             return DatasetInfo(
