@@ -1,7 +1,7 @@
 # Global configuration shared across all OSMO services
 global:
   osmoImageLocation: nvcr.io/nvidia/osmo
-  osmoImageTag: 6.2
+  osmoImageTag: "6.3.0"
   serviceAccountName: osmo-control-plane
 
   logs:
@@ -14,6 +14,140 @@ services:
   # Configuration file service settings
   configFile:
     enabled: true
+
+  # ConfigMap-based platform configuration
+  configs:
+    enabled: true
+
+    service:
+      service_base_url: "http://osmo-gateway.osmo-control-plane.svc.cluster.local"
+
+    workflow:
+      backend_images:
+        init: "nvcr.io/nvidia/osmo/init-container:6.3.0"
+        client: "nvcr.io/nvidia/osmo/client:6.3.0"
+      workflow_data:
+        credential:
+          endpoint: ""
+        base_url: ""
+      workflow_log:
+        credential:
+          endpoint: ""
+      workflow_app:
+        credential:
+          endpoint: ""
+
+    podTemplates:
+      default_ctrl:
+        metadata:
+          labels:
+            azure.workload.identity/use: "true"
+        spec:
+          serviceAccountName: "osmo-workflow"
+          containers:
+            - name: osmo-ctrl
+              resources:
+                requests: { cpu: "250m", memory: "1Gi", ephemeral-storage: "3Gi" }
+                limits: { cpu: "500m", memory: "16Gi", ephemeral-storage: "3Gi" }
+      default_user:
+        spec:
+          volumes:
+            - name: dshm
+              emptyDir: { medium: Memory, sizeLimit: "{{USER_SHM_SIZE}}" }
+          containers:
+            - name: "{{USER_CONTAINER_NAME}}"
+              resources:
+                requests: { cpu: "{{USER_CPU}}", memory: "{{USER_MEMORY}}", ephemeral-storage: "{{USER_STORAGE}}" }
+                limits: { cpu: "{{USER_CPU}}", memory: "{{USER_MEMORY}}", ephemeral-storage: "{{USER_STORAGE}}" }
+              volumeMounts:
+                - name: dshm
+                  mountPath: /dev/shm
+
+    resourceValidations:
+      static_cpu:
+        - { operator: GT, left_operand: "{{USER_CPU}}", right_operand: "0", assert_message: "CPU must be > 0" }
+      static_memory:
+        - { operator: GT, left_operand: "{{USER_MEMORY}}", right_operand: "0", assert_message: "Memory must be > 0" }
+      static_gpu_non_negative:
+        - { operator: GE, left_operand: "{{USER_GPU}}", right_operand: "0", assert_message: "GPU cannot be negative" }
+      static_storage:
+        - { operator: GT, left_operand: "{{USER_STORAGE}}", right_operand: "0", assert_message: "Storage must be > 0" }
+      default_gpu_zero:
+        - { operator: EQ, left_operand: "{{USER_GPU}}", right_operand: "0", assert_message: "Default platform is CPU-only; use a GPU platform" }
+
+    backends:
+      default:
+        description: "Default backend"
+        scheduler_settings:
+          scheduler_type: kai
+          scheduler_name: kai-scheduler
+
+    pools:
+      default:
+        description: "Default pool"
+        backend: default
+        default_platform: default
+        common_pod_template: [default_ctrl, default_user]
+        common_resource_validations: [static_cpu, static_memory, static_storage, static_gpu_non_negative]
+        common_default_variables:
+          USER_CPU: 1
+          USER_GPU: 0
+          USER_MEMORY: "1Gi"
+          USER_STORAGE: "1Gi"
+          USER_SHM_SIZE: "1Gi"
+        platforms:
+          default:
+            resource_validations: [default_gpu_zero]
+
+    # Role definitions for dev deployment (no OIDC)
+    # All authenticated users receive osmo-default which grants full access.
+    # When OIDC is enabled (Tier 3), restrict osmo-default and use external_roles mapping.
+    roles:
+      osmo-admin:
+        description: "Admin role — full access to all resources"
+        external_roles: []
+        policies:
+          - effect: Allow
+            actions: ["*:*"]
+            resources: ["*"]
+      osmo-user:
+        description: "User role — standard workflow and data operations"
+        external_roles: []
+        policies:
+          - effect: Allow
+            actions:
+              - "app:*"
+              - "auth:Token"
+              - "credentials:*"
+              - "dataset:*"
+              - "pool:List"
+              - "profile:Read"
+              - "profile:Update"
+              - "resources:Read"
+              - "user:List"
+              - "workflow:*"
+            resources: ["*"]
+      osmo-backend:
+        description: "Backend role — internal operator communication"
+        external_roles: [osmo-backend]
+        policies:
+          - effect: Allow
+            actions: ["internal:Operator", "config:Read", "pool:List"]
+            resources: ["*"]
+      osmo-ctrl:
+        description: "Controller role — internal container communication"
+        external_roles: [osmo-ctrl]
+        policies:
+          - effect: Allow
+            actions: ["internal:Logger", "internal:Router"]
+            resources: ["*"]
+      osmo-default:
+        description: "Default role — all authenticated users in dev mode"
+        external_roles: []
+        policies:
+          - effect: Allow
+            actions: ["*:*"]
+            resources: ["*"]
 
   # Admin user bootstrapped at startup (Tier 2 auth)
   # Password stored in K8s secret; doubles as access token for CLI login.
@@ -35,20 +169,18 @@ services:
 
   # Redis cache configuration
   # Azure Managed Redis provides Redis 7.4+ natively - fully compatible with OSMO
-  # Default: enabled=false uses Azure Managed Redis from terraform (recommended)
-  # Set enabled=true only for local testing without Azure Redis
+  # Azure Managed Redis (provisioned by terraform)
   redis:
-    enabled: false  # DEFAULT: Use Azure Managed Redis from terraform (Redis 7.4+)
-
-    # External Redis settings (configured automatically via helm --set from terraform outputs)
-    # serviceName: "<your-redis>.redis.azure.net"
-    # port: 10000
+    enabled: false
+    serviceName: ""
+    port: 10000
+    tlsEnabled: true
 
   # Main API service configuration
   service:
     scaling:
       minReplicas: 1
-      maxReplicas: 3
+      maxReplicas: 1  # Dev cluster; increase for production
 
     # Ingress configuration
     ingress:
@@ -69,11 +201,49 @@ services:
       limits:
         memory: "1Gi"
 
+  # UI service configuration
+  ui:
+    serviceAccountName: osmo-control-plane
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+
+  # Router service configuration
+  router:
+    scaling:
+      minReplicas: 1
+      maxReplicas: 1  # Dev cluster; increase for production
+    serviceAccountName: router
+
+    # Ingress configuration
+    ingress:
+      prefix: /
+      ingressClass: azureml-nginx  # e.g. alb, nginx
+      sslEnabled: false  # Set to true if managing SSL at the ingress level
+      annotations:
+        # when using nginx ingress, add the following annotations to handle large OAuth2 response headers from identity providers
+        nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+        nginx.ingress.kubernetes.io/proxy-buffers: "8 16k"
+        nginx.ingress.kubernetes.io/proxy-busy-buffers-size: "32k"
+        nginx.ingress.kubernetes.io/large-client-header-buffers: "4 16k"
+
+    # Resource allocation - reduced for constrained system node pools
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        memory: "512Mi"
+
   # Worker service configuration
   worker:
     scaling:
       minReplicas: 1
-      maxReplicas: 3
+      maxReplicas: 1  # Dev cluster; increase for production
     resources:
       requests:
         cpu: "100m"
@@ -85,7 +255,7 @@ services:
   logger:
     scaling:
       minReplicas: 1
-      maxReplicas: 3
+      maxReplicas: 1  # Dev cluster; increase for production
     resources:
       requests:
         cpu: "50m"
@@ -97,13 +267,13 @@ services:
   agent:
     scaling:
       minReplicas: 1
-      maxReplicas: 1
+      maxReplicas: 1  # Dev cluster; increase for production
     resources:
       requests:
         cpu: "50m"
-        memory: "64Mi"
-      limits:
         memory: "256Mi"
+      limits:
+        memory: "1Gi"
 
   # Delayed job monitor configuration
   delayedJobMonitor:
@@ -141,25 +311,14 @@ sidecars:
   logAgent:
     enabled: false
 
-  # OAuth2 Proxy configuration (requires OIDC setup)
+# Gateway configuration (auth disabled for dev-mode deployment)
+gateway:
   oauth2Proxy:
     enabled: false
-    # Tier 3 (IdP): set enabled: true and configure:
-    # provider: oidc
-    # oidcIssuerUrl: "https://login.microsoftonline.com/<tenant-id>/v2.0"
-    # clientId: "<client-id>"
-    # useKubernetesSecrets: true
-    # secretName: oauth2-proxy-secrets
-
-  # Authorization sidecar
   authz:
     enabled: false
-    # Tier 3 (IdP): set enabled: true for RBAC enforcement
-
-  # OpenTelemetry configuration (optional)
-  otel:
-    enabled: false
-
-  # Rate limiting configuration (optional)
-  rateLimit:
-    enabled: false
+  envoy:
+    defaultIdentity:
+      user: "admin"
+      roles: "osmo-admin,osmo-backend,osmo-ctrl"
+      allowedPools: "default"

@@ -3,7 +3,7 @@ sidebar_position: 7
 title: Infrastructure as Code Style Guide
 description: Terraform conventions, shell script standards, and copyright headers for contributions
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-26
+ms.date: 2026-06-10
 ms.topic: reference
 ---
 
@@ -239,7 +239,7 @@ Include header documentation:
 #
 # Prerequisites:
 #   - AKS cluster with GPU node pool deployed
-#   - OSMO control plane installed (03-deploy-osmo-control-plane.sh)
+#   - OSMO control plane installed (03-deploy-osmo.sh)
 #   - kubectl configured with AKS credentials
 #
 # Environment Variables:
@@ -250,7 +250,7 @@ Include header documentation:
 # Usage:
 #   export RESOURCE_GROUP_NAME="rg-robotics-prod"
 #   export AKS_CLUSTER_NAME="aks-robotics-prod"
-#   ./04-deploy-osmo-backend.sh
+#   ./03-deploy-osmo.sh
 ```
 
 ### Validation

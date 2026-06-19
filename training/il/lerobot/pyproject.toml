@@ -47,6 +47,11 @@ dependencies = [
     "gitpython==3.1.50",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
+    # Pin cryptography >= 48.0.1 to address GHSA-537c-gmf6-5ccf (high severity:
+    # vulnerable OpenSSL bundled in cryptography wheels < 48.0.1). Transitive via
+    # azure-identity, msal, pyjwt, google-auth, and the azure-storage clients;
+    # azureml-mlflow caps it < 47.0.0, so it is also overridden below.
+    "cryptography==49.0.0",
     # Pin wrapt to the latest stable in the 1.x line. opentelemetry-instrumentation
     # constrains wrapt below 2.0 and above 1.0, but with prerelease resolution
     # enabled below uv would otherwise pick the 1.17.4 release candidate over
@@ -79,6 +84,11 @@ override-dependencies = [
     # azure-storage-blob: azureml-mlflow==1.62.0.post2 caps below 12.29.0; we
     # need 12.29.0 for the AzureCliCredential fix shipped in that release.
     "azure-storage-blob==12.30.0",
+    # cryptography: azureml-mlflow==1.62.0.post3 caps below 47.0.0, which strands
+    # the lock on the vulnerable 46.0.7 (GHSA-537c-gmf6-5ccf, vulnerable OpenSSL in
+    # cryptography wheels). Override the cap to take the patched 48.0.1+ wheels;
+    # cryptography keeps a stable API, so newer than azureml-mlflow's pin is safe.
+    "cryptography==49.0.0",
     # mlflow-skinny: lerobot==0.5.1 has a tighter cap; mirror the direct pin.
     "mlflow-skinny==3.13.0",
     # packaging: azureml-mlflow caps below 26.x; mirror the direct pin.

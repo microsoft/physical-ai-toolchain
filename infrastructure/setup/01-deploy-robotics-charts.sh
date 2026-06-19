@@ -93,9 +93,6 @@ section "Connect and Prepare Cluster"
 
 connect_aks "$rg" "$cluster"
 
-ensure_namespace "$NS_OSMO"
-kubectl create serviceaccount osmo-workload -n "$NS_OSMO" --dry-run=client -o yaml | kubectl apply -f -
-
 #------------------------------------------------------------------------------
 # Install GPU Operator
 #------------------------------------------------------------------------------
@@ -155,17 +152,29 @@ fi
 if [[ "$skip_kai" == "false" ]]; then
   section "Install KAI Scheduler $kai_version"
 
-  kai_chart_args=( oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler --version "$kai_version" )
+  kai_chart_ref="$HELM_REPO_KAI/kai-scheduler"
+  kai_chart_args=( "$kai_chart_ref" --version "$kai_version" )
   if [[ -n "${KAI_SCHEDULER_CHART_SHA256:-}" ]]; then
-    kai_tgz=$(pull_and_verify_chart "oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler" "$kai_version" "$KAI_SCHEDULER_CHART_SHA256" "$(mktemp -d)")
+    kai_tgz=$(pull_and_verify_chart "$kai_chart_ref" "$kai_version" "$KAI_SCHEDULER_CHART_SHA256" "$(mktemp -d)")
     kai_chart_args=( "$kai_tgz" )
   fi
 
+  # KAI uses an operator pattern: the chart deploys kai-operator, which then
+  # creates the scheduler/binder/admission components and a cluster-scoped
+  # SchedulingShard CR. That CR holds a permanent Reconciling=True condition,
+  # which Helm v4's kstatus-based --wait reads as "in progress", so --wait always
+  # times out despite a healthy deployment. Wait on KAI's own signals instead.
   helm upgrade --install kai-scheduler "${kai_chart_args[@]}" \
     --namespace "$NS_KAI_SCHEDULER" \
     --create-namespace \
     -f "$kai_values" \
-    --wait --timeout "$TIMEOUT_DEPLOY"
+    --timeout "$TIMEOUT_DEPLOY"
+
+  info "Waiting for KAI operator rollout..."
+  kubectl rollout status deployment/kai-operator -n "$NS_KAI_SCHEDULER" --timeout "$TIMEOUT_DEPLOY"
+
+  info "Waiting for KAI SchedulingShard to become available..."
+  kubectl wait --for=condition=Available schedulingshard/default --timeout "$TIMEOUT_DEPLOY"
 
   info "KAI Scheduler installed successfully"
 else

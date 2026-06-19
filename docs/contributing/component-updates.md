@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Updating External Components
 description: Process for identifying, updating, and vetting reused externally-maintained components
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-06-19
 ms.topic: how-to
 keywords:
   - component-updates
@@ -18,17 +18,17 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 ## Component Inventory
 
-| Component                 | Source    | Version Location                                                   | Current Version | Update Method    |
-|---------------------------|-----------|--------------------------------------------------------------------|-----------------|------------------|
-| NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION`      | v25.3.4         | Manual           |
-| KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION`     | v0.5.5          | Manual           |
-| OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`        | 1.0.1           | Manual           |
-| OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`        | 6.0.0           | Manual           |
-| AzureML K8s Extension     | Azure CLI | `infrastructure/setup/defaults.conf` → `AZUREML_EXTENSION_VERSION` | 1.3.1           | Manual           |
-| Isaac Lab                 | Container | Hardcoded in 7+ files                                              | 2.3.2           | Manual grep      |
-| Azure Terraform Providers | Terraform | `versions.tf` across 8 directories                                 | Floor-pinned    | Dependabot (2/4) |
-| Python Packages           | pip/uv    | `pyproject.toml`, `requirements.txt`                               | Mixed           | Dependabot       |
-| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                           | SHA-pinned      | Dependabot       |
+| Component                 | Source    | Version Location                                               | Current Version | Update Method    |
+|---------------------------|-----------|----------------------------------------------------------------|-----------------|------------------|
+| NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION`  | v26.3.2         | Manual           |
+| KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION` | v0.20.1         | Manual           |
+| OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`    | 1.3.0           | Manual           |
+| OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`    | 6.3.0           | Manual           |
+| AzureML K8s Extension     | Azure CLI | `02-deploy-azureml-extension.sh` → `--release-train stable`    | Latest stable   | Automatic        |
+| Isaac Lab                 | Container | Hardcoded in 7+ files                                          | 2.3.2           | Manual grep      |
+| Azure Terraform Providers | Terraform | `versions.tf` across 8 directories                             | Floor-pinned    | Dependabot (2/4) |
+| Python Packages           | pip/uv    | `pyproject.toml`, `requirements.txt`                           | Mixed           | Dependabot       |
+| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                       | SHA-pinned      | Dependabot       |
 
 > [!IMPORTANT]
 > Isaac Lab version `2.3.2` is hardcoded across workflow YAMLs, deploy scripts, and `pyproject.toml` files. No centralized variable exists. Use `grep -r "2.3.2" --include="*.yaml" --include="*.yml" --include="*.toml" --include="*.sh"` to locate all references before updating.
