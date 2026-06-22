@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +94,7 @@ class JudgeService:
         to_s: float | None = None,
         force: bool = False,
         cache_dir: Path | None = None,
+        process_method: str | None = None,
     ) -> JudgeResult:
         """Score a single episode given one or more view MP4 paths.
 
@@ -101,15 +102,19 @@ class JudgeService:
         When ``force`` is ``False`` and a cache entry exists, returns the
         cached result without invoking the backend. ``cache_dir`` overrides the
         service-level cache for this call so the dataviewer can store judgments
-        beside the dataset being evaluated.
+        beside the dataset being evaluated. ``process_method`` overrides the
+        configured process-reward method ('gvl' or 'chronological') for this
+        call and is reflected in the cache key.
         """
+        effective_method = process_method or self._config.agent.process_method
+        agent_config = replace(self._config.agent, process_method=effective_method)
         cache = self.cache_for(cache_dir)
         cache_key = cache.key(
             video_paths=video_paths,
             instruction=instruction,
             judge_model=self.model_id,
             prompt_version=PROMPT_VERSION,
-            agent_config=self._config.agent,
+            agent_config=agent_config,
         )
         if not force and cache.enabled:
             cached = cache.get(cache_key)
@@ -123,6 +128,7 @@ class JudgeService:
             episode_id=episode_id,
             instruction=instruction,
             frames=frames,
+            process_method=effective_method,
         )
         cache.put(cache_key, result.to_dict())
         return result

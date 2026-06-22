@@ -78,6 +78,7 @@ class JudgeAgent:
         episode_id: str,
         instruction: str,
         frames: Sequence[Image],
+        process_method: str | None = None,
     ) -> JudgeResult:
         """Run the full multi-step judgment chain on ``frames``."""
         cfg = self._config
@@ -90,7 +91,7 @@ class JudgeAgent:
             outcome_temperature=cfg.outcome_temperature,
             outcome_top_p=cfg.outcome_top_p,
             process_seed=cfg.process_seed,
-            process_method=cfg.process_method,
+            process_method=process_method or cfg.process_method,
         )
         result.prompt_version = PROMPT_VERSION
 
