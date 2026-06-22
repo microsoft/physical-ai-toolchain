@@ -82,6 +82,7 @@
   color utility to any element that depends on these defaults.
 */
 @layer base {
+
   *,
   ::after,
   ::before,
@@ -151,6 +152,7 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
   }
@@ -160,6 +162,7 @@
   0% {
     transform: translateX(-100%);
   }
+
   100% {
     transform: translateX(250%);
   }
