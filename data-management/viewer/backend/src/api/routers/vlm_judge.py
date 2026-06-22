@@ -16,6 +16,7 @@ prompt_version, agent_config) so re-running over the same episode is free.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,9 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
+PROCESS_METHODS = ("gvl", "chronological")
+
+
 class JudgeRequest(SanitizedModel):
     """Optional overrides on a per-call basis."""
 
@@ -56,6 +60,10 @@ class JudgeRequest(SanitizedModel):
     views: list[str] | None = Field(
         default=None,
         description="Subset of view names to evaluate (default: all video features)",
+    )
+    process_method: str | None = Field(
+        default=None,
+        description="Process-reward scoring technique: 'gvl' or 'chronological'",
     )
     force: bool = Field(default=False, description="Bypass the cache and re-run")
 
@@ -75,6 +83,10 @@ class JudgeStatus(BaseModel):
     judge_model: str | None = None
     prompt_version: str | None = None
     cache_key: str | None = None
+    backend: str | None = None
+    process_method: str | None = None
+    process_methods: list[str] = []
+    n_frames: int | None = None
     result: dict[str, Any] | None = None
 
 
@@ -91,6 +103,7 @@ class JudgeResponse(BaseModel):
     voc: float
     milestones: list[MilestoneOut] = []
     failure_mode: str | None = None
+    process_method: str | None = None
     cached: bool = False
 
 
@@ -133,6 +146,10 @@ async def get_episode_judgment(
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
         cache_key=cache_key,
+        backend=judge_service.config.backend.kind,
+        process_method=judge_service.config.agent.process_method,
+        process_methods=list(PROCESS_METHODS),
+        n_frames=judge_service.config.frames.n_frames,
         result=cached_payload,
     )
 
@@ -168,6 +185,13 @@ async def run_episode_judgment(
             detail="No task instruction available; provide one via the request body",
         )
 
+    if payload.process_method is not None and payload.process_method not in PROCESS_METHODS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"process_method must be one of {list(PROCESS_METHODS)}",
+        )
+    effective_method = payload.process_method or judge_service.config.agent.process_method
+
     # Detect cache hit before invoking the backend so we can flag it on the wire.
     cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id))
     cache_key = cache.key(
@@ -175,7 +199,7 @@ async def run_episode_judgment(
         instruction=instruction,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
-        agent_config=judge_service.config.agent,
+        agent_config=replace(judge_service.config.agent, process_method=effective_method),
     )
     was_cached = not payload.force and cache.get(cache_key) is not None
 
@@ -192,6 +216,7 @@ async def run_episode_judgment(
             to_s=record.to_timestamp,
             force=payload.force,
             cache_dir=_judge_cache_dir(service, dataset_id),
+            process_method=payload.process_method,
         )
     except FileNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
@@ -202,7 +227,7 @@ async def run_episode_judgment(
         raise HTTPException(status_code=502, detail=f"VLM backend error: {err}") from err
 
     payload_out = result.to_dict()
-    return JudgeResponse(cached=was_cached, **payload_out)
+    return JudgeResponse(cached=was_cached, process_method=effective_method, **payload_out)
 
 
 # ---------------------------------------------------------------------------

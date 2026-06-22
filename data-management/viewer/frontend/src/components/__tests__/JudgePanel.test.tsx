@@ -69,7 +69,7 @@ describe('JudgePanel', () => {
         expect(mockMutate).toHaveBeenCalledWith({
             datasetId: 'demo',
             episodeIndex: 2,
-            options: { instruction: 'Pick up cube', force: false },
+            options: { instruction: 'Pick up cube', processMethod: 'gvl', force: false },
         })
     })
 
@@ -90,7 +90,30 @@ describe('JudgePanel', () => {
         expect(mockMutate).toHaveBeenCalledWith({
             datasetId: 'demo',
             episodeIndex: 1,
-            options: { instruction: undefined, force: true },
+            options: { instruction: undefined, processMethod: 'gvl', force: true },
+        })
+    })
+
+    it('exposes the scoring technique and sends the configured method on run', async () => {
+        const user = userEvent.setup()
+        mockUseStatus.mockReturnValue({
+            data: status({
+                processMethod: 'chronological',
+                processMethods: ['gvl', 'chronological'],
+                backend: 'qwen3-vl',
+                nFrames: 12,
+            }),
+            isLoading: false,
+            error: null,
+        })
+        render(<JudgePanel datasetId="demo" episodeIndex={0} />)
+        expect(screen.getByText(/scoring technique/i)).toBeInTheDocument()
+        expect(screen.getByText(/backend: qwen3-vl/i)).toBeInTheDocument()
+        await user.click(screen.getByRole('button', { name: /run judge/i }))
+        expect(mockMutate).toHaveBeenCalledWith({
+            datasetId: 'demo',
+            episodeIndex: 0,
+            options: { instruction: undefined, processMethod: 'chronological', force: false },
         })
     })
 

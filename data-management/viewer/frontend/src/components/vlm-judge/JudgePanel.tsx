@@ -7,12 +7,24 @@
  */
 
 import { AlertCircle, CheckCircle2, Database, Play, RefreshCw, XCircle } from 'lucide-react'
-import { memo, useCallback, useMemo } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 import { useRunVlmJudge, useVlmJudgeStatus } from '@/hooks/use-vlm-judge'
 import { cn } from '@/lib/utils'
 import type { VlmJudgeResult } from '@/types'
+
+const METHOD_LABELS: Record<string, string> = {
+    gvl: 'GVL (shuffle-and-rank)',
+    chronological: 'Chronological',
+}
 
 export interface JudgePanelProps {
     datasetId: string
@@ -79,6 +91,11 @@ export const JudgePanel = memo(function JudgePanel({
     const status = useVlmJudgeStatus({ datasetId, episodeIndex })
     const runMutation = useRunVlmJudge()
 
+    const [methodOverride, setMethodOverride] = useState<string | undefined>(undefined)
+    const available = status.data?.processMethods
+    const methods = available && available.length > 0 ? available : ['gvl', 'chronological']
+    const effectiveMethod = methodOverride ?? status.data?.processMethod ?? 'gvl'
+
     const result = useMemo(
         () => pickResult(status.data, runMutation.data),
         [status.data, runMutation.data],
@@ -97,11 +114,12 @@ export const JudgePanel = memo(function JudgePanel({
                 episodeIndex,
                 options: {
                     instruction: instruction?.trim() || undefined,
+                    processMethod: effectiveMethod,
                     force,
                 },
             })
         },
-        [runMutation, datasetId, episodeIndex, instruction],
+        [runMutation, datasetId, episodeIndex, instruction, effectiveMethod],
     )
 
     if (status.isLoading) {
@@ -214,6 +232,31 @@ export const JudgePanel = memo(function JudgePanel({
                     )}
                 </div>
             )}
+
+            <div className="space-y-1.5 border-t pt-2">
+                <label
+                    htmlFor="vlm-process-method"
+                    className="text-muted-foreground block text-xs font-medium"
+                >
+                    Scoring technique
+                </label>
+                <Select value={effectiveMethod} onValueChange={setMethodOverride}>
+                    <SelectTrigger id="vlm-process-method" className="h-7 text-xs">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {methods.map((m) => (
+                            <SelectItem key={m} value={m} className="text-xs">
+                                {METHOD_LABELS[m] ?? m}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                <p className="text-muted-foreground text-[11px]">
+                    Backend: {status.data?.backend ?? '—'}
+                    {status.data?.nFrames != null && <span> · {status.data.nFrames} frames</span>}
+                </p>
+            </div>
 
             <div className="flex flex-wrap gap-2 pt-1">
                 <Button

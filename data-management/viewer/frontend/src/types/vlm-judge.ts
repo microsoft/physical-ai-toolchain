@@ -27,6 +27,7 @@ export interface VlmJudgeResult {
     voc: number
     milestones: VlmJudgeMilestone[]
     failureMode: string | null
+    processMethod?: string | null
     cached: boolean
 }
 
@@ -36,6 +37,10 @@ export interface VlmJudgeStatus {
     judgeModel: string | null
     promptVersion: string | null
     cacheKey: string | null
+    backend?: string | null
+    processMethod?: string | null
+    processMethods?: string[]
+    nFrames?: number | null
     result: VlmJudgeResult | null
 }
 
@@ -44,6 +49,8 @@ export interface VlmJudgeRunOptions {
     instruction?: string
     /** Restrict the judge to a subset of camera views. */
     views?: string[]
+    /** Process-reward scoring technique: 'gvl' or 'chronological'. */
+    processMethod?: string
     /** Bypass the disk cache and force a fresh inference run. */
     force?: boolean
 }

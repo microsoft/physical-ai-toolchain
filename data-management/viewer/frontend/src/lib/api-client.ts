@@ -442,6 +442,7 @@ export async function runVlmJudge(
       body: JSON.stringify({
         instruction: options.instruction,
         views: options.views,
+        process_method: options.processMethod,
         force: options.force ?? false,
       }),
     },
