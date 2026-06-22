@@ -82,6 +82,24 @@ function ProgressSparkline({ values }: { values: number[] }) {
     )
 }
 
+function RunningBar({ label }: { label: string }) {
+    return (
+        <div className="space-y-1" role="status" aria-live="polite">
+            <div
+                className="bg-secondary relative h-1.5 w-full overflow-hidden rounded-full"
+                role="progressbar"
+                aria-label={label}
+            >
+                <span
+                    className="bg-primary absolute inset-y-0 left-0 w-2/5 rounded-full"
+                    style={{ animation: 'indeterminate-progress 1.2s ease-in-out infinite' }}
+                />
+            </div>
+            <p className="text-muted-foreground text-[11px]">{label}</p>
+        </div>
+    )
+}
+
 export const JudgePanel = memo(function JudgePanel({
     datasetId,
     episodeIndex,
@@ -167,7 +185,11 @@ export const JudgePanel = memo(function JudgePanel({
                 </p>
             )}
 
-            {!result && (
+            {runMutation.isPending && (
+                <RunningBar label="Running judge — first run may take a few minutes while the model loads…" />
+            )}
+
+            {!result && !runMutation.isPending && (
                 <p className="text-muted-foreground text-xs">
                     No judgment yet. Run the judge to score outcome and process reward.
                 </p>
@@ -266,7 +288,7 @@ export const JudgePanel = memo(function JudgePanel({
                     disabled={runMutation.isPending}
                 >
                     <Play className="mr-1 size-3" />
-                    {result ? 'Re-evaluate' : 'Run judge'}
+                    {runMutation.isPending ? 'Running…' : result ? 'Re-evaluate' : 'Run judge'}
                 </Button>
                 {result && (
                     <Button

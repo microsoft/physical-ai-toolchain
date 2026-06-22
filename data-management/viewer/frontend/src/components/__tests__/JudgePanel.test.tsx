@@ -146,4 +146,18 @@ describe('JudgePanel', () => {
         render(<JudgePanel datasetId="demo" episodeIndex={0} />)
         expect(screen.getByText(/timeout/i)).toBeInTheDocument()
     })
+
+    it('shows an in-progress bar and a Running label while a judge run is pending', () => {
+        mockUseRun.mockReturnValue({
+            mutate: mockMutate,
+            isPending: true,
+            error: null,
+            data: undefined,
+        })
+        mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
+        render(<JudgePanel datasetId="demo" episodeIndex={0} />)
+        expect(screen.getByRole('progressbar', { name: /running judge/i })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: /running/i })).toBeDisabled()
+        expect(screen.queryByText(/no judgment yet/i)).not.toBeInTheDocument()
+    })
 })
