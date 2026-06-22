@@ -8,6 +8,7 @@ from vlm_judge.prompts import (
     parse_milestone_response,
     parse_outcome_response,
     parse_process_response,
+    render_chronological_process_prompt,
     render_failure_prompt,
     render_milestone_prompt,
     render_outcome_prompt,
@@ -38,14 +39,33 @@ class TestProcessParser:
         text = "Some thinking [10, 20, 30, 40] and trailing text"
         assert parse_process_response(text, n_frames=4) == [10, 20, 30, 40]
 
-    def test_rejects_wrong_length(self) -> None:
-        assert parse_process_response("[1, 2, 3]", n_frames=5) is None
+    def test_pads_short_array_to_length(self) -> None:
+        # Open models often emit n_frames-1 values; pad with the last value.
+        assert parse_process_response("[0, 50, 100]", n_frames=5) == [0, 50, 100, 100, 100]
 
-    def test_rejects_non_numeric(self) -> None:
-        assert parse_process_response('["a", "b"]', n_frames=2) is None
+    def test_truncates_long_array_to_length(self) -> None:
+        assert parse_process_response("[0, 10, 20, 30, 40]", n_frames=3) == [0, 10, 20]
+
+    def test_strips_think_block(self) -> None:
+        text = "<think>frame 8 looks done, 12 total</think>[0, 0, 50, 100]"
+        assert parse_process_response(text, n_frames=4) == [0, 0, 50, 100]
+
+    def test_recovers_from_code_fence(self) -> None:
+        assert parse_process_response("```json\n[0, 33, 66, 100]\n```", n_frames=4) == [0, 33, 66, 100]
+
+    def test_falls_back_to_bare_integers(self) -> None:
+        assert parse_process_response("progress: 0, 50, 100", n_frames=3) == [0, 50, 100]
+
+    def test_clamps_out_of_range(self) -> None:
+        assert parse_process_response("[-10, 50, 250]", n_frames=3) == [0, 50, 100]
 
     def test_rounds_floats(self) -> None:
-        assert parse_process_response("[0.0, 49.5, 100.0]", n_frames=3) == [0, 50, 100]
+        assert parse_process_response("[0.0, 49.4, 100.0]", n_frames=3) == [0, 49, 100]
+
+    def test_returns_none_without_numbers(self) -> None:
+        assert parse_process_response('["a", "b"]', n_frames=2) is None
+        assert parse_process_response("no numbers here", n_frames=3) is None
+        assert parse_process_response("", n_frames=3) is None
 
 
 class TestMilestoneParser:
@@ -103,6 +123,12 @@ class TestPromptRendering:
         text = render_process_prompt(instruction="task", n_frames=10)
         assert "RANDOM ORDER" in text
         assert "0-100" in text
+
+    def test_chronological_process_prompt_is_in_order(self) -> None:
+        text = render_chronological_process_prompt(instruction="task", n_frames=10)
+        assert "CHRONOLOGICAL" in text
+        assert "0-100" in text
+        assert "RANDOM ORDER" not in text
 
     def test_milestone_prompt_passes_outcome_label(self) -> None:
         success = render_milestone_prompt(

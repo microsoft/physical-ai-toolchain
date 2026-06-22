@@ -15,6 +15,7 @@ from .prompts import (
     PROMPT_VERSION,
     parse_outcome_response,
     parse_process_response,
+    render_chronological_process_prompt,
     render_outcome_prompt,
     render_process_prompt,
     shuffle_with_anchor,
@@ -62,6 +63,7 @@ def score_episode(
     outcome_temperature: float = 0.6,
     outcome_top_p: float = 0.95,
     process_seed: int = 0,
+    process_method: str = "gvl",
 ) -> JudgeResult:
     """Run outcome + process scoring for a single episode."""
     n_frames = len(frames)
@@ -81,6 +83,7 @@ def score_episode(
         instruction=instruction,
         frames=frames,
         rng=random.Random(process_seed),
+        method=process_method,
     )
 
     return JudgeResult(
@@ -159,16 +162,33 @@ def _run_process(
     instruction: str,
     frames: Sequence[Image],
     rng: random.Random,
+    method: str = "gvl",
 ) -> dict[str, Any]:
     n = len(frames)
-    order = shuffle_with_anchor(n, rng=rng)
-    shuffled_frames = [frames[i] for i in order]
-    user_prompt = render_process_prompt(instruction=instruction, n_frames=n)
     config = GenerationConfig(max_new_tokens=512, temperature=0.0)
 
+    if method == "chronological":
+        # Frames shown in true order; the model rates each in place (no un-shuffle).
+        text = backend.generate(
+            system_prompt=PROCESS_SYSTEM_PROMPT,
+            user_prompt=render_chronological_process_prompt(instruction=instruction, n_frames=n),
+            images=list(frames),
+            config=config,
+        )
+        values = parse_process_response(text, n_frames=n)
+        if values is None:
+            _LOGGER.warning(
+                "Process format violation; returning zeros (truncated response: %r)",
+                (text or "")[:160],
+            )
+            return {"progress_per_frame": [0] * n, "voc": 0.0}
+        return {"progress_per_frame": list(values), "voc": value_order_correlation(values)}
+
+    order = shuffle_with_anchor(n, rng=rng)
+    shuffled_frames = [frames[i] for i in order]
     text = backend.generate(
         system_prompt=PROCESS_SYSTEM_PROMPT,
-        user_prompt=user_prompt,
+        user_prompt=render_process_prompt(instruction=instruction, n_frames=n),
         images=shuffled_frames,
         config=config,
     )
@@ -183,9 +203,7 @@ def _run_process(
     chronological = [0] * n
     for shuffled_idx, original_idx in enumerate(order):
         chronological[original_idx] = shuffled_values[shuffled_idx]
-
-    voc = value_order_correlation(chronological)
-    return {"progress_per_frame": chronological, "voc": voc}
+    return {"progress_per_frame": chronological, "voc": value_order_correlation(chronological)}
 
 
 def value_order_correlation(values: Sequence[int]) -> float:
