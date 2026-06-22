@@ -457,9 +457,20 @@ jobs:
 
       - name: Verify signed git tag
         if: ${{ steps.release.outputs.release_created == 'true' }}
+        shell: bash
+        env:
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
         run: |
-          $tag = '${{ steps.release.outputs.tag_name }}'
-          git tag -v $tag
+          tag_type="$(git cat-file -t "refs/tags/${TAG_NAME}")"
+          if [ "${tag_type}" != "tag" ]; then
+            echo "Expected annotated tag object for ${TAG_NAME}, found ${tag_type}"
+            exit 1
+          fi
+
+          gitsign verify-tag \
+            --certificate-identity 'https://github.com/microsoft/physical-ai-toolchain/.github/workflows/main.yml@refs/heads/main' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            "${TAG_NAME}"
 
   # Generate dependency SBOM from all package manifests
   generate-dependency-sbom:
@@ -503,6 +514,7 @@ jobs:
           output-file: dependencies.spdx.json
           artifact-name: ''
           dependency-snapshot: true
+          syft-version: v1.20.0
 
       - name: Generate dependency SBOM (CycloneDX)
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
@@ -514,6 +526,7 @@ jobs:
           artifact-name: ''
           dependency-snapshot: true
           upload-artifact: false
+          syft-version: v1.20.0
 
       - name: Upload dependency SBOM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -590,6 +603,7 @@ jobs:
           format: spdx-json
           output-file: sbom.spdx.json
           artifact-name: ''
+          syft-version: v1.20.0
 
       - name: Generate SBOM (CycloneDX)
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
@@ -599,6 +613,7 @@ jobs:
           output-file: sbom.cdx.json
           artifact-name: ''
           upload-artifact: false
+          syft-version: v1.20.0
 
       - name: Attest build provenance
         id: attest

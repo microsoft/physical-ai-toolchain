@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Release Verification
 description: Verify release artifact provenance and SBOM attestations for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-19
+ms.date: 2026-06-22
 ms.topic: reference
 ---
 
@@ -87,16 +87,20 @@ gh attestation verify physical_ai_toolchain-1.2.3-py3-none-any.whl \
   --repo microsoft/physical-ai-toolchain
 ```
 
-For offline or portable verification outside the GitHub API, use `slsa-verifier verify-artifact` against a provenance file attached to the release:
+To verify from a locally downloaded bundle rather than querying the GitHub attestations API, download the wheel's Sigstore bundle (`wheels-v1.2.3.sigstore.json`) and pass it with `--bundle`:
 
 ```bash
-slsa-verifier verify-artifact physical_ai_toolchain-1.2.3-py3-none-any.whl \
-  --provenance-path wheels-v1.2.3.intoto.jsonl \
-  --source-uri github.com/microsoft/physical-ai-toolchain \
-  --source-branch main
+gh release download v1.2.3 --repo microsoft/physical-ai-toolchain \
+  --pattern 'physical_ai_toolchain-*.whl' \
+  --pattern 'wheels-v1.2.3.sigstore.json'
+
+gh attestation verify physical_ai_toolchain-1.2.3-py3-none-any.whl \
+  --bundle wheels-v1.2.3.sigstore.json \
+  --repo microsoft/physical-ai-toolchain
 ```
 
-Use `wheels-v1.2.3.intoto.jsonl` (the wheel's provenance) rather than `source-v1.2.3.intoto.jsonl` (the source-archive provenance), and constrain on `--source-branch main` because the release pipeline runs `on: push: branches: [main]` rather than on a tag ref.
+> [!NOTE]
+> The wheel provenance is produced by `actions/attest-build-provenance` (an in-job Sigstore signer), so verify it with `gh attestation verify`. `slsa-verifier verify-artifact` matches against the `slsa-github-generator` builder ID and will reject this bundle. Because the release pipeline runs `on: push: branches: [main]`, the provenance binds to the `main` branch ref rather than a tag ref.
 
 ## Inspect CycloneDX SBOMs
 
