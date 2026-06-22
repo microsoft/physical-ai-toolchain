@@ -206,17 +206,14 @@ class LeRobotFormatHandler:
                 cache_path = self._video_cache_path(dataset_id, episode_idx, camera)
                 buster_path = cache_path if cache_path and cache_path.exists() else video_path
                 video_urls[camera] = (
-                    f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}"
-                    f"{_video_cache_query(buster_path)}"
+                    f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}{_video_cache_query(buster_path)}"
                 )
 
             # For blob datasets, add video URLs for cameras without local files.
             if dataset_info is not None:
                 for feat_name, feat in dataset_info.features.items():
                     if feat.dtype == "video" and feat_name not in video_urls:
-                        video_urls[feat_name] = (
-                            f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{feat_name}"
-                        )
+                        video_urls[feat_name] = f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{feat_name}"
 
             # Resolve per-camera time windows for v3 concatenated videos
             video_time_windows: dict[str, list[float]] = {}
