@@ -94,12 +94,12 @@ the frontend's JudgePanel auto-hides when the backend reports the judge is disab
 
 #### What it does
 
-The judge does not stream the full episode video. It samples a fixed number of
+The VLM-as_judge feature samples a fixed number of
 still frames — `VLM_JUDGE_N_FRAMES` (default 12) — evenly spaced across the
 episode's time window, decodes them with PyAV, letterboxes each to a fixed square
 (default 448×448), and, for multi-camera datasets, tiles the per-view frames
 side-by-side so every timestep becomes one composite image. The model therefore
-reasons over an ordered sequence of `N` sampled frames, not a continuous video.
+reasons over an ordered sequence of `N` sampled frames.
 Frame extraction and tiling live in [`evaluation/vlm_judge/frames.py`](../../evaluation/vlm_judge/frames.py)
 and [`service.py`](../../evaluation/vlm_judge/service.py); the scoring chain lives
 in [`judge.py`](../../evaluation/vlm_judge/judge.py) and [`agent.py`](../../evaluation/vlm_judge/agent.py).
@@ -147,6 +147,35 @@ card on the trajectory tab:
 > is loaded). It exists to verify the wiring end-to-end and for tests — switch to
 > `qwen3-vl` (local GPU) or `openai-compat` (a remote vLLM/NIM/Azure OpenAI server)
 > for real scores.
+
+#### Applying judgments as episode labels
+
+The judge's outcome maps directly onto the viewer's episode label set
+(`SUCCESS` / `FAILURE` / `PARTIAL`), so a judgment can be promoted to a saved label:
+
+- **Apply label** writes the current episode's outcome as its label
+  (`SUCCESS` → `SUCCESS`, `FAILURE` → `FAILURE`, `Inconclusive` → `PARTIAL`). It
+  replaces any existing outcome label while preserving other custom labels on the
+  episode, then persists via the labels API.
+
+#### Scoring every episode
+
+The **Whole dataset** controls run the judge across all episodes — sequentially,
+one episode at a time, not as a single batched model call. Each episode reuses the
+per-episode endpoint and its cache, so episodes already scored return instantly and
+only those not yet scored invoke the model. A progress indicator shows `done / total`, and
+**Cancel** stops the run after the in-flight episode.
+
+- **Run all** scores every episode with the selected scoring technique but writes no
+  labels.
+- **Label all** scores every episode and writes each outcome as that episode's label,
+  using the same outcome → label mapping as **Apply label** above.
+
+> [!NOTE]
+> Sequential scoring with a local backend is slow: the model loads on the first
+> episode and each subsequent episode runs a full judgment chain. Prefer a hosted
+> `openai-compat` backend for whole-dataset runs, and leave results cached so reruns
+> skip already-scored episodes.
 
 #### "Run judge" vs. "Language instruction"
 
