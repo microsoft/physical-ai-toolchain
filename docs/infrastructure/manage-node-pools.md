@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Manage Node Pools
 description: Add, remove, and resize AKS node pools on an existing cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-02
+ms.date: 2026-06-19
 ms.topic: how-to
 keywords:
   - node-pools
@@ -35,9 +35,9 @@ Pool changes follow the standard repo flow:
 
 1. Edit `node_pools` in `infrastructure/terraform/terraform.tfvars`.
 2. Run `terraform apply` to create, destroy, or update pool resources.
-3. Rerun `infrastructure/setup/04-deploy-osmo-backend.sh` to regenerate OSMO `POD_TEMPLATE`, `POOL`, and `BACKEND` configs against the new pool list.
+3. If the new pool requires different `nodeSelector`, tolerations, or resource overrides, edit `infrastructure/setup/values/osmo-platforms.yaml` and rerun `infrastructure/setup/03-deploy-osmo.sh`.
 
-Script `04` reads `node_pools` from Terraform state and embeds per-pool values (VM size in `nodeSelector`, taints as tolerations) into OSMO configs. **Skipping the rerun leaves stale OSMO configs**: workflow pods pin `nodeSelector` to the previous VM SKU and stay `Pending`.
+Script `03` deploys `osmo-platforms.yaml` as a Helm values overlay. Rerun is only needed when platform configuration changes (nodeSelector, tolerations, resource limits) — not for count-only scaling changes.
 
 ## Prerequisites
 
@@ -45,7 +45,7 @@ Script `04` reads `node_pools` from Terraform state and embeds per-pool values (
 - `kubectl`, `terraform`, `az`, `helm`, `osmo`, and `jq` available on `PATH`.
 - Active Azure CLI session (`az login`) with rights to modify the cluster resource group.
 - VPN connection if the cluster is private (default).
-- The same flags you originally passed to `04-deploy-osmo-backend.sh` (for example, `--use-acr`).
+- The same flags you originally passed to `03-deploy-osmo.sh` (for example, `--use-acr`).
 
 ## What Can and Cannot Change in Place
 
@@ -108,10 +108,10 @@ Resizing means changing `node_count`, `min_count`, `max_count`, `node_labels`, o
    terraform -chdir=infrastructure/terraform apply
    ```
 
-3. Rerun the OSMO backend script if taints or labels changed (not needed for count-only changes):
+3. Rerun the OSMO control-plane script if taints or labels changed (not needed for count-only changes):
 
    ```bash
-   bash infrastructure/setup/04-deploy-osmo-backend.sh --use-acr
+   bash infrastructure/setup/03-deploy-osmo.sh --use-acr
    ```
 
 ### Add a New Pool
@@ -139,10 +139,10 @@ Use this to add capacity (different SKU, different priority, different zones) wi
    terraform -chdir=infrastructure/terraform apply
    ```
 
-3. Rerun the OSMO backend script so the new pool appears in `POOL` and `POD_TEMPLATE` configs:
+3. Rerun the OSMO control-plane script so the new pool appears in `POOL`, `PLATFORM`, and `POD_TEMPLATE` configs:
 
    ```bash
-   bash infrastructure/setup/04-deploy-osmo-backend.sh --use-acr
+   bash infrastructure/setup/03-deploy-osmo.sh --use-acr
    ```
 
 4. Verify:
@@ -150,8 +150,9 @@ Use this to add capacity (different SKU, different priority, different zones) wi
    ```bash
    kubectl get nodes -l agentpool=sdgcpu
    az aks nodepool list --resource-group <rg> --cluster-name <aks> -o table
-   osmo config show POOL
    ```
+
+   The OSMO-side pool/platform configuration is applied by the rerun in step 3; a successful run is the confirmation. The pool definition itself lives in [`infrastructure/setup/values/osmo-platforms.yaml`](../../infrastructure/setup/values/osmo-platforms.yaml).
 
 ### Remove a Pool
 
@@ -168,10 +169,10 @@ Use this to add capacity (different SKU, different priority, different zones) wi
    terraform -chdir=infrastructure/terraform apply
    ```
 
-3. Update `DEFAULT_POOL` in `infrastructure/setup/.env.local` if it pointed at the removed pool, then rerun the OSMO backend script:
+3. Edit `infrastructure/setup/values/osmo-platforms.yaml` if it referenced the removed pool, then rerun the OSMO control-plane script:
 
    ```bash
-   bash infrastructure/setup/04-deploy-osmo-backend.sh --use-acr
+   bash infrastructure/setup/03-deploy-osmo.sh --use-acr
    ```
 
 ### Replace a Pool SKU (Two-Step, No Capacity Gap)
@@ -205,21 +206,20 @@ Faster but disruptive. Use only when no workloads are running on the pool, or wh
 
    All nodes in the pool are evicted at once; new nodes come up under the same pool name.
 
-3. Rerun the OSMO backend script:
+3. Rerun the OSMO control-plane script:
 
    ```bash
-   bash infrastructure/setup/04-deploy-osmo-backend.sh --use-acr
+   bash infrastructure/setup/03-deploy-osmo.sh --use-acr
    ```
 
 ## Operational Notes
 
 - **Subnet planning.** Every pool gets its own subnet. Pick a CIDR that does not overlap `aks_subnet_config` or any other pool's `subnet_address_prefixes`. AKS Overlay mode applies to pods; the node IP space is what you size here.
-- **Default pool.** `DEFAULT_POOL` in `infrastructure/setup/.env.local` must reference a configured pool. `04-deploy-osmo-backend.sh` auto-selects the first pool alphabetically when the variable is unset and warns.
-- **OSMO flag parity.** Pass the same flags you used for the initial `04-deploy-osmo-backend.sh` run (for example, `--use-acr`, `--use-access-keys`). Omitting them reverts the backend to defaults.
+- **OSMO flag parity.** Pass the same flags you used for the initial `03-deploy-osmo.sh` run (for example, `--use-acr`). Omitting them reverts the deployment to defaults.
 - **Spot constraints.** Azure rejects `upgrade_settings` for Spot pools; the Terraform module already handles this. `eviction_policy` applies only when `priority = "Spot"`.
 - **Autoscaling.** `min_count = 0` is allowed; the pool scales up on demand from pending pods. KAI/Volcano coscheduling requires whole-pool capacity for gang-scheduled jobs.
 - **Scale-from-zero for AzureML.** GPU pools used by AzureML jobs must declare `node_labels = { accelerator = "nvidia" }`. Without this static label, the cluster autoscaler cannot prove a from-zero scale-up would satisfy AzureML InstanceTypes that select on `accelerator: nvidia`, and refuses to scale. See [Azure ML Training Workflows — Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools).
-- **Script 03 is not affected.** Only `04-deploy-osmo-backend.sh` reads pool data. `03-deploy-osmo-control-plane.sh` does not need to be rerun for pool changes.
+- **Rerun script 03 after pool changes.** `03-deploy-osmo.sh` reconciles the unified OSMO deployment, including pool, platform, and backend config.
 
 ## 🔗 Related
 

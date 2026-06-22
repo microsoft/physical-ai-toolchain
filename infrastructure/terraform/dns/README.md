@@ -19,7 +19,7 @@ Private DNS zone for OSMO UI hostname resolution. Maps the OSMO UI hostname to t
 
 ```bash
 # Get the OSMO UI LoadBalancer IP
-kubectl get svc -n osmo-control-plane osmo-ui -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+kubectl get svc -n osmo-control-plane osmo-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 
 # Deploy DNS zone with the LoadBalancer IP
 cd infrastructure/terraform/dns

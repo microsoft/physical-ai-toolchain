@@ -53,7 +53,8 @@ print_kv "GPU Operator SHA256"   "$GPU_OPERATOR_CHART_SHA256"
 print_kv "KAI Scheduler Version" "$KAI_SCHEDULER_VERSION"
 print_kv "KAI Scheduler SHA256"  "$KAI_SCHEDULER_CHART_SHA256"
 print_kv "OSMO Chart Version"    "$OSMO_CHART_VERSION"
-print_kv "OSMO Chart SHA256"     "$OSMO_CHART_SHA256"
+print_kv "OSMO Service SHA256"   "$OSMO_SERVICE_CHART_SHA256"
+print_kv "OSMO Backend SHA256"   "$OSMO_BACKEND_CHART_SHA256"
 
 if [[ "$config_preview" == "true" ]]; then
   exit 0
@@ -79,6 +80,38 @@ ensure_v_prefix() {
 strip_v_prefix() {
   local version="$1"
   echo "${version#v}"
+}
+
+# Query the latest semver release tag from a ghcr.io OCI repository.
+# Paginates through the tags list API and returns the highest v* tag.
+oci_latest_version() {
+  local repo="$1"
+  local token token_url last_tag tags all_tags=""
+
+  # These are GHCR registry API metadata calls (a short-lived pull token and the
+  # tags list), not artifact downloads — there is nothing to checksum here. Chart
+  # integrity is verified separately: pull_chart_sha computes the SHA256 that gets
+  # pinned in defaults.conf, and the deploy script's pull_and_verify_chart checks
+  # the downloaded chart against that pin.
+  token_url="https://ghcr.io/token?service=ghcr.io&scope=repository:${repo}:pull"
+  token=$(curl -sf "$token_url" | jq -r '.token // empty')
+  [[ -n "$token" ]] || return 1
+
+  last_tag=""
+  while true; do
+    local url="https://ghcr.io/v2/${repo}/tags/list?n=100"
+    [[ -n "$last_tag" ]] && url="${url}&last=${last_tag}"
+    tags=$(curl -sf -H "Authorization: Bearer $token" "$url" | jq -r '.tags[]? // empty') || break
+    [[ -n "$tags" ]] || break
+    all_tags="${all_tags}${tags}"$'\n'
+    last_tag=$(echo "$tags" | tail -1)
+    # Stop if we got fewer than 100 tags (last page)
+    local count
+    count=$(echo "$tags" | wc -l | tr -d ' ')
+    [[ "$count" -ge 100 ]] || break
+  done
+
+  echo "$all_tags" | grep '^v[0-9]' | sort -V | tail -1
 }
 
 pull_chart_sha() {
@@ -129,11 +162,9 @@ fi
 
 # --- KAI Scheduler ---
 section "KAI Scheduler"
-kai_latest_raw=$(helm show chart oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler 2>/dev/null \
-  | grep '^version:' | awk '{print $2}')
-[[ -n "$kai_latest_raw" ]] || fatal "Failed to query latest KAI Scheduler version"
-kai_latest=$(ensure_v_prefix "$kai_latest_raw")
-kai_sha=$(pull_chart_sha "oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler" "$kai_latest_raw" "$tmpdir/kai-scheduler")
+kai_latest=$(oci_latest_version "nvidia/kai-scheduler/kai-scheduler")
+[[ -n "$kai_latest" ]] || fatal "Failed to query latest KAI Scheduler version"
+kai_sha=$(pull_chart_sha "oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler" "$kai_latest" "$tmpdir/kai-scheduler")
 
 print_kv "Current Version" "$KAI_SCHEDULER_VERSION"
 print_kv "Latest Version"  "$kai_latest"
@@ -153,38 +184,54 @@ else
   info "KAI Scheduler is up to date"
 fi
 
-# --- OSMO Backend Operator ---
-section "OSMO Backend Operator"
+# --- OSMO Charts ---
+section "OSMO Charts"
 helm repo add osmo "$HELM_REPO_OSMO" --force-update > /dev/null 2>&1
 helm repo update osmo > /dev/null 2>&1
-osmo_latest_raw=$(helm search repo osmo/backend-operator --versions -o json | jq -r '.[0].version // empty')
-[[ -n "$osmo_latest_raw" ]] || fatal "Failed to query latest OSMO Backend Operator version"
-osmo_latest=$(strip_v_prefix "$osmo_latest_raw")
-osmo_sha=$(pull_chart_sha "osmo/backend-operator" "$osmo_latest_raw" "$tmpdir/osmo-backend")
+osmo_service_latest_raw=$(helm search repo "osmo/${OSMO_SERVICE_CHART}" --versions -o json | jq -r '.[0].version // empty')
+[[ -n "$osmo_service_latest_raw" ]] || fatal "Failed to query latest OSMO service chart version"
+osmo_backend_latest_raw=$(helm search repo "osmo/${OSMO_BACKEND_CHART}" --versions -o json | jq -r '.[0].version // empty')
+[[ -n "$osmo_backend_latest_raw" ]] || fatal "Failed to query latest OSMO backend chart version"
 
-print_kv "Current Version" "$OSMO_CHART_VERSION"
-print_kv "Latest Version"  "$osmo_latest"
-print_kv "New SHA256"       "$osmo_sha"
+osmo_service_latest=$(strip_v_prefix "$osmo_service_latest_raw")
+osmo_backend_latest=$(strip_v_prefix "$osmo_backend_latest_raw")
+[[ "$osmo_service_latest" == "$osmo_backend_latest" ]] || \
+  fatal "OSMO chart versions diverged: service=$osmo_service_latest backend=$osmo_backend_latest"
 
-if [[ "$osmo_latest" != "$OSMO_CHART_VERSION" || "$osmo_sha" != "$OSMO_CHART_SHA256" ]]; then
+osmo_latest="$osmo_service_latest"
+osmo_service_sha=$(pull_chart_sha "osmo/${OSMO_SERVICE_CHART}" "$osmo_service_latest_raw" "$tmpdir/osmo-service")
+osmo_backend_sha=$(pull_chart_sha "osmo/${OSMO_BACKEND_CHART}" "$osmo_backend_latest_raw" "$tmpdir/osmo-backend")
+
+print_kv "Current Version"        "$OSMO_CHART_VERSION"
+print_kv "Latest Version"         "$osmo_latest"
+print_kv "Service SHA256"         "$osmo_service_sha"
+print_kv "Backend SHA256"         "$osmo_backend_sha"
+
+if [[ "$osmo_latest" != "$OSMO_CHART_VERSION" || "$osmo_service_sha" != "$OSMO_SERVICE_CHART_SHA256" || "$osmo_backend_sha" != "$OSMO_BACKEND_CHART_SHA256" ]]; then
   if [[ "$dry_run" == "true" ]]; then
     info "[dry-run] Would update OSMO_CHART_VERSION to $osmo_latest"
-    info "[dry-run] Would update OSMO_CHART_SHA256 to $osmo_sha"
+    info "[dry-run] Would update OSMO_SERVICE_CHART_SHA256 to $osmo_service_sha"
+    info "[dry-run] Would update OSMO_BACKEND_CHART_SHA256 to $osmo_backend_sha"
   else
     update_default "OSMO_CHART_VERSION" "$osmo_latest"
-    update_default "OSMO_CHART_SHA256" "$osmo_sha"
-    info "Updated OSMO Backend Operator to $osmo_latest ($osmo_sha)"
+    update_default "OSMO_SERVICE_CHART_SHA256" "$osmo_service_sha"
+    update_default "OSMO_BACKEND_CHART_SHA256" "$osmo_backend_sha"
+    if [[ "$osmo_latest" != "$OSMO_CHART_VERSION" ]]; then
+      info "Updated OSMO charts to $osmo_latest"
+    else
+      info "Updated OSMO chart hashes (version unchanged: $osmo_latest)"
+    fi
   fi
   updated=$((updated + 1))
 else
-  info "OSMO Backend Operator is up to date"
+  info "OSMO charts are up to date"
 fi
 
 #------------------------------------------------------------------------------
 # Summary
 #------------------------------------------------------------------------------
 section "Deployment Summary"
-print_kv "Charts Checked" "3"
+print_kv "Charts Checked" "3 (GPU Operator, KAI Scheduler, OSMO Service+Backend)"
 print_kv "Charts Updated" "$updated"
 print_kv "Dry Run"        "$dry_run"
 print_kv "Defaults File"  "$defaults_conf"
