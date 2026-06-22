@@ -86,7 +86,7 @@ Expected blob structure:
 | `FRONTEND_PORT`                      | `5173`          | Dev server port                                                |
 | `CORS_ORIGINS`                       | localhost ports | Comma-separated allowed CORS origins                           |
 
-### VLM-as-Judge (optional)
+### VLM-as-Judge (experimental)
 
 The viewer can score episodes with a vision-language-model (VLM) judge, reusing the
 `evaluation.vlm_judge` harness. The router mounts only when `VLM_JUDGE_ENABLED=true`;
@@ -94,19 +94,39 @@ the frontend's JudgePanel auto-hides when the backend reports the judge is disab
 
 #### What it does
 
-For the selected episode, the judge watches a handful of sampled video frames and
-answers, in plain language, *"did the robot accomplish the task?"* It produces four
-things, shown in the **VLM Judge** card on the trajectory tab:
+The judge does not stream the full episode video. It samples a fixed number of
+still frames — `VLM_JUDGE_N_FRAMES` (default 12) — evenly spaced across the
+episode's time window, decodes them with PyAV, letterboxes each to a fixed square
+(default 448×448), and, for multi-camera datasets, tiles the per-view frames
+side-by-side so every timestep becomes one composite image. The model therefore
+reasons over an ordered sequence of `N` sampled frames, not a continuous video.
+Frame extraction and tiling live in [`evaluation/vlm_judge/frames.py`](../../evaluation/vlm_judge/frames.py)
+and [`service.py`](../../evaluation/vlm_judge/service.py); the scoring chain lives
+in [`judge.py`](../../evaluation/vlm_judge/judge.py) and [`agent.py`](../../evaluation/vlm_judge/agent.py).
 
-- **Outcome** — `SUCCESS`, `FAILURE`, or `Inconclusive`, with a confidence percentage.
-  The model is asked the same multiple-choice question several times and the answers
-  are voted on, so confidence reflects how consistently it agreed with itself.
-- **Process reward** — a per-frame "how far along is the task" progress bar (0–100%)
-  plus a single `VOC` score summarizing how steadily progress increased over time.
+From that frame sequence the judge produces four outputs, shown in the **VLM Judge**
+card on the trajectory tab:
+
+- **Outcome** — `SUCCESS`, `FAILURE`, or `Inconclusive`, with a confidence
+  percentage. The same SUCCESS/FAILURE multiple-choice question is sampled several
+  times (default 3, at temperature 0.6 / top-p 0.95) and decided by self-consistency
+  majority vote: the episode is `SUCCESS` when at least half the valid votes say so.
+  Confidence is the fraction of valid votes for the winning answer; responses that
+  do not parse are discarded, and `Inconclusive` means no vote parsed (`judge.py`,
+  `agent.py`).
+- **Process reward** — a per-frame task-completion score (0–100%) plus a single
+  `VOC` value. `VOC` (value–order correlation) is the Spearman rank correlation
+  between the predicted per-frame progress and the true chronological order: `+1`
+  when progress rises monotonically, `0` when unordered, negative when inverted
+  (`value_order_correlation` in `judge.py`). The per-frame scores are produced by
+  one of two strategies selected with `VLM_JUDGE_PROCESS_METHOD` (see below).
 - **Milestones** — named sub-steps (e.g. *approach object*, *grasp object*) marked
-  complete or incomplete, each with the frame range and a short justification.
-- **Failure mode** — when the outcome is `FAILURE`, a short category describing what
-  went wrong (e.g. *missed grasp*).
+  complete or incomplete, each with a frame range and a short justification.
+  Milestone decomposition runs only when the outcome is uncertain (confidence below
+  0.85), inconclusive, or a failure — not on every run — to limit visual-grounding
+  hallucination (`agent.py`).
+- **Failure mode** — only when the outcome is `FAILURE`: a short category describing
+  what went wrong (e.g. *missed grasp*).
 
 #### How to use it
 
