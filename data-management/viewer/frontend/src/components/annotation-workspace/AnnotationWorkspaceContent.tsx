@@ -8,6 +8,7 @@ import { AnnotationWorkspaceTrajectoryTab } from '@/components/annotation-worksp
 import { ExportDialog } from '@/components/export'
 import { Tabs } from '@/components/ui/tabs'
 import { JudgePanel } from '@/components/vlm-judge'
+import { useAnnotationStore } from '@/stores'
 
 import type { useAnnotationWorkspaceShell } from './useAnnotationWorkspaceShell'
 
@@ -18,6 +19,12 @@ interface AnnotationWorkspaceContentProps {
 export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContentProps) {
   const currentDataset = shell.currentDataset
   const currentEpisode = shell.currentEpisode
+  // Current (draft or saved) language instruction so the judge scores against
+  // what the annotator sees in the Language Instruction widget; falls back to
+  // dataset metadata on the backend when empty.
+  const currentInstruction = useAnnotationStore(
+    (state) => state.currentAnnotation?.languageInstruction?.instruction,
+  )
 
   if (!currentDataset || !currentEpisode) {
     return null
@@ -73,7 +80,11 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
 
   const trajectoryLabelPanel = <LabelPanel episodeIndex={currentEpisode.meta.index} />
   const trajectoryJudgePanel = (
-    <JudgePanel datasetId={currentDataset.id} episodeIndex={currentEpisode.meta.index} />
+    <JudgePanel
+      datasetId={currentDataset.id}
+      episodeIndex={currentEpisode.meta.index}
+      instruction={currentInstruction}
+    />
   )
   const trajectoryLanguageInstructionPanel = <LanguageInstructionWidget />
   const trajectoryObjectDetectionPanel = <ObjectDetectionWidget />

@@ -130,17 +130,19 @@ things, shown in the **VLM Judge** card on the trajectory tab:
 
 #### "Run judge" vs. "Language instruction"
 
-The judge always scores the episode against a **task instruction** — the natural-language
-goal for the episode, such as *"Grab orange and place into plate"*. That goal is the
-same text shown in the viewer's **Language Instruction** panel, read from the dataset's
-metadata. In short:
+The judge scores the episode against a **task instruction** — the natural-language
+goal for the episode, such as *"Grab orange and place into plate"*. **Run judge** uses
+the instruction currently shown in the viewer's **Language Instruction** panel (your
+saved or in-progress edit), so refining that text changes what the judge grades against.
+In short:
 
 - **Language Instruction** = *what the robot was asked to do* (the goal the judge grades against).
 - **Run judge** = *grade this episode against that goal* and report the outcome, progress,
   milestones, and any failure mode.
 
-If the dataset has no task instruction, **Run judge** returns an error (HTTP 422) asking
-for one to be supplied.
+When the Language Instruction is left empty, **Run judge** falls back to the task
+instruction stored in the dataset's metadata. If neither is available, it returns an
+error (HTTP 422) asking for one to be supplied.
 
 #### Settings
 
