@@ -37,6 +37,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      # CPU-only torch for the runner-based unit tests, pinned outside the lock on purpose.
+      # `uv sync` would otherwise pull the root dev-group torch==2.12.0, and the lerobot/
+      # eval locks pin torch==2.10.0 (CUDA-12 wheels) — neither installs cleanly on the CPU
+      # runner. See PR #995 thread; revisit dropping this step once the pin is reconciled.
       - name: Install Torch test dependency
         run: uv pip install torch==2.11.0
 

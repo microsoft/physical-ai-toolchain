@@ -137,9 +137,6 @@ updates:
       patterns:
       - "*"
   ignore:
-  - dependency-name: "torch"
-    versions:
-    - ">=2.11.0"
   - dependency-name: "av"
     versions:
     - ">=16.0.0"
