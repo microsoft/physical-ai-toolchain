@@ -191,10 +191,17 @@ behaviour, the multi-step agent controller (success / low-confidence /
 failure flows + format-violation tolerance), and the FastAPI router. No
 GPU or network is required.
 
+## � Dataviewer integration (implemented)
+
+The dataviewer mounts this harness as a per-episode **JudgePanel**: reviewers
+run the judge inline next to human labels, and results are cached per dataset
+under `<dataset>/annotations/vlm_judge/`. The backend reuses the same
+`JudgeService` shown above via its own router and service factory. See the
+dataviewer's [VLM-as-Judge setup guidance](../../data-management/viewer/README.md#vlm-as-judge-optional)
+for enabling it (`VLM_JUDGE_ENABLED=true`), backend options, and usage.
+
 ## 🗺️ Roadmap
 
-- **Dataviewer integration.** Mount the HTTP router inside the dataviewer
-  backend so reviewers see VLM annotations inline next to human labels.
 - **MLflow logging.** Persist per-episode results into MLflow so the
   existing `evaluation/metrics/bootstrap_mlflow.py` flow picks them up.
 - **Cosmos-Reason1 NIM deployment.** Swap the `openai-compat` backend

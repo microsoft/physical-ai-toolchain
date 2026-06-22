@@ -29,6 +29,14 @@ from pydantic import BaseModel, Field
 
 from .backend import GenerationConfig, JudgeBackend, Qwen3VLBackend
 
+# Remote image fetching is OFF by default: the shim runs untrusted-input
+# inference and can bind beyond localhost, so fetching arbitrary URLs
+# server-side is an SSRF / request-hang risk. The dataviewer always sends
+# images as ``data:`` URIs. Set VLM_SHIM_ALLOW_REMOTE_IMAGES=true to opt into
+# bounded http(s) fetching on a trusted network.
+_ALLOW_REMOTE_IMAGES = os.environ.get("VLM_SHIM_ALLOW_REMOTE_IMAGES", "false").lower() == "true"
+_REMOTE_IMAGE_TIMEOUT_S = float(os.environ.get("VLM_SHIM_REMOTE_IMAGE_TIMEOUT_S", "10"))
+
 _LOGGER = logging.getLogger("evaluation.vlm_judge.openai_shim")
 
 
@@ -150,17 +158,27 @@ def _decode_image(url: str):
         _, _, b64 = url.partition(",")
         data = base64.b64decode(b64)
         return Image.open(io.BytesIO(data)).convert("RGB")
-    if url.startswith("http://") or url.startswith("https://"):
+    if url.startswith(("http://", "https://")):
+        if not _ALLOW_REMOTE_IMAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Remote image URLs are disabled; send images as data: URIs or set "
+                    "VLM_SHIM_ALLOW_REMOTE_IMAGES=true to enable bounded fetching on a trusted network."
+                ),
+            )
         import urllib.request
 
-        with urllib.request.urlopen(url) as response:
+        with urllib.request.urlopen(url, timeout=_REMOTE_IMAGE_TIMEOUT_S) as response:
             return Image.open(io.BytesIO(response.read())).convert("RGB")
     raise HTTPException(status_code=400, detail=f"Unsupported image_url scheme: {url[:32]}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vlm_judge.openai_shim")
-    parser.add_argument("--host", default=os.environ.get("VLM_SHIM_HOST", "0.0.0.0"))
+    # Bind localhost by default; override with --host/VLM_SHIM_HOST only on a
+    # trusted network (the shim performs no auth on /v1/chat/completions).
+    parser.add_argument("--host", default=os.environ.get("VLM_SHIM_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("VLM_SHIM_PORT", "8001")))
     parser.add_argument(
         "--model-id",
