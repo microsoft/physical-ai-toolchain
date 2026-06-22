@@ -32,6 +32,7 @@ def get_vlm_judge_service(config: AppConfig):
 
     try:
         from evaluation.vlm_judge import (
+            AgentConfig,
             BackendConfig,
             FrameConfig,
             JudgeService,
@@ -53,13 +54,17 @@ def get_vlm_judge_service(config: AppConfig):
         api_key=config.vlm_judge_api_key,
     )
     frames = FrameConfig(n_frames=config.vlm_judge_n_frames)
+    method = config.vlm_judge_process_method
+    process_method = method if method in ("gvl", "chronological") else "gvl"
+    agent = AgentConfig(process_method=process_method)
     _service = JudgeService(
-        ServiceConfig(backend=backend, frames=frames, cache_dir=cache_dir),
+        ServiceConfig(backend=backend, frames=frames, agent=agent, cache_dir=cache_dir),
     )
     logger.info(
-        "VLM judge service ready: backend=%s model=%s cache_dir=%s",
+        "VLM judge service ready: backend=%s model=%s process=%s cache_dir=%s",
         backend.kind,
         backend.model_id,
+        process_method,
         cache_dir,
     )
     return _service

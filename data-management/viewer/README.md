@@ -157,7 +157,25 @@ before launching the backend.
 | `VLM_JUDGE_BASE_URL`  | —                           | OpenAI-compatible server URL (`openai-compat` only)              |
 | `VLM_JUDGE_API_KEY`   | —                           | Bearer token for the remote backend                              |
 | `VLM_JUDGE_N_FRAMES`  | `12`                        | Frames sampled per episode                                       |
+| `VLM_JUDGE_PROCESS_METHOD` | `gvl`                  | Process-reward method: `gvl` (shuffle-and-rank) or `chronological` |
 | `VLM_JUDGE_CACHE_DIR` | —                           | Fallback judgment cache; the viewer caches per dataset under `annotations/vlm_judge/` |
+
+> [!NOTE]
+> **Process-reward method (`VLM_JUDGE_PROCESS_METHOD`).** The per-frame progress
+> histogram comes from one of two strategies:
+>
+> - `gvl` (default) shows the frames **shuffled** and asks the model to rank each
+>   by completion, then re-orders them ([GVL](https://arxiv.org/abs/2411.04549)).
+>   Shuffling prevents the model from faking a monotonic ramp from frame position,
+>   so it is the more rigorous signal — but it needs a capable VLM. Small local
+>   models (e.g. `Qwen3-VL-4B`) often collapse to a flat/empty histogram under it.
+> - `chronological` shows the frames in order and asks for the same per-frame
+>   score. It yields fuller curves with small models, at the cost of being easier
+>   to game positionally.
+>
+> Recommendation: keep `gvl` with an 8B+ or hosted model; switch to
+> `chronological` when running a small local model and you want a populated
+> histogram. Changing the method invalidates cached judgments automatically.
 
 ## 🔒 Authentication with Entra ID
 

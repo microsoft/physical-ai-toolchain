@@ -75,6 +75,9 @@ class AppConfig:
     vlm_judge_n_frames: int = 12
     """Number of frames sampled per episode."""
 
+    vlm_judge_process_method: str = "gvl"
+    """Process-reward method: 'gvl' (shuffle-and-rank) or 'chronological'."""
+
     vlm_judge_cache_dir: str | None = None
     """Directory for the SHA256-keyed result cache; None disables disk cache."""
 
@@ -117,6 +120,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     vlm_judge_base_url = os.environ.get("VLM_JUDGE_BASE_URL") or None
     vlm_judge_api_key = os.environ.get("VLM_JUDGE_API_KEY") or None
     vlm_judge_n_frames = int(os.environ.get("VLM_JUDGE_N_FRAMES", "12"))
+    vlm_judge_process_method = os.environ.get("VLM_JUDGE_PROCESS_METHOD", "gvl").lower()
     vlm_judge_cache_dir = os.environ.get("VLM_JUDGE_CACHE_DIR") or None
 
     return AppConfig(
@@ -137,6 +141,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         vlm_judge_base_url=vlm_judge_base_url,
         vlm_judge_api_key=vlm_judge_api_key,
         vlm_judge_n_frames=vlm_judge_n_frames,
+        vlm_judge_process_method=vlm_judge_process_method,
         vlm_judge_cache_dir=vlm_judge_cache_dir,
     )
 
