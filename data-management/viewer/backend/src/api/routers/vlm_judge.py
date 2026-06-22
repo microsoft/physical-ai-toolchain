@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from ..config import AppConfig, get_app_config
@@ -179,7 +180,11 @@ async def run_episode_judgment(
     was_cached = not payload.force and cache.get(cache_key) is not None
 
     try:
-        result = judge_service.judge_episode(
+        # Model inference is blocking and GPU-bound; run it in a worker thread so
+        # the single event loop stays free to serve episode/video requests while
+        # a judgment is in flight (otherwise the whole backend stalls per run).
+        result = await run_in_threadpool(
+            judge_service.judge_episode,
             episode_id=f"{dataset_id}/episode_{episode_idx:06d}",
             instruction=instruction,
             video_paths=record.video_paths,
