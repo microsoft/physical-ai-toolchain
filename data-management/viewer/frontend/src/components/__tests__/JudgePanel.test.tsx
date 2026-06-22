@@ -8,10 +8,29 @@ import type { VlmJudgeResult, VlmJudgeStatus } from '@/types'
 const mockUseStatus = vi.fn()
 const mockMutate = vi.fn()
 const mockUseRun = vi.fn()
+const mockSaveLabels = vi.fn()
+const mockRunAll = vi.fn()
+const mockApplyLabelsAll = vi.fn()
+const mockCancel = vi.fn()
+const mockBatch = vi.fn()
 
 vi.mock('@/hooks/use-vlm-judge', () => ({
     useVlmJudgeStatus: () => mockUseStatus(),
     useRunVlmJudge: () => mockUseRun(),
+}))
+
+vi.mock('@/hooks/use-labels', () => ({
+    useSaveEpisodeLabels: () => ({ mutate: mockSaveLabels, isPending: false }),
+    labelKeys: { dataset: (id: string) => ['labels', id] },
+}))
+
+vi.mock('@/hooks/use-vlm-judge-batch', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@/hooks/use-vlm-judge-batch')>()
+    return { ...actual, useVlmJudgeBatch: () => mockBatch() }
+})
+
+vi.mock('@/stores/label-store', () => ({
+    useLabelStore: Object.assign(vi.fn(), { getState: () => ({ episodeLabels: {} }) }),
 }))
 
 function status(partial: Partial<VlmJudgeStatus> = {}): VlmJudgeStatus {
@@ -50,7 +69,20 @@ describe('JudgePanel', () => {
         mockUseStatus.mockReset()
         mockMutate.mockReset()
         mockUseRun.mockReset()
+        mockSaveLabels.mockReset()
+        mockRunAll.mockReset()
+        mockApplyLabelsAll.mockReset()
+        mockCancel.mockReset()
+        mockBatch.mockReset()
         mockUseRun.mockReturnValue({ mutate: mockMutate, isPending: false, error: null, data: undefined })
+        mockBatch.mockReturnValue({
+            progress: null,
+            error: null,
+            isRunning: false,
+            runAll: mockRunAll,
+            applyLabelsAll: mockApplyLabelsAll,
+            cancel: mockCancel,
+        })
     })
 
     it('shows a disabled hint when the judge backend is not enabled', () => {
@@ -159,5 +191,42 @@ describe('JudgePanel', () => {
         expect(screen.getByRole('progressbar', { name: /running judge/i })).toBeInTheDocument()
         expect(screen.getByRole('button', { name: /running/i })).toBeDisabled()
         expect(screen.queryByText(/no judgment yet/i)).not.toBeInTheDocument()
+    })
+
+    it('applies the current outcome as the episode label', async () => {
+        const user = userEvent.setup()
+        const result = judgeResult({ outcomeSuccess: true })
+        mockUseStatus.mockReturnValue({ data: status({ result }), isLoading: false, error: null })
+        render(<JudgePanel datasetId="demo" episodeIndex={4} />)
+        await user.click(screen.getByRole('button', { name: /apply label/i }))
+        expect(mockSaveLabels).toHaveBeenCalledWith({ episodeIdx: 4, labels: ['SUCCESS'] })
+    })
+
+    it('exposes batch actions and runs the judge across the dataset', async () => {
+        const user = userEvent.setup()
+        mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
+        render(<JudgePanel datasetId="demo" episodeIndex={0} totalEpisodes={3} />)
+        expect(screen.getByText(/whole dataset \(3 episodes\)/i)).toBeInTheDocument()
+        await user.click(screen.getByRole('button', { name: /run all/i }))
+        expect(mockRunAll).toHaveBeenCalledWith({ processMethod: 'gvl' })
+        await user.click(screen.getByRole('button', { name: /label all/i }))
+        expect(mockApplyLabelsAll).toHaveBeenCalledWith({ processMethod: 'gvl' })
+    })
+
+    it('renders batch progress with a cancel control', async () => {
+        const user = userEvent.setup()
+        mockBatch.mockReturnValue({
+            progress: { phase: 'judging', done: 1, total: 3 },
+            error: null,
+            isRunning: true,
+            runAll: mockRunAll,
+            applyLabelsAll: mockApplyLabelsAll,
+            cancel: mockCancel,
+        })
+        mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
+        render(<JudgePanel datasetId="demo" episodeIndex={0} totalEpisodes={3} />)
+        expect(screen.getByText('1 / 3')).toBeInTheDocument()
+        await user.click(screen.getByRole('button', { name: /cancel/i }))
+        expect(mockCancel).toHaveBeenCalled()
     })
 })

@@ -450,3 +450,32 @@ export async function runVlmJudge(
   const data = await handleResponse<unknown>(response)
   return transformKeys<VlmJudgeResult>(data)
 }
+
+// ============================================================================
+// Episode Labels API
+// ============================================================================
+
+export interface EpisodeLabelsResult {
+  episodeIndex: number
+  labels: string[]
+}
+
+/**
+ * Replace the label set assigned to a single episode.
+ */
+export async function setEpisodeLabels(
+  datasetId: string,
+  episodeIndex: number,
+  labels: string[],
+): Promise<EpisodeLabelsResult> {
+  const response = await mutationFetch(
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/labels`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ labels }),
+    },
+  )
+  const data = await handleResponse<unknown>(response)
+  return transformKeys<EpisodeLabelsResult>(data)
+}

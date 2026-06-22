@@ -84,6 +84,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
       datasetId={currentDataset.id}
       episodeIndex={currentEpisode.meta.index}
       instruction={currentInstruction}
+      totalEpisodes={currentDataset.totalEpisodes}
     />
   )
   const trajectoryLanguageInstructionPanel = <LanguageInstructionWidget />

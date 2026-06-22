@@ -6,10 +6,11 @@
  * configured (``VLM_JUDGE_ENABLED=false``), so it can ship enabled by default.
  */
 
-import { AlertCircle, CheckCircle2, Database, Play, RefreshCw, XCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Database, Play, RefreshCw, Tag, Tags, XCircle } from 'lucide-react'
 import { memo, useCallback, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import {
     Select,
     SelectContent,
@@ -17,8 +18,15 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
+import { useSaveEpisodeLabels } from '@/hooks/use-labels'
 import { useRunVlmJudge, useVlmJudgeStatus } from '@/hooks/use-vlm-judge'
+import {
+    applyOutcomeLabel,
+    outcomeToLabel,
+    useVlmJudgeBatch,
+} from '@/hooks/use-vlm-judge-batch'
 import { cn } from '@/lib/utils'
+import { useLabelStore } from '@/stores/label-store'
 import type { VlmJudgeResult } from '@/types'
 
 const METHOD_LABELS: Record<string, string> = {
@@ -31,6 +39,8 @@ export interface JudgePanelProps {
     episodeIndex: number
     /** Optional language instruction override; falls back to dataset metadata. */
     instruction?: string
+    /** Episode count for the loaded dataset; enables the batch (all-episode) actions. */
+    totalEpisodes?: number
     className?: string
 }
 
@@ -104,10 +114,13 @@ export const JudgePanel = memo(function JudgePanel({
     datasetId,
     episodeIndex,
     instruction,
+    totalEpisodes,
     className,
 }: JudgePanelProps) {
     const status = useVlmJudgeStatus({ datasetId, episodeIndex })
     const runMutation = useRunVlmJudge()
+    const saveLabels = useSaveEpisodeLabels()
+    const batch = useVlmJudgeBatch(datasetId, totalEpisodes ?? 0)
 
     const [methodOverride, setMethodOverride] = useState<string | undefined>(undefined)
     const available = status.data?.processMethods
@@ -122,8 +135,9 @@ export const JudgePanel = memo(function JudgePanel({
     const errorMessage = useMemo(() => {
         if (runMutation.error) return runMutation.error.message
         if (status.error) return (status.error as Error).message
+        if (batch.error) return batch.error
         return null
-    }, [runMutation.error, status.error])
+    }, [runMutation.error, status.error, batch.error])
 
     const handleRun = useCallback(
         (force: boolean) => {
@@ -139,6 +153,16 @@ export const JudgePanel = memo(function JudgePanel({
         },
         [runMutation, datasetId, episodeIndex, instruction, effectiveMethod],
     )
+
+    const handleApplyLabel = useCallback(() => {
+        if (!result) return
+        const existing = useLabelStore.getState().episodeLabels[episodeIndex] ?? []
+        const next = applyOutcomeLabel(existing, outcomeToLabel(result))
+        saveLabels.mutate({ episodeIdx: episodeIndex, labels: next })
+    }, [result, episodeIndex, saveLabels])
+
+    const hasBatch = (totalEpisodes ?? 0) > 0
+    const busy = runMutation.isPending || batch.isRunning || saveLabels.isPending
 
     if (status.isLoading) {
         return (
@@ -285,7 +309,7 @@ export const JudgePanel = memo(function JudgePanel({
                     type="button"
                     size="sm"
                     onClick={() => handleRun(false)}
-                    disabled={runMutation.isPending}
+                    disabled={busy}
                 >
                     <Play className="mr-1 size-3" />
                     {runMutation.isPending ? 'Running…' : result ? 'Re-evaluate' : 'Run judge'}
@@ -296,13 +320,87 @@ export const JudgePanel = memo(function JudgePanel({
                         size="sm"
                         variant="outline"
                         onClick={() => handleRun(true)}
-                        disabled={runMutation.isPending}
+                        disabled={busy}
                     >
                         <RefreshCw className="mr-1 size-3" />
                         Force fresh
                     </Button>
                 )}
+                {result && (
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleApplyLabel}
+                        disabled={busy}
+                        title={`Apply ${outcomeToLabel(result)} as this episode's label`}
+                    >
+                        <Tag className="mr-1 size-3" />
+                        Apply label
+                    </Button>
+                )}
             </div>
+
+            {hasBatch && (
+                <div className="space-y-2 border-t pt-2">
+                    <p className="text-muted-foreground text-xs font-medium">
+                        Whole dataset ({totalEpisodes} episodes)
+                    </p>
+                    {batch.progress ? (
+                        <div className="space-y-1">
+                            <div className="text-muted-foreground flex items-center justify-between text-[11px]">
+                                <span>
+                                    {batch.progress.phase === 'judging'
+                                        ? 'Running judge on all episodes'
+                                        : 'Applying labels to all episodes'}
+                                </span>
+                                <span>
+                                    {batch.progress.done} / {batch.progress.total}
+                                </span>
+                            </div>
+                            <Progress
+                                value={(batch.progress.done / batch.progress.total) * 100}
+                                className="h-1.5"
+                                aria-label="Batch judge progress"
+                            />
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 px-2 text-[11px]"
+                                onClick={batch.cancel}
+                            >
+                                Cancel
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="flex flex-wrap gap-2">
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void batch.runAll({ processMethod: effectiveMethod })}
+                                disabled={busy}
+                            >
+                                <Play className="mr-1 size-3" />
+                                Run all
+                            </Button>
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                    void batch.applyLabelsAll({ processMethod: effectiveMethod })
+                                }
+                                disabled={busy}
+                            >
+                                <Tags className="mr-1 size-3" />
+                                Label all
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            )}
         </section>
     )
 })
