@@ -7,8 +7,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from vlm_judge.api import build_router
-from vlm_judge.judge import JudgeResult
+
+pytest.importorskip("pydantic")
+
+from vlm_judge.api import build_router  # noqa: E402
+from vlm_judge.judge import JudgeResult  # noqa: E402
 
 
 class StubService:

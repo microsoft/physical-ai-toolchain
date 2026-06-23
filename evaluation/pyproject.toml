@@ -77,6 +77,10 @@ omit = [
     "sil/monitor_checkpoints.py",
     "sil/play.py",
     "sil/play_policy.py",
+    # CLI analysis scripts that require heavy media/dataframe deps (opencv, av,
+    # pandas) not installed in the lean evaluation CI environment.
+    "metrics/analyze_action_smoothness.py",
+    "metrics/detect_initial_objects.py",
 ]
 
 [tool.coverage.report]
