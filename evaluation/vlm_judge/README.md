@@ -191,13 +191,13 @@ behaviour, the multi-step agent controller (success / low-confidence /
 failure flows + format-violation tolerance), and the FastAPI router. No
 GPU or network is required.
 
-## � Dataviewer integration (implemented)
+## � Dataviewer integration (experimental)
 
 The dataviewer mounts this harness as a per-episode **JudgePanel**: reviewers
 run the judge inline next to human labels, and results are cached per dataset
 under `<dataset>/annotations/vlm_judge/`. The backend reuses the same
 `JudgeService` shown above via its own router and service factory. See the
-dataviewer's [VLM-as-Judge setup guidance](../../data-management/viewer/README.md#vlm-as-judge-optional)
+dataviewer's [VLM-as-Judge setup guidance](../../data-management/viewer/README.md#vlm-as-judge-experimental)
 for enabling it (`VLM_JUDGE_ENABLED=true`), backend options, and usage.
 
 ## 🗺️ Roadmap
