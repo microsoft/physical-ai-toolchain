@@ -98,6 +98,72 @@ def submit_aml_training(
     )
 
 
+def submit_aml_lerobot_training(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    dataset_repo_id: str,
+    policy_type: str,
+    training_steps: int,
+    save_freq: int,
+    batch_size: int,
+    log_freq: int,
+) -> AzureMLJob:
+    experiment_name = _e2e_name("il-training-e2e-aml")
+    log_e2e(
+        "Submitting AzureML LeRobot training job "
+        f"for dataset={dataset_repo_id}, policy={policy_type}, training_steps={training_steps}, "
+        f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}"
+    )
+    # eval-freq > training-steps disables in-loop evaluation (which would need
+    # sim deps that are not part of the lerobot training container).
+    result = run_command(
+        [
+            str(repo_root / "training/il/scripts/submit-azureml-lerobot-training.sh"),
+            "--dataset-repo-id",
+            dataset_repo_id,
+            "--policy-type",
+            policy_type,
+            "--training-steps",
+            str(training_steps),
+            "--save-freq",
+            str(save_freq),
+            "--batch-size",
+            str(batch_size),
+            "--eval-freq",
+            str(training_steps + 1),
+            "--log-freq",
+            str(log_freq),
+            "--experiment-name",
+            experiment_name,
+            "--subscription-id",
+            aml_workspace.subscription_id,
+            "--resource-group",
+            aml_workspace.resource_group,
+            "--workspace-name",
+            aml_workspace.workspace_name,
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"AzureML LeRobot e2e submission failed\n\n{format_command_failure(result)}")
+
+    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    job_name = _parse_azureml_job_name(combined_output)
+    if job_name is None:
+        raise AssertionError(
+            f"Unable to parse AzureML job name from LeRobot submission output\n\n{combined_output.strip()}"
+        )
+
+    log_e2e(f"Submitted AzureML LeRobot job name={job_name}")
+
+    return AzureMLJob(
+        name=job_name,
+        workspace=aml_workspace,
+        experiment_name=experiment_name,
+    )
+
+
 def fetch_aml_job_payload(job: AzureMLJob, repo_root: Path) -> dict[str, Any]:
     result = run_command(
         [
@@ -183,18 +249,59 @@ def _mark_job_terminal(job: AzureMLJob, terminal_status: str) -> None:
     job.terminal_status = terminal_status
 
 
-def assert_job_has_checkpoint(job: AzureMLJob, repo_root: Path) -> None:
-    log_e2e(f"Checking checkpoint output for AzureML job {job.name}")
-    payload = fetch_aml_job_payload(job, repo_root)
-    properties = payload.get("properties")
-    outputs = payload.get("outputs")
-    if isinstance(properties, Mapping) and isinstance(properties.get("outputs"), Mapping):
-        outputs = properties["outputs"]
+def assert_job_has_checkpoint(job: AzureMLJob) -> None:
+    """Verify the AzureML ``checkpoints`` named output was populated with at least one file.
 
-    if isinstance(outputs, Mapping) and "checkpoints" in outputs:
-        log_e2e(f"Checkpoint output is present for AzureML job {job.name}")
-        return
-    raise AssertionError(f"AzureML job {job.name!r} did not expose a 'checkpoints' output")
+    The contents check (not just declaration check) is essential: when the
+    output binding is mis-wired, the named output is still *declared* on the
+    job payload but the upload directory stays empty and Azure ML silently
+    skips the upload. The bug fixed by #855 had exactly this shape — the
+    pre-fix code produced jobs whose payload listed ``outputs.checkpoints``
+    but whose blob path contained zero files.
+
+    Lists blobs under the named output's ``workspaceblobstore`` prefix
+    instead of downloading them — checkpoints can be hundreds of MB.
+    """
+    from azure.ai.ml import MLClient
+    from azure.identity import DefaultAzureCredential
+    from azure.storage.blob import ContainerClient
+
+    log_e2e(f"Listing checkpoint output blobs for AzureML job {job.name}")
+    credential = DefaultAzureCredential()
+    client = MLClient(
+        credential=credential,
+        subscription_id=job.workspace.subscription_id,
+        resource_group_name=job.workspace.resource_group,
+        workspace_name=job.workspace.workspace_name,
+    )
+
+    datastore = client.datastores.get("workspaceblobstore")
+    account_name = getattr(datastore, "account_name", None)
+    container_name = getattr(datastore, "container_name", None)
+    if not isinstance(account_name, str) or not account_name:
+        raise AssertionError(f"workspaceblobstore datastore has no account_name: {datastore!r}")
+    if not isinstance(container_name, str) or not container_name:
+        raise AssertionError(f"workspaceblobstore datastore has no container_name: {datastore!r}")
+
+    prefix = f"azureml/{job.name}/checkpoints/"
+    container = ContainerClient(
+        account_url=f"https://{account_name}.blob.core.windows.net",
+        container_name=container_name,
+        credential=credential,
+    )
+    with container:
+        blob_names = sorted(b.name for b in container.list_blobs(name_starts_with=prefix))
+
+    if not blob_names:
+        raise AssertionError(
+            f"AzureML job {job.name!r} 'checkpoints' named output is empty. "
+            "The training entry point did not write any files to "
+            "$AZURE_ML_OUTPUT_CHECKPOINTS — the wiring is broken (see #855)."
+        )
+
+    relative_names = [name.removeprefix(prefix) for name in blob_names]
+    sample = ", ".join(relative_names[:5])
+    log_e2e(f"Checkpoint output for AzureML job {job.name} contains {len(blob_names)} file(s); sample: {sample}")
 
 
 def _aml_code_resource_id(payload: Mapping[str, Any]) -> str:

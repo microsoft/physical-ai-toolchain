@@ -40,12 +40,11 @@ RTX PRO 6000 nodes must set `nvidia.com/gpu.deploy.driver=false` to prevent GPU 
 
 ### Setup Script Order
 
-| Order | Script                            | Components                                           |
-|-------|-----------------------------------|------------------------------------------------------|
-| 1     | `01-deploy-robotics-charts.sh`    | GPU Operator, KAI Scheduler                          |
-| 2     | `02-deploy-azureml-extension.sh`  | AzureML extension, compute attach, InstanceType CRDs |
-| 3     | `03-deploy-osmo-control-plane.sh` | OSMO control plane services                          |
-| 4     | `04-deploy-osmo-backend.sh`       | OSMO backend operator, pool configuration            |
+| Order | Script                           | Components                                                            |
+|-------|----------------------------------|-----------------------------------------------------------------------|
+| 1     | `01-deploy-robotics-charts.sh`   | GPU Operator, KAI Scheduler                                           |
+| 2     | `02-deploy-azureml-extension.sh` | AzureML extension, compute attach, InstanceType CRDs                  |
+| 3     | `03-deploy-osmo.sh`              | OSMO control plane, gateway, backend operator, and pool configuration |
 
 ## Dependencies
 

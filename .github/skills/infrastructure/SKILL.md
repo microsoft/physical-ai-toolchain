@@ -14,7 +14,7 @@ Deploy and manage Azure cloud infrastructure for the Physical AI Toolchain — T
 | Azure CLI | `az login` authenticated |
 | Terraform | 1.5+ |
 | kubectl | Matching cluster version |
-| Helm | 3.x |
+| Helm | 4.2+ |
 | shellcheck | For script validation |
 
 ## Deployment Workflow
@@ -74,8 +74,7 @@ kubectl cluster-info
 cd infrastructure/setup
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo-control-plane.sh
-./04-deploy-osmo-backend.sh
+./03-deploy-osmo.sh
 ```
 
 Scripts must run in numeric order. Each supports `--config-preview` for dry-run output.
@@ -158,8 +157,7 @@ infrastructure/
 ├── setup/                             # Post-deploy cluster configuration
 │   ├── 01-deploy-robotics-charts.sh   # GPU Operator, KAI Scheduler
 │   ├── 02-deploy-azureml-extension.sh # AzureML K8s extension
-│   ├── 03-deploy-osmo-control-plane.sh# OSMO control plane
-│   ├── 04-deploy-osmo-backend.sh      # OSMO backend services
+│   ├── 03-deploy-osmo.sh             # OSMO control plane and backend
 │   ├── defaults.conf                  # Central version and namespace config
 │   └── lib/                           # Shared shell libraries
 ├── specifications/                    # Domain specification documents

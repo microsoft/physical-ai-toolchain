@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Cluster Operations and Troubleshooting
 description: Accessing OSMO, troubleshooting common issues, and optional deployment scripts
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-22
+ms.date: 2026-06-12
 ms.topic: reference
 keywords:
   - troubleshooting
@@ -32,7 +32,7 @@ When connected to VPN, OSMO services are accessible via the internal load balanc
 
 ```bash
 # Login to OSMO via internal load balancer
-osmo login http://10.0.5.6 --method=dev --username=testuser
+osmo login http://10.0.5.6 --method=dev --username=admin
 
 # Verify connection
 osmo info
@@ -63,37 +63,34 @@ If `should_enable_private_aks_cluster = false` and you are not using VPN, use `k
 
 | Service      | Command                                                               | Local URL               |
 |--------------|-----------------------------------------------------------------------|-------------------------|
-| UI Dashboard | `kubectl port-forward svc/osmo-ui 3000:80 -n osmo-control-plane`      | `http://localhost:3000` |
 | API Service  | `kubectl port-forward svc/osmo-service 9000:80 -n osmo-control-plane` | `http://localhost:9000` |
-| Router       | `kubectl port-forward svc/osmo-router 8080:80 -n osmo-control-plane`  | `http://localhost:8080` |
+| Gateway      | `kubectl port-forward svc/osmo-gateway 8080:80 -n osmo-control-plane` | `http://localhost:8080` |
 
 ```bash
 # Terminal 1: Start port-forward for API service
 kubectl port-forward svc/osmo-service 9000:80 -n osmo-control-plane
 
 # Terminal 2: Login and use OSMO CLI
-osmo login http://localhost:9000 --method=dev --username=testuser
+osmo login http://localhost:9000 --method=dev --username=admin
 
 # Verify connection
 osmo info
 osmo backend list
 ```
 
-For full OSMO functionality (UI + API + Router), run port-forwards in separate terminals:
+For full OSMO functionality (UI + API + gateway), run these port-forwards in separate terminals:
 
 ```bash
 # Terminal 1: API service (for osmo CLI)
 kubectl port-forward svc/osmo-service 9000:80 -n osmo-control-plane
 
-# Terminal 2: UI dashboard (for web browser)
-kubectl port-forward svc/osmo-ui 3000:80 -n osmo-control-plane
+# Terminal 2: Gateway (for web browser and API routing)
+kubectl port-forward svc/osmo-gateway 8080:80 -n osmo-control-plane
 
-# Terminal 3: Router (optional, for workflow exec/port-forward)
-kubectl port-forward svc/osmo-router 8080:80 -n osmo-control-plane
 ```
 
 > [!NOTE]
-> When accessing OSMO through port-forwarding, `osmo workflow exec` and `osmo workflow port-forward` commands are not supported. These require the router service to be accessible via ingress.
+> When accessing OSMO through port-forwarding, `osmo workflow exec` and `osmo workflow port-forward` commands are not supported. These require the gateway service to be accessible via ingress.
 
 ## 🔍 Troubleshooting
 
@@ -145,8 +142,7 @@ kubectl describe sa osmo-service -n osmo-control-plane
 002-setup/
 ├── 01-deploy-robotics-charts.sh
 ├── 02-deploy-azureml-extension.sh
-├── 03-deploy-osmo-control-plane.sh
-├── 04-deploy-osmo-backend.sh
+├── 03-deploy-osmo.sh
 ├── cleanup/                    # Cleanup scripts
 ├── config/                     # OSMO configuration templates
 ├── lib/                        # Shared functions
@@ -157,11 +153,11 @@ kubectl describe sa osmo-service -n osmo-control-plane
 
 ## 🧩 Optional Scripts
 
-| Script                                    | Purpose                                                 |
-|-------------------------------------------|---------------------------------------------------------|
-| `optional/deploy-volcano-scheduler.sh`    | Volcano (alternative to KAI)                            |
-| `optional/uninstall-volcano-scheduler.sh` | Uninstall Volcano scheduler                             |
-| `optional/add-user-to-platform.sh`        | Add user to OSMO platform                               |
+| Script                                    | Purpose                      |
+|-------------------------------------------|------------------------------|
+| `optional/deploy-volcano-scheduler.sh`    | Volcano (alternative to KAI) |
+| `optional/uninstall-volcano-scheduler.sh` | Uninstall Volcano scheduler  |
+| `optional/add-user-to-platform.sh`        | Add user to OSMO platform    |
 
 For adding, removing, or resizing AKS node pools on a running cluster, see [Manage Node Pools](manage-node-pools.md).
 

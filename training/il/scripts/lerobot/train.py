@@ -42,6 +42,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from training.il.scripts.lerobot._env import has_blob_urls
+
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 
@@ -70,6 +72,33 @@ SYSTEM_METRICS_INTERVAL = 30
 _PROCESS_GROUP_KILL_GRACE_S = 15
 
 _VALID_MIXED_PRECISION = {"no", "fp16", "bf16"}
+
+
+def _sync_checkpoint_output(output_dir: Path) -> None:
+    """Mirror ``output_dir/checkpoints/`` into ``$AZURE_ML_OUTPUT_CHECKPOINTS`` if set.
+
+    Azure ML exports ``AZURE_ML_OUTPUT_<NAME>`` for each ``uri_folder`` output
+    declared on the job; whatever lands in that directory is uploaded to the
+    named output's blob path at job end. No-op when the env var is unset
+    (e.g., local runs) or when there is nothing to copy.
+    """
+
+    target = os.environ.get("AZURE_ML_OUTPUT_CHECKPOINTS")
+    if not target:
+        return
+
+    source = output_dir / "checkpoints"
+    if not source.exists():
+        return
+
+    destination = Path(target)
+    try:
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(source, destination, dirs_exist_ok=True)
+        print(f"[AzureML] Copied checkpoints to {destination}")
+    except Exception as exc:
+        print(f"[AzureML] Failed to copy checkpoints to {destination}: {exc}")
 
 
 def _detect_num_gpus() -> int:
@@ -317,10 +346,6 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
         print(f"[MLflow] Run ID: {run.info.run_id}")
 
         params = _build_train_params(num_gpus)
-        # Add extra params for azure-data variant
-        if os.environ.get("STORAGE_ACCOUNT"):
-            params["storage_account"] = os.environ.get("STORAGE_ACCOUNT", "")
-            params["blob_prefix"] = os.environ.get("BLOB_PREFIX", "")
         mlflow.log_params(params)
 
         # Lineage tags: dataset -> run -> registered model. These are visible
@@ -336,10 +361,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
         }
         if os.environ.get("DATASET_REPO_ID"):
             lineage_tags["dataset.repo_id"] = os.environ["DATASET_REPO_ID"]
-        if os.environ.get("STORAGE_ACCOUNT"):
-            lineage_tags["dataset.storage_account"] = os.environ["STORAGE_ACCOUNT"]
-            lineage_tags["dataset.storage_container"] = os.environ.get("STORAGE_CONTAINER", "datasets")
-            lineage_tags["dataset.blob_prefix"] = os.environ.get("BLOB_PREFIX", "")
+        if has_blob_urls():
             lineage_tags["dataset.source"] = "azure-blob"
         elif os.environ.get("DATASET_REPO_ID"):
             lineage_tags["dataset.source"] = "huggingface"
@@ -372,9 +394,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
         )
 
         def signal_handler(signum: int, frame: object) -> None:
-            print(f"[MLflow] Received signal {signum}, saving checkpoints and terminating subprocess group...")
-            with contextlib.suppress(Exception):
-                upload_new_checkpoints(run, output_dir, uploaded_checkpoints, source=source)
+            print(f"[MLflow] Received signal {signum}, terminating subprocess group then mirroring checkpoints...")
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGTERM)
             try:
@@ -386,6 +406,16 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
                 )
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(process.pid, signal.SIGKILL)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=5)
+            # Workers are now quiescent; safe to read the on-disk checkpoint tree
+            # without risking partial-file mirrors. Doing the copy before kill
+            # would race accelerate workers still writing to checkpoint shards
+            # and could mirror a half-written destination.
+            with contextlib.suppress(Exception):
+                upload_new_checkpoints(run, output_dir, uploaded_checkpoints, source=source)
+            with contextlib.suppress(Exception):
+                _sync_checkpoint_output(output_dir)
 
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGINT, signal_handler)
@@ -429,6 +459,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
 
         print("[MLflow] Uploading final checkpoints...")
         upload_new_checkpoints(run, output_dir, uploaded_checkpoints, source=source)
+        _sync_checkpoint_output(output_dir)
 
         mlflow.log_param("output_dir", str(output_dir))
 
@@ -520,6 +551,7 @@ def main() -> int:
         "LEARNING_RATE": "--policy.optimizer_lr",
         "EVAL_FREQ": "--eval_freq",
         "SAVE_FREQ": "--save_freq",
+        "LOG_FREQ": "--log_freq",
     }
     for env_var, arg_name in env_arg_map.items():
         if arg_name not in cli_text:
@@ -527,10 +559,12 @@ def main() -> int:
             if value:
                 cmd.append(f"{arg_name}={value}")
 
-    # Determine source tag
-    source = "osmo-lerobot-training"
-    if os.environ.get("STORAGE_ACCOUNT"):
-        source = "osmo-azure-data-training"
+    # Source tag for MLflow lineage: {platform}-lerobot-{datasource}.
+    # AZUREML_RUN_ID is set automatically by Azure ML on job pods; absent on OSMO.
+    # BLOB_URLS discriminates blob-fed runs from HuggingFace downloads on either platform.
+    platform = "azureml" if os.environ.get("AZUREML_RUN_ID") else "osmo"
+    datasource = "blob" if has_blob_urls() else "hf"
+    source = f"{platform}-lerobot-{datasource}"
 
     # Single-node multi-GPU: detect the GPU count visible to the job container
     # (AzureML-on-Kubernetes: pod's `nvidia.com/gpu` request via InstanceType;
@@ -551,7 +585,7 @@ def main() -> int:
 
     # Post-training checkpoint registration
     if exit_code == EXIT_SUCCESS and os.environ.get("REGISTER_CHECKPOINT"):
-        register_final_checkpoint()
+        exit_code = register_final_checkpoint()
 
     return exit_code
 

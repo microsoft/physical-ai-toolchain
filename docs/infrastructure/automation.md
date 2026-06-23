@@ -3,7 +3,7 @@ sidebar_position: 9
 title: Cluster Automation
 description: Scheduled start and stop automation for AKS cluster cost management
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-22
+ms.date: 2026-06-12
 ms.topic: reference
 keywords:
   - automation

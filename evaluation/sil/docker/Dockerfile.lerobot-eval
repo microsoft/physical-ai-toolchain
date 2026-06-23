@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:20260528.v1@sha256:f69a905143be337c938c6c8b0955749a8a3bc253804f2f6c3a3309d554c37f90
+FROM mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:20260614.v1@sha256:c2025155ac60bdeb71c55d5eef7b885f7d85d7bea9d5822d7bce7f0e8fb2eba9
 
 RUN apt-get update -qq && \
     apt-get install -y -qq ffmpeg git build-essential unzip python3-dev && \

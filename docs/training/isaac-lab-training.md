@@ -23,7 +23,7 @@ Isaac Lab reinforcement learning training with SKRL and RSL-RL backends. Both Az
 |-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | Infrastructure    | AKS cluster deployed via [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/README.md) |
 | Azure ML          | Extension installed via `02-deploy-azureml-extension.sh`                                                                               |
-| OSMO              | Control plane and backend via `03-deploy-osmo-control-plane.sh`                                                                        |
+| OSMO              | Control plane and backend via `03-deploy-osmo.sh`                                                                                      |
 | Terraform outputs | Available in `infrastructure/terraform/` (or provide values via CLI / environment vars)                                                |
 | Azure CLI         | `az` with `ml` extension for Azure ML submissions                                                                                      |
 | OSMO CLI          | `osmo` CLI installed and authenticated for OSMO submissions                                                                            |

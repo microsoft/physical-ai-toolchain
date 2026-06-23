@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-08
+ms.date: 2026-06-11
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -26,9 +26,7 @@ Deployment order:
 
 1. `./01-deploy-robotics-charts.sh` — GPU Operator, KAI Scheduler
 2. `./02-deploy-azureml-extension.sh` — AzureML K8s extension, compute attach
-3. `./03-deploy-osmo-control-plane.sh` — OSMO control plane
-4. `./04-deploy-osmo-backend.sh` — OSMO backend services
-5. `./05-deploy-dataviewer.sh` — Dataviewer container build and deploy
+3. `./03-deploy-osmo.sh` — OSMO control plane and backend operator
 
 ## 📖 Documentation
 
@@ -55,17 +53,7 @@ Mirror completed OSMO training runs to an Azure ML workspace as new model versio
 
 ### Enabling
 
-The mirror is enabled by default when an AzureML workspace exists in Terraform outputs. Run:
-
-```bash
-./04-deploy-osmo-backend.sh
-```
-
-To disable it explicitly:
-
-```bash
-./04-deploy-osmo-backend.sh --skip-azureml-pod-template
-```
+AzureML integration is configured in the OSMO workflow YAML directly. The workflow template (`training/il/workflows/osmo/lerobot-train.yaml`) passes `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, and `AZUREML_WORKSPACE_NAME` as environment variables. No special deploy-time flag is required.
 
 ### Using
 
@@ -77,26 +65,20 @@ Submit a replay for any completed run:
 
 ### What it does
 
-| Component       | Action                                                                                                                      |
-|-----------------|-----------------------------------------------------------------------------------------------------------------------------|
-| Deploy script   | Renders `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZUREML_WORKSPACE_NAME` into the `default_user` OSMO pod template |
-| Replay workflow | Spawns an OSMO pod that reads the run's output directory                                                                    |
-| `aml_mirror.py` | Uploads tensorboard logs + filtered final checkpoint                                                                        |
-
-### Disabling after deploy
-
-```bash
-./04-deploy-osmo-backend.sh --skip-azureml-pod-template
-```
+| Component       | Action                                                                     |
+|-----------------|----------------------------------------------------------------------------|
+| Workflow YAML   | Passes AzureML workspace coordinates as env vars to the training container |
+| Replay workflow | Spawns an OSMO pod that reads the run's output directory                   |
+| `aml_mirror.py` | Uploads tensorboard logs + filtered final checkpoint                       |
 
 ### Troubleshooting
 
-| Symptom                          | Cause                            | Fix                                                                       |
-|----------------------------------|----------------------------------|---------------------------------------------------------------------------|
-| `aml_mirror: missing env vars`   | Pod template not extended        | Re-run deploy script without `--skip-azureml-pod-template`                |
-| `AuthorizationFailed` on storage | Identity missing data-plane role | Re-apply Terraform                                                        |
-| Upload timeout                   | Default 7200s exceeded           | Set `AZUREML_ARTIFACTS_DEFAULT_TIMEOUT` env var on submission             |
-| `DefaultAzureCredential` failed  | Workload Identity not enabled    | Verify `azure.workload.identity/use: "true"` label and `osmo-workflow` SA |
+| Symptom                          | Cause                            | Fix                                                                                                     |
+|----------------------------------|----------------------------------|---------------------------------------------------------------------------------------------------------|
+| `aml_mirror: missing env vars`   | Workflow YAML missing AzureML vars | Add `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZUREML_WORKSPACE_NAME` to workflow environment |
+| `AuthorizationFailed` on storage | Identity missing data-plane role | Re-apply Terraform                                                                                      |
+| Upload timeout                   | Default 7200s exceeded           | Set `AZUREML_ARTIFACTS_DEFAULT_TIMEOUT` env var on submission                                           |
+| `DefaultAzureCredential` failed  | Workload Identity not enabled    | Verify `azure.workload.identity/use: "true"` label and `osmo-workflow` SA                               |
 
 ## ➡️ Next Step
 

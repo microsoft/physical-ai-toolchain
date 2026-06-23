@@ -3,7 +3,7 @@ sidebar_position: 9
 title: Cost Considerations
 description: Testing budgets, cost tracking, and optimization strategies for contribution validation
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-03
+ms.date: 2026-06-12
 ms.topic: concept
 ---
 

@@ -361,8 +361,7 @@ OSMO is an external orchestration platform for multi-cluster Kubernetes workload
 * Two payload strategies:
   * Base64-encoded archive: ~1MB limit, embedded in workflow YAML
   * Dataset folder injection: unlimited size, versioned, folder name in workflow env vars
-* Config types: SERVICE, WORKFLOW, DATASET, BACKEND, POOL, POD_TEMPLATE, RESOURCE_VALIDATION, BACKEND_TEST, ROLE
-* Apply config: `osmo config update <TYPE> [name] --file <path>`
+* Configuration mode: ConfigMap; all config is in Helm values files
 * Namespace layout:
   * `osmo-control-plane` — service components
   * `osmo-operator` — backend operator
@@ -371,6 +370,7 @@ OSMO is an external orchestration platform for multi-cluster Kubernetes workload
 * `oauth2Proxy.enabled: false` REQUIRED in Helm values when no OIDC provider is configured
 * Prerelease mode: `OSMO_USE_PRERELEASE=true` switches both chart and image versions
 * Service URL exposed via AzureML ingress controller internal load balancer
+* Storage: workload identity only — credential shape `azure://<account>/<container>`
 
 ## AzureML Integration
 
@@ -402,7 +402,7 @@ Training runs in NVIDIA Isaac Lab containers on GPU nodes via AzureML or OSMO.
 * Behavioral cloning: LeRobot (ACT/Diffusion policies), runtime-installed via `uv pip` in AzureML container
 * MLflow: monkey-patches `agent._update` for metric interception
   * Logging intervals: `step`, `balanced` (default, every 10 steps), `rollout`, or custom integer
-* Checkpoint flow: training writes to local FS → `TRAINING_CHECKPOINT_OUTPUT` env var → AzureML uploads as `uri_folder`
+* Checkpoint flow: training writes to local FS → mirrored into `$AZURE_ML_OUTPUT_CHECKPOINTS` at job exit → AzureML uploads as `uri_folder`
 
 ## GPU Configuration
 

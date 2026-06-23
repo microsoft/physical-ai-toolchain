@@ -18,13 +18,13 @@ legacy naming.
 
 ## Template Inventory
 
-| Template             | Purpose                                            | Source YAML path                                  | Typical submit path                                   |
-|----------------------|----------------------------------------------------|---------------------------------------------------|-------------------------------------------------------|
+| Template             | Purpose                                             | Source YAML path                                  | Typical submit path                                   |
+|----------------------|-----------------------------------------------------|---------------------------------------------------|-------------------------------------------------------|
 | `train.yaml`         | Isaac Lab RL training with inline payload archive   | `training/rl/workflows/osmo/train.yaml`           | `training/rl/scripts/submit-osmo-training.sh`         |
 | `train-dataset.yaml` | Isaac Lab RL training with dataset folder injection | `training/rl/workflows/osmo/train-dataset.yaml`   | `training/rl/scripts/submit-osmo-dataset-training.sh` |
-| `lerobot-train.yaml` | LeRobot ACT or Diffusion training workflow         | `training/il/workflows/osmo/lerobot-train.yaml`   | `training/il/scripts/submit-osmo-lerobot-training.sh` |
+| `lerobot-train.yaml` | LeRobot ACT or Diffusion training workflow          | `training/il/workflows/osmo/lerobot-train.yaml`   | `training/il/scripts/submit-osmo-lerobot-training.sh` |
 | `eval.yaml`          | Isaac Lab checkpoint evaluation workflow            | `evaluation/sil/workflows/osmo/eval.yaml`         | `evaluation/sil/scripts/submit-osmo-eval.sh`          |
-| `lerobot-eval.yaml`  | LeRobot policy evaluation workflow                 | `evaluation/sil/workflows/osmo/lerobot-eval.yaml` | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`  |
+| `lerobot-eval.yaml`  | LeRobot policy evaluation workflow                  | `evaluation/sil/workflows/osmo/lerobot-eval.yaml` | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`  |
 
 ## train.yaml
 
@@ -60,7 +60,7 @@ legacy naming.
 
 | Field                            | Details                                                                                                                                                                                                                                        |
 |----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Purpose                          | OSMO Isaac Lab checkpoint evaluation for policy export and rollout scoring.                                                                                                                                                                     |
+| Purpose                          | OSMO Isaac Lab checkpoint evaluation for policy export and rollout scoring.                                                                                                                                                                    |
 | Source YAML path                 | `evaluation/sil/workflows/osmo/eval.yaml`                                                                                                                                                                                                      |
 | Primary parameters and overrides | `default-values.task` (`Isaac-Ant-v0`), `default-values.num_envs` (`"4"`), `default-values.max_steps` (`"500"`), `default-values.video_length` (`"200"`), `default-values.checkpoint_uri` (empty), `default-values.inference_format` (`both`). |
 | Typical submit path              | `evaluation/sil/scripts/submit-osmo-eval.sh`                                                                                                                                                                                                   |

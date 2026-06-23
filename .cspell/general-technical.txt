@@ -388,6 +388,7 @@ downtime
 dpu
 drawtext
 dremio
+dshm
 dsvm
 dtsx
 ducktail
@@ -407,6 +408,7 @@ enablement
 enduser
 endusers
 enhancements
+enqueueable
 entitlement
 entitlements
 epicor
@@ -501,6 +503,7 @@ grafana
 graphql
 greenfield
 grooming
+groot
 gruntwork
 hadoop
 hardcoded
@@ -581,6 +584,7 @@ inmon
 innersource
 innodb
 inprivate
+inqueue
 intel
 intellicode
 intellij
@@ -1178,6 +1182,7 @@ scalability
 scalesetpriority
 scenario
 schedules
+schedulingshard
 schemathesis
 schwinn
 scikit
@@ -1605,6 +1610,7 @@ apikey
 # Azure NVIDIA Robotics Reference Architecture
 amlarc
 amlignore
+amloperator
 argjson
 autouse
 burstable
@@ -1647,6 +1653,7 @@ pentry
 persistenced
 pgpassword
 pname
+podgroup
 podgroups
 podmonitors
 portforward
@@ -1669,6 +1676,16 @@ ueks
 unnormalization
 updt
 zstd
+acrdev
+eeuo
+gpustat
+libsm
+libvulkan
+libxext
+libxrender
+noheader
+PYTHONUNBUFFERED
+torchcodec
 
 # Matplotlib / plotting API terms
 axhline
