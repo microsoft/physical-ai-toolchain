@@ -21,6 +21,14 @@ import { getJointLabel, type JointGroup } from './joint-constants'
 import { buildTrajectoryChartData } from './trajectory-plot-utils'
 import { useTrajectoryPlotSelection } from './useTrajectoryPlotSelection'
 
+// Stable empty fallback so an episode without named variables does not allocate
+// a fresh array every render (which would churn every dependent memo/effect).
+const EMPTY_TRAJECTORY_VARIABLES: TrajectoryVariable[] = []
+
+function sameNumberArray(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
 interface UseTrajectoryPlotStateOptions {
   onSaved?: () => void
   selectedRange?: [number, number] | null
@@ -116,7 +124,7 @@ export function useTrajectoryPlotState({
   const [defaultsOpen, setDefaultsOpen] = useState(false)
   const [plotArea, setPlotArea] = useState<TrajectoryPlotArea | null>(null)
   const selectionSurfaceRef = useRef<HTMLDivElement>(null)
-  const namedTrajectoryVariables = currentEpisode?.trajectoryVariables ?? []
+  const namedTrajectoryVariables = currentEpisode?.trajectoryVariables ?? EMPTY_TRAJECTORY_VARIABLES
   const shouldUseNamedVariables = !showVelocity && namedTrajectoryVariables.length > 0
   const stateVariables = useMemo(
     () => namedTrajectoryVariables.filter((variable) => variable.kind === 'state'),
@@ -251,7 +259,10 @@ export function useTrajectoryPlotState({
   ])
 
   useEffect(() => {
-    setSelectedJoints(autoSelectedJoints)
+    // Only update when the auto-selection actually changes. ``autoSelectedJoints``
+    // is a freshly-derived array each render, so assigning it unconditionally
+    // would set new state every render and cascade into an infinite re-render loop.
+    setSelectedJoints((prev) => (sameNumberArray(prev, autoSelectedJoints) ? prev : autoSelectedJoints))
   }, [autoSelectedJoints])
 
   useEffect(() => {
