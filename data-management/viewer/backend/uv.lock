@@ -1388,7 +1388,7 @@ requires-dist = [
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = "==1.20.1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = "==6.155.7" },
     { name = "numpy", specifier = "==2.5.0" },
-    { name = "openai", specifier = ">=1.0" },
+    { name = "openai", specifier = "==2.43.0" },
     { name = "pandas", marker = "extra == 'analysis'", specifier = "==3.0.3" },
     { name = "pillow", specifier = "==12.2.0" },
     { name = "pyarrow", specifier = "==24.0.0" },
