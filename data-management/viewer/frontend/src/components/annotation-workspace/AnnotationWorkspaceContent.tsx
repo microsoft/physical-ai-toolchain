@@ -1,4 +1,8 @@
-import { LabelPanel, LanguageInstructionWidget, ObjectDetectionWidget } from '@/components/annotation-panel'
+import {
+  LabelPanel,
+  LanguageInstructionWidget,
+  ObjectDetectionWidget,
+} from '@/components/annotation-panel'
 import { AnnotationWorkspaceDiagnosticsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceDiagnosticsPanel'
 import { AnnotationWorkspaceEditToolsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceEditToolsPanel'
 import { AnnotationWorkspacePlaybackCard } from '@/components/annotation-workspace/AnnotationWorkspacePlaybackCard'

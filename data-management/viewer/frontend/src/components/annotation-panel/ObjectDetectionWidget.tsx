@@ -119,15 +119,12 @@ export function ObjectDetectionWidget() {
     return `/api/datasets/${datasetId}/episodes/${episodeIndex}/frames/${frameIndex}?camera=${encodeURIComponent(camera)}`
   }, [datasetId, episodeIndex, frameIndex, camera])
 
-  const addLabel = useCallback(
-    (raw: string) => {
-      const trimmed = raw.trim()
-      if (!trimmed) return
-      setLabels((current) => (current.includes(trimmed) ? current : [...current, trimmed]))
-      setLabelInput('')
-    },
-    [],
-  )
+  const addLabel = useCallback((raw: string) => {
+    const trimmed = raw.trim()
+    if (!trimmed) return
+    setLabels((current) => (current.includes(trimmed) ? current : [...current, trimmed]))
+    setLabelInput('')
+  }, [])
 
   const removeLabel = useCallback((label: string) => {
     setLabels((current) => current.filter((entry) => entry !== label))
@@ -303,9 +300,7 @@ export function ObjectDetectionWidget() {
             className="text-muted-foreground mb-1 block text-xs"
           >
             Labels to detect{' '}
-            <span className="text-muted-foreground/70">
-              (leave empty for default COCO classes)
-            </span>
+            <span className="text-muted-foreground/70">(leave empty for default COCO classes)</span>
           </label>
           <div className="flex flex-wrap items-center gap-1 rounded-md border px-2 py-1.5">
             {labels.map((label, index) => (
@@ -422,7 +417,10 @@ export function ObjectDetectionWidget() {
             </p>
             <ul className="divide-y rounded-md border text-xs">
               {detections.map((det, index) => (
-                <li key={`${det.class_name}-${index}`} className="flex items-center gap-2 px-2 py-1">
+                <li
+                  key={`${det.class_name}-${index}`}
+                  className="flex items-center gap-2 px-2 py-1"
+                >
                   <span
                     className="inline-block h-2 w-2 rounded-full"
                     style={{ backgroundColor: paletteColor(index) }}

@@ -14,57 +14,57 @@ import { fetchVlmJudgeStatus, runVlmJudge } from '@/lib/api-client'
 import type { VlmJudgeResult, VlmJudgeRunOptions, VlmJudgeStatus } from '@/types'
 
 export const vlmJudgeKeys = {
-    all: ['vlm-judge'] as const,
-    episode: (datasetId: string, episodeIndex: number) =>
-        [...vlmJudgeKeys.all, datasetId, episodeIndex] as const,
+  all: ['vlm-judge'] as const,
+  episode: (datasetId: string, episodeIndex: number) =>
+    [...vlmJudgeKeys.all, datasetId, episodeIndex] as const,
 }
 
 interface UseVlmJudgeStatusOptions {
-    datasetId: string | null
-    episodeIndex: number | null
-    enabled?: boolean
+  datasetId: string | null
+  episodeIndex: number | null
+  enabled?: boolean
 }
 
 export function useVlmJudgeStatus({
-    datasetId,
-    episodeIndex,
-    enabled = true,
+  datasetId,
+  episodeIndex,
+  enabled = true,
 }: UseVlmJudgeStatusOptions) {
-    const isReady = enabled && !!datasetId && episodeIndex !== null && episodeIndex >= 0
-    return useQuery<VlmJudgeStatus>({
-        queryKey:
-            datasetId && episodeIndex !== null
-                ? vlmJudgeKeys.episode(datasetId, episodeIndex)
-                : [...vlmJudgeKeys.all, 'idle'],
-        queryFn: () => fetchVlmJudgeStatus(datasetId as string, episodeIndex as number),
-        enabled: isReady,
-        staleTime: 60_000,
-        gcTime: 5 * 60_000,
-        retry: false,
-    })
+  const isReady = enabled && !!datasetId && episodeIndex !== null && episodeIndex >= 0
+  return useQuery<VlmJudgeStatus>({
+    queryKey:
+      datasetId && episodeIndex !== null
+        ? vlmJudgeKeys.episode(datasetId, episodeIndex)
+        : [...vlmJudgeKeys.all, 'idle'],
+    queryFn: () => fetchVlmJudgeStatus(datasetId as string, episodeIndex as number),
+    enabled: isReady,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
+    retry: false,
+  })
 }
 
 interface RunVlmJudgeArgs {
-    datasetId: string
-    episodeIndex: number
-    options?: VlmJudgeRunOptions
+  datasetId: string
+  episodeIndex: number
+  options?: VlmJudgeRunOptions
 }
 
 export function useRunVlmJudge() {
-    const queryClient = useQueryClient()
-    return useMutation<VlmJudgeResult, Error, RunVlmJudgeArgs>({
-        mutationFn: ({ datasetId, episodeIndex, options }) =>
-            runVlmJudge(datasetId, episodeIndex, options),
-        onSuccess: (result, { datasetId, episodeIndex }) => {
-            const status: VlmJudgeStatus = {
-                enabled: true,
-                cached: result.cached,
-                judgeModel: result.judgeModel,
-                promptVersion: result.promptVersion,
-                cacheKey: null,
-                result,
-            }
-            queryClient.setQueryData(vlmJudgeKeys.episode(datasetId, episodeIndex), status)
-        },
-    })
+  const queryClient = useQueryClient()
+  return useMutation<VlmJudgeResult, Error, RunVlmJudgeArgs>({
+    mutationFn: ({ datasetId, episodeIndex, options }) =>
+      runVlmJudge(datasetId, episodeIndex, options),
+    onSuccess: (result, { datasetId, episodeIndex }) => {
+      const status: VlmJudgeStatus = {
+        enabled: true,
+        cached: result.cached,
+        judgeModel: result.judgeModel,
+        promptVersion: result.promptVersion,
+        cacheKey: null,
+        result,
+      }
+      queryClient.setQueryData(vlmJudgeKeys.episode(datasetId, episodeIndex), status)
+    },
+  })
 }

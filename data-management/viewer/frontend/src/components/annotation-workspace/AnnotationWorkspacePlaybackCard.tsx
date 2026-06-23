@@ -211,9 +211,7 @@ export function AnnotationWorkspacePlaybackCard({
                   preload="auto"
                   className={cn(
                     'absolute inset-0 m-auto max-h-full max-w-full object-contain',
-                    isActive
-                      ? 'z-10 opacity-100'
-                      : 'pointer-events-none z-0 opacity-0',
+                    isActive ? 'z-10 opacity-100' : 'pointer-events-none z-0 opacity-0',
                   )}
                   style={isActive && displayFilter ? { filter: displayFilter } : undefined}
                   aria-hidden={!isActive}
@@ -276,31 +274,31 @@ export function AnnotationWorkspacePlaybackCard({
             controls={
               compact
                 ? renderCompactControls({
-                  isPlaying,
-                  onTogglePlayback,
-                  onStepFrame,
-                  playbackSpeed,
-                  onSetPlaybackSpeed,
-                  autoPlay,
-                  onSetAutoPlay,
-                  autoLoop,
-                  onSetAutoLoop,
-                  playbackRangeStart,
-                  onSetFrameWithinPlaybackRange,
-                })
+                    isPlaying,
+                    onTogglePlayback,
+                    onStepFrame,
+                    playbackSpeed,
+                    onSetPlaybackSpeed,
+                    autoPlay,
+                    onSetAutoPlay,
+                    autoLoop,
+                    onSetAutoLoop,
+                    playbackRangeStart,
+                    onSetFrameWithinPlaybackRange,
+                  })
                 : renderDefaultControls({
-                  isPlaying,
-                  onTogglePlayback,
-                  onStepFrame,
-                  playbackSpeed,
-                  onSetPlaybackSpeed,
-                  autoPlay,
-                  onSetAutoPlay,
-                  autoLoop,
-                  onSetAutoLoop,
-                  playbackRangeStart,
-                  onSetFrameWithinPlaybackRange,
-                })
+                    isPlaying,
+                    onTogglePlayback,
+                    onStepFrame,
+                    playbackSpeed,
+                    onSetPlaybackSpeed,
+                    autoPlay,
+                    onSetAutoPlay,
+                    autoLoop,
+                    onSetAutoLoop,
+                    playbackRangeStart,
+                    onSetFrameWithinPlaybackRange,
+                  })
             }
             slider={
               <div className="space-y-1">

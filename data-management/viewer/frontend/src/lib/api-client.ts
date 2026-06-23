@@ -417,10 +417,9 @@ export async function fetchVlmJudgeStatus(
   datasetId: string,
   episodeIndex: number,
 ): Promise<VlmJudgeStatus> {
-  const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`,
-    { headers: await requestHeaders() },
-  )
+  const response = await fetch(`${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`, {
+    headers: await requestHeaders(),
+  })
   if (response.status === 404) return VLM_JUDGE_DISABLED
   const data = await handleResponse<unknown>(response)
   return transformKeys<VlmJudgeStatus>(data)
@@ -434,19 +433,16 @@ export async function runVlmJudge(
   episodeIndex: number,
   options: VlmJudgeRunOptions = {},
 ): Promise<VlmJudgeResult> {
-  const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(await mutationHeaders()) },
-      body: JSON.stringify({
-        instruction: options.instruction,
-        views: options.views,
-        process_method: options.processMethod,
-        force: options.force ?? false,
-      }),
-    },
-  )
+  const response = await fetch(`${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await mutationHeaders()) },
+    body: JSON.stringify({
+      instruction: options.instruction,
+      views: options.views,
+      process_method: options.processMethod,
+      force: options.force ?? false,
+    }),
+  })
   const data = await handleResponse<unknown>(response)
   return transformKeys<VlmJudgeResult>(data)
 }
