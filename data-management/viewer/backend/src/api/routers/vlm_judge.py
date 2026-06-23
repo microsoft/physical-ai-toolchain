@@ -34,6 +34,7 @@ from ..validation import (
     SanitizedModel,
     path_int_param,
     path_string_param,
+    validate_path_containment,
 )
 
 logger = logging.getLogger(__name__)
@@ -223,7 +224,8 @@ async def run_episode_judgment(
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     except Exception as err:  # backend / model errors surface as 502
-        logger.exception("VLM judge failed for %s/%d", dataset_id, episode_idx)
+        safe_dataset_id = dataset_id.replace("\r", "").replace("\n", "")
+        logger.exception("VLM judge failed for %s/%d", safe_dataset_id, episode_idx)
         raise HTTPException(status_code=502, detail=f"VLM backend error: {err}") from err
 
     payload_out = result.to_dict()
@@ -272,7 +274,9 @@ def _dataset_root(service: DatasetService, dataset_id: str) -> Path:
         )
     # Dataset IDs use '--' as a separator that maps to nested directories on disk
     # (e.g. "hybrid-hack--session_xyz" -> "hybrid-hack/session_xyz").
-    return Path(base_path) / dataset_id_to_blob_prefix(dataset_id)
+    # Validate containment so a crafted dataset_id cannot escape the data dir.
+    root = Path(base_path) / dataset_id_to_blob_prefix(dataset_id)
+    return validate_path_containment(root, Path(base_path))
 
 
 def _judge_cache_dir(service: DatasetService, dataset_id: str) -> Path:
