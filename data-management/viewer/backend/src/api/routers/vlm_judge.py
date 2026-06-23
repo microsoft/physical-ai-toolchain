@@ -225,7 +225,8 @@ async def run_episode_judgment(
         raise HTTPException(status_code=400, detail=str(err)) from err
     except Exception as err:  # backend / model errors surface as 502
         safe_dataset_id = dataset_id.replace("\r", "").replace("\n", "")
-        logger.exception("VLM judge failed for %s/%d", safe_dataset_id, episode_idx)
+        safe_episode_idx = int(episode_idx)
+        logger.exception("VLM judge failed for %s/%d", safe_dataset_id, safe_episode_idx)
         raise HTTPException(status_code=502, detail=f"VLM backend error: {err}") from err
 
     payload_out = result.to_dict()
