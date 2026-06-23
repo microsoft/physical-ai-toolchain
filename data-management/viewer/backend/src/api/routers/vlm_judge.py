@@ -249,25 +249,29 @@ def _resolve_episode(
     """Return the matching ``EpisodeRecord`` or ``None`` if not found."""
     from evaluation.vlm_judge.dataset import iter_episodes
 
-    dataset_root = _dataset_root(service, dataset_id)
-    # Re-assert containment in-flow: normalize the resolved path and confirm it
-    # stays within the data dir before it reaches any filesystem access below.
-    # This keeps the normpath+startswith sanitizer on the same value the sinks
-    # consume (defense-in-depth against a crafted dataset_id escaping base).
-    base_real = os.path.realpath(str(getattr(service, "base_path", "") or ""))
-    resolved = os.path.normpath(os.path.realpath(str(dataset_root)))
-    if base_real and resolved != base_real and not resolved.startswith(base_real + os.sep):
+    base_path = getattr(service, "base_path", None)
+    if not base_path:
+        raise HTTPException(
+            status_code=503,
+            detail="VLM judge requires a local dataset path (base_path)",
+        )
+    # Build the dataset path from the user-supplied id and confirm it stays
+    # within the data dir before any filesystem access. Normalizing then
+    # checking the prefix keeps the sanitizer on the same value the sinks below
+    # consume (CWE-22 path-traversal barrier).
+    base_dir = os.path.normpath(os.path.realpath(str(base_path)))
+    dataset_root = os.path.normpath(os.path.join(base_dir, dataset_id_to_blob_prefix(dataset_id)))
+    if dataset_root != base_dir and not dataset_root.startswith(base_dir + os.sep):
         raise HTTPException(
             status_code=400,
             detail="Path traversal detected: resolved path escapes base directory",
         )
-    dataset_root = Path(resolved)
-    if not dataset_root.exists():
+    if not os.path.exists(dataset_root):
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
 
     try:
         for record in iter_episodes(
-            dataset_root,
+            Path(dataset_root),
             views=views or None,
             indices=[episode_idx],
             limit=1,
