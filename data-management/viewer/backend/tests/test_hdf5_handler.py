@@ -406,6 +406,7 @@ def _make_hdf5_data(length=4, num_joints=6, cameras=None):
         timestamps=np.linspace(0.0, (length - 1) / 30.0, length),
         joint_positions=np.zeros((length, num_joints)),
         joint_velocities=np.zeros((length, num_joints)),
+        actions=np.zeros((length, num_joints)),
         end_effector_pose=np.zeros((length, 6)),
         gripper_states=np.zeros(length),
         task_index=0,

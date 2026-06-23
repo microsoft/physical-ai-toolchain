@@ -61,7 +61,7 @@ def test_run_detection_success_returns_summary(client: TestClient, override_serv
     episode = EpisodeData(
         meta=EpisodeMeta(index=0, length=5, task_index=0, has_annotations=False),
         video_urls={},
-        cameras=[],
+        cameras=["il-camera"],
         trajectory_data=[],
     )
     dataset_service.get_episode.return_value = episode
@@ -90,7 +90,7 @@ def test_run_detection_unexpected_error_returns_500(client: TestClient, override
     dataset_service.get_episode.return_value = EpisodeData(
         meta=EpisodeMeta(index=0, length=1, task_index=0, has_annotations=False),
         video_urls={},
-        cameras=[],
+        cameras=["il-camera"],
         trajectory_data=[],
     )
     detection_service.detect_episode.side_effect = RuntimeError("boom")

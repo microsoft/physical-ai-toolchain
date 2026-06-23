@@ -664,7 +664,7 @@ class TestV2EpisodeLayout:
         loader = LeRobotLoader(v2_dataset)
         ep = loader.load_episode(0)
 
-        assert ep.signals["observation.gripper.is_closed"].tolist() == [False, True, False]
+        assert ep.additional_features["observation.gripper.is_closed"].tolist() == [False, True, False]
 
     def test_get_video_path_v2(self, v2_dataset):
         loader = LeRobotLoader(v2_dataset)
