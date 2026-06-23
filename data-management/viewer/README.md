@@ -226,6 +226,43 @@ before launching the backend.
 > `chronological` when running a small local model and you want a populated
 > histogram. Changing the method invalidates cached judgments automatically.
 
+#### Local model via the openai-compat shim
+
+`VLM_JUDGE_BACKEND=qwen3-vl` loads the model inside the dataviewer backend process.
+To keep the backend environment lightweight, run the model in a separate process —
+the bundled OpenAI-compatible shim — and point the dataviewer at it with
+`VLM_JUDGE_BACKEND=openai-compat` and `VLM_JUDGE_BASE_URL=http://127.0.0.1:8001/v1`:
+
+```bash
+python -m evaluation.vlm_judge.openai_shim --port 8001 --model-id Qwen/Qwen3-VL-4B-Instruct
+```
+
+The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../evaluation/vlm_judge/openai_shim.py)):
+
+| Variable                          | Default                     | Description                                                            |
+|-----------------------------------|-----------------------------|------------------------------------------------------------------------|
+| `VLM_SHIM_HOST`                   | `127.0.0.1`                 | Bind address; the shim has no auth, so keep it on loopback             |
+| `VLM_SHIM_PORT`                   | `8001`                      | Listen port                                                            |
+| `VLM_SHIM_MODEL_ID`               | `Qwen/Qwen3-VL-4B-Instruct` | Hugging Face model id to load                                          |
+| `VLM_SHIM_DEVICE_MAP`             | `auto`                      | Transformers device map                                                |
+| `VLM_SHIM_DTYPE`                  | `bfloat16`                  | Model dtype                                                            |
+| `VLM_SHIM_ALLOW_REMOTE_IMAGES`    | `false`                     | Fetch `http(s)` image URLs server-side; off restricts to `data:` URIs |
+| `VLM_SHIM_REMOTE_IMAGE_TIMEOUT_S` | `10`                        | Per-fetch timeout (seconds) when remote images are enabled            |
+
+> [!WARNING]
+> The shim exposes an unauthenticated `/v1/chat/completions` endpoint and runs
+> model inference on untrusted input. Treat it as a trusted-network-only service:
+>
+> - Bind to loopback (`VLM_SHIM_HOST=127.0.0.1`, the default). Expose it only on a
+>   private, trusted network — never a public interface — and front it with your own
+>   auth/proxy if it must be reachable remotely.
+> - Leave `VLM_SHIM_ALLOW_REMOTE_IMAGES=false`. The dataviewer sends frames as
+>   `data:` URIs, so it never needs remote fetching. Enabling remote fetch lets the
+>   shim issue server-side requests (a server-side request forgery surface) with no
+>   host allowlist, so only enable it on a network you fully control.
+> - When remote images are enabled, keep `VLM_SHIM_REMOTE_IMAGE_TIMEOUT_S` low to
+>   bound request hangs.
+
 ## 🔒 Authentication with Entra ID
 
 The application supports Microsoft Entra ID (Azure AD) authentication for public-facing deployments. When auth is disabled (the default for local development), all requests bypass authentication. When enabled, the frontend uses MSAL.js to acquire tokens via PKCE, and the backend validates JWT tokens against the Entra ID JWKS endpoint.
