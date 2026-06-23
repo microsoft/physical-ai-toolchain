@@ -160,7 +160,12 @@ describe('useTrajectoryPlotState', () => {
       videoUrls: {},
       cameras: [],
       trajectoryVariables: [
-        { key: 'observation.state[0]', label: 'State: a', source: 'observation.state', kind: 'state' },
+        {
+          key: 'observation.state[0]',
+          label: 'State: a',
+          source: 'observation.state',
+          kind: 'state',
+        },
       ],
       trajectoryData: [
         {
@@ -233,8 +238,8 @@ describe('useTrajectoryPlotState', () => {
     expect(result.current.jointCount).toBe(variableCount)
     // More than sixteen variables triggers the rank-and-trim path (top 12).
     expect(result.current.selectedJoints).toHaveLength(12)
-    expect(result.current.selectedJoints.every((index) => index >= 0 && index < variableCount)).toBe(
-      true,
-    )
+    expect(
+      result.current.selectedJoints.every((index) => index >= 0 && index < variableCount),
+    ).toBe(true)
   })
 })

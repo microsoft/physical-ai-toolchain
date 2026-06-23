@@ -262,7 +262,9 @@ export function useTrajectoryPlotState({
     // Only update when the auto-selection actually changes. ``autoSelectedJoints``
     // is a freshly-derived array each render, so assigning it unconditionally
     // would set new state every render and cascade into an infinite re-render loop.
-    setSelectedJoints((prev) => (sameNumberArray(prev, autoSelectedJoints) ? prev : autoSelectedJoints))
+    setSelectedJoints((prev) =>
+      sameNumberArray(prev, autoSelectedJoints) ? prev : autoSelectedJoints,
+    )
   }, [autoSelectedJoints])
 
   useEffect(() => {
