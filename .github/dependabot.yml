@@ -60,6 +60,18 @@ updates:
   - dependency-name: "marshmallow"
     versions:
     - ">=4.0.0"
+  # numpy and packaging are pinned for Isaac Lab 2.3.2 / Isaac Sim ABI compatibility.
+  # train.sh force-installs numpy>=1.26.0,<2.0.0 at runtime; if uv.lock resolves 2.x
+  # the --frozen uv export overwrites it, breaking the numpy 1.x C-ABI Isaac Lab needs.
+  # Stricter than sibling groups (>=2.3.0) to fully enforce the <2.0.0 train.sh guard.
+  # Upgrades here require a manual RL smoke run on a GPU node; hosted CI cannot validate
+  # the Isaac Sim runtime path.
+  - dependency-name: "numpy"
+    versions:
+    - ">=2.0.0"
+  - dependency-name: "packaging"
+    versions:
+    - ">=26.0"
   labels:
   - dependencies
   - python
