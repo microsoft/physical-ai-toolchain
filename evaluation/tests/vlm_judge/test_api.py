@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("pydantic")
 
-from vlm_judge.api import build_router  # noqa: E402
-from vlm_judge.judge import JudgeResult  # noqa: E402
+from vlm_judge.api import build_router
+from vlm_judge.judge import JudgeResult
 
 
 class StubService:
