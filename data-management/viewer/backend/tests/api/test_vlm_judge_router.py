@@ -72,12 +72,12 @@ def _reload_app(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
     monkeypatch.setenv("VLM_JUDGE_N_FRAMES", "6")
 
     import src.api.config as config_mod
-    import src.api.services.dataset_service as ds_mod
-    import src.api.services.vlm_judge_service as vjs_mod
+    import src.api.services.dataset_service.service as ds_service_mod
+    from src.api.services.vlm_judge_service import reset_vlm_judge_service
 
     config_mod._app_config = None
-    ds_mod._dataset_service = None
-    vjs_mod._service = None
+    ds_service_mod._dataset_service = None
+    reset_vlm_judge_service()
 
     # main.py snapshots config at import time; force a fresh module import.
     import src.api.main as main_mod
@@ -133,6 +133,33 @@ def test_post_instruction_override_is_used(vlm_client: TestClient) -> None:
     )
     assert rsp.status_code == 200
     assert rsp.json()["instruction"] == "Open the drawer"
+
+
+def test_post_accepts_safe_view_filter(vlm_client: TestClient) -> None:
+    rsp = vlm_client.post(
+        f"/api/datasets/{DATASET_ID}/episodes/0/judge",
+        json={"views": ["obs.front"], "force": True},
+    )
+    assert rsp.status_code == 200
+    assert rsp.json()["episode_id"] == f"{DATASET_ID}/episode_000000"
+
+
+@pytest.mark.parametrize("view", ["../obs.front", "obs/front", "obs\\front", "\x00front"])
+def test_post_rejects_unsafe_view_names(vlm_client: TestClient, view: str) -> None:
+    rsp = vlm_client.post(
+        f"/api/datasets/{DATASET_ID}/episodes/0/judge",
+        json={"views": [view], "force": True},
+    )
+    assert rsp.status_code == 422
+
+
+def test_post_rejects_dataset_id_that_resolves_to_base_path(vlm_client: TestClient) -> None:
+    rsp = vlm_client.post(
+        f"/api/datasets/{DATASET_ID}--../episodes/0/judge",
+        json={"force": True},
+    )
+    assert rsp.status_code == 400
+    assert "Path traversal" in rsp.json()["detail"]
 
 
 def test_post_returns_404_for_missing_dataset(vlm_client: TestClient) -> None:

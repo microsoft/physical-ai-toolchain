@@ -16,14 +16,14 @@ prompt_version, agent_config) so re-running over the same episode is free.
 from __future__ import annotations
 
 import logging
-import os
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..config import AppConfig, get_app_config
 from ..csrf import require_csrf_token
@@ -31,10 +31,12 @@ from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.vlm_judge_service import get_vlm_judge_service
 from ..storage.paths import dataset_id_to_blob_prefix
 from ..validation import (
+    SAFE_CAMERA_NAME_PATTERN,
     SAFE_DATASET_ID_PATTERN,
     SanitizedModel,
     path_int_param,
     path_string_param,
+    sanitize_user_string,
     validate_path_containment,
 )
 
@@ -49,6 +51,7 @@ router = APIRouter()
 
 
 PROCESS_METHODS = ("gvl", "chronological")
+_VIEW_NAME_RE = re.compile(SAFE_CAMERA_NAME_PATTERN)
 
 
 class JudgeRequest(SanitizedModel):
@@ -62,12 +65,20 @@ class JudgeRequest(SanitizedModel):
     views: list[str] | None = Field(
         default=None,
         description="Subset of view names to evaluate (default: all video features)",
+        max_length=16,
     )
     process_method: str | None = Field(
         default=None,
         description="Process-reward scoring technique: 'gvl' or 'chronological'",
     )
     force: bool = Field(default=False, description="Bypass the cache and re-run")
+
+    @field_validator("views")
+    @classmethod
+    def validate_views(cls, views: list[str] | None) -> list[str] | None:
+        if views is None:
+            return None
+        return [_validate_view_name(view) for view in views]
 
 
 class MilestoneOut(BaseModel):
@@ -255,23 +266,13 @@ def _resolve_episode(
             status_code=503,
             detail="VLM judge requires a local dataset path (base_path)",
         )
-    # Build the dataset path from the user-supplied id and confirm it stays
-    # within the data dir before any filesystem access. Normalizing then
-    # checking the prefix keeps the sanitizer on the same value the sinks below
-    # consume (CWE-22 path-traversal barrier).
-    base_dir = os.path.normpath(os.path.realpath(str(base_path)))
-    dataset_root = os.path.normpath(os.path.join(base_dir, dataset_id_to_blob_prefix(dataset_id)))
-    if dataset_root != base_dir and not dataset_root.startswith(base_dir + os.sep):
-        raise HTTPException(
-            status_code=400,
-            detail="Path traversal detected: resolved path escapes base directory",
-        )
-    if not os.path.exists(dataset_root):
+    dataset_root = _dataset_root(service, dataset_id)
+    if not dataset_root.exists():
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
 
     try:
         for record in iter_episodes(
-            Path(dataset_root),
+            dataset_root,
             views=views or None,
             indices=[episode_idx],
             limit=1,
@@ -293,8 +294,28 @@ def _dataset_root(service: DatasetService, dataset_id: str) -> Path:
     # Dataset IDs use '--' as a separator that maps to nested directories on disk
     # (e.g. "hybrid-hack--session_xyz" -> "hybrid-hack/session_xyz").
     # Validate containment so a crafted dataset_id cannot escape the data dir.
-    root = Path(base_path) / dataset_id_to_blob_prefix(dataset_id)
-    return validate_path_containment(root, Path(base_path))
+    base_root = validate_path_containment(Path(base_path), Path(base_path))
+    root = validate_path_containment(base_root / dataset_id_to_blob_prefix(dataset_id), base_root)
+    if root == base_root:
+        raise HTTPException(
+            status_code=400,
+            detail="Path traversal detected: resolved path escapes dataset directory",
+        )
+    return root
+
+
+def _validate_view_name(view: str) -> str:
+    sanitized = sanitize_user_string(view)
+    if (
+        "\x00" in sanitized
+        or sanitized in (".", "..")
+        or "/" in sanitized
+        or "\\" in sanitized
+        or not sanitized.strip()
+        or _VIEW_NAME_RE.fullmatch(sanitized) is None
+    ):
+        raise ValueError(f"Invalid view: {sanitized!r}")
+    return sanitized
 
 
 def _judge_cache_dir(service: DatasetService, dataset_id: str) -> Path:
