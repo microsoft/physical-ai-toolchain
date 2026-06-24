@@ -305,13 +305,7 @@ def _dataset_path_parts(dataset_id: str) -> tuple[str, ...]:
     if not parts:
         raise HTTPException(status_code=400, detail="Invalid dataset_id")
     for part in parts:
-        if (
-            "\x00" in part
-            or part in ("", ".", "..")
-            or "/" in part
-            or "\\" in part
-            or Path(part).name != part
-        ):
+        if "\x00" in part or part in ("", ".", "..") or "/" in part or "\\" in part or Path(part).name != part:
             raise HTTPException(
                 status_code=400,
                 detail="Path traversal detected: resolved path escapes dataset directory",

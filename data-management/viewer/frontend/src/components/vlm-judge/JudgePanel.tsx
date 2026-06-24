@@ -353,8 +353,8 @@ export const JudgePanel = memo(function JudgePanel({
             Whole dataset ({totalEpisodes} episodes)
           </p>
           <p className="text-muted-foreground text-[11px]">
-            Uses each episode&apos;s saved or dataset instruction; the current draft instruction applies
-            only to this episode.
+            Uses each episode&apos;s saved or dataset instruction; the current draft instruction
+            applies only to this episode.
           </p>
           {batch.progress ? (
             <div className="space-y-1">
