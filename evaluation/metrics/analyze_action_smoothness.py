@@ -275,6 +275,7 @@ def _episode_task_label(ep_meta: pd.Series, frames_group: pd.DataFrame, tasks_by
             if isinstance(tasks_field, str) and tasks_field:
                 return tasks_field
         except (TypeError, AttributeError):
+            # Malformed optional task metadata falls back to the task_index lookup below.
             pass
     if "task_index" in frames_group.columns:
         idx = int(frames_group["task_index"].iloc[0])
@@ -310,15 +311,16 @@ def _analyze_dataset(root: Path, fps: float) -> dict[str, Any]:
 
     rows: list[dict[str, Any]] = []
     for episode_index, group in frames.groupby("episode_index", sort=True):
-        actions = np.stack(group["action"].to_numpy()).astype(np.float32)
+        actions = np.stack(list(group["action"].to_numpy())).astype(np.float32)
         gripper: np.ndarray | None = None
         if has_gripper_obs:
             gripper_raw = group[GRIPPER_FEATURE].to_numpy()
             gripper = gripper_raw.astype(bool) if gripper_raw.dtype != bool else gripper_raw
         ep_meta_rows = episodes[episodes["episode_index"] == episode_index]
         ep_meta = ep_meta_rows.iloc[0] if not ep_meta_rows.empty else pd.Series(dtype=object)
+        episode_id = int(str(episode_index))
         row = {
-            "episode_index": int(episode_index),
+            "episode_index": episode_id,
             "task": _episode_task_label(ep_meta, group, tasks_by_index),
             **_episode_metrics(actions, gripper, fps, arm_dims, gripper_dim),
         }

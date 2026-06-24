@@ -188,6 +188,18 @@ describe('JudgePanel', () => {
     expect(screen.getByText(/timeout/i)).toBeInTheDocument()
   })
 
+  it('explains how to recover when no task instruction is available', () => {
+    mockUseRun.mockReturnValue({
+      mutate: mockMutate,
+      isPending: false,
+      error: new Error('No task instruction available; provide one via the request body'),
+      data: undefined,
+    })
+    mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
+    render(<JudgePanel datasetId="demo" episodeIndex={0} />)
+    expect(screen.getByText(/add a language instruction/i)).toBeInTheDocument()
+  })
+
   it('shows an in-progress bar and a Running label while a judge run is pending', () => {
     mockUseRun.mockReturnValue({
       mutate: mockMutate,
@@ -216,6 +228,7 @@ describe('JudgePanel', () => {
     mockUseStatus.mockReturnValue({ data: status(), isLoading: false, error: null })
     render(<JudgePanel datasetId="demo" episodeIndex={0} totalEpisodes={3} />)
     expect(screen.getByText(/whole dataset \(3 episodes\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/uses each episode's saved or dataset instruction/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /run all/i }))
     expect(mockRunAll).toHaveBeenCalledWith({ processMethod: 'gvl' })
     await user.click(screen.getByRole('button', { name: /label all/i }))

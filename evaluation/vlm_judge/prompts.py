@@ -13,11 +13,8 @@ Two prompt patterns:
 from __future__ import annotations
 
 import json
-import logging
 import random
 import re
-
-_LOGGER = logging.getLogger("evaluation.vlm_judge")
 
 PROMPT_VERSION = "outcome-mcq-v1+gvl-process-v1+milestones-v1+failuremode-v1"
 

@@ -137,6 +137,13 @@ wait_for_backend() {
 
 start_backend() {
     log_info "Starting backend on port ${BACKEND_PORT}..."
+    local backend_install_extras=".[dev,analysis,export]"
+    local should_install_vlm_judge=false
+
+    if [[ "${VLM_JUDGE_ENABLED:-false}" == "true" && "${VLM_JUDGE_BACKEND:-echo}" == "qwen3-vl" ]]; then
+        backend_install_extras=".[dev,analysis,export,vlm-judge]"
+        should_install_vlm_judge=true
+    fi
 
     if [[ -z "${DATAVIEWER_AUTH_DISABLED:-}" ]]; then
         export DATAVIEWER_AUTH_DISABLED=true
@@ -173,11 +180,14 @@ start_backend() {
 
         if command -v uv &>/dev/null; then
             (cd "${BACKEND_DIR}" && uv venv --python 3.12)
-            (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e ".[dev,analysis,export]")
+            (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
         else
             log_error "uv not found. Please install uv or create venv manually."
             exit 1
         fi
+    elif [[ "${should_install_vlm_judge}" == "true" ]]; then
+        log_info "Ensuring local VLM judge backend dependencies are installed..."
+        (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e ".[vlm-judge]")
     fi
 
     (

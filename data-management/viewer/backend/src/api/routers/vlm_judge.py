@@ -29,7 +29,6 @@ from ..config import AppConfig, get_app_config
 from ..csrf import require_csrf_token
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.vlm_judge_service import get_vlm_judge_service
-from ..storage.paths import dataset_id_to_blob_prefix
 from ..validation import (
     SAFE_CAMERA_NAME_PATTERN,
     SAFE_DATASET_ID_PATTERN,
@@ -150,6 +149,8 @@ async def get_episode_judgment(
         instruction=record.instruction,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
+        from_s=record.from_timestamp,
+        to_s=record.to_timestamp,
         agent_config=judge_service.config.agent,
     )
     cached_payload = cache.get(cache_key)
@@ -212,6 +213,8 @@ async def run_episode_judgment(
         instruction=instruction,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
+        from_s=record.from_timestamp,
+        to_s=record.to_timestamp,
         agent_config=replace(judge_service.config.agent, process_method=effective_method),
     )
     was_cached = not payload.force and cache.get(cache_key) is not None
@@ -291,17 +294,29 @@ def _dataset_root(service: DatasetService, dataset_id: str) -> Path:
             status_code=503,
             detail="VLM judge requires a local dataset path (base_path)",
         )
-    # Dataset IDs use '--' as a separator that maps to nested directories on disk
-    # (e.g. "hybrid-hack--session_xyz" -> "hybrid-hack/session_xyz").
-    # Validate containment so a crafted dataset_id cannot escape the data dir.
     base_root = validate_path_containment(Path(base_path), Path(base_path))
-    root = validate_path_containment(base_root / dataset_id_to_blob_prefix(dataset_id), base_root)
-    if root == base_root:
-        raise HTTPException(
-            status_code=400,
-            detail="Path traversal detected: resolved path escapes dataset directory",
-        )
+    root = validate_path_containment(base_root.joinpath(*_dataset_path_parts(dataset_id)), base_root)
     return root
+
+
+def _dataset_path_parts(dataset_id: str) -> tuple[str, ...]:
+    sanitized = sanitize_user_string(dataset_id)
+    parts = tuple(sanitized.split("--"))
+    if not parts:
+        raise HTTPException(status_code=400, detail="Invalid dataset_id")
+    for part in parts:
+        if (
+            "\x00" in part
+            or part in ("", ".", "..")
+            or "/" in part
+            or "\\" in part
+            or Path(part).name != part
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Path traversal detected: resolved path escapes dataset directory",
+            )
+    return parts
 
 
 def _validate_view_name(view: str) -> str:

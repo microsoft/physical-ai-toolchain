@@ -53,6 +53,11 @@ export = [
 yolo = [
     "ultralytics==8.4.75",
 ]
+vlm-judge = [
+    "accelerate==1.13.0",
+    "torch==2.10.0",
+    "transformers==5.12.1",
+]
 
 [build-system]
 requires = ["hatchling"]

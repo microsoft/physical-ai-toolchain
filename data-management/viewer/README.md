@@ -130,8 +130,9 @@ card on the trajectory tab:
 
 #### How to use it
 
-1. Enable the judge and start the viewer with `./start.sh` (it exports the
-   `evaluation` package onto `PYTHONPATH` automatically):
+1. Enable the judge and start the viewer with `./start.sh`. It exports the
+  `evaluation` package onto `PYTHONPATH` automatically and installs the local
+  VLM dependencies when `VLM_JUDGE_BACKEND=qwen3-vl`:
 
    ```bash
    VLM_JUDGE_ENABLED=true VLM_JUDGE_BACKEND=qwen3-vl ./start.sh
@@ -163,13 +164,14 @@ The judge's outcome maps directly onto the viewer's episode label set
 The **Whole dataset** controls run the judge across all episodes — sequentially,
 one episode at a time, not as a single batched model call. Each episode reuses the
 per-episode endpoint and its cache, so episodes already scored return instantly and
-only those not yet scored invoke the model. A progress indicator shows `done / total`, and
-**Cancel** stops the run after the in-flight episode.
+only those not yet scored invoke the model. A progress indicator shows
+`done / total`, and **Cancel** stops the run after the in-flight episode.
 
-- **Run all** scores every episode with the selected scoring technique but writes no
-  labels.
-- **Label all** scores every episode and writes each outcome as that episode's label,
-  using the same outcome → label mapping as **Apply label** above.
+- **Run all** scores every episode with the selected scoring technique but writes
+  no labels. It uses each episode's saved instruction, or the instruction from
+  dataset metadata when no saved annotation exists.
+- **Label all** scores every episode and writes each outcome as that episode's
+  label, using the same outcome → label mapping as **Apply label** above.
 
 > [!NOTE]
 > Sequential scoring with a local backend is slow: the model loads on the first
@@ -185,18 +187,24 @@ the instruction currently shown in the viewer's **Language Instruction** panel (
 saved or in-progress edit), so refining that text changes what the judge grades against.
 In short:
 
-- **Language Instruction** = *what the robot was asked to do* (the goal the judge grades against).
-- **Run judge** = *grade this episode against that goal* and report the outcome, progress,
-  milestones, and any failure mode.
+- **Language Instruction** = *what the robot was asked to do* (the goal the
+  judge grades against).
+- **Run judge** = *grade this episode against that goal* and report the outcome,
+  progress, milestones, and any failure mode.
 
 When the Language Instruction is left empty, **Run judge** falls back to the task
 instruction stored in the dataset's metadata. If neither is available, it returns an
-error (HTTP 422) asking for one to be supplied.
+error asking you to add or save a Language Instruction.
+
+Whole-dataset actions do not reuse the current unsaved Language Instruction for every
+episode. They score each episode against that episode's saved annotation text, falling
+back to dataset metadata when needed.
 
 #### Settings
 
 Enable the judge via `start.sh`, or by exporting `PYTHONPATH` to the repository root
-before launching the backend.
+before launching the backend. Install the backend `vlm-judge` extra before using
+the in-process `qwen3-vl` backend without `start.sh`.
 
 | Variable              | Default                     | Description                                                       |
 |-----------------------|-----------------------------|-------------------------------------------------------------------|
@@ -225,6 +233,14 @@ before launching the backend.
 > Recommendation: keep `gvl` with an 8B+ or hosted model; switch to
 > `chronological` when running a small local model and you want a populated
 > histogram. Changing the method invalidates cached judgments automatically.
+
+#### Request timeouts
+
+The `/judge` request stays open until model loading and inference finish. Local
+`qwen3-vl` runs can take minutes on the first request because the backend loads
+the model in-process. Configure any reverse proxy, ingress, or browser-facing
+gateway timeout above the expected first-run latency, or run the model through the
+`openai-compat` shim so the dataviewer backend remains lightweight.
 
 #### Local model via the openai-compat shim
 

@@ -43,7 +43,8 @@ class JudgeBackend(ABC):
         user_prompt: str,
         images: Sequence[Image],
         config: GenerationConfig,
-    ) -> str: ...
+    ) -> str:
+        raise NotImplementedError
 
 
 # -------------------------------------------------------------------------

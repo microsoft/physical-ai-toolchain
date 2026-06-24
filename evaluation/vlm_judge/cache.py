@@ -1,7 +1,7 @@
 """Disk-backed cache for VLM-judge results.
 
 Idempotency follows the existing checkpoint-upload pattern in the repo: a
-SHA256 of ``(video_paths, instruction, judge_model, prompt_version, agent_config)``
+SHA256 of ``(video_paths, time window, instruction, judge_model, prompt_version, agent_config)``
 keys a JSON file on disk. Cache hits are returned verbatim and skip all VLM
 inference.
 """
@@ -36,11 +36,14 @@ class JudgeCache:
         instruction: str,
         judge_model: str,
         prompt_version: str,
+        from_s: float | None = None,
+        to_s: float | None = None,
         agent_config: object | None = None,
     ) -> str:
         """Return a stable hex digest for the given judgement input."""
         payload = {
             "videos": _video_fingerprints(video_paths),
+            "time_window": {"from_s": from_s, "to_s": to_s},
             "instruction": instruction,
             "judge_model": judge_model,
             "prompt_version": prompt_version,

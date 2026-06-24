@@ -115,6 +115,14 @@ function RunningBar({ label }: { label: string }) {
   )
 }
 
+function displayErrorMessage(error: Error | string): string {
+  const message = error instanceof Error ? error.message : error
+  if (message.includes('No task instruction available')) {
+    return 'Add a Language Instruction for this episode, or save one in the dataset metadata, before running the judge.'
+  }
+  return message
+}
+
 export const JudgePanel = memo(function JudgePanel({
   datasetId,
   episodeIndex,
@@ -138,9 +146,9 @@ export const JudgePanel = memo(function JudgePanel({
   )
   const enabled = status.data?.enabled !== false
   const errorMessage = useMemo(() => {
-    if (runMutation.error) return runMutation.error.message
-    if (status.error) return (status.error as Error).message
-    if (batch.error) return batch.error
+    if (runMutation.error) return displayErrorMessage(runMutation.error)
+    if (status.error) return displayErrorMessage(status.error as Error)
+    if (batch.error) return displayErrorMessage(batch.error)
     return null
   }, [runMutation.error, status.error, batch.error])
 
@@ -343,6 +351,10 @@ export const JudgePanel = memo(function JudgePanel({
         <div className="space-y-2 border-t pt-2">
           <p className="text-muted-foreground text-xs font-medium">
             Whole dataset ({totalEpisodes} episodes)
+          </p>
+          <p className="text-muted-foreground text-[11px]">
+            Uses each episode&apos;s saved or dataset instruction; the current draft instruction applies
+            only to this episode.
           </p>
           {batch.progress ? (
             <div className="space-y-1">
