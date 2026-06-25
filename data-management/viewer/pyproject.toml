@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.15.18",
+    "ruff==0.15.19",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "httpx==0.28.1",
@@ -43,7 +43,7 @@ export = [
     "Pillow==12.2.0",
 ]
 yolo = [
-    "ultralytics==8.4.75",
+    "ultralytics==8.4.77",
     "numpy==2.5.0",
     "Pillow==12.2.0",
 ]

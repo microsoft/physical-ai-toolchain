@@ -53,7 +53,7 @@ Submit a full training run with the SKRL backend (default):
   --max-iterations 1500
 ```
 
-The script packages `training/rl/` as a base64 payload, injects it into the OSMO workflow template, and submits the job. OSMO schedules the job on a GPU node via KAI Scheduler.
+The script packages `training/rl/`, uploads it to OSMO object storage with `osmo data upload`, and injects it into the workflow pod through a `url:` task input. OSMO schedules the job on a GPU node via KAI Scheduler.
 
 Override the backend to use RSL-RL instead of SKRL:
 

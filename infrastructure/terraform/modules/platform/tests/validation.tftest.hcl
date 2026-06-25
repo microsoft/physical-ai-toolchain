@@ -406,3 +406,35 @@ run "aml_compute_compound_scale_down_after_idle_accepted" {
     }
   }
 }
+
+run "grafana_major_version_11_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix       = run.setup.resource_prefix
+    environment           = run.setup.environment
+    instance              = run.setup.instance
+    location              = run.setup.location
+    resource_group        = run.setup.resource_group
+    current_user_oid      = run.setup.current_user_oid
+    grafana_major_version = "11"
+  }
+
+  expect_failures = [var.grafana_major_version]
+}
+
+run "grafana_major_version_13_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix       = run.setup.resource_prefix
+    environment           = run.setup.environment
+    instance              = run.setup.instance
+    location              = run.setup.location
+    resource_group        = run.setup.resource_group
+    current_user_oid      = run.setup.current_user_oid
+    grafana_major_version = "13"
+  }
+
+  expect_failures = [var.grafana_major_version]
+}

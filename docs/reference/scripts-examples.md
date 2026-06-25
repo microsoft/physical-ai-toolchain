@@ -22,7 +22,7 @@ Detailed submission examples for training, inference, and pipeline workflows on 
 
 ## OSMO Dataset Training
 
-The `submit-osmo-dataset-training.sh` script uploads `training/rl/` as a versioned OSMO dataset. This approach removes the ~1MB size limit of base64-encoded archives and enables dataset reuse across runs.
+The `submit-osmo-dataset-training.sh` script uploads `training/rl/` as a versioned OSMO dataset and enables dataset reuse across runs.
 
 ### Dataset Submission Example
 

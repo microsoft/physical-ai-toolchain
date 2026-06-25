@@ -8,12 +8,16 @@ workflow:
       cpu: 120
       memory: 480Gi
       storage: 200Gi
+      platform: gpu_platform
   tasks:
     - name: isaac-inference
       image: "{{ image }}"
       command:
         - /bin/bash
         - /tmp/entry.sh
+      inputs:
+        - url: "{{ code_url }}"
+          regex: ".*"
       environment:
         NVIDIA_DRIVER_CAPABILITIES: "all"
         TASK: "{{ task }}"
@@ -22,7 +26,6 @@ workflow:
         VIDEO_LENGTH: "{{ video_length }}"
         ACCEPT_EULA: "Y"
         PRIVACY_CONSENT: "Y"
-        ENCODED_ARCHIVE: "{{ encoded_archive }}"
         PAYLOAD_ROOT: "{{ payload_root }}"
         CHECKPOINT_URI: "{{ checkpoint_uri }}"
         INFERENCE_FORMAT: "{{ inference_format }}"
@@ -39,22 +42,24 @@ workflow:
             #!/bin/bash
             set -euo pipefail
 
-            if [[ -z "${ENCODED_ARCHIVE:-}" ]]; then
-              echo "encoded_archive is required" >&2
-              exit 1
-            fi
-
             if [[ -z "${CHECKPOINT_URI:-}" ]]; then
               echo "checkpoint_uri is required" >&2
               exit 1
             fi
 
-            ARCHIVE_PATH="${TEMP_ARCHIVE:-/tmp/isaac_payload.zip}"
             PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/isaac_payload}"
             INFERENCE_ROOT="${INFERENCE_ROOT:-${PAYLOAD_ROOT}/evaluation/sil}"
 
             mkdir -p "${PAYLOAD_ROOT}"
-            printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"
+            # Code is delivered via the OSMO url: input (object storage), not an
+            # env var: a single env string is capped at 128 KiB (MAX_ARG_STRLEN)
+            # and the archive exceeds that, failing the container execve E2BIG.
+            ARCHIVE_PATH="$(find "{{input:0}}" -maxdepth 2 -name '*.zip' | head -n1)"
+            if [[ -z "${ARCHIVE_PATH}" || ! -s "${ARCHIVE_PATH}" ]]; then
+              echo "ERROR: no code archive found under the input mount; runtime payload is required." >&2
+              ls -laR "{{input:0}}" || true
+              exit 1
+            fi
             unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
 
             infer_args=(
@@ -67,7 +72,7 @@ workflow:
               --headless
             )
 
-            bash "${INFERENCE_ROOT}/scripts/infer.sh" "${infer_args[@]}"
+            bash "${INFERENCE_ROOT}/infer.sh" "${infer_args[@]}"
 
 default-values:
   # Submission scripts set image from scripts/lib/common.sh via --set-string.
@@ -77,7 +82,7 @@ default-values:
   num_envs: "4"
   max_steps: "500"
   video_length: "200"
-  encoded_archive: ""
+  code_url: ""
   payload_root: /workspace/isaac_payload
   checkpoint_uri: ""
   inference_format: "both"
