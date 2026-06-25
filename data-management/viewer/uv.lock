@@ -600,7 +600,7 @@ requires-dist = [
     { name = "h5py", marker = "extra == 'export'", specifier = "==3.16.0" },
     { name = "h5py", marker = "extra == 'hdf5'", specifier = "==3.16.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = "==0.28.1" },
-    { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = "==1.20.1" },
+    { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = "==1.21.0" },
     { name = "numpy", specifier = "==2.5.0" },
     { name = "numpy", marker = "extra == 'export'", specifier = "==2.5.0" },
     { name = "numpy", marker = "extra == 'yolo'", specifier = "==2.5.0" },
@@ -618,7 +618,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.15.19" },
     { name = "scikit-learn", specifier = "==1.9.0" },
     { name = "scipy", specifier = "==1.18.0" },
-    { name = "ultralytics", marker = "extra == 'yolo'", specifier = "==8.4.77" },
+    { name = "ultralytics", marker = "extra == 'yolo'", specifier = "==8.4.78" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.49.0" },
 ]
 provides-extras = ["dev", "azure", "huggingface", "hdf5", "export", "yolo", "all"]
@@ -937,7 +937,7 @@ wheels = [
 
 [[package]]
 name = "huggingface-hub"
-version = "1.20.1"
+version = "1.21.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -951,9 +951,9 @@ dependencies = [
     { name = "typer" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e6/7e/fad82ad491b226e832d2da90a1a59f36acd4526cda8c726f639834754aa4/huggingface_hub-1.20.1.tar.gz", hash = "sha256:9f6d63bfbeab2d2a8357200a9bc4f18cd2c8bfac9579f792f5922e77bf6471d0", size = 859910, upload-time = "2026-06-18T22:06:53.348Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8f/77/ce3331f40cb2d021fe9b24c46c41e72faf74493621138e5eddac12bf5e1c/huggingface_hub-1.21.0.tar.gz", hash = "sha256:a44f222cd8f2f7c2eade30b5e7a04cac984a3235fa61ea87a0a5a31db77d561f", size = 861572, upload-time = "2026-06-25T13:09:26.356Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/b5/ff8516e74b459da3dce9567540c39f2d305ee7a2655109f6802873ff1588/huggingface_hub-1.20.1-py3-none-any.whl", hash = "sha256:274448a45c1ba6f112fe2fb168ead05574c654faa156904157a84085cfae14bd", size = 719837, upload-time = "2026-06-18T22:06:51.486Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/85/b505a99a133d9f99d21af182af416e9baef70bdeef019983479651e494c2/huggingface_hub-1.21.0-py3-none-any.whl", hash = "sha256:eadaa3678c512c82aea69e8675d90a184861e68de32f1105668628b4dce0e7cd", size = 721078, upload-time = "2026-06-25T13:09:24.402Z" },
 ]
 
 [[package]]
@@ -2521,7 +2521,7 @@ wheels = [
 
 [[package]]
 name = "ultralytics"
-version = "8.4.77"
+version = "8.4.78"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "matplotlib" },
@@ -2533,14 +2533,13 @@ dependencies = [
     { name = "psutil" },
     { name = "pyyaml" },
     { name = "requests" },
-    { name = "scipy" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "ultralytics-thop" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/52/77cbe58469fe51f2b07711f2599bab03809f6f84fb23f2c75723d8c37833/ultralytics-8.4.77.tar.gz", hash = "sha256:61e64e9bb689113c5bf2e1b846ae3f8e74c3081410d3609855967d902900003a", size = 1114841, upload-time = "2026-06-25T02:52:37.518Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/2a/95176cb2cbccab93f79fe198d0787cb3bd07d79efad689f5c49c515276a2/ultralytics-8.4.78.tar.gz", hash = "sha256:3afdab061cb4d72b8aa664b0a800481a4ffa2c1a13edf5e5c120eca3d9472d6c", size = 1116485, upload-time = "2026-06-25T12:55:29.376Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/04/b64f1966a0c7f85b64cf39a121370b7b0e753141ab816158ddc94053b92e/ultralytics-8.4.77-py3-none-any.whl", hash = "sha256:a7cb01c8993098ec303bc25e69e1d0ca2718b92c7fa51e2808f539d87749134a", size = 1324840, upload-time = "2026-06-25T02:52:33.54Z" },
+    { url = "https://files.pythonhosted.org/packages/54/bb/85f5c933162b849b716e7a24026795982bd70919777148aadd85d03880fd/ultralytics-8.4.78-py3-none-any.whl", hash = "sha256:0718684a9d5191fac8b4e5269f05ed96142d817dfb6f2ed0dfac76d5adeca595", size = 1326621, upload-time = "2026-06-25T12:55:25.309Z" },
 ]
 
 [[package]]

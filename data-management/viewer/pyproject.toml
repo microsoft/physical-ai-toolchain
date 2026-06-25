@@ -32,7 +32,7 @@ azure = [
     "azure-identity==1.25.3",
 ]
 huggingface = [
-    "huggingface-hub==1.20.1",
+    "huggingface-hub==1.21.0",
 ]
 hdf5 = [
     "h5py==3.16.0",
@@ -43,7 +43,7 @@ export = [
     "Pillow==12.2.0",
 ]
 yolo = [
-    "ultralytics==8.4.77",
+    "ultralytics==8.4.78",
     "numpy==2.5.0",
     "Pillow==12.2.0",
 ]
