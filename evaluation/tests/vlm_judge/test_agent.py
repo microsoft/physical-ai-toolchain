@@ -72,6 +72,22 @@ class TestJudgeAgent:
         assert result.milestones == []
         assert result.failure_mode is None
 
+    def test_chronological_process_method_uses_in_order_prompt(self) -> None:
+        backend = ScriptedBackend()
+        for _ in range(3):
+            backend.queue("SUCCESSFULLY completed", "<answer>A</answer>")
+        backend.queue("CHRONOLOGICAL", "[0, 20, 40, 60, 80, 100, 100, 100]")
+
+        agent = JudgeAgent(
+            backend,
+            config=AgentConfig(n_outcome_samples=3, process_method="chronological"),
+        )
+        result = agent.judge(episode_id="epc", instruction="pick", frames=_make_frames(8))
+        # Chronological method maps values directly (no shuffle/un-shuffle).
+        assert result.progress_per_frame == [0, 20, 40, 60, 80, 100, 100, 100]
+        assert any("CHRONOLOGICAL" in up for _, up in backend.calls)
+        assert not any("RANDOM ORDER" in up for _, up in backend.calls)
+
     def test_failure_runs_milestones_and_attribution(self) -> None:
         backend = ScriptedBackend()
         for _ in range(3):

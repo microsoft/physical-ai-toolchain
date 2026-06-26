@@ -1,8 +1,8 @@
 # Internal LoadBalancer for OSMO control plane access via NGINX ingress
 # This service provides a stable internal IP for the backend operator to connect to OSMO.
 #
-# Deployed by: 03-deploy-osmo-control-plane.sh
-# Used by: 04-deploy-osmo-backend.sh (auto-detects this service's IP)
+# Deployed by: 03-deploy-osmo.sh
+# Used by: backend operator (auto-detects this service's IP)
 #
 # NOTE: The azureml-fe service is reserved for AzureML inference endpoints.
 # OSMO uses this dedicated internal LoadBalancer to avoid conflicts.

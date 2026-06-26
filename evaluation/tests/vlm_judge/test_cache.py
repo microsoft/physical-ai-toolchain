@@ -49,6 +49,27 @@ class TestJudgeCache:
         )
         assert a != b
 
+    def test_key_changes_with_time_window(self, tmp_path: Path) -> None:
+        cache = JudgeCache(tmp_path / "cache")
+        video = _touch(tmp_path / "chunk.mp4")
+        first = cache.key(
+            video_paths={"front": video},
+            instruction="pick orange",
+            judge_model="echo",
+            prompt_version="v1",
+            from_s=0.0,
+            to_s=3.0,
+        )
+        second = cache.key(
+            video_paths={"front": video},
+            instruction="pick orange",
+            judge_model="echo",
+            prompt_version="v1",
+            from_s=3.0,
+            to_s=6.0,
+        )
+        assert first != second
+
     def test_key_invalidates_on_file_mtime_change(self, tmp_path: Path) -> None:
         cache = JudgeCache(tmp_path / "cache")
         video = _touch(tmp_path / "ep.mp4", 32)
@@ -65,27 +86,6 @@ class TestJudgeCache:
             instruction="t",
             judge_model="echo",
             prompt_version="v1",
-        )
-        assert key1 != key2
-
-    def test_key_changes_with_episode_window(self, tmp_path: Path) -> None:
-        cache = JudgeCache(tmp_path / "cache")
-        video = _touch(tmp_path / "chunk.mp4")
-        key1 = cache.key(
-            video_paths={"front": video},
-            instruction="pick orange",
-            judge_model="echo",
-            prompt_version="v1",
-            from_s=0.0,
-            to_s=10.0,
-        )
-        key2 = cache.key(
-            video_paths={"front": video},
-            instruction="pick orange",
-            judge_model="echo",
-            prompt_version="v1",
-            from_s=10.0,
-            to_s=20.0,
         )
         assert key1 != key2
 

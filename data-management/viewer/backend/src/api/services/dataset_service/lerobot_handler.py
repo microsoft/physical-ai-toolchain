@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TaskInfo, TrajectoryPoint
-from .base import build_trajectory, build_trajectory_variables
+from .base import build_trajectory, build_trajectory_variables, normalize_feature_names
 
 if TYPE_CHECKING:
     from ..lerobot_loader import LeRobotLoader as LeRobotLoaderType
@@ -123,7 +123,7 @@ class LeRobotFormatHandler:
                 features[name] = FeatureSchema(
                     dtype=feat.get("dtype", "unknown"),
                     shape=feat.get("shape", []),
-                    names=feat.get("names"),
+                    names=normalize_feature_names(feat.get("names")),
                 )
 
             return DatasetInfo(
@@ -206,17 +206,14 @@ class LeRobotFormatHandler:
                 cache_path = self._video_cache_path(dataset_id, episode_idx, camera)
                 buster_path = cache_path if cache_path and cache_path.exists() else video_path
                 video_urls[camera] = (
-                    f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}"
-                    f"{_video_cache_query(buster_path)}"
+                    f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}{_video_cache_query(buster_path)}"
                 )
 
             # For blob datasets, add video URLs for cameras without local files.
             if dataset_info is not None:
                 for feat_name, feat in dataset_info.features.items():
                     if feat.dtype == "video" and feat_name not in video_urls:
-                        video_urls[feat_name] = (
-                            f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{feat_name}"
-                        )
+                        video_urls[feat_name] = f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{feat_name}"
 
             # Resolve per-camera time windows for v3 concatenated videos
             video_time_windows: dict[str, list[float]] = {}
@@ -300,7 +297,6 @@ class LeRobotFormatHandler:
         if loader is None:
             return None
 
-        source_video_path = loader.get_video_path(episode_idx, camera)
         resolved_video_path = self.get_video_path(dataset_id, episode_idx, camera)
         video_path = Path(resolved_video_path) if resolved_video_path is not None else None
         if video_path is None:
@@ -312,20 +308,12 @@ class LeRobotFormatHandler:
 
         info = loader.get_dataset_info()
         fps = info.fps or 30.0
-        window = loader.get_video_time_window(episode_idx, camera)
-        start_time_s = 0.0
-        if source_video_path is not None and video_path == source_video_path and window is not None:
-            start_time_s = window[0]
 
-        result = self._extract_frame_ffmpeg(str(video_path), frame_idx, fps, start_time_s=start_time_s)
+        result = self._extract_frame_ffmpeg(str(video_path), frame_idx, fps)
         if result is not None:
             return result
 
-        result = self._extract_frame_av(str(video_path), frame_idx, fps, start_time_s=start_time_s)
-        if result is not None:
-            return result
-
-        return self._extract_frame_cv2(str(video_path), frame_idx, fps, start_time_s=start_time_s)
+        return self._extract_frame_cv2(str(video_path), frame_idx)
 
     @staticmethod
     def _resolve_ffmpeg() -> str | None:
@@ -343,13 +331,13 @@ class LeRobotFormatHandler:
             return shutil.which("ffmpeg")
 
     @staticmethod
-    def _extract_frame_ffmpeg(video_path: str, frame_idx: int, fps: float, *, start_time_s: float = 0.0) -> bytes | None:
+    def _extract_frame_ffmpeg(video_path: str, frame_idx: int, fps: float) -> bytes | None:
         """Extract a single frame as JPEG using ffmpeg."""
         ffmpeg = LeRobotFormatHandler._resolve_ffmpeg()
         if ffmpeg is None:
             return None
 
-        seek_time = start_time_s + (frame_idx / fps)
+        seek_time = frame_idx / fps
         try:
             proc = subprocess.run(
                 [
@@ -379,50 +367,18 @@ class LeRobotFormatHandler:
         return None
 
     @staticmethod
-    def _extract_frame_av(video_path: str, frame_idx: int, fps: float, *, start_time_s: float = 0.0) -> bytes | None:
-        """Extract a single frame as JPEG using PyAV."""
-        try:
-            import av
-        except ImportError:
-            return None
-
-        target_time_s = start_time_s + (frame_idx / fps)
-        try:
-            with av.open(video_path) as container:
-                stream = next((s for s in container.streams.video), None)
-                if stream is None:
-                    return None
-
-                if stream.time_base is not None:
-                    seek_pts = int(target_time_s / float(stream.time_base))
-                    container.seek(seek_pts, stream=stream, backward=True)
-
-                for frame in container.decode(stream):
-                    frame_time = frame.time
-                    if frame_time is not None and frame_time + (0.5 / fps) < target_time_s:
-                        continue
-                    image = frame.to_image()
-                    buf = io.BytesIO()
-                    image.save(buf, format="JPEG", quality=85)
-                    return buf.getvalue()
-        except Exception as e:
-            logger.warning("PyAV frame extraction failed: %s", e)
-
-        return None
-
-    @staticmethod
-    def _extract_frame_cv2(video_path: str, frame_idx: int, fps: float, *, start_time_s: float = 0.0) -> bytes | None:
+    def _extract_frame_cv2(video_path: str, frame_idx: int) -> bytes | None:
         """Extract a single frame as JPEG using OpenCV (fallback)."""
         try:
             import cv2
             from PIL import Image
         except ImportError:
-            logger.warning("Neither ffmpeg, PyAV, nor cv2 available for frame extraction")
+            logger.warning("Neither ffmpeg nor cv2 available for frame extraction")
             return None
 
         cap = cv2.VideoCapture(video_path)
         try:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, int(round(start_time_s * fps)) + frame_idx)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if not ret or frame is None:
                 logger.warning("Failed to read frame %s", frame_idx)

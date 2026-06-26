@@ -1,0 +1,40 @@
+# GPU platform configuration for OSMO.
+# Edit this file when adding/removing GPU node pools.
+# Must match Terraform node pool configuration (vm_size, taints).
+services:
+  configs:
+    podTemplates:
+      gpu_tpl:
+        spec:
+          nodeSelector:
+            node.kubernetes.io/instance-type: "Standard_NC24ads_A100_v4"
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
+            - key: "kubernetes.azure.com/scalesetpriority"
+              value: "spot"
+              operator: "Equal"
+              effect: "NoSchedule"
+          containers:
+            - name: "{{USER_CONTAINER_NAME}}"
+              resources:
+                requests: { nvidia.com/gpu: "{{USER_GPU}}" }
+                limits: { nvidia.com/gpu: "{{USER_GPU}}" }
+
+    resourceValidations:
+      gpu_gpu_required:
+        - { operator: GE, left_operand: "{{USER_GPU}}", right_operand: "1", assert_message: "GPU platform: GPU must be >= 1" }
+
+    pools:
+      default:
+        platforms:
+          gpu_platform:
+            override_pod_template: [gpu_tpl]
+            resource_validations: [gpu_gpu_required]
+            default_variables:
+              USER_GPU: 1
+              USER_CPU: 8
+              USER_MEMORY: "64Gi"
+              USER_STORAGE: "100Gi"
+              USER_SHM_SIZE: "16Gi"

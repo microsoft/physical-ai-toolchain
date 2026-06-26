@@ -24,9 +24,22 @@ def _install_azure_stubs(monkeypatch, list_blobs_return=(), download_payload=b"d
 
     azure_identity.DefaultAzureCredential = MagicMock(return_value="cred")
 
-    download_stream = SimpleNamespace(readall=MagicMock(return_value=download_payload))
+    def _readinto(buf):
+        buf.write(download_payload)
+        return len(download_payload)
+
+    download_stream = SimpleNamespace(readinto=MagicMock(side_effect=_readinto))
+    # Inject a `size` attribute on each blob so the post-download integrity
+    # check matches the stub payload length. Callers that already set size
+    # are left untouched.
+    blobs = []
+    for blob in list_blobs_return:
+        if not hasattr(blob, "size") or blob.size is None:
+            blob.size = len(download_payload)
+        blobs.append(blob)
+
     container_client = SimpleNamespace(
-        list_blobs=MagicMock(return_value=list(list_blobs_return)),
+        list_blobs=MagicMock(return_value=blobs),
         download_blob=MagicMock(return_value=download_stream),
     )
     service_client = SimpleNamespace(
@@ -606,18 +619,27 @@ class TestDownloadDatasetFromUrl:
             storage_account="acct",
             storage_container="cont",
             blob_prefix="prefix",
-            dataset_root=str(tmp_path),
+            dataset_root=str(tmp_path / ".staging"),
             dataset_repo_id="0",
         )
 
-    def test_creates_staging_directory(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(_MOD, "download_dataset", MagicMock(return_value=tmp_path / ".staging" / "1"))
+    def test_clears_stale_staging_directory(self, monkeypatch, tmp_path):
+        # Pre-existing staging directory with stale content must be removed
+        # before delegating to download_dataset so the next run starts clean.
+        stale = tmp_path / ".staging" / "1"
+        stale.mkdir(parents=True)
+        (stale / "leftover.bin").write_bytes(b"x")
+
+        def _fake_download(**_kwargs):
+            return stale
+
+        monkeypatch.setattr(_MOD, "download_dataset", MagicMock(side_effect=_fake_download))
         _MOD.download_dataset_from_url(
             "https://acct.blob.core.windows.net/cont/p",
             str(tmp_path),
             1,
         )
-        assert (tmp_path / ".staging" / "1").exists()
+        assert not (stale / "leftover.bin").exists()
 
 
 class TestMergeDatasets:
@@ -825,3 +847,103 @@ class TestMultiBlobFlow:
 
         assert result == tmp_path / "user" / "dataset"
         assert (tmp_path / "user" / "dataset" / "data.txt").read_text() == "x"
+
+
+class TestParseEnvConfig:
+    """Direct tests for `_parse_env_config` covering the tightened payload validation.
+
+    `prepare_dataset` raises SystemExit(EXIT_FAILURE) on any ValueError raised
+    here, so callers see a loud crash rather than silently degrading.
+    """
+
+    def _set_repo(self, monkeypatch, tmp_path, repo_id="u/d"):
+        monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
+        monkeypatch.setenv("DATASET_REPO_ID", repo_id)
+
+    def test_missing_repo_id_raises(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DATASET_ROOT", str(tmp_path))
+        monkeypatch.delenv("DATASET_REPO_ID", raising=False)
+        monkeypatch.setenv("BLOB_URLS", '["https://a.blob.core.windows.net/c/p"]')
+        with pytest.raises(ValueError, match="DATASET_REPO_ID is required"):
+            _MOD._parse_env_config()
+
+    @pytest.mark.parametrize("repo_id", ["/abs", "..", "../escape", "ok/../bad"])
+    def test_unsafe_repo_id_raises(self, monkeypatch, tmp_path, repo_id):
+        self._set_repo(monkeypatch, tmp_path, repo_id=repo_id)
+        monkeypatch.setenv("BLOB_URLS", '["https://a.blob.core.windows.net/c/p"]')
+        with pytest.raises(ValueError):
+            _MOD._parse_env_config()
+
+    def test_missing_blob_urls_raises(self, monkeypatch, tmp_path):
+        self._set_repo(monkeypatch, tmp_path)
+        monkeypatch.delenv("BLOB_URLS", raising=False)
+        with pytest.raises(ValueError, match="Invalid BLOB_URLS JSON"):
+            _MOD._parse_env_config()
+
+    def test_malformed_blob_urls_raises(self, monkeypatch, tmp_path):
+        self._set_repo(monkeypatch, tmp_path)
+        monkeypatch.setenv("BLOB_URLS", "not-json")
+        with pytest.raises(ValueError, match="Invalid BLOB_URLS JSON"):
+            _MOD._parse_env_config()
+
+    @pytest.mark.parametrize("raw", ['{"a": 1}', "null", '"string"', "42", "true"])
+    def test_non_list_blob_urls_raises(self, monkeypatch, tmp_path, raw):
+        self._set_repo(monkeypatch, tmp_path)
+        monkeypatch.setenv("BLOB_URLS", raw)
+        with pytest.raises(ValueError, match="BLOB_URLS must be a JSON array"):
+            _MOD._parse_env_config()
+
+    def test_empty_blob_urls_array_raises(self, monkeypatch, tmp_path):
+        self._set_repo(monkeypatch, tmp_path)
+        monkeypatch.setenv("BLOB_URLS", "[]")
+        with pytest.raises(ValueError, match="non-empty JSON array of URL strings"):
+            _MOD._parse_env_config()
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '[""]',
+            '[" "]',
+            "[null]",
+            '[null, ""]',
+            "[1, 2, 3]",
+            "[{}, false]",
+        ],
+    )
+    def test_blob_urls_with_only_invalid_entries_raises(self, monkeypatch, tmp_path, raw):
+        """Payloads that survive json.loads but contain no usable URL strings
+        must be rejected with the same loud error as an empty array, rather
+        than silently degrading into a no-op download."""
+        self._set_repo(monkeypatch, tmp_path)
+        monkeypatch.setenv("BLOB_URLS", raw)
+        with pytest.raises(ValueError, match="non-empty JSON array of URL strings"):
+            _MOD._parse_env_config()
+
+    def test_mixed_blob_urls_drops_empty_entries(self, monkeypatch, tmp_path):
+        self._set_repo(monkeypatch, tmp_path)
+        monkeypatch.setenv(
+            "BLOB_URLS",
+            '["", "https://a.blob.core.windows.net/c/p", "  ", null, "https://b.blob.core.windows.net/c/p2"]',
+        )
+        root, repo, urls = _MOD._parse_env_config()
+        assert root == tmp_path
+        assert repo == "u/d"
+        assert urls == [
+            "https://a.blob.core.windows.net/c/p",
+            "https://b.blob.core.windows.net/c/p2",
+        ]
+
+    def test_pretty_printed_blob_urls_are_accepted(self, monkeypatch, tmp_path):
+        self._set_repo(monkeypatch, tmp_path)
+        monkeypatch.setenv(
+            "BLOB_URLS",
+            '[\n  "https://a.blob.core.windows.net/c/p"\n]',
+        )
+        _root, _repo, urls = _MOD._parse_env_config()
+        assert urls == ["https://a.blob.core.windows.net/c/p"]
+
+    def test_entries_are_stripped(self, monkeypatch, tmp_path):
+        self._set_repo(monkeypatch, tmp_path)
+        monkeypatch.setenv("BLOB_URLS", '["  https://a.blob.core.windows.net/c/p  "]')
+        _root, _repo, urls = _MOD._parse_env_config()
+        assert urls == ["https://a.blob.core.windows.net/c/p"]

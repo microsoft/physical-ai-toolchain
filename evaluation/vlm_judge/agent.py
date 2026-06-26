@@ -49,6 +49,8 @@ class AgentConfig:
     outcome_temperature: float = 0.6
     outcome_top_p: float = 0.95
     process_seed: int = 0
+    process_method: str = "gvl"
+    """Process-reward method: 'gvl' (shuffle-and-rank) or 'chronological'."""
     milestone_max_tokens: int = 768
     failure_max_tokens: int = 256
     milestone_threshold: float = 0.85
@@ -76,6 +78,7 @@ class JudgeAgent:
         episode_id: str,
         instruction: str,
         frames: Sequence[Image],
+        process_method: str | None = None,
     ) -> JudgeResult:
         """Run the full multi-step judgment chain on ``frames``."""
         cfg = self._config
@@ -88,6 +91,7 @@ class JudgeAgent:
             outcome_temperature=cfg.outcome_temperature,
             outcome_top_p=cfg.outcome_top_p,
             process_seed=cfg.process_seed,
+            process_method=process_method or cfg.process_method,
         )
         result.prompt_version = PROMPT_VERSION
 

@@ -224,6 +224,8 @@ class TestFfmpegExtraction:
 # handler's orchestration logic without filesystem fixtures.
 # ---------------------------------------------------------------------------
 
+from pathlib import Path
+
 import numpy as np
 
 from src.api.services.dataset_service import lerobot_handler as lh_module
@@ -251,6 +253,7 @@ class FakeLREpisode:
         self.actions = np.zeros((length, 6), dtype=np.float64)
         self.task_index = 0
         self.video_paths = {"observation.images.cam0": "/tmp/cam0.mp4"}
+        self.additional_features = {}
 
 
 class FakeLoader:
@@ -258,6 +261,7 @@ class FakeLoader:
         self._episodes = episodes if episodes is not None else {0: {"length": 4}, 1: {"length": 5}}
         self._info = info if info is not None else FakeLRInfo()
         self._raise_on = raise_on or set()
+        self.base_path = Path("/tmp/fake-lerobot-ds")
 
     def _maybe_raise(self, name):
         if name in self._raise_on:
@@ -280,6 +284,10 @@ class FakeLoader:
         if camera == "missing":
             return None
         return f"/tmp/{camera}.mp4"
+
+    def get_video_time_window(self, idx, camera):
+        self._maybe_raise("get_video_time_window")
+        return None
 
     def get_cameras(self):
         self._maybe_raise("get_cameras")

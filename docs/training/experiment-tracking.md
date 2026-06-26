@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Experiment Tracking
 description: MLflow experiment tracking configuration for training workflows on Azure ML and OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-03
 ms.topic: how-to
 keywords:
   - mlflow
@@ -35,15 +35,12 @@ See [MLflow Integration](mlflow-integration.md) for SKRL metric categories, filt
 
 ### LeRobot
 
-Enable MLflow for LeRobot on OSMO:
+MLflow is enabled automatically for LeRobot training on both OSMO and Azure ML. Submit an OSMO training job:
 
 ```bash
-./scripts/submit-osmo-lerobot-training.sh \
-  -d user/dataset \
-  --mlflow-enable
+training/il/scripts/submit-osmo-lerobot-training.sh \
+  -d user/dataset
 ```
-
-Azure ML LeRobot submissions use MLflow automatically.
 
 ### MLflow Configuration
 
@@ -68,15 +65,15 @@ Training scripts register model checkpoints to Azure ML automatically at complet
 
 ```bash
 # Isaac Lab: custom model name
-./scripts/submit-azureml-training.sh \
+training/rl/scripts/submit-azureml-training.sh \
   --register-checkpoint my-anymal-model
 
 # Isaac Lab: skip registration
-./scripts/submit-osmo-training.sh \
+training/rl/scripts/submit-osmo-training.sh \
   --skip-register-checkpoint
 
-# LeRobot: register after inference
-./scripts/submit-osmo-lerobot-inference.sh \
+# LeRobot: register after evaluation
+evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/trained-policy \
   -r my-evaluated-model
 ```
@@ -95,23 +92,22 @@ huggingface-cli download user/trained-policy --local-dir ./checkpoint
 
 ## 🔄 Checkpoint Workflows
 
-Training supports four checkpoint initialization modes:
+Training supports three checkpoint initialization modes:
 
-| Mode           | Weights | Optimizer | Counters | Use Case                         |
-|----------------|---------|-----------|----------|----------------------------------|
-| `from-scratch` | Random  | Fresh     | Reset    | Initial training                 |
-| `warm-start`   | Loaded  | Fresh     | Reset    | Transfer learning                |
-| `resume`       | Loaded  | Loaded    | Loaded   | Continue interrupted training    |
-| `fresh`        | Random  | Fresh     | Reset    | Architecture-only initialization |
+| Mode           | Weights | Optimizer | Counters | Use Case                      |
+|----------------|---------|-----------|----------|-------------------------------|
+| `from-scratch` | Random  | Fresh     | Reset    | Initial training              |
+| `warm-start`   | Loaded  | Fresh     | Reset    | Transfer learning             |
+| `resume`       | Loaded  | Loaded    | Loaded   | Continue interrupted training |
 
 ```bash
 # Resume training from MLflow artifact
-./scripts/submit-azureml-training.sh \
+training/rl/scripts/submit-azureml-training.sh \
   --checkpoint-uri "runs:/abc123/checkpoint" \
   --checkpoint-mode resume
 
 # Warm-start from registered model
-./scripts/submit-osmo-training.sh \
+training/rl/scripts/submit-osmo-training.sh \
   --checkpoint-uri "models:/anymal-c-velocity/1" \
   --checkpoint-mode warm-start
 ```

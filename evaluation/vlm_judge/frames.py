@@ -8,7 +8,6 @@ slicing (LeRobot v3.0 packs many episodes into one chunk file).
 from __future__ import annotations
 
 import io
-import logging
 import math
 from base64 import b64encode
 from collections.abc import Sequence
@@ -18,8 +17,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from PIL.Image import Image
-
-_LOGGER = logging.getLogger("evaluation.vlm_judge")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +43,7 @@ def extract_frames(
     if not window.path.exists():
         raise FileNotFoundError(f"Video not found: {window.path}")
 
+    decoded_frames = []
     with av.open(str(window.path)) as container:
         stream = container.streams.video[0]
         stream.thread_type = "AUTO"
@@ -57,9 +55,9 @@ def extract_frames(
                 f"Invalid window {from_s:.3f}->{to_s:.3f}s for {window.path}",
             )
         timestamps = _evenly_spaced(from_s, to_s, n_frames)
-        frames = [_seek_and_decode(container, stream, ts) for ts in timestamps]
+        decoded_frames = [_seek_and_decode(container, stream, ts) for ts in timestamps]
 
-    images = [PILImage.fromarray(arr) for arr in frames]
+    images = [PILImage.fromarray(arr) for arr in decoded_frames]
     if target_size is not None:
         images = [_letterbox(img, target_size) for img in images]
     return images

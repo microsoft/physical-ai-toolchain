@@ -18,6 +18,7 @@ import {
   fetchDatasets,
   fetchEpisode,
   fetchEpisodes,
+  fetchVlmJudgeStatus,
   mutationFetch,
   mutationHeaders,
   saveAnnotation,
@@ -433,5 +434,34 @@ describe('mutationFetch', () => {
     const [, init] = mockFetch.mock.calls[1]
     const headers = (init as RequestInit).headers as Record<string, string>
     expect(headers['X-CSRF-Token']).toBe('caller-override')
+  })
+})
+
+describe('fetchVlmJudgeStatus', () => {
+  it('maps a 404 (router not mounted) to the disabled status', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ detail: 'Not Found' }, { status: 404 }))
+
+    const result = await fetchVlmJudgeStatus('ds-1', 0)
+    expect(result.enabled).toBe(false)
+    expect(result.result).toBeNull()
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0/judge', { headers: {} })
+  })
+
+  it('camelCases an enabled status payload', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        enabled: true,
+        cached: false,
+        judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+        prompt_version: 'outcome-mcq-v1',
+        cache_key: null,
+        result: null,
+      }),
+    )
+
+    const result = await fetchVlmJudgeStatus('ds-1', 0)
+    expect(result.enabled).toBe(true)
+    expect(result.judgeModel).toBe('Qwen/Qwen3-VL-4B-Instruct')
+    expect(result.promptVersion).toBe('outcome-mcq-v1')
   })
 })

@@ -213,15 +213,6 @@ detect_acr_name() {
   echo "$acr_name"
 }
 
-# Auto-detect OSMO identity client ID from terraform outputs
-detect_osmo_identity() {
-  local tf_output="${1:?terraform output required}"
-  local client_id
-  client_id=$(tf_get "$tf_output" "osmo_workload_identity.value.client_id")
-  [[ -n "$client_id" ]] || fatal "osmo_workload_identity output not found in terraform state"
-  echo "$client_id"
-}
-
 # Detect OSMO service URL from cluster (for CLI and external access)
 detect_service_url() {
   local url=""
@@ -241,49 +232,6 @@ detect_service_url() {
     fi
   fi
   echo "$url"
-}
-
-# Detect in-cluster ingress FQDN for service_base_url (used by osmo-ctrl sidecars in workflow pods)
-detect_ingress_base_url() {
-  local ns="${1:-azureml}"
-  local svc="azureml-ingress-nginx-controller"
-  if kubectl get svc "$svc" -n "$ns" &>/dev/null; then
-    echo "http://${svc}.${ns}.svc.cluster.local"
-  fi
-}
-
-# Validate that the OSMO service URL is reachable from the current host.
-# Internal load balancer IPs are only accessible from within the VNet; when running
-# from a devcontainer or codespace, users must port-forward instead.
-validate_service_url_reachable() {
-  local url="${1:?service URL required}"
-
-  if curl -sf --connect-timeout 5 "${url}/api/version" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  warn "OSMO service URL $url is not reachable from this host"
-  warn "The auto-detected URL is an internal load balancer IP only accessible from within the AKS VNet."
-  echo >&2
-  warn "If running from a devcontainer or codespace, use kubectl port-forward:"
-  warn "  kubectl port-forward svc/osmo-service -n osmo-control-plane 8080:80 &"
-  warn "Then re-run this script with:"
-  warn "  --service-url http://localhost:8080"
-  echo >&2
-  fatal "Cannot reach OSMO service at $url"
-}
-
-detect_default_storage_class() {
-  local storage_class
-
-  storage_class=$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -n 1)
-
-  if [[ -z "$storage_class" ]]; then
-    storage_class=$(kubectl get storageclass default -o jsonpath='{.metadata.name}' 2>/dev/null || true)
-  fi
-
-  [[ -n "$storage_class" ]] || fatal "No default StorageClass detected for in-cluster Redis"
-  echo "$storage_class"
 }
 
 # Print section header
@@ -351,34 +299,8 @@ validate_version_pair() {
 }
 
 # // ===================================================================
-# OSMO Authentication
+# OSMO Secrets
 # // ===================================================================
-
-osmo_login_and_setup() {
-  local service_url="${1:?service URL required}"
-  local admin_password="${2:?admin password required}"
-  local username="${3:-}"
-  local roles="${4:-osmo-backend}"
-
-  info "Logging into OSMO at ${service_url}..."
-  osmo login "${service_url}/" --method token --token-file <(printf '%s' "$admin_password")
-
-  if [[ -n "$username" ]]; then
-    info "Ensuring service account '$username' exists with $roles role..."
-    local lookup_output=""
-    local lookup_status=0
-    lookup_output=$(osmo user get "$username" 2>&1) || lookup_status=$?
-
-    if [[ "$lookup_status" -eq 0 ]]; then
-      osmo user update "$username" --add-roles "$roles" >/dev/null || warn "Unable to update user roles; continuing"
-    elif [[ "$lookup_output" == *"404"* || "$lookup_output" == *"not found"* ]]; then
-      osmo user create "$username" --roles "$roles" >/dev/null || warn "User management endpoint unavailable; skipping user setup"
-    else
-      printf '%s\n' "$lookup_output" >&2
-      warn "Unable to query user '$username'; skipping user setup"
-    fi
-  fi
-}
 
 # Apply SecretProviderClass for Azure Key Vault secrets sync
 # Usage: apply_secret_provider_class <namespace> <keyvault> <client_id> <tenant_id> [include_redis_secret]

@@ -172,6 +172,8 @@ def _load_tasks_jsonl(path: Path) -> dict[int, str]:
     with path.open() as fh:
         for line in fh:
             entry = json.loads(line)
+            if "task_index" not in entry or "task" not in entry:
+                continue
             tasks[int(entry["task_index"])] = str(entry["task"])
     return tasks
 
@@ -328,6 +330,19 @@ def _load_tasks_parquet(path: Path) -> dict[int, str]:
     import pyarrow.parquet as pq
 
     df = pq.read_table(path).to_pandas()
-    if "task_index" not in df.columns or "task" not in df.columns:
-        return {}
-    return {int(r["task_index"]): str(r["task"]) for r in df.to_dict(orient="records")}
+    # LeRobot v3 stores the task text as the (named) DataFrame index alongside a
+    # "task_index" column, so ``to_dict(records)`` drops the text and a direct
+    # ``row["task"]`` lookup raises KeyError. Restore index columns first.
+    if "task" not in df.columns or "task_index" not in df.columns:
+        df = df.reset_index()
+    text_col = "task" if "task" in df.columns else None
+    if text_col is None:
+        # Fall back to the first non-index text column (e.g. "task_description").
+        candidates = [c for c in df.columns if c != "task_index"]
+        text_col = candidates[0] if candidates else None
+    tasks: dict[int, str] = {}
+    for row in df.to_dict(orient="records"):
+        if "task_index" not in row or text_col is None or text_col not in row:
+            continue
+        tasks[int(row["task_index"])] = str(row[text_col])
+    return tasks

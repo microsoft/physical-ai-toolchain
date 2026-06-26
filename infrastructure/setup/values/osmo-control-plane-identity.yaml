@@ -35,6 +35,14 @@ services:
         mountPath: /mnt/secrets-store
         readOnly: true
 
+  router:
+    serviceAccount:
+      annotations:
+        # Client ID set via --set "services.router.serviceAccount.annotations.azure\.workload\.identity/client-id=..."
+        azure.workload.identity/client-id: ""
+    extraPodLabels:
+      azure.workload.identity/use: "true"
+
   worker:
     extraPodLabels:
       azure.workload.identity/use: "true"

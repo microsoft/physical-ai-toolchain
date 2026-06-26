@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+pytest.importorskip("pydantic")
+
 from vlm_judge.api import build_router
 from vlm_judge.judge import JudgeResult
 

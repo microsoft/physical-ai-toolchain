@@ -22,7 +22,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -37,6 +37,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      # CPU-only torch for the runner-based unit tests, pinned outside the lock on purpose.
+      # `uv sync` would otherwise pull the root dev-group torch==2.12.0, and the lerobot/
+      # eval locks pin torch==2.10.0 (CUDA-12 wheels) — neither installs cleanly on the CPU
+      # runner. See PR #995 thread; revisit dropping this step once the pin is reconciled.
       - name: Install Torch test dependency
         run: uv pip install torch==2.11.0
 
@@ -58,7 +62,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: ${{ inputs.code-coverage && always() }}
-        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354  # v6.0.1
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
         with:
           files: logs/coverage-training.xml
           use_oidc: true

@@ -10,29 +10,33 @@ Endpoints (all under ``/api/datasets``, mounted with auth):
 - ``POST   /{dataset_id}/episodes/{episode_idx}/judge`` — run the judge (cached or fresh).
 
 The cache is keyed on (video paths + size + mtime, instruction, judge_model,
-prompt_version, temporal window, agent_config) so re-running over the same
-episode is free.
+prompt_version, agent_config) so re-running over the same episode is free.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field, field_validator
 
 from ..config import AppConfig, get_app_config
 from ..csrf import require_csrf_token
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.vlm_judge_service import get_vlm_judge_service
-from ..storage.paths import dataset_id_to_blob_prefix
 from ..validation import (
+    SAFE_CAMERA_NAME_PATTERN,
     SAFE_DATASET_ID_PATTERN,
     SanitizedModel,
     path_int_param,
     path_string_param,
+    sanitize_user_string,
+    validate_path_containment,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,6 +47,10 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
+
+
+PROCESS_METHODS = ("gvl", "chronological")
+_VIEW_NAME_RE = re.compile(SAFE_CAMERA_NAME_PATTERN)
 
 
 class JudgeRequest(SanitizedModel):
@@ -56,8 +64,20 @@ class JudgeRequest(SanitizedModel):
     views: list[str] | None = Field(
         default=None,
         description="Subset of view names to evaluate (default: all video features)",
+        max_length=16,
+    )
+    process_method: str | None = Field(
+        default=None,
+        description="Process-reward scoring technique: 'gvl' or 'chronological'",
     )
     force: bool = Field(default=False, description="Bypass the cache and re-run")
+
+    @field_validator("views")
+    @classmethod
+    def validate_views(cls, views: list[str] | None) -> list[str] | None:
+        if views is None:
+            return None
+        return [_validate_view_name(view) for view in views]
 
 
 class MilestoneOut(BaseModel):
@@ -75,6 +95,10 @@ class JudgeStatus(BaseModel):
     judge_model: str | None = None
     prompt_version: str | None = None
     cache_key: str | None = None
+    backend: str | None = None
+    process_method: str | None = None
+    process_methods: list[str] = []
+    n_frames: int | None = None
     result: dict[str, Any] | None = None
 
 
@@ -91,6 +115,7 @@ class JudgeResponse(BaseModel):
     voc: float
     milestones: list[MilestoneOut] = []
     failure_mode: str | None = None
+    process_method: str | None = None
     cached: bool = False
 
 
@@ -135,6 +160,10 @@ async def get_episode_judgment(
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
         cache_key=cache_key,
+        backend=judge_service.config.backend.kind,
+        process_method=judge_service.config.agent.process_method,
+        process_methods=list(PROCESS_METHODS),
+        n_frames=judge_service.config.frames.n_frames,
         result=cached_payload,
     )
 
@@ -170,6 +199,13 @@ async def run_episode_judgment(
             detail="No task instruction available; provide one via the request body",
         )
 
+    if payload.process_method is not None and payload.process_method not in PROCESS_METHODS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"process_method must be one of {list(PROCESS_METHODS)}",
+        )
+    effective_method = payload.process_method or judge_service.config.agent.process_method
+
     # Detect cache hit before invoking the backend so we can flag it on the wire.
     cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id))
     cache_key = cache.key(
@@ -179,12 +215,16 @@ async def run_episode_judgment(
         prompt_version=_prompt_version(),
         from_s=record.from_timestamp,
         to_s=record.to_timestamp,
-        agent_config=judge_service.config.agent,
+        agent_config=replace(judge_service.config.agent, process_method=effective_method),
     )
     was_cached = not payload.force and cache.get(cache_key) is not None
 
     try:
-        result = judge_service.judge_episode(
+        # Model inference is blocking and GPU-bound; run it in a worker thread so
+        # the single event loop stays free to serve episode/video requests while
+        # a judgment is in flight (otherwise the whole backend stalls per run).
+        result = await run_in_threadpool(
+            judge_service.judge_episode,
             episode_id=f"{dataset_id}/episode_{episode_idx:06d}",
             instruction=instruction,
             video_paths=record.video_paths,
@@ -192,17 +232,20 @@ async def run_episode_judgment(
             to_s=record.to_timestamp,
             force=payload.force,
             cache_dir=_judge_cache_dir(service, dataset_id),
+            process_method=payload.process_method,
         )
     except FileNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
     except Exception as err:  # backend / model errors surface as 502
-        logger.exception("VLM judge failed for %s/%d", dataset_id, episode_idx)
+        safe_dataset_id = dataset_id.replace("\r", "").replace("\n", "")
+        safe_episode_idx = int(episode_idx)
+        logger.exception("VLM judge failed for %s/%d", safe_dataset_id, safe_episode_idx)
         raise HTTPException(status_code=502, detail=f"VLM backend error: {err}") from err
 
     payload_out = result.to_dict()
-    return JudgeResponse(cached=was_cached, **payload_out)
+    return JudgeResponse(cached=was_cached, process_method=effective_method, **payload_out)
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +263,12 @@ def _resolve_episode(
     """Return the matching ``EpisodeRecord`` or ``None`` if not found."""
     from evaluation.vlm_judge.dataset import iter_episodes
 
+    base_path = getattr(service, "base_path", None)
+    if not base_path:
+        raise HTTPException(
+            status_code=503,
+            detail="VLM judge requires a local dataset path (base_path)",
+        )
     dataset_root = _dataset_root(service, dataset_id)
     if not dataset_root.exists():
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
@@ -245,9 +294,37 @@ def _dataset_root(service: DatasetService, dataset_id: str) -> Path:
             status_code=503,
             detail="VLM judge requires a local dataset path (base_path)",
         )
-    # Dataset IDs use '--' as a separator that maps to nested directories on disk
-    # (e.g. "hybrid-hack--session_xyz" -> "hybrid-hack/session_xyz").
-    return Path(base_path) / dataset_id_to_blob_prefix(dataset_id)
+    base_root = validate_path_containment(Path(base_path), Path(base_path))
+    root = validate_path_containment(base_root.joinpath(*_dataset_path_parts(dataset_id)), base_root)
+    return root
+
+
+def _dataset_path_parts(dataset_id: str) -> tuple[str, ...]:
+    sanitized = sanitize_user_string(dataset_id)
+    parts = tuple(sanitized.split("--"))
+    if not parts:
+        raise HTTPException(status_code=400, detail="Invalid dataset_id")
+    for part in parts:
+        if "\x00" in part or part in ("", ".", "..") or "/" in part or "\\" in part or Path(part).name != part:
+            raise HTTPException(
+                status_code=400,
+                detail="Path traversal detected: resolved path escapes dataset directory",
+            )
+    return parts
+
+
+def _validate_view_name(view: str) -> str:
+    sanitized = sanitize_user_string(view)
+    if (
+        "\x00" in sanitized
+        or sanitized in (".", "..")
+        or "/" in sanitized
+        or "\\" in sanitized
+        or not sanitized.strip()
+        or _VIEW_NAME_RE.fullmatch(sanitized) is None
+    ):
+        raise ValueError(f"Invalid view: {sanitized!r}")
+    return sanitized
 
 
 def _judge_cache_dir(service: DatasetService, dataset_id: str) -> Path:

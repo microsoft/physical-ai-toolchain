@@ -88,12 +88,13 @@ workflow:
             unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
             export PYTHONPATH="${PAYLOAD_ROOT}:${PYTHONPATH:-}"
 
-            LEROBOT_REQUIREMENTS="${PAYLOAD_ROOT}/training/il/lerobot/requirements.txt"
-            if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
-              echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
+            LEROBOT_PROJECT="${PAYLOAD_ROOT}/training/il/lerobot"
+            if [[ ! -f "${LEROBOT_PROJECT}/uv.lock" ]]; then
+              echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT}/uv.lock" >&2
               exit 1
             fi
-            uv pip install --no-cache-dir --no-deps --system --requirement "${LEROBOT_REQUIREMENTS}"
+            uv export --frozen --no-hashes --no-emit-project --project "${LEROBOT_PROJECT}" \
+              | uv pip install --no-cache-dir --no-deps --system -r -
 
             # Install MLflow and matplotlib when MLflow tracking is enabled
             if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then

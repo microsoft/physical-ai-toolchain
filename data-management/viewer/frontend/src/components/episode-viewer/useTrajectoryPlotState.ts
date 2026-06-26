@@ -21,6 +21,14 @@ import { getJointLabel, type JointGroup } from './joint-constants'
 import { buildTrajectoryChartData } from './trajectory-plot-utils'
 import { useTrajectoryPlotSelection } from './useTrajectoryPlotSelection'
 
+// Stable empty fallback so an episode without named variables does not allocate
+// a fresh array every render (which would churn every dependent memo/effect).
+const EMPTY_TRAJECTORY_VARIABLES: TrajectoryVariable[] = []
+
+function sameNumberArray(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
 interface UseTrajectoryPlotStateOptions {
   onSaved?: () => void
   selectedRange?: [number, number] | null
@@ -116,7 +124,7 @@ export function useTrajectoryPlotState({
   const [defaultsOpen, setDefaultsOpen] = useState(false)
   const [plotArea, setPlotArea] = useState<TrajectoryPlotArea | null>(null)
   const selectionSurfaceRef = useRef<HTMLDivElement>(null)
-  const namedTrajectoryVariables = currentEpisode?.trajectoryVariables ?? []
+  const namedTrajectoryVariables = currentEpisode?.trajectoryVariables ?? EMPTY_TRAJECTORY_VARIABLES
   const shouldUseNamedVariables = !showVelocity && namedTrajectoryVariables.length > 0
   const stateVariables = useMemo(
     () => namedTrajectoryVariables.filter((variable) => variable.kind === 'state'),
@@ -142,7 +150,13 @@ export function useTrajectoryPlotState({
       }
       return jointConfig.labels[String(idx)] ?? getJointLabel(idx)
     },
-    [jointConfig.labels, namedTrajectoryVariables, shouldUseNamedVariables, showVelocity, stateVariables],
+    [
+      jointConfig.labels,
+      namedTrajectoryVariables,
+      shouldUseNamedVariables,
+      showVelocity,
+      stateVariables,
+    ],
   )
 
   const resolveDataKey = useCallback(
@@ -161,11 +175,20 @@ export function useTrajectoryPlotState({
     }
     if (showVelocity && stateVariables.length > 0) {
       return Object.fromEntries(
-        stateVariables.map((variable, index) => [String(index), removeVariableLabelPrefix(variable.label)]),
+        stateVariables.map((variable, index) => [
+          String(index),
+          removeVariableLabelPrefix(variable.label),
+        ]),
       )
     }
     return {}
-  }, [namedTrajectoryVariables.length, resolveLabel, shouldUseNamedVariables, showVelocity, stateVariables])
+  }, [
+    namedTrajectoryVariables.length,
+    resolveLabel,
+    shouldUseNamedVariables,
+    showVelocity,
+    stateVariables,
+  ])
 
   const variableGroups = useMemo(() => {
     if (shouldUseNamedVariables) {
@@ -175,7 +198,13 @@ export function useTrajectoryPlotState({
       return buildVariableGroups(stateVariables)
     }
     return jointConfig.groups
-  }, [jointConfig.groups, namedTrajectoryVariables, shouldUseNamedVariables, showVelocity, stateVariables])
+  }, [
+    jointConfig.groups,
+    namedTrajectoryVariables,
+    shouldUseNamedVariables,
+    showVelocity,
+    stateVariables,
+  ])
 
   const chartData = useMemo(() => {
     if (!currentEpisode?.trajectoryData) {
@@ -201,38 +230,41 @@ export function useTrajectoryPlotState({
     return showVelocity
       ? currentEpisode.trajectoryData[0].jointVelocities.length
       : currentEpisode.trajectoryData[0].jointPositions.length
-  }, [currentEpisode?.trajectoryData, namedTrajectoryVariables.length, shouldUseNamedVariables, showVelocity])
+  }, [
+    currentEpisode?.trajectoryData,
+    namedTrajectoryVariables.length,
+    shouldUseNamedVariables,
+    showVelocity,
+  ])
 
-  const autoSelectedJoints = useMemo(
-    () => {
-      if (shouldUseNamedVariables) {
-        return resolveNamedVariableSelection(chartData, jointCount)
-      }
+  const autoSelectedJoints = useMemo(() => {
+    if (shouldUseNamedVariables) {
+      return resolveNamedVariableSelection(chartData, jointCount)
+    }
 
-      const groups =
-        showVelocity && stateVariables.length > 0
-          ? buildVariableGroups(stateVariables)
-          : jointConfig.groups
+    const groups =
+      showVelocity && stateVariables.length > 0
+        ? buildVariableGroups(stateVariables)
+        : jointConfig.groups
 
-      return getAutoSelectedJointsForEpisode(
-        currentEpisode?.trajectoryData ?? [],
-        groups,
-        jointCount,
-      )
-    },
-    [
-      chartData,
-      currentEpisode?.trajectoryData,
-      jointConfig.groups,
-      jointCount,
-      shouldUseNamedVariables,
-      showVelocity,
-      stateVariables,
-    ],
-  )
+    return getAutoSelectedJointsForEpisode(currentEpisode?.trajectoryData ?? [], groups, jointCount)
+  }, [
+    chartData,
+    currentEpisode?.trajectoryData,
+    jointConfig.groups,
+    jointCount,
+    shouldUseNamedVariables,
+    showVelocity,
+    stateVariables,
+  ])
 
   useEffect(() => {
-    setSelectedJoints(autoSelectedJoints)
+    // Only update when the auto-selection actually changes. ``autoSelectedJoints``
+    // is a freshly-derived array each render, so assigning it unconditionally
+    // would set new state every render and cascade into an infinite re-render loop.
+    setSelectedJoints((prev) =>
+      sameNumberArray(prev, autoSelectedJoints) ? prev : autoSelectedJoints,
+    )
   }, [autoSelectedJoints])
 
   useEffect(() => {

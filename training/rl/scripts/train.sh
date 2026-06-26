@@ -86,14 +86,14 @@ else
   run_python -m pip install --upgrade "numpy>=1.26.0,<2.0.0" --quiet
 fi
 
-runtime_requirements="${TRAINING_DIR}/requirements.txt"
-
 if command -v uv &>/dev/null; then
-  echo "uv detected, installing training manifest dependencies..."
+  echo "uv detected, exporting locked training manifest dependencies..."
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --no-deps --requirement "${runtime_requirements}"
+    uv export --frozen --no-hashes --no-emit-project --project "${TRAINING_DIR}" \
+      | uv pip install --no-cache-dir --no-deps --requirement -
   else
-    uv pip install --no-cache-dir --no-deps --system --requirement "${runtime_requirements}"
+    uv export --frozen --no-hashes --no-emit-project --project "${TRAINING_DIR}" \
+      | uv pip install --no-cache-dir --no-deps --system --requirement -
   fi
 else
   echo "Error: uv is required to install workflow manifest dependencies" >&2

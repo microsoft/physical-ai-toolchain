@@ -1,9 +1,0 @@
-lerobot==0.5.1
-pyarrow==24.0.0
-azure-storage-blob==12.29.0
-azure-identity==1.25.3
-azure-ai-ml==1.33.0
-matplotlib==3.10.9
-azureml-mlflow==1.62.0.post2
-mlflow==3.13.0
-av==17.0.1

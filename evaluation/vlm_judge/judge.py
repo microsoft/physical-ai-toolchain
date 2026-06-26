@@ -15,8 +15,10 @@ from .prompts import (
     PROMPT_VERSION,
     parse_outcome_response,
     parse_process_response,
+    render_chronological_process_prompt,
     render_outcome_prompt,
     render_process_prompt,
+    shuffle_with_anchor,
 )
 
 if TYPE_CHECKING:
@@ -61,6 +63,7 @@ def score_episode(
     outcome_temperature: float = 0.6,
     outcome_top_p: float = 0.95,
     process_seed: int = 0,
+    process_method: str = "gvl",
 ) -> JudgeResult:
     """Run outcome + process scoring for a single episode."""
     n_frames = len(frames)
@@ -80,6 +83,7 @@ def score_episode(
         instruction=instruction,
         frames=frames,
         rng=random.Random(process_seed),
+        method=process_method,
     )
 
     return JudgeResult(
@@ -158,17 +162,34 @@ def _run_process(
     instruction: str,
     frames: Sequence[Image],
     rng: random.Random,
+    method: str = "gvl",
 ) -> dict[str, Any]:
     n = len(frames)
-    order = list(range(n))
-    process_frames = _label_process_frames(frames)
-    user_prompt = render_process_prompt(instruction=instruction, n_frames=n)
     config = GenerationConfig(max_new_tokens=512, temperature=0.0)
 
+    if method == "chronological":
+        # Frames shown in true order; the model rates each in place (no un-shuffle).
+        text = backend.generate(
+            system_prompt=PROCESS_SYSTEM_PROMPT,
+            user_prompt=render_chronological_process_prompt(instruction=instruction, n_frames=n),
+            images=list(frames),
+            config=config,
+        )
+        values = parse_process_response(text, n_frames=n)
+        if values is None:
+            _LOGGER.warning(
+                "Process format violation; returning zeros (truncated response: %r)",
+                (text or "")[:160],
+            )
+            return {"progress_per_frame": [0] * n, "voc": 0.0}
+        return {"progress_per_frame": list(values), "voc": value_order_correlation(values)}
+
+    order = shuffle_with_anchor(n, rng=rng)
+    shuffled_frames = [frames[i] for i in order]
     text = backend.generate(
         system_prompt=PROCESS_SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-        images=process_frames,
+        user_prompt=render_process_prompt(instruction=instruction, n_frames=n),
+        images=shuffled_frames,
         config=config,
     )
     shuffled_values = parse_process_response(text, n_frames=n)
@@ -182,29 +203,7 @@ def _run_process(
     chronological = [0] * n
     for shuffled_idx, original_idx in enumerate(order):
         chronological[original_idx] = shuffled_values[shuffled_idx]
-
-    voc = value_order_correlation(chronological)
-    return {"progress_per_frame": chronological, "voc": voc}
-
-
-def _label_process_frames(frames: Sequence[Image]) -> list[Image]:
-    from PIL import ImageDraw
-
-    n = len(frames)
-    labeled = []
-    for idx, frame in enumerate(frames):
-        image = frame.convert("RGB").copy()
-        draw = ImageDraw.Draw(image)
-        label = f"frame {idx + 1}/{n}"
-        box = draw.textbbox((0, 0), label)
-        padding = 8
-        x0, y0 = 8, 8
-        x1 = x0 + (box[2] - box[0]) + padding * 2
-        y1 = y0 + (box[3] - box[1]) + padding * 2
-        draw.rectangle((x0, y0, x1, y1), fill=(0, 0, 0))
-        draw.text((x0 + padding, y0 + padding), label, fill=(255, 255, 255))
-        labeled.append(image)
-    return labeled
+    return {"progress_per_frame": chronological, "voc": value_order_correlation(chronological)}
 
 
 def value_order_correlation(values: Sequence[int]) -> float:
@@ -212,30 +211,9 @@ def value_order_correlation(values: Sequence[int]) -> float:
     n = len(values)
     if n < 2:
         return 0.0
-    predicted_ranks = _average_tie_ranks(values)
-    chronological_ranks = [float(i) for i in range(n)]
-    predicted_mean = sum(predicted_ranks) / n
-    chronological_mean = (n - 1) / 2.0
-    numerator = sum(
-        (predicted_ranks[i] - predicted_mean) * (chronological_ranks[i] - chronological_mean) for i in range(n)
-    )
-    predicted_var = sum((rank - predicted_mean) ** 2 for rank in predicted_ranks)
-    chronological_var = sum((rank - chronological_mean) ** 2 for rank in chronological_ranks)
-    if predicted_var == 0.0 or chronological_var == 0.0:
-        return 0.0
-    return numerator / ((predicted_var * chronological_var) ** 0.5)
-
-
-def _average_tie_ranks(values: Sequence[int]) -> list[float]:
-    ranks = [0.0] * len(values)
-    ordered = sorted(range(len(values)), key=lambda i: values[i])
-    start = 0
-    while start < len(ordered):
-        end = start + 1
-        while end < len(ordered) and values[ordered[end]] == values[ordered[start]]:
-            end += 1
-        average_rank = (start + end - 1) / 2.0
-        for idx in ordered[start:end]:
-            ranks[idx] = average_rank
-        start = end
-    return ranks
+    ranks_by_value = sorted(range(n), key=lambda i: values[i])
+    rank_of = [0] * n
+    for r, i in enumerate(ranks_by_value):
+        rank_of[i] = r
+    d2 = sum((rank_of[i] - i) ** 2 for i in range(n))
+    return 1.0 - (6.0 * d2) / (n * (n * n - 1))

@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Troubleshooting Guide
 description: Symptom-based resolution guide for common errors in the robotics reference architecture
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-15
+ms.date: 2026-06-19
 ms.topic: troubleshooting
 keywords:
   - troubleshooting
@@ -142,7 +142,7 @@ Run `source infrastructure/terraform/prerequisites/az-sub-init.sh` before any `t
 
 1. Complete VPN deployment: `infrastructure/terraform/vpn/`.
 2. Connect the VPN client.
-3. Re-run deploy scripts in order: `01-deploy-robotics-charts.sh` through `04-deploy-osmo-backend.sh`.
+3. Re-run deploy scripts in order: `01-deploy-robotics-charts.sh` through `03-deploy-osmo.sh`.
 
 ### AzureML extension pods stuck in CrashLoopBackOff
 
@@ -154,13 +154,13 @@ Run `source infrastructure/terraform/prerequisites/az-sub-init.sh` before any `t
 2. Verify the managed identity has federated credentials for the `azureml:default` and `azureml:training` service accounts.
 3. Check subscription quota: `az vm list-usage --location <region> -o table`.
 
-### OSMO backend deployment returns oauth2Proxy errors
+### OSMO deployment returns oauth2Proxy errors
 
 **Cause:** `oauth2Proxy.enabled` is set to `true` but no OIDC provider is configured.
 
 **Resolution:**
 
-Set `oauth2Proxy.enabled: false` in the OSMO Helm values when no OIDC provider is available. See `infrastructure/setup/04-deploy-osmo-backend.sh` for the configuration.
+Set `oauth2Proxy.enabled: false` in the OSMO Helm values when no OIDC provider is available. See `infrastructure/setup/03-deploy-osmo.sh` for the configuration.
 
 ### Resource group creation fails with quota errors
 
@@ -217,13 +217,13 @@ Use `simulation_shutdown.py` which stops the simulation timeline and applies a S
 
 ### Checkpoint upload fails silently
 
-**Cause:** The `TRAINING_CHECKPOINT_OUTPUT` environment variable is not set or points to a non-existent directory.
+**Cause:** The AzureML named output is wired through `${{outputs.checkpoints}}` in `environment_variables:`, which AzureML does NOT substitute (substitution only happens in `command:`). The container receives the literal template string and the sync helper writes to a relative directory of that name, leaving `cap/data-capability/wd/checkpoints/` empty.
 
 **Resolution:**
 
-1. Verify the environment variable is set in the job definition.
-2. Confirm the output path is writable during training.
-3. Check job logs for upload errors after training completes.
+1. Read `AZURE_ML_OUTPUT_CHECKPOINTS` (set by the data-capability runtime) directly in the training entry point — do not indirect through a custom env var.
+2. Confirm the named `outputs.checkpoints` `uri_folder` is declared in the job YAML.
+3. Check job logs (`system_logs/data_capability/data-capability.log`) for `uploaded N files` rather than `is empty. Skip uploading`.
 
 ## Workflow Runtime Errors
 
@@ -243,6 +243,73 @@ Switch from inline payload to dataset folder injection. Upload files as an OSMO 
 
 Convert all template expressions to Jinja syntax. For variable substitution, use `{{ env_var }}` patterns.
 
+### OSMO workflow fails during CreateGroup with Exit Code 3002
+
+**Cause:** OSMO asks Kubernetes to create workflow pods during the CreateGroup phase. Kubernetes calls the KAI Scheduler binder admission webhooks before admitting those pods. If the API server cannot verify the binder webhook TLS certificate, pod admission fails before the training container starts, and OSMO reports `Exit Code: 3002`.
+
+The characteristic Kubernetes error includes `failed calling webhook "binder.run.ai"`, `binder.kai-scheduler.svc`, and an x509 message such as `certificate signed by unknown authority` or `parent certificate cannot sign this kind of certificate`. The `unknown field "spec.env"` warning can appear in the same response but is not the admission blocker.
+
+The KAI Scheduler chart (`v0.5.5`) refreshes `binder-webhook-tls-secret` on every install but does not reliably keep the `MutatingWebhookConfiguration` / `ValidatingWebhookConfiguration` `caBundle` in sync with the freshly minted leaf. On upgrade the API server can be left trusting a stale CA while the binder service serves a different leaf. In a degenerate case, `caBundle` references a self-signed cert (`binder.kai-scheduler.svc-ca`) that does not sign the served leaf at all.
+
+A secondary failure mode is binder pods caching an old mounted certificate after a chart upgrade. Tracked as [#794](https://github.com/microsoft/physical-ai-toolchain/issues/794).
+
+**Diagnostics:**
+
+Compare the leaf certificate served by the binder Secret against the `caBundle` advertised on the webhook configs — they must match.
+
+```bash
+kubectl -n kai-scheduler get secret binder-webhook-tls-secret \
+  -o jsonpath='{.data.tls\.crt}' | base64 --decode |
+  openssl x509 -noout -subject -fingerprint -sha256
+
+kubectl get mutatingwebhookconfiguration kai-binder \
+  -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | base64 --decode |
+  openssl x509 -noout -subject -fingerprint -sha256
+
+kubectl run kai-binder-webhook-tls-check --image=registry.k8s.io/pause:3.10 \
+  --restart=Never --dry-run=server -o yaml
+```
+
+The dry-run admission probe is the definitive test: it exercises the binder webhook path without creating a pod and surfaces the exact x509 failure the API server sees. If the two fingerprints differ, the cluster is in the drift state described above; the probe will report `x509: certificate signed by unknown authority`.
+
+**Resolution:**
+
+Repair both failure modes manually with the following sequence. Each step is idempotent and safe to re-run on a live cluster.
+
+First, force binder pods to re-read the mounted certificate (sufficient when only the cached cert is stale):
+
+```bash
+kubectl -n kai-scheduler rollout restart deployment/binder
+kubectl -n kai-scheduler rollout status deployment/binder --timeout=180s
+```
+
+Re-run the admission probe above. If the x509 error persists, the Secret and the webhook `caBundle` are out of sync. Sync the `caBundle` on both webhook configs to the leaf certificate currently in the Secret, then restart binder:
+
+```bash
+leaf_b64=$(kubectl -n kai-scheduler get secret binder-webhook-tls-secret \
+  -o jsonpath='{.data.tls\.crt}')
+[[ -n "$leaf_b64" ]] || { echo "binder-webhook-tls-secret has no tls.crt" >&2; exit 1; }
+
+for kind in mutatingwebhookconfiguration validatingwebhookconfiguration; do
+  kubectl get "$kind" kai-binder -o json |
+    jq --arg ca "$leaf_b64" '.webhooks |= map(.clientConfig.caBundle = $ca)' |
+    kubectl replace -f -
+done
+
+kubectl -n kai-scheduler rollout restart deployment/binder
+kubectl -n kai-scheduler rollout status deployment/binder --timeout=180s
+```
+
+If the webhook configs themselves are corrupted (for example, `caBundle` references a self-signed cert that does not match any leaf), delete them and re-run `infrastructure/setup/01-deploy-robotics-charts.sh` to let the chart recreate them. The post-install sync block above then aligns the freshly minted Secret with the recreated configs:
+
+```bash
+for kind in mutatingwebhookconfiguration validatingwebhookconfiguration; do
+  kubectl delete "$kind" kai-binder --ignore-not-found
+done
+
+infrastructure/setup/01-deploy-robotics-charts.sh
+```
+
 ### KAI scheduler rejects multi-GPU job
 
 **Cause:** Coscheduling (gang-scheduling) requirements are not met. Either insufficient GPU resources or the PodGroup configuration is missing.
@@ -259,8 +326,37 @@ Convert all template expressions to Jinja syntax. For variable substitution, use
 
 **Resolution:**
 
-1. List available datasets: `osmo config list DATASET`.
+1. List available datasets: `osmo dataset list`.
 2. Verify the dataset name and version in the workflow environment variables match a published dataset.
+
+### LeRobot training fails with PyTorch shared memory allocation error
+
+**Cause:** PyTorch DataLoader workers use `/dev/shm` to collate batches across worker processes. Kubernetes pods inherit the container runtime default shared-memory mount unless the pod spec overrides it, and that default is too small for image-heavy LeRobot batches. The failure occurs after OSMO creates the pod and after training starts, so it is not an OSMO `CreateGroup`, KAI, or webhook TLS issue.
+
+Characteristic log line:
+
+```text
+RuntimeError: unable to allocate shared memory(shm) for file </torch_...>: Success (0)
+```
+
+**Resolution:**
+
+OSMO mounts `/dev/shm` according to the pod template in Helm values, with `USER_SHM_SIZE` rendered from the platform config (default `16Gi` for GPU platforms). The mount applies only to pods created *after* the config is deployed — restarting the training pod is not enough; a stuck workflow must be cancelled and resubmitted.
+
+In ConfigMap mode the pod template — including `USER_SHM_SIZE` — is the source of truth in `infrastructure/setup/values/osmo-platforms.yaml` and is rendered into the deployed ConfigMap on every run of the deploy script. Inspect the live pod to verify it received the mount, and check the values file for the size it should have:
+
+```bash
+# Live pod (the actual verification)
+kubectl get pod <pod> -n osmo-workflows -o jsonpath='{.spec.volumes[?(@.name=="dshm")].emptyDir.sizeLimit}'
+kubectl get pod <pod> -n osmo-workflows -o jsonpath='{.spec.containers[?(@.name!="osmo-ctrl")].volumeMounts[?(@.mountPath=="/dev/shm")].name}'
+
+# Expected size in the source values (for comparison)
+grep -A 3 dshm infrastructure/setup/values/osmo-platforms.yaml
+```
+
+If a running pod lacks the `dshm` mount, either the values file was edited without rerunning `infrastructure/setup/03-deploy-osmo.sh` (rerun it to re-render the ConfigMap), or the pod predates the last config update — cancel the workflow and submit a new one so it picks up the current template.
+
+If new pods still exhaust `/dev/shm`, raise `USER_SHM_SIZE` in `infrastructure/setup/values/osmo-platforms.yaml` (current default is `16Gi` for GPU platforms), rerun `03-deploy-osmo.sh`, and resubmit. Reducing `--batch-size` is the workaround when raising the mount is not an option.
 
 ### OSMO workflow pods stuck in Pending
 
@@ -285,27 +381,30 @@ Convert all template expressions to Jinja syntax. For variable substitution, use
      python3 -c "import sys,json; [print(a) for c in json.load(sys.stdin)['spec']['containers'] if c['name']=='osmo-ctrl' for a in c.get('args',[])]"
    ```
 
-2. If `-host` is empty (`""`), the `service_base_url` in the SERVICE config is not set:
+2. If `-host` is empty (`""`), `service_base_url` in the SERVICE config is not set. In ConfigMap mode this value is rendered from the Helm values:
 
    ```bash
-   osmo config show SERVICE | grep service_base_url
+   grep service_base_url infrastructure/setup/values/osmo-control-plane.yaml
    ```
 
-3. Set `service_base_url` to the AzureML ingress controller ClusterIP FQDN:
+3. Set `service_base_url` to the AzureML ingress controller ClusterIP FQDN by editing `infrastructure/setup/values/osmo-control-plane.yaml` (`services.configs.service.service_base_url`) and rerunning the deploy script:
+
+   ```yaml
+   # infrastructure/setup/values/osmo-control-plane.yaml
+   services:
+     configs:
+       service:
+         service_base_url: "http://azureml-ingress-nginx-controller.azureml.svc.cluster.local"
+   ```
 
    ```bash
-   osmo config show SERVICE | python3 -c "
-   import sys, json
-   c = json.load(sys.stdin)
-   c['service_base_url'] = 'http://azureml-ingress-nginx-controller.azureml.svc.cluster.local'
-   json.dump(c, sys.stdout, indent=2)" > /tmp/service-config.json
-   osmo config update SERVICE --file /tmp/service-config.json --description "Set service base URL"
+   ./infrastructure/setup/03-deploy-osmo.sh
    ```
 
 4. Cancel and resubmit the workflow. New pods pick up the updated `service_base_url`.
 
-> [!WARNING]
-> Do not set `service_base_url` to `osmo-router`. The router only handles `/api/router/` paths. The ingress controller routes all API paths (`/api/logger`, `/api/agent`, `/api/auth`, `/api`) to the correct backend services.
+> [!NOTE]
+> `service_base_url` points to `osmo-gateway`, which routes `/api/logger`, `/api/agent`, `/api/auth`, and related paths to the correct backend services.
 
 ### OSMO UI shows "server IP address could not be found" for workflow logs
 
@@ -319,14 +418,20 @@ Connect via VPN and set `service_base_url` to the internal load balancer IP, whi
 # Find the internal LB IP
 kubectl get svc azureml-ingress-nginx-internal-lb -n azureml \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+```
 
-# Update service_base_url to the internal LB IP
-osmo config show SERVICE | python3 -c "
-import sys, json
-c = json.load(sys.stdin)
-c['service_base_url'] = 'http://10.0.5.6'  # replace with actual IP
-json.dump(c, sys.stdout, indent=2)" > /tmp/service-config.json
-osmo config update SERVICE --file /tmp/service-config.json --description "Set service base URL to internal LB"
+Set that IP as `services.configs.service.service_base_url` in `infrastructure/setup/values/osmo-control-plane.yaml`, then rerun the deploy script:
+
+```yaml
+# infrastructure/setup/values/osmo-control-plane.yaml
+services:
+  configs:
+    service:
+      service_base_url: "http://10.0.5.6"  # replace with actual internal LB IP
+```
+
+```bash
+./infrastructure/setup/03-deploy-osmo.sh
 ```
 
 Without VPN, use the CLI to view workflow logs: `osmo workflow logs <workflow-id>`.

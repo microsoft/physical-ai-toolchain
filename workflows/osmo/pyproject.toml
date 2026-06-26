@@ -1,0 +1,27 @@
+[project]
+name = "osmo-aml-mirror"
+version = "0.1.0"
+description = "AzureML replay mirror runtime dependencies for OSMO pods"
+# Pinned to 3.11: the replay mirror installs into a fresh venv on OSMO pods
+# (replay-azureml.yaml) where the runtime is Python 3.11. Versions resolve
+# independently from training/rl/pyproject.toml.
+requires-python = "==3.11.*"
+dependencies = [
+    "mlflow==3.13.0",
+    "azureml-mlflow==1.62.0.post3",
+    "azure-identity==1.25.3",
+    "azure-ai-ml==1.34.0",
+    "tbparse==0.0.9",
+]
+
+[tool.uv]
+package = false
+# OSMO pods run Linux; constrain universal resolution to a single-marker graph
+# so the exported mirror matches the original linux-only `uv pip compile`
+# (drops Windows-only pywin32/waitress and platform markers).
+environments = ["sys_platform == 'linux'"]
+# cryptography: azureml-mlflow caps below 47.0.0, but wheels before 48.0.1 bundle
+# a vulnerable OpenSSL (GHSA-537c-gmf6-5ccf); force the patched release.
+override-dependencies = [
+    "cryptography==48.0.1",
+]

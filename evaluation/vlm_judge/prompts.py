@@ -13,13 +13,10 @@ Two prompt patterns:
 from __future__ import annotations
 
 import json
-import logging
 import random
 import re
 
-_LOGGER = logging.getLogger("evaluation.vlm_judge")
-
-PROMPT_VERSION = "outcome-mcq-v1+process-progress-v3+milestones-v1+failuremode-v1"
+PROMPT_VERSION = "outcome-mcq-v1+gvl-process-v1+milestones-v1+failuremode-v1"
 
 
 # -------------------------------------------------------------------------
@@ -74,71 +71,99 @@ def parse_outcome_response(text: str) -> bool | None:
 
 
 PROCESS_SYSTEM_PROMPT = (
-    "You estimate visible task-completion progress at each frame of a robot manipulation video. "
-    "You compare frames against each other, use the full 0-100 scale when progress changes, "
-    "and always output a strict JSON array and nothing else."
+    "You estimate task-completion progress at each frame of a robot manipulation video. "
+    "You always output a strict JSON array and nothing else."
 )
 
 
 PROCESS_USER_TEMPLATE = """\
 You will see {n_frames} frames sampled from a robot manipulation episode.
 
-The frames are presented in CHRONOLOGICAL ORDER from the beginning to the end of the episode. \
-Each image is labeled "frame i/n" in the top-left corner.
+The first frame shown is the FIRST frame of the trajectory (anchored at progress 0). \
+The remaining {n_shuffled} frames are presented in RANDOM ORDER (NOT chronological).
 
 TASK INSTRUCTION: {instruction}
 
-For each labeled frame in order, output an integer 0-100 estimating how much of the task is completed:
+For each frame index i = 1..{n_frames} in the order shown, output an integer 0-100 \
+estimating how much of the task is completed in that frame:
   - 0 = nothing of the task is yet started.
-    - 20-40 = the robot is approaching or aligning with the object.
-    - 40-70 = the robot has grasped/lifted or is transporting the object.
-    - 70-95 = the object is at or near the target, but final placement is not fully clear.
   - 100 = the task is fully complete and the goal state is achieved.
+  - Intermediate values reflect the visible progress (approach, grasp, transport, place).
 
-If the final frame shows successful completion, the final value MUST be between 80 and 100. \
-If visible state changes across the episode, the values MUST change across frames. \
-Do not return the same value for every frame unless every frame is visually indistinguishable.
+Output ONLY a single JSON array of {n_frames} integers and nothing else. Example:
 
-Output ONLY a single JSON array of exactly {n_frames} integers and nothing else. Example:
-
-    {example_array}
+  [0, 27, 13, 88, 41, 100]
 """
 
 
 def render_process_prompt(*, instruction: str, n_frames: int) -> str:
-    if n_frames <= 1:
-        example = [0]
-    else:
-        example = [round(i * 100 / (n_frames - 1)) for i in range(n_frames)]
     return PROCESS_USER_TEMPLATE.format(
         instruction=instruction,
         n_frames=n_frames,
-        example_array=json.dumps(example),
+        n_shuffled=max(0, n_frames - 1),
     )
 
 
+CHRONOLOGICAL_PROCESS_USER_TEMPLATE = """\
+You will see {n_frames} frames sampled from a robot manipulation episode, in \
+CHRONOLOGICAL order (frame 1 first, frame {n_frames} last).
+
+TASK INSTRUCTION: {instruction}
+
+For each frame index i = 1..{n_frames} in the order shown, output an integer 0-100 \
+estimating how much of the task is completed in that frame:
+  - 0 = nothing of the task is yet started.
+  - 100 = the task is fully complete and the goal state is achieved.
+  - Intermediate values reflect the visible progress (approach, grasp, transport, place).
+
+Output ONLY a single JSON array of {n_frames} integers and nothing else. Example:
+
+  [0, 14, 33, 60, 100]
+"""
+
+
+def render_chronological_process_prompt(*, instruction: str, n_frames: int) -> str:
+    return CHRONOLOGICAL_PROCESS_USER_TEMPLATE.format(instruction=instruction, n_frames=n_frames)
+
+
 _JSON_ARRAY_RE = re.compile(r"\[[^\[\]]*\]", re.DOTALL)
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_INT_RE = re.compile(r"-?\d+")
 
 
 def parse_process_response(text: str, *, n_frames: int) -> list[int] | None:
-    """Extract the first JSON integer array of length ``n_frames`` from ``text``."""
+    """Extract a length-``n_frames`` progress array (each 0-100) from ``text``.
+
+    Tolerant of open-model output quirks: strips ``<think>`` blocks, recovers a
+    JSON array even amid prose or code fences, falls back to scanning bare
+    integers, clamps each value to 0-100, and pads/truncates to ``n_frames``
+    (small models frequently return ``n_frames - 1`` values). Returns ``None``
+    only when no integers can be recovered at all.
+    """
     if not text:
         return None
-    match = _JSON_ARRAY_RE.search(text)
-    if match is None:
+    cleaned = _THINK_RE.sub("", text)
+    values: list[float] | None = None
+    match = _JSON_ARRAY_RE.search(cleaned)
+    if match is not None:
+        try:
+            parsed = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            numeric = [v for v in parsed if isinstance(v, (int, float)) and not isinstance(v, bool)]
+            if numeric:
+                values = [float(v) for v in numeric]
+    if values is None:
+        ints = _INT_RE.findall(cleaned)
+        if ints:
+            values = [float(v) for v in ints]
+    if not values:
         return None
-    try:
-        values = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(values, list) or len(values) != n_frames:
-        return None
-    out: list[int] = []
-    for v in values:
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
-            return None
-        out.append(round(float(v)))
-    return out
+    clamped = [max(0, min(100, round(v))) for v in values]
+    if len(clamped) >= n_frames:
+        return clamped[:n_frames]
+    return clamped + [clamped[-1]] * (n_frames - len(clamped))
 
 
 def shuffle_with_anchor(

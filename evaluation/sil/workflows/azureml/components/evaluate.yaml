@@ -1,0 +1,84 @@
+# LeRobot Evaluate Component (Pipeline)
+#
+# Wraps evaluation/sil/scripts/run_evaluation.py as an AzureML CommandComponent
+# for use inside lerobot-pipeline.yaml. Emits the existing eval_results.json
+# alongside the evaluation_schema_version=1 pair (metrics.json +
+# failure_cases.jsonl) so the pipeline output is HITL-feedback ready.
+#
+# Code root is the repository root so the script's relative path
+# (evaluation/sil/scripts/run_evaluation.py) resolves cleanly without the
+# broken `cp -r scripts /tmp/scripts` pattern used by the legacy CommandJob.
+#
+# Compute and environment_variables (POLICY_REPO_ID, POLICY_TYPE,
+# DATASET_REPO_ID, EVAL_EPISODES, OUTPUT_DIR, JOB_NAME, MLFLOW_ENABLE) are
+# set at the parent pipeline job step.
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+name: lerobot_evaluate
+display_name: LeRobot Evaluate
+version: "1"
+description: >-
+  Run LeRobot imitation learning evaluation (ACT / Diffusion / pi0). Emits
+  per-episode metrics, trajectory plots, eval_results.json (legacy),
+  metrics.json + failure_cases.jsonl (VLA evaluation_schema_version=1).
+
+code: ../../../../..
+
+inputs:
+  model_checkpoint:
+    type: uri_folder
+    description: Trained checkpoint folder from the train step or a registered model URI.
+  prepared_dataset:
+    type: uri_folder
+    optional: true
+    description: Dataset prepared by the preprocess step (or mounted directly).
+  dataset_repo_id:
+    type: string
+    description: HuggingFace-style dataset repo id (set as DATASET_REPO_ID at the step level).
+  policy_type:
+    type: string
+    default: act
+    description: Policy type forwarded to the evaluator (act / diffusion / pi0).
+  job_name:
+    type: string
+    description: Pipeline job display name (used for MLflow run naming).
+
+outputs:
+  eval_metrics:
+    type: uri_folder
+    mode: upload
+    description: >-
+      Evaluation outputs: eval_results.json (legacy aggregate), metrics.json
+      (VLA schema v1 aggregate verdict), failure_cases.jsonl (VLA schema v1
+      per-episode failure records), plus trajectory plots.
+
+environment: azureml:lerobot-inference-env:latest
+
+# Bridge pipeline-mounted inputs/output into the env-var ABI run_evaluation.py
+# expects:
+#   model_checkpoint    -> POLICY_REPO_ID (local checkpoint dir; from_pretrained
+#                          accepts a local path identically to a HF repo id)
+#   prepared_dataset    -> DATASET_DIR (optional; if unset, falls back to
+#                          DATASET_REPO_ID HF download path). preprocess.py
+#                          writes the dataset to "{output}/{repo_id}/", so the
+#                          bridge appends DATASET_REPO_ID to land at the
+#                          directory containing meta/info.json.
+#   outputs.eval_metrics -> OUTPUT_DIR (where metrics.json + failure_cases.jsonl
+#                          + eval_results.json + plots are written)
+command: >-
+  bash -c '
+  set -euo pipefail;
+  export POLICY_REPO_ID="$AZURE_ML_INPUT_model_checkpoint";
+  if [[ -n "${AZURE_ML_INPUT_prepared_dataset:-}" ]]; then
+    : "${DATASET_REPO_ID:?DATASET_REPO_ID required when prepared_dataset is provided}";
+    case "$DATASET_REPO_ID" in
+      /*|*..*) echo "DATASET_REPO_ID must be relative (no /, no ..): $DATASET_REPO_ID" >&2; exit 1 ;;
+    esac;
+    export DATASET_DIR="$AZURE_ML_INPUT_prepared_dataset/$DATASET_REPO_ID";
+    echo "[BRIDGE] DATASET_DIR=$DATASET_DIR";
+  fi;
+  export OUTPUT_DIR="$AZURE_ML_OUTPUT_eval_metrics";
+  echo "[BRIDGE] POLICY_REPO_ID=$POLICY_REPO_ID";
+  echo "[BRIDGE] OUTPUT_DIR=$OUTPUT_DIR";
+  python evaluation/sil/scripts/run_evaluation.py'

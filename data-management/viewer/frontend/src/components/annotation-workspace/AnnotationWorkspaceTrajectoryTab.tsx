@@ -103,8 +103,8 @@ export function AnnotationWorkspaceTrajectoryTab({
           <CardContent className="h-full overflow-y-auto p-4">
             <div className="space-y-6">
               {labelPanel}
-              <div className="border-t pt-6">{judgePanel}</div>
               <div className="border-t pt-6">{languageInstructionPanel}</div>
+              <div className="border-t pt-6">{judgePanel}</div>
               <div className="border-t pt-6">{objectDetectionPanel}</div>
               <div className="border-t pt-6">{editToolsPanel}</div>
             </div>

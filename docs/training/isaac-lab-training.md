@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Isaac Lab Training
 description: Reinforcement learning training with SKRL and RSL-RL backends on Azure ML and OSMO platforms
 author: Microsoft Robotics-AI Team
-ms.date: 2026-02-23
+ms.date: 2026-06-03
 ms.topic: how-to
 keywords:
   - isaac lab
@@ -23,7 +23,7 @@ Isaac Lab reinforcement learning training with SKRL and RSL-RL backends. Both Az
 |-------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | Infrastructure    | AKS cluster deployed via [Infrastructure Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/infrastructure/README.md) |
 | Azure ML          | Extension installed via `02-deploy-azureml-extension.sh`                                                                               |
-| OSMO              | Control plane and backend via `03-deploy-osmo-control-plane.sh`                                                                        |
+| OSMO              | Control plane and backend via `03-deploy-osmo.sh`                                                                                      |
 | Terraform outputs | Available in `infrastructure/terraform/` (or provide values via CLI / environment vars)                                                |
 | Azure CLI         | `az` with `ml` extension for Azure ML submissions                                                                                      |
 | OSMO CLI          | `osmo` CLI installed and authenticated for OSMO submissions                                                                            |
@@ -79,7 +79,7 @@ Core parameters shared across platforms:
 | `--task`           | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task identifier            |
 | `--num-envs`       | `2048`                             | Parallel simulation environments     |
 | `--max-iterations` | (unset)                            | Training iteration limit             |
-| `--image`          | `nvcr.io/nvidia/isaac-lab:2.2.0`   | Container image                      |
+| `--image`          | `nvcr.io/nvidia/isaac-lab:2.3.2`   | Container image                      |
 | `--backend`        | `skrl`                             | Training backend: `skrl` or `rsl_rl` |
 | `--headless`       | `true`                             | Disable rendering                    |
 

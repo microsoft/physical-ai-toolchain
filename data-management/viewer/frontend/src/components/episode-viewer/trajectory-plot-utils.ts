@@ -98,14 +98,14 @@ export function buildTrajectoryChartData({
   const seriesValues = shouldUseNamedVariables
     ? buildNamedVariableValues(trajectoryData, trajectoryVariables)
     : trajectoryData.map((point) => {
-      const adjustment = trajectoryAdjustments.get(point.frame)
+        const adjustment = trajectoryAdjustments.get(point.frame)
 
-      return showVelocity
-        ? point.jointVelocities
-        : point.jointPositions.map((position, jointIndex) =>
-          applyTrajectoryAdjustment(position, jointIndex, adjustment),
-        )
-    })
+        return showVelocity
+          ? point.jointVelocities
+          : point.jointPositions.map((position, jointIndex) =>
+              applyTrajectoryAdjustment(position, jointIndex, adjustment),
+            )
+      })
 
   const shouldNormalizePositions = showNormalized && !showVelocity
   const normalizedRanges = shouldNormalizePositions ? normalizeSeriesValues(seriesValues) : []
