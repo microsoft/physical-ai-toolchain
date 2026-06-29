@@ -259,6 +259,16 @@ jobs:
       security-events: write
       actions: read
 
+  # GPU-free import smoke gate. No path filter on main: run every domain depth.
+  smoke:
+    name: Smoke
+    uses: ./.github/workflows/smoke-cpu.yml
+    with:
+      rl: true
+      il: true
+    permissions:
+      contents: read
+
   # Automated release PR management via release-please
   release-please:
     needs:

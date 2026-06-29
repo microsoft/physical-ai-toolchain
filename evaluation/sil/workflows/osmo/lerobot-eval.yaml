@@ -8,12 +8,16 @@ workflow:
       cpu: 4
       memory: 32Gi
       storage: 40Gi
+      platform: gpu_platform
   tasks:
     - name: lerobot-eval
       image: "{{ image }}"
       command:
         - /bin/bash
         - /tmp/entry.sh
+      inputs:
+        - url: "{{ code_url }}"
+          regex: ".*"
       credentials:
         huggingface:
           HF_TOKEN: hf_token
@@ -42,7 +46,6 @@ workflow:
         BLOB_STORAGE_ACCOUNT: "{{ blob_storage_account }}"
         BLOB_STORAGE_CONTAINER: "{{ blob_storage_container }}"
         BLOB_PREFIX: "{{ blob_prefix }}"
-        ENCODED_ARCHIVE: "{{ encoded_archive }}"
         PAYLOAD_ROOT: "{{ payload_root }}"
       files:
         - path: /tmp/entry.sh
@@ -76,15 +79,28 @@ workflow:
             echo "Installing UV package manager..."
             pip install --quiet uv==0.7.12
 
-            # Unpack runtime payload and install dependencies from workflow manifest
-            ARCHIVE_PATH="/tmp/lerobot_payload.zip"
+            # LeRobot requires Python >= 3.12; the base image ships 3.11. Create a
+            # dedicated 3.12 venv (uv downloads the interpreter) so `uv export` of
+            # the lerobot lock resolves, matching the training workflow.
+            echo "Creating Python 3.12 environment..."
+            uv python install 3.12
+            uv venv --python 3.12 /opt/lerobot-venv
+            # shellcheck disable=SC1091
+            source /opt/lerobot-venv/bin/activate
+
+            # Unpack runtime payload and install dependencies from workflow manifest.
+            # Code is delivered via the OSMO url: input (object storage), not an
+            # env var: a single env string is capped at 128 KiB (MAX_ARG_STRLEN)
+            # and the archive (which ships the lerobot uv.lock for `uv export`)
+            # exceeds that, failing the container execve E2BIG.
             PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
             mkdir -p "${PAYLOAD_ROOT}"
-            if [[ -z "${ENCODED_ARCHIVE:-}" ]]; then
-              echo "ERROR: ENCODED_ARCHIVE is not set or empty; runtime payload is required." >&2
+            ARCHIVE_PATH="$(find "{{input:0}}" -maxdepth 2 -name '*.zip' | head -n1)"
+            if [[ -z "${ARCHIVE_PATH}" || ! -s "${ARCHIVE_PATH}" ]]; then
+              echo "ERROR: no code archive found under the input mount; runtime payload is required." >&2
+              ls -laR "{{input:0}}" || true
               exit 1
             fi
-            printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"
             unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
             export PYTHONPATH="${PAYLOAD_ROOT}:${PYTHONPATH:-}"
 
@@ -94,12 +110,14 @@ workflow:
               exit 1
             fi
             uv export --frozen --no-hashes --no-emit-project --project "${LEROBOT_PROJECT}" \
-              | uv pip install --no-cache-dir --no-deps --system -r -
+              | uv pip install --no-cache-dir --no-deps -r -
 
-            # Install MLflow and matplotlib when MLflow tracking is enabled
+            # matplotlib (trajectory plots) is the only MLflow-logging dependency
+            # not already provided by the lerobot lock; azureml-mlflow and
+            # mlflow-skinny come from the lock install above.
             if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
-              echo "Installing MLflow and plotting dependencies..."
-              uv pip install azureml-mlflow "mlflow>=2.8.0,<3.0.0" matplotlib --system
+              echo "Installing plotting dependencies..."
+              uv pip install matplotlib
             fi
 
             # Download model from AzureML registry if specified
@@ -179,9 +197,6 @@ workflow:
 
             # Download dataset from Azure Blob Storage if configured
             if [[ -n "${BLOB_STORAGE_ACCOUNT:-}" && -n "${BLOB_PREFIX:-}" ]]; then
-              echo "Installing Azure storage dependencies..."
-              uv pip install azure-storage-blob azure-identity --system
-
               echo "Downloading dataset from Azure Blob: ${BLOB_STORAGE_ACCOUNT}/${BLOB_STORAGE_CONTAINER}/${BLOB_PREFIX}..."
 
               python3 << 'BLOB_DOWNLOAD_SCRIPT'
@@ -857,5 +872,5 @@ default-values:
   blob_storage_account: ""
   blob_storage_container: datasets
   blob_prefix: ""
-  encoded_archive: ""
+  code_url: ""
   payload_root: /workspace/lerobot_payload

@@ -15,6 +15,9 @@ workflow:
       command:
         - /bin/bash
         - /tmp/entry.sh
+      inputs:
+        - url: "{{ code_url }}"
+          regex: ".*"
       credentials:
         huggingface:
           HF_TOKEN: hf_token
@@ -44,7 +47,6 @@ workflow:
         AZURE_SUBSCRIPTION_ID: "{{ azure_subscription_id }}"
         AZURE_RESOURCE_GROUP: "{{ azure_resource_group }}"
         AZUREML_WORKSPACE_NAME: "{{ azure_workspace_name }}"
-        ENCODED_ARCHIVE: "{{ encoded_archive }}"
         PAYLOAD_ROOT: "{{ payload_root }}"
         AZURE_AUTHORITY_HOST: "{{ azure_authority_host }}"
         MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES: "{{ mlflow_token_refresh_retries }}"
@@ -97,18 +99,22 @@ workflow:
             # shellcheck disable=SC1091
             source /opt/lerobot-venv/bin/activate
 
-            # Unpack training scripts from base64-encoded payload
-            ARCHIVE_PATH="/tmp/lerobot_payload.zip"
+            # Unpack training scripts delivered via the OSMO url: input. The code
+            # archive arrives as a downloaded object under the input mount rather
+            # than an env var: a single env string is capped at 128 KiB
+            # (MAX_ARG_STRLEN) and the archive (which ships the lerobot uv.lock
+            # for `uv export`) exceeds that, failing the container execve E2BIG.
             PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
             mkdir -p "${PAYLOAD_ROOT}"
-            if [[ -z "${ENCODED_ARCHIVE:-}" ]]; then
-              echo "ERROR: ENCODED_ARCHIVE is not set or empty; training payload is required." >&2
+            ARCHIVE_PATH="$(find "{{input:0}}" -maxdepth 2 -name '*.zip' | head -n1)"
+            if [[ -z "${ARCHIVE_PATH}" || ! -s "${ARCHIVE_PATH}" ]]; then
+              echo "ERROR: no code archive found under the input mount; training payload is required." >&2
+              ls -laR "{{input:0}}" || true
               exit 1
             fi
-            printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"
             unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
             export PYTHONPATH="${PAYLOAD_ROOT}:${PYTHONPATH:-}"
-            echo "Training scripts unpacked to ${PAYLOAD_ROOT}"
+            echo "Training scripts unpacked to ${PAYLOAD_ROOT} from ${ARCHIVE_PATH}"
 
             # Decide blob-vs-HuggingFace via the canonical Python helper so
             # whitespace, pretty-printed JSON, and [""] / [null] payloads agree
@@ -160,7 +166,7 @@ workflow:
 
 default-values:
   image: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime
-  encoded_archive: ""
+  code_url: ""
   payload_root: /workspace/lerobot_payload
   dataset_repo_id: ""
   dataset_root: /workspace/data

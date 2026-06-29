@@ -77,7 +77,7 @@ EOF
 # Defaults
 #------------------------------------------------------------------------------
 
-workflow="$REPO_ROOT/workflows/osmo/lerobot-infer.yaml"
+workflow="$REPO_ROOT/evaluation/sil/workflows/osmo/lerobot-eval.yaml"
 policy_repo_id="${POLICY_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 dataset_repo_id="${DATASET_REPO_ID:-}"
@@ -106,6 +106,9 @@ blob_prefix="${BLOB_PREFIX:-}"
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
+
+code_storage_account="${AZURE_STORAGE_ACCOUNT_NAME:-$(get_storage_account)}"
+osmo_container="${OSMO_WORKFLOW_BUCKET:-osmo}"
 
 forward_args=()
 
@@ -153,8 +156,7 @@ done
 
 [[ "$use_local_osmo" == "true" ]] && activate_local_osmo
 
-require_tools osmo
-require_tools osmo zip base64
+require_tools osmo zip
 
 # Policy source validation
 if [[ "$from_aml_model" == "true" ]]; then
@@ -211,41 +213,25 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Subscription" "${subscription_id:-<not set>}"
   print_kv "Resource Group" "${resource_group:-<not set>}"
   print_kv "Workspace" "${workspace_name:-<not set>}"
+  print_kv "Storage Account" "${code_storage_account:-<not set>}"
+  print_kv "Code Storage" "azure://${code_storage_account}/${osmo_container}/osmo-code"
   print_kv "Workflow" "$workflow"
   exit 0
 fi
 
 #------------------------------------------------------------------------------
-# Package Runtime Payload
+# Package and Upload Runtime Payload
 #------------------------------------------------------------------------------
 
-TMP_DIR="$SCRIPT_DIR/.tmp"
-ARCHIVE_PATH="$TMP_DIR/osmo-lerobot-inference.zip"
-B64_PATH="$TMP_DIR/osmo-lerobot-inference.b64"
 payload_root="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
+[[ -z "$code_storage_account" ]] && fatal "Azure storage account required for code upload (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
 
-info "Packaging LeRobot runtime payload..."
-mkdir -p "$TMP_DIR"
-rm -f "$ARCHIVE_PATH" "$B64_PATH"
-
-(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/il evaluation/sil \
-  -x "**/__pycache__/*" \
-  -x "*.pyc" \
-  -x "*.pyo" \
-  -x "**/.pytest_cache/*" \
-  -x "**/.mypy_cache/*" \
-  -x "**/*.egg-info/*") || fatal "Failed to create runtime archive"
-
-[[ -f "$ARCHIVE_PATH" ]] || fatal "Archive not created: $ARCHIVE_PATH"
-
-if base64 --help 2>&1 | grep -q '\-\-input'; then
-  base64 --input "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-else
-  base64 -i "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-fi
-
-[[ -s "$B64_PATH" ]] || fatal "Failed to encode archive"
-encoded_payload=$(<"$B64_PATH")
+info "Packaging and uploading LeRobot runtime payload..."
+code_url=$(stage_and_upload_code "$REPO_ROOT" \
+  "azure://${code_storage_account}/${osmo_container}/osmo-code" \
+  training/il evaluation/sil) \
+  || fatal "Failed to stage and upload runtime payload"
+info "Runtime payload uploaded: $code_url"
 
 #------------------------------------------------------------------------------
 # Build Submission Command
@@ -254,7 +240,7 @@ encoded_payload=$(<"$B64_PATH")
 submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
-  "encoded_archive=$encoded_payload"
+  "code_url=$code_url"
   "payload_root=$payload_root"
   "policy_repo_id=$policy_repo_id"
   "policy_type=$policy_type"

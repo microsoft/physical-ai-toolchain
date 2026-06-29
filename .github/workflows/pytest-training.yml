@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: '3.12'
 
@@ -36,13 +36,6 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --group dev
-
-      # CPU-only torch for the runner-based unit tests, pinned outside the lock on purpose.
-      # `uv sync` would otherwise pull the root dev-group torch==2.12.0, and the lerobot/
-      # eval locks pin torch==2.10.0 (CUDA-12 wheels) — neither installs cleanly on the CPU
-      # runner. See PR #995 thread; revisit dropping this step once the pin is reconciled.
-      - name: Install Torch test dependency
-        run: uv pip install torch==2.11.0
 
       - name: Run pytest
         run: >-

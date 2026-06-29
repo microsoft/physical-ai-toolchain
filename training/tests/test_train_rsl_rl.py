@@ -8,10 +8,8 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
-torch = pytest.importorskip("torch")
-
-from conftest import load_training_module  # noqa: E402
+import torch
+from conftest import load_training_module
 
 # ---------------------------------------------------------------------------
 # Pre-load stubs: register all heavy/missing modules in sys.modules BEFORE

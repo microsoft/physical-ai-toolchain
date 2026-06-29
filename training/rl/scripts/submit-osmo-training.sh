@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit OSMO training workflow with training/rl/ packaged as base64 payload
+# Submit OSMO training workflow with training/rl/ delivered via object storage
 # Excludes __pycache__ and build artifacts to reduce payload size
 set -o errexit -o nounset
 
@@ -19,7 +19,7 @@ show_help() {
   cat << EOF
 Usage: submit-osmo-training.sh [OPTIONS] [-- osmo-submit-flags]
 
-Package training/rl/, encode as base64, and submit an OSMO workflow.
+Package training/rl/, upload it to OSMO object storage, and submit an OSMO workflow.
 
 WORKFLOW OPTIONS:
     -w, --workflow PATH           Workflow template (default: training/rl/workflows/osmo/train.yaml)
@@ -83,10 +83,6 @@ normalize_checkpoint_mode() {
 # Defaults
 #------------------------------------------------------------------------------
 
-TMP_DIR="$SCRIPT_DIR/.tmp"
-ARCHIVE_PATH="$TMP_DIR/osmo-training.zip"
-B64_PATH="$TMP_DIR/osmo-training.b64"
-
 workflow="$REPO_ROOT/training/rl/workflows/osmo/train.yaml"
 task="${TASK:-Isaac-Velocity-Rough-Anymal-C-v0}"
 num_envs="${NUM_ENVS:-2048}"
@@ -108,6 +104,8 @@ skip_register=false
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
+storage_account="${AZURE_STORAGE_ACCOUNT_NAME:-$(get_storage_account)}"
+osmo_container="${OSMO_WORKFLOW_BUCKET:-osmo}"
 correlation_id="${MLFLOW_CORRELATION_ID:-}"
 
 sleep_after_unpack="${SLEEP_AFTER_UNPACK:-}"
@@ -157,10 +155,11 @@ done
 
 [[ "$use_local_osmo" == "true" ]] && activate_local_osmo
 
-require_tools osmo zip base64
+require_tools osmo zip
 
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
 [[ -d "$REPO_ROOT/training/rl" ]] || fatal "Directory training/rl not found"
+[[ -z "$storage_account" ]] && fatal "Azure storage account required for code upload (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
 
 checkpoint_mode="$(normalize_checkpoint_mode "$checkpoint_mode")"
 
@@ -189,44 +188,21 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Subscription" "${subscription_id:-<not set>}"
   print_kv "Resource Group" "${resource_group:-<not set>}"
   print_kv "Workspace" "${workspace_name:-<not set>}"
+  print_kv "Storage Account" "${storage_account:-<not set>}"
   print_kv "Correlation ID" "${correlation_id:-<not set>}"
   exit 0
 fi
 
 #------------------------------------------------------------------------------
-# Package Training Payload
+# Package and Upload Training Payload
 #------------------------------------------------------------------------------
 
-info "Packaging training payload..."
-mkdir -p "$TMP_DIR"
-rm -f "$ARCHIVE_PATH" "$B64_PATH"
-
-# Exclude __pycache__, .pyc, and build artifacts to reduce payload size
-(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/rl training/__init__.py training/stream.py training/utils \
-  -x "**/__pycache__/*" \
-  -x "*.pyc" \
-  -x "*.pyo" \
-  -x "**/.venv/*" \
-  -x "**/.pytest_cache/*" \
-  -x "**/.mypy_cache/*" \
-  -x "**/*.egg-info/*") || fatal "Failed to create training archive"
-
-[[ -f "$ARCHIVE_PATH" ]] || fatal "Archive not created: $ARCHIVE_PATH"
-
-# Base64 encode (macOS vs Linux compatible)
-if base64 --help 2>&1 | grep -q '\-\-input'; then
-  base64 --input "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-else
-  base64 -i "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-fi
-
-[[ -s "$B64_PATH" ]] || fatal "Failed to encode archive"
-
-archive_size=$(wc -c < "$ARCHIVE_PATH" | tr -d ' ')
-b64_size=$(wc -c < "$B64_PATH" | tr -d ' ')
-info "Payload: ${archive_size} bytes (${b64_size} bytes base64)"
-
-encoded_payload=$(<"$B64_PATH")
+info "Packaging and uploading training payload..."
+code_url=$(stage_and_upload_code "$REPO_ROOT" \
+  "azure://${storage_account}/${osmo_container}/osmo-code" \
+  training/rl training/__init__.py training/stream.py training/utils) \
+  || fatal "Failed to stage and upload training payload"
+info "Training payload uploaded: $code_url"
 
 #------------------------------------------------------------------------------
 # Build Submission Command
@@ -235,7 +211,7 @@ encoded_payload=$(<"$B64_PATH")
 submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
-  "encoded_archive=$encoded_payload"
+  "code_url=$code_url"
   "task=$task"
   "num_envs=$num_envs"
   "payload_root=$payload_root"

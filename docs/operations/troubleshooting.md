@@ -227,13 +227,28 @@ Use `simulation_shutdown.py` which stops the simulation timeline and applies a S
 
 ## Workflow Runtime Errors
 
-### OSMO workflow submission fails with payload too large
+### OSMO workflow code upload or download fails
 
-**Cause:** Base64-encoded archive exceeds the ~1 MB payload limit.
+**Cause:** The submit host or the workflow pod cannot reach the OSMO object-storage container that carries the packaged code, which the submission uploads with `osmo data upload` and the pod retrieves through a `url:` task input.
 
 **Resolution:**
 
-Switch from inline payload to dataset folder injection. Upload files as an OSMO dataset and reference the dataset folder name in the workflow environment variables.
+1. Ensure the submit host is authenticated (`az login`) and holds `Storage Blob Data Contributor` on the OSMO storage account. Set `AZURE_STORAGE_ACCOUNT_NAME` (and `OSMO_WORKFLOW_BUCKET`, default `osmo`) if they are not resolved from Terraform outputs.
+2. Confirm access before submitting: `osmo data check azure://<account>/<container>` returns `{"status": "pass"}`.
+3. If the pod fails to fetch the code, verify the workflow pod's workload identity has read access to the same container.
+
+### OSMO code-upload objects accumulate under `osmo-code/`
+
+**Cause:** Each submission content-addresses the packaged code by a hash over its files and uploads it to `osmo-code/<hash>` only when that object is absent. Byte-identical code reuses the existing object, but every distinct code revision creates a new one, so the prefix grows as the code evolves and is not pruned automatically.
+
+**Resolution:**
+
+List the staged archives and delete stale ones, or apply an Azure Storage lifecycle management policy that expires blobs under the prefix:
+
+```bash
+osmo data list azure://<account>/<container>/osmo-code
+osmo data delete azure://<account>/<container>/osmo-code/<hash>
+```
 
 ### OSMO workflow YAML template rendering fails
 

@@ -32,11 +32,6 @@ LeRobot is runtime-installed via `uv pip` inside the Isaac Lab container. Traini
 | AzureML  | `training/il/scripts/submit-azureml-lerobot-training.sh` | `training/il/workflows/azureml/lerobot-train.yaml` |
 | OSMO     | `training/il/scripts/submit-osmo-lerobot-training.sh`    | `training/il/workflows/osmo/lerobot-train.yaml`    |
 
-## Dataset Injection
+## Code Delivery
 
-OSMO supports two payload strategies for dataset delivery:
-
-| Strategy                 | Size Limit | Mechanism                                   |
-|--------------------------|------------|---------------------------------------------|
-| Base64-encoded archive   | ~1 MB      | Embedded in workflow YAML                   |
-| Dataset folder injection | Unlimited  | Versioned folder, name in workflow env vars |
+The OSMO submission packages the code, uploads it to object storage with `osmo data upload`, and injects it into the workflow pod through a `url:` task input. The pod downloads the archive via its workload identity and unpacks it at runtime. This delivery path has no payload size limit.

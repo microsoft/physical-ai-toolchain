@@ -148,13 +148,12 @@ register_checkpoint="${REGISTER_CHECKPOINT:-}"
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
+storage_account="${AZURE_STORAGE_ACCOUNT_NAME:-$(get_storage_account)}"
+osmo_container="${OSMO_WORKFLOW_BUCKET:-osmo}"
 azure_authority_host="${AZURE_AUTHORITY_HOST:-https://login.microsoftonline.com}"
 mlflow_retries="${MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES:-3}"
 mlflow_timeout="${MLFLOW_HTTP_REQUEST_TIMEOUT:-60}"
 
-TMP_DIR="$SCRIPT_DIR/.tmp"
-ARCHIVE_PATH="$TMP_DIR/osmo-lerobot-training.zip"
-B64_PATH="$TMP_DIR/osmo-lerobot-training.b64"
 payload_root="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
 
 use_local_osmo=false
@@ -204,7 +203,7 @@ done
 
 [[ "$use_local_osmo" == "true" ]] && activate_local_osmo
 
-require_tools osmo zip base64 python3
+require_tools osmo zip python3
 
 [[ -d "$REPO_ROOT/training/il" ]] || fatal "Directory training/il not found"
 
@@ -235,6 +234,7 @@ esac
 [[ -z "$subscription_id" ]] && fatal "Azure subscription ID required (set AZURE_SUBSCRIPTION_ID or deploy infra)"
 [[ -z "$resource_group" ]] && fatal "Azure resource group required (set AZURE_RESOURCE_GROUP or deploy infra)"
 [[ -z "$workspace_name" ]] && fatal "Azure ML workspace name required (set AZUREML_WORKSPACE_NAME or deploy infra)"
+[[ -z "$storage_account" ]] && fatal "Azure storage account required (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
 
 [[ "$val_split_enabled" == "false" ]] && val_split="0"
 
@@ -258,41 +258,22 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Subscription" "$subscription_id"
   print_kv "Resource Group" "$resource_group"
   print_kv "Workspace" "$workspace_name"
+  print_kv "Storage Account" "$storage_account"
+  print_kv "Code Storage" "azure://${storage_account}/${osmo_container}/osmo-code"
   print_kv "Workflow" "$workflow"
   exit 0
 fi
 
 #------------------------------------------------------------------------------
-# Package Training Payload
+# Package and Upload Training Payload
 #------------------------------------------------------------------------------
 
-info "Packaging training payload..."
-mkdir -p "$TMP_DIR"
-rm -f "$ARCHIVE_PATH" "$B64_PATH"
-
-(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/il training/__init__.py training/stream.py training/utils \
-  -x "**/__pycache__/*" \
-  -x "*.pyc" \
-  -x "*.pyo" \
-  -x "**/.pytest_cache/*" \
-  -x "**/.mypy_cache/*" \
-  -x "**/*.egg-info/*") || fatal "Failed to create training archive"
-
-[[ -f "$ARCHIVE_PATH" ]] || fatal "Archive not created: $ARCHIVE_PATH"
-
-if base64 --help 2>&1 | grep -q '\-\-input'; then
-  base64 --input "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-else
-  base64 -i "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-fi
-
-[[ -s "$B64_PATH" ]] || fatal "Failed to encode archive"
-
-archive_size=$(wc -c < "$ARCHIVE_PATH" | tr -d ' ')
-b64_size=$(wc -c < "$B64_PATH" | tr -d ' ')
-info "Payload: ${archive_size} bytes (${b64_size} bytes base64)"
-
-encoded_payload=$(<"$B64_PATH")
+info "Packaging and uploading training payload..."
+code_url=$(stage_and_upload_code "$REPO_ROOT" \
+  "azure://${storage_account}/${osmo_container}/osmo-code" \
+  training/il training/__init__.py training/stream.py training/utils) \
+  || fatal "Failed to stage and upload training payload"
+info "Training payload uploaded: $code_url"
 
 #------------------------------------------------------------------------------
 # Build Submission Command
@@ -301,7 +282,7 @@ encoded_payload=$(<"$B64_PATH")
 submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
-  "encoded_archive=$encoded_payload"
+  "code_url=$code_url"
   "payload_root=$payload_root"
   "dataset_repo_id=$dataset_repo_id"
   "dataset_root=$dataset_root"
@@ -348,7 +329,7 @@ info "  Batch Size: $batch_size"
 info "  Learning Rate: $learning_rate"
 info "  Val Split: $val_split"
 info "  System Metrics: $system_metrics"
-info "  Payload: ${archive_size} bytes"
+info "  Code URL: $code_url"
 [[ $blob_source_count -gt 0 ]] && info "  Data Source: Azure Blob URLs ($blob_source_count)"
 [[ -n "$policy_repo_id" ]] && info "  Fine-tune from: $policy_repo_id"
 [[ -n "$register_checkpoint" ]] && info "  Register model: $register_checkpoint"

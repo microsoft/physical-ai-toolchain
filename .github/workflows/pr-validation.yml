@@ -21,6 +21,8 @@ jobs:
       contents: read
     outputs:
       training: ${{ steps.filter.outputs.training }}
+      rl: ${{ steps.filter.outputs.rl }}
+      il: ${{ steps.filter.outputs.il }}
       dm_tools: ${{ steps.filter.outputs.dm_tools }}
       data_pipeline: ${{ steps.filter.outputs.data_pipeline }}
       inference: ${{ steps.filter.outputs.inference }}
@@ -45,11 +47,17 @@ jobs:
           FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
           echo "Changed files:"
           echo "$FILES"
+          # match() returns false (not an error) on an empty/non-matching diff.
+          # That is safe: the unconditional CPU import baseline in smoke-cpu.yml
+          # runs regardless of these outputs, so a false here can only narrow the
+          # path-gated runtime-image depth, never silently skip the gate.
           match() { echo "$FILES" | grep -qE "$1" && echo true || echo false; }
           pester_match=$(match '\.(ps1|psm1|psd1)$')
           echo "Computed pester=$pester_match"
           {
             echo "training=$(match '^training/')"
+            echo "rl=$(match '^(training/rl/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
+            echo "il=$(match '^(training/il/|shared/ci/|\.github/workflows/smoke-cpu\.yml)')"
             echo "dm_tools=$(match '^data-management/tools/')"
             echo "data_pipeline=$(match '^data-pipeline/capture/')"
             echo "inference=$(match '^fleet-deployment/inference/')"
@@ -59,6 +67,19 @@ jobs:
             echo "docusaurus=$(match '^docs/docusaurus/')"
             echo "pester=$pester_match"
           } >> "$GITHUB_OUTPUT"
+
+  # GPU-free import smoke gate. CPU import smoke runs for every domain on every
+  # PR (unconditional baseline); the runtime-image smoke is path-gated to the
+  # changed training domain.
+  smoke:
+    name: Smoke
+    needs: changes
+    uses: ./.github/workflows/smoke-cpu.yml
+    with:
+      rl: ${{ needs.changes.outputs.rl == 'true' }}
+      il: ${{ needs.changes.outputs.il == 'true' }}
+    permissions:
+      contents: read
 
   # Validate that all `uses: ./.github/workflows/*.yml` references resolve
   workflow-refs-check:
@@ -457,6 +478,7 @@ jobs:
       - go-tests
       - shellcheck
       - codeql-analysis
+      - smoke
     permissions:
       contents: read
     steps:

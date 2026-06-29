@@ -1,0 +1,95 @@
+name: Smoke (GPU-free)
+
+# GPU-free import smoke gate. Two depths, both on standard runners:
+#   - CPU import smoke runs for every domain, unconditionally, on each PR.
+#   - Runtime-image smoke pulls a domain's real container and imports it on the
+#     real interpreter; path-gated by the caller because it pulls a large image.
+
+'on':
+  workflow_call:
+    inputs:
+      rl:
+        description: 'Run the RL runtime-image smoke (training/rl changed)'
+        required: false
+        default: false
+        type: boolean
+      il:
+        description: 'Run the LeRobot runtime-image smoke (training/il changed)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  # Unconditional fail-safe baseline: import every domain on CPU on every PR.
+  # DO NOT add an `if:` or path filter here -- a skipped required job counts as a
+  # pass, so path-gating this would let the gate go green while testing nothing
+  # (the silent-skip failure that has shipped before). Only the runtime-image
+  # depth below is path-gated. See shared/ci/README.md (Design) for the rationale.
+  import-smoke:
+    name: CPU Import Smoke (${{ matrix.domain }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        domain: [rl, il, evaluation]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+
+      - name: CPU import smoke
+        run: shared/ci/smoke-import.sh ${{ matrix.domain }} --mode cpu
+
+  # Runtime-image smoke: import the domain inside its real production container,
+  # on the real interpreter. Path-gated (large image pull) via the caller input.
+  image-smoke-rl:
+    name: Runtime-Image Smoke (rl)
+    if: inputs.rl
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
+        with:
+          tool-cache: true
+
+      - name: Runtime-image smoke
+        run: shared/ci/smoke-image.sh rl
+
+  image-smoke-il:
+    name: Runtime-Image Smoke (il)
+    if: inputs.il
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
+        with:
+          tool-cache: true
+
+      - name: Runtime-image smoke
+        run: shared/ci/smoke-image.sh il

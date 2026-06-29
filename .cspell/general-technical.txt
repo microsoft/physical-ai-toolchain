@@ -697,6 +697,7 @@ lenbuffer
 lenovo
 lerobot
 levelname
+libc
 libx
 libzstd
 lifecycle

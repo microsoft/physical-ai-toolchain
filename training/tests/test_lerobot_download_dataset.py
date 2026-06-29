@@ -8,12 +8,10 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
-
-pa = pytest.importorskip("pyarrow")
-pq = pytest.importorskip("pyarrow.parquet")
-
-from conftest import load_training_module  # noqa: E402
+from conftest import load_training_module
 
 
 def _install_azure_stubs(monkeypatch, list_blobs_return=(), download_payload=b"data"):
@@ -100,13 +98,7 @@ class TestDownloadDataset:
 
 
 class TestDownloadDatasetTraversal:
-    """Path-traversal hardening for download_dataset.
-
-    Originally added in feat/add-azureml-data-assets; lives here so the
-    `pytest.importorskip("pyarrow")` gate above keeps `download_dataset.py`
-    out of the `--cov=training` scope on CI runners that do not install
-    pyarrow.
-    """
+    """Path-traversal hardening for download_dataset."""
 
     def test_skips_absolute_blob_name(self, monkeypatch, tmp_path, capsys):
         prefix = "p"
