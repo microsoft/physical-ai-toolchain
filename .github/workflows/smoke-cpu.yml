@@ -18,6 +18,11 @@ name: Smoke (GPU-free)
         required: false
         default: false
         type: boolean
+      dataviewer:
+        description: 'Build the dataviewer compose stack (viewer images/compose changed)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -93,3 +98,21 @@ jobs:
 
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh il
+
+  # Docker build smoke: prove a service image still builds on its bumped base.
+  # Path-gated by the caller (each builds one image); build is the gate, no app
+  # tests. Covers the dataviewer compose stack that no other check rebuilds.
+  build-smoke-dataviewer:
+    name: Docker Build Smoke (dataviewer)
+    if: inputs.dataviewer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Build compose stack
+        run: shared/ci/smoke-docker.sh

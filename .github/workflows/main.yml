@@ -266,6 +266,7 @@ jobs:
     with:
       rl: true
       il: true
+      dataviewer: true
     permissions:
       contents: read
 
