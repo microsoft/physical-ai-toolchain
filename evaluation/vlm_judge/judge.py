@@ -211,6 +211,8 @@ def value_order_correlation(values: Sequence[int]) -> float:
     n = len(values)
     if n < 2:
         return 0.0
+    if len(set(values)) < 2:
+        return 0.0
     ranks_by_value = sorted(range(n), key=lambda i: values[i])
     rank_of = [0] * n
     for r, i in enumerate(ranks_by_value):

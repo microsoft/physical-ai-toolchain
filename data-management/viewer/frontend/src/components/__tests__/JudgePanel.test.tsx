@@ -135,6 +135,17 @@ describe('JudgePanel', () => {
     })
   })
 
+  it('shows unavailable process reward text when every progress value is zero', () => {
+    const result = judgeResult({ progressPerFrame: [0, 0, 0, 0, 0, 0], voc: 1 })
+    mockUseStatus.mockReturnValue({ data: status({ result }), isLoading: false, error: null })
+
+    render(<JudgePanel datasetId="demo" episodeIndex={1} />)
+
+    expect(screen.getByText(/process reward unavailable/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/per-frame task-completion progress/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/voc 1\.00/i)).toBeInTheDocument()
+  })
+
   it('exposes the scoring technique and sends the configured method on run', async () => {
     const user = userEvent.setup()
     mockUseStatus.mockReturnValue({

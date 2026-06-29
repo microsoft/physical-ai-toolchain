@@ -12,6 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BACKEND_DIR="${SCRIPT_DIR}/backend"
 FRONTEND_DIR="${SCRIPT_DIR}/frontend"
 
@@ -138,11 +139,15 @@ wait_for_backend() {
 start_backend() {
     log_info "Starting backend on port ${BACKEND_PORT}..."
     local backend_install_extras=".[dev,analysis,export]"
+    local vlm_judge_package_spec="${REPO_ROOT}/evaluation/vlm_judge"
     local should_install_vlm_judge=false
 
-    if [[ "${VLM_JUDGE_ENABLED:-false}" == "true" && "${VLM_JUDGE_BACKEND:-echo}" == "qwen3-vl" ]]; then
-        backend_install_extras=".[dev,analysis,export,vlm-judge]"
+    if [[ "${VLM_JUDGE_ENABLED:-false}" == "true" ]]; then
         should_install_vlm_judge=true
+        if [[ "${VLM_JUDGE_BACKEND:-echo}" == "qwen3-vl" ]]; then
+            vlm_judge_package_spec="${vlm_judge_package_spec}[qwen3-vl]"
+            backend_install_extras=".[dev,analysis,export,vlm-judge]"
+        fi
     fi
 
     if [[ -z "${DATAVIEWER_AUTH_DISABLED:-}" ]]; then
@@ -153,7 +158,7 @@ start_backend() {
     # Resolve datasets directory: prefer explicit DATA_DIR, otherwise default
     # to <repo>/datasets (../../datasets relative to this script).
     if [[ -z "${DATA_DIR:-}" ]]; then
-        DATA_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)/datasets"
+        DATA_DIR="${REPO_ROOT}/datasets"
         log_info "Defaulting DATA_DIR=${DATA_DIR}"
     fi
     if [[ ! -d "${DATA_DIR}" ]]; then
@@ -162,18 +167,6 @@ start_backend() {
     export DATA_DIR
     log_info "Using DATA_DIR=${DATA_DIR}"
 
-    # When VLM_JUDGE_ENABLED=true, expose the evaluation package to the backend
-    # process so its lazy-import of evaluation.vlm_judge succeeds.
-    if [[ "${VLM_JUDGE_ENABLED:-false}" == "true" ]]; then
-        REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-        if [[ -n "${PYTHONPATH:-}" ]]; then
-            export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/evaluation:${PYTHONPATH}"
-        else
-            export PYTHONPATH="${REPO_ROOT}:${REPO_ROOT}/evaluation"
-        fi
-        log_info "VLM judge enabled — PYTHONPATH=${PYTHONPATH}"
-    fi
-
     if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
         log_warn "Virtual environment not found at ${BACKEND_DIR}/.venv"
         log_info "Creating virtual environment..."
@@ -181,13 +174,17 @@ start_backend() {
         if command -v uv &>/dev/null; then
             (cd "${BACKEND_DIR}" && uv venv --python 3.12)
             (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
+            if [[ "${should_install_vlm_judge}" == "true" ]]; then
+                (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
+            fi
         else
             log_error "uv not found. Please install uv or create venv manually."
             exit 1
         fi
     elif [[ "${should_install_vlm_judge}" == "true" ]]; then
-        log_info "Ensuring local VLM judge backend dependencies are installed..."
-        (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e ".[vlm-judge]")
+        log_info "Ensuring VLM judge package dependencies are installed..."
+        (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
+        (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
     fi
 
     (

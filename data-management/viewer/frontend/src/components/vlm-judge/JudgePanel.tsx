@@ -97,6 +97,10 @@ function ProgressSparkline({ values }: { values: number[] }) {
   )
 }
 
+function hasProcessProgress(values: number[]): boolean {
+  return values.some((value) => value > 0)
+}
+
 function RunningBar({ label }: { label: string }) {
   return (
     <div className="space-y-1" role="status" aria-live="polite">
@@ -249,7 +253,13 @@ export const JudgePanel = memo(function JudgePanel({
 
           <div>
             <p className="text-muted-foreground mb-1 text-xs font-medium">Process reward</p>
-            <ProgressSparkline values={result.progressPerFrame} />
+            {hasProcessProgress(result.progressPerFrame) ? (
+              <ProgressSparkline values={result.progressPerFrame} />
+            ) : (
+              <p className="text-muted-foreground text-xs">
+                Process reward unavailable for this run
+              </p>
+            )}
             <p className="text-muted-foreground mt-1 text-xs">
               VOC {result.voc.toFixed(2)} ({result.nFrames} frames)
             </p>

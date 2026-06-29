@@ -1,0 +1,38 @@
+[project]
+name = "physical-ai-vlm-judge"
+version = "0.1.0"
+description = "VLM-as-judge harness for robot manipulation episodes"
+requires-python = ">=3.12"
+dependencies = [
+    "av==15.1.0",
+    "pandas==3.0.3",
+    "Pillow==12.2.0",
+    "pyarrow==24.0.0",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi==0.138.0",
+    "pydantic==2.13.4",
+    "uvicorn[standard]==0.49.0",
+]
+openai = [
+    "openai==2.43.0",
+]
+qwen3-vl = [
+    "accelerate==1.13.0",
+    "torch==2.10.0",
+    "torchvision==0.25.0",
+    "transformers==5.12.1",
+]
+
+[build-system]
+requires = ["setuptools>=80.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["evaluation.vlm_judge"]
+package-dir = { "evaluation.vlm_judge" = "." }
+
+[tool.uv]
+prerelease = "allow"

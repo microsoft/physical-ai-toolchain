@@ -56,15 +56,20 @@ export function useRunVlmJudge() {
     mutationFn: ({ datasetId, episodeIndex, options }) =>
       runVlmJudge(datasetId, episodeIndex, options),
     onSuccess: (result, { datasetId, episodeIndex }) => {
+      const queryKey = vlmJudgeKeys.episode(datasetId, episodeIndex)
+      const existing = queryClient.getQueryData<VlmJudgeStatus>(queryKey)
       const status: VlmJudgeStatus = {
+        ...existing,
         enabled: true,
         cached: result.cached,
         judgeModel: result.judgeModel,
         promptVersion: result.promptVersion,
-        cacheKey: null,
+        cacheKey: existing?.cacheKey ?? null,
+        processMethod: result.processMethod ?? existing?.processMethod ?? null,
+        nFrames: existing?.nFrames ?? result.nFrames,
         result,
       }
-      queryClient.setQueryData(vlmJudgeKeys.episode(datasetId, episodeIndex), status)
+      queryClient.setQueryData(queryKey, status)
     },
   })
 }

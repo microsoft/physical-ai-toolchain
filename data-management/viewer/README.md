@@ -130,9 +130,9 @@ card on the trajectory tab:
 
 #### How to use it
 
-1. Enable the judge and start the viewer with `./start.sh`. It exports the
-  `evaluation` package onto `PYTHONPATH` automatically and installs the local
-  VLM dependencies when `VLM_JUDGE_BACKEND=qwen3-vl`:
+1. Enable the judge and start the viewer with `./start.sh`. It installs the
+  lightweight `physical-ai-vlm-judge` package into the backend environment and
+  adds local model dependencies only when `VLM_JUDGE_BACKEND=qwen3-vl`:
 
    ```bash
    VLM_JUDGE_ENABLED=true VLM_JUDGE_BACKEND=qwen3-vl ./start.sh
@@ -202,9 +202,9 @@ back to dataset metadata when needed.
 
 #### Settings
 
-Enable the judge via `start.sh`, or by exporting `PYTHONPATH` to the repository root
-before launching the backend. Install the backend `vlm-judge` extra before using
-the in-process `qwen3-vl` backend without `start.sh`.
+Enable the judge via `start.sh`, or install the backend `vlm-judge` extra before
+launching the backend manually. Install `vlm-judge-local` when using the
+in-process `qwen3-vl` backend without `start.sh`.
 
 | Variable              | Default                     | Description                                                       |
 |-----------------------|-----------------------------|-------------------------------------------------------------------|
@@ -250,7 +250,10 @@ the bundled OpenAI-compatible shim — and point the dataviewer at it with
 `VLM_JUDGE_BACKEND=openai-compat` and `VLM_JUDGE_BASE_URL=http://127.0.0.1:8001/v1`:
 
 ```bash
-python -m evaluation.vlm_judge.openai_shim --port 8001 --model-id Qwen/Qwen3-VL-4B-Instruct
+uv run --project ../../evaluation/vlm_judge --extra api --extra qwen3-vl \
+  python -m evaluation.vlm_judge.openai_shim \
+  --port 8001 \
+  --model-id Qwen/Qwen3-VL-4B-Instruct
 ```
 
 The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../evaluation/vlm_judge/openai_shim.py)):

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -11,16 +10,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
-
-# Expose the repository root on sys.path so tests can import the
-# ``evaluation.vlm_judge`` package the running backend reaches via
-# ``start.sh`` (which exports PYTHONPATH when VLM_JUDGE_ENABLED=true). This
-# keeps the VLM-judge router and service tests runnable in CI without the
-# production launch wrapper.
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
 
 def make_asgi_request(
     method: str = "POST",
@@ -91,7 +80,7 @@ def client(test_dataset_path):
     # Reset all singletons so each test gets a fresh service instance that
     # re-reads the current DATA_DIR from the environment.
     config_mod._app_config = None
-    ds_mod._dataset_service = None
+    setattr(ds_mod, "_dataset_service", None)
     ann_mod._annotation_service = None
 
     from src.api.main import app
@@ -100,5 +89,5 @@ def client(test_dataset_path):
         yield c
 
     config_mod._app_config = None
-    ds_mod._dataset_service = None
+    setattr(ds_mod, "_dataset_service", None)
     ann_mod._annotation_service = None
