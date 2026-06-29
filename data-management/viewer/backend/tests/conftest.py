@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+
 def make_asgi_request(
     method: str = "POST",
     path: str = "/api/x",
@@ -75,12 +76,12 @@ def client(test_dataset_path):
 
     import src.api.config as config_mod
     import src.api.services.annotation_service as ann_mod
-    import src.api.services.dataset_service as ds_mod
+    import src.api.services.dataset_service.service as ds_mod
 
     # Reset all singletons so each test gets a fresh service instance that
     # re-reads the current DATA_DIR from the environment.
     config_mod._app_config = None
-    setattr(ds_mod, "_dataset_service", None)
+    ds_mod._dataset_service = None
     ann_mod._annotation_service = None
 
     from src.api.main import app
@@ -89,5 +90,5 @@ def client(test_dataset_path):
         yield c
 
     config_mod._app_config = None
-    setattr(ds_mod, "_dataset_service", None)
+    ds_mod._dataset_service = None
     ann_mod._annotation_service = None

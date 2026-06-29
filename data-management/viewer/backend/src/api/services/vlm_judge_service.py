@@ -40,8 +40,7 @@ def get_vlm_judge_service(config: AppConfig):
         )
     except ImportError as err:
         logger.warning(
-            "VLM judge unavailable: evaluation.vlm_judge import failed (%s); "
-            "install the backend vlm-judge extra",
+            "VLM judge unavailable: evaluation.vlm_judge import failed (%s); install the backend vlm-judge extra",
             err,
         )
         return None
