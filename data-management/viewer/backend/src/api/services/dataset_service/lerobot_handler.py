@@ -313,6 +313,10 @@ class LeRobotFormatHandler:
         if result is not None:
             return result
 
+        result = self._extract_frame_av(str(video_path), frame_idx, fps)
+        if result is not None:
+            return result
+
         return self._extract_frame_cv2(str(video_path), frame_idx)
 
     @staticmethod
@@ -365,6 +369,58 @@ class LeRobotFormatHandler:
             logger.warning("ffmpeg frame extraction failed: %s", e)
 
         return None
+
+    @staticmethod
+    def _extract_frame_av(video_path: str, frame_idx: int, fps: float) -> bytes | None:
+        """Extract a single frame as JPEG using PyAV."""
+        try:
+            import av
+            from PIL import Image
+        except ImportError:
+            return None
+
+        seek_time_s = frame_idx / fps
+        try:
+            with av.open(video_path) as container:
+                stream = next((s for s in container.streams if s.type == "video"), None)
+                if stream is None:
+                    logger.warning("No video stream found in %s", video_path)
+                    return None
+
+                if stream.time_base is not None:
+                    timestamp = int(seek_time_s / float(stream.time_base))
+                    container.seek(timestamp, stream=stream, any_frame=False, backward=True)
+
+                best_frame = None
+                best_delta = float("inf")
+                for frame in container.decode(stream):
+                    frame_time = float(getattr(frame, "time", 0.0) or 0.0)
+                    delta = abs(frame_time - seek_time_s)
+                    if delta < best_delta:
+                        best_frame = frame
+                        best_delta = delta
+                    if frame_time >= seek_time_s and best_frame is not None:
+                        break
+
+                if best_frame is None:
+                    logger.warning("Failed to read frame %s with PyAV", frame_idx)
+                    return None
+
+                to_image = getattr(best_frame, "to_image", None)
+                if to_image is None:
+                    logger.warning("Decoded PyAV frame cannot be converted to an image")
+                    return None
+
+                img = to_image()
+                if not isinstance(img, Image.Image):
+                    logger.warning("Decoded PyAV frame did not produce a PIL image")
+                    return None
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85)
+                return buf.getvalue()
+        except Exception as e:
+            logger.warning("PyAV frame extraction failed: %s", e)
+            return None
 
     @staticmethod
     def _extract_frame_cv2(video_path: str, frame_idx: int) -> bytes | None:
