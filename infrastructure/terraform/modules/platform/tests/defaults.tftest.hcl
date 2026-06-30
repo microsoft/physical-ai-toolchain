@@ -54,6 +54,12 @@ run "verify_defaults" {
     error_message = "Grafana should be created by default"
   }
 
+  // Grafana uses the default major version
+  assert {
+    condition     = azurerm_dashboard_grafana.main[0].grafana_major_version == "12"
+    error_message = "Grafana should default to major version 12"
+  }
+
   // Monitor Workspace enabled by default
   assert {
     condition     = length(azurerm_monitor_workspace.main) == 1

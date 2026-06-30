@@ -258,7 +258,7 @@ if [[ "$skip_wait" == "true" ]]; then
   section "Deployment Summary"
   print_kv "Mode" "async (training submitted, not waiting)"
   print_kv "Training Job" "$train_job_name"
-  print_kv "Monitor" "osmo workflow status $train_job_name"
+  print_kv "Monitor" "osmo workflow query $train_job_name"
   info "To continue the pipeline after training completes:"
   info "  $0 --skip-wait is not applicable for the remaining stages."
   info "  Instead, run inference separately:"
@@ -279,7 +279,7 @@ workflow_status=""
 
 while [[ $elapsed -lt $timeout_secs ]]; do
   # Capture workflow status from OSMO
-  workflow_status=$(osmo workflow status "$train_job_name" --output json 2>/dev/null | \
+  workflow_status=$(osmo workflow query "$train_job_name" --output json 2>/dev/null | \
     jq -r '.status // .state // empty' 2>/dev/null || echo "UNKNOWN")
 
   case "$workflow_status" in
@@ -307,7 +307,7 @@ done
 
 if [[ $elapsed -ge $timeout_secs ]]; then
   warn "Training timeout reached (${timeout_mins}m)"
-  warn "Workflow may still be running. Check: osmo workflow status $train_job_name"
+  warn "Workflow may still be running. Check: osmo workflow query $train_job_name"
   fatal "Pipeline aborted due to timeout"
 fi
 
@@ -366,5 +366,5 @@ print_kv "Training Job" "$train_job_name"
 [[ -n "$register_model" ]] && print_kv "Model Name" "$register_model"
 
 info "Monitor workflows:"
-info "  osmo workflow status $train_job_name"
-[[ "$skip_inference" == "false" ]] && info "  osmo workflow status $eval_job_name"
+info "  osmo workflow query $train_job_name"
+[[ "$skip_inference" == "false" ]] && info "  osmo workflow query $eval_job_name"

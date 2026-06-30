@@ -8,12 +8,16 @@ workflow:
       cpu: {{ cpu }}
       memory: {{ memory }}
       storage: {{ storage }}
+      platform: gpu_platform
   tasks:
     - name: isaac-training
       image: "{{ image }}"
       command:
         - /bin/bash
         - /tmp/entry.sh
+      inputs:
+        - url: "{{ code_url }}"
+          regex: ".*"
       environment:
         NVIDIA_DRIVER_CAPABILITIES: "all"
         TASK: "{{ task }}"
@@ -21,7 +25,6 @@ workflow:
         MAX_ITERATIONS: "{{ max_iterations }}"
         ACCEPT_EULA: "Y"
         PRIVACY_CONSENT: "Y"
-        ENCODED_ARCHIVE: "{{ encoded_archive }}"
         PAYLOAD_ROOT: "{{ payload_root }}"
         SLEEP_AFTER_UNPACK: "{{ sleep_after_unpack }}"
         AZURE_SUBSCRIPTION_ID: "{{ azure_subscription_id }}"
@@ -43,17 +46,19 @@ workflow:
             #!/bin/bash
             set -euo pipefail
 
-            if [[ -z "${ENCODED_ARCHIVE:-}" ]]; then
-              echo "encoded_archive is required" >&2
-              exit 1
-            fi
-
-            ARCHIVE_PATH="${TEMP_ARCHIVE:-/tmp/isaac_payload.zip}"
             PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/isaac_payload}"
             TRAINING_ROOT="${TRAINING_ROOT:-${PAYLOAD_ROOT}/training/rl}"
 
             mkdir -p "${PAYLOAD_ROOT}"
-            printf '%s' "${ENCODED_ARCHIVE}" | base64 -d > "${ARCHIVE_PATH}"
+            # Code is delivered via the OSMO url: input (object storage), not an
+            # env var: a single env string is capped at 128 KiB (MAX_ARG_STRLEN)
+            # and the archive exceeds that, failing the container execve E2BIG.
+            ARCHIVE_PATH="$(find "{{input:0}}" -maxdepth 2 -name '*.zip' | head -n1)"
+            if [[ -z "${ARCHIVE_PATH}" || ! -s "${ARCHIVE_PATH}" ]]; then
+              echo "ERROR: no code archive found under the input mount; training payload is required." >&2
+              ls -laR "{{input:0}}" || true
+              exit 1
+            fi
             unzip -oq "${ARCHIVE_PATH}" -d "${PAYLOAD_ROOT}"
 
             if [[ -n "${SLEEP_AFTER_UNPACK:-}" ]]; then
@@ -88,7 +93,7 @@ default-values:
   task: Isaac-Velocity-Rough-Anymal-C-v0
   num_envs: "2048"
   max_iterations: ""
-  encoded_archive: ""
+  code_url: ""
   payload_root: /workspace/isaac_payload
   sleep_after_unpack: ""
   azure_subscription_id: ""

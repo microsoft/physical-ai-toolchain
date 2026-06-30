@@ -503,6 +503,7 @@ grafana
 graphql
 greenfield
 grooming
+groot
 gruntwork
 hadoop
 hardcoded
@@ -696,6 +697,7 @@ lenbuffer
 lenovo
 lerobot
 levelname
+libc
 libx
 libzstd
 lifecycle
@@ -1181,6 +1183,7 @@ scalability
 scalesetpriority
 scenario
 schedules
+schedulingshard
 schemathesis
 schwinn
 scikit
@@ -1674,6 +1677,16 @@ ueks
 unnormalization
 updt
 zstd
+acrdev
+eeuo
+gpustat
+libsm
+libvulkan
+libxext
+libxrender
+noheader
+PYTHONUNBUFFERED
+torchcodec
 
 # Matplotlib / plotting API terms
 axhline

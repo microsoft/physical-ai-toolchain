@@ -22,7 +22,7 @@ Detailed submission examples for training, inference, and pipeline workflows on 
 
 ## OSMO Dataset Training
 
-The `submit-osmo-dataset-training.sh` script uploads `training/rl/` as a versioned OSMO dataset. This approach removes the ~1MB size limit of base64-encoded archives and enables dataset reuse across runs.
+The `submit-osmo-dataset-training.sh` script uploads `training/rl/` as a versioned OSMO dataset and enables dataset reuse across runs.
 
 ### Dataset Submission Example
 
@@ -55,7 +55,7 @@ The script stages files to exclude `__pycache__` and build artifacts via `.amlig
 
 ## LeRobot Behavioral Cloning
 
-The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows supporting ACT and Diffusion policy architectures. It trains from HuggingFace Hub datasets or Azure Blob datasets and installs runtime dependencies from `training/il/lerobot/requirements.txt`.
+The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows supporting ACT and Diffusion policy architectures. It trains from HuggingFace Hub datasets or Azure Blob datasets and installs runtime dependencies exported at build time from `training/il/lerobot/uv.lock`.
 
 ### LeRobot Submission Examples
 
@@ -160,7 +160,7 @@ The `run-lerobot-pipeline.sh` script orchestrates the full LeRobot lifecycle: tr
 | Stage | Action                                | Script Used                        |
 |-------|---------------------------------------|------------------------------------|
 | 1     | Submit training workflow              | `submit-osmo-lerobot-training.sh`  |
-| 2     | Poll workflow status until completion | `osmo workflow status`             |
+| 2     | Poll workflow status until completion | `osmo workflow query`              |
 | 3     | Submit inference/evaluation workflow  | `submit-osmo-lerobot-inference.sh` |
 
 ### Pipeline Examples

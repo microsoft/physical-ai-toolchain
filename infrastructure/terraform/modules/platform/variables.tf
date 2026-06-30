@@ -276,6 +276,17 @@ variable "should_deploy_grafana" {
   default     = true
 }
 
+variable "grafana_major_version" {
+  type        = string
+  description = "Azure Managed Grafana major version. Only \"12\" is valid for the Standard SKU with the current azurerm provider."
+  default     = "12"
+
+  validation {
+    condition     = contains(["12"], var.grafana_major_version)
+    error_message = "grafana_major_version must be \"12\" (the only version valid for the Grafana Standard SKU with the current azurerm provider)."
+  }
+}
+
 variable "should_deploy_monitor_workspace" {
   type        = bool
   description = "Whether to deploy Azure Monitor Workspace for Prometheus metrics"

@@ -1,31 +1,76 @@
 global:
-  osmoImageTag: "6.2"
-  serviceUrl: "http://osmo-agent.osmo-control-plane.svc.cluster.local"
+  osmoImageTag: "6.3.0"
+  serviceUrl: "http://osmo-gateway.osmo-control-plane.svc.cluster.local"
   agentNamespace: "osmo-operator"
   backendNamespace: "osmo-workflows"
   backendName: "default"
-  accountTokenSecret: "osmo-operator-token"
+
+  # loginMethod is passed by the chart as --login_method. Must be "password" or "token"
+  # (pydantic validation). In dev mode (--method dev via extraArgs), login_method is
+  # ignored but a dummy token secret must exist to satisfy the chart's volume mount.
   loginMethod: "token"
+  accountTokenSecret: "svc-osmo-admin"
+  accountTokenSecretKey: "token"
 
   # Node selector to prefer system pool nodes (non-GPU)
   nodeSelector:
     kubernetes.io/os: linux
 
-  services:
-    backendListener:
-      resources:
-        requests:
-          cpu: "100m"
-          memory: "256Mi"
-        limits:
-          memory: "1Gi"
-    backendWorker:
-      resources:
-        requests:
-          cpu: "100m"
-          memory: "256Mi"
-        limits:
-          memory: "1Gi"
+# Dev mode authentication bypasses OIDC (no token_endpoint configured).
+# --method dev makes the operator send x-osmo-user header to the gateway.
+# KUBECONFIG env var + mounted ConfigMap work around dev mode calling
+# load_kube_config() instead of load_incluster_config(). The kubeconfig uses an exec
+# credential plugin (token-cred.py, a second key in the incluster-kubeconfig ConfigMap)
+# rather than a static tokenFile: load_kube_config() caches a tokenFile at startup and
+# never refreshes it, so the ~1h projected token would expire and every K8s call would
+# 401. The exec plugin is re-invoked on expiry and re-reads the rotated projected token.
+services:
+  backendListener:
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        memory: "1Gi"
+    extraArgs:
+      - --method
+      - dev
+      - --username
+      - admin
+    extraEnvs:
+      - name: KUBECONFIG
+        value: /etc/kubeconfig/config
+    volumes:
+      - name: incluster-kubeconfig
+        configMap:
+          name: incluster-kubeconfig
+    volumeMounts:
+      - name: incluster-kubeconfig
+        mountPath: /etc/kubeconfig
+        readOnly: true
+  backendWorker:
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+      limits:
+        memory: "1Gi"
+    extraArgs:
+      - --method
+      - dev
+      - --username
+      - admin
+    extraEnvs:
+      - name: KUBECONFIG
+        value: /etc/kubeconfig/config
+    volumes:
+      - name: incluster-kubeconfig
+        configMap:
+          name: incluster-kubeconfig
+    volumeMounts:
+      - name: incluster-kubeconfig
+        mountPath: /etc/kubeconfig
+        readOnly: true
 
 # Disable backend-test-runner CronJob — image nvcr.io/nvidia/osmo/backend-test-runner
 # is not in ACR and NVCR requires authentication. Enable after importing image to ACR.

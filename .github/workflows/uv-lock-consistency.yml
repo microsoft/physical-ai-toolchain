@@ -1,0 +1,67 @@
+name: uv Lock Consistency
+
+on:
+  workflow_call:
+    inputs:
+      changed-files-only:
+        description: 'Only check projects whose uv.lock or pyproject.toml changed'
+        required: false
+        type: boolean
+        default: false
+      soft-fail:
+        description: 'Prevent PR failures when lock drift is detected'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  uv-lock-consistency:
+    name: Check uv Lock Consistency
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Create logs directory
+        run: New-Item -ItemType Directory -Force -Path logs | Out-Null
+
+      - name: Run uv Lock Consistency Check
+        env:
+          CHANGED_FILES_ONLY: ${{ inputs.changed-files-only }}
+        run: |
+          $params = @{}
+          if ($env:CHANGED_FILES_ONLY -eq 'true') {
+            $params['ChangedFilesOnly'] = $true
+          }
+          & scripts/linting/Invoke-UvLockConsistencyCheck.ps1 @params
+        continue-on-error: ${{ inputs.soft-fail }}
+
+      - name: Upload lock consistency results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: uv-lock-consistency-results
+          path: logs/uv-lock-consistency-results.json
+          retention-days: 30
+
+      - name: Upload job summary
+        if: always()
+        run: |
+          if (Test-Path logs/uv-lock-consistency-summary.md) {
+            Get-Content logs/uv-lock-consistency-summary.md >> $env:GITHUB_STEP_SUMMARY
+          }

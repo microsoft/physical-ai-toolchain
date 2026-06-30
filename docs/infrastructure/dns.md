@@ -28,7 +28,7 @@ Internal DNS resolution for the OSMO UI service running on an internal LoadBalan
 Get the OSMO UI LoadBalancer IP from your cluster:
 
 ```bash
-kubectl get svc -n osmo-control-plane osmo-ui -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+kubectl get svc -n osmo-control-plane osmo-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 ```
 
 Deploy the DNS zone:

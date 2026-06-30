@@ -132,6 +132,7 @@ module "platform" {
 
   // Observability feature flags
   should_deploy_grafana           = var.should_deploy_grafana
+  grafana_major_version           = var.grafana_major_version
   should_deploy_monitor_workspace = var.should_deploy_monitor_workspace
   should_deploy_ampls             = var.should_deploy_ampls
   should_deploy_dce               = var.should_deploy_dce

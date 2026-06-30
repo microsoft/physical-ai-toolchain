@@ -128,26 +128,33 @@ else
   export PYTHONPATH="${SRC_DIR}:${PYTHONPATH:-}"
 fi
 
-INFERENCE_REQS="${SRC_DIR}/training/il/lerobot/requirements.txt"
+INFERENCE_PROJECT="${SRC_DIR}/training/il/lerobot"
+INFERENCE_REQS=""
 cleanup() {
   rm -rf "${CHECKPOINT_DIR:-}"
+  rm -f "${INFERENCE_REQS:-}"
 }
 trap cleanup EXIT
 
-if [[ ! -f "${INFERENCE_REQS}" ]]; then
-  echo "Error: LeRobot requirements not found at ${INFERENCE_REQS}" >&2
+if [[ ! -f "${INFERENCE_PROJECT}/uv.lock" ]]; then
+  echo "Error: LeRobot lockfile not found at ${INFERENCE_PROJECT}/uv.lock" >&2
   exit 1
 fi
 
 if command -v uv &>/dev/null; then
-  echo "Installing inference workflow dependencies from pre-compiled requirements..."
+  echo "Installing inference workflow dependencies from the exported lockfile..."
+  # Export the fully-resolved set from the committed lock, then install with the
+  # IL project as context so its override-dependencies and prerelease settings
+  # apply during full resolution (the SIL path does not use --no-deps).
+  INFERENCE_REQS="$(mktemp)"
+  uv export --frozen --no-hashes --no-emit-project --project "${INFERENCE_PROJECT}" -o "${INFERENCE_REQS}"
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --requirement "${INFERENCE_REQS}" || \
-      uv pip install --no-cache-dir --requirement "${INFERENCE_REQS}" --index-strategy first-index \
+    uv pip install --no-cache-dir --project "${INFERENCE_PROJECT}" --requirement "${INFERENCE_REQS}" || \
+      uv pip install --no-cache-dir --project "${INFERENCE_PROJECT}" --requirement "${INFERENCE_REQS}" --index-strategy first-index \
         --extra-index-url https://download.pytorch.org/whl/cu124
   else
-    uv pip install --no-cache-dir --system --requirement "${INFERENCE_REQS}" || \
-      uv pip install --no-cache-dir --system --requirement "${INFERENCE_REQS}" --index-strategy first-index \
+    uv pip install --no-cache-dir --system --project "${INFERENCE_PROJECT}" --requirement "${INFERENCE_REQS}" || \
+      uv pip install --no-cache-dir --system --project "${INFERENCE_PROJECT}" --requirement "${INFERENCE_REQS}" --index-strategy first-index \
         --extra-index-url https://download.pytorch.org/whl/cu124
   fi
 else

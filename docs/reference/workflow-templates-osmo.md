@@ -20,7 +20,7 @@ legacy naming.
 
 | Template             | Purpose                                             | Source YAML path                                  | Typical submit path                                   |
 |----------------------|-----------------------------------------------------|---------------------------------------------------|-------------------------------------------------------|
-| `train.yaml`         | Isaac Lab RL training with inline payload archive   | `training/rl/workflows/osmo/train.yaml`           | `training/rl/scripts/submit-osmo-training.sh`         |
+| `train.yaml`         | Isaac Lab RL training with object-storage code delivery | `training/rl/workflows/osmo/train.yaml`       | `training/rl/scripts/submit-osmo-training.sh`         |
 | `train-dataset.yaml` | Isaac Lab RL training with dataset folder injection | `training/rl/workflows/osmo/train-dataset.yaml`   | `training/rl/scripts/submit-osmo-dataset-training.sh` |
 | `lerobot-train.yaml` | LeRobot ACT or Diffusion training workflow          | `training/il/workflows/osmo/lerobot-train.yaml`   | `training/il/scripts/submit-osmo-lerobot-training.sh` |
 | `eval.yaml`          | Isaac Lab checkpoint evaluation workflow            | `evaluation/sil/workflows/osmo/eval.yaml`         | `evaluation/sil/scripts/submit-osmo-eval.sh`          |
@@ -30,11 +30,11 @@ legacy naming.
 
 | Field                            | Details                                                                                                                                                                                                                                                                                                |
 |----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Purpose                          | OSMO RL training using a base64-encoded runtime payload.                                                                                                                                                                                                                                               |
+| Purpose                          | OSMO RL training. Code is packaged, uploaded to object storage with `osmo data upload`, and injected into the pod through a `url:` task input.                                                                                                                                                          |
 | Source YAML path                 | `training/rl/workflows/osmo/train.yaml`                                                                                                                                                                                                                                                                |
 | Primary parameters and overrides | `default-values.task` (`Isaac-Velocity-Rough-Anymal-C-v0`), `default-values.num_envs` (`"2048"`), `default-values.max_iterations` (empty), `default-values.checkpoint_mode` (`from-scratch`), `default-values.training_backend` (`skrl`), `default-values.gpu` (`"1"`), `default-values.cpu` (`"30"`). |
 | Typical submit path              | `training/rl/scripts/submit-osmo-training.sh`                                                                                                                                                                                                                                                          |
-| Usage notes                      | Use for RL training when shipping the runtime payload inline. Script flags typically override task, resources, and checkpoint behavior.                                                                                                                                                                |
+| Usage notes                      | Use for RL training. The submission delivers code via object storage; script flags typically override task, resources, and checkpoint behavior.                                                                                                                                                                |
 
 ## train-dataset.yaml
 
@@ -82,5 +82,5 @@ legacy naming.
 |-------------------|------------------------------------------------------------------------------------------------------------------|
 | Source of truth   | Use YAML files under `training/` and `evaluation/` as the canonical inventory.                                   |
 | Submission flow   | Submit through the companion scripts listed above to resolve defaults from CLI, env vars, and Terraform outputs. |
-| Runtime packaging | RL workflows use inline payload or dataset injection; choose based on payload size and reuse needs.              |
+| Runtime packaging | RL workflows deliver code via object storage (`url:` input) or dataset injection; choose based on reuse needs.    |
 | Related reference | See [Reference index](README.md) for adjacent script and artifact guides.                                        |

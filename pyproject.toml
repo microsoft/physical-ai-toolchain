@@ -14,28 +14,34 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.155.2",
-    "numpy==2.4.6",
-    "ruff==0.15.17",
-    "pytest==9.1.0",
+    "hypothesis==6.155.7",
+    "numpy==2.5.0",
+    "ruff==0.15.19",
+    "pyarrow==24.0.0",
+    "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
     "pydantic==2.13.4",
     "ipykernel==7.3.0",
     "ipywidgets==8.1.8",
-    "tqdm==4.68.2",
+    "tqdm==4.68.3",
     "matplotlib==3.11.0",
-    "torch==2.12.0",
+    "torch==2.12.1",
     "azureml-mlflow==1.62.0.post3",
     "azure-ai-ml==1.34.0",
 ]
-fuzz = ["atheris>=3.0"]
+fuzz = ["atheris>=3.1.0"]
 
 [tool.uv]
 package = false
 constraint-dependencies = [
     "gitpython==3.1.50",
     "pygments==2.20.0",
+]
+override-dependencies = [
+    # cryptography: azureml-mlflow caps cryptography<47.0.0; override to the
+    # 48.0.1 release that patches GHSA-537c-gmf6-5ccf.
+    "cryptography==48.0.1",
 ]
 
 [tool.pytest.ini_options]
@@ -96,6 +102,9 @@ select = [
 "data-management/viewer/backend/tests/*.py" = ["E402"]
 "data-pipeline/capture/tests/test_config_models.py" = ["E402"]
 "data-pipeline/capture/tests/test_config_models_hypothesis.py" = ["E402"]
+# GR00T data_config.py fragments are appended onto gr00t/experiment/data_config.py
+# at runtime; So100DataConfig and DATA_CONFIG_MAP are injected by the parent module.
+"training/vla/configs/groot/examples/data_config.py" = ["F821", "RUF012"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["training"]

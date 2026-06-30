@@ -78,18 +78,10 @@ if ! command -v zip >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v base64 >/dev/null 2>&1; then
-  echo "base64 utility is required on PATH" >&2
-  exit 1
-fi
-
 use_local_osmo=false
 config_preview=false
 
-WORKFLOW_TEMPLATE=${WORKFLOW_TEMPLATE:-"$REPO_ROOT/workflows/osmo/infer.yaml"}
-TMP_DIR=${TMP_DIR:-"$SCRIPT_DIR/.tmp"}
-ARCHIVE_PATH=${ARCHIVE_PATH:-"$TMP_DIR/osmo-inference.zip"}
-B64_PATH=${B64_PATH:-"$TMP_DIR/osmo-inference.b64"}
+WORKFLOW_TEMPLATE=${WORKFLOW_TEMPLATE:-"$REPO_ROOT/evaluation/sil/workflows/osmo/eval.yaml"}
 TASK_VALUE=${TASK:-Isaac-Ant-v0}
 NUM_ENVS_VALUE=${NUM_ENVS:-4}
 MAX_STEPS_VALUE=${MAX_STEPS:-500}
@@ -103,6 +95,7 @@ AZURE_SUBSCRIPTION_ID_VALUE="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 AZURE_RESOURCE_GROUP_VALUE="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 AZURE_WORKSPACE_NAME_VALUE="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
 AZURE_STORAGE_ACCOUNT_VALUE="${AZURE_STORAGE_ACCOUNT_NAME:-$(get_storage_account)}"
+OSMO_CONTAINER_VALUE="${OSMO_WORKFLOW_BUCKET:-osmo}"
 
 forward_args=()
 while [[ $# -gt 0 ]]; do
@@ -220,39 +213,17 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-mkdir -p "$TMP_DIR"
-rm -f "$ARCHIVE_PATH" "$B64_PATH"
+[[ -z "$AZURE_STORAGE_ACCOUNT_VALUE" ]] && fatal "Azure storage account required for code upload (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
 
-pushd "$REPO_ROOT" >/dev/null
-if ! zip -qr "$ARCHIVE_PATH" training/rl evaluation/sil; then
-  echo "Failed to create evaluation archive" >&2
-  popd >/dev/null
-  exit 1
-fi
-popd >/dev/null
-
-if [[ ! -f "$ARCHIVE_PATH" ]]; then
-  echo "Archive not created: $ARCHIVE_PATH" >&2
-  exit 1
-fi
-
-if base64 --help 2>&1 | grep -q '\-\-input'; then
-  base64 --input "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-else
-  base64 -i "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-fi
-
-if [[ ! -s "$B64_PATH" ]]; then
-  echo "Failed to encode archive to base64" >&2
-  exit 1
-fi
-
-ENCODED_PAYLOAD=$(cat "$B64_PATH")
+CODE_URL=$(stage_and_upload_code "$REPO_ROOT" \
+  "azure://${AZURE_STORAGE_ACCOUNT_VALUE}/${OSMO_CONTAINER_VALUE}/osmo-code" \
+  training/rl evaluation/sil) \
+  || fatal "Failed to stage and upload evaluation payload"
 
 submit_args=(
   workflow submit "$WORKFLOW_TEMPLATE"
   --set-string "image=$IMAGE_VALUE"
-  "encoded_archive=$ENCODED_PAYLOAD"
+  "code_url=$CODE_URL"
   "task=$TASK_VALUE"
   "num_envs=$NUM_ENVS_VALUE"
   "max_steps=$MAX_STEPS_VALUE"

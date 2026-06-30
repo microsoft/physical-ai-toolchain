@@ -55,12 +55,11 @@ locals {
 resource "azurerm_federated_identity_credential" "osmo" {
   for_each = local.osmo_federated_credentials
 
-  name                = "osmo-${each.key}-fic"
-  resource_group_name = var.resource_group.name
-  parent_id           = var.osmo_workload_identity.id
-  issuer              = azurerm_kubernetes_cluster.main.oidc_issuer_url
-  subject             = "system:serviceaccount:${each.value.namespace}:${each.value.sa_name}"
-  audience            = ["api://AzureADTokenExchange"]
+  name                      = "osmo-${each.key}-fic"
+  user_assigned_identity_id = var.osmo_workload_identity.id
+  issuer                    = azurerm_kubernetes_cluster.main.oidc_issuer_url
+  subject                   = "system:serviceaccount:${each.value.namespace}:${each.value.sa_name}"
+  audience                  = ["api://AzureADTokenExchange"]
 }
 
 // ============================================================
@@ -72,10 +71,9 @@ resource "azurerm_federated_identity_credential" "osmo" {
 resource "azurerm_federated_identity_credential" "osmo_default_sa" {
   for_each = var.osmo_config.should_federate_identity ? toset(local.osmo_namespaces_for_default_sa) : toset([])
 
-  name                = "osmo-${each.key}-default-sa-fic"
-  resource_group_name = var.resource_group.name
-  parent_id           = var.osmo_workload_identity.id
-  issuer              = azurerm_kubernetes_cluster.main.oidc_issuer_url
-  subject             = "system:serviceaccount:${each.key}:default"
-  audience            = ["api://AzureADTokenExchange"]
+  name                      = "osmo-${each.key}-default-sa-fic"
+  user_assigned_identity_id = var.osmo_workload_identity.id
+  issuer                    = azurerm_kubernetes_cluster.main.oidc_issuer_url
+  subject                   = "system:serviceaccount:${each.key}:default"
+  audience                  = ["api://AzureADTokenExchange"]
 }

@@ -196,7 +196,7 @@ See [VPN Gateway](vpn.md) for configuration options and VPN client setup.
 
 ### Private DNS for OSMO UI
 
-Configure DNS resolution for the OSMO UI LoadBalancer after setup from `infrastructure/setup/03-deploy-osmo-control-plane.sh` (requires VPN):
+Configure DNS resolution for the OSMO UI LoadBalancer after setup from `infrastructure/setup/03-deploy-osmo.sh` (requires VPN):
 
 ```bash
 cd dns

@@ -82,6 +82,104 @@ activate_local_osmo() {
   export -f osmo
 }
 
+# Package repo-relative paths into a zip, upload it to a unique OSMO data URI,
+# and echo that URI for a workflow `url:` input to consume.
+#
+# The payload is delivered to the workflow pod as a downloaded object (via the
+# pod's workload identity) rather than an inline base64 env var: a single env
+# string is capped at 128 KiB (Linux MAX_ARG_STRLEN) and the payload exceeds
+# that, which fails the container execve with E2BIG.
+#
+# All progress logs go to stderr; only the URI is printed to stdout.
+# Usage: code_url=$(stage_and_upload_code <repo_root> <uri_base> <path>...)
+stage_and_upload_code() {
+  local repo_root="${1:?repo_root required}"
+  local uri_base="${2:?uri_base required}"
+  shift 2
+  [[ $# -gt 0 ]] || { error "stage_and_upload_code: no paths to package"; return 1; }
+
+  local tmp archive hash uri size extract manifest
+  tmp="$(mktemp -d)"
+  archive="$tmp/osmo-code.zip"
+
+  if ! (cd "$repo_root" && zip -qr "$archive" "$@" \
+    -x '**/__pycache__/*' \
+    -x '*.pyc' \
+    -x '*.pyo' \
+    -x '**/.pytest_cache/*' \
+    -x '**/.mypy_cache/*' \
+    -x '**/*.egg-info/*' \
+    -x '**/.git/*' \
+    -x '**/node_modules/*' \
+    -x '**/.venv/*' \
+    -x '**/.tmp/*') >&2; then
+    rm -rf "$tmp"
+    error "Failed to build code archive"
+    return 1
+  fi
+
+  if [[ ! -s "$archive" ]]; then
+    rm -rf "$tmp"
+    error "Code archive is empty"
+    return 1
+  fi
+
+  size="$(wc -c < "$archive" | tr -d ' ')"
+
+  # Content-addressed key over the archive *contents* (per-file sha + sorted
+  # relative path), not the .zip itself: Info-ZIP records each entry's mtime, so
+  # hashing the archive file would yield a new key for byte-identical code on
+  # every submit. Re-reading the just-built archive hashes exactly what is
+  # uploaded and reuses the exclude set applied above.
+  extract="$tmp/extract"
+  manifest="$tmp/manifest"
+  mkdir -p "$extract"
+  if ! unzip -qq "$archive" -d "$extract" >&2; then
+    rm -rf "$tmp"
+    error "Failed to extract code archive for content hashing"
+    return 1
+  fi
+  ( cd "$extract" && find . -type f -print0 | LC_ALL=C sort -z \
+    | while IFS= read -r -d '' f; do
+        printf '%s  %s\n' "$(calculate_sha256 "$f")" "$f"
+      done ) > "$manifest"
+  if [[ ! -s "$manifest" ]]; then
+    rm -rf "$tmp"
+    error "Code archive contains no files to hash"
+    return 1
+  fi
+  hash="$(calculate_sha256 "$manifest" | cut -c1-16)"
+  uri="${uri_base}/${hash}"
+
+  # Upload only when the content-addressed object is absent. The key is a pure
+  # function of the code, so an existing object is byte-identical: skipping the
+  # upload avoids overwriting an object a concurrent job may be downloading
+  # (osmo data upload always overwrites) and saves re-uploading unchanged code.
+  #
+  # The list (check) and upload (use) are not atomic, so there is a TOCTOU
+  # window. It is benign by construction: because the key is content-addressed,
+  # two submitters that both observe "absent" upload byte-identical bytes to the
+  # same key, and no workflow pod reads the object until *after* its submitter
+  # has finished uploading and submitted the workflow. The worst case is a
+  # redundant overwrite with identical content, never a corrupt or partial read.
+  if osmo data list "$uri" "$tmp/listing" >&2 && grep -q "$hash" "$tmp/listing" 2>/dev/null; then
+    info "Code archive already present at ${uri}; skipping upload" >&2
+    rm -rf "$tmp"
+    echo "$uri"
+    return 0
+  fi
+
+  info "Uploading code archive (${size} bytes) to ${uri}" >&2
+  if ! osmo data upload "$uri" "$archive" >&2; then
+    rm -rf "$tmp"
+    error "osmo data upload failed for ${uri}"
+    return 1
+  fi
+
+  rm -rf "$tmp"
+  echo "$uri"
+}
+
 # Ensure Azure CLI extension is installed
 require_az_extension() {
   local ext="${1:?extension name required}"
@@ -213,15 +311,6 @@ detect_acr_name() {
   echo "$acr_name"
 }
 
-# Auto-detect OSMO identity client ID from terraform outputs
-detect_osmo_identity() {
-  local tf_output="${1:?terraform output required}"
-  local client_id
-  client_id=$(tf_get "$tf_output" "osmo_workload_identity.value.client_id")
-  [[ -n "$client_id" ]] || fatal "osmo_workload_identity output not found in terraform state"
-  echo "$client_id"
-}
-
 # Detect OSMO service URL from cluster (for CLI and external access)
 detect_service_url() {
   local url=""
@@ -241,49 +330,6 @@ detect_service_url() {
     fi
   fi
   echo "$url"
-}
-
-# Detect in-cluster ingress FQDN for service_base_url (used by osmo-ctrl sidecars in workflow pods)
-detect_ingress_base_url() {
-  local ns="${1:-azureml}"
-  local svc="azureml-ingress-nginx-controller"
-  if kubectl get svc "$svc" -n "$ns" &>/dev/null; then
-    echo "http://${svc}.${ns}.svc.cluster.local"
-  fi
-}
-
-# Validate that the OSMO service URL is reachable from the current host.
-# Internal load balancer IPs are only accessible from within the VNet; when running
-# from a devcontainer or codespace, users must port-forward instead.
-validate_service_url_reachable() {
-  local url="${1:?service URL required}"
-
-  if curl -sf --connect-timeout 5 "${url}/api/version" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  warn "OSMO service URL $url is not reachable from this host"
-  warn "The auto-detected URL is an internal load balancer IP only accessible from within the AKS VNet."
-  echo >&2
-  warn "If running from a devcontainer or codespace, use kubectl port-forward:"
-  warn "  kubectl port-forward svc/osmo-service -n osmo-control-plane 8080:80 &"
-  warn "Then re-run this script with:"
-  warn "  --service-url http://localhost:8080"
-  echo >&2
-  fatal "Cannot reach OSMO service at $url"
-}
-
-detect_default_storage_class() {
-  local storage_class
-
-  storage_class=$(kubectl get storageclass -o jsonpath='{range .items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -n 1)
-
-  if [[ -z "$storage_class" ]]; then
-    storage_class=$(kubectl get storageclass default -o jsonpath='{.metadata.name}' 2>/dev/null || true)
-  fi
-
-  [[ -n "$storage_class" ]] || fatal "No default StorageClass detected for in-cluster Redis"
-  echo "$storage_class"
 }
 
 # Print section header
@@ -351,34 +397,8 @@ validate_version_pair() {
 }
 
 # // ===================================================================
-# OSMO Authentication
+# OSMO Secrets
 # // ===================================================================
-
-osmo_login_and_setup() {
-  local service_url="${1:?service URL required}"
-  local admin_password="${2:?admin password required}"
-  local username="${3:-}"
-  local roles="${4:-osmo-backend}"
-
-  info "Logging into OSMO at ${service_url}..."
-  osmo login "${service_url}/" --method token --token-file <(printf '%s' "$admin_password")
-
-  if [[ -n "$username" ]]; then
-    info "Ensuring service account '$username' exists with $roles role..."
-    local lookup_output=""
-    local lookup_status=0
-    lookup_output=$(osmo user get "$username" 2>&1) || lookup_status=$?
-
-    if [[ "$lookup_status" -eq 0 ]]; then
-      osmo user update "$username" --add-roles "$roles" >/dev/null || warn "Unable to update user roles; continuing"
-    elif [[ "$lookup_output" == *"404"* || "$lookup_output" == *"not found"* ]]; then
-      osmo user create "$username" --roles "$roles" >/dev/null || warn "User management endpoint unavailable; skipping user setup"
-    else
-      printf '%s\n' "$lookup_output" >&2
-      warn "Unable to query user '$username'; skipping user setup"
-    fi
-  fi
-}
 
 # Apply SecretProviderClass for Azure Key Vault secrets sync
 # Usage: apply_secret_provider_class <namespace> <keyvault> <client_id> <tenant_id> [include_redis_secret]

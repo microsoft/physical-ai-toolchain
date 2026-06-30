@@ -1,0 +1,51 @@
+[project]
+name = "physical-ai-sil-lerobot-eval"
+version = "0.1.0"
+description = "LeRobot SIL evaluation image runtime dependencies"
+requires-python = ">=3.12"
+# Direct dependencies for the LeRobot SIL evaluation image. Versions mirror the
+# top-level pins previously hand-maintained in requirements-lerobot-eval.txt.
+# The Dockerfile derives the install set from uv.lock via a build-time
+# `uv export --frozen`. Regenerate the lock after any change here:
+#   cd evaluation/sil/docker
+#   uv lock
+dependencies = [
+    "lerobot==0.5.1",
+    "pyarrow==24.0.0",
+    "azure-storage-blob==12.30.0",
+    "azure-identity==1.25.3",
+    "azure-ai-ml==1.34.0",
+    "matplotlib==3.11.0",
+    "azureml-mlflow==1.62.0.post3",
+    "mlflow==3.14.0",
+    # av is resolved transitively through lerobot. The legacy flat file pinned
+    # av==17.1.0, which violates lerobot==0.5.1's av>=15.0.0,<16.0.0 cap (the
+    # same manifest-invalid-pin defect as IL torch). The lock resolves the
+    # manifest-correct av; do not re-introduce the invalid direct pin.
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+# Constrain the universal lock to the AzureML image target so the resolution
+# yields a single marker per package, suitable for a deterministic build-time
+# `uv export`.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+prerelease = "allow"
+override-dependencies = [
+    # diffusers: lerobot==0.5.1 pins a range that includes versions vulnerable
+    # to GHSA-98h9-4798-4q5v; force the patched release.
+    "diffusers==0.38.0",
+    # azure-storage-blob: azureml-mlflow==1.62.0.post3 caps below 12.29.0; we
+    # need 12.30.0 for the AzureCliCredential fix shipped in that release.
+    "azure-storage-blob==12.30.0",
+    # mlflow-skinny: azureml-mlflow==1.62.0.post3 caps at <=3.13.0; mlflow 3.14.0
+    # requires mlflow-skinny==3.14.0. Override the cap to allow the newer pair.
+    "mlflow-skinny==3.14.0",
+    # cryptography: transitively resolved below 48.0.1, whose wheels bundle a
+    # vulnerable OpenSSL (GHSA-537c-gmf6-5ccf); force the patched release.
+    "cryptography==48.0.1",
+]
+package = false

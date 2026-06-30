@@ -35,14 +35,6 @@ reason = "Static test-fixture transitive; never installed. Re-evaluate by 2026-0
 
 # === Vulnerability suppressions ===
 
-# starlette < 1.0.1 — affects uv.lock (root), evaluation/uv.lock, and
-# data-management/viewer{,/backend}/uv.lock. Lockfile bumps scheduled for the
-# next Dependabot/Renovate cycle following PR #781.
-[[IgnoredVulns]]
-id = "PYSEC-2026-161"
-ignoreUntil = 2026-06-30
-reason = "starlette < 1.0.1; lockfile refreshes scheduled across viewer, evaluation, and root uv.locks post-#781."
-
 # torch 2.10.0 — no published fix at scan time. Sibling PR #783 bumps
 # training/il and evaluation to torch 2.11.0; data-management/viewer{,/backend}
 # uv.locks remain on 2.10.0 pending a follow-up bump.
