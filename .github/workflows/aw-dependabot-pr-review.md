@@ -149,7 +149,7 @@ tools:
     - "cat **/*.toml"
     - "cat **/go.mod"
     - "cat **/*.tf"
-    - "cat training/rl/requirements.txt"
+    - "cat training/rl/uv.lock"
     - "cat training/rl/scripts/train.sh"
     - "grep -R --line-number * -- :!node_modules :!.venv :!external"
     - "jq . **/*.json"

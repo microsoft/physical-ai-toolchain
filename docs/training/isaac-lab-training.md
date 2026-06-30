@@ -39,7 +39,7 @@ Isaac Lab reinforcement learning training with SKRL and RSL-RL backends. Both Az
   --stream
 ```
 
-### OSMO (Base64 Payload)
+### OSMO (Object Storage)
 
 ```bash
 ./scripts/submit-osmo-training.sh \
@@ -55,7 +55,7 @@ Isaac Lab reinforcement learning training with SKRL and RSL-RL backends. Both Az
   --dataset-name my-training-v1
 ```
 
-Dataset injection removes the ~1 MB payload size limit of base64-encoded archives and enables dataset reuse across runs.
+Dataset injection provides named, reusable dataset versions across runs.
 
 ## ⚖️ Platform Selection
 
@@ -64,9 +64,9 @@ Dataset injection removes the ~1 MB payload size limit of base64-encoded archive
 | Submission          | `az ml job create` via YAML templates | `osmo workflow submit`               |
 | Orchestration       | AKS compute targets                   | KAI Scheduler / Volcano integration  |
 | Experiment tracking | MLflow (managed)                      | MLflow (Azure ML backend)            |
-| Dataset delivery    | Azure ML datastores                   | Base64 payload or OSMO bucket upload |
+| Dataset delivery    | Azure ML datastores                   | Object storage (`url:`) or OSMO bucket upload |
 | Monitoring          | Azure ML Studio                       | OSMO UI Dashboard                    |
-| Payload modes       | Single (YAML template)                | Base64 or dataset folder injection   |
+| Payload modes       | Single (YAML template)                | Object storage (`url:`) or dataset injection |
 
 Azure ML provides managed compute and experiment tracking through Azure ML Studio. OSMO adds distributed training coordination, KAI Scheduler integration, and a dataset versioning system.
 
@@ -137,10 +137,10 @@ Training scripts register checkpoints to Azure ML automatically. Override the mo
 
 OSMO supports two payload delivery modes for training code:
 
-| Mode              | Script                            | Size Limit | Versioning |
-|-------------------|-----------------------------------|------------|------------|
-| Base64 payload    | `submit-osmo-training.sh`         | ~1 MB      | None       |
-| Dataset injection | `submit-osmo-dataset-training.sh` | Unlimited  | Automatic  |
+| Mode                  | Script                            | Size Limit | Versioning |
+|-----------------------|-----------------------------------|------------|------------|
+| Object storage (`url:`) | `submit-osmo-training.sh`         | Unlimited  | Per submit |
+| Dataset injection     | `submit-osmo-dataset-training.sh` | Unlimited  | Automatic  |
 
 Dataset injection uploads `training/rl/` as a versioned OSMO dataset, mounted at `/data/<dataset_name>/training` in the container:
 

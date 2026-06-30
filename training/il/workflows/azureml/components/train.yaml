@@ -4,7 +4,7 @@
 # AzureML CommandComponent for use inside lerobot-pipeline.yaml.
 #
 # Code root is the repository root so the entry script's hard-coded paths
-# (training/il/lerobot/requirements.txt, training.il.scripts.lerobot.train,
+# (training/il/lerobot/uv.lock, training.il.scripts.lerobot.train,
 # etc.) resolve without modification.
 #
 # Compute and environment_variables (DATASET_REPO_ID, POLICY_TYPE, JOB_NAME,

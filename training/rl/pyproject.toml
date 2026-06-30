@@ -2,8 +2,8 @@
 name = "robotics-training-rl"
 version = "0.1.0"
 description = "RL training workflow runtime dependencies"
-# Pinned to 3.11: the Isaac Lab 2.3.2 container runtime is Python 3.11 and
-# requirements.txt is compiled for 3.11. (Also sidesteps uv universal-resolution
+# Pinned to 3.11: the Isaac Lab 2.3.2 container runtime is Python 3.11 and the
+# committed uv.lock resolves under 3.11. (Also sidesteps uv universal-resolution
 # conflicts on 3.13+, where ml-dtypes>=0.5.0 forces numpy>=2.1.0 vs the pinned
 # numpy==1.26.4.)
 requires-python = "==3.11.*"
@@ -33,6 +33,10 @@ dependencies = [
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Mirror the IL pipeline; bump together with azure-ai-ml.
     "marshmallow==3.26.2",
+    # starlette pulled transitively by mlflow-skinny. 1.3.1 patches GHSA-wqp7-x3pw-xc5r
+    # (SSRF/NTLM via UNC StaticFiles), GHSA-x746-7m8f-x49c (HTTPEndpoint getattr
+    # dispatch), and GHSA-82w8-qh3p-5jfq (urlencoded form() DoS).
+    "starlette==1.3.1",
 ]
 
 [build-system]
@@ -40,6 +44,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
+# Constrain the universal lock to the Isaac Lab 2.3.2 container target so the
+# resolution yields a single marker per package, suitable for the `--no-deps`
+# build-time `uv export` in scripts/train.sh (mirrors the IL and SIL projects).
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 # `override-dependencies` forces uv to ignore upstream upper-bound constraints
 # during resolution. Each entry below must repeat a pinned version that also
 # appears in `dependencies` above, otherwise resolution drifts. Remove an
@@ -54,8 +62,12 @@ override-dependencies = [
     # (critical for long-running checkpoint uploads). Mirror the direct pin
     # and the IL pipeline.
     "azure-storage-blob==12.29.0",
+    # cryptography: azureml-mlflow==1.62.0.post2 caps below 47.0.0; 48.0.1 is
+    # required for the upstream security fixes pulled in by Dependabot. Mirror
+    # the direct pin.
+    "cryptography==48.0.1",
     # starlette: mlflow-skinny pulls starlette transitively; upstream pin may
     # lag behind security fixes. Override to ensure patched version.
-    "starlette==1.0.1",
+    "starlette==1.3.1",
 ]
 package = false

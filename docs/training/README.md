@@ -34,7 +34,7 @@ Training documentation for reinforcement learning with Isaac Lab and behavioral 
 | Submission          | `az ml job create`       | `osmo workflow submit`                  |
 | Orchestration       | Azure ML compute targets | OSMO workflow engine + KAI Scheduler    |
 | Experiment tracking | MLflow (managed)         | MLflow (Azure ML backend)               |
-| Dataset injection   | Azure ML datastores      | OSMO buckets (base64 or dataset upload) |
+| Dataset injection   | Azure ML datastores      | OSMO object storage or dataset upload   |
 | Model registration  | `az ml model create`     | Via MLflow or post-training script      |
 | Monitoring          | Azure ML Studio          | OSMO UI Dashboard                       |
 

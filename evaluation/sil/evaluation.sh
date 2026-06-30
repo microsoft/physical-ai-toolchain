@@ -22,21 +22,27 @@ fi
 
 export PYTHONPATH="${SRC_DIR}:${PYTHONPATH:-}"
 
-runtime_requirements="${SRC_DIR}/training/il/lerobot/requirements.txt"
+runtime_project="${SRC_DIR}/training/il/lerobot"
 
-if [[ ! -f "${runtime_requirements}" ]]; then
-  echo "Error: LeRobot requirements not found at ${runtime_requirements}" >&2
+if [[ ! -f "${runtime_project}/uv.lock" ]]; then
+  echo "Error: LeRobot lockfile not found at ${runtime_project}/uv.lock" >&2
   exit 1
 fi
 
 if command -v uv &>/dev/null; then
+  # Export the fully-resolved set from the committed lock, then install with the
+  # IL project as context so its override-dependencies and prerelease settings
+  # apply during full resolution (the SIL path does not use --no-deps).
+  runtime_requirements="$(mktemp)"
+  trap 'rm -f "${runtime_requirements}"' EXIT
+  uv export --frozen --no-hashes --no-emit-project --project "${runtime_project}" -o "${runtime_requirements}"
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --requirement "${runtime_requirements}" || \
-      uv pip install --no-cache-dir --requirement "${runtime_requirements}" --index-strategy first-index \
+    uv pip install --no-cache-dir --project "${runtime_project}" --requirement "${runtime_requirements}" || \
+      uv pip install --no-cache-dir --project "${runtime_project}" --requirement "${runtime_requirements}" --index-strategy first-index \
         --extra-index-url https://download.pytorch.org/whl/cu124
   else
-    uv pip install --no-cache-dir --system --requirement "${runtime_requirements}" || \
-      uv pip install --no-cache-dir --system --requirement "${runtime_requirements}" --index-strategy first-index \
+    uv pip install --no-cache-dir --system --project "${runtime_project}" --requirement "${runtime_requirements}" || \
+      uv pip install --no-cache-dir --system --project "${runtime_project}" --requirement "${runtime_requirements}" --index-strategy first-index \
         --extra-index-url https://download.pytorch.org/whl/cu124
   fi
 else

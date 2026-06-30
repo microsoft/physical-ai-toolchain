@@ -1,89 +1,138 @@
+# SECURITY FAST LANE — do not throttle or batch security updates.
+# `cooldown` applies to version updates only; security updates are unaffected by design.
+# Do NOT add `applies-to: security-updates` to any group, especially for runtime/GPU
+# packages — it would batch security fixes into the cooldown'd PR and delay them.
+version: 2
 updates:
-- commit-message:
-    include: scope
-    prefix: chore
+- package-ecosystem: npm
   directory: /
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     root-npm-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   labels:
   - dependencies
   - npm
-  open-pull-requests-limit: 5
-  package-ecosystem: npm
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     python-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 10
   labels:
   - dependencies
   - python
-  open-pull-requests-limit: 10
-  package-ecosystem: uv
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /data-pipeline
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     data-pipeline-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   labels:
   - dependencies
   - python
   - data-pipeline
-  open-pull-requests-limit: 5
-  package-ecosystem: uv
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /training/rl
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     training-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   ignore:
   - dependency-name: "marshmallow"
     versions:
     - ">=4.0.0"
+  # numpy and packaging are pinned for Isaac Lab 2.3.2 / Isaac Sim ABI compatibility.
+  # train.sh force-installs numpy>=1.26.0,<2.0.0 at runtime; if uv.lock resolves 2.x
+  # the --frozen uv export overwrites it, breaking the numpy 1.x C-ABI Isaac Lab needs.
+  # Stricter than sibling groups (>=2.3.0) to fully enforce the <2.0.0 train.sh guard.
+  # Upgrades here require a manual RL smoke run on a GPU node; hosted CI cannot validate
+  # the Isaac Sim runtime path.
+  - dependency-name: "numpy"
+    versions:
+    - ">=2.0.0"
+  - dependency-name: "packaging"
+    versions:
+    - ">=26.0"
   labels:
   - dependencies
   - python
   - training
-  open-pull-requests-limit: 5
-  package-ecosystem: uv
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /training/il/lerobot
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     lerobot-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   ignore:
   - dependency-name: "marshmallow"
     versions:
     - ">=4.0.0"
   - dependency-name: "torch"
     versions:
-    - ">=2.12.0"
+    - ">=2.11.0"
   - dependency-name: "numpy"
     versions:
     - ">=2.3.0"
@@ -94,26 +143,32 @@ updates:
   - dependencies
   - python
   - training
-  open-pull-requests-limit: 5
-  package-ecosystem: uv
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /evaluation
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     inference-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   ignore:
   - dependency-name: "marshmallow"
     versions:
     - ">=4.0.0"
   - dependency-name: "torch"
     versions:
-    - ">=2.12.0"
+    - ">=2.11.0"
   - dependency-name: "numpy"
     versions:
     - ">=2.3.0"
@@ -123,90 +178,163 @@ updates:
   labels:
   - dependencies
   - python
-  open-pull-requests-limit: 5
-  package-ecosystem: uv
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /evaluation/sil/docker
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     lerobot-eval-image-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   ignore:
-  - dependency-name: "torch"
+  - dependency-name: "av"
     versions:
-    - ">=2.12.0"
+    - ">=16.0.0"
   labels:
   - dependencies
   - python
   - evaluation
-  open-pull-requests-limit: 5
-  package-ecosystem: pip
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
-  directory: /infrastructure/terraform
-  labels:
-  - dependencies
-  - terraform
-  open-pull-requests-limit: 5
-  package-ecosystem: terraform
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
     include: scope
-    prefix: chore
-  directory: /infrastructure/terraform/dns
-  labels:
-  - dependencies
-  - terraform
-  open-pull-requests-limit: 5
-  package-ecosystem: terraform
+- package-ecosystem: uv
+  directory: /workflows/osmo
   schedule:
-    day: monday
     interval: weekly
-- commit-message:
-    include: scope
-    prefix: chore
-  directory: /infrastructure/terraform/vpn
-  labels:
-  - dependencies
-  - terraform
-  open-pull-requests-limit: 5
-  package-ecosystem: terraform
-  schedule:
     day: monday
-    interval: weekly
-- commit-message:
-    include: scope
-    prefix: chore
-  directory: /infrastructure/terraform/automation
-  labels:
-  - dependencies
-  - terraform
-  open-pull-requests-limit: 5
-  package-ecosystem: terraform
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
-    prefix: chore
-  directory: /
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
-    github-actions:
-      exclude-patterns:
-      - github/gh-aw-actions/*
+    osmo-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: terraform
+  directory: /infrastructure/terraform
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    terraform-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - terraform
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: terraform
+  directory: /infrastructure/terraform/dns
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    terraform-dns-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - terraform
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: terraform
+  directory: /infrastructure/terraform/vpn
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    terraform-vpn-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - terraform
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: terraform
+  directory: /infrastructure/terraform/automation
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    terraform-automation-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - terraform
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: github-actions
+  directory: /
+  # Agentic Workflows lock files are generated by `gh aw compile`; update the
+  # source `.md` workflow instead of accepting direct Dependabot edits here.
+  exclude-paths:
+  - ".github/workflows/*.lock.yml"
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    github-actions:
+      patterns:
+      - "*"
+      exclude-patterns:
+      - github/gh-aw-actions/*
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   ignore:
   - dependency-name: "github/gh-aw-actions/*"
   - dependency-name: "github/gh-aw-actions/**"
@@ -214,49 +342,63 @@ updates:
   labels:
   - dependencies
   - github-actions
-  open-pull-requests-limit: 5
-  package-ecosystem: github-actions
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /data-management/viewer
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     dataviewer-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   labels:
   - dependencies
   - python
   - dataviewer
-  open-pull-requests-limit: 5
-  package-ecosystem: uv
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /data-management/viewer/backend
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     dataviewer-backend-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   labels:
   - dependencies
   - python
   - dataviewer
-  open-pull-requests-limit: 5
-  package-ecosystem: uv
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: npm
   directory: /data-management/viewer/frontend
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     dataviewer-frontend-patch-minor:
       patterns:
@@ -264,77 +406,118 @@ updates:
       update-types:
       - minor
       - patch
+  open-pull-requests-limit: 10
   labels:
   - dependencies
   - npm
   - dataviewer
-  open-pull-requests-limit: 10
-  package-ecosystem: npm
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: npm
   directory: /docs/docusaurus
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
   groups:
     docusaurus-dependencies:
       patterns:
       - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   labels:
   - dependencies
   - npm
-  open-pull-requests-limit: 5
-  package-ecosystem: npm
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: gomod
   directory: /infrastructure/terraform/e2e
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    terraform-e2e-go-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   labels:
   - dependencies
   - infrastructure
-  open-pull-requests-limit: 5
-  package-ecosystem: gomod
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: docker
   directory: /data-management/viewer/backend
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    dataviewer-backend-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   labels:
   - dependencies
   - docker
-  open-pull-requests-limit: 5
-  package-ecosystem: docker
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: docker
   directory: /data-management/viewer/frontend
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    dataviewer-frontend-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   labels:
   - dependencies
   - docker
-  open-pull-requests-limit: 5
-  package-ecosystem: docker
-  schedule:
-    day: monday
-    interval: weekly
-- commit-message:
-    include: scope
+  commit-message:
     prefix: chore
+    include: scope
+- package-ecosystem: docker
   directory: /evaluation/sil/docker
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    lerobot-eval-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
   labels:
   - dependencies
   - docker
-  open-pull-requests-limit: 5
-  package-ecosystem: docker
-  schedule:
-    day: monday
-    interval: weekly
-version: 2
+  commit-message:
+    prefix: chore
+    include: scope

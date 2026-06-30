@@ -22,9 +22,9 @@ apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential >/dev/nu
 # because the container is ephemeral and isolated from any host system Python.
 pip install --quiet --break-system-packages uv
 
-LEROBOT_REQUIREMENTS="training/il/lerobot/requirements.txt"
-if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
-  echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
+LEROBOT_PROJECT="training/il/lerobot"
+if [[ ! -f "${LEROBOT_PROJECT}/uv.lock" ]]; then
+  echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT}/uv.lock" >&2
   exit 1
 fi
 
@@ -34,17 +34,19 @@ fi
 # subsequent `python3` and `lerobot-train` invocations resolve through the
 # venv's bin directory once it is on PATH.
 #
-# `--no-deps` is required: requirements.txt is a fully-resolved lockfile
-# emitted by `uv pip compile`, and pyproject.toml carries `override-dependencies`
-# entries (e.g., azure-storage-blob==12.29.0 above azureml-mlflow's <=12.27.1
-# cap) that are honored at compile time only. Re-resolving at install time
-# would fail with the same conflicts the overrides were added to bypass.
+# `--no-deps` is required: the flat requirement set is exported at build time
+# from training/il/lerobot/uv.lock, and pyproject.toml carries
+# `override-dependencies` entries (e.g., azure-storage-blob==12.30.0 above
+# azureml-mlflow's cap) that are honored only during locking. Re-resolving at
+# install time would fail with the same conflicts the overrides were added to
+# bypass.
 LEROBOT_VENV="${LEROBOT_VENV:-/opt/lerobot-venv}"
 uv python install 3.12
 uv venv --python 3.12 "${LEROBOT_VENV}"
 # shellcheck disable=SC1091
 source "${LEROBOT_VENV}/bin/activate"
-uv pip install --no-cache-dir --no-deps --requirement "${LEROBOT_REQUIREMENTS}"
+uv export --frozen --no-hashes --no-emit-project --project "${LEROBOT_PROJECT}" \
+  | uv pip install --no-cache-dir --no-deps -r -
 
 # Build args forwarded to the MLflow training wrapper. Only flags whose values
 # are not derivable from environment variables go here. The wrapper at

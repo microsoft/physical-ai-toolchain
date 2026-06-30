@@ -108,6 +108,16 @@ Detailed template and structure in `.github/instructions/shell-scripts.instructi
 * Child configs extend root ruff config: `extend = "../../pyproject.toml"`
 * `from __future__ import annotations` required as the first import in every module
 
+### Dependency Locking
+
+Every Python subproject carries a committed `uv.lock` next to its `pyproject.toml`. The lock is the single resolution source of truth — runtime-flat `requirements.txt` files are NOT committed; they are derived at build time.
+
+* Regenerate a lock with `uv lock` (or `uv lock --upgrade`) after editing `pyproject.toml` — never hand-edit `uv.lock`, and never run `uv pip compile` to produce a committed flat file.
+* Derive runtime dependencies at build/submit time via `uv export --frozen --no-hashes --no-emit-project` piped into `uv pip install --no-deps`. `--frozen` guarantees the lock is read, not regenerated.
+* Do not reintroduce committed flat requirements files (for example `requirements-aml-mirror.txt`); derive them from the lock instead.
+* Dependabot regenerates affected locks natively. The read-only `uv lock --check` CI gate (`uv-lock-consistency.yml`, run via `npm run lint:uvlock`) fails any PR whose lock drifts from its manifest, so no manual `uv lock` step is required on Dependabot PRs.
+* `[tool.uv] environments` constrains the universal lock to supported platforms (for example linux x86_64 for GPU/Isaac subprojects). Preserve these markers when regenerating.
+
 ### Import Ordering
 
 ```python
@@ -435,11 +445,12 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | `training/**/*.py` | `cd training && ruff check . && pytest` |
 | `evaluation/**/*.py` | `cd evaluation && ruff check . && pytest` |
 | `data-pipeline/**/*.py` | `cd data-pipeline && ruff check .` |
+| `uv.lock`, `pyproject.toml` | `uv lock` (regenerate the lock), `npm run lint:uvlock` (verify lock/manifest consistency) |
 | Any file | `npm run spell-check` |
 
 ### Linting
 
-* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` + `lint:go` in sequence
+* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` + `lint:go` + `lint:sh` + `lint:py` + `lint:uvlock` in sequence
 * `npm run spell-check` and `npm run format:tables` are NOT included in `lint:all` — run them separately
 * `npm run lint:md:fix` and `npm run format:tables` auto-fix markdown issues
 * `.copilot-tracking/` is excluded from markdown linting via `.markdownlint-cli2.jsonc`
@@ -469,7 +480,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 ## CI/CD Pipeline
 
 * Two orchestrators: `main.yml` (push to main), `pr-validation.yml` (PRs) using reusable `workflow_call` workflows
-* PR validation sequence: spell check → markdown lint → table format → frontmatter → PSScriptAnalyzer → YAML lint → link check → Python lint → Python tests → frontend tests → Pester → dependency review → dependency pinning → CodeQL
+* PR validation sequence: spell check → markdown lint → table format → frontmatter → PSScriptAnalyzer → YAML lint → link check → Python lint → Python tests → uv lock consistency → frontend tests → Pester → dependency review → dependency pinning → CodeQL
 * Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
 * Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main)
 * Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)

@@ -8,9 +8,8 @@ import pytest
 if TYPE_CHECKING:
     from pytest_mock import MockerFixture
 
-torch = pytest.importorskip("torch")
-
-from conftest import load_training_module  # noqa: E402
+import torch
+from conftest import load_training_module
 
 _MOD = load_training_module("training_packaging_export_policy", "training/packaging/scripts/export_policy.py")
 

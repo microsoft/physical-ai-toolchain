@@ -27,7 +27,7 @@ Submit distributed Isaac Lab training jobs through NVIDIA OSMO workflow orchestr
 
 | Template             | Purpose                             | Submission Script                                                     |
 |----------------------|-------------------------------------|-----------------------------------------------------------------------|
-| `train.yaml`         | Isaac Lab training (base64 inline)  | `training/rl/scripts/submit-osmo-training.sh`                         |
+| `train.yaml`         | Isaac Lab RL training               | `training/rl/scripts/submit-osmo-training.sh`                         |
 | `train-dataset.yaml` | Isaac Lab training (dataset upload) | `training/rl/scripts/submit-osmo-dataset-training.sh`                 |
 | `lerobot-train.yaml` | LeRobot behavioral cloning          | `training/il/scripts/submit-osmo-lerobot-training.sh`                 |
 | `groot-train.yaml`   | GR00T-N1.5 / N1.7 fine-tuning (VLA) | `vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh` |
@@ -35,13 +35,13 @@ Submit distributed Isaac Lab training jobs through NVIDIA OSMO workflow orchestr
 
 ## ⚙️ Workflow Comparison
 
-| Aspect      | train.yaml             | train-dataset.yaml    |
-|-------------|------------------------|-----------------------|
-| Payload     | Base64-encoded archive | Dataset folder upload |
-| Size limit  | ~1MB                   | Unlimited             |
-| Versioning  | None                   | Automatic             |
-| Reusability | Per-run                | Across runs           |
-| Setup       | None                   | Bucket configured     |
+| Aspect      | train.yaml                 | train-dataset.yaml    |
+|-------------|----------------------------|-----------------------|
+| Payload     | Object-storage archive     | Dataset folder upload |
+| Size limit  | Unlimited                  | Unlimited             |
+| Versioning  | Content-hash per submit     | Automatic             |
+| Reusability | Per-run                    | Across runs           |
+| Setup       | Storage account            | Bucket configured     |
 
 ## 🏋️ Isaac Lab Training
 
@@ -72,7 +72,7 @@ Multi-GPU distributed training with KAI Scheduler / Volcano integration, automat
 
 ## 📂 Isaac Lab Dataset Training
 
-Dataset folder injection via OSMO bucket system instead of base64-encoded archives. Training folder mounts at `/data/<dataset_name>/training`.
+Dataset folder injection via OSMO bucket system. Training folder mounts at `/data/<dataset_name>/training`.
 
 ### Dataset Parameters
 

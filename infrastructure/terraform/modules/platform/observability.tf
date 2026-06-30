@@ -67,7 +67,7 @@ resource "azurerm_dashboard_grafana" "main" {
   api_key_enabled                   = true
   deterministic_outbound_ip_enabled = false
   public_network_access_enabled     = var.should_enable_public_network_access
-  grafana_major_version             = 11
+  grafana_major_version             = var.grafana_major_version
   sku                               = "Standard"
   zone_redundancy_enabled           = false
 

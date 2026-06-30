@@ -18,17 +18,17 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 ## Component Inventory
 
-| Component                 | Source    | Version Location                                               | Current Version | Update Method    |
-|---------------------------|-----------|----------------------------------------------------------------|-----------------|------------------|
-| NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION`  | v26.3.2         | Manual           |
-| KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION` | v0.20.1         | Manual           |
-| OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`    | 1.3.0           | Manual           |
-| OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`    | 6.3.0           | Manual           |
-| AzureML K8s Extension     | Azure CLI | `02-deploy-azureml-extension.sh` → `--release-train stable`    | Latest stable   | Automatic        |
-| Isaac Lab                 | Container | Hardcoded in 7+ files                                          | 2.3.2           | Manual grep      |
-| Azure Terraform Providers | Terraform | `versions.tf` across 8 directories                             | Floor-pinned    | Dependabot (2/4) |
-| Python Packages           | pip/uv    | `pyproject.toml`, `requirements.txt`                           | Mixed           | Dependabot       |
-| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                       | SHA-pinned      | Dependabot       |
+| Component                 | Source    | Version Location                                              | Current Version | Update Method    |
+|---------------------------|-----------|---------------------------------------------------------------|-----------------|------------------|
+| NVIDIA GPU Operator       | Helm      | `infrastructure/setup/defaults.conf` → `GPU_OPERATOR_VERSION` | v26.3.2         | Manual           |
+| KAI Scheduler             | Helm      | `infrastructure/setup/defaults.conf` → `KAI_SCHEDULER_VERSION`| v0.20.1         | Manual           |
+| OSMO Chart                | Helm      | `infrastructure/setup/defaults.conf` → `OSMO_CHART_VERSION`   | 1.3.0           | Manual           |
+| OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`   | 6.3.0           | Manual           |
+| AzureML K8s Extension     | Azure CLI | `02-deploy-azureml-extension.sh` → `--release-train stable`   | Latest stable   | Automatic        |
+| Isaac Lab                 | Container | Hardcoded in 7+ files                                         | 2.3.2           | Manual grep      |
+| Azure Terraform Providers | Terraform | `versions.tf` across 8 directories                            | Floor-pinned    | Dependabot (2/4) |
+| Python Packages           | uv        | `pyproject.toml`, `uv.lock`                                   | Mixed           | Dependabot       |
+| GitHub Actions            | GitHub    | Workflow YAML (18 files)                                      | SHA-pinned      | Dependabot       |
 
 > [!IMPORTANT]
 > Isaac Lab version `2.3.2` is hardcoded across workflow YAMLs, deploy scripts, and `pyproject.toml` files. No centralized variable exists. Use `grep -r "2.3.2" --include="*.yaml" --include="*.yml" --include="*.toml" --include="*.sh"` to locate all references before updating.
@@ -37,7 +37,7 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 
 | Ecosystem        | Tool or Method                                                | Command or Location                                   |
 |------------------|---------------------------------------------------------------|-------------------------------------------------------|
-| Python           | Dependabot PRs, `uv pip compile --upgrade`                    | `.github/dependabot.yml`, `pyproject.toml`            |
+| Python           | Dependabot PRs, `uv lock --upgrade`                           | `.github/dependabot.yml`, `pyproject.toml`            |
 | Terraform        | Dependabot PRs, `terraform init -upgrade`                     | `.github/dependabot.yml`, `infrastructure/terraform/` |
 | Helm Charts      | `helm repo update && helm search repo <chart> --versions`     | NVIDIA NGC Helm repositories                          |
 | Container Images | NVIDIA NGC catalog, GitHub release pages                      | `nvcr.io/nvidia/` namespace                           |
@@ -73,6 +73,15 @@ The reviewer enriches each update with:
 The review body prepends a `⚠️ Maintainer review recommended` banner when any high-risk signal fires. Up to five inline comments are anchored to the changed manifest or lockfile lines. The workflow skips drafts and any PR that touches `.github/workflows/**`. The persona is defined in [.github/agents/dependabot-pr-reviewer.agent.md](pathname://../../.github/agents/dependabot-pr-reviewer.agent.md).
 
 Maintainers remain the source of truth — the reviewer is advisory context, not automated policy.
+
+### Python Lockfiles
+
+Every Python subproject carries a committed `uv.lock` beside its `pyproject.toml`. The lock is the single resolution source of truth — runtime-flat `requirements.txt` files are not committed.
+
+* **Regenerate** a lock with `uv lock` (or `uv lock --upgrade`) after editing `pyproject.toml`. Never hand-edit `uv.lock` and never run `uv pip compile` to produce a committed flat file.
+* **Derive** runtime dependencies at build or submit time via `uv export --frozen --no-hashes --no-emit-project` piped into `uv pip install --no-deps`. `--frozen` reads the lock without regenerating it. The OSMO replay mirror ([training/utils/replay-azureml.sh](pathname://../../training/utils/replay-azureml.sh)) derives its requirements this way from `workflows/osmo/uv.lock`.
+* **Constrain** the universal lock to supported platforms with `[tool.uv] environments` (for example linux x86_64 for GPU and Isaac subprojects). Preserve these markers when regenerating.
+* Dependabot regenerates affected locks natively on dependency PRs. The read-only `uv lock --check` gate (see [CI Validation for Dependency PRs](#ci-validation-for-dependency-prs)) fails any PR whose lock drifts from its manifest, so no manual `uv lock` step is required on Dependabot PRs.
 
 ## Manual Update Process
 
@@ -145,6 +154,7 @@ These workflows validate dependency update PRs automatically.
 | `dependency-pinning-scan.yml` | Enforce 95% SHA pinning compliance | GitHub Actions     |
 | `codeql-analysis.yml`         | Static analysis for Python code    | Python changes     |
 | `scorecard.yml`               | OpenSSF Scorecard assessment       | Repository-wide    |
+| `uv-lock-consistency.yml`     | Fail on `uv.lock`/manifest drift   | Python lockfiles   |
 
 ## Security-Critical Updates
 

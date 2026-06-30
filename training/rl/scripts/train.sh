@@ -54,8 +54,8 @@ run_python() {
 
 if ! command -v uv &>/dev/null; then
   echo "Installing uv package manager..."
-  UV_VERSION="0.10.9"
-  UV_SHA256="20d79708222611fa540b5c9ed84f352bcd3937740e51aacc0f8b15b271c57594"
+  UV_VERSION="0.11.21"
+  UV_SHA256="8c88519b0ef0af9801fcdee419bbb12116bd9e6b18e162ae093c932d8b264050"
   curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/uv.tar.gz
   echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
   tar -xzf /tmp/uv.tar.gz -C /tmp
@@ -86,14 +86,14 @@ else
   run_python -m pip install --upgrade "numpy>=1.26.0,<2.0.0" --quiet
 fi
 
-runtime_requirements="${TRAINING_DIR}/requirements.txt"
-
 if command -v uv &>/dev/null; then
-  echo "uv detected, installing training manifest dependencies..."
+  echo "uv detected, exporting locked training manifest dependencies..."
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --no-deps --requirement "${runtime_requirements}"
+    uv export --frozen --no-hashes --no-emit-project --project "${TRAINING_DIR}" \
+      | uv pip install --no-cache-dir --no-deps --requirement -
   else
-    uv pip install --no-cache-dir --no-deps --system --requirement "${runtime_requirements}"
+    uv export --frozen --no-hashes --no-emit-project --project "${TRAINING_DIR}" \
+      | uv pip install --no-cache-dir --no-deps --system --requirement -
   fi
 else
   echo "Error: uv is required to install workflow manifest dependencies" >&2

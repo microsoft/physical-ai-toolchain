@@ -140,10 +140,10 @@ safely using `cat`, `grep`, `jq`, `npm view`, and `web-fetch`. These checks
 must run regardless of CI conclusion:
 
 * **Isaac Sim ABI guard (training-rl-abi).** When the diff touches
-  `training/rl/requirements.txt` or `training/rl/pyproject.toml`, read
+  `training/rl/uv.lock` or `training/rl/pyproject.toml`, read
   `training/rl/scripts/train.sh` and confirm the pin
   `numpy>=1.26.0,<2.0.0` is still satisfied by the resolved version in
-  `training/rl/requirements.txt`. A `numpy` 2.x bump MUST be flagged as
+  `training/rl/uv.lock`. A `numpy` 2.x bump MUST be flagged as
   high-risk regardless of advisory severity or CI conclusion. Cite both file
   paths in the comment.
 * **Torch / tensordict / onnxruntime-gpu.** A major bump invalidates GPU
@@ -173,7 +173,7 @@ review body with three parts:
    `conclusion == success`, state "all per-surface check-runs passed".
 2. **Static impact reasoning:** one or two sentences citing the static
    checks above. Always include the Isaac Sim ABI line when
-   `training/rl/requirements.txt` is in the diff, even on minor bumps.
+   `training/rl/uv.lock` is in the diff, even on minor bumps.
 3. **Banner:** if any high-risk trigger fired (advisory severity, ABI guard
    violation, peer-dep conflict, breaking-changelog quote), prepend
    `⚠️ Maintainer review recommended` to the top of the review body once.

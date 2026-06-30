@@ -26,7 +26,7 @@ Inventory of submission scripts for training, evaluation, and inference workflow
 | `submit-azureml-training.sh`            | Package code and submit Azure ML training job       | Azure ML |
 | `submit-azureml-isaaclab-evaluation.sh` | Submit Isaac Lab policy evaluation job              | Azure ML |
 | `submit-azureml-lerobot-training.sh`    | Submit LeRobot training to Azure ML                 | Azure ML |
-| `submit-osmo-training.sh`               | Package code and submit OSMO workflow (base64)      | OSMO     |
+| `submit-osmo-training.sh`               | Package code and submit OSMO workflow               | OSMO     |
 | `submit-osmo-dataset-training.sh`       | Submit OSMO workflow using dataset folder injection | OSMO     |
 | `submit-osmo-lerobot-training.sh`       | Submit LeRobot behavioral cloning training          | OSMO     |
 | `submit-osmo-lerobot-inference.sh`      | Submit LeRobot inference/evaluation                 | OSMO     |
@@ -40,7 +40,7 @@ Scripts auto-detect Azure context from Terraform outputs in `infrastructure/terr
 # Azure ML training
 ./submit-azureml-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
 
-# OSMO training (base64 encoded)
+# OSMO training
 ./submit-osmo-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
 
 # OSMO training (dataset folder upload)
@@ -81,7 +81,7 @@ Script-specific tools:
 - Azure ML scripts: `az` CLI + `az extension add --name ml`
 - Validation: `jq`
 - OSMO scripts: `osmo`
-- Base64 payload submission: `zip`, `base64`
+- OSMO code upload: `zip`
 - Dataset injection submission: `rsync`
 
 ## CLI Arguments
@@ -168,7 +168,7 @@ Example:
   --stream
 ```
 
-### `submit-osmo-training.sh` (base64 payload)
+### `submit-osmo-training.sh`
 
 | Option                         | Default                                                      | Description                                      | Source                        |
 |--------------------------------|--------------------------------------------------------------|--------------------------------------------------|-------------------------------|

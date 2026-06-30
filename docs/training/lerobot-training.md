@@ -272,16 +272,17 @@ Data assets and blob URLs can be combined. All sources are merged automatically 
 
 ## 🔒 Runtime Dependency Lockfile
 
-AzureML LeRobot jobs install `training/il/lerobot/requirements.txt` with `uv pip install --no-deps`, so the compiled lockfile is the runtime contract. Regenerate it after any `training/il/lerobot/pyproject.toml` change:
+AzureML LeRobot jobs derive their runtime dependencies at build time from the committed `training/il/lerobot/uv.lock`, the single resolution source of truth. The entrypoints run `uv export --frozen --no-hashes --no-emit-project` and pipe the result into `uv pip install --no-deps`, so the lock — not a committed flat file — is the runtime contract. Regenerate the lock after any `training/il/lerobot/pyproject.toml` change:
 
 ```bash
 cd training/il/lerobot
-uv pip compile pyproject.toml -o requirements.txt --python-version 3.12 --python-platform manylinux_2_28_x86_64
+uv lock
 ```
 
-The Linux platform flag is intentional. It matches the AzureML CUDA container rather than the developer workstation and prevents macOS-only wheels from entering the lockfile. It can select older but compatible transitive versions than a local unconstrained compile; for example, `lerobot==0.5.1` requires `torch<2.11`, so the Linux lockfile uses the latest resolver-compatible Torch 2.10 series instead of the invalid Torch 2.12 output produced by an unconstrained local compile.
+`[tool.uv] environments` constrains the universal lock to the AzureML CUDA target (`sys_platform == 'linux' and platform_machine == 'x86_64'`), so `uv export` emits a single-marker, runtime-flat requirement set without macOS-only wheels.
+The override-dependencies and `prerelease = "allow"` under `[tool.uv]` keep the resolution valid; for example, `lerobot==0.5.1` requires `torch<2.11`, so the lock pins the latest resolver-compatible Torch 2.10 series instead of the invalid Torch 2.12 output an unconstrained compile would produce.
 
-Some downgraded packages are corrections, not regressions: `av<16` and `cmake<4.2` come from LeRobot's declared constraints. Security-sensitive pins such as `gitpython` and `urllib3` remain explicit in `pyproject.toml`; any older transitive version introduced by the Linux resolver should be reviewed before committing the regenerated lockfile.
+Some pins are corrections, not regressions: `av<16` and `cmake<4.2` come from LeRobot's declared constraints. Dependabot regenerates `uv.lock` natively, and the read-only `uv lock --check` CI gate fails any PR whose lock drifts from `pyproject.toml`.
 
 ## 🔄 End-to-End Pipeline
 
