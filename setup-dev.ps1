@@ -138,7 +138,7 @@ Write-Info 'All required tools found'
 
 Write-Section 'UV Package Manager Setup'
 
-$UvVersion = '0.7.12'
+$UvVersion = '0.11.21'
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Info "Installing uv package manager v$UvVersion..."
@@ -165,7 +165,7 @@ Write-Info "Using uv: $(uv --version)"
 # ===================================================================
 Write-Section 'Terraform-Docs Setup'
 
-$TerraformDocsVersion = '0.21.0'
+$TerraformDocsVersion = '0.24.0'
 
 if (Get-Command terraform-docs -ErrorAction SilentlyContinue) {
     Write-Info "terraform-docs: $(terraform-docs --version)"

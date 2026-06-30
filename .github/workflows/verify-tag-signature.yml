@@ -21,6 +21,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install gitsign
         run: |
@@ -66,4 +67,7 @@ jobs:
             exit 1
           fi
 
-          git tag -v "${TAG_NAME}"
+          gitsign verify-tag \
+            --certificate-identity 'https://github.com/microsoft/physical-ai-toolchain/.github/workflows/main.yml@refs/heads/main' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            "${TAG_NAME}"

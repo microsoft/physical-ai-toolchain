@@ -282,7 +282,7 @@ workflow:
               export DEBIAN_FRONTEND=noninteractive
               retry_cmd 3 apt-get update -qq
               retry_cmd 3 apt-get install -y --no-install-recommends curl >/dev/null
-              pip install --quiet azure-storage-blob azure-identity
+              pip install --quiet azure-storage-blob==12.27.1 azure-identity==1.25.3
               python3 /tmp/download_blob.py
               echo "--- dataset download complete ---"
               ls -lh "${DATASET_PATH}/" | head
@@ -363,12 +363,12 @@ workflow:
                 source /opt/conda/etc/profile.d/conda.sh
                 conda activate gr00t-py310
                 pip install --upgrade pip setuptools wheel
-                pip install azure-identity azure-storage-blob
+                pip install azure-identity==1.25.3 azure-storage-blob==12.27.1
               fi
             fi
 
             pip install --upgrade setuptools wheel
-            pip install gpustat wandb==0.19.0 packaging ninja
+            pip install gpustat==1.1.1 wandb==0.19.0 packaging==25.0 ninja==1.13.0
 
             GPU_PRODUCT="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
             echo "Detected GPU: ${GPU_PRODUCT}"
@@ -429,8 +429,8 @@ workflow:
             python -c "import torch, torchvision, flash_attn; print('torch=', torch.__version__, 'tv=', torchvision.__version__, 'cuda=', torch.version.cuda, 'flash_attn=', flash_attn.__version__)"
 
             pip install -e . --no-deps
-            pip install "accelerate>=0.26.0"
-            pip install torchcodec || true
+            pip install "accelerate==1.14.0"
+            pip install torchcodec==0.4.0 || true
 
             if [ -n "${DATA_CONFIG_B64:-}" ]; then
               DATA_CFG_PY="$(pwd)/gr00t/experiment/data_config.py"
@@ -503,10 +503,10 @@ workflow:
               else
                 echo "--- mirroring run to Azure ML ---"
                 pip install --quiet \
-                  'mlflow>=2.10,<3' \
-                  'azureml-mlflow>=1.55' \
-                  'azure-identity>=1.17' \
-                  'azure-ai-ml>=1.20'
+                  'mlflow==2.22.5' \
+                  'azureml-mlflow==1.62.0.post3' \
+                  'azure-identity==1.25.3' \
+                  'azure-ai-ml==1.34.0'
                 RUN_ID="${RUN_ID}" OUTPUT_DIR="${OUTPUT_DIR}" \
                   python /tmp/mlflow_log.py || \
                   echo "WARN: Azure ML mirror failed; local run at ${OUTPUT_DIR} is unaffected." >&2
@@ -521,7 +521,7 @@ workflow:
               chmod +x /usr/local/bin/oras
               rm -f "oras_${ORAS_VERSION}_linux_amd64.tar.gz"
 
-              pip install --quiet azure-identity
+              pip install --quiet azure-identity==1.25.3
               ACR_HOST="${ACR_REGISTRY}.azurecr.io"
               az login --identity --allow-no-subscriptions 2>/dev/null && \
                 az acr login --name "${ACR_REGISTRY}" 2>/dev/null || {
@@ -561,7 +561,7 @@ default-values:
   workflow_name: groot-train
   image: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
   gpu: 1
-  platform: h100gpu_platform
+  platform: gpu_platform
   blob_url: ""
   dataset_path: "/data/dataset"
   data_config: ""

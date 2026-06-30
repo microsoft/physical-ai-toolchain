@@ -60,11 +60,11 @@ section "UV Package Manager Setup"
 
 if ! command -v uv &>/dev/null; then
   info "Installing uv package manager..."
-  UV_VERSION="0.7.12"
+  UV_VERSION="0.11.21"
   UV_ARCH=$(uname -m)
   case "${UV_ARCH}" in
-    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="735891fb553d0be129f3aa39dc8e9c4c49aaa76ec17f7dfb6a732e79a714873a" ;;
-    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="23233d2e950ed8187858350da5c6803b14cbbeaef780382093bb2f2bc4ba1200" ;;
+    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="8c88519b0ef0af9801fcdee419bbb12116bd9e6b18e162ae093c932d8b264050" ;;
+    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="88e800834007cc5efd4675f166eb2a51e7e3ad19876d85fa8805a6fb5c922397" ;;
     *) error "Unsupported architecture for uv: ${UV_ARCH}"; exit 1 ;;
   esac
   curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TRIPLE}.tar.gz" -o /tmp/uv.tar.gz
@@ -82,12 +82,12 @@ info "Using uv: $(uv --version)"
 # ===================================================================
 section "Terraform-Docs Setup"
 
-TERRAFORM_DOCS_VERSION="0.21.0"
+TERRAFORM_DOCS_VERSION="0.24.0"
 
 ARCH=$(uname -m)
 case "${ARCH}" in
-  x86_64)  ARCH="amd64"; TERRAFORM_DOCS_SHA256="2fdd81b8d21ff1498cd559af0dcc5d155835f84600db06d3923e217124fc735a" ;;
-  aarch64|arm64) ARCH="arm64"; TERRAFORM_DOCS_SHA256="35b2e6846268841484e6eea7d00d7dfe2c94b4725e52cfe19aa6c26a86c32edc" ;;
+  x86_64)  ARCH="amd64"; TERRAFORM_DOCS_SHA256="9005daf969de0b50134493a2c00078b49f5f5b39d021cda7c89bf4d4f3d776d3" ;;
+  aarch64|arm64) ARCH="arm64"; TERRAFORM_DOCS_SHA256="d12bd7b73c1fc9c64efc79f8157dd713dabd559f1ecf3cfc0f42e32279a155fd" ;;
   *) error "Unsupported architecture: ${ARCH}"; exit 1 ;;
 esac
 

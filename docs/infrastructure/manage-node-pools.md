@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Manage Node Pools
 description: Add, remove, and resize AKS node pools on an existing cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-19
+ms.date: 2026-06-24
 ms.topic: how-to
 keywords:
   - node-pools
@@ -38,6 +38,11 @@ Pool changes follow the standard repo flow:
 3. If the new pool requires different `nodeSelector`, tolerations, or resource overrides, edit `infrastructure/setup/values/osmo-platforms.yaml` and rerun `infrastructure/setup/03-deploy-osmo.sh`.
 
 Script `03` deploys `osmo-platforms.yaml` as a Helm values overlay. Rerun is only needed when platform configuration changes (nodeSelector, tolerations, resource limits) — not for count-only scaling changes.
+
+> [!NOTE]
+> Single-node multi-GPU jobs require an OSMO platform whose pod-template `nodeSelector` targets a multi-GPU node SKU.
+> The shipped `gpu_platform_2x` platform (pod template `gpu_tpl_2x`) binds a 2x A100 pool and is selected via the workflow `platform` field — for example `submit-osmo-lerobot-training.sh --num-gpus 2 --platform gpu_platform_2x`.
+> The single-GPU `gpu_platform` cannot satisfy a 2-GPU request because its node SKU exposes one GPU. Add further multi-GPU platforms by copying this pair in `osmo-platforms.yaml`.
 
 ## Prerequisites
 

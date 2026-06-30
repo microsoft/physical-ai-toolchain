@@ -117,7 +117,7 @@ workflow:
             # mlflow-skinny come from the lock install above.
             if [[ "${MLFLOW_ENABLE:-false}" == "true" ]]; then
               echo "Installing plotting dependencies..."
-              uv pip install matplotlib
+              uv pip install matplotlib==3.11.0
             fi
 
             # Download model from AzureML registry if specified

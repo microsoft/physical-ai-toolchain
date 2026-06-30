@@ -273,7 +273,7 @@ git fetch --tags
 git tag -v v1.0.0
 ```
 
-GitHub Actions validates signatures for pushed version tags (`v*`).
+GitHub Actions validates signatures for pushed version tags (`v*`). CI gates each `v*` tag with constrained `gitsign verify-tag`, binding the signature to the pinned CI workflow identity rather than accepting any valid Sigstore signature. `git tag -v` confirms cryptographic integrity and the Rekor entry but does not validate the signer identity, so it remains a local diagnostic for maintainers rather than the authoritative gate.
 
 > [!IMPORTANT]
 > Maintainer GPG key distribution is not required for this repository because release tags are signed using keyless Sigstore identities.

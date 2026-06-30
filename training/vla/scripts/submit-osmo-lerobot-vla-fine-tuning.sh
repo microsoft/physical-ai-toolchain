@@ -67,7 +67,7 @@ WORKFLOW:
     -w, --workflow PATH           Workflow template (default: training/vla/workflows/osmo/groot-train.yaml)
     -j, --job-name NAME           Job identifier (default: groot-train)
     -i, --image IMAGE             Container image (default: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel)
-        --platform PLATFORM       OSMO platform name (default: h100gpu_platform)
+        --platform PLATFORM       OSMO platform name (default: gpu_platform)
 
 AZURE CONTEXT:
         --azure-subscription-id ID    Azure subscription ID
@@ -134,7 +134,7 @@ max_steps="${MAX_STEPS:-500}"
 batch_size="${BATCH_SIZE:-4}"
 save_steps="${SAVE_STEPS:-100}"
 dataloader_workers="${DATALOADER_WORKERS:-0}"
-platform="${PLATFORM:-h100gpu_platform}"
+platform="${PLATFORM:-gpu_platform}"
 
 resume="false"
 run_id_override="${RUN_ID_OVERRIDE:-}"

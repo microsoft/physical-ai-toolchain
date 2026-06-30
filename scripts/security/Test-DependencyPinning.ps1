@@ -109,7 +109,7 @@ param(
     [string]$ExcludePaths = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads",
+    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip",
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 100)]
@@ -157,6 +157,14 @@ $DependencyPatterns = @{
         FilePatterns   = @('**/.devcontainer/scripts/*.sh', '**/scripts/*.sh')
         ValidationFunc = 'Test-ShellDownloadSecurity'
         Description    = 'Shell script downloads must include checksum verification'
+    }
+
+    'shell-inline-pip' = @{
+        FilePatterns   = @('**/workflows/**/*.yaml', '**/workflows/**/*.yml', '**/*.sh')
+        ValidationFunc = 'Get-ShellInlinePipViolations'
+        PinPattern     = '^.+==.+'
+        RemediationUrl = 'https://pypi.org/pypi/{0}/{1}/json'
+        Description    = 'Inline pip/uv pip installs in workflow YAML and shell scripts must be exact-pinned (==) or lock-derived'
     }
 }
 
@@ -405,6 +413,168 @@ function Get-PipDependencyViolations {
     return $violations
 }
 
+function Get-ShellInlinePipViolations {
+    <#
+    .SYNOPSIS
+        Detects unpinned inline pip / uv pip install invocations embedded in workflow YAML.
+    .DESCRIPTION
+        OSMO (and similar) workflow YAML embed shell commands in task args that run
+        'pip install' / 'uv pip install'. Each installed package must be exact-pinned
+        with == (including shell-variable pins like name=="${VAR}"), installed from a
+        lock/requirement (-r FILE, -r -, --requirement, or a 'uv export | uv pip install'
+        pipe), or be an editable local project (-e .). Bare names and range specifiers
+        are violations. Build-frontend tools (pip/setuptools/wheel) are allowlisted.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    # Build-frontend tools tolerated unpinned (idiomatic `pip install --upgrade pip ...`)
+    $allowlist = @('pip', 'setuptools', 'wheel')
+    # Flags that consume the following token as their value
+    $valueFlags = @('--index-url', '--extra-index-url', '-i', '--timeout', '--retries',
+        '-c', '--constraint', '-r', '--requirement', '--find-links', '-f', '-e',
+        '--editable', '--prefix', '--target', '--index-strategy', '--python-version',
+        '--project', '-p')
+
+    $lines = Get-Content -Path $filePath
+
+    # Join backslash line continuations into logical lines, tracking the start line number.
+    $logicalLines = @()
+    $buffer = ''
+    $startLine = 0
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($buffer -eq '') { $startLine = $i + 1 }
+        $current = $lines[$i]
+        if ($current -match '\\\s*$') {
+            $buffer += ($current -replace '\\\s*$', ' ')
+        }
+        else {
+            $buffer += $current
+            $logicalLines += @{ Text = $buffer; Line = $startLine }
+            $buffer = ''
+        }
+    }
+    if ($buffer -ne '') { $logicalLines += @{ Text = $buffer; Line = $startLine } }
+
+    $installRegex = '(?:uv\s+pip|pip3?|python3?\s+-m\s+pip)\s+install\b'
+    # uv run / uvx / uv tool run, anchored to command position so binary-install
+    # lines like `install /tmp/.../uvx /usr/local/bin/uvx` do not match.
+    $uvRunAnchored = '^(?:sudo\s+)?(?:uvx|uv\s+tool\s+run|uv\s+run)\b'
+
+    # Shared compliance check for a single package spec. Emits a violation object
+    # (or $null when compliant). Build-frontend tools are allowlisted; exact ==
+    # pins (including name=="${VAR}") pass; bare names and ranges fail.
+    $testSpec = {
+        param([string]$specRaw, [int]$lineNo, [string]$cmdText, [string]$source)
+
+        $spec = $specRaw.Trim('"', "'").Trim()
+        if ([string]::IsNullOrWhiteSpace($spec)) { return $null }
+        if ($spec.StartsWith('-')) { return $null }
+        if ($spec -match '^\$' -or $spec -match '^https?://' -or
+            $spec -match '^[./~]' -or $spec -match '^[<>|&]') {
+            return $null
+        }
+        if ($spec -notmatch '^([A-Za-z0-9][A-Za-z0-9._-]*)') { return $null }
+        $packageName = $Matches[1]
+        if ($allowlist -contains $packageName.ToLower()) { return $null }
+        if ($spec -match '^[A-Za-z0-9][A-Za-z0-9._-]*(\[[^\]]+\])?==') { return $null }
+
+        $versionSpec = ($spec -replace '^[A-Za-z0-9][A-Za-z0-9._-]*(\[[^\]]+\])?', '')
+        if ([string]::IsNullOrWhiteSpace($versionSpec)) { $versionSpec = '(none)' }
+
+        $v = [DependencyViolation]::new()
+        $v.File = $relativePath
+        $v.Line = $lineNo
+        $v.Type = $type
+        $v.Name = $packageName
+        $v.Version = $versionSpec
+        $v.Severity = 'warning'
+        $v.Description = "Unpinned inline pip dependency via $source (use ==, -r/--requirement lockfile, or uv export)"
+        $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $cmdText }
+        return $v
+    }
+
+    $prevWasIgnoreComment = $false
+    foreach ($logical in $logicalLines) {
+        $lineText = $logical.Text
+        $hasIgnore = $lineText -match 'pinning-ignore'
+
+        # Inline exemption: `# pinning-ignore` trailing the install (or its continued lines),
+        # or a dedicated `# pinning-ignore` comment line directly above the install. Lets an
+        # intentional non-pin opt out of this check (e.g. an Isaac-ABI numpy range).
+        $exempt = $hasIgnore -or $prevWasIgnoreComment
+        $prevWasIgnoreComment = $hasIgnore -and $lineText.TrimStart().StartsWith('#')
+
+        if ($lineText -notmatch 'install|uv\s+run|uvx|uv\s+tool\s+run') { continue }
+        if ($exempt) { continue }
+
+        # Split into shell commands on &&, ||, ; (NOT single | so 'uv export | uv pip install' stays intact)
+        $commands = $lineText -split '\s*(?:&&|\|\||;)\s*'
+
+        foreach ($command in $commands) {
+            $cmdTrim = $command.TrimStart()
+            if ($cmdTrim.StartsWith('#')) { continue }
+
+            if ($command -match $installRegex) {
+                # Lock/requirement-driven installs are compliant
+                if ($command -match 'uv\s+export\b' -or
+                    $command -match '(?:^|\s)-r(?:=|\s+)\S' -or
+                    $command -match '(?:^|\s)--requirement(?:=|\s+)\S') {
+                    continue
+                }
+
+                # Isolate the package arguments (everything after the install keyword)
+                $installArgs = ($command -replace '^.*?\binstall\b', '').Trim()
+                $tokens = [regex]::Matches($installArgs, '"[^"]*"|''[^'']*''|\S+') | ForEach-Object { $_.Value }
+
+                $skipNext = $false
+                foreach ($rawToken in $tokens) {
+                    if ($skipNext) { $skipNext = $false; continue }
+                    $token = $rawToken.Trim('"', "'").Trim()
+                    if ($token.StartsWith('-')) {
+                        if ($valueFlags -contains $token) { $skipNext = $true }
+                        continue
+                    }
+                    $result = & $testSpec $rawToken $logical.Line $command.Trim() 'pip install'
+                    if ($null -ne $result) { $violations += $result }
+                }
+            }
+            elseif ($cmdTrim -match $uvRunAnchored) {
+                # uv run / uvx / uv tool run with ephemeral deps: each --with SPEC must be pinned.
+                # --with-requirements FILE is lock-derived (compliant); --with-editable is a local project (compliant).
+                $tokens = [regex]::Matches($command, '"[^"]*"|''[^'']*''|\S+') | ForEach-Object { $_.Value }
+                for ($t = 0; $t -lt $tokens.Count; $t++) {
+                    $tok = $tokens[$t].Trim('"', "'")
+                    if ($tok -eq '--with' -and ($t + 1) -lt $tokens.Count) {
+                        $result = & $testSpec $tokens[$t + 1] $logical.Line $command.Trim() 'uv run --with'
+                        if ($null -ne $result) { $violations += $result }
+                    }
+                    elseif ($tok -match '^--with=(.+)$') {
+                        $result = & $testSpec $Matches[1] $logical.Line $command.Trim() 'uv run --with'
+                        if ($null -ne $result) { $violations += $result }
+                    }
+                }
+            }
+        }
+    }
+
+    return $violations
+}
+
 function Get-NpmDependencyViolations {
     <#
     .SYNOPSIS
@@ -521,6 +691,45 @@ function Get-FilesToScan {
                 $hasRecursiveGlob = $pattern.StartsWith('**/')
                 $effectivePattern = if ($hasRecursiveGlob) { $pattern.Substring(3) } else { $pattern }
 
+                # Handle an interior ** (e.g. workflows/**/*.yaml): recurse for the leaf
+                # filter, then keep files whose relative path contains the required segment.
+                # Get-ChildItem cannot resolve ** as a mid-path directory segment.
+                # -Force is required so recursion descends into the dot-prefixed .github
+                # directory, where GitHub Actions workflows live; without it -Recurse skips
+                # hidden trees and .github/workflows/* is never scanned. Vendored hidden
+                # trees (.git, .venv, …) are pruned by the relative-path filter below.
+                if ($effectivePattern -match '/\*\*/') {
+                    $segments = $effectivePattern -split '/\*\*/'
+                    $requiredSegment = $segments[0]
+                    $leafFilter = Split-Path $segments[-1] -Leaf
+                    try {
+                        $interiorFiles = Get-ChildItem -Path $ScanPath -Filter $leafFilter -Recurse -File -Force -ErrorAction SilentlyContinue |
+                            Where-Object {
+                                $rel = ([System.IO.Path]::GetRelativePath($ScanPath, $_.FullName)) -replace '\\', '/'
+                                ($rel -match "(^|/)$([regex]::Escape($requiredSegment))/") -and
+                                ($_.FullName -notmatch '[/\\](\.git|\.venv|node_modules|external)[/\\]')
+                            }
+
+                        if ($ExcludePatterns) {
+                            foreach ($exclude in $ExcludePatterns) {
+                                $interiorFiles = $interiorFiles | Where-Object { $_.FullName -notlike "*$exclude*" }
+                            }
+                        }
+
+                        $allFiles += $interiorFiles | ForEach-Object {
+                            @{
+                                Path         = $_.FullName
+                                Type         = $type
+                                RelativePath = [System.IO.Path]::GetRelativePath($ScanPath, $_.FullName)
+                            }
+                        }
+                    }
+                    catch {
+                        Write-PinningLog "Error scanning for $type files with pattern $pattern`: $($_.Exception.Message)" -Level Warning
+                    }
+                    continue
+                }
+
                 $dirPart = Split-Path $effectivePattern -Parent
                 $filePart = Split-Path $effectivePattern -Leaf
 
@@ -541,6 +750,11 @@ function Get-FilesToScan {
                     }
 
                     $files = Get-ChildItem @gciParams
+
+                    # Always skip vendored / VCS / virtualenv trees (never lint dependencies' own files)
+                    $files = $files | Where-Object {
+                        $_.FullName -notmatch '[/\\](\.git|\.venv|node_modules|external)[/\\]'
+                    }
 
                     # Apply exclusion filters
                     if ($ExcludePatterns) {

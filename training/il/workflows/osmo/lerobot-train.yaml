@@ -4,11 +4,11 @@ workflow:
     exec_timeout: 12h
   resources:
     default:
-      gpu: 1
+      gpu: {{ num_gpus }}
       cpu: 8
       memory: 48Gi
       storage: 80Gi
-      platform: gpu_platform
+      platform: "{{ platform }}"
   tasks:
     - name: lerobot-train
       image: "{{ image }}"
@@ -41,6 +41,7 @@ workflow:
         SAVE_FREQ: "{{ save_freq }}"
         VAL_SPLIT: "{{ val_split }}"
         SYSTEM_METRICS: "{{ system_metrics }}"
+        MIXED_PRECISION: "{{ mixed_precision }}"
         LEROBOT_VERSION: "{{ lerobot_version }}"
         EXPERIMENT_NAME: "{{ experiment_name }}"
         REGISTER_CHECKPOINT: "{{ register_checkpoint }}"
@@ -183,6 +184,9 @@ default-values:
   save_freq: "5000"
   val_split: "0.1"
   system_metrics: "true"
+  num_gpus: "1"
+  mixed_precision: "no"
+  platform: gpu_platform
   lerobot_version: ""
   experiment_name: ""
   register_checkpoint: ""

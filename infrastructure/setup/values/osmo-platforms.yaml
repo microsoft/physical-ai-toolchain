@@ -21,6 +21,26 @@ services:
               resources:
                 requests: { nvidia.com/gpu: "{{USER_GPU}}" }
                 limits: { nvidia.com/gpu: "{{USER_GPU}}" }
+      # Multi-GPU node pool (2x A100 per node). Single-node multi-GPU jobs
+      # (USER_GPU > 1) must target this SKU; the 1x SKU above cannot satisfy a
+      # 2-GPU request because each NC24 node exposes only one GPU.
+      gpu_tpl_2x:
+        spec:
+          nodeSelector:
+            node.kubernetes.io/instance-type: "Standard_NC48ads_A100_v4"
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
+            - key: "kubernetes.azure.com/scalesetpriority"
+              value: "spot"
+              operator: "Equal"
+              effect: "NoSchedule"
+          containers:
+            - name: "{{USER_CONTAINER_NAME}}"
+              resources:
+                requests: { nvidia.com/gpu: "{{USER_GPU}}" }
+                limits: { nvidia.com/gpu: "{{USER_GPU}}" }
 
     resourceValidations:
       gpu_gpu_required:
@@ -34,6 +54,17 @@ services:
             resource_validations: [gpu_gpu_required]
             default_variables:
               USER_GPU: 1
+              USER_CPU: 8
+              USER_MEMORY: "64Gi"
+              USER_STORAGE: "100Gi"
+              USER_SHM_SIZE: "16Gi"
+          # Single-node multi-GPU platform: binds gpu_tpl_2x (2x A100 SKU).
+          # Select it for jobs requesting more than one GPU.
+          gpu_platform_2x:
+            override_pod_template: [gpu_tpl_2x]
+            resource_validations: [gpu_gpu_required]
+            default_variables:
+              USER_GPU: 2
               USER_CPU: 8
               USER_MEMORY: "64Gi"
               USER_STORAGE: "100Gi"

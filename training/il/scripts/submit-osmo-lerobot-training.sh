@@ -52,6 +52,21 @@ TRAINING HYPERPARAMETERS:
         --eval-freq N             Evaluation frequency
         --save-freq N             Checkpoint save frequency (default: 5000)
 
+COMPUTE:
+        --num-gpus N              GPUs to request per task (default: 1). Sets the
+                                  OSMO resources.gpu request; the training wrapper
+                                  auto-detects the visible GPU count via
+                                  torch.cuda.device_count() and enables Accelerate
+                                  multi-GPU launch when N>1. Pair with --platform
+                                  to target a node pool whose SKU exposes >= N GPUs.
+        --mixed-precision MODE    Accelerate mixed-precision mode (no|fp16|bf16);
+                                  default: no. Only effective when more than one
+                                  GPU is visible to the job container.
+        --platform NAME           OSMO platform binding the GPU node pool
+                                  (default: gpu_platform, 1x A100). Use
+                                  gpu_platform_2x for 2x A100 nodes with
+                                  --num-gpus 2.
+
 VALIDATION:
         --val-split RATIO         Validation split ratio (default: 0.1 = 10%%)
         --no-val-split            Disable train/val splitting
@@ -99,6 +114,13 @@ EXAMPLES:
       --blob-url https://stosmorbt3dev001.blob.core.windows.net/datasets/hve-robo/hve-robo-cell \
       --no-val-split \
       -r my-act-model
+
+    # Multi-GPU training (2 GPUs, bf16 mixed precision)
+    submit-osmo-lerobot-training.sh \
+      -d lerobot/aloha_sim_insertion_human \
+      --num-gpus 2 \
+      --platform gpu_platform_2x \
+      --mixed-precision bf16
 EOF
 }
 
@@ -141,6 +163,9 @@ save_freq="${SAVE_FREQ:-5000}"
 val_split="${VAL_SPLIT:-0.1}"
 val_split_enabled=true
 system_metrics="${SYSTEM_METRICS:-true}"
+num_gpus="${OSMO_NUM_GPUS:-1}"
+mixed_precision="${MIXED_PRECISION:-no}"
+platform="${OSMO_PLATFORM:-gpu_platform}"
 
 experiment_name="${EXPERIMENT_NAME:-}"
 register_checkpoint="${REGISTER_CHECKPOINT:-}"
@@ -185,6 +210,9 @@ while [[ $# -gt 0 ]]; do
     --val-split)                  val_split="$2"; shift 2 ;;
     --no-val-split)               val_split_enabled=false; shift ;;
     --no-system-metrics)          system_metrics="false"; shift ;;
+    --num-gpus)                   num_gpus="$2"; shift 2 ;;
+    --mixed-precision)            mixed_precision="$2"; shift 2 ;;
+    --platform)                   platform="$2"; shift 2 ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     -r|--register-checkpoint)     register_checkpoint="$2"; shift 2 ;;
     --azure-subscription-id)      subscription_id="$2"; shift 2 ;;
@@ -231,6 +259,13 @@ case "$policy_type" in
   *) fatal "Unsupported policy type: $policy_type (use: act, diffusion)" ;;
 esac
 
+case "$mixed_precision" in
+  no|fp16|bf16) ;;
+  *) fatal "--mixed-precision must be one of: no, fp16, bf16 (got '$mixed_precision')" ;;
+esac
+
+[[ "$num_gpus" =~ ^[1-9][0-9]*$ ]] || fatal "--num-gpus must be a positive integer (got '$num_gpus')"
+
 [[ -z "$subscription_id" ]] && fatal "Azure subscription ID required (set AZURE_SUBSCRIPTION_ID or deploy infra)"
 [[ -z "$resource_group" ]] && fatal "Azure resource group required (set AZURE_RESOURCE_GROUP or deploy infra)"
 [[ -z "$workspace_name" ]] && fatal "Azure ML workspace name required (set AZUREML_WORKSPACE_NAME or deploy infra)"
@@ -253,6 +288,9 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Save Freq" "$save_freq"
   print_kv "Val Split" "$val_split"
   print_kv "System Metrics" "$system_metrics"
+  print_kv "Num GPUs" "$num_gpus"
+  print_kv "Mixed Precision" "$mixed_precision"
+  print_kv "Platform" "$platform"
   [[ $blob_source_count -gt 0 ]] && print_kv "Blob URL Count" "$blob_source_count"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
   print_kv "Subscription" "$subscription_id"
@@ -297,6 +335,9 @@ submit_args=(
   "save_freq=$save_freq"
   "val_split=$val_split"
   "system_metrics=$system_metrics"
+  "num_gpus=$num_gpus"
+  "mixed_precision=$mixed_precision"
+  "platform=$platform"
   "azure_authority_host=$azure_authority_host"
   "mlflow_token_refresh_retries=$mlflow_retries"
   "mlflow_http_request_timeout=$mlflow_timeout"
@@ -329,6 +370,9 @@ info "  Batch Size: $batch_size"
 info "  Learning Rate: $learning_rate"
 info "  Val Split: $val_split"
 info "  System Metrics: $system_metrics"
+info "  Num GPUs: $num_gpus"
+info "  Mixed Precision: $mixed_precision"
+info "  Platform: $platform"
 info "  Code URL: $code_url"
 [[ $blob_source_count -gt 0 ]] && info "  Data Source: Azure Blob URLs ($blob_source_count)"
 [[ -n "$policy_repo_id" ]] && info "  Fine-tune from: $policy_repo_id"
@@ -351,6 +395,9 @@ print_kv "Training Steps" "$training_steps"
 print_kv "Batch Size" "$batch_size"
 print_kv "Learning Rate" "$learning_rate"
 print_kv "Val Split" "$val_split"
+print_kv "Num GPUs" "$num_gpus"
+print_kv "Mixed Precision" "$mixed_precision"
+print_kv "Platform" "$platform"
 print_kv "Register Model" "${register_checkpoint:-<none>}"
 print_kv "Workflow" "$workflow"
 
