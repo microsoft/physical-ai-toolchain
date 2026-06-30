@@ -412,8 +412,7 @@ jobs:
     name: Go Tests
     uses: ./.github/workflows/go-tests.yml
     with:
-      soft-fail: true
-      changed-files-only: true
+      soft-fail: false
       code-coverage: true
     permissions:
       contents: read

@@ -227,7 +227,7 @@ jobs:
     name: Go Tests
     uses: ./.github/workflows/go-tests.yml
     with:
-      soft-fail: true
+      soft-fail: false
       code-coverage: true
     permissions:
       contents: read
