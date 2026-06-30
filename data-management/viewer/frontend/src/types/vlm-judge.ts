@@ -34,9 +34,11 @@ export interface VlmJudgeResult {
 export interface VlmJudgeStatus {
   enabled: boolean
   cached: boolean
+  jobStatus?: 'idle' | 'pending' | 'running' | 'done' | 'error'
   judgeModel: string | null
   promptVersion: string | null
   cacheKey: string | null
+  error?: string | null
   backend?: string | null
   processMethod?: string | null
   processMethods?: string[]

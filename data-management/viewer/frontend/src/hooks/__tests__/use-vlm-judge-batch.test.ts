@@ -17,7 +17,23 @@ function routeFetch(outcomes: Record<number, boolean | null>) {
     const judgeMatch = target.match(/episodes\/(\d+)\/judge$/)
     if (judgeMatch) {
       const idx = Number(judgeMatch[1])
-      return Promise.resolve(jsonResponse({ outcome_success: outcomes[idx] ?? null }))
+      return Promise.resolve(
+        jsonResponse({
+          episode_id: `ds-1/episode_${String(idx).padStart(6, '0')}`,
+          instruction: 'Pick',
+          judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+          prompt_version: 'outcome-mcq-v1',
+          n_frames: 6,
+          outcome_success: outcomes[idx] ?? null,
+          outcome_confidence: 1,
+          outcome_n_valid_votes: 3,
+          progress_per_frame: [100],
+          voc: 1,
+          milestones: [],
+          failure_mode: null,
+          cached: false,
+        }),
+      )
     }
     const labelMatch = target.match(/episodes\/(\d+)\/labels$/)
     if (labelMatch) {

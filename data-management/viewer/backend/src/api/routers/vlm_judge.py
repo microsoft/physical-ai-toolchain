@@ -17,12 +17,12 @@ from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.concurrency import run_in_threadpool
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, field_validator
 
 from ..config import AppConfig, get_app_config
@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_JUDGE_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vlm-judge")
+_jobs: dict[str, JudgeJob] = {}
+
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -50,7 +53,15 @@ router = APIRouter()
 
 
 PROCESS_METHODS = ("gvl", "chronological")
+JOB_STATUSES = ("idle", "pending", "running", "done", "error")
 _VIEW_NAME_RE = re.compile(SAFE_CAMERA_NAME_PATTERN)
+
+
+class JudgeJob(BaseModel):
+    cache_key: str
+    status: str
+    error: str | None = None
+    result: dict[str, Any] | None = None
 
 
 class JudgeRequest(SanitizedModel):
@@ -92,9 +103,11 @@ class JudgeStatus(BaseModel):
 
     enabled: bool
     cached: bool
+    job_status: str = "idle"
     judge_model: str | None = None
     prompt_version: str | None = None
     cache_key: str | None = None
+    error: str | None = None
     backend: str | None = None
     process_method: str | None = None
     process_methods: list[str] = []
@@ -131,6 +144,7 @@ class JudgeResponse(BaseModel):
 async def get_episode_judgment(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
+    cache_key: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
     service: DatasetService = Depends(get_dataset_service),
     config: AppConfig = Depends(get_app_config),
 ) -> JudgeStatus:
@@ -144,7 +158,7 @@ async def get_episode_judgment(
         raise HTTPException(status_code=404, detail=f"Episode {episode_idx} not found")
 
     cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id))
-    cache_key = cache.key(
+    resolved_cache_key = cache_key or cache.key(
         video_paths=record.video_paths,
         instruction=record.instruction,
         judge_model=judge_service.model_id,
@@ -153,34 +167,43 @@ async def get_episode_judgment(
         to_s=record.to_timestamp,
         agent_config=judge_service.config.agent,
     )
-    cached_payload = cache.get(cache_key)
+    job = _jobs.get(resolved_cache_key)
+    active_job = job is not None and job.status in ("pending", "running", "error")
+    cached_payload = None if active_job else cache.get(resolved_cache_key)
+    result_payload = cached_payload or (job.result if job is not None and job.status == "done" else None)
+    if cached_payload is not None:
+        _jobs.pop(resolved_cache_key, None)
+    job_status = "done" if result_payload is not None else job.status if job is not None else "idle"
     return JudgeStatus(
         enabled=True,
         cached=cached_payload is not None,
+        job_status=job_status,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
-        cache_key=cache_key,
+        cache_key=resolved_cache_key,
+        error=job.error if job is not None and job.status == "error" else None,
         backend=judge_service.config.backend.kind,
         process_method=judge_service.config.agent.process_method,
         process_methods=list(PROCESS_METHODS),
         n_frames=judge_service.config.frames.n_frames,
-        result=cached_payload,
+        result=result_payload,
     )
 
 
 @router.post(
     "/{dataset_id}/episodes/{episode_idx}/judge",
-    response_model=JudgeResponse,
+    response_model=JudgeStatus,
     dependencies=[Depends(require_csrf_token)],
 )
 async def run_episode_judgment(
     payload: JudgeRequest,
+    response: Response,
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     service: DatasetService = Depends(get_dataset_service),
     config: AppConfig = Depends(get_app_config),
-) -> JudgeResponse:
-    """Run the VLM judge on ``(dataset_id, episode_idx)`` (cache-first)."""
+) -> JudgeStatus:
+    """Start the VLM judge on ``(dataset_id, episode_idx)`` and poll via GET."""
     judge_service = get_vlm_judge_service(config)
     if judge_service is None:
         raise HTTPException(
@@ -217,15 +240,26 @@ async def run_episode_judgment(
         to_s=record.to_timestamp,
         agent_config=replace(judge_service.config.agent, process_method=effective_method),
     )
-    was_cached = not payload.force and cache.get(cache_key) is not None
+    cached_payload = None if payload.force else cache.get(cache_key)
+    if cached_payload is not None:
+        _jobs.pop(cache_key, None)
+        return _judge_status(
+            judge_service=judge_service,
+            cache_key=cache_key,
+            cached_payload=cached_payload,
+            job_status="done",
+        )
 
-    try:
-        # Model inference is blocking and GPU-bound; run it in a worker thread so
-        # the single event loop stays free to serve episode/video requests while
-        # a judgment is in flight (otherwise the whole backend stalls per run).
-        result = await run_in_threadpool(
-            judge_service.judge_episode,
-            episode_id=f"{dataset_id}/episode_{episode_idx:06d}",
+    job = _jobs.get(cache_key)
+    if job is None or job.status == "error":
+        job = JudgeJob(cache_key=cache_key, status="pending")
+        _jobs[cache_key] = job
+        _JUDGE_EXECUTOR.submit(
+            _run_judgment_job,
+            job=job,
+            judge_service=judge_service,
+            dataset_id=dataset_id,
+            episode_idx=episode_idx,
             instruction=instruction,
             video_paths=record.video_paths,
             from_s=record.from_timestamp,
@@ -233,19 +267,81 @@ async def run_episode_judgment(
             force=payload.force,
             cache_dir=_judge_cache_dir(service, dataset_id),
             process_method=payload.process_method,
+            effective_method=effective_method,
         )
-    except FileNotFoundError as err:
-        raise HTTPException(status_code=404, detail=str(err)) from err
-    except ValueError as err:
-        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    response.status_code = status.HTTP_202_ACCEPTED
+    return _judge_status(
+        judge_service=judge_service,
+        cache_key=cache_key,
+        cached_payload=None,
+        job_status=job.status,
+        error=job.error,
+    )
+
+
+def _run_judgment_job(
+    *,
+    job: JudgeJob,
+    judge_service,
+    dataset_id: str,
+    episode_idx: int,
+    instruction: str,
+    video_paths: dict[str, Path],
+    from_s: float | None,
+    to_s: float | None,
+    force: bool,
+    cache_dir: Path,
+    process_method: str | None,
+    effective_method: str,
+) -> None:
+    job.status = "running"
+    try:
+        result = judge_service.judge_episode(
+            episode_id=f"{dataset_id}/episode_{episode_idx:06d}",
+            instruction=instruction,
+            video_paths=video_paths,
+            from_s=from_s,
+            to_s=to_s,
+            force=force,
+            cache_dir=cache_dir,
+            process_method=process_method,
+        )
     except Exception as err:  # backend / model errors surface as 502
         safe_dataset_id = dataset_id.replace("\r", "").replace("\n", "")
         safe_episode_idx = int(episode_idx)
         logger.exception("VLM judge failed for %s/%d", safe_dataset_id, safe_episode_idx)
-        raise HTTPException(status_code=502, detail=f"VLM backend error: {err}") from err
+        job.status = "error"
+        job.error = f"VLM backend error: {err}"
+        return
 
     payload_out = result.to_dict()
-    return JudgeResponse(cached=was_cached, process_method=effective_method, **payload_out)
+    job.result = JudgeResponse(cached=False, process_method=effective_method, **payload_out).model_dump(mode="json")
+    job.status = "done"
+
+
+def _judge_status(
+    *,
+    judge_service,
+    cache_key: str,
+    cached_payload: dict[str, Any] | None,
+    job_status: str,
+    error: str | None = None,
+) -> JudgeStatus:
+    return JudgeStatus(
+        enabled=True,
+        cached=cached_payload is not None,
+        job_status=job_status,
+        judge_model=judge_service.model_id,
+        prompt_version=_prompt_version(),
+        cache_key=cache_key,
+        error=error,
+        backend=judge_service.config.backend.kind,
+        process_method=judge_service.config.agent.process_method,
+        process_methods=list(PROCESS_METHODS),
+        n_frames=judge_service.config.frames.n_frames,
+        result=cached_payload,
+    )
 
 
 # ---------------------------------------------------------------------------

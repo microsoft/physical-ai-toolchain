@@ -40,6 +40,10 @@ export function useVlmJudgeStatus({
     enabled: isReady,
     staleTime: 60_000,
     gcTime: 5 * 60_000,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      return data?.jobStatus === 'pending' || data?.jobStatus === 'running' ? 1000 : false
+    },
     retry: false,
   })
 }

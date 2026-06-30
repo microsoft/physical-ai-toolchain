@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import importlib
 import json
+import time
 from pathlib import Path
+from typing import Any
 
 import av
 import numpy as np
@@ -86,6 +88,20 @@ def _reload_app(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
     return TestClient(main_mod.app)
 
 
+def _wait_for_judge_done(client: TestClient, path: str, cache_key: str) -> dict[str, Any]:
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        rsp = client.get(path, params={"cache_key": cache_key})
+        assert rsp.status_code == 200
+        body = rsp.json()
+        if body["job_status"] == "done":
+            assert body["result"] is not None
+            return body["result"]
+        assert body["job_status"] in ("pending", "running")
+        time.sleep(0.01)
+    raise AssertionError("VLM judge job did not finish")
+
+
 @pytest.fixture
 def vlm_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """Build a TestClient backed by a synthetic dataset under ``tmp_path``."""
@@ -117,9 +133,11 @@ def test_get_reports_disabled_when_service_is_unavailable(tmp_path: Path, monkey
     assert rsp.json() == {
         "enabled": False,
         "cached": False,
+        "job_status": "idle",
         "judge_model": None,
         "prompt_version": None,
         "cache_key": None,
+        "error": None,
         "backend": None,
         "process_method": None,
         "process_methods": [],
@@ -133,12 +151,15 @@ def test_get_reports_disabled_when_service_is_unavailable(tmp_path: Path, monkey
 
 
 def test_post_runs_judge_and_warms_cache(vlm_client: TestClient) -> None:
+    path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"
     rsp = vlm_client.post(
-        f"/api/datasets/{DATASET_ID}/episodes/0/judge",
+        path,
         json={"force": True},
     )
-    assert rsp.status_code == 200
-    body = rsp.json()
+    assert rsp.status_code == 202
+    started = rsp.json()
+    assert started["job_status"] in ("pending", "running")
+    body = _wait_for_judge_done(vlm_client, path, started["cache_key"])
     assert body["episode_id"] == f"{DATASET_ID}/episode_000000"
     assert body["instruction"] == INSTRUCTION
     assert body["outcome_success"] is True
@@ -147,29 +168,34 @@ def test_post_runs_judge_and_warms_cache(vlm_client: TestClient) -> None:
     assert isinstance(body["voc"], float)
 
     # Second GET should now report cached state with the same payload echoed back.
-    rsp2 = vlm_client.get(f"/api/datasets/{DATASET_ID}/episodes/0/judge")
+    rsp2 = vlm_client.get(path)
     assert rsp2.status_code == 200
     status = rsp2.json()
     assert status["cached"] is True
+    assert status["job_status"] == "done"
     assert status["result"]["episode_id"] == body["episode_id"]
 
 
 def test_post_instruction_override_is_used(vlm_client: TestClient) -> None:
+    path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"
     rsp = vlm_client.post(
-        f"/api/datasets/{DATASET_ID}/episodes/0/judge",
+        path,
         json={"instruction": "Open the drawer", "force": True},
     )
-    assert rsp.status_code == 200
-    assert rsp.json()["instruction"] == "Open the drawer"
+    assert rsp.status_code == 202
+    assert _wait_for_judge_done(vlm_client, path, rsp.json()["cache_key"])["instruction"] == "Open the drawer"
 
 
 def test_post_accepts_safe_view_filter(vlm_client: TestClient) -> None:
+    path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"
     rsp = vlm_client.post(
-        f"/api/datasets/{DATASET_ID}/episodes/0/judge",
+        path,
         json={"views": ["obs.front"], "force": True},
     )
-    assert rsp.status_code == 200
-    assert rsp.json()["episode_id"] == f"{DATASET_ID}/episode_000000"
+    assert rsp.status_code == 202
+    assert _wait_for_judge_done(vlm_client, path, rsp.json()["cache_key"])["episode_id"] == (
+        f"{DATASET_ID}/episode_000000"
+    )
 
 
 def test_post_rejects_invalid_process_method(vlm_client: TestClient) -> None:
