@@ -104,6 +104,34 @@ def test_get_returns_uncached_status_initially(vlm_client: TestClient) -> None:
     assert body["prompt_version"].startswith("outcome-mcq-v1")
 
 
+def test_get_reports_disabled_when_service_is_unavailable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _build_dataset(tmp_path / DATASET_ID, instruction=INSTRUCTION)
+    client = _reload_app(monkeypatch, tmp_path)
+
+    import src.api.routers.vlm_judge as router_mod
+
+    monkeypatch.setattr(router_mod, "get_vlm_judge_service", lambda _config: None)
+
+    rsp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/judge")
+    assert rsp.status_code == 200
+    assert rsp.json() == {
+        "enabled": False,
+        "cached": False,
+        "judge_model": None,
+        "prompt_version": None,
+        "cache_key": None,
+        "backend": None,
+        "process_method": None,
+        "process_methods": [],
+        "n_frames": None,
+        "result": None,
+    }
+
+    rsp = client.post(f"/api/datasets/{DATASET_ID}/episodes/0/judge", json={})
+    assert rsp.status_code == 503
+    assert "VLM judge is disabled" in rsp.json()["detail"]
+
+
 def test_post_runs_judge_and_warms_cache(vlm_client: TestClient) -> None:
     rsp = vlm_client.post(
         f"/api/datasets/{DATASET_ID}/episodes/0/judge",
@@ -142,6 +170,15 @@ def test_post_accepts_safe_view_filter(vlm_client: TestClient) -> None:
     )
     assert rsp.status_code == 200
     assert rsp.json()["episode_id"] == f"{DATASET_ID}/episode_000000"
+
+
+def test_post_rejects_invalid_process_method(vlm_client: TestClient) -> None:
+    rsp = vlm_client.post(
+        f"/api/datasets/{DATASET_ID}/episodes/0/judge",
+        json={"process_method": "reverse", "force": True},
+    )
+    assert rsp.status_code == 422
+    assert "process_method must be one of" in rsp.json()["detail"]
 
 
 @pytest.mark.parametrize("view", ["../obs.front", "obs/front", "obs\\front", "\x00front"])

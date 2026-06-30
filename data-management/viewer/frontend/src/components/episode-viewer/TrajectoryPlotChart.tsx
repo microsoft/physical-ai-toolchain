@@ -26,7 +26,7 @@ function TrajectoryTooltipPortal({
   mousePosition,
 }: {
   active?: boolean
-  payload?: Array<{ name: string; value: number; color: string }>
+  payload?: Array<{ name: string; value: number; color: string; dataKey?: string | number }>
   label?: number
   mousePosition: { x: number; y: number }
 }) {
@@ -63,7 +63,10 @@ function TrajectoryTooltipPortal({
     >
       <p className="mb-1 font-medium">{label}</p>
       {payload.map((entry) => (
-        <p key={entry.name} style={{ color: entry.color }}>
+        <p
+          key={String(entry.dataKey ?? `${entry.name}-${entry.color}`)}
+          style={{ color: entry.color }}
+        >
           {entry.name} : {entry.value}
         </p>
       ))}
