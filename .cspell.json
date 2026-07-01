@@ -9,11 +9,13 @@
 	"words": [
 		"envaccount",
 		"envcontainer",
+		"getfixturevalue",
 		"misattributed",
 		"mlruns",
 		"myacct",
 		"mycontainer",
 		"noseparator",
+		"pixelformat",
 		"preds",
 		"prio",
 		"refetches",

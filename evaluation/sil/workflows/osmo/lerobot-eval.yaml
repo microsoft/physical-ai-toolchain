@@ -46,6 +46,7 @@ workflow:
         BLOB_STORAGE_ACCOUNT: "{{ blob_storage_account }}"
         BLOB_STORAGE_CONTAINER: "{{ blob_storage_container }}"
         BLOB_PREFIX: "{{ blob_prefix }}"
+        BUILTIN_POLICY: "{{ builtin_policy }}"
         PAYLOAD_ROOT: "{{ payload_root }}"
       files:
         - path: /tmp/entry.sh
@@ -61,6 +62,7 @@ workflow:
             echo "Output Dir: ${OUTPUT_DIR}"
             echo "AML Model: ${AML_MODEL_NAME:-none}:${AML_MODEL_VERSION:-none}"
             echo "Local Dataset: ${LOCAL_DATASET:-false}"
+            echo "Builtin Policy: ${BUILTIN_POLICY:-false}"
 
             # Install system dependencies
             echo "Installing system dependencies..."
@@ -252,10 +254,61 @@ workflow:
               fi
             fi
 
+            # Mint a self-contained base policy from LeRobot's built-in
+            # architecture when requested, removing the dependency on an external
+            # policy. The eval test only asserts metrics exist, so an untrained
+            # policy suffices; lerobot-train writes a `from_pretrained`-loadable
+            # checkpoint identical in shape to a Hub policy. Requires the local
+            # blob dataset (DATASET_DIR), set above.
+            if [[ "${BUILTIN_POLICY:-false}" == "true" ]]; then
+              echo "Minting built-in ${POLICY_TYPE} base policy from dataset..."
+              if [[ -z "${DATASET_DIR:-}" || ! -d "${DATASET_DIR:-}" ]]; then
+                echo "ERROR: --builtin-policy requires a local dataset; set --from-blob-dataset." >&2
+                exit 1
+              fi
+
+              MINT_DEVICE=cpu
+              if python3 -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)"; then
+                MINT_DEVICE=cuda
+              fi
+
+              # A single optimizer step is the minimum that triggers a checkpoint
+              # save (lerobot writes the checkpoint inside the step loop, so 0
+              # steps saves nothing). pretrained_backbone_weights=null keeps the
+              # mint fully offline (random ResNet init; irrelevant for an
+              # untrained smoke policy). repo_id is an arbitrary local label
+              # because --dataset.root points at the downloaded dataset tree.
+              BASE_POLICY_OUTPUT=/workspace/base-policy
+              lerobot-train \
+                --policy.type="${POLICY_TYPE}" \
+                --policy.device="${MINT_DEVICE}" \
+                --policy.pretrained_backbone_weights=null \
+                --policy.push_to_hub=false \
+                --dataset.repo_id=dataset \
+                --dataset.root="${DATASET_DIR}" \
+                --dataset.use_imagenet_stats=false \
+                --dataset.video_backend=pyav \
+                --output_dir="${BASE_POLICY_OUTPUT}" \
+                --steps=1 \
+                --save_freq=1 \
+                --batch_size=1 \
+                --num_workers=0 \
+                --wandb.enable=false
+
+              POLICY_REPO_ID="${BASE_POLICY_OUTPUT}/checkpoints/last/pretrained_model"
+              export POLICY_REPO_ID
+              if [[ ! -f "${POLICY_REPO_ID}/model.safetensors" ]]; then
+                echo "ERROR: base policy mint did not produce ${POLICY_REPO_ID}/model.safetensors" >&2
+                ls -laR "${BASE_POLICY_OUTPUT}" || true
+                exit 1
+              fi
+              echo "Built-in base policy ready at: ${POLICY_REPO_ID}"
+            fi
+
             # Authenticate with HuggingFace Hub
             echo "Authenticating with HuggingFace Hub..."
             if [[ -n "${HF_TOKEN:-}" ]]; then
-              python3 -c "from huggingface_hub import login; login(token='${HF_TOKEN}', add_to_git_credential=False)"
+              python3 -c "import os; from huggingface_hub import login; login(token=os.environ['HF_TOKEN'], add_to_git_credential=False)"
             else
               echo "Warning: HF_TOKEN not set, skipping HuggingFace authentication"
             fi
@@ -585,14 +638,15 @@ workflow:
                     JOINT_NAMES = [f"joint_{j}" for j in range(n_action)]
                 print(f"[INFO] Action dims: {len(JOINT_NAMES)} — {JOINT_NAMES[:4]}{'...' if len(JOINT_NAMES) > 4 else ''}")
 
-                # Discover image key from dataset features
-                image_key = None
-                for key, feat in info.get("features", {}).items():
-                    if key.startswith("observation.images."):
-                        image_key = key
-                        break
-                if image_key is None:
-                    image_key = "observation.images.color"
+                # Discover image key from dataset features (camera = video/image feature)
+                features = info.get("features", {})
+                video_keys = [k for k, v in features.items() if v.get("dtype") in ("video", "image")]
+                # Prefer an observation.images.* key for a deterministic choice on
+                # multi-camera datasets; fall back to the first video/image feature.
+                image_key = next(
+                    (k for k in video_keys if k.startswith("observation.images.")),
+                    video_keys[0] if video_keys else "observation.images.color",
+                )
                 print(f"[INFO] Using image key: {image_key}")
 
                 # Load policy (LeRobot 0.3.x — normalize/unnormalize handled internally)
@@ -872,5 +926,6 @@ default-values:
   blob_storage_account: ""
   blob_storage_container: datasets
   blob_prefix: ""
+  builtin_policy: "false"
   code_url: ""
   payload_root: /workspace/lerobot_payload
