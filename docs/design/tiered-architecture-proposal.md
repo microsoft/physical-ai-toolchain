@@ -179,7 +179,14 @@ The honest floor for Goal: Full Training Lifecycle.
 **Edge infra:** ROS 2 and Docker only. **Cloud infra:** none.
 
 > [!NOTE]
-> Experiment tracking belongs at T0, not as a collaboration perk. Goal: Full Training Lifecycle includes *validate*, and a success number you cannot reproduce, compare across runs, or use to attribute a regression is an anecdote, not a result — doubly so in the high-variance world of RL and IL. File-backed MLflow and trackio run as local processes with no server, so tracking stays inside the zero-cloud, zero-Kubernetes floor. Tracking as a *hosted server* plus a *model registry* is a separate, later concern (T2).
+> Experiment tracking belongs at T0, not as a collaboration perk.
+> Goal: Full Training Lifecycle includes *validate*, and a success number you cannot
+> reproduce, compare across runs, or use to attribute a regression is an anecdote,
+> not a result — doubly so in the high-variance world of RL and IL.
+> File-backed MLflow and trackio run as local processes with no server, so tracking
+> stays inside the zero-cloud, zero-Kubernetes floor.
+> Tracking as a *hosted server* plus a *model registry* is a separate, later concern
+> (T2).
 
 This tier exists in the code today and is undocumented. Surfacing it is the highest-leverage change in this proposal.
 
