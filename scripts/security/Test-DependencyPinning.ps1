@@ -280,6 +280,79 @@ function Test-ShellDownloadSecurity {
     return $violations
 }
 
+function Get-PyprojectSpecViolation {
+    <#
+    .SYNOPSIS
+        Builds pip pinning violations for every quoted specifier in a pyproject array segment.
+    .DESCRIPTION
+        Parses each double-quoted specifier found in the supplied text and returns a
+        [DependencyViolation] for any that is not exactly == pinned. Handles multiple
+        specifiers on one line (single-line arrays such as fuzz = ["atheris>=3.1.0"]),
+        bare package names, and the self-referencing project name.
+    .PARAMETER LineText
+        Array segment to scan (the remainder after [ on an opener line, or a full array line).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$LineText,
+        [Parameter(Mandatory)]
+        [int]$LineNumber,
+        [Parameter(Mandatory)]
+        [string]$SectionName,
+        [string]$ProjectName,
+        [Parameter(Mandatory)]
+        [string]$RelativePath,
+        [Parameter(Mandatory)]
+        [string]$Type
+    )
+
+    $violations = @()
+
+    foreach ($specMatch in [regex]::Matches($LineText, '"([^"]+)"')) {
+        $spec = $specMatch.Groups[1].Value.Trim()
+
+        # Extract package name and version spec
+        if ($spec -notmatch '^([a-zA-Z0-9_][\w.\-]*)(.*)$') {
+            continue
+        }
+
+        $packageName = $Matches[1]
+        $versionSpec = $Matches[2].Trim()
+
+        # Skip self-referencing extras (e.g. "mypackage[dev,test]")
+        if ($ProjectName -and $packageName -eq $ProjectName) {
+            continue
+        }
+
+        $violation = [DependencyViolation]::new()
+        $violation.File = $RelativePath
+        $violation.Line = $LineNumber
+        $violation.Type = $Type
+        $violation.Name = $packageName
+        $violation.Severity = 'warning'
+        $violation.Metadata = @{ Section = $SectionName; Format = 'pyproject.toml' }
+
+        # Entries with no version constraint (bare package names) are unpinned
+        if ([string]::IsNullOrWhiteSpace($versionSpec)) {
+            $violation.Version = '(none)'
+            $violation.Description = "Unpinned pip dependency in $SectionName (no version specified)"
+            $violations += $violation
+            continue
+        }
+
+        # Pinned means exactly ==version (may include extras like [extra])
+        if ($versionSpec -notmatch '^(\[[\w,]+\])?\s*==\s*\S+') {
+            $violation.Version = $versionSpec
+            $violation.Description = "Unpinned pip dependency in $SectionName"
+            $violations += $violation
+        }
+    }
+
+    return $violations
+}
+
 function Get-PipDependencyViolations {
     <#
     .SYNOPSIS
@@ -328,10 +401,20 @@ function Get-PipDependencyViolations {
             $line = $lines[$i]
 
             # Detect dependency array start: dependencies = [ or optional-dependencies.*= [
-            if ($line -match '^\s*(dependencies)\s*=\s*\[' -or
-                $line -match '^\s*(\w[\w-]*)\s*=\s*\[' -and $inDependencySection) {
+            if ($line -match '^\s*(dependencies)\s*=\s*\[(.*)$' -or
+                ($line -match '^\s*(\w[\w-]*)\s*=\s*\[(.*)$' -and $inDependencySection)) {
                 $inArray = $true
                 $sectionName = $Matches[1]
+                $remainder = $Matches[2]
+
+                # Parse specifiers on the opener line itself (single-line arrays)
+                $violations += Get-PyprojectSpecViolation -LineText $remainder -LineNumber ($i + 1) `
+                    -SectionName $sectionName -ProjectName $projectName -RelativePath $relativePath -Type $type
+
+                # A closing bracket on the same line terminates the array
+                if ($remainder -match '\]') {
+                    $inArray = $false
+                }
                 continue
             }
 
@@ -360,51 +443,10 @@ function Get-PipDependencyViolations {
                 continue
             }
 
-            # Inside array — parse quoted dependency specifiers
-            if ($inArray -and $line -match '"([^"]+)"') {
-                $spec = $Matches[1].Trim()
-
-                # Extract package name and check for == pin
-                if ($spec -match '^([a-zA-Z0-9_][\w.\-]*)(.*)$') {
-                    $packageName = $Matches[1]
-                    $versionSpec = $Matches[2].Trim()
-
-                    # Skip self-referencing extras (e.g. "mypackage[dev,test]")
-                    if ($projectName -and $packageName -eq $projectName) {
-                        continue
-                    }
-
-                    # Skip entries with no version constraint (bare package names)
-                    if ([string]::IsNullOrWhiteSpace($versionSpec)) {
-                        $violation = [DependencyViolation]::new()
-                        $violation.File = $relativePath
-                        $violation.Line = $i + 1
-                        $violation.Type = $type
-                        $violation.Name = $packageName
-                        $violation.Version = '(none)'
-                        $violation.Severity = 'warning'
-                        $violation.Description = "Unpinned pip dependency in $sectionName (no version specified)"
-                        $violation.Metadata = @{ Section = $sectionName; Format = 'pyproject.toml' }
-                        $violations += $violation
-                        continue
-                    }
-
-                    # Pinned means exactly ==version (may include extras like [extra])
-                    $isPinned = $versionSpec -match '^(\[[\w,]+\])?\s*==\s*\S+'
-
-                    if (-not $isPinned) {
-                        $violation = [DependencyViolation]::new()
-                        $violation.File = $relativePath
-                        $violation.Line = $i + 1
-                        $violation.Type = $type
-                        $violation.Name = $packageName
-                        $violation.Version = $versionSpec
-                        $violation.Severity = 'warning'
-                        $violation.Description = "Unpinned pip dependency in $sectionName"
-                        $violation.Metadata = @{ Section = $sectionName; Format = 'pyproject.toml' }
-                        $violations += $violation
-                    }
-                }
+            # Inside array — parse every quoted dependency specifier on the line
+            if ($inArray -and $line -match '"') {
+                $violations += Get-PyprojectSpecViolation -LineText $line -LineNumber ($i + 1) `
+                    -SectionName $sectionName -ProjectName $projectName -RelativePath $relativePath -Type $type
             }
         }
     }
@@ -938,15 +980,84 @@ function Get-DockerImageViolations {
     return $violations
 }
 
+function Get-NpmOverrideViolation {
+    <#
+    .SYNOPSIS
+        Recursively scans an npm overrides / resolutions object for unpinned specifiers.
+    .DESCRIPTION
+        overrides entries may nest: a package key can map to a child object that overrides
+        that package's own transitive dependencies, with an optional "." key pinning the
+        package itself. resolutions (Yarn) entries are flat. Every string leaf is a version
+        specifier checked for exact pinning; nested objects are walked, attributing a "."
+        entry to the enclosing package name.
+    .PARAMETER Node
+        The overrides / resolutions object (or a nested override object) to scan.
+    .PARAMETER ParentName
+        Enclosing package name, used to attribute a "." self-pin during recursion.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        $Node,
+        [Parameter(Mandatory)]
+        [string]$Section,
+        [Parameter(Mandatory)]
+        [string]$Type,
+        [Parameter(Mandatory)]
+        [string]$RelativePath,
+        [string]$ParentName = ''
+    )
+
+    $violations = @()
+
+    if ($null -eq $Node -or $null -eq $Node.PSObject) {
+        return $violations
+    }
+
+    foreach ($prop in $Node.PSObject.Properties) {
+        # A "." key pins the enclosing package itself; attribute it to the parent
+        $packageName = if ($prop.Name -eq '.') { $ParentName } else { $prop.Name }
+        $value = $prop.Value
+
+        if ($value -is [string]) {
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                continue
+            }
+
+            if (-not (Test-SHAPinning -Version $value -Type $Type)) {
+                $violation = [DependencyViolation]::new()
+                $violation.File = $RelativePath
+                $violation.Line = 0
+                $violation.Type = $Type
+                $violation.Name = $packageName
+                $violation.Version = $value
+                $violation.Severity = 'warning'
+                $violation.Description = "Unpinned npm dependency in $Section"
+                $violation.Metadata = @{ Section = $Section }
+                $violations += $violation
+            }
+        }
+        elseif ($null -ne $value -and $null -ne $value.PSObject) {
+            # Nested override object — recurse, tracking the enclosing package name
+            $violations += Get-NpmOverrideViolation -Node $value -Section $Section -Type $Type `
+                -RelativePath $RelativePath -ParentName $packageName
+        }
+    }
+
+    return $violations
+}
+
 function Get-NpmDependencyViolations {
     <#
     .SYNOPSIS
         Analyzes package.json files for unpinned npm dependencies.
     .DESCRIPTION
-        Parses package.json as JSON and checks only actual dependency sections
-        (dependencies, devDependencies, peerDependencies, optionalDependencies)
-        for exact version pinning. Rejects range operators (^, ~, >=, *, etc.).
-        Ignores metadata fields like name, version, description, scripts, etc.
+        Parses package.json as JSON and checks the dependency sections
+        (dependencies, devDependencies, peerDependencies, optionalDependencies) and
+        the override sections (overrides, resolutions) for exact version pinning.
+        Rejects range operators (^, ~, >=, *, etc.). Ignores metadata fields like
+        name, version, description, scripts, etc.
     .PARAMETER FileInfo
         Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
     .OUTPUTS
@@ -1007,6 +1118,16 @@ function Get-NpmDependencyViolations {
                 $violations += $violation
             }
         }
+    }
+
+    # overrides / resolutions may nest arbitrarily; walk them recursively
+    foreach ($section in @('overrides', 'resolutions')) {
+        $node = $packageJson.$section
+        if ($null -eq $node) {
+            continue
+        }
+
+        $violations += Get-NpmOverrideViolation -Node $node -Section $section -Type $type -RelativePath $relativePath
     }
 
     return $violations
