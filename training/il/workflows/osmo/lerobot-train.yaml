@@ -39,6 +39,7 @@ workflow:
         LR_WARMUP_STEPS: "{{ lr_warmup_steps }}"
         EVAL_FREQ: "{{ eval_freq }}"
         SAVE_FREQ: "{{ save_freq }}"
+        LOG_FREQ: "{{ log_freq }}"
         VAL_SPLIT: "{{ val_split }}"
         SYSTEM_METRICS: "{{ system_metrics }}"
         MIXED_PRECISION: "{{ mixed_precision }}"
@@ -142,6 +143,7 @@ workflow:
             TRAIN_ARGS=(
               "--policy.push_to_hub=false"
               "--wandb.enable=false"
+              "--dataset.video_backend=pyav"
             )
 
             # Download dataset from Azure Blob Storage when configured
@@ -154,7 +156,6 @@ workflow:
               TRAIN_ARGS+=(
                 "--dataset.root=${FULL_DATASET_PATH}"
                 "--dataset.use_imagenet_stats=false"
-                "--dataset.video_backend=pyav"
               )
             fi
 
@@ -182,6 +183,7 @@ default-values:
   lr_warmup_steps: "1000"
   eval_freq: ""
   save_freq: "5000"
+  log_freq: ""
   val_split: "0.1"
   system_metrics: "true"
   num_gpus: "1"

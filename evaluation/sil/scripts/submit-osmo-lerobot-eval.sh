@@ -36,6 +36,8 @@ POLICY SOURCE (one required):
         --from-aml-model          Load policy from AzureML model registry instead of HuggingFace
         --model-name NAME         AzureML model registry name (e.g., hve-robo-act-model)
         --model-version VERSION   AzureML model version (e.g., 4)
+        --builtin-policy          Mint a base policy from LeRobot's built-in architecture
+                                  (no external policy dependency; requires --from-blob-dataset)
 
 DATASET SOURCE (one required):
     -d, --dataset-repo-id ID     HuggingFace dataset for replay evaluation
@@ -98,6 +100,7 @@ config_preview=false
 from_aml_model=false
 model_name="${AML_MODEL_NAME:-}"
 model_version="${AML_MODEL_VERSION:-}"
+builtin_policy="${BUILTIN_POLICY:-false}"
 from_blob_dataset=false
 storage_account="${BLOB_STORAGE_ACCOUNT:-${AZURE_STORAGE_ACCOUNT_NAME:-}}"
 storage_container="${BLOB_STORAGE_CONTAINER:-datasets}"
@@ -133,6 +136,7 @@ while [[ $# -gt 0 ]]; do
     --mlflow-enable)              mlflow_enable="true"; shift ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --from-aml-model)             from_aml_model=true; shift ;;
+    --builtin-policy)             builtin_policy=true; shift ;;
     --model-name)                 model_name="$2"; shift 2 ;;
     --model-version)              model_version="$2"; shift 2 ;;
     --from-blob-dataset)          from_blob_dataset=true; shift ;;
@@ -158,8 +162,11 @@ done
 
 require_tools osmo zip
 
-# Policy source validation
-if [[ "$from_aml_model" == "true" ]]; then
+# Policy source validation — exactly one of: --builtin-policy, --from-aml-model, --policy-repo-id
+if [[ "$builtin_policy" == "true" ]]; then
+  [[ "$from_aml_model" == "true" ]] && fatal "--builtin-policy cannot be combined with --from-aml-model"
+  [[ -n "$policy_repo_id" ]] && fatal "--builtin-policy cannot be combined with --policy-repo-id"
+elif [[ "$from_aml_model" == "true" ]]; then
   [[ -z "$model_name" ]]    && fatal "--model-name is required with --from-aml-model"
   [[ -z "$model_version" ]] && fatal "--model-version is required with --from-aml-model"
   policy_repo_id="${model_name}:${model_version}"
@@ -170,7 +177,12 @@ elif [[ "$policy_repo_id" == *:* ]]; then
   from_aml_model=true
   info "Auto-detected AzureML model: ${model_name} version ${model_version}"
 else
-  [[ -z "$policy_repo_id" ]] && fatal "--policy-repo-id is required (or use --from-aml-model)"
+  [[ -z "$policy_repo_id" ]] && fatal "A policy source is required: use --builtin-policy, --policy-repo-id, or --from-aml-model"
+fi
+
+# The built-in mint trains a single step from a local dataset, so it requires the blob dataset source.
+if [[ "$builtin_policy" == "true" && "$from_blob_dataset" != "true" ]]; then
+  fatal "--builtin-policy requires --from-blob-dataset (the base policy is minted from the local dataset)"
 fi
 
 # Dataset source validation
@@ -200,6 +212,7 @@ if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Policy" "$policy_repo_id"
   print_kv "Policy Type" "$policy_type"
+  [[ "$builtin_policy" == "true" ]] && print_kv "Policy Source" "LeRobot built-in (minted base policy)"
   print_kv "Job Name" "$job_name"
   print_kv "Image" "$image"
   print_kv "Eval Episodes" "$eval_episodes"
@@ -262,6 +275,9 @@ if [[ "$from_aml_model" == "true" ]]; then
   submit_args+=("aml_model_name=$model_name" "aml_model_version=$model_version")
 fi
 
+# Built-in base policy mint
+[[ "$builtin_policy" == "true" ]] && submit_args+=("builtin_policy=true")
+
 # Azure Blob dataset source
 if [[ "$from_blob_dataset" == "true" ]]; then
   submit_args+=("blob_storage_account=$storage_account" "blob_storage_container=$storage_container" "blob_prefix=$blob_prefix")
@@ -283,6 +299,7 @@ info "  Policy Type: $policy_type"
 info "  Job Name: $job_name"
 info "  Eval Episodes: $eval_episodes"
 info "  Image: $image"
+[[ "$builtin_policy" == "true" ]] && info "  Policy source: LeRobot built-in (minted base policy)"
 [[ -n "$dataset_repo_id" ]] && info "  Dataset: $dataset_repo_id"
 [[ "$from_blob_dataset" == "true" ]] && info "  Dataset: Azure Blob ($storage_account/$storage_container/$blob_prefix)"
 [[ "$from_aml_model" == "true" ]] && info "  Model source: AzureML registry (${model_name}:${model_version})"

@@ -104,14 +104,17 @@ osmo workflow logs <workflow-id> | grep "checkpoint"
 
 ### LeRobot CLI Parameters
 
-| Parameter           | Required | Default | Description                   |
-|---------------------|----------|---------|-------------------------------|
-| `--policy-repo-id`  | Yes      | —       | HuggingFace model repo        |
-| `--policy-type`     | No       | `act`   | Policy architecture           |
-| `--dataset-repo-id` | No       | —       | Evaluation dataset            |
-| `--eval-episodes`   | No       | `10`    | Number of evaluation episodes |
-| `--eval-batch-size` | No       | `1`     | Batch size for evaluation     |
-| `--record-video`    | No       | `false` | Enable video recording        |
+| Parameter           | Required | Default | Description                                     |
+|---------------------|----------|---------|-------------------------------------------------|
+| `--policy-repo-id`  | One of*  | —       | HuggingFace model repo                          |
+| `--builtin-policy`  | One of*  | —       | Mint a base policy from LeRobot's built-in arch |
+| `--policy-type`     | No       | `act`   | Policy architecture                             |
+| `--dataset-repo-id` | No       | —       | Evaluation dataset                              |
+| `--eval-episodes`   | No       | `10`    | Number of evaluation episodes                   |
+| `--eval-batch-size` | No       | `1`     | Batch size for evaluation                       |
+| `--record-video`    | No       | `false` | Enable video recording                          |
+
+*Exactly one policy source is required: `--policy-repo-id`, `--from-aml-model`, or `--builtin-policy`. `--builtin-policy` mints a self-contained base policy from the local dataset and requires `--from-blob-dataset`.
 
 ### Usage Examples
 

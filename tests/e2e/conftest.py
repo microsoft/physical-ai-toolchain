@@ -57,6 +57,19 @@ def _json_object_from_output(output: str) -> dict[str, Any]:
     return {}
 
 
+def _json_array_from_output(output: str) -> list[Any]:
+    stripped = output.strip()
+    if not stripped:
+        return []
+
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return []
+
+    return payload if isinstance(payload, list) else []
+
+
 def _has_resolved_output(outputs: TerraformOutputs, key: str) -> bool:
     return bool(outputs.try_key_value(key))
 
@@ -225,6 +238,21 @@ def aml_workspace(repo_root: Path) -> AzureMLWorkspace:
 
 
 @pytest.fixture(scope="session")
+def storage_account(repo_root: Path) -> str:
+    """Resolves the storage account used to stage e2e datasets, skipping if undeterminable.
+
+    Resolution order: ``E2E_VLA_STORAGE_ACCOUNT`` env var, then the ``storage_account``
+    Terraform output (or its terraform.tfvars fallback).
+    """
+    account = os.environ.get("E2E_VLA_STORAGE_ACCOUNT")
+    if not account:
+        account = _terraform_outputs(repo_root).try_key_value("storage_account")
+    if not account:
+        pytest.skip("Storage account is not configured in env vars, Terraform outputs, or terraform.tfvars")
+    return account
+
+
+@pytest.fixture(scope="session")
 def aml_compute_target(repo_root: Path, aml_workspace: AzureMLWorkspace) -> None:
     """
     Ensures AML compute target is available, skipping tests if not.
@@ -280,34 +308,38 @@ def ensure_osmo_cli_available(repo_root: Path) -> None:
         pytest.skip("OSMO CLI is unavailable or not authenticated")
 
 
-@pytest.fixture(scope="session")
-def ensure_gpu_nodes_available(repo_root: Path) -> None:
-    """Ensures that GPU nodes are available in the Kubernetes cluster, skipping tests if not."""
+def _is_gpu_vm_size(vm_size: str) -> bool:
+    # Azure N-series VMs (NC/ND/NV/NG families) are the GPU-accelerated SKUs.
+    return vm_size.strip().lower().startswith("standard_n")
+
+
+def _is_scalable_gpu_node_pool(pool: Any) -> bool:
+    if not isinstance(pool, dict) or not pool.get("enableAutoScaling"):
+        return False
+
+    max_count = pool.get("maxCount")
+    if not isinstance(max_count, int) or max_count <= 0:
+        return False
+
+    vm_size = pool.get("vmSize")
+    return isinstance(vm_size, str) and _is_gpu_vm_size(vm_size)
+
+
+def _cluster_has_present_gpu_node(repo_root: Path) -> bool:
+    """Returns whether the cluster currently has a registered GPU node."""
     if shutil.which("kubectl") is None:
-        pytest.skip("kubectl is not installed")
-
-    result = run_command(["kubectl", "get", "nodes", "--no-headers"], cwd=repo_root)
-    if result.returncode != 0:
-        pytest.skip("kubectl context is unavailable")
-
-    output = result.stdout.strip()
-    if not output:
-        pytest.skip("kubectl returned no cluster nodes")
+        return False
 
     result = run_command(
         ["kubectl", "get", "nodes", "-l", "nvidia.com/gpu.present=true", "-o", "json"],
         cwd=repo_root,
     )
     if result.returncode != 0:
-        pytest.skip("Unable to query GPU nodes from the Kubernetes cluster")
+        return False
 
-    payload = _json_object_from_output(result.stdout)
-    if not payload:
-        pytest.skip("kubectl GPU node output was not a valid JSON object")
-
-    items = payload.get("items")
-    if not isinstance(items, list) or not items:
-        pytest.skip("No GPU nodes are available in the Kubernetes cluster")
+    items = _json_object_from_output(result.stdout).get("items")
+    if not isinstance(items, list):
+        return False
 
     for item in items:
         if not isinstance(item, dict):
@@ -317,6 +349,61 @@ def ensure_gpu_nodes_available(repo_root: Path) -> None:
             continue
         name = metadata.get("name")
         if isinstance(name, str) and name:
-            return
+            return True
+    return False
 
-    pytest.skip("No GPU node names were returned from kubectl")
+
+def _cluster_has_scalable_gpu_node_pool(repo_root: Path) -> bool:
+    """Returns whether the AKS cluster has an autoscaling GPU node pool that can scale up.
+
+    Reads the agent pool profiles from the ARM control plane (``az aks show``) rather than the
+    Kubernetes API, so scale-from-zero GPU pools are detected even when no GPU node is
+    registered and even on private clusters.
+    """
+    if shutil.which("az") is None:
+        return False
+
+    tf_outputs = _terraform_outputs(repo_root)
+    resource_group = os.environ.get("AZURE_RESOURCE_GROUP") or tf_outputs.try_key_value("resource_group")
+    cluster_name = tf_outputs.try_key_value("aks_cluster")
+    if not resource_group or not cluster_name:
+        return False
+
+    command = [
+        "az",
+        "aks",
+        "show",
+        "--resource-group",
+        resource_group,
+        "--name",
+        cluster_name,
+        "--query",
+        "agentPoolProfiles",
+        "-o",
+        "json",
+    ]
+    subscription_id = os.environ.get("AZURE_SUBSCRIPTION_ID")
+    if subscription_id:
+        command += ["--subscription", subscription_id]
+
+    result = run_command(command, cwd=repo_root)
+    if result.returncode != 0:
+        return False
+
+    return any(_is_scalable_gpu_node_pool(pool) for pool in _json_array_from_output(result.stdout))
+
+
+@pytest.fixture(scope="session")
+def ensure_gpu_nodes_available(repo_root: Path) -> None:
+    """Ensures the cluster can run GPU workloads, skipping tests if it cannot.
+
+    The cluster qualifies if it currently has a registered GPU node, or if it has an
+    autoscaling GPU node pool that can scale up (max_count > 0). The latter covers
+    scale-from-zero setups (e.g. OSMO Spot GPU pools) where GPU nodes are provisioned on
+    demand and are therefore absent while the cluster is idle.
+    """
+    if _cluster_has_present_gpu_node(repo_root):
+        return
+    if _cluster_has_scalable_gpu_node_pool(repo_root):
+        return
+    pytest.skip("No registered GPU nodes and no autoscaling GPU node pool (max_count > 0) are available")

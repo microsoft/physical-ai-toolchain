@@ -51,6 +51,7 @@ TRAINING HYPERPARAMETERS:
         --lr-warmup-steps N       Learning rate warmup steps (default: 1000)
         --eval-freq N             Evaluation frequency
         --save-freq N             Checkpoint save frequency (default: 5000)
+        --log-freq N              MLflow metric log frequency (default: 200)
 
 COMPUTE:
         --num-gpus N              GPUs to request per task (default: 1). Sets the
@@ -159,6 +160,7 @@ learning_rate="${LEARNING_RATE:-1e-4}"
 lr_warmup_steps="${LR_WARMUP_STEPS:-1000}"
 eval_freq="${EVAL_FREQ:-}"
 save_freq="${SAVE_FREQ:-5000}"
+log_freq="${LOG_FREQ:-}"
 
 val_split="${VAL_SPLIT:-0.1}"
 val_split_enabled=true
@@ -207,6 +209,7 @@ while [[ $# -gt 0 ]]; do
     --lr-warmup-steps)            lr_warmup_steps="$2"; shift 2 ;;
     --eval-freq)                  eval_freq="$2"; shift 2 ;;
     --save-freq)                  save_freq="$2"; shift 2 ;;
+    --log-freq)                   log_freq="$2"; shift 2 ;;
     --val-split)                  val_split="$2"; shift 2 ;;
     --no-val-split)               val_split_enabled=false; shift ;;
     --no-system-metrics)          system_metrics="false"; shift ;;
@@ -346,6 +349,7 @@ submit_args=(
 [[ -n "$policy_repo_id" ]]      && submit_args+=("policy_repo_id=$policy_repo_id")
 [[ -n "$lerobot_version" ]]     && submit_args+=("lerobot_version=$lerobot_version")
 [[ -n "$eval_freq" ]]           && submit_args+=("eval_freq=$eval_freq")
+[[ -n "$log_freq" ]]            && submit_args+=("log_freq=$log_freq")
 [[ -n "$experiment_name" ]]     && submit_args+=("experiment_name=$experiment_name")
 [[ -n "$register_checkpoint" ]] && submit_args+=("register_checkpoint=$register_checkpoint")
 

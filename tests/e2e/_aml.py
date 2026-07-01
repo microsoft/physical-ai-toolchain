@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import re
-import time
-import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from tests.e2e._common import format_command_failure, log_e2e, parse_json_from_output, run_command, wait_for_status
+from tests.e2e._common import (
+    e2e_name,
+    format_command_failure,
+    log_e2e,
+    parse_json_from_output,
+    run_command,
+    wait_for_status,
+)
 
 AML_STARTED_STATES = {"Queued", "Preparing", "Starting", "Running", "Finalizing", "Completed"}
 AML_FAILURE_STATES = {"Canceled", "Cancelled", "Failed", "NotResponding"}
@@ -29,10 +34,6 @@ class AzureMLJob:
     experiment_name: str
     is_terminal: bool = False
     terminal_status: str | None = None
-
-
-def _e2e_name(prefix: str) -> str:
-    return f"{prefix}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
 
 
 def _parse_azureml_job_name(output: str) -> str | None:
@@ -55,7 +56,7 @@ def submit_aml_training(
     max_iterations: int,
     num_envs: int,
 ) -> AzureMLJob:
-    experiment_name = _e2e_name("rl-training-e2e-aml")
+    experiment_name = e2e_name("rl-training-e2e-aml")
     log_e2e(
         "Submitting AzureML training job "
         f"for task={task}, num_envs={num_envs}, max_iterations={max_iterations}, experiment={experiment_name}"
@@ -102,17 +103,17 @@ def submit_aml_lerobot_training(
     repo_root: Path,
     aml_workspace: AzureMLWorkspace,
     *,
-    dataset_repo_id: str,
+    blob_url: str,
     policy_type: str,
     training_steps: int,
     save_freq: int,
     batch_size: int,
     log_freq: int,
 ) -> AzureMLJob:
-    experiment_name = _e2e_name("il-training-e2e-aml")
+    experiment_name = e2e_name("il-training-e2e-aml")
     log_e2e(
         "Submitting AzureML LeRobot training job "
-        f"for dataset={dataset_repo_id}, policy={policy_type}, training_steps={training_steps}, "
+        f"for dataset={blob_url}, policy={policy_type}, training_steps={training_steps}, "
         f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}"
     )
     # eval-freq > training-steps disables in-loop evaluation (which would need
@@ -120,8 +121,8 @@ def submit_aml_lerobot_training(
     result = run_command(
         [
             str(repo_root / "training/il/scripts/submit-azureml-lerobot-training.sh"),
-            "--dataset-repo-id",
-            dataset_repo_id,
+            "--blob-url",
+            blob_url,
             "--policy-type",
             policy_type,
             "--training-steps",

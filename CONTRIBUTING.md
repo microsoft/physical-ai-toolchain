@@ -344,15 +344,17 @@ Requirements:
 
 Run these commands from the repository root:
 
+Each system under test has its own `tests/e2e/test_e2e_*.py` file.
+
 ```bash
-# Azure ML submission path only
-uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py::test_aml_rl_training_e2e
+# Azure ML RL submission path only
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_rl_training.py
 
-# OSMO submission path only
-uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py::test_osmo_rl_training_e2e
+# OSMO RL submission path only
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_rl_training.py
 
-# Full RL e2e suite
-uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py
+# Full e2e suite
+uv run pytest -vv -s -m e2e tests/e2e/
 ```
 
 #### Bug Fix PR Requirements
