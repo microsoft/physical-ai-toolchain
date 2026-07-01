@@ -115,7 +115,7 @@ Describe 'Invoke-DependencyPinningWorkflowCore' -Tag 'Unit' {
     }
 
     It 'Rejects thresholds outside the allowed range' {
-        { Invoke-DependencyPinningWorkflowCore -Threshold 101 -InvokeScanner { param($ScannerParams, [ref]$ExitCode) $ExitCode.Value = 0 } } |
+        { Invoke-DependencyPinningWorkflowCore -Threshold 101 -InvokeScanner { param($ScannerParams, [ref]$ExitCode) $null = $ScannerParams; $ExitCode.Value = 0 } } |
             Should -Throw -ExpectedMessage 'Threshold must be between 0 and 100; got 101'
     }
 
@@ -123,6 +123,7 @@ Describe 'Invoke-DependencyPinningWorkflowCore' -Tag 'Unit' {
         $scanner = {
             param($ScannerParams, [ref]$ExitCode)
 
+            $null = $ScannerParams
             $ExitCode.Value = 0
         }
 
