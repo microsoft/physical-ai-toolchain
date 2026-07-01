@@ -51,6 +51,11 @@ Describe 'Test-SHAPinning' -Tag 'Unit' {
         It 'Returns false for unknown dependency type' {
             Test-SHAPinning -Version 'a5ac7e51b41094c92402da3b24376905380afc29' -Type 'unknown-type' | Should -BeFalse
         }
+
+        It 'Returns false for validation-function types without pin patterns' {
+            { Test-SHAPinning -Version 'ignored' -Type 'shell-downloads' } | Should -Not -Throw
+            Test-SHAPinning -Version 'ignored' -Type 'shell-downloads' | Should -BeFalse
+        }
     }
 }
 
@@ -163,6 +168,28 @@ Describe 'Test-ShellDownloadSecurity' -Tag 'Unit' {
 }
 
 Describe 'Get-DependencyViolation' -Tag 'Unit' {
+    Context 'NPM manifests' {
+        It 'Handles missing optional dependency sections under strict mode' {
+            $testFile = Join-Path $TestDrive 'package.json'
+            @'
+{
+  "dependencies": {
+    "left-pad": "1.3.0"
+  }
+}
+'@ | Set-Content -Path $testFile
+
+            $fileInfo = @{
+                Path         = $testFile
+                Type         = 'npm'
+                RelativePath = 'package.json'
+            }
+
+            { Get-DependencyViolation -FileInfo $fileInfo } | Should -Not -Throw
+            Get-DependencyViolation -FileInfo $fileInfo | Should -BeNullOrEmpty
+        }
+    }
+
     Context 'Pinned workflows' {
         It 'Returns no violations for fully pinned workflow' {
             $pinnedPath = Join-Path $script:FixturesPath 'pinned-workflow.yml'

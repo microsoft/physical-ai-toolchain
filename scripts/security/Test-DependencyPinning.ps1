@@ -979,10 +979,11 @@ function Get-NpmDependencyViolations {
     $dependencySections = @('dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies')
 
     foreach ($section in $dependencySections) {
-        $deps = $packageJson.$section
-        if ($null -eq $deps) {
+        $sectionProperty = $packageJson.PSObject.Properties[$section]
+        if ($null -eq $sectionProperty) {
             continue
         }
+        $deps = $sectionProperty.Value
 
         foreach ($prop in $deps.PSObject.Properties) {
             $packageName = $prop.Name
@@ -1170,12 +1171,12 @@ function Test-SHAPinning {
     $config = $DependencyPatterns[$Type]
 
     # Use SHAPattern for ecosystems that require commit SHA pinning (github-actions)
-    if ($config.SHAPattern) {
+    if ($config.ContainsKey('SHAPattern') -and $config.SHAPattern) {
         return $Version -match $config.SHAPattern
     }
 
     # Use PinPattern for ecosystems with version-based pinning (npm, pip)
-    if ($config.PinPattern) {
+    if ($config.ContainsKey('PinPattern') -and $config.PinPattern) {
         return $Version -match $config.PinPattern
     }
 
@@ -1199,9 +1200,11 @@ function Get-DependencyViolation {
         return $violations
     }
 
+    $config = $DependencyPatterns[$fileType]
+
     # Check if this type uses a validation function instead of regex patterns
-    if ($null -ne $DependencyPatterns[$fileType].ValidationFunc) {
-        $funcName = $DependencyPatterns[$fileType].ValidationFunc
+    if ($config.ContainsKey('ValidationFunc') -and $null -ne $config.ValidationFunc) {
+        $funcName = $config.ValidationFunc
         $rawViolations = & $funcName -FileInfo $FileInfo
 
         if ($null -eq $rawViolations) {
@@ -1238,7 +1241,7 @@ function Get-DependencyViolation {
         $content = Get-Content -Path $filePath -Raw
         $lines = @(Get-Content -Path $filePath)
 
-        $patterns = $DependencyPatterns[$fileType].VersionPatterns
+        $patterns = $config.VersionPatterns
 
         foreach ($patternInfo in $patterns) {
             $pattern = $patternInfo.Pattern
