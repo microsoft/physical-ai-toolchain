@@ -712,6 +712,41 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
         }
     }
 
+    Context 'Helm values init/client keys' {
+        It 'Flags an unpinned image under an init: key' {
+            $content = '  init: "nvcr.io/nvidia/osmo/init-container:6.3.0"'
+            $tmp = Join-Path $TestDrive 'init-unpinned.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'init-unpinned.yaml' })
+            $result.Name | Should -Be 'nvcr.io/nvidia/osmo/init-container'
+            $result.Version | Should -Be '6.3.0'
+        }
+
+        It 'Flags an unpinned image under a client: key' {
+            $content = '  client: "nvcr.io/nvidia/osmo/client:6.3.0"'
+            $tmp = Join-Path $TestDrive 'client-unpinned.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'client-unpinned.yaml' })
+            $result.Name | Should -Be 'nvcr.io/nvidia/osmo/client'
+        }
+
+        It 'Treats a digest-pinned init: image as compliant' {
+            $content = '  init: "nvcr.io/nvidia/osmo/init-container:6.3.0@sha256:1071863497eba749e4f680a336a08e0fe48cba7d0ddea402fecb732bb6de2041"'
+            $tmp = Join-Path $TestDrive 'init-pinned.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'init-pinned.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Ignores plain scalars under init:/client: (no registry path)' {
+            $content = "  init: true`n  client: guest"
+            $tmp = Join-Path $TestDrive 'scalar-init-client.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'scalar-init-client.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
     Context 'pinning-ignore directive' {
         It 'Exempts a same-line marked image but still flags the next' {
             $content = "  image: busybox:latest  # pinning-ignore`n  image: redis:7"
@@ -744,6 +779,10 @@ Describe 'Get-FilesToScan docker discovery' -Tag 'Unit' {
         New-Item -ItemType Directory -Path (Join-Path $script:DockerScanRoot 'training/workflows/osmo') -Force | Out-Null
         Set-Content -Path (Join-Path $script:DockerScanRoot 'training/workflows/osmo/t.yaml') -Value 'image: foo:bar'
         Set-Content -Path (Join-Path $script:DockerScanRoot 'training/workflows/osmo/notes.sh') -Value 'echo hi'
+        New-Item -ItemType Directory -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/manifests') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/values') -Force | Out-Null
+        Set-Content -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/manifests/m.yaml') -Value 'image: foo:bar'
+        Set-Content -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/values/v.yaml') -Value 'init: reg.io/x:1'
     }
 
     It 'Discovers workflow YAML but not .sh under the docker type' {
@@ -757,6 +796,12 @@ Describe 'Get-FilesToScan docker discovery' -Tag 'Unit' {
         $workflowScans = @($files | Where-Object { $_.RelativePath -replace '\\', '/' -eq 'training/workflows/osmo/t.yaml' })
         $workflowScans.Count | Should -Be 2
         ($workflowScans.Type | Sort-Object) | Should -Be @('docker', 'shell-inline-pip')
+    }
+
+    It 'Discovers Kubernetes manifests and Helm values under the docker type' {
+        $rels = @(Get-FilesToScan -ScanPath $script:DockerScanRoot -Types @('docker') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Contain 'infrastructure/setup/manifests/m.yaml'
+        $rels | Should -Contain 'infrastructure/setup/values/v.yaml'
     }
 }
 

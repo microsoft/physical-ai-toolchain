@@ -182,9 +182,11 @@ $DependencyPatterns = @{
     }
 
     'docker'           = @{
-        FilePatterns   = @('**/workflows/**/*.yaml', '**/workflows/**/*.yml')
+        FilePatterns   = @('**/workflows/**/*.yaml', '**/workflows/**/*.yml',
+            '**/infrastructure/setup/manifests/*.yaml', '**/infrastructure/setup/manifests/*.yml',
+            '**/infrastructure/setup/values/*.yaml', '**/infrastructure/setup/values/*.yml')
         ValidationFunc = 'Get-DockerImageViolations'
-        Description    = 'Workflow-YAML container image: references must be digest-pinned (@sha256)'
+        Description    = 'Container image references in workflow YAML, Kubernetes manifests, and Helm values must be digest-pinned (@sha256)'
     }
 }
 
@@ -845,17 +847,22 @@ function Get-PowerShellModuleViolations {
 function Get-DockerImageViolations {
     <#
     .SYNOPSIS
-        Detects unpinned OCI container image references in workflow YAML.
+        Detects unpinned OCI container image references in workflow YAML, Kubernetes
+        manifests, and Helm values.
     .DESCRIPTION
-        OSMO and AzureML workflow YAML reference runtime container images via 'image:'
-        fields. Each concrete OCI reference must be pinned by an immutable
-        '@sha256:<digest>' so pulls are reproducible and tamper-evident; the human-readable
-        tag may be kept alongside the digest. Submission-time templated ('{{ ... }}') and
-        shell-variable ('$VAR' / '${VAR}') references are injected at submit time and skipped,
-        as are AzureML asset references ('azureml:<name>:<version>'), which are versioned
-        assets rather than OCI images. Dockerfile 'FROM' pinning is out of scope (covered by
-        OpenSSF Scorecard). An intentional non-pin opts out with a '# pinning-ignore' comment
-        on the image line or a dedicated comment line directly above it.
+        OSMO and AzureML workflow YAML, Kubernetes manifests, and Helm values reference
+        runtime container images via 'image:' fields; Helm values additionally carry OCI
+        references under 'init:'/'client:' keys (the OSMO backend_images block). Each concrete
+        OCI reference must be pinned by an immutable '@sha256:<digest>' so pulls are
+        reproducible and tamper-evident; the human-readable tag may be kept alongside the
+        digest. A value under 'init:'/'client:' is treated as an image only when it carries a
+        registry/namespace path, so plain configuration scalars are left untouched.
+        Submission-time templated ('{{ ... }}') and shell-variable ('$VAR' / '${VAR}')
+        references are injected at submit time and skipped, as are AzureML asset references
+        ('azureml:<name>:<version>'), which are versioned assets rather than OCI images.
+        Dockerfile 'FROM' pinning is out of scope (covered by OpenSSF Scorecard). An
+        intentional non-pin opts out with a '# pinning-ignore' comment on the image line or a
+        dedicated comment line directly above it.
     .PARAMETER FileInfo
         Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
     #>
@@ -884,18 +891,26 @@ function Get-DockerImageViolations {
         $exempt = $hasIgnore -or $prevWasIgnoreComment
         $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
 
-        # Match an 'image:' field (optionally a YAML list item), capturing its value.
-        if ($line -notmatch '^\s*(?:-\s*)?image:\s*(.+?)\s*$') { continue }
+        # Match an image-bearing field (optionally a YAML list item), capturing key and value.
+        # 'image:' is the canonical field; Helm values also express OCI references under
+        # 'init:'/'client:' (the OSMO backend_images block), so those keys are inspected too.
+        if ($line -notmatch '^\s*(?:-\s*)?(image|init|client):\s*(.+?)\s*$') { continue }
         if ($exempt) { continue }
 
+        $key = $Matches[1]
         # Drop any trailing YAML comment, then surrounding quotes.
-        $ref = ($Matches[1] -replace '\s+#.*$', '').Trim().Trim('"', "'").Trim()
+        $ref = ($Matches[2] -replace '\s+#.*$', '').Trim().Trim('"', "'").Trim()
 
         # Skip empties, submission-time templates/variables, AzureML assets, and prose.
         if ([string]::IsNullOrWhiteSpace($ref)) { continue }
         if ($ref -match '\{\{' -or $ref -match '^\$' -or $ref -match '\$\{') { continue }
         if ($ref -match '^azureml:') { continue }
         if ($ref -match '\s') { continue }
+
+        # 'init:'/'client:' are generic keys that only sometimes carry an OCI reference;
+        # require a registry/namespace path ('/') before treating the value as an image, so
+        # plain scalars (e.g. 'init: true', 'client: guest') are not misread as unpinned.
+        if ($key -ne 'image' -and $ref -notmatch '/') { continue }
 
         # Already digest-pinned -> compliant.
         if ($ref -match $digestPattern) { continue }
