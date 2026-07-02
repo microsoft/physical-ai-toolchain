@@ -5,7 +5,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect } from 'react'
 
-import { mutationFetch } from '@/lib/api-client'
+import { mutationFetch, setEpisodeLabels } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
 import { useLabelStore } from '@/stores/label-store'
 
@@ -15,11 +15,6 @@ interface DatasetLabelsResponse {
   dataset_id: string
   available_labels: string[]
   episodes: Record<string, string[]>
-}
-
-interface EpisodeLabelsResponse {
-  episode_index: number
-  labels: string[]
 }
 
 export const labelKeys = {
@@ -33,23 +28,6 @@ export const labelKeys = {
 async function fetchDatasetLabels(datasetId: string): Promise<DatasetLabelsResponse> {
   const res = await fetch(`${API_BASE}/datasets/${datasetId}/labels`)
   if (!res.ok) throw new Error('Failed to fetch labels')
-  return res.json()
-}
-
-async function setEpisodeLabels(
-  datasetId: string,
-  episodeIdx: number,
-  labels: string[],
-): Promise<EpisodeLabelsResponse> {
-  const res = await mutationFetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIdx}/labels`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ labels }),
-    },
-  )
-  if (!res.ok) throw new Error('Failed to save labels')
   return res.json()
 }
 
@@ -115,7 +93,7 @@ export function useSaveEpisodeLabels() {
       return setEpisodeLabels(currentDataset.id, episodeIdx, labels)
     },
     onSuccess: (data) => {
-      commitEpisodeLabels(data.episode_index, data.labels)
+      commitEpisodeLabels(data.episodeIndex, data.labels)
       if (currentDataset) {
         queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) })
       }

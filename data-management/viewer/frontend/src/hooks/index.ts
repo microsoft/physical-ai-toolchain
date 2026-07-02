@@ -70,9 +70,9 @@ export {
   useRemoveLabelOption,
   useSaveEpisodeLabels,
 } from './use-labels'
-export { detectionKeys, useObjectDetection } from './use-object-detection'
 export {
   type OfflineAnnotation,
   useOfflineAnnotations,
   type UseOfflineAnnotationsResult,
 } from './use-offline-annotations'
+export { useRunVlmJudge, useVlmJudgeStatus, vlmJudgeKeys } from './use-vlm-judge'

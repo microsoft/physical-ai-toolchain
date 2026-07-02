@@ -12,9 +12,13 @@ import logging
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ...models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TaskInfo, TrajectoryPoint
-from .base import build_trajectory
+from .base import build_trajectory, build_trajectory_variables, normalize_feature_names
+
+if TYPE_CHECKING:
+    from ..lerobot_loader import LeRobotLoader as LeRobotLoaderType
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +31,30 @@ except ImportError:
     LEROBOT_AVAILABLE = False
     LeRobotLoader = None
 
-    def is_lerobot_dataset(x):
+    def is_lerobot_dataset(path: str | Path) -> bool:
         return False
+
+
+def _video_cache_query(video_path: Path | str | None) -> str:
+    """Return ``?v=<mtime>`` for a video clip, or empty when unavailable.
+
+    The mtime changes when the cached clip is regenerated, which forces
+    browsers to refetch instead of reusing a previously-cached corrupt body.
+    """
+    if video_path is None:
+        return ""
+    try:
+        mtime = int(Path(video_path).stat().st_mtime)
+    except OSError:
+        return ""
+    return f"?v={mtime}"
 
 
 class LeRobotFormatHandler:
     """Handler for LeRobot parquet-format datasets."""
 
     def __init__(self) -> None:
-        self._loaders: dict[str, LeRobotLoader] = {}
+        self._loaders: dict[str, LeRobotLoaderType] = {}
 
     @property
     def available(self) -> bool:
@@ -46,7 +65,7 @@ class LeRobotFormatHandler:
 
     def get_loader(self, dataset_id: str, dataset_path: Path) -> bool:
         """Get or create a LeRobot loader. Returns True if successful."""
-        if not LEROBOT_AVAILABLE:
+        if not LEROBOT_AVAILABLE or LeRobotLoader is None:
             return False
 
         if dataset_id in self._loaders:
@@ -66,7 +85,7 @@ class LeRobotFormatHandler:
             )
             return False
 
-    def _get_loader(self, dataset_id: str) -> LeRobotLoader | None:
+    def _get_loader(self, dataset_id: str) -> LeRobotLoaderType | None:
         return self._loaders.get(dataset_id)
 
     def has_loader(self, dataset_id: str) -> bool:
@@ -74,7 +93,7 @@ class LeRobotFormatHandler:
 
     def list_episodes_from_path(self, path: Path) -> tuple[list[int], dict[int, dict]]:
         """List episodes from a path without registering a persistent loader."""
-        if not LEROBOT_AVAILABLE:
+        if not LEROBOT_AVAILABLE or LeRobotLoader is None:
             return [], {}
         try:
             loader = LeRobotLoader(path)
@@ -104,6 +123,7 @@ class LeRobotFormatHandler:
                 features[name] = FeatureSchema(
                     dtype=feat.get("dtype", "unknown"),
                     shape=feat.get("shape", []),
+                    names=normalize_feature_names(feat.get("names")),
                 )
 
             return DatasetInfo(
@@ -150,6 +170,20 @@ class LeRobotFormatHandler:
 
         try:
             lr_data = loader.load_episode(episode_idx)
+            lr_info = loader.get_dataset_info()
+            trajectory_variables, variable_values = build_trajectory_variables(
+                length=lr_data.length,
+                feature_values={
+                    "observation.state": lr_data.joint_positions,
+                    "action": lr_data.actions,
+                    **lr_data.additional_features,
+                },
+                feature_schemas=lr_info.features,
+                feature_kinds={
+                    "observation.state": "state",
+                    "action": "action",
+                },
+            )
 
             trajectory_data = build_trajectory(
                 length=lr_data.length,
@@ -158,13 +192,24 @@ class LeRobotFormatHandler:
                 joint_positions=lr_data.joint_positions,
                 joint_velocities=lr_data.joint_velocities,
                 end_effector_poses=lr_data.actions[:, :6] if lr_data.actions is not None else None,
+                trajectory_variables=trajectory_variables,
+                variable_values=variable_values,
             )
 
             video_urls: dict[str, str] = {}
-            for camera in lr_data.video_paths:
-                video_urls[camera] = f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}"
+            # Append a content-derived cache-buster (file mtime of the cached
+            # per-episode clip) so the URL changes whenever the on-disk clip is
+            # regenerated. Without this, browsers can keep using a previously
+            # cached corrupt response because Chromium's HTML <video> element
+            # does not always honor ETag/Last-Modified revalidation for media.
+            for camera, video_path in lr_data.video_paths.items():
+                cache_path = self._video_cache_path(dataset_id, episode_idx, camera)
+                buster_path = cache_path if cache_path and cache_path.exists() else video_path
+                video_urls[camera] = (
+                    f"/api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}{_video_cache_query(buster_path)}"
+                )
 
-            # For blob datasets, add video URLs for cameras without local files
+            # For blob datasets, add video URLs for cameras without local files.
             if dataset_info is not None:
                 for feat_name, feat in dataset_info.features.items():
                     if feat.dtype == "video" and feat_name not in video_urls:
@@ -190,6 +235,7 @@ class LeRobotFormatHandler:
                 video_urls=video_urls,
                 video_time_windows=video_time_windows,
                 cameras=list(video_urls.keys()),
+                trajectory_variables=trajectory_variables,
                 trajectory_data=trajectory_data,
             )
         except Exception as e:
@@ -207,6 +253,20 @@ class LeRobotFormatHandler:
 
         try:
             lr_data = loader.load_episode(episode_idx)
+            lr_info = loader.get_dataset_info()
+            trajectory_variables, variable_values = build_trajectory_variables(
+                length=lr_data.length,
+                feature_values={
+                    "observation.state": lr_data.joint_positions,
+                    "action": lr_data.actions,
+                    **lr_data.additional_features,
+                },
+                feature_schemas=lr_info.features,
+                feature_kinds={
+                    "observation.state": "state",
+                    "action": "action",
+                },
+            )
 
             return build_trajectory(
                 length=lr_data.length,
@@ -215,6 +275,8 @@ class LeRobotFormatHandler:
                 joint_positions=lr_data.joint_positions,
                 joint_velocities=lr_data.joint_velocities,
                 end_effector_poses=lr_data.actions[:, :6] if lr_data.actions is not None else None,
+                trajectory_variables=trajectory_variables,
+                variable_values=variable_values,
             )
         except Exception as e:
             logger.warning(
@@ -235,7 +297,8 @@ class LeRobotFormatHandler:
         if loader is None:
             return None
 
-        video_path = loader.get_video_path(episode_idx, camera)
+        resolved_video_path = self.get_video_path(dataset_id, episode_idx, camera)
+        video_path = Path(resolved_video_path) if resolved_video_path is not None else None
         if video_path is None:
             logger.warning(
                 "No video for episode %s",
@@ -247,6 +310,10 @@ class LeRobotFormatHandler:
         fps = info.fps or 30.0
 
         result = self._extract_frame_ffmpeg(str(video_path), frame_idx, fps)
+        if result is not None:
+            return result
+
+        result = self._extract_frame_av(str(video_path), frame_idx, fps)
         if result is not None:
             return result
 
@@ -304,6 +371,58 @@ class LeRobotFormatHandler:
         return None
 
     @staticmethod
+    def _extract_frame_av(video_path: str, frame_idx: int, fps: float) -> bytes | None:
+        """Extract a single frame as JPEG using PyAV."""
+        try:
+            import av
+            from PIL import Image
+        except ImportError:
+            return None
+
+        seek_time_s = frame_idx / fps
+        try:
+            with av.open(video_path) as container:
+                stream = next((s for s in container.streams if s.type == "video"), None)
+                if stream is None:
+                    logger.warning("No video stream found in %s", video_path)
+                    return None
+
+                if stream.time_base is not None:
+                    timestamp = int(seek_time_s / float(stream.time_base))
+                    container.seek(timestamp, stream=stream, any_frame=False, backward=True)
+
+                best_frame = None
+                best_delta = float("inf")
+                for frame in container.decode(stream):
+                    frame_time = float(getattr(frame, "time", 0.0) or 0.0)
+                    delta = abs(frame_time - seek_time_s)
+                    if delta < best_delta:
+                        best_frame = frame
+                        best_delta = delta
+                    if frame_time >= seek_time_s and best_frame is not None:
+                        break
+
+                if best_frame is None:
+                    logger.warning("Failed to read frame %s with PyAV", frame_idx)
+                    return None
+
+                to_image = getattr(best_frame, "to_image", None)
+                if to_image is None:
+                    logger.warning("Decoded PyAV frame cannot be converted to an image")
+                    return None
+
+                img = to_image()
+                if not isinstance(img, Image.Image):
+                    logger.warning("Decoded PyAV frame did not produce a PIL image")
+                    return None
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=85)
+                return buf.getvalue()
+        except Exception as e:
+            logger.warning("PyAV frame extraction failed: %s", e)
+            return None
+
+    @staticmethod
     def _extract_frame_cv2(video_path: str, frame_idx: int) -> bytes | None:
         """Extract a single frame as JPEG using OpenCV (fallback)."""
         try:
@@ -345,9 +464,86 @@ class LeRobotFormatHandler:
 
         try:
             video_path = loader.get_video_path(episode_idx, camera)
-            if video_path is not None:
+            if video_path is None:
+                return None
+
+            window = loader.get_video_time_window(episode_idx, camera)
+            if window is None:
                 return str(video_path)
+
+            clip_path = self._video_cache_path(dataset_id, episode_idx, camera)
+            if clip_path is None:
+                return str(video_path)
+
+            if clip_path.exists():
+                return str(clip_path)
+
+            if self._generate_episode_video_clip(video_path, window, clip_path):
+                return str(clip_path)
+
+            return str(video_path)
         except Exception as e:
             logger.warning("Failed to get video path: %s", str(e))
 
         return None
+
+    def _video_cache_path(self, dataset_id: str, episode_idx: int, camera: str) -> Path | None:
+        loader = self._get_loader(dataset_id)
+        if loader is None:
+            return None
+
+        safe_camera = camera.replace("/", "_").replace("\\", "_")
+        return loader.base_path / "meta" / "videos" / safe_camera / f"episode_{episode_idx:06d}.mp4"
+
+    @staticmethod
+    def _generate_episode_video_clip(source_path: Path, window: tuple[float, float], clip_path: Path) -> bool:
+        ffmpeg = LeRobotFormatHandler._resolve_ffmpeg()
+        if ffmpeg is None:
+            logger.warning("ffmpeg is not available for LeRobot video clipping")
+            return False
+
+        start, end = window
+        duration = end - start
+        if duration <= 0:
+            return False
+
+        clip_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = clip_path.with_suffix(".tmp.mp4")
+
+        try:
+            proc = subprocess.run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-ss",
+                    f"{start:.6f}",
+                    "-i",
+                    str(source_path),
+                    "-t",
+                    f"{duration:.6f}",
+                    "-an",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "23",
+                    "-movflags",
+                    "+faststart",
+                    str(temp_path),
+                ],
+                capture_output=True,
+                timeout=60,
+            )
+            if proc.returncode != 0:
+                stderr = proc.stderr.decode(errors="ignore").strip()
+                logger.warning("ffmpeg LeRobot video clipping failed: %s", stderr[-500:])
+                return False
+            temp_path.replace(clip_path)
+            return True
+        except Exception as exc:
+            logger.warning("LeRobot video clipping failed: %s", exc)
+            return False
+        finally:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)

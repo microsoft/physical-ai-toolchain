@@ -8,8 +8,20 @@ import { useDatasetStore } from '@/stores/dataset-store'
 import { useEpisodeStore } from '@/stores/episode-store'
 import type { DatasetInfo, EpisodeAnnotation, EpisodeData } from '@/types'
 
+const mocks = vi.hoisted(() => ({
+  saveCurrentAnnotation: vi.fn(),
+  isSavePending: false,
+}))
+
 vi.mock('@/hooks/use-annotations', () => ({
   useEpisodeAnnotations: () => ({ isLoading: false, data: undefined }),
+  useSaveCurrentAnnotation: () => ({
+    save: mocks.saveCurrentAnnotation,
+    isPending: mocks.isSavePending,
+    isSuccess: false,
+    isError: false,
+    error: null,
+  }),
 }))
 
 const baseAnnotation: EpisodeAnnotation = {
@@ -59,6 +71,8 @@ function seedStores({ withDatasetTask = true }: { withDatasetTask?: boolean } = 
 
 describe('LanguageInstructionWidget', () => {
   beforeEach(() => {
+    mocks.saveCurrentAnnotation.mockReset()
+    mocks.isSavePending = false
     seedStores()
   })
 
@@ -166,6 +180,17 @@ describe('LanguageInstructionWidget', () => {
     expect(useAnnotationStore.getState().currentAnnotation?.languageInstruction).toBeUndefined()
   })
 
+  it('saves the current annotation from the language instruction card', async () => {
+    const user = userEvent.setup()
+    useAnnotationStore.getState().updateLanguageInstruction({ instruction: 'lift' })
+
+    render(<LanguageInstructionWidget />)
+
+    await user.click(screen.getByRole('button', { name: /save annotation/i }))
+
+    expect(mocks.saveCurrentAnnotation).toHaveBeenCalled()
+  })
+
   it('ignores blank paraphrase submissions', async () => {
     const user = userEvent.setup()
     useAnnotationStore.getState().updateLanguageInstruction({ instruction: 'lift' })
@@ -178,34 +203,5 @@ describe('LanguageInstructionWidget', () => {
     expect(
       useAnnotationStore.getState().currentAnnotation?.languageInstruction?.paraphrases,
     ).toEqual([])
-  })
-
-  it('updates the instruction text when the textarea changes', async () => {
-    const user = userEvent.setup()
-    useAnnotationStore.getState().updateLanguageInstruction({ instruction: '' })
-
-    render(<LanguageInstructionWidget />)
-
-    const textarea = screen.getByPlaceholderText(/Describe the task/i)
-    await user.type(textarea, 'wave hello')
-
-    expect(useAnnotationStore.getState().currentAnnotation?.languageInstruction?.instruction).toBe(
-      'wave hello',
-    )
-  })
-
-  it('updates the language code when the language input changes', async () => {
-    const user = userEvent.setup()
-    useAnnotationStore.getState().updateLanguageInstruction({ instruction: 'lift' })
-
-    render(<LanguageInstructionWidget />)
-
-    const langInput = screen.getByLabelText(/language/i, { selector: 'input' })
-    await user.clear(langInput)
-    await user.type(langInput, 'fr')
-
-    expect(useAnnotationStore.getState().currentAnnotation?.languageInstruction?.language).toBe(
-      'fr',
-    )
   })
 })

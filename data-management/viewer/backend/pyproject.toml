@@ -14,6 +14,7 @@ dependencies = [
     "numpy==2.5.0",
     "pyarrow==24.0.0",
     "Pillow==12.2.0",
+    "av==15.1.0",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +51,11 @@ export = [
 ]
 yolo = [
     "ultralytics==8.4.77",
+]
+vlm-judge = [
+    "accelerate==1.13.0",
+    "torch==2.10.0",
+    "transformers==5.12.1",
 ]
 
 [build-system]

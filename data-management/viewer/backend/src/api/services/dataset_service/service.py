@@ -23,7 +23,7 @@ from ...models.datasources import (
 )
 from ...storage import LocalStorageAdapter, StorageAdapter
 from ..episode_cache import EpisodeCache
-from .base import DatasetFormatHandler
+from .base import DatasetFormatHandler, normalize_feature_names
 from .hdf5_handler import HDF5FormatHandler
 from .lerobot_handler import LEROBOT_AVAILABLE, LeRobotFormatHandler
 
@@ -31,28 +31,6 @@ if TYPE_CHECKING:
     from ...storage.blob_dataset import BlobDatasetProvider
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_feature_names(raw: Any) -> list[str] | None:
-    """Coerce a feature ``names`` value into ``list[str]``.
-
-    Some LeRobot ``info.json`` files store names as a list-of-lists
-    (e.g. ``[["JOINT_A", "JOINT_B"]]``) or as a dict keyed by axis. Flatten
-    nested sequences and stringify scalars so the schema validates.
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, dict):
-        raw = list(raw.values())
-    if not isinstance(raw, list | tuple):
-        return [str(raw)]
-    flat: list[str] = []
-    for item in raw:
-        if isinstance(item, list | tuple):
-            flat.extend(str(x) for x in item)
-        else:
-            flat.append(str(item))
-    return flat or None
 
 
 def _validate_dataset_id(dataset_id: str) -> str:
@@ -275,7 +253,7 @@ class DatasetService:
             features[name] = FeatureSchema(
                 dtype=feat.get("dtype", "unknown"),
                 shape=feat.get("shape", []),
-                names=_normalize_feature_names(feat.get("names")),
+                names=normalize_feature_names(feat.get("names")),
             )
 
         dataset_info = DatasetInfo(
@@ -365,8 +343,12 @@ class DatasetService:
             else:
                 headers["Content-Length"] = str(total_size)
 
+        blob_provider = self._blob_provider
+        if blob_provider is None:
+            return None
+
         async def _stream():
-            async for chunk in self._blob_provider.stream_video(blob_path, offset=offset, length=length):
+            async for chunk in blob_provider.stream_video(blob_path, offset=offset, length=length):
                 yield chunk
 
         return headers, media_type, _stream()
@@ -895,6 +877,9 @@ class DatasetService:
 
     def _upload_video_to_blob(self, dataset_id: str, episode_idx: int, camera: str, cache_path: Path) -> None:
         """Upload a generated video to blob storage for caching."""
+        if self._blob_provider is None:
+            return
+
         try:
             loop = asyncio.new_event_loop()
             loop.run_until_complete(self._blob_provider.upload_video(dataset_id, camera, episode_idx, cache_path))

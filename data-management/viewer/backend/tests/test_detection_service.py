@@ -27,6 +27,7 @@ class TestDetectionEpisodeProcessing:
             frame_idx: int,
             confidence: float = 0.25,
             model_name: str = "yolo11n",
+            labels: list[str] | None = None,
         ) -> DetectionResult:
             assert image_bytes == b"image-bytes"
             assert isinstance(frame_idx, int)

@@ -274,6 +274,7 @@ class TestDetectionSecurity:
 
         mock_episode = MagicMock()
         mock_episode.meta.length = 5
+        mock_episode.cameras = ["il-camera"]
 
         mock_ds = AsyncMock()
         mock_ds.get_episode = AsyncMock(return_value=mock_episode)
@@ -305,6 +306,7 @@ class TestDetectionSecurity:
 
         mock_episode = MagicMock()
         mock_episode.meta.length = 5
+        mock_episode.cameras = ["il-camera"]
 
         mock_ds = AsyncMock()
         mock_ds.get_episode = AsyncMock(return_value=mock_episode)

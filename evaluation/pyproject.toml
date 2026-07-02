@@ -21,6 +21,7 @@ dependencies = [
     "toml==0.10.2",
     "gymnasium==1.3.0",
     "torch==2.10.0",
+    "transformers==5.12.1",
     "tensordict==0.13.0",
     "lerobot==0.5.1",
 ]
@@ -77,6 +78,10 @@ omit = [
     "sil/monitor_checkpoints.py",
     "sil/play.py",
     "sil/play_policy.py",
+    # CLI analysis scripts that require heavy media/dataframe deps (opencv, av,
+    # pandas) not installed in the lean evaluation CI environment.
+    "metrics/analyze_action_smoothness.py",
+    "metrics/detect_initial_objects.py",
 ]
 
 [tool.coverage.report]
