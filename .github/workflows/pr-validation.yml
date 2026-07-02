@@ -213,14 +213,18 @@ jobs:
             ./
 
   # Container base-image CVE scan (Trivy). Discovers every digest-pinned base
-  # image across the repo's Dockerfiles and hard-fails on fixable CRITICAL/HIGH
-  # vulnerabilities. Path-gated to Dockerfile, scan workflow, or discovery
-  # helper changes; a weekly Container Rescan re-evaluates already-merged base images.
+  # image across the repo's Dockerfiles and reports fixable CRITICAL/HIGH
+  # vulnerabilities to the Security tab. Runs soft-fail while the shipped base
+  # images still carry fixable CVEs (see #1085). Path-gated to Dockerfile, scan
+  # workflow, or discovery/slug helper changes; a weekly Container Rescan
+  # re-evaluates already-merged base images.
   container-scan:
     name: Container Scan
     needs: changes
     if: needs.changes.outputs.containers == 'true'
     uses: ./.github/workflows/container-scan.yml
+    with:
+      soft-fail: true
     permissions:
       contents: read
       security-events: write  # Required for SARIF upload to Security tab

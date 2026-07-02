@@ -98,6 +98,8 @@ jobs:
         with:
           scan-type: image
           image-ref: ${{ matrix.image }}
+          # Pin the scanner build; container-cve-remediation.yml pins the same version.
+          version: v0.72.0
           format: sarif
           output: trivy-${{ steps.slug.outputs.slug }}.sarif
           severity: ${{ inputs.severity }}
