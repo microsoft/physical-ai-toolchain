@@ -215,7 +215,7 @@ model_json=$(az ml model show \
 #------------------------------------------------------------------------------
 
 register_azureml_environment "$environment_name" "$environment_version" "$image" \
-  "$resource_group" "$workspace_name"
+  "$resource_group" "$workspace_name" "$subscription_id"
 
 info "Code path: $code_path"
 info "Environment: ${environment_name}:${environment_version}"

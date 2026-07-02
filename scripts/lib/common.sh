@@ -61,7 +61,9 @@ derive_azureml_environment_version_from_image() {
 }
 
 register_azureml_environment() {
-  local name="$1" version="$2" image="$3" rg="$4" ws="$5" sub="${6:-}"
+  local name="${1:?environment name required}" version="${2:?environment version required}"
+  local image="${3:?image required}" rg="${4:?resource group required}"
+  local ws="${5:?workspace name required}" sub="${6:?subscription id required}"
   local env_file existing_image
   local create_args=(ml environment create)
   local show_args=(ml environment show)
@@ -75,10 +77,8 @@ version: $version
 image: $image
 EOF
 
-  create_args+=(--file "$env_file" --name "$name" --version "$version" --resource-group "$rg" --workspace-name "$ws")
-  show_args+=(--name "$name" --version "$version" --resource-group "$rg" --workspace-name "$ws")
-  [[ -n "$sub" ]] && create_args+=(--subscription "$sub")
-  [[ -n "$sub" ]] && show_args+=(--subscription "$sub")
+  create_args+=(--file "$env_file" --name "$name" --version "$version" --resource-group "$rg" --workspace-name "$ws" --subscription "$sub")
+  show_args+=(--name "$name" --version "$version" --resource-group "$rg" --workspace-name "$ws" --subscription "$sub")
 
   info "Publishing AzureML environment ${name}:${version}"
   if az "${create_args[@]}" >/dev/null 2>&1; then

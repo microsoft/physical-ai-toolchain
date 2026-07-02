@@ -238,7 +238,7 @@ fi
 #------------------------------------------------------------------------------
 
 register_azureml_environment "$environment_name" "$environment_version" "$image" \
-  "$resource_group" "$workspace_name"
+  "$resource_group" "$workspace_name" "$subscription_id"
 
 info "Code path: $code_path (training/ contents only)"
 info "Environment: ${environment_name}:${environment_version}"
