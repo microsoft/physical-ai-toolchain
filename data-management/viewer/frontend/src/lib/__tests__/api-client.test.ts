@@ -516,8 +516,11 @@ describe('runVlmJudge', () => {
 
     const pending = runVlmJudge('ds-1', 0, { processMethod: 'gvl' })
     await expect(pending).resolves.toMatchObject({ episodeId: 'ds-1/episode_000000' })
-    expect(mockFetch).toHaveBeenLastCalledWith('/api/datasets/ds-1/episodes/0/judge?cache_key=' + 'a'.repeat(64), {
-      headers: {},
-    })
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      '/api/datasets/ds-1/episodes/0/judge?cache_key=' + 'a'.repeat(64),
+      {
+        headers: {},
+      },
+    )
   })
 })

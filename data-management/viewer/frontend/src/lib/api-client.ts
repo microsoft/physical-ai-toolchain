@@ -430,9 +430,12 @@ export async function fetchVlmJudgeStatus(
   const params = new URLSearchParams()
   if (options.cacheKey) params.set('cache_key', options.cacheKey)
   const query = params.size > 0 ? `?${params.toString()}` : ''
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge${query}`, {
-    headers: await requestHeaders(),
-  })
+  const response = await fetch(
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge${query}`,
+    {
+      headers: await requestHeaders(),
+    },
+  )
   if (response.status === 404) return VLM_JUDGE_DISABLED
   const data = await handleResponse<unknown>(response)
   return transformKeys<VlmJudgeStatus>(data)
@@ -456,11 +459,17 @@ export async function runVlmJudge(
       force: options.force ?? false,
     }),
   })
-  const data = transformKeys<VlmJudgeStatus | VlmJudgeResult>(await handleResponse<unknown>(response))
+  const data = transformKeys<VlmJudgeStatus | VlmJudgeResult>(
+    await handleResponse<unknown>(response),
+  )
   if ('episodeId' in data) return data
   if (data.result) return data.result
   if (!data.cacheKey) {
-    throw new ApiClientError('VLM judge did not return a pollable cache key', 'VLM_JUDGE_NO_CACHE_KEY', 500)
+    throw new ApiClientError(
+      'VLM judge did not return a pollable cache key',
+      'VLM_JUDGE_NO_CACHE_KEY',
+      500,
+    )
   }
 
   const started = Date.now()
@@ -473,7 +482,11 @@ export async function runVlmJudge(
     if (status.result) return status.result
   }
 
-  throw new ApiClientError('VLM judge timed out while waiting for a result', 'VLM_JUDGE_TIMEOUT', 408)
+  throw new ApiClientError(
+    'VLM judge timed out while waiting for a result',
+    'VLM_JUDGE_TIMEOUT',
+    408,
+  )
 }
 
 // ============================================================================
