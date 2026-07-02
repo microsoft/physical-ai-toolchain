@@ -127,6 +127,7 @@ class TestLoadVideoFrame:
 def _make_args(**overrides) -> object:
     defaults = dict(
         policy_repo="repo",
+        policy_revision="0123456789abcdef0123456789abcdef01234567",
         dataset_dir="/tmp/ds",
         episode=0,
         start_frame=0,
@@ -199,6 +200,15 @@ class TestRunInferenceTest:
         args = _make_args(dataset_dir=str(tmp_path), num_steps=10, output=str(out_file))
         _mod.run_inference_test(args)
         assert out_file.exists()
+
+    def test_remote_policy_without_revision_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        mocks = _setup_run_inference_test(monkeypatch, tmp_path)
+        args = _make_args(dataset_dir=str(tmp_path), policy_repo="owner/policy", policy_revision=None)
+
+        with pytest.raises(ValueError, match="--policy-revision is required"):
+            _mod.run_inference_test(args)
+
+        mocks["policy"].to.assert_not_called()
 
     def test_no_output_skips_save(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _setup_run_inference_test(monkeypatch, tmp_path)

@@ -34,7 +34,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from tests.e2e._common import e2e_name, env_value, format_command_failure, log_e2e, run_command
+from tests.e2e._common import delete_blob_prefix, e2e_name, env_value, log_e2e, upload_blob_directory
 
 # --- Embodiment spec (single source of truth) -------------------------------
 # A self-contained ACT-compatible embodiment: one RGB camera ``observation.image``
@@ -398,57 +398,6 @@ class StagedDataset:
         return f"https://{self.storage_account}.blob.core.windows.net/{self.container}/{self.prefix}"
 
 
-def _upload_dataset(repo_root: Path, storage_account: str, container: str, prefix: str, dataset_dir: Path) -> None:
-    result = run_command(
-        [
-            "az",
-            "storage",
-            "blob",
-            "upload-batch",
-            "--account-name",
-            storage_account,
-            "--auth-mode",
-            "login",
-            "--destination",
-            container,
-            "--destination-path",
-            prefix,
-            "--source",
-            str(dataset_dir),
-            "--overwrite",
-            "--only-show-errors",
-        ],
-        cwd=repo_root,
-    )
-    if result.returncode != 0:
-        raise AssertionError(
-            f"Failed to upload synthetic LeRobot dataset to {storage_account}/{container}/{prefix}\n\n"
-            f"{format_command_failure(result)}"
-        )
-
-
-def _delete_dataset(repo_root: Path, storage_account: str, container: str, prefix: str) -> None:
-    log_e2e(f"Deleting staged synthetic LeRobot dataset under {container}/{prefix}")
-    run_command(
-        [
-            "az",
-            "storage",
-            "blob",
-            "delete-batch",
-            "--account-name",
-            storage_account,
-            "--auth-mode",
-            "login",
-            "--source",
-            container,
-            "--pattern",
-            f"{prefix}/*",
-            "--only-show-errors",
-        ],
-        cwd=repo_root,
-    )
-
-
 def stage_synthetic_lerobot_dataset(
     request: pytest.FixtureRequest, repo_root: Path, storage_account: str
 ) -> StagedDataset:
@@ -469,7 +418,23 @@ def stage_synthetic_lerobot_dataset(
 
     prefix = f"e2e-il-datasets/{e2e_name('lerobot')}"
     log_e2e(f"Uploading synthetic LeRobot dataset to {storage_account}/{container}/{prefix}")
-    _upload_dataset(repo_root, storage_account, container, prefix, dataset_dir)
-    request.addfinalizer(lambda: _delete_dataset(repo_root, storage_account, container, prefix))
+    # Register cleanup before the upload so a partial upload is still torn down.
+    request.addfinalizer(
+        lambda: delete_blob_prefix(
+            repo_root,
+            storage_account,
+            container,
+            prefix,
+            description="staged synthetic LeRobot dataset",
+        )
+    )
+    upload_blob_directory(
+        repo_root,
+        storage_account,
+        container,
+        prefix,
+        dataset_dir,
+        description="synthetic LeRobot dataset",
+    )
 
     return StagedDataset(storage_account=storage_account, container=container, prefix=prefix)
