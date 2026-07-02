@@ -229,7 +229,12 @@ def run_evaluation(args: argparse.Namespace) -> None:
 
     features = info.get("features", {})
     video_keys = [k for k, v in features.items() if v.get("dtype") in ("video", "image")]
-    image_key = video_keys[0] if video_keys else "observation.images.color"
+    # Prefer an observation.images.* key for a deterministic choice on
+    # multi-camera datasets; fall back to the first video/image feature.
+    image_key = next(
+        (k for k in video_keys if k.startswith("observation.images.")),
+        video_keys[0] if video_keys else "observation.images.color",
+    )
 
     action_dim = features.get("action", {}).get("shape", [0])[0]
     state_dim = features.get("observation.state", {}).get("shape", [0])[0]

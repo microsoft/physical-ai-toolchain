@@ -36,8 +36,11 @@ jobs:
           VIOLATIONS=0
           TOTAL=0
 
+          # nullglob: no *.yaml workflow exists today, so an unmatched glob must expand to nothing, not a literal path
+          shopt -s nullglob
+
           echo "Scanning workflow files for top-level permissions blocks..."
-          for wf in .github/workflows/*.yml; do
+          for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
             TOTAL=$((TOTAL + 1))
             if ! grep -q "^permissions:" "$wf"; then
               echo "::warning file=${wf}::Missing top-level permissions block: ${wf}"

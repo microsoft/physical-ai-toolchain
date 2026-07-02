@@ -1,0 +1,21 @@
+# Fixture: compliant inline pip/uv pip installs (all pinned or lock-derived).
+# Used by Test-DependencyPinning.Tests.ps1 for the shell-inline-pip ecosystem.
+name: compliant-inline-pip
+tasks:
+  - name: install
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        pip install --quiet --break-system-packages uv==0.7.12
+        TORCH_VER="2.7.1"
+        pip install --force-reinstall torch=="${TORCH_VER}" numpy==1.26.4
+        uv pip install azureml-mlflow==1.62.0.post3 "mlflow==2.22.5" --system
+        uv export --frozen --no-hashes --no-emit-project --project "${PROJ}" \
+          | uv pip install --no-cache-dir --no-deps --system -r -
+        pip install -r /tmp/requirements.txt
+        pip install --upgrade pip setuptools wheel
+        pip install -e .[base]
+        uv run --with azure-identity==1.25.3 python /tmp/job.py
+        uv run --with-requirements /tmp/reqs.txt python /tmp/job.py
+        uvx --with ruff==0.6.0 ruff check .

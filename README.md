@@ -194,6 +194,9 @@ git fetch --tags
 git tag -v v1.0.0
 ```
 
+> [!NOTE]
+> `git tag -v` confirms cryptographic integrity and the Rekor entry but does not validate the signer identity. CI gates each `v*` tag with constrained `gitsign verify-tag`, binding the signature to the pinned workflow identity. For identity-constrained local verification, run `gitsign verify-tag --certificate-identity 'https://github.com/microsoft/physical-ai-toolchain/.github/workflows/main.yml@refs/heads/main' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' v1.0.0`.
+
 This repository uses Sigstore `gitsign` keyless signing for release tags. For tag signing policy and maintainer guidance, see [CONTRIBUTING.md](CONTRIBUTING.md#release-tag-signing).
 
 ## Roadmap

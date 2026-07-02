@@ -149,6 +149,260 @@ Describe 'Get-DependencyViolation' -Tag 'Unit' {
     }
 }
 
+Describe 'Get-ShellInlinePipViolations' -Tag 'Unit' {
+    Context 'Compliant inline installs' {
+        It 'Returns no violations when every install is pinned or lock-derived' {
+            $testFile = Join-Path $script:FixturesPath 'inline-pip-compliant-workflow.yaml'
+            $fileInfo = @{
+                Path         = $testFile
+                Type         = 'shell-inline-pip'
+                RelativePath = 'inline-pip-compliant-workflow.yaml'
+            }
+            $result = @(Get-ShellInlinePipViolations -FileInfo $fileInfo)
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Unpinned inline installs' {
+        BeforeAll {
+            $testFile = Join-Path $script:FixturesPath 'inline-pip-unpinned-workflow.yaml'
+            $fileInfo = @{
+                Path         = $testFile
+                Type         = 'shell-inline-pip'
+                RelativePath = 'inline-pip-unpinned-workflow.yaml'
+            }
+            $script:InlineResult = @(Get-ShellInlinePipViolations -FileInfo $fileInfo)
+        }
+
+        It 'Flags every bare or range-specified package' {
+            $script:InlineResult.Count | Should -Be 5
+        }
+
+        It 'Flags the expected package names' {
+            $names = $script:InlineResult.Name | Sort-Object
+            $names | Should -Be @('gpustat', 'matplotlib', 'mlflow', 'packaging', 'requests')
+        }
+
+        It 'Does not flag the exact-pinned package on a mixed line' {
+            $script:InlineResult.Name | Should -Not -Contain 'wandb'
+        }
+
+        It 'Reports violations as shell-inline-pip type with warning severity' {
+            $script:InlineResult[0].Type | Should -Be 'shell-inline-pip'
+            $script:InlineResult[0].Severity | Should -Be 'warning'
+        }
+    }
+
+    Context 'Compliance-preserving patterns' {
+        It 'Treats shell-variable pins (name=="$VAR") as compliant' {
+            $content = 'pip install torch=="${TORCH_VER}"'
+            $tmp = Join-Path $TestDrive 'var-pin.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'var-pin.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats uv export pipes as compliant' {
+            $content = 'uv export --frozen | uv pip install --no-deps -r -'
+            $tmp = Join-Path $TestDrive 'pipe.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'pipe.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats editable installs (-e .) as compliant' {
+            $content = 'pip install -e .[base]'
+            $tmp = Join-Path $TestDrive 'editable.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'editable.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats pinned uv run --with specs as compliant' {
+            $content = 'uv run --with azure-identity==1.25.3 python /tmp/job.py'
+            $tmp = Join-Path $TestDrive 'uvrun-pinned.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'uvrun-pinned.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats uv run --with-requirements as compliant' {
+            $content = 'uv run --with-requirements /tmp/reqs.txt python /tmp/job.py'
+            $tmp = Join-Path $TestDrive 'uvrun-reqs.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'uvrun-reqs.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Allows unpinned build-frontend tools (pip/setuptools/wheel)' {
+            $content = 'pip install --upgrade pip setuptools wheel'
+            $tmp = Join-Path $TestDrive 'tools.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'tools.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats a wheel URL install as compliant' {
+            $content = "uv pip install requests==2.31.0`nuv pip install https://example.com/pkg-1.0-py3-none-any.whl"
+            $tmp = Join-Path $TestDrive 'url-spec.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'url-spec.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats a local path install as compliant' {
+            $content = "pip install numpy==1.26.4`npip install ./local-project"
+            $tmp = Join-Path $TestDrive 'path-spec.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'path-spec.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Ignores an empty-string package argument' {
+            $content = "pip install requests==2.31.0`npip install ''"
+            $tmp = Join-Path $TestDrive 'empty-spec.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'empty-spec.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Ignores a token that is not a package specifier' {
+            $content = "pip install requests==2.31.0`npip install _internal_tool"
+            $tmp = Join-Path $TestDrive 'nonpkg-spec.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'nonpkg-spec.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Ignores a flag supplied as a uv run --with value' {
+            $content = "uv run --with requests==2.8.0 python a.py`nuvx --with -U sometool"
+            $tmp = Join-Path $TestDrive 'with-flag.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'with-flag.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Unpinned uv run --with' {
+        It 'Flags unpinned --with specs' {
+            $content = "uv run --with requests python s.py`nuvx --with 'mlflow>=2.8,<3' tool"
+            $tmp = Join-Path $TestDrive 'uvrun-unpinned.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'uvrun-unpinned.yaml' })
+            $result.Count | Should -Be 2
+            ($result.Name | Sort-Object) | Should -Be @('mlflow', 'requests')
+        }
+
+        It 'Flags unpinned --with=SPEC (equals form)' {
+            $content = "uv run --with=requests python s.py`nuvx --with=mlflow tool"
+            $tmp = Join-Path $TestDrive 'uvrun-equals.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'uvrun-equals.yaml' })
+            $result.Count | Should -Be 2
+            ($result.Name | Sort-Object) | Should -Be @('mlflow', 'requests')
+        }
+    }
+
+    Context 'Line continuations' {
+        It 'Flushes a dangling backslash continuation on the final line' {
+            $content = "echo done`npip install foo \"
+            $tmp = Join-Path $TestDrive 'dangling-continuation.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'dangling-continuation.yaml' })
+            $result.Name | Should -Be 'foo'
+        }
+    }
+
+    Context 'File not found' {
+        It 'Returns empty array for non-existent file' {
+            $fileInfo = @{
+                Path         = 'TestDrive:/nonexistent/workflow.yaml'
+                Type         = 'shell-inline-pip'
+                RelativePath = 'nonexistent/workflow.yaml'
+            }
+            $result = Get-ShellInlinePipViolations -FileInfo $fileInfo
+            $result | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Get-ShellInlinePipViolations (.sh files)' -Tag 'Unit' {
+    Context 'Compliant shell script' {
+        It 'Returns no violations when every install is pinned, lock-derived, or exempted' {
+            $testFile = Join-Path $script:SecurityFixturesPath 'inline-pip-compliant.sh'
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $testFile; Type = 'shell-inline-pip'; RelativePath = 'inline-pip-compliant.sh' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Unpinned shell script' {
+        It 'Flags bare names, ranges, and unpinned uv run --with' {
+            $testFile = Join-Path $script:SecurityFixturesPath 'inline-pip-unpinned.sh'
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $testFile; Type = 'shell-inline-pip'; RelativePath = 'inline-pip-unpinned.sh' })
+            $result.Count | Should -Be 3
+            ($result.Name | Sort-Object) | Should -Be @('mlflow', 'requests', 'torch')
+        }
+    }
+
+    Context 'Binary-install false-positive defense' {
+        It 'Does not flag `install ... /usr/local/bin/uvx` (coreutils install, not a package)' {
+            $content = 'sudo install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uvx /usr/local/bin/uvx'
+            $tmp = Join-Path $TestDrive 'bininstall.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'bininstall.sh' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'pinning-ignore directive' {
+        It 'Exempts a same-line marked install but still flags the next line' {
+            $content = "pip install `"numpy>=1.26,<2`"  # pinning-ignore`npip install requests"
+            $tmp = Join-Path $TestDrive 'ignore-sameline.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'ignore-sameline.sh' })
+            $result.Name | Should -Be 'requests'
+        }
+
+        It 'Exempts an install preceded by a dedicated pinning-ignore comment line' {
+            $content = "# pinning-ignore: deliberate`npip install `"flask>=2,<3`""
+            $tmp = Join-Path $TestDrive 'ignore-prevline.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'ignore-prevline.sh' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Get-FilesToScan shell-inline-pip discovery' -Tag 'Unit' {
+    BeforeAll {
+        $script:ScanRoot = Join-Path $TestDrive 'scan-root'
+        foreach ($d in @('.github/workflows', 'workflows/nested', 'external/x/workflows')) {
+            New-Item -ItemType Directory -Path (Join-Path $script:ScanRoot $d) -Force | Out-Null
+        }
+        $body = "steps:`n  - run: uv pip install requests"
+        Set-Content -Path (Join-Path $script:ScanRoot '.github/workflows/ci.yml') -Value $body
+        Set-Content -Path (Join-Path $script:ScanRoot 'workflows/nested/deep.yaml') -Value $body
+        Set-Content -Path (Join-Path $script:ScanRoot 'external/x/workflows/vendor.yaml') -Value $body
+    }
+
+    It 'Discovers .yml under the hidden .github directory and .yaml under interior workflows' {
+        $rels = @(Get-FilesToScan -ScanPath $script:ScanRoot -Types @('shell-inline-pip') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Contain '.github/workflows/ci.yml'
+        $rels | Should -Contain 'workflows/nested/deep.yaml'
+    }
+
+    It 'Prunes vendored trees (external/)' {
+        $rels = @(Get-FilesToScan -ScanPath $script:ScanRoot -Types @('shell-inline-pip') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Not -Contain 'external/x/workflows/vendor.yaml'
+    }
+
+    It 'Honors ExcludePatterns in the interior-glob handler' {
+        $rels = @(Get-FilesToScan -ScanPath $script:ScanRoot -Types @('shell-inline-pip') -ExcludePatterns @('nested') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Not -Contain 'workflows/nested/deep.yaml'
+        $rels | Should -Contain '.github/workflows/ci.yml'
+    }
+}
+
 Describe 'Export-ComplianceReport' -Tag 'Unit' {
     BeforeEach {
         $script:TestOutputPath = Join-Path $TestDrive 'report'

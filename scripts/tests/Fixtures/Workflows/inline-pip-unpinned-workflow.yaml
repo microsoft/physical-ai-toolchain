@@ -1,0 +1,13 @@
+# Fixture: non-compliant inline pip/uv pip installs (bare names and ranges).
+# Used by Test-DependencyPinning.Tests.ps1 for the shell-inline-pip ecosystem.
+# Expected violations (5): requests, mlflow, matplotlib, gpustat, packaging.
+name: unpinned-inline-pip
+tasks:
+  - name: install
+    args:
+      - "-lc"
+      - |
+        set -euo pipefail
+        pip install --quiet requests
+        uv pip install "mlflow>=2.8.0,<3.0.0" matplotlib --system
+        pip install gpustat wandb==0.19.0 packaging

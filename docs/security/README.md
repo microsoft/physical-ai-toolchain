@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-06-30
 ms.topic: overview
 keywords:
   - security
@@ -48,14 +48,20 @@ The [security guide](../operations/security-guide.md) documents:
 
 Automated security and freshness checks that run on GitHub Actions schedules and publish findings to the Security tab.
 
-| Script                                                                                                                                                    | Workflow                       | Purpose                                                                                       |
-|-----------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------|-----------------------------------------------------------------------------------------------|
-| [`scripts/security/Test-BinaryFreshness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-BinaryFreshness.ps1)     | `check-binary-integrity.yml`   | Verify pinned binary SHA-256 hashes and detect Helm chart version drift (SARIF output)        |
-| [`scripts/security/Test-DependencyPinning.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-DependencyPinning.ps1) | `dependency-pinning-scan.yml`  | Validate that GitHub Actions, Docker images, and package manifests pin exact versions         |
-| [`scripts/security/Test-SHAStaleness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-SHAStaleness.ps1)           | `sha-staleness-check.yml`      | Detect SHA pins that have drifted behind upstream release tags                                |
-| [`scripts/update-chart-hashes.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-chart-hashes.sh)                           | Run manually after chart bumps | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
+| Script                                                                                                                                                    | Workflow                       | Purpose                                                                                                                                          |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`scripts/security/Test-BinaryFreshness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-BinaryFreshness.ps1)     | `check-binary-integrity.yml`   | Verify pinned binary SHA-256 hashes and detect Helm chart version drift (SARIF output)                                                           |
+| [`scripts/security/Test-DependencyPinning.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-DependencyPinning.ps1) | `dependency-pinning-scan.yml`  | Validate that GitHub Actions, Docker images, package manifests, and inline pip/uv installs in workflow YAML and shell scripts pin exact versions |
+| [`scripts/security/Test-SHAStaleness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-SHAStaleness.ps1)           | `sha-staleness-check.yml`      | Detect SHA pins that have drifted behind upstream release tags                                                                                   |
+| [`scripts/update-chart-hashes.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-chart-hashes.sh)                           | Run manually after chart bumps | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf`                                                    |
 
 Each PowerShell script supports a `-SarifFile` parameter for CI integration and a `-ConfigPreview` switch for local dry-run inspection. Run `scripts/update-chart-hashes.sh` locally whenever a pinned Helm chart version is updated so `defaults.conf` stays in sync.
+
+`Test-DependencyPinning.ps1` also flags unpinned inline `pip install` / `uv pip install` commands embedded in workflow YAML and shell scripts, scanned under the `shell-inline-pip` type. A compliant install uses an exact `==` pin, a lockfile (`-r`/`--requirement`, or a `uv export | uv pip install` pipe), or an editable local project (`-e .`). To exempt an intentional non-pin, add a `# pinning-ignore` comment on the install line:
+
+```bash
+uv pip install "numpy>=1.26,<2.0"  # pinning-ignore
+```
 
 ## 🔗 Related Resources
 

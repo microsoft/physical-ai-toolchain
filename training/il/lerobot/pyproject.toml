@@ -56,10 +56,6 @@ dependencies = [
     # enabled below uv would otherwise pick the 1.17.4 release candidate over
     # 1.17.3 stable.
     "wrapt==2.2.2",
-    # cuda-bindings: torch==2.10.0 depends on cuda-bindings but does not cap it;
-    # unconstrained resolution picks 13.x which requires libcudart.so.13 (CUDA 13).
-    # The cu12 torch wheels only ship CUDA 12 runtime, so pin to 12.x.
-    "cuda-bindings==13.3.1",
 ]
 
 [build-system]
@@ -108,9 +104,6 @@ override-dependencies = [
     # torchcodec: lerobot==0.5.1 caps below 0.12; 0.13.0 ships the manylinux
     # 2.28 wheel needed by the AzureML CUDA container.
     "torchcodec==0.14.0",
-    # cuda-bindings: torch==2.10.0 adds an uncapped dependency; 13.x requires
-    # libcudart.so.13 but the cu12 wheels only bundle CUDA 12 runtime.
-    "cuda-bindings==13.3.1",
     # datasets: lerobot==0.5.1 caps at <5.0.0; 5.0.0 is needed for Parquet
     # performance improvements and compatibility with newer pyarrow.
     "datasets==5.0.0",

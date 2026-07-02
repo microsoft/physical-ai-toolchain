@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
+import uuid
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+
+def e2e_name(prefix: str) -> str:
+    """Generate a collision-resistant resource name for an e2e run."""
+    return f"{prefix}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+
+
+def env_value(name: str, default: str | None = None) -> str | None:
+    """Return a stripped environment variable, or ``default`` when unset/blank."""
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip()
 
 
 def run_command(

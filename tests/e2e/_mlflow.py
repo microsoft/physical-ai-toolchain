@@ -197,3 +197,78 @@ def assert_osmo_workflow_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspa
         f"OSMO MLflow tracking passed: run_id={run_id} metrics=[{rendered_metrics}] "
         f"params=[{rendered_params}] tags=[{rendered_tags}]"
     )
+
+
+_LEROBOT_EVAL_REQUIRED_METRICS = (
+    "ep0_mse",
+    "ep0_mae",
+    "ep0_avg_inference_ms",
+    "ep0_throughput_hz",
+    "aggregate_mse",
+    "aggregate_mae",
+    "aggregate_avg_inference_ms",
+    "aggregate_throughput_hz",
+)
+_LEROBOT_EVAL_REQUIRED_PARAMS = (
+    "policy_repo_id",
+    "policy_type",
+    "eval_episodes",
+    "device",
+    "fps",
+)
+
+
+def _resolve_latest_mlflow_run_id_by_experiment(aml_workspace: AzureMLWorkspace, experiment_name: str) -> str:
+    """Resolve the most recent MLflow run in a per-run unique experiment.
+
+    Used by OSMO LeRobot submission paths whose scripts do not set a
+    ``correlation_id`` tag; the unique experiment name keeps the resolution
+    unambiguous (a single run lands in each experiment).
+    """
+    client = _mlflow_client(aml_workspace)
+    experiment = _experiment_by_name(client, experiment_name)
+    runs = client.search_runs(
+        [experiment.experiment_id],
+        order_by=["attributes.start_time DESC"],
+        max_results=1,
+    )
+    if not runs:
+        raise AssertionError(f"No MLflow runs were found in experiment {experiment_name!r}")
+
+    run_id = runs[0].info.run_id
+    log_e2e(f"Resolved latest MLflow run in experiment {experiment_name}: run_id={run_id}")
+    return run_id
+
+
+def assert_osmo_lerobot_training_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspace: AzureMLWorkspace) -> None:
+    run_id = _resolve_latest_mlflow_run_id_by_experiment(aml_workspace, workflow.experiment_name)
+    tracking = _assert_run_has_expected_tracking(
+        aml_workspace,
+        run_id=run_id,
+        experiment_name=workflow.experiment_name,
+        required_metrics=_LEROBOT_REQUIRED_METRICS,
+        required_params=_LEROBOT_REQUIRED_PARAMS,
+    )
+    rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
+    rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
+    log_e2e(
+        f"OSMO LeRobot training MLflow tracking passed: run_id={run_id} "
+        f"metrics=[{rendered_metrics}] params=[{rendered_params}]"
+    )
+
+
+def assert_osmo_lerobot_eval_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspace: AzureMLWorkspace) -> None:
+    run_id = _resolve_latest_mlflow_run_id_by_experiment(aml_workspace, workflow.experiment_name)
+    tracking = _assert_run_has_expected_tracking(
+        aml_workspace,
+        run_id=run_id,
+        experiment_name=workflow.experiment_name,
+        required_metrics=_LEROBOT_EVAL_REQUIRED_METRICS,
+        required_params=_LEROBOT_EVAL_REQUIRED_PARAMS,
+    )
+    rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
+    rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
+    log_e2e(
+        f"OSMO LeRobot eval MLflow tracking passed: run_id={run_id} "
+        f"metrics=[{rendered_metrics}] params=[{rendered_params}]"
+    )

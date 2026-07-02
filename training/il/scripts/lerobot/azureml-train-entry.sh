@@ -20,7 +20,7 @@ apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential >/dev/nu
 # --break-system-packages bypasses PEP 668 (externally-managed-environment)
 # enforced by Debian-packaged Python in PyTorch 2.4.1+ containers. Safe here
 # because the container is ephemeral and isolated from any host system Python.
-pip install --quiet --break-system-packages uv
+pip install --quiet --break-system-packages uv==0.7.12
 
 LEROBOT_PROJECT="training/il/lerobot"
 if [[ ! -f "${LEROBOT_PROJECT}/uv.lock" ]]; then

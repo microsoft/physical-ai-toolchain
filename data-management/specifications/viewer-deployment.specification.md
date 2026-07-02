@@ -7,17 +7,17 @@ Deployment contracts for the Dataset Analysis Tool on Kubernetes and Azure Conta
 | Component     | Technology                       | Port |
 |---------------|----------------------------------|------|
 | Backend       | FastAPI (Python)                 | 8000 |
-| Frontend      | React/Vite (nginx in production) | 80   |
+| Frontend      | React/Vite (nginx in production) | 8080 |
 | Reverse Proxy | nginx                            | 443  |
 
 The frontend serves static assets and proxies `/api/` requests to the backend service.
 
 ## Container Images
 
-| Image    | Base         | Build Context                      |
-|----------|--------------|------------------------------------|
-| Backend  | Python 3.12  | `data-management/viewer/backend/`  |
-| Frontend | nginx:alpine | `data-management/viewer/frontend/` |
+| Image    | Base               | Build Context                      |
+|----------|--------------------|------------------------------------|
+| Backend  | Python 3.12        | `data-management/viewer/backend/`  |
+| Frontend | nginx-unprivileged | `data-management/viewer/frontend/` |
 
 Images are pushed to the Azure Container Registry provisioned by the infrastructure domain.
 

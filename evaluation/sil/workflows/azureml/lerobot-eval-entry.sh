@@ -14,7 +14,7 @@ echo "=== LeRobot AzureML Inference ==="
 
 # HuggingFace auth
 if [[ -n "${HF_TOKEN:-}" ]]; then
-  python3 -c "from huggingface_hub import login; login(token='${HF_TOKEN}', add_to_git_credential=False)"
+  python3 -c "import os; from huggingface_hub import login; login(token=os.environ['HF_TOKEN'], add_to_git_credential=False)"
 fi
 
 # Download model from AzureML registry if specified

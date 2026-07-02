@@ -273,7 +273,7 @@ git fetch --tags
 git tag -v v1.0.0
 ```
 
-GitHub Actions validates signatures for pushed version tags (`v*`).
+GitHub Actions validates signatures for pushed version tags (`v*`). CI gates each `v*` tag with constrained `gitsign verify-tag`, binding the signature to the pinned CI workflow identity rather than accepting any valid Sigstore signature. `git tag -v` confirms cryptographic integrity and the Rekor entry but does not validate the signer identity, so it remains a local diagnostic for maintainers rather than the authoritative gate.
 
 > [!IMPORTANT]
 > Maintainer GPG key distribution is not required for this repository because release tags are signed using keyless Sigstore identities.
@@ -344,15 +344,17 @@ Requirements:
 
 Run these commands from the repository root:
 
+Each system under test has its own `tests/e2e/test_e2e_*.py` file.
+
 ```bash
-# Azure ML submission path only
-uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py::test_aml_rl_training_e2e
+# Azure ML RL submission path only
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_rl_training.py
 
-# OSMO submission path only
-uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py::test_osmo_rl_training_e2e
+# OSMO RL submission path only
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_rl_training.py
 
-# Full RL e2e suite
-uv run pytest -vv -s -m e2e tests/e2e/test_e2e_training.py
+# Full e2e suite
+uv run pytest -vv -s -m e2e tests/e2e/
 ```
 
 #### Bug Fix PR Requirements
