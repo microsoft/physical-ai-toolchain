@@ -12,6 +12,7 @@ from __future__ import annotations
 import importlib
 import json
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,43 @@ def _build_dataset(root: Path, *, instruction: str | None, n_frames: int = 12) -
     (root / "meta" / "episodes.jsonl").write_text(json.dumps(episode) + "\n")
 
 
+def _write_saved_instruction(root: Path, *, instruction: str, annotator_id: str = "reviewer") -> None:
+    annotations_dir = root / "annotations" / "episodes"
+    annotations_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "episode_index": 0,
+        "dataset_id": root.name,
+        "annotations": [
+            {
+                "annotator_id": annotator_id,
+                "timestamp": datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
+                "task_completeness": {
+                    "rating": "success",
+                    "confidence": 5,
+                    "completion_percentage": 100,
+                },
+                "trajectory_quality": {
+                    "overall_score": 5,
+                    "metrics": {"smoothness": 5, "efficiency": 5, "safety": 5, "precision": 5},
+                    "flags": [],
+                },
+                "data_quality": {"overall_quality": "good", "issues": []},
+                "anomalies": {"anomalies": []},
+                "language_instruction": {
+                    "instruction": instruction,
+                    "source": "human",
+                    "language": "en",
+                    "paraphrases": [],
+                    "subtask_instructions": [],
+                },
+                "object_detections": [],
+                "notes": None,
+            },
+        ],
+    }
+    (annotations_dir / "episode_000000.json").write_text(json.dumps(payload))
+
+
 def _reload_app(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
     """Reload the API with the VLM judge enabled and the echo backend."""
     monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
@@ -74,10 +112,12 @@ def _reload_app(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
     monkeypatch.setenv("VLM_JUDGE_N_FRAMES", "6")
 
     import src.api.config as config_mod
+    import src.api.services.annotation_service as ann_service_mod
     import src.api.services.dataset_service.service as ds_service_mod
     from src.api.services.vlm_judge_service import reset_vlm_judge_service
 
     config_mod._app_config = None
+    ann_service_mod._annotation_service = None
     ds_service_mod._dataset_service = None
     reset_vlm_judge_service()
 
@@ -184,6 +224,22 @@ def test_post_instruction_override_is_used(vlm_client: TestClient) -> None:
     )
     assert rsp.status_code == 202
     assert _wait_for_judge_done(vlm_client, path, rsp.json()["cache_key"])["instruction"] == "Open the drawer"
+
+
+def test_post_uses_saved_language_instruction_when_request_omits_instruction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset_root = tmp_path / DATASET_ID
+    _build_dataset(dataset_root, instruction="Dataset fallback instruction")
+    _write_saved_instruction(dataset_root, instruction="Saved episode instruction")
+    client = _reload_app(monkeypatch, tmp_path)
+    path = f"/api/datasets/{DATASET_ID}/episodes/0/judge"
+
+    rsp = client.post(path, json={"force": True})
+
+    assert rsp.status_code == 202
+    assert _wait_for_judge_done(client, path, rsp.json()["cache_key"])["instruction"] == "Saved episode instruction"
 
 
 def test_post_accepts_safe_view_filter(vlm_client: TestClient) -> None:

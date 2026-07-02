@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..config import AppConfig, get_app_config
 from ..csrf import require_csrf_token
+from ..services.annotation_service import AnnotationService, get_annotation_service
 from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.vlm_judge_service import get_vlm_judge_service
 from ..validation import (
@@ -146,6 +147,7 @@ async def get_episode_judgment(
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     cache_key: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
     service: DatasetService = Depends(get_dataset_service),
+    annotation_service: AnnotationService = Depends(get_annotation_service),
     config: AppConfig = Depends(get_app_config),
 ) -> JudgeStatus:
     """Return any cached judgment for ``(dataset_id, episode_idx)`` without inference."""
@@ -157,10 +159,17 @@ async def get_episode_judgment(
     if record is None:
         raise HTTPException(status_code=404, detail=f"Episode {episode_idx} not found")
 
+    instruction = await _resolve_judge_instruction(
+        annotation_service=annotation_service,
+        dataset_id=dataset_id,
+        episode_idx=episode_idx,
+        request_instruction=None,
+        dataset_instruction=record.instruction,
+    )
     cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id))
     resolved_cache_key = cache_key or cache.key(
         video_paths=record.video_paths,
-        instruction=record.instruction,
+        instruction=instruction,
         judge_model=judge_service.model_id,
         prompt_version=_prompt_version(),
         from_s=record.from_timestamp,
@@ -201,6 +210,7 @@ async def run_episode_judgment(
     dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     service: DatasetService = Depends(get_dataset_service),
+    annotation_service: AnnotationService = Depends(get_annotation_service),
     config: AppConfig = Depends(get_app_config),
 ) -> JudgeStatus:
     """Start the VLM judge on ``(dataset_id, episode_idx)`` and poll via GET."""
@@ -215,7 +225,13 @@ async def run_episode_judgment(
     if record is None:
         raise HTTPException(status_code=404, detail=f"Episode {episode_idx} not found")
 
-    instruction = payload.instruction or record.instruction or ""
+    instruction = await _resolve_judge_instruction(
+        annotation_service=annotation_service,
+        dataset_id=dataset_id,
+        episode_idx=episode_idx,
+        request_instruction=payload.instruction,
+        dataset_instruction=record.instruction,
+    )
     if not instruction:
         raise HTTPException(
             status_code=422,
@@ -407,6 +423,34 @@ def _dataset_path_parts(dataset_id: str) -> tuple[str, ...]:
                 detail="Path traversal detected: resolved path escapes dataset directory",
             )
     return parts
+
+
+async def _resolve_judge_instruction(
+    *,
+    annotation_service: AnnotationService,
+    dataset_id: str,
+    episode_idx: int,
+    request_instruction: str | None,
+    dataset_instruction: str,
+) -> str:
+    request_value = (request_instruction or "").strip()
+    if request_value:
+        return request_value
+
+    annotation_file = await annotation_service.get_annotation(dataset_id, episode_idx)
+    if annotation_file is not None:
+        saved: list[tuple[Any, str]] = []
+        for annotation in annotation_file.annotations:
+            language_instruction = annotation.language_instruction
+            if language_instruction is None:
+                continue
+            instruction = language_instruction.instruction.strip()
+            if instruction:
+                saved.append((annotation.timestamp, instruction))
+        if saved:
+            return max(saved, key=lambda item: item[0])[1]
+
+    return dataset_instruction or ""
 
 
 def _validate_view_name(view: str) -> str:
