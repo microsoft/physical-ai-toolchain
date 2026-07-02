@@ -3,6 +3,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     environment:
@@ -44,8 +45,9 @@ services:
       args:
         VITE_AZURE_CLIENT_ID: "${VITE_AZURE_CLIENT_ID:-}"
         VITE_AZURE_TENANT_ID: "${VITE_AZURE_TENANT_ID:-}"
+    restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-5173}:80"
+      - "${FRONTEND_PORT:-5173}:8080"
     environment:
       NGINX_BACKEND_HOST: "backend:8000"
     depends_on:
