@@ -147,6 +147,8 @@ start_backend() {
         if [[ "${VLM_JUDGE_BACKEND:-echo}" == "qwen3-vl" ]]; then
             vlm_judge_package_spec="${vlm_judge_package_spec}[qwen3-vl]"
             backend_install_extras=".[dev,analysis,export,vlm-judge]"
+        elif [[ "${VLM_JUDGE_BACKEND:-echo}" == "openai-compat" ]]; then
+            vlm_judge_package_spec="${vlm_judge_package_spec}[openai]"
         fi
     fi
 

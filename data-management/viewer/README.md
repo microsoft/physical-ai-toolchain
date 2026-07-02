@@ -94,7 +94,7 @@ the frontend's JudgePanel auto-hides when the backend reports the judge is disab
 
 #### What it does
 
-The VLM-as_judge feature samples a fixed number of
+The VLM-as-judge feature samples a fixed number of
 still frames — `VLM_JUDGE_N_FRAMES` (default 12) — evenly spaced across the
 episode's time window, decodes them with PyAV, letterboxes each to a fixed square
 (default 448×448), and, for multi-camera datasets, tiles the per-view frames

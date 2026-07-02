@@ -15,7 +15,6 @@ dependencies = [
     "pyarrow==24.0.0",
     "Pillow==12.2.0",
     "av==15.1.0",
-    "openai==2.43.0",
 ]
 
 [project.optional-dependencies]
