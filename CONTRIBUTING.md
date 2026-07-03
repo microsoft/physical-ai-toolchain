@@ -369,10 +369,11 @@ Reviewers verify regression tests are included. Compliance is tracked over time 
 
 ### Running Tests
 
-Tests are split into seven pytest component suites that mirror the CI
+Tests are split into eight pytest component suites that mirror the CI
 `pytest-*` flags (`pytest-training`, `pytest-dm-tools`,
-`pytest-data-pipeline`, `pytest-inference`, `pytest-dataviewer`,
-`pytest-evaluation`, `pytest-fuzz`). Run a single component locally:
+`pytest-data-pipeline`, `pytest-inference`, `pytest-shared-ci`,
+`pytest-dataviewer`, `pytest-evaluation`, `pytest-fuzz`). Run a single
+component locally:
 
 ```bash
 # Training (training/tests)
@@ -387,6 +388,9 @@ uv run pytest data-pipeline/capture/tests -v
 # Fleet deployment inference (fleet-deployment/inference/tests)
 uv run pytest fleet-deployment/inference/tests -v
 
+# Shared CI scripts (shared/ci/tests)
+uv run pytest shared/ci/tests -v
+
 # Dataviewer backend (data-management/viewer/backend, run from that dir)
 cd data-management/viewer/backend && uv run pytest -v
 
@@ -397,12 +401,12 @@ cd evaluation && uv run pytest -v
 uv run pytest tests/ -v
 ```
 
-Run the four root-discovered suites (`tests`, `training/tests`,
-`data-management/tools/tests`, `fleet-deployment/inference/tests`) in one
-invocation (uses the `testpaths` configured in root `pyproject.toml`).
-Dataviewer backend and evaluation run from their own project directories
-(each has its own `pyproject.toml`) and are not picked up by the root
-discovery:
+Run the five root-discovered suites (`tests`, `training/tests`,
+`data-management/tools/tests`, `fleet-deployment/inference/tests`,
+`shared/ci/tests`) in one invocation (uses the `testpaths` configured
+in root `pyproject.toml`). Dataviewer backend and evaluation run from
+their own project directories (each has its own `pyproject.toml`) and
+are not picked up by the root discovery:
 
 ```bash
 uv run pytest
@@ -459,9 +463,10 @@ Coverage thresholds increase with each milestone:
 
 CI enforces coverage on every PR through Codecov. The top-level project gates
 are the named `pester`, `pytest-training`, `pytest-dm-tools`,
-`pytest-data-pipeline`, `pytest-inference`, `pytest-dataviewer`, and
-`pytest-evaluation` statuses, each targeting 80%. The default aggregate
-project status and aggregate patch status are disabled; component-level
+`pytest-data-pipeline`, `pytest-inference`, `pytest-shared-ci`,
+`pytest-dataviewer`, and `pytest-evaluation` statuses, each targeting
+80%. The default aggregate project status and aggregate patch status are
+disabled; component-level
 project and patch statuses still apply through
 `component_management.default_rules.statuses`. `pytest-fuzz`, `vitest-*`,
 `terraform`, and `go` uploads remain tracked but are not top-level project
@@ -471,12 +476,13 @@ Codecov flag uploads remain authoritative for PR coverage gates.
 ### Configuration
 
 Pytest is centrally configured in the root `pyproject.toml` under
-`[tool.pytest.ini_options]`. The `testpaths` entry enumerates the four
+`[tool.pytest.ini_options]`. The `testpaths` entry enumerates the five
 root-discovered component test directories (`tests`, `training/tests`,
-`data-management/tools/tests`, `fleet-deployment/inference/tests`) so
-`uv run pytest` with no arguments discovers every suite served from the
-repository root. The dataviewer backend (`data-management/viewer/backend`),
-evaluation (`evaluation/`), and data-pipeline capture
+`data-management/tools/tests`, `fleet-deployment/inference/tests`,
+`shared/ci/tests`) so `uv run pytest` with no arguments discovers every
+suite served from the repository root. The dataviewer backend
+(`data-management/viewer/backend`), evaluation (`evaluation/`), and
+data-pipeline capture
 (`data-pipeline/capture`) suites have their own `pyproject.toml` and run
 from their respective directories; the matching CI flags
 (`pytest-dataviewer`, `pytest-evaluation`, `pytest-data-pipeline`) are
@@ -484,7 +490,7 @@ defined per-workflow rather than via root discovery. Default options
 applied to every root run include `-m "not e2e"`, `--strict-markers`,
 `--strict-config`, a JUnit XML report at `logs/pytest-results.xml`, and
 advisory coverage reports (`--cov=training`, `--cov=data-management/tools`,
-`--cov=fleet-deployment/inference`, `--cov=tests`,
+`--cov=fleet-deployment/inference`, `--cov=shared/ci`, `--cov=tests`,
 `--cov-report=xml:logs/coverage-root.xml`, `--cov-fail-under=0`). When
 adding tests, place them under one of the configured component directories
 (or the matching per-domain project) so they are picked up by both local

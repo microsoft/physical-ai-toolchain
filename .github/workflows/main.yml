@@ -137,6 +137,16 @@ jobs:
       contents: read
       id-token: write
 
+  # Pytest: shared CI scripts component
+  pytest-shared-ci:
+    name: Pytest Shared CI
+    uses: ./.github/workflows/pytest-shared-ci.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Dataviewer frontend lint, type-check, and build
   dataviewer-frontend-tests:
     name: Dataviewer Frontend Tests
@@ -287,6 +297,7 @@ jobs:
       - pytest-dm-tools
       - pytest-data-pipeline
       - pytest-inference
+      - pytest-shared-ci
       - dataviewer-frontend-tests
       - dataviewer-backend-pytests
       - evaluation-pytests
