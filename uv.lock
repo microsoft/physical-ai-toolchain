@@ -2047,7 +2047,7 @@ dev = [
     { name = "torch", specifier = "==2.12.1" },
     { name = "tqdm", specifier = "==4.68.3" },
 ]
-fuzz = [{ name = "atheris", specifier = ">=3.1.0" }]
+fuzz = [{ name = "atheris", specifier = "==3.1.0" }]
 
 [[package]]
 name = "pillow"
