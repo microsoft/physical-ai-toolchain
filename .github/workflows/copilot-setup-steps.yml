@@ -42,6 +42,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends shellcheck jq ffmpeg
 
+      - name: Install actionlint
+        run: scripts/setup/install-actionlint.sh
+
       - name: Install OSV-Scanner v2.3.8
         env:
           OSV_SCANNER_VERSION: 2.3.8
