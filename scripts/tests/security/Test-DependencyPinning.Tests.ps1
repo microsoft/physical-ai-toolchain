@@ -1391,6 +1391,50 @@ Describe 'Get-NpmDependencyViolations' -Tag 'Unit' {
             $violations | Where-Object { $_.Name -eq 'valid-package' } | Should -Not -BeNullOrEmpty
         }
     }
+
+    Context 'Package.json with overrides and resolutions' {
+        BeforeAll {
+            $script:overridesFileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'overrides-package.json'
+                Type         = 'npm'
+                RelativePath = 'overrides-package.json'
+            }
+        }
+
+        It 'Flags a range specifier in overrides' {
+            $violations = Get-NpmDependencyViolations -FileInfo $script:overridesFileInfo
+            $followRedirects = $violations | Where-Object { $_.Name -eq 'follow-redirects' }
+
+            $followRedirects | Should -Not -BeNullOrEmpty
+            $followRedirects.Version | Should -Be '>=1.16.0 <2.0.0'
+            $followRedirects.Metadata.Section | Should -Be 'overrides'
+        }
+
+        It 'Flags a range specifier in resolutions' {
+            $violations = Get-NpmDependencyViolations -FileInfo $script:overridesFileInfo
+            $globParent = $violations | Where-Object { $_.Name -eq 'glob-parent' }
+
+            $globParent | Should -Not -BeNullOrEmpty
+            $globParent.Metadata.Section | Should -Be 'resolutions'
+        }
+
+        It 'Flags a range specifier in a nested override object' {
+            $violations = Get-NpmDependencyViolations -FileInfo $script:overridesFileInfo
+            $bar = $violations | Where-Object { $_.Name -eq 'bar' }
+
+            $bar | Should -Not -BeNullOrEmpty
+            $bar.Version | Should -Be '^2.0.0'
+        }
+
+        It 'Does not flag exact-pinned overrides or resolutions' {
+            $violations = Get-NpmDependencyViolations -FileInfo $script:overridesFileInfo
+            $names = $violations | ForEach-Object { $_.Name }
+
+            $names | Should -Not -Contain 'semver'
+            $names | Should -Not -Contain 'minimatch'
+            $names | Should -Not -Contain 'foo'
+        }
+    }
 }
 
 Describe 'Get-PipDependencyViolations' -Tag 'Unit' {
@@ -1559,6 +1603,41 @@ Describe 'Get-PipDependencyViolations' -Tag 'Unit' {
             $violations = Get-PipDependencyViolations -FileInfo $fileInfo
 
             $violations.Count | Should -Be 0
+        }
+    }
+
+    Context 'Single-line pyproject.toml arrays' {
+        BeforeAll {
+            $script:singleLineFileInfo = @{
+                Path         = Join-Path $script:FixturesPath 'single-line-pyproject.toml'
+                Type         = 'pip'
+                RelativePath = 'single-line-pyproject.toml'
+            }
+        }
+
+        It 'Detects an unpinned dep in a single-line main dependencies array' {
+            $violations = Get-PipDependencyViolations -FileInfo $script:singleLineFileInfo
+            $numpy = $violations | Where-Object { $_.Name -eq 'numpy' }
+
+            $numpy | Should -Not -BeNullOrEmpty
+            $numpy.Version | Should -Be '>=1.26.0'
+            $numpy.Metadata.Section | Should -Be 'dependencies'
+        }
+
+        It 'Detects an unpinned dep in a single-line optional-dependencies array' {
+            $violations = Get-PipDependencyViolations -FileInfo $script:singleLineFileInfo
+            $atheris = $violations | Where-Object { $_.Name -eq 'atheris' }
+
+            $atheris | Should -Not -BeNullOrEmpty
+            $atheris.Metadata.Section | Should -Be 'fuzz'
+        }
+
+        It 'Does not flag exact-pinned deps in single-line arrays' {
+            $violations = Get-PipDependencyViolations -FileInfo $script:singleLineFileInfo
+            $names = $violations | ForEach-Object { $_.Name }
+
+            $names | Should -Not -Contain 'requests'
+            $names | Should -Not -Contain 'sphinx'
         }
     }
 }
