@@ -1,0 +1,13 @@
+# Fixture: compliant Install-Module (pinned with -RequiredVersion).
+# Used by Test-DependencyPinning.Tests.ps1 for the powershell-modules ecosystem.
+name: install-module-compliant
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install modules
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
+          Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -Scope CurrentUser

@@ -1,0 +1,10 @@
+# Fixture: compliant gh extension install (pinned with --pin).
+# Used by Test-DependencyPinning.Tests.ps1 for the gh-extension ecosystem.
+name: gh-extension-compliant
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install gh-aw
+        run: gh extension install github/gh-aw --pin v0.81.6

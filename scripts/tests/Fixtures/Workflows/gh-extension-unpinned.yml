@@ -1,0 +1,14 @@
+# Fixture: non-compliant gh extension install (no --pin, tracks HEAD).
+# Used by Test-DependencyPinning.Tests.ps1 for the gh-extension ecosystem.
+# Expected violations (1): github/gh-aw. The commented line must NOT be flagged.
+name: gh-extension-unpinned
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install gh-aw
+        run: gh extension install github/gh-aw
+      - name: Mention in a comment
+        # gh extension install github/should-not-flag
+        run: echo "noop"

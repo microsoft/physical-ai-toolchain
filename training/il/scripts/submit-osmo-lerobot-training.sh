@@ -40,7 +40,7 @@ TRAINING OPTIONS:
     -p, --policy-type TYPE        Policy architecture: act, diffusion (default: act)
     -j, --job-name NAME           Job identifier (default: lerobot-act-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
-    -i, --image IMAGE             Container image (default: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime)
+    -i, --image IMAGE             Container image (default: $DEFAULT_LEROBOT_TRAIN_IMAGE, digest-pinned in scripts/lib/common.sh)
         --policy-repo-id ID       Pre-trained policy for fine-tuning (HuggingFace repo)
         --lerobot-version VER     Specific LeRobot version
 
@@ -146,7 +146,7 @@ dataset_repo_id="${DATASET_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 job_name="${JOB_NAME:-lerobot-act-training}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
-image="${IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime}"
+image="${IMAGE:-$DEFAULT_LEROBOT_TRAIN_IMAGE}"
 policy_repo_id="${POLICY_REPO_ID:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
 dataset_root="${DATASET_ROOT:-/workspace/data}"

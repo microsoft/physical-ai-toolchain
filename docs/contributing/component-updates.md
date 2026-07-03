@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Updating External Components
 description: Process for identifying, updating, and vetting reused externally-maintained components
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-19
+ms.date: 2026-07-01
 ms.topic: how-to
 keywords:
   - component-updates
@@ -26,6 +26,7 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 | OSMO Image                | Container | `infrastructure/setup/defaults.conf` → `OSMO_IMAGE_VERSION`   | 6.3.0           | Manual           |
 | AzureML K8s Extension     | Azure CLI | `02-deploy-azureml-extension.sh` → `--release-train stable`   | Latest stable   | Automatic        |
 | Isaac Lab                 | Container | Hardcoded in 7+ files                                         | 2.3.2           | Manual grep      |
+| ORAS                      | Binary    | `scripts/security/tool-checksums.json`                        | 1.2.0           | Manual           |
 | Azure Terraform Providers | Terraform | `versions.tf` across 8 directories                            | Floor-pinned    | Dependabot (2/4) |
 | Python Packages           | uv        | `pyproject.toml`, `uv.lock`                                   | Mixed           | Dependabot       |
 | GitHub Actions            | GitHub    | Workflow YAML (18 files)                                      | SHA-pinned      | Dependabot       |
@@ -38,6 +39,7 @@ For quick dependency commands, see the [Component Updates](pull-request-process.
 | Ecosystem        | Tool or Method                                                | Command or Location                                   |
 |------------------|---------------------------------------------------------------|-------------------------------------------------------|
 | Python           | Dependabot PRs, `uv lock --upgrade`                           | `.github/dependabot.yml`, `pyproject.toml`            |
+| Shell Downloads  | Manual check, `scripts/security/tool-checksums.json`          | `tool-checksums.json`                                 |
 | Terraform        | Dependabot PRs, `terraform init -upgrade`                     | `.github/dependabot.yml`, `infrastructure/terraform/` |
 | Helm Charts      | `helm repo update && helm search repo <chart> --versions`     | NVIDIA NGC Helm repositories                          |
 | Container Images | NVIDIA NGC catalog, GitHub release pages                      | `nvcr.io/nvidia/` namespace                           |
@@ -83,6 +85,26 @@ Every Python subproject carries a committed `uv.lock` beside its `pyproject.toml
 * **Constrain** the universal lock to supported platforms with `[tool.uv] environments` (for example linux x86_64 for GPU and Isaac subprojects). Preserve these markers when regenerating.
 * Dependabot regenerates affected locks natively on dependency PRs. The read-only `uv lock --check` gate (see [CI Validation for Dependency PRs](#ci-validation-for-dependency-prs)) fails any PR whose lock drifts from its manifest, so no manual `uv lock` step is required on Dependabot PRs.
 
+## Tool Checksums
+
+The `scripts/security/tool-checksums.json` file is the repository's single source of truth for explicit tool versions and their SHA-256 digests. This file currently manages:
+
+* **ORAS**: Fetched inside the GR00T training container to push checkpoints to ACR.
+* **Actionlint**: Used in the devcontainer for GitHub Actions workflow linting.
+* **Gitleaks**: Used in the devcontainer for secret scanning.
+
+### Updating Tool Checksums
+
+When you need to update a tool managed by this manifest (e.g. bumping ORAS to a new release):
+
+1. **Find the target version and release asset**: Visit the tool's upstream release page (e.g. `https://github.com/oras-project/oras/releases`).
+2. **Retrieve the SHA-256 checksum**: Download the target asset (`oras_..._linux_amd64.tar.gz`) or its checksum file, and run `shasum -a 256 <file>`.
+3. **Update the manifest**: Edit `scripts/security/tool-checksums.json`, updating the `version` and `sha256` fields for the appropriate entry.
+4. **Commit the change**: All downstream consumers dynamically read from this file at runtime; no secondary edits are required.
+
+> [!WARNING]
+> Do not attempt to update these tools directly in shell scripts. The CI pinning scanner will flag mismatches if download URLs point to one version while checking against another, but the canonical version and hash live in `tool-checksums.json`.
+
 ## Manual Update Process
 
 ### Helm Charts
@@ -103,6 +125,10 @@ Helm chart versions are centralized in `infrastructure/setup/defaults.conf`.
 
 ### Container Images (Isaac Lab)
 
+Runtime GPU images are digest-pinned: the human-readable tag stays for legibility while an
+immutable `@sha256:<digest>` makes the pull tamper-evident. Dependabot's `docker` ecosystem only
+tracks Dockerfiles, so these tag-plus-digest references are bumped manually.
+
 1. Check NVIDIA NGC for a new Isaac Lab release
 2. Search for all current version references:
 
@@ -110,9 +136,21 @@ Helm chart versions are centralized in `infrastructure/setup/defaults.conf`.
    grep -r "2.3.2" --include="*.yaml" --include="*.yml" --include="*.toml" --include="*.sh"
    ```
 
-3. Update all references (expect 7+ files across `workflows/`, `deploy/`, `pyproject.toml`)
-4. Test a training workflow with the new image
-5. Submit PR with migration notes from the NVIDIA release changelog
+3. Resolve the digest the new tag points to:
+
+   ```bash
+   docker buildx imagetools inspect nvcr.io/nvidia/isaac-lab:<version> --format '{{.Manifest.Digest}}'
+   ```
+
+4. Update every reference to `<version>@sha256:<digest>`:
+   * `scripts/lib/common.sh` — `DEFAULT_ISAAC_LAB_IMAGE` (embed `<version>@sha256:<digest>`; `DEFAULT_ISAAC_LAB_IMAGE_VERSION` is derived from it automatically)
+   * the OSMO workflow fallback `image:` lines (kept in sync with `DEFAULT_ISAAC_LAB_IMAGE`)
+   * `setup-dev.sh` — `ISAACLAB_COMMIT`, the matching IsaacLab git commit cloned for intellisense
+   * `pyproject.toml` and any remaining tag-only references
+5. The GR00T base image (`pytorch/pytorch`) in `training/vla/workflows/osmo/groot-train.yaml` is
+   digest-pinned the same way; refresh its digest when bumping that tag.
+6. Test a training workflow with the new image
+7. Submit PR with migration notes from the NVIDIA release changelog
 
 ### Terraform Providers
 

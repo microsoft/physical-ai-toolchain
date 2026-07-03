@@ -20,7 +20,7 @@ export function AppContent() {
   const setSelectedEpisode = shellState.setSelectedEpisode
   const toggleDiagnostics = shellState.toggleDiagnostics
   const { data: capabilities } = useCapabilities(datasetId || undefined)
-  const { data: episodes } = useEpisodes(datasetId, { limit: 100 })
+  const { data: episodes } = useEpisodes(datasetId, { limit: 1000 })
 
   // Load labels for the selected dataset
   useDatasetLabels()

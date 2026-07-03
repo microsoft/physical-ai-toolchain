@@ -6,7 +6,7 @@
  * conditioning.
  */
 
-import { Plus, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Save, Trash2 } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { useEpisodeAnnotations } from '@/hooks/use-annotations'
+import { useEpisodeAnnotations, useSaveCurrentAnnotation } from '@/hooks/use-annotations'
 import { cn } from '@/lib/utils'
 import { useAnnotationStore } from '@/stores'
 import { useDatasetStore } from '@/stores/dataset-store'
@@ -39,8 +39,10 @@ const SOURCE_OPTIONS: { value: InstructionSource; label: string }[] = [
 
 export function LanguageInstructionWidget() {
   useEpisodeAnnotations('default')
+  const saveAnnotation = useSaveCurrentAnnotation()
 
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
+  const isDirty = useAnnotationStore((state) => state.isDirty)
   const updateLanguageInstruction = useAnnotationStore((state) => state.updateLanguageInstruction)
   const clearLanguageInstruction = useAnnotationStore((state) => state.clearLanguageInstruction)
 
@@ -302,15 +304,31 @@ export function LanguageInstructionWidget() {
           </div>
         </FormSection>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-destructive hover:text-destructive w-full text-xs"
-          onClick={clearLanguageInstruction}
-        >
-          <Trash2 className="mr-2 h-3 w-3" />
-          Remove Instruction
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 text-xs"
+            onClick={saveAnnotation.save}
+            disabled={!isDirty || saveAnnotation.isPending}
+          >
+            {saveAnnotation.isPending ? (
+              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-3 w-3" />
+            )}
+            Save Annotation
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive flex-1 text-xs"
+            onClick={clearLanguageInstruction}
+          >
+            <Trash2 className="mr-2 h-3 w-3" />
+            Remove Instruction
+          </Button>
+        </div>
       </CardContent>
     </Card>
   )

@@ -43,9 +43,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path logs | Out-Null
 
-      - name: Install PowerShell-Yaml
+      - name: Install powershell-yaml
         run: |
-          Install-Module -Name PowerShell-Yaml -Force -Scope CurrentUser
+          Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -Scope CurrentUser
 
       - name: Run ms.date Freshness Check
         env:

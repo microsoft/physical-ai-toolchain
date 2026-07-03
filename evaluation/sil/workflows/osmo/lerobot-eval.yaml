@@ -902,7 +902,9 @@ workflow:
             fi
 
 default-values:
-  image: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+  # Submission scripts set image from scripts/lib/common.sh via --set-string.
+  # This value is the direct-workflow fallback; keep it in sync with DEFAULT_LEROBOT_EVAL_IMAGE.
+  image: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime@sha256:0a3b9fedefe1f61ac4d5a9de9015c0863db27ca0fde2d4e37e6268147980b726
   policy_repo_id: ""
   policy_type: act
   dataset_repo_id: ""

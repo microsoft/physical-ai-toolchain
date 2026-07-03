@@ -147,6 +147,13 @@ args=(--version "$ver" --namespace "$ns")
 command "${args[@]}"
 ```
 
+**Downloads:**
+
+- Every `curl`/`wget` that fetches an installer, archive, binary, or `.deb` must verify a pinned SHA-256 within five lines of the download — via `sha256sum -c`, `shasum -a 256 -c`, or the portable `verify_sha256` helper.
+- Pin the expected digest beside the version (`TOOL_VERSION=...` + `TOOL_SHA256=...`), one digest per supported architecture.
+- The `shell-downloads` check in `scripts/security/Test-DependencyPinning.ps1` enforces this across every `.sh` in the repository.
+- When a download has no stable digest to pin — a distro/version-dependent URL whose trust comes from a GPG-signed apt repository, or an apt source list carrying only repository URLs — exempt it with `# pinning-ignore: <reason>` on the download line or the comment line directly above it.
+
 <!-- </important-conventions> -->
 
 ## Library Functions (`scripts/lib/common.sh`)

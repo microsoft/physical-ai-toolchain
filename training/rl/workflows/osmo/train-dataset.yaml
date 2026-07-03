@@ -79,7 +79,7 @@ workflow:
 default-values:
   # Submission scripts set image from scripts/lib/common.sh via --set-string.
   # This value is the direct-workflow fallback; keep it in sync with DEFAULT_ISAAC_LAB_IMAGE.
-  image: nvcr.io/nvidia/isaac-lab:2.3.2
+  image: nvcr.io/nvidia/isaac-lab:2.3.2@sha256:388dbc806f48359a964cb9f807feb226da95d0a107f470fdcad9780ea10fe6f2
   task: Isaac-Velocity-Rough-Anymal-C-v0
   num_envs: "2048"
   max_iterations: ""

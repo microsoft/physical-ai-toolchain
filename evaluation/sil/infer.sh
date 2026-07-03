@@ -61,7 +61,7 @@ Options:
   --video-length      Video recording length in steps (default: 200)
   --inference-format  Inference format: onnx, jit, or both (default: both)
   --checkpoint-uri    URI to checkpoint (.pt file)
-  --checkpoint-sha256  Expected SHA256 hash for checkpoint verification
+  --checkpoint-sha256  Expected SHA256 hash for checkpoint verification (required for plain http(s) URLs)
   --headless          Run in headless mode
   -h, --help          Show this help message
 
@@ -235,6 +235,12 @@ print(f"Downloaded: {local_file}")
 BLOB_DOWNLOAD
   else
     echo "Detected HTTP URL, using curl"
+    if [[ -z "${CHECKPOINT_SHA256}" ]]; then
+      echo "Error: --checkpoint-sha256 is required for plain http(s) checkpoint URLs" >&2
+      echo "  An unauthenticated download has no trust anchor; pin the expected SHA-256 to verify integrity." >&2
+      echo "  (MLflow runs:/ models:/ and *.blob.core.windows.net URIs are authenticated and may omit it.)" >&2
+      exit 1
+    fi
     local filename
     filename=$(basename "${uri}")
     curl -fsSL -o "${dst_dir}/${filename}" "${uri}"

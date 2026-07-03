@@ -80,6 +80,86 @@ Describe 'Test-ShellDownloadSecurity' -Tag 'Unit' {
             $result | Should -BeNullOrEmpty
         }
     }
+
+    Context 'Checksum helpers' {
+        It 'Treats the portable verify_sha256 helper as checksum verification' {
+            $content = "curl -fsSL https://example.com/uv.tar.gz -o /tmp/uv.tar.gz`nverify_sha256 `"deadbeef`" /tmp/uv.tar.gz"
+            $tmp = Join-Path $TestDrive 'verify-helper.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'verify-helper.sh' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Flags the same download when the verify_sha256 line is absent (negative control)' {
+            $content = 'curl -fsSL https://example.com/uv.tar.gz -o /tmp/uv.tar.gz'
+            $tmp = Join-Path $TestDrive 'verify-helper-missing.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'verify-helper-missing.sh' })
+            $result.Count | Should -Be 1
+        }
+    }
+
+    Context 'pinning-ignore directive' {
+        It 'Exempts a same-line marked download but still flags the next one' {
+            $content = "curl -fsSL https://example.com/a.tgz -o /tmp/a  # pinning-ignore`ncurl -fsSL https://example.com/b.tgz -o /tmp/b"
+            $tmp = Join-Path $TestDrive 'dl-ignore-sameline.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'dl-ignore-sameline.sh' })
+            $result.Count | Should -Be 1
+            $result[0].Line | Should -Be 2
+        }
+
+        It 'Exempts a download preceded by a dedicated pinning-ignore comment line' {
+            $content = "# pinning-ignore: trusted GPG-signed apt repo`ncurl -fsSL https://example.com/repo.list -o /tmp/repo.list"
+            $tmp = Join-Path $TestDrive 'dl-ignore-prevline.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'dl-ignore-prevline.sh' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Still flags a download whose URL contains the marker outside a comment' {
+            $content = 'curl -fsSL https://example.com/pinning-ignore-tool.tgz -o /tmp/x'
+            $tmp = Join-Path $TestDrive 'dl-marker-in-url.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'dl-marker-in-url.sh' })
+            $result.Count | Should -Be 1
+        }
+
+        It 'Still flags a download when the marker follows a # embedded in a URL (not a comment)' {
+            $content = 'curl -fsSL "https://example.com/a#b" -o /tmp/pinning-ignore-out.tgz'
+            $tmp = Join-Path $TestDrive 'dl-hash-in-url.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'dl-hash-in-url.sh' })
+            $result.Count | Should -Be 1
+        }
+
+        It 'Flags a download when the marker is not on the immediately preceding line' {
+            $content = "# pinning-ignore: x`n# intervening comment`ncurl -fsSL https://example.com/a.tgz -o /tmp/a"
+            $tmp = Join-Path $TestDrive 'dl-ignore-gap.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'dl-ignore-gap.sh' })
+            $result.Count | Should -Be 1
+            $result[0].Line | Should -Be 3
+        }
+    }
+
+    Context 'Comment lines' {
+        It 'Does not flag a curl/wget inside a comment line' {
+            $content = '# example: curl -fsSL https://example.com/install.sh | bash'
+            $tmp = Join-Path $TestDrive 'dl-comment.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'dl-comment.sh' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Returns no violations for a file of only comments and blank lines' {
+            $content = "#!/usr/bin/env bash`n`n# no downloads here`n"
+            $tmp = Join-Path $TestDrive 'dl-comments-only.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'dl-comments-only.sh' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
 }
 
 Describe 'Get-DependencyViolation' -Tag 'Unit' {
@@ -210,12 +290,54 @@ Describe 'Get-ShellInlinePipViolations' -Tag 'Unit' {
             $result | Should -BeNullOrEmpty
         }
 
+        It 'Treats uv pip option values in lock-derived installs as compliant' {
+            $content = 'uv export --frozen | uv pip install --torch-backend cpu --no-deps --requirement -'
+            $tmp = Join-Path $TestDrive 'uv-pip-option-value.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'uv-pip-option-value.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats requirement-only installs as compliant' {
+            $content = 'pip install -r requirements.txt'
+            $tmp = Join-Path $TestDrive 'requirement-only.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'requirement-only.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Allows extra exact-pinned packages with requirement installs' {
+            $content = 'pip install --requirement requirements.txt requests==2.32.0'
+            $tmp = Join-Path $TestDrive 'requirement-pinned-extra.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'requirement-pinned-extra.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
         It 'Treats editable installs (-e .) as compliant' {
             $content = 'pip install -e .[base]'
             $tmp = Join-Path $TestDrive 'editable.yaml'
             Set-Content -Path $tmp -Value $content
             $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'editable.yaml' })
             $result | Should -BeNullOrEmpty
+        }
+
+        It 'Still validates extra package args after a requirement file' {
+            $content = 'pip install -r requirements.txt requests'
+            $tmp = Join-Path $TestDrive 'mixed-requirement.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'mixed-requirement.yaml' })
+            $result.Count | Should -Be 1
+            $result.Name | Should -Be 'requests'
+        }
+
+        It 'Still validates extra uv pip args after a long requirement flag' {
+            $content = 'uv pip install --requirement req.txt matplotlib'
+            $tmp = Join-Path $TestDrive 'mixed-uv-requirement.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'mixed-uv-requirement.yaml' })
+            $result.Count | Should -Be 1
+            $result.Name | Should -Be 'matplotlib'
         }
 
         It 'Treats pinned uv run --with specs as compliant' {
@@ -283,6 +405,26 @@ Describe 'Get-ShellInlinePipViolations' -Tag 'Unit' {
         }
     }
 
+    Context 'Mixed requirement and inline installs' {
+        It 'Flags bare packages mixed with requirement files' {
+            $content = 'pip install -r requirements.txt requests'
+            $tmp = Join-Path $TestDrive 'mixed-req.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'mixed-req.yaml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'requests'
+        }
+
+        It 'Flags bare packages mixed with uv export pipes' {
+            $content = 'uv export --frozen | uv pip install --no-deps -r - requests'
+            $tmp = Join-Path $TestDrive 'mixed-uv-export.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'mixed-uv-export.yaml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'requests'
+        }
+    }
+
     Context 'Unpinned uv run --with' {
         It 'Flags unpinned --with specs' {
             $content = "uv run --with requests python s.py`nuvx --with 'mlflow>=2.8,<3' tool"
@@ -300,6 +442,15 @@ Describe 'Get-ShellInlinePipViolations' -Tag 'Unit' {
             $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'uvrun-equals.yaml' })
             $result.Count | Should -Be 2
             ($result.Name | Sort-Object) | Should -Be @('mlflow', 'requests')
+        }
+
+        It 'Flags extra unpinned packages with requirement installs' {
+            $content = 'pip install -r requirements.txt requests'
+            $tmp = Join-Path $TestDrive 'requirement-unpinned-extra.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'requirement-unpinned-extra.yaml' })
+            $result.Count | Should -Be 1
+            $result.Name | Should -Be 'requests'
         }
     }
 
@@ -322,6 +473,16 @@ Describe 'Get-ShellInlinePipViolations' -Tag 'Unit' {
             }
             $result = Get-ShellInlinePipViolations -FileInfo $fileInfo
             $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Single-line files' {
+        It 'Flags an unpinned install in a single-line file' {
+            $content = 'pip install requests'
+            $tmp = Join-Path $TestDrive 'single-line-install.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'single-line-install.yaml' })
+            $result.Name | Should -Be 'requests'
         }
     }
 }
@@ -370,18 +531,35 @@ Describe 'Get-ShellInlinePipViolations (.sh files)' -Tag 'Unit' {
             $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'ignore-prevline.sh' })
             $result | Should -BeNullOrEmpty
         }
+
+        It 'Still flags an install whose argument contains the marker outside a comment' {
+            $content = 'pip install pinning-ignore-pkg'
+            $tmp = Join-Path $TestDrive 'inline-marker-in-arg.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'inline-marker-in-arg.sh' })
+            $result.Count | Should -Be 1
+        }
+
+        It 'Still flags an install when the marker follows a # embedded in the spec (not a comment)' {
+            $content = 'pip install requests#pinning-ignore'
+            $tmp = Join-Path $TestDrive 'inline-hash-in-spec.sh'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-ShellInlinePipViolations -FileInfo @{ Path = $tmp; Type = 'shell-inline-pip'; RelativePath = 'inline-hash-in-spec.sh' })
+            $result.Count | Should -Be 1
+        }
     }
 }
 
 Describe 'Get-FilesToScan shell-inline-pip discovery' -Tag 'Unit' {
     BeforeAll {
         $script:ScanRoot = Join-Path $TestDrive 'scan-root'
-        foreach ($d in @('.github/workflows', 'workflows/nested', 'external/x/workflows')) {
+        foreach ($d in @('.github/workflows', 'workflows/nested', 'scripts', 'external/x/workflows')) {
             New-Item -ItemType Directory -Path (Join-Path $script:ScanRoot $d) -Force | Out-Null
         }
         $body = "steps:`n  - run: uv pip install requests"
         Set-Content -Path (Join-Path $script:ScanRoot '.github/workflows/ci.yml') -Value $body
         Set-Content -Path (Join-Path $script:ScanRoot 'workflows/nested/deep.yaml') -Value $body
+        Set-Content -Path (Join-Path $script:ScanRoot 'scripts/shared.sh') -Value 'uv pip install requests'
         Set-Content -Path (Join-Path $script:ScanRoot 'external/x/workflows/vendor.yaml') -Value $body
     }
 
@@ -400,6 +578,230 @@ Describe 'Get-FilesToScan shell-inline-pip discovery' -Tag 'Unit' {
         $rels = @(Get-FilesToScan -ScanPath $script:ScanRoot -Types @('shell-inline-pip') -ExcludePatterns @('nested') -Recursive).RelativePath -replace '\\', '/'
         $rels | Should -Not -Contain 'workflows/nested/deep.yaml'
         $rels | Should -Contain '.github/workflows/ci.yml'
+    }
+
+    It 'Keeps each scan type for files matched by multiple validators' {
+        $results = @(Get-FilesToScan -ScanPath $script:ScanRoot -Types @('shell-downloads', 'shell-inline-pip') -Recursive)
+        $types = @(
+            $results |
+                Where-Object { ($_.RelativePath -replace '\\', '/') -eq 'scripts/shared.sh' } |
+                ForEach-Object Type |
+                Sort-Object
+        )
+
+        $types | Should -Be @('shell-downloads', 'shell-inline-pip')
+    }
+}
+
+Describe 'Get-FilesToScan shell-downloads discovery' -Tag 'Unit' {
+    BeforeAll {
+        $script:DlScanRoot = Join-Path $TestDrive 'dl-scan-root'
+        foreach ($d in @('scripts', 'training/component/scripts', 'infrastructure/setup/optional', 'external/vendor')) {
+            New-Item -ItemType Directory -Path (Join-Path $script:DlScanRoot $d) -Force | Out-Null
+        }
+        $body = 'curl -fsSL https://example.com/tool.tgz -o /tmp/tool.tgz'
+        Set-Content -Path (Join-Path $script:DlScanRoot 'scripts/root.sh') -Value $body
+        Set-Content -Path (Join-Path $script:DlScanRoot 'training/component/scripts/nested.sh') -Value $body
+        Set-Content -Path (Join-Path $script:DlScanRoot 'infrastructure/setup/optional/install.sh') -Value $body
+        Set-Content -Path (Join-Path $script:DlScanRoot 'external/vendor/vendor.sh') -Value $body
+    }
+
+    It 'Discovers .sh outside the root scripts/ directory (nested and non-scripts paths)' {
+        $rels = @(Get-FilesToScan -ScanPath $script:DlScanRoot -Types @('shell-downloads') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Contain 'scripts/root.sh'
+        $rels | Should -Contain 'training/component/scripts/nested.sh'
+        $rels | Should -Contain 'infrastructure/setup/optional/install.sh'
+    }
+
+    It 'Prunes vendored trees (external/)' {
+        $rels = @(Get-FilesToScan -ScanPath $script:DlScanRoot -Types @('shell-downloads') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Not -Contain 'external/vendor/vendor.sh'
+    }
+}
+
+Describe 'Get-DockerImageViolations' -Tag 'Unit' {
+    Context 'Compliant image references' {
+        It 'Returns no violations for digest-pinned, templated, variable, or exempted images' {
+            $testFile = Join-Path $script:FixturesPath 'docker-image-compliant-workflow.yaml'
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $testFile; Type = 'docker'; RelativePath = 'docker-image-compliant-workflow.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Unpinned image references' {
+        BeforeAll {
+            $testFile = Join-Path $script:FixturesPath 'docker-image-unpinned-workflow.yaml'
+            $script:DockerResult = @(Get-DockerImageViolations -FileInfo @{ Path = $testFile; Type = 'docker'; RelativePath = 'docker-image-unpinned-workflow.yaml' })
+        }
+
+        It 'Flags every tag-only OCI image' {
+            $script:DockerResult.Count | Should -Be 3
+        }
+
+        It 'Flags the expected image repositories' {
+            ($script:DockerResult.Name | Sort-Object) | Should -Be @('nvcr.io/nvidia/isaac-lab', 'python', 'pytorch/pytorch')
+        }
+
+        It 'Records the tag as the unpinned version' {
+            ($script:DockerResult | Where-Object { $_.Name -eq 'python' }).Version | Should -Be '3.11-slim'
+        }
+
+        It 'Reports violations as docker type with warning severity' {
+            $script:DockerResult[0].Type | Should -Be 'docker'
+            $script:DockerResult[0].Severity | Should -Be 'warning'
+        }
+    }
+
+    Context 'Reference-shape handling' {
+        It 'Treats a @sha256 digest pin as compliant' {
+            $content = "workflow:`n  image: nvcr.io/nvidia/isaac-lab:2.3.2@sha256:388dbc806f48359a964cb9f807feb226da95d0a107f470fdcad9780ea10fe6f2"
+            $tmp = Join-Path $TestDrive 'pinned.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'pinned.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Skips submission-time templated images ({{ image }})' {
+            $content = '  image: "{{ image }}"'
+            $tmp = Join-Path $TestDrive 'templated.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'templated.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Skips shell-variable images ($VAR and ${VAR})' {
+            $content = "  image: `$IMAGE`n  image: `${CONTAINER_IMAGE}"
+            $tmp = Join-Path $TestDrive 'var.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'var.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Skips AzureML asset references on an image: field' {
+            $content = '  image: azureml:some-asset:latest'
+            $tmp = Join-Path $TestDrive 'aml-image.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'aml-image.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Does not inspect environment: fields (AzureML :latest is left untouched)' {
+            $content = '  environment: azureml:lerobot-training-env:latest'
+            $tmp = Join-Path $TestDrive 'env.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'env.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Ignores a YAML comment that mentions image:' {
+            $content = '  # image: example.com/repo:tag is just prose'
+            $tmp = Join-Path $TestDrive 'comment.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'comment.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Single-line files' {
+        It 'Flags an unpinned image in a single-line file' {
+            $content = '  image: python:3.11-slim'
+            $tmp = Join-Path $TestDrive 'single-line-image.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'single-line-image.yaml' })
+            $result.Name | Should -Be 'python'
+        }
+    }
+
+    Context 'Helm values init/client keys' {
+        It 'Flags an unpinned image under an init: key' {
+            $content = '  init: "nvcr.io/nvidia/osmo/init-container:6.3.0"'
+            $tmp = Join-Path $TestDrive 'init-unpinned.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'init-unpinned.yaml' })
+            $result.Name | Should -Be 'nvcr.io/nvidia/osmo/init-container'
+            $result.Version | Should -Be '6.3.0'
+        }
+
+        It 'Flags an unpinned image under a client: key' {
+            $content = '  client: "nvcr.io/nvidia/osmo/client:6.3.0"'
+            $tmp = Join-Path $TestDrive 'client-unpinned.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'client-unpinned.yaml' })
+            $result.Name | Should -Be 'nvcr.io/nvidia/osmo/client'
+        }
+
+        It 'Treats a digest-pinned init: image as compliant' {
+            $content = '  init: "nvcr.io/nvidia/osmo/init-container:6.3.0@sha256:1071863497eba749e4f680a336a08e0fe48cba7d0ddea402fecb732bb6de2041"'
+            $tmp = Join-Path $TestDrive 'init-pinned.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'init-pinned.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Ignores plain scalars under init:/client: (no registry path)' {
+            $content = "  init: true`n  client: guest"
+            $tmp = Join-Path $TestDrive 'scalar-init-client.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'scalar-init-client.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'pinning-ignore directive' {
+        It 'Exempts a same-line marked image but still flags the next' {
+            $content = "  image: busybox:latest  # pinning-ignore`n  image: redis:7"
+            $tmp = Join-Path $TestDrive 'ignore-sameline.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'ignore-sameline.yaml' })
+            $result.Name | Should -Be 'redis'
+        }
+
+        It 'Exempts an image preceded by a dedicated pinning-ignore comment line' {
+            $content = "  # pinning-ignore: local dev only`n  image: busybox:latest"
+            $tmp = Join-Path $TestDrive 'ignore-prevline.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'ignore-prevline.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'File not found' {
+        It 'Returns empty array for non-existent file' {
+            $result = Get-DockerImageViolations -FileInfo @{ Path = 'TestDrive:/nope/wf.yaml'; Type = 'docker'; RelativePath = 'nope/wf.yaml' }
+            $result | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Get-FilesToScan docker discovery' -Tag 'Unit' {
+    BeforeAll {
+        $script:DockerScanRoot = Join-Path $TestDrive 'docker-scan-root'
+        New-Item -ItemType Directory -Path (Join-Path $script:DockerScanRoot 'training/workflows/osmo') -Force | Out-Null
+        Set-Content -Path (Join-Path $script:DockerScanRoot 'training/workflows/osmo/t.yaml') -Value 'image: foo:bar'
+        Set-Content -Path (Join-Path $script:DockerScanRoot 'training/workflows/osmo/notes.sh') -Value 'echo hi'
+        New-Item -ItemType Directory -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/manifests') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/values') -Force | Out-Null
+        Set-Content -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/manifests/m.yaml') -Value 'image: foo:bar'
+        Set-Content -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/values/v.yaml') -Value 'init: reg.io/x:1'
+    }
+
+    It 'Discovers workflow YAML but not .sh under the docker type' {
+        $rels = @(Get-FilesToScan -ScanPath $script:DockerScanRoot -Types @('docker') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Contain 'training/workflows/osmo/t.yaml'
+        $rels | Should -Not -Contain 'training/workflows/osmo/notes.sh'
+    }
+
+    It 'Keeps one scan entry per path and type for overlapping scanners' {
+        $files = @(Get-FilesToScan -ScanPath $script:DockerScanRoot -Types @('shell-inline-pip', 'docker') -Recursive)
+        $workflowScans = @($files | Where-Object { $_.RelativePath -replace '\\', '/' -eq 'training/workflows/osmo/t.yaml' })
+        $workflowScans.Count | Should -Be 2
+        ($workflowScans.Type | Sort-Object) | Should -Be @('docker', 'shell-inline-pip')
+    }
+
+    It 'Discovers Kubernetes manifests and Helm values under the docker type' {
+        $rels = @(Get-FilesToScan -ScanPath $script:DockerScanRoot -Types @('docker') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Contain 'infrastructure/setup/manifests/m.yaml'
+        $rels | Should -Contain 'infrastructure/setup/values/v.yaml'
     }
 }
 
@@ -620,6 +1022,32 @@ Describe 'Dot-sourced execution protection' -Tag 'Integration' {
             # Assert - Functions should be importable via dot-sourcing
             $result | Should -Contain 'available'
         }
+    }
+}
+
+Describe 'Default fixture exclusions' -Tag 'Integration' {
+    It 'Excludes intentionally insecure fixtures from direct scans' {
+        $scanRoot = Join-Path $TestDrive 'scan-root'
+        $scriptDir = Join-Path $scanRoot 'app'
+        $fixtureDir = Join-Path $scanRoot 'scripts/tests/Fixtures/Security'
+        New-Item -ItemType Directory -Path $scriptDir, $fixtureDir -Force | Out-Null
+        Set-Content -Path (Join-Path $scriptDir 'run.sh') -Value 'pip install requests'
+        Set-Content -Path (Join-Path $fixtureDir 'inline-pip-unpinned.sh') -Value 'pip install flask'
+
+        $scriptPath = Join-Path $PSScriptRoot '../../security/Test-DependencyPinning.ps1'
+        $reportPath = Join-Path $TestDrive 'dependency-pinning-results.json'
+
+        pwsh -NoProfile -File $scriptPath `
+            -Path $scanRoot `
+            -Recursive `
+            -IncludeTypes 'shell-inline-pip' `
+            -Format json `
+            -OutputPath $reportPath `
+            -Threshold 0 | Out-Null
+
+        $report = Get-Content -Path $reportPath -Raw | ConvertFrom-Json
+        $report.UnpinnedDependencies | Should -Be 1
+        ($report.Violations[0].File -replace '\\', '/') | Should -Be 'app/run.sh'
     }
 }
 
@@ -1380,5 +1808,292 @@ jobs:
         pwsh -Command "& '$script:TestScript' -Path '$workDir' -Format 'json' -OutputPath '$jsonPath' -FailOnUnpinned -Threshold 100 2>&1" | Out-Null
 
         $LASTEXITCODE | Should -Be 1
+    }
+}
+
+Describe 'Get-GhExtensionPinViolations' -Tag 'Unit' {
+    BeforeAll {
+        $script:FixturesPath = Join-Path $PSScriptRoot '../Fixtures/Workflows'
+    }
+    Context 'Compliant install' {
+        It 'Returns no violations when --pin is present' {
+            $testFile = Join-Path $script:FixturesPath 'gh-extension-compliant.yml'
+            $result = @(Get-GhExtensionPinViolations -FileInfo @{ Path = $testFile; Type = 'gh-extension'; RelativePath = 'gh-extension-compliant.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Unpinned install' {
+        It 'Flags an install without --pin and ignores a commented mention' {
+            $testFile = Join-Path $script:FixturesPath 'gh-extension-unpinned.yml'
+            $result = @(Get-GhExtensionPinViolations -FileInfo @{ Path = $testFile; Type = 'gh-extension'; RelativePath = 'gh-extension-unpinned.yml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'github/gh-aw'
+            $result[0].Severity | Should -Be 'warning'
+        }
+
+        It 'Honors a trailing pinning-ignore directive' {
+            $tmp = Join-Path $TestDrive 'gh-ignore.sh'
+            Set-Content -Path $tmp -Value 'gh extension install github/gh-aw  # pinning-ignore'
+            $result = @(Get-GhExtensionPinViolations -FileInfo @{ Path = $tmp; Type = 'gh-extension'; RelativePath = 'gh-ignore.sh' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'File not found' {
+        It 'Returns empty array for non-existent file' {
+            $result = @(Get-GhExtensionPinViolations -FileInfo @{ Path = 'TestDrive:/nope.yml'; Type = 'gh-extension'; RelativePath = 'nope.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Get-PowerShellModuleViolations' -Tag 'Unit' {
+    BeforeAll {
+        $script:FixturesPath = Join-Path $PSScriptRoot '../Fixtures/Workflows'
+    }
+    Context 'Compliant install' {
+        It 'Returns no violations when every Install-Module pins -RequiredVersion' {
+            $testFile = Join-Path $script:FixturesPath 'install-module-compliant.yml'
+            $result = @(Get-PowerShellModuleViolations -FileInfo @{ Path = $testFile; Type = 'powershell-modules'; RelativePath = 'install-module-compliant.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Unpinned install' {
+        It 'Flags installs missing -RequiredVersion and ignores Mock and string mentions' {
+            $testFile = Join-Path $script:FixturesPath 'install-module-unpinned.yml'
+            $result = @(Get-PowerShellModuleViolations -FileInfo @{ Path = $testFile; Type = 'powershell-modules'; RelativePath = 'install-module-unpinned.yml' })
+            $result.Count | Should -Be 2
+            ($result.Name | Sort-Object) | Should -Be @('powershell-yaml', 'PSScriptAnalyzer' | Sort-Object)
+        }
+
+        It 'Treats -MinimumVersion as a range, not a pin' {
+            $tmp = Join-Path $TestDrive 'minver.ps1'
+            Set-Content -Path $tmp -Value 'Install-Module -Name powershell-yaml -MinimumVersion 0.4.0 -Force'
+            $result = @(Get-PowerShellModuleViolations -FileInfo @{ Path = $tmp; Type = 'powershell-modules'; RelativePath = 'minver.ps1' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'powershell-yaml'
+        }
+    }
+
+    Context 'File not found' {
+        It 'Returns empty array for non-existent file' {
+            $result = @(Get-PowerShellModuleViolations -FileInfo @{ Path = 'TestDrive:/nope.yml'; Type = 'powershell-modules'; RelativePath = 'nope.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Test-ShellDownloadSecurity (workflow run: blocks)' -Tag 'Unit' {
+    It 'Flags curl/wget without checksum inside a workflow run: block' {
+        $content = @'
+steps:
+  - run: |
+      curl -sLO https://example.com/oras.tar.gz
+      tar xzf oras.tar.gz -C /usr/local/bin/ oras
+'@
+        $tmp = Join-Path $TestDrive 'insecure-dl.yaml'
+        Set-Content -Path $tmp -Value $content
+        $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'insecure-dl.yaml' })
+        $result.Count | Should -Be 1
+        $result[0].Severity | Should -Be 'warning'
+    }
+
+    It 'Does not flag a download followed by sha256sum verification' {
+        $content = @'
+steps:
+  - run: |
+      curl -sLO https://example.com/oras.tar.gz
+      echo "abc  oras.tar.gz" | sha256sum -c -
+'@
+        $tmp = Join-Path $TestDrive 'verified-dl.yaml'
+        Set-Content -Path $tmp -Value $content
+        $result = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'verified-dl.yaml' })
+        $result | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-FilesToScan composite-action and workflow-download discovery' -Tag 'Unit' {
+    BeforeAll {
+        $script:ScanRoot2 = Join-Path $TestDrive 'scan-root-2'
+        foreach ($d in @('.github/workflows', '.github/actions/foo', '.github/actions/bar', 'training/x/workflows/osmo', 'scripts')) {
+            New-Item -ItemType Directory -Path (Join-Path $script:ScanRoot2 $d) -Force | Out-Null
+        }
+        Set-Content -Path (Join-Path $script:ScanRoot2 '.github/workflows/ci.yml') -Value "jobs: {}"
+        Set-Content -Path (Join-Path $script:ScanRoot2 '.github/actions/foo/action.yml') -Value "runs: { using: composite }"
+        Set-Content -Path (Join-Path $script:ScanRoot2 '.github/actions/bar/action.yaml') -Value "runs: { using: composite }"
+        Set-Content -Path (Join-Path $script:ScanRoot2 'training/x/workflows/osmo/job.yaml') -Value "tasks: []"
+        Set-Content -Path (Join-Path $script:ScanRoot2 'scripts/tool.sh') -Value "echo hi"
+    }
+
+    It 'Discovers composite actions under .github/actions for github-actions' {
+        $rels = @(Get-FilesToScan -ScanPath $script:ScanRoot2 -Types @('github-actions') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Contain '.github/actions/foo/action.yml'
+        $rels | Should -Contain '.github/actions/bar/action.yaml'
+        $rels | Should -Contain '.github/workflows/ci.yml'
+    }
+
+    It 'Discovers workflow YAML and shell scripts for shell-downloads' {
+        $rels = @(Get-FilesToScan -ScanPath $script:ScanRoot2 -Types @('shell-downloads') -Recursive).RelativePath -replace '\\', '/'
+        $rels | Should -Contain '.github/workflows/ci.yml'
+        $rels | Should -Contain 'training/x/workflows/osmo/job.yaml'
+        $rels | Should -Contain 'scripts/tool.sh'
+    }
+}
+
+Describe 'Join-LineContinuations' -Tag 'Unit' {
+    It 'Preserves blank lines (empty-string elements) without a binding error' {
+        $r = Join-LineContinuations -Lines @('a', '', 'b') -ContinuationPattern '\\\s*$'
+        $r.Count | Should -Be 3
+    }
+
+    It 'Joins a bash backslash continuation and tracks the start line' {
+        $r = @(Join-LineContinuations -Lines @('foo \', '  bar', 'baz') -ContinuationPattern '\\\s*$')
+        $r.Count | Should -Be 2
+        $r[0].Text | Should -Match 'foo\s+bar'
+        $r[0].Line | Should -Be 1
+        $r[1].Line | Should -Be 3
+    }
+
+    It 'Joins a PowerShell backtick continuation only when the pattern includes it' {
+        $bt = [char]96
+        $lines = @("foo $bt", '  bar')
+        @(Join-LineContinuations -Lines $lines -ContinuationPattern '[\\`]\s*$').Count | Should -Be 1
+        @(Join-LineContinuations -Lines $lines -ContinuationPattern '\\\s*$').Count | Should -Be 2
+    }
+}
+
+Describe 'Get-FilesToScan multi-type routing' -Tag 'Unit' {
+    BeforeAll {
+        $script:MultiRoot = Join-Path $TestDrive 'multi-root'
+        New-Item -ItemType Directory -Path (Join-Path $script:MultiRoot '.github/workflows') -Force | Out-Null
+        Set-Content -Path (Join-Path $script:MultiRoot '.github/workflows/ci.yml') -Value "jobs: {}"
+    }
+
+    It 'Returns one entry per matching type for a workflow YAML (dedup by Path+Type, not Path)' {
+        $entries = @(Get-FilesToScan -ScanPath $script:MultiRoot -Types @('github-actions', 'gh-extension', 'powershell-modules') -Recursive)
+        $ciEntries = @($entries | Where-Object { ($_.RelativePath -replace '\\', '/') -eq '.github/workflows/ci.yml' })
+        $ciEntries.Count | Should -Be 3
+        ($ciEntries.Type | Sort-Object) | Should -Be @('gh-extension', 'github-actions', 'powershell-modules')
+    }
+}
+
+Describe 'Test-DependencyPinning end-to-end routing' -Tag 'Unit' {
+    BeforeAll {
+        $script:TestScript = Join-Path $PSScriptRoot '../../security/Test-DependencyPinning.ps1'
+    }
+
+    It 'Reports every applicable validator for one workflow file (gh-extension and powershell-modules are not shadowed by github-actions)' {
+        $root = Join-Path $TestDrive 'e2e-root'
+        New-Item -ItemType Directory -Path (Join-Path $root '.github/workflows') -Force | Out-Null
+        $wf = @'
+name: bad
+on: push
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: gh extension install github/gh-aw
+      - shell: pwsh
+        run: Install-Module -Name powershell-yaml -Force -Scope CurrentUser
+'@
+        Set-Content -Path (Join-Path $root '.github/workflows/bad.yml') -Value $wf
+
+        $jsonPath = Join-Path $TestDrive 'e2e.json'
+        & $script:TestScript -Path $root -Recursive -Format json -OutputPath $jsonPath 2>&1 | Out-Null
+        $report = Get-Content $jsonPath -Raw | ConvertFrom-Json
+        $types = @($report.Violations.Type | Sort-Object -Unique)
+        $types | Should -Contain 'github-actions'
+        $types | Should -Contain 'gh-extension'
+        $types | Should -Contain 'powershell-modules'
+    }
+
+    It 'Still flags unpinned inline pip in a workflow YAML (shell-downloads glob does not shadow shell-inline-pip)' {
+        $root = Join-Path $TestDrive 'e2e-pip-root'
+        New-Item -ItemType Directory -Path (Join-Path $root 'training/x/workflows/osmo') -Force | Out-Null
+        $wf = @'
+tasks:
+  - name: t
+    args:
+      - "-lc"
+      - |
+        curl -sLO https://example.com/x.tgz
+        pip install requests
+'@
+        Set-Content -Path (Join-Path $root 'training/x/workflows/osmo/job.yaml') -Value $wf
+
+        $jsonPath = Join-Path $TestDrive 'e2e-pip.json'
+        & $script:TestScript -Path $root -Recursive -Format json -OutputPath $jsonPath 2>&1 | Out-Null
+        $report = Get-Content $jsonPath -Raw | ConvertFrom-Json
+        @($report.Violations | Where-Object { $_.Type -eq 'shell-inline-pip' -and $_.Name -eq 'requests' }).Count | Should -BeGreaterThan 0
+    }
+}
+
+Describe 'New validators: continuation and flow-style robustness' -Tag 'Unit' {
+    It 'gh-extension: does not flag a pin split across a bash backslash continuation' {
+        $tmp = Join-Path $TestDrive 'gh-cont.yml'
+        Set-Content -Path $tmp -Value "      gh extension install github/gh-aw \`n        --pin v0.81.6"
+        $r = @(Get-GhExtensionPinViolations -FileInfo @{ Path = $tmp; Type = 'gh-extension'; RelativePath = 'gh-cont.yml' })
+        $r | Should -BeNullOrEmpty
+    }
+
+    It 'gh-extension: a bash backtick command-substitution is not a continuation (flags the install at its own line)' {
+        $bt = [char]96
+        $tmp = Join-Path $TestDrive 'gh-bash-subst.sh'
+        Set-Content -Path $tmp -Value "msg=${bt}echo skip --pin${bt}`ngh extension install github/gh-aw"
+        $r = @(Get-GhExtensionPinViolations -FileInfo @{ Path = $tmp; Type = 'gh-extension'; RelativePath = 'gh-bash-subst.sh' })
+        $r.Count | Should -Be 1
+        $r[0].Line | Should -Be 2
+    }
+
+    It 'powershell-modules: does not flag -RequiredVersion split across a backtick continuation' {
+        $bt = [char]96
+        $tmp = Join-Path $TestDrive 'pm-cont.yml'
+        Set-Content -Path $tmp -Value "      Install-Module -Name powershell-yaml $bt`n        -RequiredVersion 0.4.12 -Force"
+        $r = @(Get-PowerShellModuleViolations -FileInfo @{ Path = $tmp; Type = 'powershell-modules'; RelativePath = 'pm-cont.yml' })
+        $r | Should -BeNullOrEmpty
+    }
+
+    It 'powershell-modules: flags a flow-style `run: Install-Module ...` step (no run: prefix shadowing)' {
+        $tmp = Join-Path $TestDrive 'pm-flow.yml'
+        Set-Content -Path $tmp -Value '      - run: Install-Module -Name powershell-yaml -Force -Scope CurrentUser'
+        $r = @(Get-PowerShellModuleViolations -FileInfo @{ Path = $tmp; Type = 'powershell-modules'; RelativePath = 'pm-flow.yml' })
+        $r.Count | Should -Be 1
+        $r[0].Name | Should -Be 'powershell-yaml'
+    }
+
+    It 'powershell-modules: does not flag Install-Module mentioned inside a block comment' {
+        $tmp = Join-Path $TestDrive 'pm-blockcomment.ps1'
+        Set-Content -Path $tmp -Value @'
+<#
+    Install-Module without -RequiredVersion resolves latest at run time.
+#>
+Write-Host 'noop'
+'@
+        $r = @(Get-PowerShellModuleViolations -FileInfo @{ Path = $tmp; Type = 'powershell-modules'; RelativePath = 'pm-blockcomment.ps1' })
+        $r | Should -BeNullOrEmpty
+    }
+
+    It 'powershell-modules: does not flag Install-Module inside a here-string body' {
+        $tmp = Join-Path $TestDrive 'pm-herestring.ps1'
+        $content = @(
+            "`$wf = @'"
+            'run: Install-Module -Name powershell-yaml -Force'
+            "'@"
+        )
+        Set-Content -Path $tmp -Value $content
+        $r = @(Get-PowerShellModuleViolations -FileInfo @{ Path = $tmp; Type = 'powershell-modules'; RelativePath = 'pm-herestring.ps1' })
+        $r | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Test-ShellDownloadSecurity single-line file' -Tag 'Unit' {
+    It 'Flags an unverified download in a single-line file (no scalar Get-Content trap)' {
+        $tmp = Join-Path $TestDrive 'oneline.sh'
+        Set-Content -Path $tmp -Value 'curl -sL https://example.com/install.sh | bash'
+        $r = @(Test-ShellDownloadSecurity -FileInfo @{ Path = $tmp; Type = 'shell-downloads'; RelativePath = 'oneline.sh' })
+        $r.Count | Should -Be 1
     }
 }

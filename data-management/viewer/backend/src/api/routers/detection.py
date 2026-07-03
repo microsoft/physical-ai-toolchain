@@ -71,9 +71,31 @@ async def run_detection(
     total_frames = episode.meta.length
     logger.info("Episode has %d frames", total_frames)
 
+    # Resolve camera: explicit request value > first camera reported by the episode.
+    available_cameras = list(episode.cameras or [])
+    requested_camera = request_body.camera
+    if requested_camera is not None:
+        if requested_camera not in available_cameras and available_cameras:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Camera '{requested_camera}' not available for this episode. "
+                    f"Available cameras: {available_cameras}"
+                ),
+            )
+        camera = requested_camera
+    elif available_cameras:
+        camera = available_cameras[0]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Episode exposes no cameras; cannot run detection.",
+        )
+    logger.info("Detection camera resolved to %s", _sanitize_for_log(camera))
+
     # Create frame image getter
     async def get_frame_image(frame_idx: int) -> bytes | None:
-        return await dataset_service.get_frame_image(dataset_id, episode_idx, frame_idx, "il-camera")
+        return await dataset_service.get_frame_image(dataset_id, episode_idx, frame_idx, camera)
 
     try:
         summary = await detection_service.detect_episode(

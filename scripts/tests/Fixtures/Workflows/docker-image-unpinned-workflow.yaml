@@ -1,0 +1,11 @@
+# Fixture: non-compliant container image references (tag-only, no @sha256 digest).
+# Used by Test-DependencyPinning.Tests.ps1 for the docker ecosystem.
+# Expected violations (3): nvcr.io/nvidia/isaac-lab, pytorch/pytorch, python.
+name: unpinned-docker
+workflow:
+  image: nvcr.io/nvidia/isaac-lab:2.3.2
+tasks:
+  - name: eval
+    image: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+  - name: replay
+    image: python:3.11-slim

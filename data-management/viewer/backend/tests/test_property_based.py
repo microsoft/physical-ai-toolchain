@@ -40,6 +40,11 @@ from src.api.validation import (
 
 _valid_dataset_ids = st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,50}"), fullmatch=True)
 
+_valid_nested_dataset_id_parts = st.from_regex(
+    re.compile(r"[a-zA-Z0-9](?:[a-zA-Z0-9._-]{0,19}[a-zA-Z0-9._])?"),
+    fullmatch=True,
+)
+
 _valid_camera_names = st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,30}"), fullmatch=True)
 
 _nested_json = st.recursive(
@@ -174,60 +179,56 @@ class TestValidateSafeStringProperties:
 # ===================================================================
 
 
-@given(
-    parts=st.lists(
-        st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,20}"), fullmatch=True).filter(
-            lambda s: "--" not in s and not s.endswith("-")
-        ),
-        min_size=1,
-        max_size=5,
+class TestValidateDatasetIdProperties:
+    @given(
+        parts=st.lists(
+            _valid_nested_dataset_id_parts,
+            min_size=1,
+            max_size=5,
+        )
     )
-)
-def test_valid_nested_ids_accepted(parts: list[str]) -> None:
-    dataset_id = "--".join(parts)
-    result = _validate_dataset_id(dataset_id)
-    assert result == dataset_id
+    def test_valid_nested_ids_accepted(self, parts: list[str]) -> None:
+        dataset_id = "--".join(parts)
+        result = _validate_dataset_id(dataset_id)
+        assert result == dataset_id
 
-
-@given(
-    parts=st.lists(
-        st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,10}"), fullmatch=True),
-        min_size=6,
-        max_size=10,
+    @given(
+        parts=st.lists(
+            _valid_nested_dataset_id_parts,
+            min_size=6,
+            max_size=10,
+        )
     )
-)
-def test_deep_nesting_rejected(parts: list[str]) -> None:
-    dataset_id = "--".join(parts)
-    try:
-        _validate_dataset_id(dataset_id)
-    except ValueError:
-        return
-    raise AssertionError("Expected ValueError for deep nesting")
-
-
-@given(value=st.text(min_size=1, max_size=100))
-def test_dataset_id_slash_always_rejected(value: str) -> None:
-    for char in ("/", "\\"):
-        try:
-            _validate_dataset_id(value + char)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError(f"Expected ValueError for {char!r}")
-
-
-@given(
-    prefix=st.from_regex(re.compile(r"[a-zA-Z0-9]{1,10}"), fullmatch=True),
-)
-def test_dot_parts_rejected(prefix: str) -> None:
-    for dot_part in (".", ".."):
-        dataset_id = f"{prefix}--{dot_part}"
+    def test_deep_nesting_rejected(self, parts: list[str]) -> None:
+        dataset_id = "--".join(parts)
         try:
             _validate_dataset_id(dataset_id)
         except ValueError:
-            pass
-        else:
-            raise AssertionError(f"Expected ValueError for part={dot_part!r}")
+            return
+        raise AssertionError("Expected ValueError for deep nesting")
+
+    @given(value=st.text(min_size=1, max_size=100))
+    def test_slash_always_rejected(self, value: str) -> None:
+        for char in ("/", "\\"):
+            try:
+                _validate_dataset_id(value + char)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"Expected ValueError for {char!r}")
+
+    @given(
+        prefix=st.from_regex(re.compile(r"[a-zA-Z0-9]{1,10}"), fullmatch=True),
+    )
+    def test_dot_parts_rejected(self, prefix: str) -> None:
+        for dot_part in (".", ".."):
+            dataset_id = f"{prefix}--{dot_part}"
+            try:
+                _validate_dataset_id(dataset_id)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(f"Expected ValueError for part={dot_part!r}")
 
 
 # ===================================================================
@@ -540,7 +541,7 @@ class TestInterpolateFrameDataProperties:
     def test_output_shape_matches_row(self, n: int, cols: int, t: float) -> None:
         data = np.random.default_rng(42).standard_normal((n, cols))
         idx = np.random.default_rng(0).integers(0, n - 1)
-        result = interpolate_frame_data(data, idx, t)
+        result = interpolate_frame_data(data, int(idx), t)
         assert result.shape == (cols,)
 
     @given(
@@ -798,9 +799,6 @@ class TestTrajectoryAnalyzerIntegrationProperties:
     @given(data=_small_float_array)
     @settings(max_examples=60, deadline=None)
     def test_analyze_returns_valid_metric_types(self, data: tuple) -> None:
-        # deadline=None: numpy/trajectory analysis paths show high latency
-        # variance on CI runners and exceed the default 200ms deadline. Perf
-        # regressions are tracked by dedicated benchmarks, not Hypothesis timing.
         n, positions = data
         timestamps = np.cumsum(np.full(n, 0.033))
         analyzer = TrajectoryAnalyzer()

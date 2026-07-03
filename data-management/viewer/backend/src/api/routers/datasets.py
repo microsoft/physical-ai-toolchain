@@ -296,11 +296,20 @@ async def get_episode_video(
             ".mov": "video/quicktime",
         }
         media_type = media_types.get(suffix, "video/mp4")
+        # Force inline disposition so HTML <video> elements stream the bytes
+        # instead of treating the response as a downloadable attachment.
+        # FileResponse switches to attachment whenever `filename=` is set, so
+        # we set the header explicitly and omit the filename argument.
+        # Cache-control allows etag-based revalidation rather than blind cache:
+        # `immutable` was caching corrupt clips across backend fixes.
+        download_name = f"{dataset_id}_ep{episode_idx}_{camera.replace('.', '_')}{suffix}"
         return FileResponse(
             path=str(video_file),
             media_type=media_type,
-            filename=f"{dataset_id}_ep{episode_idx}_{camera.replace('.', '_')}{suffix}",
-            headers={"Cache-Control": "public, max-age=86400, immutable"},
+            headers={
+                "Cache-Control": "public, max-age=300, must-revalidate",
+                "Content-Disposition": f'inline; filename="{download_name}"',
+            },
         )
 
     # Fall back to blob storage when local file is unavailable. Blob videos

@@ -187,7 +187,7 @@ install_admin_azure_cli_extension "ml"
 . /etc/os-release
 DISTRO=$ID
 VERSION=$VERSION_ID
-# URL is dynamic (distro/version-dependent); trust relies on the GPG-signed repository.
+# pinning-ignore: dynamic distro/version URL has no stable digest to pin; trust relies on the GPG-signed Microsoft apt repository.
 curl -sSL -O "https://packages.microsoft.com/config/${DISTRO}/${VERSION}/packages-microsoft-prod.deb"
 dpkg_install packages-microsoft-prod.deb
 rm packages-microsoft-prod.deb
@@ -196,7 +196,7 @@ apt_get install -y azcopy
 
 ## Install CUDA
 VERSION_NO_DOT="${VERSION//./}"
-# URL is dynamic (distro/version-dependent); trust relies on the GPG-signed repository.
+# pinning-ignore: dynamic distro/version URL has no stable digest to pin; trust relies on the GPG-signed NVIDIA CUDA apt repository.
 wget "https://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}${VERSION_NO_DOT}/x86_64/cuda-keyring_1.1-1_all.deb" && dpkg_install cuda-keyring_1.1-1_all.deb
 apt_get update
 apt_get install -y cuda-toolkit-12-6
@@ -210,6 +210,7 @@ curl -fsSL -o /tmp/nvidia-ctk.gpg.key https://nvidia.github.io/libnvidia-contain
 echo "${NVIDIA_CTK_GPG_SHA256}  /tmp/nvidia-ctk.gpg.key" | sha256sum -c --quiet -
 sudo gpg --dearmor --batch --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg < /tmp/nvidia-ctk.gpg.key
 rm -f /tmp/nvidia-ctk.gpg.key
+# pinning-ignore: upstream apt source list (repo URLs only, no payload to digest); the keyring above is checksum-verified and packages install GPG-verified.
 curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 apt_get update
 apt_get install -y nvidia-container-toolkit

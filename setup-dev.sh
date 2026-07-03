@@ -176,8 +176,15 @@ if [[ -d "${ISAACLAB_DIR}" ]]; then
 else
   info "Cloning Isaac Lab for intellisense/Pylance support..."
   mkdir -p "${SCRIPT_DIR}/external"
-  git clone https://github.com/isaac-sim/IsaacLab.git "${ISAACLAB_DIR}"
-  info "Isaac Lab cloned successfully"
+  # Pin to the commit matching the runtime image tag (v2.3.2); bump with the image.
+  ISAACLAB_COMMIT="37ddf626871758333d6ed89cf64ad702aef127d0"
+  # Clone-and-checkout into a temp dir, then move into place so an interrupted run never
+  # leaves a half-pinned clone that a re-run would skip (the directory guard above).
+  ISAACLAB_TMP="$(mktemp -d "${SCRIPT_DIR}/external/.IsaacLab.XXXXXX")"
+  git clone https://github.com/isaac-sim/IsaacLab.git "${ISAACLAB_TMP}"
+  git -C "${ISAACLAB_TMP}" checkout --quiet "${ISAACLAB_COMMIT}"
+  mv "${ISAACLAB_TMP}" "${ISAACLAB_DIR}"
+  info "Isaac Lab cloned successfully (pinned to ${ISAACLAB_COMMIT})"
 fi
 
 section "hve-core Check"

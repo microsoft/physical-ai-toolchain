@@ -113,6 +113,11 @@ vi.mock('@/components/annotation-panel', () => ({
     </div>
   ),
   LanguageInstructionWidget: () => <div>Language Instructions</div>,
+  ObjectDetectionWidget: () => <div>Object Detection Widget</div>,
+}))
+
+vi.mock('@/components/vlm-judge', () => ({
+  JudgePanel: () => <div>VLM Judge</div>,
 }))
 
 vi.mock('@/components/episode-viewer', () => ({
@@ -146,7 +151,7 @@ vi.mock('@/components/episode-viewer', () => ({
     }
 
     return (
-      <div>
+      <div data-testid="trajectory-plot" className={String(props.className ?? '')}>
         <div>Trajectory Plot</div>
         <div>
           {plotProps.selectedRange
@@ -190,7 +195,7 @@ vi.mock('@/components/frame-editor', () => ({
 }))
 
 vi.mock('@/components/object-detection', () => ({
-  DetectionPanel: () => <div>Detection Panel</div>,
+  DetectionViewer: () => <div>Detection Viewer</div>,
 }))
 
 vi.mock('@/components/playback/PlaybackControlStrip', () => ({
@@ -300,6 +305,8 @@ vi.mock('@/stores/label-store', () => ({
 vi.mock('@/stores', () => ({
   useDatasetStore: (selector: (state: unknown) => unknown) =>
     selector({ currentDataset: { id: 'dataset-1', fps: 30 } }),
+  useAnnotationStore: (selector: (state: unknown) => unknown) =>
+    selector({ currentAnnotation: null }),
   useEditDirtyState: () => ({ isDirty: hoisted.state.hasEdits, resetEdits: hoisted.resetEdits }),
   useFrameInsertionState: () => ({
     insertedFrames: new Map<number, { interpolationFactor?: number }>(),

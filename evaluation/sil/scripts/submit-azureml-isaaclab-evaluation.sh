@@ -27,7 +27,7 @@ MODEL OPTIONS:
 
 AZUREML ASSET OPTIONS:
     --environment-name NAME       AzureML environment name (default: isaaclab-training-env)
-    --environment-version VER     Environment version (default: ${DEFAULT_ISAAC_LAB_IMAGE_VERSION})
+    --environment-version VER     Environment version (default: derived from --image)
     --image IMAGE                 Container image (default: ${DEFAULT_ISAAC_LAB_IMAGE})
 
 EVALUATION OPTIONS:
@@ -68,32 +68,15 @@ derive_model_name() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g'
 }
 
-register_environment() {
-  local name="$1" version="$2" image="$3" rg="$4" ws="$5"
-  local env_file
-  env_file=$(mktemp)
-
-  cat >"$env_file" <<EOF
-\$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
-name: $name
-version: $version
-image: $image
-EOF
-
-  info "Publishing AzureML environment ${name}:${version}"
-  az ml environment create --file "$env_file" \
-    --name "$name" --version "$version" \
-    --resource-group "$rg" --workspace-name "$ws" >/dev/null
-  rm -f "$env_file"
-}
-
 #------------------------------------------------------------------------------
 # Defaults
 #------------------------------------------------------------------------------
 
 environment_name="isaaclab-training-env"
-environment_version="${ENVIRONMENT_VERSION:-$DEFAULT_ISAAC_LAB_IMAGE_VERSION}"
 image="${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}"
+environment_version="${ENVIRONMENT_VERSION:-}"
+environment_version_explicit=false
+[[ -n "${ENVIRONMENT_VERSION:-}" ]] && environment_version_explicit=true
 
 model_name=""
 model_version="latest"
@@ -127,7 +110,7 @@ while [[ $# -gt 0 ]]; do
     --model-name)           model_name="$2"; shift 2 ;;
     --model-version)        model_version="$2"; shift 2 ;;
     --environment-name)     environment_name="$2"; shift 2 ;;
-    --environment-version)  environment_version="$2"; shift 2 ;;
+    --environment-version)  environment_version="$2"; environment_version_explicit=true; shift 2 ;;
     --image)                image="$2"; shift 2 ;;
     --task)                 task="$2"; shift 2 ;;
     --framework)            framework="$2"; shift 2 ;;
@@ -149,6 +132,10 @@ while [[ $# -gt 0 ]]; do
     *)                      fatal "Unknown option: $1" ;;
   esac
 done
+
+if [[ "$environment_version_explicit" != "true" ]]; then
+  environment_version="$(derive_azureml_environment_version_from_image "$image")"
+fi
 
 #------------------------------------------------------------------------------
 # Validation
@@ -227,8 +214,8 @@ model_json=$(az ml model show \
 # Register Environment
 #------------------------------------------------------------------------------
 
-register_environment "$environment_name" "$environment_version" "$image" \
-  "$resource_group" "$workspace_name"
+register_azureml_environment "$environment_name" "$environment_version" "$image" \
+  "$resource_group" "$workspace_name" "$subscription_id"
 
 info "Code path: $code_path"
 info "Environment: ${environment_name}:${environment_version}"

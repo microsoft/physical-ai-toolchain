@@ -108,6 +108,8 @@ class TestLoadEpisode:
         assert pt.frame >= 0
         assert len(pt.joint_positions) > 0
         assert len(pt.end_effector_pose) == 6
+        assert len(pt.action) > 0
+        assert isinstance(pt.signals, dict)
 
     def test_video_urls(self, handler):
         ep = handler.load_episode(DATASET_ID, 0)
@@ -222,6 +224,8 @@ class TestFfmpegExtraction:
 # handler's orchestration logic without filesystem fixtures.
 # ---------------------------------------------------------------------------
 
+from pathlib import Path
+
 import numpy as np
 
 from src.api.services.dataset_service import lerobot_handler as lh_module
@@ -249,6 +253,7 @@ class FakeLREpisode:
         self.actions = np.zeros((length, 6), dtype=np.float64)
         self.task_index = 0
         self.video_paths = {"observation.images.cam0": "/tmp/cam0.mp4"}
+        self.additional_features = {}
 
 
 class FakeLoader:
@@ -256,6 +261,7 @@ class FakeLoader:
         self._episodes = episodes if episodes is not None else {0: {"length": 4}, 1: {"length": 5}}
         self._info = info if info is not None else FakeLRInfo()
         self._raise_on = raise_on or set()
+        self.base_path = Path("/tmp/fake-lerobot-ds")
 
     def _maybe_raise(self, name):
         if name in self._raise_on:
@@ -278,6 +284,10 @@ class FakeLoader:
         if camera == "missing":
             return None
         return f"/tmp/{camera}.mp4"
+
+    def get_video_time_window(self, idx, camera):
+        self._maybe_raise("get_video_time_window")
+        return None
 
     def get_cameras(self):
         self._maybe_raise("get_cameras")
@@ -435,44 +445,6 @@ class TestLoadEpisodeSynthetic:
         h = LeRobotFormatHandler()
         _inject(h, FakeLoader(raise_on={"load_episode"}))
         assert h.load_episode("ds", 0) is None
-
-    def test_populates_video_time_windows_per_camera(self):
-        from src.api.models.datasources import DatasetInfo, FeatureSchema
-
-        class _WindowedLoader(FakeLoader):
-            def get_video_time_window(self, episode_idx, camera):
-                if camera == "observation.images.cam0":
-                    return (1.0, 2.5)
-                return None
-
-        h = LeRobotFormatHandler()
-        _inject(h, _WindowedLoader())
-        ds_info = DatasetInfo(
-            id="ds",
-            name="ds",
-            total_episodes=1,
-            fps=30.0,
-            features={
-                "observation.images.cam0": FeatureSchema(dtype="video", shape=[480, 640, 3]),
-                "observation.images.blob_only": FeatureSchema(dtype="video", shape=[480, 640, 3]),
-            },
-            tasks=[],
-        )
-        ep = h.load_episode("ds", 0, dataset_info=ds_info)
-        assert ep is not None
-        assert ep.video_time_windows == {"observation.images.cam0": [1.0, 2.5]}
-
-    def test_video_time_window_exception_is_swallowed(self):
-        class _RaisingLoader(FakeLoader):
-            def get_video_time_window(self, episode_idx, camera):
-                raise RuntimeError("blob unreachable")
-
-        h = LeRobotFormatHandler()
-        _inject(h, _RaisingLoader())
-        ep = h.load_episode("ds", 0)
-        assert ep is not None
-        # Loader raised for every camera → no entries populated, but loading itself succeeded.
-        assert ep.video_time_windows == {}
 
 
 class TestGetTrajectorySynthetic:

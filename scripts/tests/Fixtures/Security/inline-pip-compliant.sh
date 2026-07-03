@@ -11,3 +11,8 @@ uv run --with azure-identity==1.25.3 python job.py
 
 # An intentional, exempted range (e.g. an ABI constraint):
 pip install "numpy>=1.26.0,<2.0.0"  # pinning-ignore: base-image ABI constraint
+# compliant comment test
+pip install numpy==1.26.4 # this is a trailing comment with unpinned words
+# compliant long option parsing test
+pip install --target /tmp/dir numpy==1.26.4
+pip install --prefix /usr/local pandas==2.0.0

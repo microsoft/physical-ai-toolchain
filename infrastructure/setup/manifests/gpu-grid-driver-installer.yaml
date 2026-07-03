@@ -51,7 +51,7 @@ spec:
       hostNetwork: true
       initContainers:
         - name: installer
-          image: ubuntu:22.04
+          image: ubuntu:22.04@sha256:4f838adc7181d9039ac795a7d0aba05a9bd9ecd480d294483169c5def983b64d
           securityContext:
             privileged: true
           volumeMounts:
@@ -142,7 +142,7 @@ spec:
                 /bin/bash /tmp/install-grid-driver.sh
       containers:
         - name: sleep
-          image: registry.k8s.io/pause:3.10
+          image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
       volumes:
         - name: host-root
           hostPath:

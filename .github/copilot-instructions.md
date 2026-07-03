@@ -311,7 +311,7 @@ GitHub Copilot Coding Agent runs in a cloud GitHub Actions environment, separate
 
 The cloud-agent workflow does NOT install: `actionlint` (devcontainer-only, used for `npm run lint:yaml`), `golangci-lint`, `terraform-docs`, `osmo`, `ngc`, Azure CLI, kubectl, helm, k9s. These are Azure-deployment or local-validation tools the agent does not need to author or test code.
 
-The cloud-agent workflow installs `gh aw` (GitHub Agentic Workflows CLI) without version pinning. The latest stable release is installed at session start because `gh aw` maintains backward compatibility with older compiled workflows, lock files embed their `compiler_version` for auditability, and the extension releases multiple times per week making pinning impractical.
+The cloud-agent workflow installs `gh aw` (GitHub Agentic Workflows CLI) pinned to a released tag (`gh extension install github/gh-aw --pin <tag>`) so every session resolves a fixed, auditable version instead of upstream HEAD. Pin to a stable release at or above the `compiler_version` embedded in the repo's `.lock.yml` files — `gh aw` reads workflows compiled by older versions — and bump the `--pin` ref when adopting a newer release.
 
 ### Environment Synchronization
 
@@ -405,7 +405,7 @@ Training runs in NVIDIA Isaac Lab containers on GPU nodes via AzureML or OSMO.
   * Python path: `/isaac-sim/kit/python/bin/python3` (NOT system Python)
   * `PYTHON` env var: set to `/workspace/isaaclab/isaaclab.sh -p` (wrapper activating correct conda env)
 * EULA acceptance: all jobs MUST set `ACCEPT_EULA: "Y"` and `PRIVACY_CONSENT: "Y"`
-* numpy: forcibly pinned to `>=1.26.0,<2.0.0` in `train.sh` for ABI compatibility with Isaac Sim
+* numpy: pinned to `1.26.4` in `training/rl/pyproject.toml` (locked in `training/rl/uv.lock`) for ABI compatibility with Isaac Sim
 * Shutdown bug: Isaac Sim 4.x hangs after `env.close()` on vGPU nodes; fixed via `simulation_shutdown.py` with timeline stop + SIGKILL watchdog
 * Vulkan: `NVIDIA_DRIVER_CAPABILITIES=all` required (Isaac Sim needs Vulkan for rendering)
 * RL frameworks: SKRL (primary), RSL-RL (alternative)

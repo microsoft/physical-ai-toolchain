@@ -176,6 +176,34 @@ export interface LanguageInstructionAnnotation {
 }
 
 // ============================================================================
+// Object Detection Annotation Types
+// ============================================================================
+
+/** Single saved object detection with label and bounding box. */
+export interface ObjectDetectionBox {
+  /** Label/class name as queried by the user (or COCO class for closed-vocabulary). */
+  label: string
+  /** Detection confidence in [0, 1]. */
+  confidence: number
+  /** Pixel bounding box (x1, y1, x2, y2) in source-image coordinates. */
+  bbox: [number, number, number, number]
+}
+
+/** Open-vocabulary object detections saved for a single reference frame. */
+export interface ObjectDetectionAnnotation {
+  /** Frame index the detections were computed on. */
+  frameIndex: number
+  /** Camera stream the frame was sourced from. */
+  camera: string
+  /** User-supplied labels passed to the open-vocabulary detector (empty for closed-vocabulary). */
+  queriedLabels: string[]
+  /** Detection results, one per box. */
+  detections: ObjectDetectionBox[]
+  /** Model variant used to produce the detections. */
+  model?: string
+}
+
+// ============================================================================
 // Combined Episode Annotation Types
 // ============================================================================
 
@@ -195,6 +223,8 @@ export interface EpisodeAnnotation {
   anomalies: AnomalyAnnotation
   /** Language instruction for VLA training */
   languageInstruction?: LanguageInstructionAnnotation
+  /** Saved open-vocabulary object detections per reference frame */
+  objectDetections?: ObjectDetectionAnnotation[]
   /** Free-form notes about the episode */
   notes?: string
 }

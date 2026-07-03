@@ -1,0 +1,14 @@
+# Fixture: compliant container image references (digest-pinned, templated, variable, or exempted).
+# Used by Test-DependencyPinning.Tests.ps1 for the docker ecosystem. Expected violations: 0.
+name: compliant-docker
+workflow:
+  image: nvcr.io/nvidia/isaac-lab:2.3.2@sha256:388dbc806f48359a964cb9f807feb226da95d0a107f470fdcad9780ea10fe6f2
+tasks:
+  - name: templated
+    image: "{{ image }}"
+  - name: variable
+    image: ${CONTAINER_IMAGE}
+  - name: azureml-env
+    environment: azureml:lerobot-training-env:latest
+  - name: deliberate
+    image: busybox:latest  # pinning-ignore

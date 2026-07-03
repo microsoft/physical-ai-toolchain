@@ -55,7 +55,7 @@ jobs:
 
       - name: Install PowerShell-Yaml
         run: |
-          Install-Module -Name powershell-yaml -Force -SkipPublisherCheck -Scope CurrentUser
+          Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -SkipPublisherCheck -Scope CurrentUser
 
       - name: Get changed files
         id: changed-files

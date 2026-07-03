@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Script Reference
 description: Submission script inventory, CLI arguments, variable reference, and configuration for AzureML and OSMO training and inference pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-01
+ms.date: 2026-07-01
 ms.topic: reference
 keywords:
   - scripts
@@ -89,14 +89,14 @@ Script-specific tools:
 Values resolve in order: **CLI arguments → environment variables → Terraform outputs** (when applicable).
 
 > [!NOTE]
-> Isaac Lab image defaults come from `scripts/lib/common.sh` (`DEFAULT_ISAAC_LAB_IMAGE_VERSION` and `DEFAULT_ISAAC_LAB_IMAGE`). OSMO workflow YAML image literals are direct-workflow fallbacks and should stay in sync with those shared defaults.
+> Isaac Lab image defaults come from `scripts/lib/common.sh` (`DEFAULT_ISAAC_LAB_IMAGE`; `DEFAULT_ISAAC_LAB_IMAGE_VERSION` is the derived tag-only value). OSMO workflow YAML image literals are direct-workflow fallbacks and should stay in sync with those shared defaults. AzureML environment versions default to a digest-aware value derived from `--image`.
 
 ### `submit-azureml-training.sh`
 
 | Option                         | Default                                                      | Description                                     | Source                                  |
 |--------------------------------|--------------------------------------------------------------|-------------------------------------------------|-----------------------------------------|
 | `--environment-name`           | `isaaclab-training-env`                                      | AzureML environment name                        | CLI                                     |
-| `--environment-version`        | `DEFAULT_ISAAC_LAB_IMAGE_VERSION` (`2.3.2`)                  | AzureML environment version                     | CLI                                     |
+| `--environment-version`        | derived from `--image` tag/digest                            | AzureML environment version                     | CLI                                     |
 | `--image` / `-i`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                 | CLI                                     |
 | `--assets-only`                | `false`                                                      | Register environment without submitting a job   | CLI                                     |
 | `--job-file` / `-w`            | `workflows/azureml/train.yaml`                               | Job YAML template                               | CLI                                     |
@@ -140,7 +140,7 @@ Example:
 | `--model-name`          | derived from task                                            | Azure ML model name                              | CLI                           |
 | `--model-version`       | `latest`                                                     | Azure ML model version                           | CLI                           |
 | `--environment-name`    | `isaaclab-training-env`                                      | AzureML environment name                         | CLI                           |
-| `--environment-version` | `DEFAULT_ISAAC_LAB_IMAGE_VERSION` (`2.3.2`)                  | AzureML environment version                      | CLI                           |
+| `--environment-version` | derived from `--image` tag/digest                            | AzureML environment version                      | CLI                           |
 | `--image`               | `DEFAULT_ISAAC_LAB_IMAGE` (`nvcr.io/nvidia/isaac-lab:2.3.2`) | Container image                                  | CLI                           |
 | `--task`                | `Isaac-Velocity-Rough-Anymal-C-v0`                           | Override task ID                                 | `TASK`                        |
 | `--framework`           | unset                                                        | Override framework                               | CLI                           |

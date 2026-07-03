@@ -14,6 +14,9 @@ import type {
   EpisodeAnnotationFile,
   EpisodeData,
   EpisodeMeta,
+  VlmJudgeResult,
+  VlmJudgeRunOptions,
+  VlmJudgeStatus,
 } from '@/types'
 
 import { getAuthHeaders } from './auth-headers'
@@ -386,4 +389,131 @@ export async function warmCache(datasetId: string, count = 5): Promise<void> {
     method: 'POST',
     headers: await mutationHeaders(),
   })
+}
+
+// ============================================================================
+// VLM-as-Judge API
+// ============================================================================
+
+/** Status returned to the panel when the judge router is not mounted. */
+const VLM_JUDGE_DISABLED: VlmJudgeStatus = {
+  enabled: false,
+  cached: false,
+  jobStatus: 'idle',
+  judgeModel: null,
+  promptVersion: null,
+  cacheKey: null,
+  error: null,
+  result: null,
+}
+
+const VLM_JUDGE_POLL_INTERVAL_MS = 1000
+const VLM_JUDGE_POLL_TIMEOUT_MS = 30 * 60_000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
+}
+
+/**
+ * Fetch any cached VLM-judge result for an episode without running inference.
+ *
+ * Returns ``{enabled: false}`` when the backend has not been configured with
+ * ``VLM_JUDGE_ENABLED=true`` — in that case the router is not mounted and the
+ * endpoint responds with 404, which we map to the disabled status so the panel
+ * hides cleanly instead of surfacing a spurious error.
+ */
+export async function fetchVlmJudgeStatus(
+  datasetId: string,
+  episodeIndex: number,
+  options: { cacheKey?: string | null } = {},
+): Promise<VlmJudgeStatus> {
+  const params = new URLSearchParams()
+  if (options.cacheKey) params.set('cache_key', options.cacheKey)
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  const response = await fetch(
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge${query}`,
+    {
+      headers: await requestHeaders(),
+    },
+  )
+  if (response.status === 404) return VLM_JUDGE_DISABLED
+  const data = await handleResponse<unknown>(response)
+  return transformKeys<VlmJudgeStatus>(data)
+}
+
+/**
+ * Run the VLM judge on an episode (cache-first unless ``force`` is true).
+ */
+export async function runVlmJudge(
+  datasetId: string,
+  episodeIndex: number,
+  options: VlmJudgeRunOptions = {},
+): Promise<VlmJudgeResult> {
+  const response = await fetch(`${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await mutationHeaders()) },
+    body: JSON.stringify({
+      instruction: options.instruction,
+      views: options.views,
+      process_method: options.processMethod,
+      force: options.force ?? false,
+    }),
+  })
+  const data = transformKeys<VlmJudgeStatus | VlmJudgeResult>(
+    await handleResponse<unknown>(response),
+  )
+  if ('episodeId' in data) return data
+  if (data.result) return data.result
+  if (!data.cacheKey) {
+    throw new ApiClientError(
+      'VLM judge did not return a pollable cache key',
+      'VLM_JUDGE_NO_CACHE_KEY',
+      500,
+    )
+  }
+
+  const started = Date.now()
+  while (Date.now() - started < VLM_JUDGE_POLL_TIMEOUT_MS) {
+    await sleep(VLM_JUDGE_POLL_INTERVAL_MS)
+    const status = await fetchVlmJudgeStatus(datasetId, episodeIndex, { cacheKey: data.cacheKey })
+    if (status.jobStatus === 'error') {
+      throw new ApiClientError(status.error ?? 'VLM judge failed', 'VLM_JUDGE_FAILED', 502)
+    }
+    if (status.result) return status.result
+  }
+
+  throw new ApiClientError(
+    'VLM judge timed out while waiting for a result',
+    'VLM_JUDGE_TIMEOUT',
+    408,
+  )
+}
+
+// ============================================================================
+// Episode Labels API
+// ============================================================================
+
+export interface EpisodeLabelsResult {
+  episodeIndex: number
+  labels: string[]
+}
+
+/**
+ * Replace the label set assigned to a single episode.
+ */
+export async function setEpisodeLabels(
+  datasetId: string,
+  episodeIndex: number,
+  labels: string[],
+): Promise<EpisodeLabelsResult> {
+  const response = await mutationFetch(
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/labels`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ labels }),
+    },
+  )
+  const data = await handleResponse<unknown>(response)
+  return transformKeys<EpisodeLabelsResult>(data)
 }

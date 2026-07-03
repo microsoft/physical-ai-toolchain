@@ -47,8 +47,8 @@ DATASET SOURCE:
 
 AZUREML ASSET OPTIONS:
         --environment-name NAME   AzureML environment name (default: lerobot-inference-env)
-        --environment-version VER Environment version (default: 1.0.0)
-    -i, --image IMAGE             Container image (default: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime)
+        --environment-version VER Environment version (default: derived from --image)
+    -i, --image IMAGE             Container image (default: $DEFAULT_LEROBOT_EVAL_IMAGE, digest-pinned in scripts/lib/common.sh)
         --assets-only             Register environment without submitting job
 
 EVALUATION OPTIONS:
@@ -119,34 +119,15 @@ ensure_ml_extension() {
     fatal "Azure ML CLI extension not installed. Run: az extension add --name ml"
 }
 
-register_environment() {
-  local name="$1" version="$2" image="$3" rg="$4" ws="$5" sub="$6"
-  local env_file
-  env_file=$(mktemp)
-
-  cat >"$env_file" <<EOF
-\$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
-name: $name
-version: $version
-image: $image
-EOF
-
-  info "Publishing AzureML environment ${name}:${version}"
-  az ml environment create --file "$env_file" \
-    --name "$name" --version "$version" \
-    --resource-group "$rg" --workspace-name "$ws" \
-    --subscription "$sub" >/dev/null 2>&1 || \
-    warn "Environment ${name}:${version} already exists or registration failed; continuing"
-  rm -f "$env_file"
-}
-
 #------------------------------------------------------------------------------
 # Defaults
 #------------------------------------------------------------------------------
 
 environment_name="lerobot-inference-env"
-environment_version="1.0.0"
-image="${IMAGE:-pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime}"
+environment_version="${ENVIRONMENT_VERSION:-}"
+environment_version_explicit=false
+[[ -n "${ENVIRONMENT_VERSION:-}" ]] && environment_version_explicit=true
+image="${IMAGE:-$DEFAULT_LEROBOT_EVAL_IMAGE}"
 assets_only=false
 
 job_file="$REPO_ROOT/workflows/azureml/lerobot-infer.yaml"
@@ -193,7 +174,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                    show_help; exit 0 ;;
     --environment-name)           environment_name="$2"; shift 2 ;;
-    --environment-version)        environment_version="$2"; shift 2 ;;
+    --environment-version)        environment_version="$2"; environment_version_explicit=true; shift 2 ;;
     --image|-i)                   image="$2"; shift 2 ;;
     --assets-only)                assets_only=true; shift ;;
     -w|--job-file)                job_file="$2"; shift 2 ;;
@@ -230,6 +211,10 @@ while [[ $# -gt 0 ]]; do
     *)                            fatal "Unknown option: $1" ;;
   esac
 done
+
+if [[ "$environment_version_explicit" != "true" ]]; then
+  environment_version="$(derive_azureml_environment_version_from_image "$image")"
+fi
 
 #------------------------------------------------------------------------------
 # Validation
@@ -298,7 +283,7 @@ fi
 # Register Environment
 #------------------------------------------------------------------------------
 
-register_environment "$environment_name" "$environment_version" "$image" \
+register_azureml_environment "$environment_name" "$environment_version" "$image" \
   "$resource_group" "$workspace_name" "$subscription_id"
 
 info "Environment: ${environment_name}:${environment_version}"

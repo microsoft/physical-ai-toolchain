@@ -66,7 +66,7 @@ OUTPUT:
 WORKFLOW:
     -w, --workflow PATH           Workflow template (default: training/vla/workflows/osmo/groot-train.yaml)
     -j, --job-name NAME           Job identifier (default: groot-train)
-    -i, --image IMAGE             Container image (default: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel)
+    -i, --image IMAGE             Container image (default: $DEFAULT_GROOT_IMAGE, digest-pinned in scripts/lib/common.sh)
         --platform PLATFORM       OSMO platform name (default: gpu_platform)
 
 AZURE CONTEXT:
@@ -115,7 +115,7 @@ EOF
 
 workflow=""
 job_name="${JOB_NAME:-groot-train}"
-image="${IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel}"
+image="${IMAGE:-$DEFAULT_GROOT_IMAGE}"
 
 blob_url="${BLOB_URL:-}"
 dataset_path="${DATASET_PATH:-/data/dataset}"

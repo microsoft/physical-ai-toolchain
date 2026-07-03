@@ -14,9 +14,19 @@ fi
 unset _common_sh_dir _env_local
 
 # Shared container defaults for training and evaluation submission scripts.
-DEFAULT_ISAAC_LAB_IMAGE_VERSION="${DEFAULT_ISAAC_LAB_IMAGE_VERSION:-2.3.2}"
-DEFAULT_ISAAC_LAB_IMAGE="${DEFAULT_ISAAC_LAB_IMAGE:-nvcr.io/nvidia/isaac-lab:${DEFAULT_ISAAC_LAB_IMAGE_VERSION}}"
-export DEFAULT_ISAAC_LAB_IMAGE_VERSION DEFAULT_ISAAC_LAB_IMAGE
+# OCI images are pinned by immutable @sha256 digest for reproducible, tamper-evident
+# pulls; the tag is retained for readability. Refresh digests with
+# scripts/update-image-digests.sh.
+DEFAULT_ISAAC_LAB_IMAGE="${DEFAULT_ISAAC_LAB_IMAGE:-nvcr.io/nvidia/isaac-lab:2.3.2@sha256:388dbc806f48359a964cb9f807feb226da95d0a107f470fdcad9780ea10fe6f2}"
+DEFAULT_LEROBOT_TRAIN_IMAGE="${DEFAULT_LEROBOT_TRAIN_IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be}"
+DEFAULT_LEROBOT_EVAL_IMAGE="${DEFAULT_LEROBOT_EVAL_IMAGE:-pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime@sha256:0a3b9fedefe1f61ac4d5a9de9015c0863db27ca0fde2d4e37e6268147980b726}"
+DEFAULT_GROOT_IMAGE="${DEFAULT_GROOT_IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel@sha256:0cf3402e946b7c384ba943ee05c90b4c5a4a05227923921f2b0918c011cfaf56}"
+# isaac-lab tag, available to callers that need the tag without the digest.
+_isaac_ref="${DEFAULT_ISAAC_LAB_IMAGE%@*}"
+DEFAULT_ISAAC_LAB_IMAGE_VERSION="${DEFAULT_ISAAC_LAB_IMAGE_VERSION:-${_isaac_ref##*:}}"
+unset _isaac_ref
+export DEFAULT_ISAAC_LAB_IMAGE DEFAULT_ISAAC_LAB_IMAGE_VERSION
+export DEFAULT_LEROBOT_TRAIN_IMAGE DEFAULT_LEROBOT_EVAL_IMAGE DEFAULT_GROOT_IMAGE
 
 # Logging functions with color support (NO_COLOR standard: https://no-color.org)
 if [[ -z "${NO_COLOR+x}" ]]; then
@@ -29,6 +39,60 @@ else
   error() { printf '[ERROR] %s\n' "$*" >&2; }
 fi
 fatal() { error "$@"; exit 1; }
+
+derive_azureml_environment_version_from_image() {
+  local image="$1" tag_ref tag digest version
+
+  tag_ref="${image%@*}"
+  tag="${tag_ref##*:}"
+  [[ "$tag_ref" == *:* && "$tag" != */* ]] || fatal "Image reference must include a tag: $image"
+
+  if [[ "$image" == *@sha256:* ]]; then
+    digest="${image##*@sha256:}"
+    [[ "$digest" =~ ^[0-9A-Fa-f]{64}$ ]] || fatal "Image reference has an invalid sha256 digest: $image"
+    digest="$(printf '%s' "$digest" | tr '[:upper:]' '[:lower:]')"
+    version="${tag}-sha256-${digest}"
+  else
+    version="$tag"
+  fi
+
+  [[ "$version" =~ ^[A-Za-z0-9._-]+$ ]] || fatal "Derived AzureML environment version contains unsupported characters: $version"
+  printf '%s\n' "$version"
+}
+
+register_azureml_environment() {
+  local name="${1:?environment name required}" version="${2:?environment version required}"
+  local image="${3:?image required}" rg="${4:?resource group required}"
+  local ws="${5:?workspace name required}" sub="${6:?subscription id required}"
+  local env_file existing_image
+  local create_args=(ml environment create)
+  local show_args=(ml environment show)
+
+  env_file=$(mktemp)
+
+  cat >"$env_file" <<EOF
+\$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
+name: $name
+version: $version
+image: $image
+EOF
+
+  create_args+=(--file "$env_file" --name "$name" --version "$version" --resource-group "$rg" --workspace-name "$ws" --subscription "$sub")
+  show_args+=(--name "$name" --version "$version" --resource-group "$rg" --workspace-name "$ws" --subscription "$sub")
+
+  info "Publishing AzureML environment ${name}:${version}"
+  if az "${create_args[@]}" >/dev/null 2>&1; then
+    rm -f "$env_file"
+    return
+  fi
+
+  rm -f "$env_file"
+  existing_image=$(az "${show_args[@]}" --query image -o tsv 2>/dev/null || true)
+
+  [[ -n "$existing_image" ]] || fatal "Environment ${name}:${version} registration failed, and no existing environment image could be verified"
+  [[ "$existing_image" == "$image" ]] || fatal "Environment ${name}:${version} already uses image '$existing_image', expected '$image'"
+  info "Environment ${name}:${version} already exists with matching image; continuing"
+}
 
 # Check for required tools
 require_tools() {

@@ -516,7 +516,11 @@ workflow:
             if [ -n "${ACR_REGISTRY:-}" ]; then
               echo "--- pushing model to ACR: ${ACR_REGISTRY} ---"
               ORAS_VERSION="1.2.0"
-              curl -sLO "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+              # Canonical hash recorded in scripts/security/tool-checksums.json; bump both together.
+              ORAS_SHA256="5b3f1cbb86d869eee68120b9b45b9be983f3738442f87ee5f06b00edd0bab336"
+              # -f makes curl exit non-zero on an HTTP error instead of saving the error body.
+              curl -fsSLO "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+              echo "${ORAS_SHA256}  oras_${ORAS_VERSION}_linux_amd64.tar.gz" | sha256sum -c -
               tar xzf "oras_${ORAS_VERSION}_linux_amd64.tar.gz" -C /usr/local/bin/ oras
               chmod +x /usr/local/bin/oras
               rm -f "oras_${ORAS_VERSION}_linux_amd64.tar.gz"
@@ -559,7 +563,9 @@ workflow:
 
 default-values:
   workflow_name: groot-train
-  image: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel
+  # Submission scripts set image from scripts/lib/common.sh via --set-string.
+  # This value is the direct-workflow fallback; keep it in sync with DEFAULT_GROOT_IMAGE.
+  image: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel@sha256:0cf3402e946b7c384ba943ee05c90b4c5a4a05227923921f2b0918c011cfaf56
   gpu: 1
   platform: gpu_platform
   blob_url: ""

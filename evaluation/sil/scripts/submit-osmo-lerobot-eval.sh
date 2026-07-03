@@ -47,7 +47,7 @@ DATASET SOURCE (one required):
         --blob-prefix PREFIX      Blob path prefix (e.g., hve-robo/hve-robo-cell)
     -j, --job-name NAME           Job identifier (default: lerobot-eval)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/eval)
-    -i, --image IMAGE             Container image (default: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime)
+    -i, --image IMAGE             Container image (default: $DEFAULT_LEROBOT_EVAL_IMAGE, digest-pinned in scripts/lib/common.sh)
         --lerobot-version VER     Specific LeRobot version (default: latest)
         --eval-episodes N         Number of evaluation episodes (default: 10)
         --eval-batch-size N       Evaluation batch size (default: 10)
@@ -85,7 +85,7 @@ policy_type="${POLICY_TYPE:-act}"
 dataset_repo_id="${DATASET_REPO_ID:-}"
 job_name="${JOB_NAME:-lerobot-eval}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/eval}"
-image="${IMAGE:-pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime}"
+image="${IMAGE:-$DEFAULT_LEROBOT_EVAL_IMAGE}"
 lerobot_version="${LEROBOT_VERSION:-}"
 
 eval_episodes="${EVAL_EPISODES:-10}"

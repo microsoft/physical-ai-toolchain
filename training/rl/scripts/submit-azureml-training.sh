@@ -24,7 +24,7 @@ Submit an Azure ML training job with argument parity to the OSMO workflow.
 
 AZUREML ASSET OPTIONS:
     --environment-name NAME       AzureML environment name (default: isaaclab-training-env)
-    --environment-version VER     Environment version (default: ${DEFAULT_ISAAC_LAB_IMAGE_VERSION})
+    --environment-version VER     Environment version (default: derived from --image)
     --image IMAGE                 Container image (default: ${DEFAULT_ISAAC_LAB_IMAGE})
     --assets-only                 Register environment without submitting job
 
@@ -94,25 +94,6 @@ normalize_bool() {
   esac
 }
 
-register_environment() {
-  local name="$1" version="$2" image="$3" rg="$4" ws="$5"
-  local env_file
-  env_file=$(mktemp)
-
-  cat >"$env_file" <<EOF
-\$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
-name: $name
-version: $version
-image: $image
-EOF
-
-  info "Publishing AzureML environment ${name}:${version}"
-  az ml environment create --file "$env_file" \
-    --name "$name" --version "$version" \
-    --resource-group "$rg" --workspace-name "$ws" >/dev/null
-  rm -f "$env_file"
-}
-
 run_smoke_test() {
   local python_bin="${PYTHON:-python3}"
   command -v "$python_bin" &>/dev/null || python_bin="python"
@@ -131,8 +112,10 @@ run_smoke_test() {
 #------------------------------------------------------------------------------
 
 environment_name="isaaclab-training-env"
-environment_version="${ENVIRONMENT_VERSION:-$DEFAULT_ISAAC_LAB_IMAGE_VERSION}"
 image="${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}"
+environment_version="${ENVIRONMENT_VERSION:-}"
+environment_version_explicit=false
+[[ -n "${ENVIRONMENT_VERSION:-}" ]] && environment_version_explicit=true
 assets_only=false
 
 job_file="$REPO_ROOT/training/rl/workflows/azureml/train.yaml"
@@ -170,7 +153,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                  show_help; exit 0 ;;
     --environment-name)         environment_name="$2"; shift 2 ;;
-    --environment-version)      environment_version="$2"; shift 2 ;;
+    --environment-version)      environment_version="$2"; environment_version_explicit=true; shift 2 ;;
     --image|-i)                 image="$2"; shift 2 ;;
     --assets-only)              assets_only=true; shift ;;
     -w|--job-file)              job_file="$2"; shift 2 ;;
@@ -201,6 +184,10 @@ while [[ $# -gt 0 ]]; do
     *)                          fatal "Unknown option: $1" ;;
   esac
 done
+
+if [[ "$environment_version_explicit" != "true" ]]; then
+  environment_version="$(derive_azureml_environment_version_from_image "$image")"
+fi
 
 #------------------------------------------------------------------------------
 # Validation
@@ -250,8 +237,8 @@ fi
 # Register Environment
 #------------------------------------------------------------------------------
 
-register_environment "$environment_name" "$environment_version" "$image" \
-  "$resource_group" "$workspace_name"
+register_azureml_environment "$environment_name" "$environment_version" "$image" \
+  "$resource_group" "$workspace_name" "$subscription_id"
 
 info "Code path: $code_path (training/ contents only)"
 info "Environment: ${environment_name}:${environment_version}"

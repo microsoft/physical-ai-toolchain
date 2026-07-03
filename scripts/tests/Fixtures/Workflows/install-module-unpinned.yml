@@ -1,0 +1,17 @@
+# Fixture: non-compliant Install-Module (no -RequiredVersion) plus false-positive defenses.
+# Used by Test-DependencyPinning.Tests.ps1 for the powershell-modules ecosystem.
+# Expected violations (2): powershell-yaml, PSScriptAnalyzer.
+# Not flagged: the Mock invocation and the Write-Warning string mention.
+name: install-module-unpinned
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install modules
+        shell: pwsh
+        run: |
+          Install-Module -Name powershell-yaml -Force -Scope CurrentUser
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery
+          Mock Install-Module {} -ParameterFilter { $Name -eq 'powershell-yaml' }
+          Write-Warning "module missing. Install with: Install-Module powershell-yaml"

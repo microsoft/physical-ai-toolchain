@@ -26,7 +26,7 @@ function TrajectoryTooltipPortal({
   mousePosition,
 }: {
   active?: boolean
-  payload?: Array<{ name: string; value: number; color: string }>
+  payload?: Array<{ name: string; value: number; color: string; dataKey?: string | number }>
   label?: number
   mousePosition: { x: number; y: number }
 }) {
@@ -63,7 +63,10 @@ function TrajectoryTooltipPortal({
     >
       <p className="mb-1 font-medium">{label}</p>
       {payload.map((entry) => (
-        <p key={entry.name} style={{ color: entry.color }}>
+        <p
+          key={String(entry.dataKey ?? `${entry.name}-${entry.color}`)}
+          style={{ color: entry.color }}
+        >
           {entry.name} : {entry.value}
         </p>
       ))}
@@ -77,6 +80,7 @@ interface TrajectoryPlotChartProps {
   currentFrame: number
   selectedJoints: number[]
   resolveLabel: (index: number) => string
+  resolveDataKey: (index: number) => string
   trajectoryAdjustments: Map<number, unknown>
   showVelocity: boolean
   showNormalized: boolean
@@ -98,6 +102,7 @@ export function TrajectoryPlotChart({
   currentFrame,
   selectedJoints,
   resolveLabel,
+  resolveDataKey,
   trajectoryAdjustments,
   showVelocity,
   showNormalized,
@@ -173,9 +178,9 @@ export function TrajectoryPlotChart({
 
           {selectedJoints.map((jointIdx) => (
             <Line
-              key={jointIdx}
+              key={resolveDataKey(jointIdx)}
               type="monotone"
-              dataKey={`joint_${jointIdx}`}
+              dataKey={resolveDataKey(jointIdx)}
               name={resolveLabel(jointIdx)}
               stroke={JOINT_COLORS[jointIdx % JOINT_COLORS.length]}
               dot={false}
