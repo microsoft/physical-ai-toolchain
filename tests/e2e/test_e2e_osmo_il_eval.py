@@ -19,13 +19,12 @@ from pathlib import Path
 
 import pytest
 
-import tests.e2e._common as e2e_common
-import tests.e2e._osmo as e2e_osmo
 from tests.e2e._aml import AzureMLWorkspace
-from tests.e2e._common import log_e2e
+from tests.e2e._common import delete_blob_prefix, log_e2e
 from tests.e2e._lerobot_dataset import stage_synthetic_lerobot_dataset
 from tests.e2e._mlflow import assert_osmo_lerobot_eval_has_mlflow_tracking
 from tests.e2e._osmo import (
+    OSMOWorkflow,
     _lerobot_eval_model_source_args,
     assert_workflow_task_succeeded,
     cancel_osmo_workflow,
@@ -44,10 +43,10 @@ def test_delete_blob_prefix_raises_on_failed_cleanup(monkeypatch: pytest.MonkeyP
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args=args, returncode=1, stdout="cleanup out", stderr="cleanup err")
 
-    monkeypatch.setattr(e2e_common, "run_command", fake_run_command)
+    monkeypatch.setattr("tests.e2e._common.run_command", fake_run_command)
 
     with pytest.raises(AssertionError, match="Failed to delete staged data"):
-        e2e_common.delete_blob_prefix(
+        delete_blob_prefix(
             tmp_path,
             "account",
             "container",
@@ -62,8 +61,8 @@ def test_cancel_osmo_workflow_raises_on_failed_cancel(monkeypatch: pytest.Monkey
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args=args, returncode=1, stdout="cancel out", stderr="cancel err")
 
-    monkeypatch.setattr(e2e_osmo, "run_command", fake_run_command)
-    workflow = e2e_osmo.OSMOWorkflow(
+    monkeypatch.setattr("tests.e2e._osmo.run_command", fake_run_command)
+    workflow = OSMOWorkflow(
         workflow_id="workflow-1",
         workflow_name="workflow",
         experiment_name="experiment",
@@ -71,7 +70,7 @@ def test_cancel_osmo_workflow_raises_on_failed_cancel(monkeypatch: pytest.Monkey
     )
 
     with pytest.raises(AssertionError, match="Failed to cancel OSMO workflow"):
-        e2e_osmo.cancel_osmo_workflow(workflow, tmp_path)
+        cancel_osmo_workflow(workflow, tmp_path)
 
 
 def test_lerobot_eval_policy_repo_forwards_revision(monkeypatch: pytest.MonkeyPatch) -> None:

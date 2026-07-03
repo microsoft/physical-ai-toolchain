@@ -47,17 +47,12 @@ _EXCLUDED_PARTS = frozenset({"tests", "external", "node_modules", ".venv", ".git
 
 # Heredoc opener ``<< 'DELIM'`` / ``<<-"DELIM"`` / ``<<DELIM``, matched independently of
 # the command that consumes the body so both ``python3 <<'DELIM'`` and the piped
-# ``cat <<'DELIM' | python3`` forms are covered. ``_python_heredocs`` treats the body as
-# Python when the opener either invokes ``python`` or redirects the body into a ``.py`` file.
+# ``cat <<'DELIM' | python3`` forms are covered. ``_python_heredocs`` scans every
+# quoted-delimiter heredoc body as a candidate Python snippet regardless of the opener.
 _HEREDOC_OPENER_RE = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?(?:\s|$)")
-_PYTHON_TOKEN_RE = re.compile(r"\bpython3?\b")
 # ``python -c`` interpreter basename, allowing version suffixes (``python3.12``), matched
 # in full so the inline-``-c`` scanner sees the same interpreters as the heredoc opener.
 _PYTHON_INTERPRETER_RE = re.compile(r"python(?:\d+(?:\.\d+)?)?")
-# Redirect of the heredoc body into a ``.py`` file (``> dl.py`` / ``>> dl.py``): an
-# unambiguous signal the body is Python that a later ``python <file>`` line will execute,
-# so ``cat > dl.py <<'DELIM'`` is not a way to smuggle an unpinned download past the guard.
-_PY_FILE_REDIRECT_RE = re.compile(r">>?\s*[^\s|&;<>]+\.py(?:\s|$)")
 
 
 class ScanError(RuntimeError):
