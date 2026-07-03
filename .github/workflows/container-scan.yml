@@ -45,7 +45,7 @@ jobs:
         id: extract
         run: |
           set -euo pipefail
-          if ! images="$(bash .github/scripts/discover-base-images.sh)"; then
+          if ! images="$(bash scripts/security/discover-base-images.sh)"; then
             echo "::error::Failed to discover digest-pinned base images"
             exit 1
           fi
@@ -87,7 +87,7 @@ jobs:
           IMAGE: ${{ matrix.image }}
         run: |
           set -euo pipefail
-          slug=$(bash .github/scripts/image-slug.sh "$IMAGE")
+          slug=$(bash scripts/security/image-slug.sh "$IMAGE")
           echo "slug=$slug" >> "$GITHUB_OUTPUT"
         shell: bash
 
@@ -103,6 +103,11 @@ jobs:
           format: sarif
           output: trivy-${{ steps.slug.outputs.slug }}.sarif
           severity: ${{ inputs.severity }}
+          # Scope must match scan_image() in container-cve-remediation.sh exactly so
+          # both channels report identical findings: vuln scanner only (no secret /
+          # misconfig) over os+library packages. `vuln-type` is this action version's
+          # input name for Trivy's `--pkg-types` (upstream rename still pending).
+          scanners: vuln
           vuln-type: os,library
           ignore-unfixed: true
           limit-severities-for-sarif: true
