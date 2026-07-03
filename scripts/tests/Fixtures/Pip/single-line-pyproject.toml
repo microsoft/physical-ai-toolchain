@@ -1,0 +1,8 @@
+[project]
+name = "single-line-project"
+version = "1.0.0"
+dependencies = ["numpy>=1.26.0", "requests==2.33.1"]
+
+[project.optional-dependencies]
+fuzz = ["atheris>=3.1.0"]
+docs = ["sphinx==7.2.0"]
