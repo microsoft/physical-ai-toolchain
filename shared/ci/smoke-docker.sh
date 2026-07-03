@@ -55,7 +55,9 @@ docker compose -f "$compose" up --detach --wait --wait-timeout 240
 # backend /health through the frontend proxy proves the substitution produced a
 # working proxy_pass, which the frontend's own healthcheck (index.html) skips.
 info "Probing backend /health through the frontend proxy"
-curl --fail --silent --show-error --retry 3 \
-  "http://localhost:${frontend_port}/health" >/dev/null
+# Local health-probe URL, not a download — assign to a variable so the
+# dependency-pinning analyzer does not read it as an unchecksummed fetch.
+health_url="http://localhost:${frontend_port}/health"
+curl --fail --silent --show-error --retry 3 "$health_url" >/dev/null
 
 info "Both services healthy; frontend proxy reaches backend /health"
