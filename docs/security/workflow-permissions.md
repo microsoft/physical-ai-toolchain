@@ -62,7 +62,8 @@ The workflow-scoped `GITHUB_TOKEN` remains read-only. Workflows that need reposi
 | `container-cve-remediation.yml` | `Generate GitHub App token` | `pull-requests: write` | Required to open digest-bump pull requests for human review.                                              |
 
 > [!NOTE]
-> The repository/organization **"Allow GitHub Actions to create and approve pull requests"** setting is intentionally *not* required for `container-cve-remediation.yml`. That toggle governs the default `GITHUB_TOKEN`; this workflow instead mints a scoped GitHub App token, which the toggle does not apply to. Using an App token is also deliberate for gate coverage: pull requests opened with an App token trigger `pr-validation.yml` (including the `container-scan` gate), whereas pull requests opened with the default `GITHUB_TOKEN` would not.
+> The repository/organization **"Allow GitHub Actions to create and approve pull requests"** setting is intentionally *not* required for `container-cve-remediation.yml`. That toggle governs the default `GITHUB_TOKEN`; this workflow instead mints a scoped GitHub App token, which the toggle does not apply to.
+> Using an App token is also deliberate for gate coverage: pull requests opened with an App token trigger `pr-validation.yml` (including the `container-scan` gate), whereas pull requests opened with the default `GITHUB_TOKEN` would not.
 
 ## 🛡️ Defense in Depth
 
