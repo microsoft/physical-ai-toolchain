@@ -110,6 +110,7 @@ def build_app():
 
     - ``VLM_JUDGE_BACKEND``  (default ``echo`` for safe boot without GPU)
     - ``VLM_JUDGE_MODEL_ID`` (default ``Qwen/Qwen3-VL-4B-Instruct``)
+    - ``VLM_JUDGE_MODEL_REVISION`` (immutable HF commit SHA to pin the qwen3-vl download)
     - ``VLM_JUDGE_BASE_URL`` (required for ``openai-compat``)
     - ``VLM_JUDGE_API_KEY``  (optional API key for ``openai-compat``)
     - ``VLM_JUDGE_N_FRAMES`` (default ``12``)
@@ -120,6 +121,7 @@ def build_app():
     backend = BackendConfig(
         kind=os.environ.get("VLM_JUDGE_BACKEND", "echo"),
         model_id=os.environ.get("VLM_JUDGE_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct"),
+        revision=os.environ.get("VLM_JUDGE_MODEL_REVISION") or None,
         base_url=os.environ.get("VLM_JUDGE_BASE_URL") or None,
         api_key=os.environ.get("VLM_JUDGE_API_KEY") or None,
     )

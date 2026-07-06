@@ -39,6 +39,7 @@ class BackendConfig:
     """One of ``qwen3-vl``, ``openai-compat``, ``echo``."""
 
     model_id: str = "Qwen/Qwen3-VL-4B-Instruct"
+    revision: str | None = None
     base_url: str | None = None
     api_key: str | None = None
     device_map: str = "auto"
@@ -188,6 +189,7 @@ class JudgeService:
         if cfg.kind == "qwen3-vl":
             return Qwen3VLBackend(
                 model_id=cfg.model_id,
+                revision=cfg.revision,
                 device_map=cfg.device_map,
                 dtype=cfg.dtype,
             )

@@ -32,6 +32,8 @@ model on AKS GPU nodes with optional Azure ML + ACR model upload.
 
 REQUIRED:
         --base-model MODEL        vla base model (e.g., nvidia/GR00T-N1.5-3B)
+        --base-model-revision SHA HuggingFace commit SHA to pin the base model
+                                  (defaults to a pinned SHA for the selected --vla-version)
         --data-config CONFIG      GR00T data config key (embodiment identifier)
 
 DATA SOURCE:
@@ -122,6 +124,7 @@ dataset_path="${DATASET_PATH:-/data/dataset}"
 
 vla_version="${VLA_VERSION:-1.5}"
 base_model="${BASE_MODEL:-}"
+base_model_revision="${BASE_MODEL_REVISION:-}"
 data_config="${DATA_CONFIG:-}"
 data_config_b64="${DATA_CONFIG_B64:-}"
 data_config_file="${DATA_CONFIG_FILE:-}"
@@ -166,6 +169,7 @@ while [[ $# -gt 0 ]]; do
     --blob-url)                   blob_url="$2"; shift 2 ;;
     --dataset-path)               dataset_path="$2"; shift 2 ;;
     --base-model)                 base_model="$2"; shift 2 ;;
+    --base-model-revision)        base_model_revision="$2"; shift 2 ;;
     --data-config)                data_config="$2"; shift 2 ;;
     --data-config-b64)            data_config_b64="$2"; shift 2 ;;
     --data-config-file)           data_config_file="$2"; shift 2 ;;
@@ -213,11 +217,13 @@ case "$vla_version" in
   1.5)
     default_groot_ref="796ca8d87360913c47e9f75e17c11d63f7805048"
     default_base_model="nvidia/GR00T-N1.5-3B"
+    default_base_model_revision="869830fc749c35f34771aa5209f923ac57e4564e"
     auto_resolve_modality=false
     ;;
   1.7)
     default_groot_ref="23ace64f17aa5015259b8609d371eb61a357c776"
     default_base_model="nvidia/GR00T-N1.7-3B"
+    default_base_model_revision="2fc962b973bccdd5d8ce4f67cc63b264d6886495"
     auto_resolve_modality=true
     ;;
   *)
@@ -226,8 +232,15 @@ case "$vla_version" in
 esac
 [[ -z "$groot_ref" ]]   && groot_ref="$default_groot_ref"
 [[ -z "$base_model" ]]  && base_model="$default_base_model"
+# Only apply the pinned-revision default when the base model is the version
+# default; a caller-supplied --base-model must bring its own --base-model-revision.
+[[ -z "$base_model_revision" && "$base_model" == "$default_base_model" ]] && base_model_revision="$default_base_model_revision"
 
 [[ -z "$base_model" ]] && fatal "--base-model is required"
+# A remote HuggingFace repo id (org/name, not an absolute on-disk path) must be
+# pinned to an immutable commit; absolute paths are exempt because no Hub download occurs.
+require_hf_pin "$base_model" "$base_model_revision" "--base-model-revision"
+
 [[ -z "$data_config" ]] && fatal "--data-config is required"
 [[ -z "$blob_url" ]] && fatal "--blob-url is required (no dataset source configured)"
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
@@ -326,6 +339,7 @@ submit_args=(
   "max_steps=$max_steps"
   "save_steps=$save_steps"
   "base_model=$base_model"
+  "base_model_revision=$base_model_revision"
   "data_config=$data_config"
   "embodiment_tag=$embodiment_tag"
   "isaac_groot_ref=$groot_ref"
@@ -374,6 +388,7 @@ section "Deployment Summary"
 print_kv "Job Name" "$job_name"
 print_kv "VLA Version" "$vla_version"
 print_kv "Base Model" "$base_model"
+print_kv "Base Model Revision" "${base_model_revision:-unpinned}"
 print_kv "Data Config" "$data_config"
 [[ -n "$data_config_file" ]] && print_kv "Data Config File" "$data_config_file"
 [[ -n "$modality_config_file" ]] && print_kv "Modality Config File" "$modality_config_file"

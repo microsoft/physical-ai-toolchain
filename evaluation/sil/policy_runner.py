@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
+from .hf_revision import resolve_hf_revision
 from .robot_types import (
     NUM_JOINTS,
     JointPositionCommand,
@@ -77,6 +78,7 @@ class PolicyRunner:
         cls,
         repo_id: str,
         device: str = "cuda",
+        revision: str | None = None,
     ) -> PolicyRunner:
         """Load a trained ACT policy and its normalization processors.
 
@@ -84,24 +86,31 @@ class PolicyRunner:
             repo_id: HuggingFace repo ID or local path containing
                 ``config.json``, ``model.safetensors``, and processor JSONs.
             device: Target device (``cuda``, ``cpu``, ``mps``).
+            revision: Immutable 40-hex commit SHA to pin the
+                download. Ignored for local paths; a 40-hex SHA is required for
+                remote repositories to prevent an upstream repo from silently shipping new
+                weights.
         """
         from lerobot.policies.act.modeling_act import ACTPolicy
         from lerobot.processor.pipeline import PolicyProcessorPipeline
 
         device = _resolve_device(device)
+        revision = resolve_hf_revision(repo_id, revision, revision_name="revision")
 
-        policy = ACTPolicy.from_pretrained(repo_id)
+        policy = ACTPolicy.from_pretrained(repo_id, revision=revision)
         policy.to(device)
 
         device_override = {"device_processor": {"device": device}}
         preprocessor = PolicyProcessorPipeline.from_pretrained(
             repo_id,
             "policy_preprocessor.json",
+            revision=revision,
             overrides=device_override,
         )
         postprocessor = PolicyProcessorPipeline.from_pretrained(
             repo_id,
             "policy_postprocessor.json",
+            revision=revision,
             overrides=device_override,
         )
 

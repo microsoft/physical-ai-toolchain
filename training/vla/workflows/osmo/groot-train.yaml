@@ -33,6 +33,7 @@ workflow:
         OUTPUT_ROOT: "/outputs"
         DATA_CONFIG: "{{data_config}}"
         BASE_MODEL: "{{base_model}}"
+        BASE_MODEL_REVISION: "{{base_model_revision}}"
         BATCH_SIZE: "{{batch_size}}"
         MAX_STEPS: "{{max_steps}}"
         SAVE_STEPS: "{{save_steps}}"
@@ -445,6 +446,25 @@ workflow:
 
             python -c "import torch; p=torch.cuda.get_device_properties(0); print(f'[preflight] GPU: {p.name}  total={p.total_memory/1024**3:.2f} GiB  sm={p.major}.{p.minor}')"
 
+            # Pin the base model to an immutable commit before the (external) finetune
+            # script resolves it: nvcr/HF tags are mutable, so an upstream repo could
+            # otherwise ship new weights silently. When BASE_MODEL is a HuggingFace repo
+            # id (not an on-disk path) and a revision is set, snapshot it locally at that
+            # SHA and point BASE_MODEL at the snapshot.
+            if [ -n "${BASE_MODEL_REVISION:-}" ] && [ ! -d "${BASE_MODEL}" ]; then
+              if ! printf '%s' "${BASE_MODEL_REVISION}" | grep -qzE '^[0-9a-fA-F]{40}$'; then
+                echo "ERROR: base_model_revision '${BASE_MODEL_REVISION}' must be an immutable 40-hex commit SHA for remote BASE_MODEL '${BASE_MODEL}'" >&2
+                exit 1
+              fi
+              echo "--- pinning base model ${BASE_MODEL} @ ${BASE_MODEL_REVISION} ---"
+              BASE_MODEL_LOCAL="/tmp/base_model"
+              python -c "import sys; from huggingface_hub import snapshot_download; snapshot_download(repo_id=sys.argv[1], revision=sys.argv[2], local_dir=sys.argv[3]); print('[base-model] pinned', sys.argv[1], sys.argv[2], '->', sys.argv[3])" "${BASE_MODEL}" "${BASE_MODEL_REVISION}" "${BASE_MODEL_LOCAL}"
+              BASE_MODEL="${BASE_MODEL_LOCAL}"
+            elif [ -z "${BASE_MODEL_REVISION:-}" ] && [ ! -d "${BASE_MODEL}" ]; then
+              echo "ERROR: BASE_MODEL ${BASE_MODEL} is a remote repo but base_model_revision is empty; refusing to train against a mutable HEAD" >&2
+              exit 1
+            fi
+
             echo "--- starting training ---"
             if [ -f "scripts/gr00t_finetune.py" ]; then
               echo "  N1.5/N1.6 branch: using scripts/gr00t_finetune.py"
@@ -574,6 +594,7 @@ default-values:
   data_config_b64: ""
   modality_config_b64: ""
   base_model: ""
+  base_model_revision: ""
   batch_size: 4
   max_steps: 500
   save_steps: 100

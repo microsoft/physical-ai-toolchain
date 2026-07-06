@@ -58,12 +58,16 @@ class Qwen3VLBackend(JudgeBackend):
     Defaults to ``Qwen/Qwen3-VL-4B-Instruct`` which fits on a 24GB GPU in
     bf16. Larger variants (``8B``, ``30B-A3B``) work the same way; pass the
     model id via ``model_id`` and adjust ``dtype`` / ``device_map`` as needed.
+    Pass ``revision`` (an immutable commit SHA) to pin the Hub download for
+    reproducible, tamper-evident judging; ``None`` resolves the mutable default
+    branch.
     """
 
     def __init__(
         self,
         *,
         model_id: str = "Qwen/Qwen3-VL-4B-Instruct",
+        revision: str | None = None,
         device_map: str = "auto",
         dtype: str = "bfloat16",
         attn_implementation: str | None = "sdpa",
@@ -77,10 +81,12 @@ class Qwen3VLBackend(JudgeBackend):
         self._dtype = getattr(torch, dtype)
         self._processor = AutoProcessor.from_pretrained(
             model_id,
+            revision=revision,
             trust_remote_code=trust_remote_code,
         )
         self._model = _load_qwen3_vl_model(
             model_id=model_id,
+            revision=revision,
             device_map=device_map,
             dtype=self._dtype,
             attn_implementation=attn_implementation,
@@ -142,6 +148,7 @@ class Qwen3VLBackend(JudgeBackend):
 def _load_qwen3_vl_model(
     *,
     model_id: str,
+    revision: str | None,
     device_map: str,
     dtype,
     attn_implementation: str | None,
@@ -164,6 +171,7 @@ def _load_qwen3_vl_model(
         try:
             return cls.from_pretrained(
                 model_id,
+                revision=revision,
                 dtype=dtype,
                 device_map=device_map,
                 attn_implementation=attn_implementation,
