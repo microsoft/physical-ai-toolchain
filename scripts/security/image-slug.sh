@@ -2,9 +2,8 @@
 # Print the disambiguation slug for a digest-pinned image ref
 # (registry/repo:tag@sha256:...). A short hash of the full ref (digest included)
 # is appended so two images whose tags collapse to the same alphanumeric slug
-# still get distinct slugs. Shared by container-scan.yml (SARIF file names and
-# categories) and container-cve-remediation.sh (remediation branch names) so
-# both derive identical slugs from one source.
+# still get distinct slugs. Used by container-scan.yml to name the per-image
+# SARIF file and category.
 set -o errexit -o nounset -o pipefail
 
 ref="${1:?usage: image-slug.sh <image-ref>}"

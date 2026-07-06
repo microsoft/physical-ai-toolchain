@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: MIT
 
 # Behavioral coverage for scripts/security/discover-base-images.sh, the FROM-line
-# parser shared by container-scan.yml and container-cve-remediation.sh. It must
-# emit only external, digest-pinned bases and exclude stage aliases, ARG/scratch
-# bases, and duplicates. Tests run the script inside a throwaway git work tree
-# (it enumerates tracked Dockerfiles via `git ls-files`).
+# parser used by container-scan.yml. It must emit only external, digest-pinned
+# bases and exclude stage aliases, ARG/scratch bases, and duplicates. Tests run
+# the script inside a throwaway git work tree (it enumerates tracked Dockerfiles
+# via `git ls-files`).
 
 BeforeDiscovery {
     $script:ToolsPresent = [bool](Get-Command bash -ErrorAction SilentlyContinue) -and

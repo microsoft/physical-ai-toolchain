@@ -51,20 +51,6 @@ The 21 write permissions below are required by the action or CLI invoked in the 
 | `terraform-security.yml`      | `checkov`                   | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish Checkov findings to the Security tab.                             |
 | `weekly-validation.yml`       | `container-rescan`          | `security-events: write` | Inherited by reusable `container-scan.yml`; required for SARIF upload of the soft-fail base-image rescan.                    |
 
-## 🔑 GitHub App Token Write Scopes
-
-The workflow-scoped `GITHUB_TOKEN` remains read-only. Workflows that need repository mutations mint GitHub App tokens for the minimum write scopes required by the corresponding step.
-
-| Workflow                        | Step                        | Token scope            | Rationale                                                                                                 |
-|---------------------------------|-----------------------------|------------------------|-----------------------------------------------------------------------------------------------------------|
-| `container-cve-remediation.yml` | `Generate GitHub App token` | `contents: write`      | Required to push digest-bump branches and update files when a clean replacement base-image digest exists. |
-| `container-cve-remediation.yml` | `Generate GitHub App token` | `issues: write`        | Required to open or refresh tracking issues when no clean replacement base-image digest is available.     |
-| `container-cve-remediation.yml` | `Generate GitHub App token` | `pull-requests: write` | Required to open digest-bump pull requests for human review.                                              |
-
-> [!NOTE]
-> The repository/organization **"Allow GitHub Actions to create and approve pull requests"** setting is intentionally *not* required for `container-cve-remediation.yml`. That toggle governs the default `GITHUB_TOKEN`; this workflow instead mints a scoped GitHub App token, which the toggle does not apply to.
-> Using an App token is also deliberate for gate coverage: pull requests opened with an App token trigger `pr-validation.yml` (including the `container-scan` gate), whereas pull requests opened with the default `GITHUB_TOKEN` would not.
-
 ## 🛡️ Defense in Depth
 
 The release-publishing path uses additional hardening beyond minimum permissions:
