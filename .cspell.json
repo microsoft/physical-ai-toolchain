@@ -17,12 +17,16 @@
 		"envaccount",
 		"envcontainer",
 		"failuremode",
-		"veryfast",
-		"visualisation",
-		"worldv",
-		"xticklabels",
-		"yoloe",
-		"yolov"
+		"fixpoint",
+		"freqs",
+		"fstring",
+		"getfixturevalue",
+		"headlessly",
+		"hfpins",
+		"imwrite",
+		"leisaac",
+		"minimise",
+		"misattributed",
 		"mlruns",
 		"myacct",
 		"mycontainer",
@@ -54,17 +58,13 @@
 		"uppercased",
 		"uvlock",
 		"varname",
-<<<<<<< HEAD
 		"veryfast",
+		"vLLM",
 		"visualisation",
 		"worldv",
 		"xticklabels",
 		"yoloe",
 		"yolov"
-=======
-		"vLLM",
-		"xticklabels"
->>>>>>> e8f1ac7 (refactor(data): restructure dataviewer components)
 	],
 	"ignorePaths": [
 		"**/.github/chatmodes/**",
