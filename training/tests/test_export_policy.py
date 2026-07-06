@@ -86,6 +86,20 @@ class TestInferArchitectureFromCheckpoint:
 
         assert arch == _MOD.PolicyArchitecture(obs_dim=3, action_dim=2, hidden_dims=[5, 4], activation="elu")
 
+    def test_loads_checkpoint_with_non_model_keys(self, tmp_path: Path) -> None:
+        # Real RSL-RL checkpoints carry optimizer_state_dict/iter/infos beside
+        # model_state_dict; weights_only=True must still load these safe-typed extras.
+        checkpoint_path = tmp_path / "realistic.pt"
+        state = _checkpoint_state()
+        state["optimizer_state_dict"] = {"state": {}, "param_groups": [{"lr": 1e-3, "params": [0]}]}
+        state["iter"] = 100
+        state["infos"] = None
+        torch.save(state, checkpoint_path)
+
+        arch = _MOD.infer_architecture_from_checkpoint(str(checkpoint_path))
+
+        assert arch == _MOD.PolicyArchitecture(obs_dim=3, action_dim=2, hidden_dims=[5, 4], activation="elu")
+
     def test_rejects_checkpoint_without_model_state_dict(self, tmp_path: Path) -> None:
         checkpoint_path = tmp_path / "missing-state.pt"
         torch.save({"epoch": 3}, checkpoint_path)
@@ -179,6 +193,7 @@ class TestExportPolicy:
         load_actor = mocker.patch.object(_MOD, "load_actor_from_checkpoint", return_value=(actor, None, arch))
         jit_export = mocker.patch.object(_MOD._TorchPolicyExporter, "export", return_value="/exports/policy.pt")
         onnx_export = mocker.patch.object(_MOD._OnnxPolicyExporter, "export", return_value="/exports/policy.onnx")
+        sidecar = mocker.patch.object(_MOD, "write_sha256_sidecar")
 
         exported = _MOD.export_policy(
             checkpoint_path="checkpoint.pt",
@@ -193,6 +208,7 @@ class TestExportPolicy:
         load_actor.assert_called_once_with("checkpoint.pt", 3, 2, [], "relu")
         jit_export.assert_called_once_with(str(tmp_path), "policy.pt")
         onnx_export.assert_called_once_with(str(tmp_path), 3, "policy.onnx")
+        assert sidecar.call_args_list == [mocker.call("/exports/policy.pt"), mocker.call("/exports/policy.onnx")]
 
     def test_skips_disabled_export_formats(self, mocker: MockerFixture, tmp_path: Path) -> None:
         actor = torch.nn.Linear(3, 2)
@@ -211,3 +227,31 @@ class TestExportPolicy:
         assert exported == {}
         jit_export.assert_not_called()
         onnx_export.assert_not_called()
+
+
+class TestSha256Sidecar:
+    def test_writes_sha256sum_format_matching_content(self, tmp_path: Path) -> None:
+        import hashlib
+
+        model_path = tmp_path / "policy.pt"
+        model_path.write_bytes(b"scripted-model-bytes")
+
+        sidecar = _MOD.write_sha256_sidecar(str(model_path))
+
+        expected = hashlib.sha256(b"scripted-model-bytes").hexdigest()
+        assert sidecar == str(model_path) + ".sha256"
+        assert Path(sidecar).read_text(encoding="utf-8") == f"{expected}  policy.pt\n"
+
+    def test_load_rejects_weights_only_incompatible_payload(self, tmp_path: Path) -> None:
+        # weights_only=True must refuse a pickle carrying an arbitrary object.
+        # argparse.Namespace is picklable but not in torch's safe-globals allowlist,
+        # so the load is rejected and surfaced as an actionable error that chains the cause.
+        import argparse
+        import pickle
+
+        checkpoint_path = tmp_path / "evil.pt"
+        torch.save({"model_state_dict": {}, "payload": argparse.Namespace(cmd="rm -rf /")}, checkpoint_path)
+
+        with pytest.raises(ValueError, match="add_safe_globals") as excinfo:
+            _MOD.infer_architecture_from_checkpoint(str(checkpoint_path))
+        assert isinstance(excinfo.value.__cause__, pickle.UnpicklingError)

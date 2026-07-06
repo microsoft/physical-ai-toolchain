@@ -15,12 +15,14 @@ import pytest
 
 from tests.e2e._aml import AzureMLWorkspace
 from tests.e2e._common import (
+    delete_blob_prefix,
     e2e_name,
     env_value,
     format_command_failure,
     log_e2e,
     parse_json_from_output,
     run_command,
+    upload_blob_directory,
     wait_for_status,
 )
 
@@ -239,7 +241,11 @@ def cancel_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
 
     log_e2e(f"Cancelling OSMO workflow {workflow.workflow_id}")
 
-    run_command(["osmo", "workflow", "cancel", workflow.workflow_id], cwd=repo_root)
+    result = run_command(["osmo", "workflow", "cancel", workflow.workflow_id], cwd=repo_root)
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Failed to cancel OSMO workflow {workflow.workflow_id!r}\n\n{format_command_failure(result)}"
+        )
 
 
 @dataclass(frozen=True)
@@ -343,11 +349,15 @@ class TaskPodLogStream:
 
     def stop(self, *, timeout_seconds: float = 30.0) -> None:
         self._stop.set()
+        self._terminate_current_process()
+        self._thread.join(timeout=timeout_seconds)
+        self._terminate_current_process()
+
+    def _terminate_current_process(self) -> None:
         with self._proc_lock:
             proc = self._proc
         if proc is not None and proc.poll() is None:
             proc.terminate()
-        self._thread.join(timeout=timeout_seconds)
 
     def _run(self) -> None:
         if shutil.which("kubectl") is None:
@@ -371,6 +381,8 @@ class TaskPodLogStream:
                 reported[pod.name] = signature
 
             if pod.started and pod.name not in streamed:
+                if self._stop.is_set():
+                    return
                 streamed.add(pod.name)
                 self._follow(pod.name)
                 continue
@@ -403,6 +415,9 @@ class TaskPodLogStream:
         return _task_pod_from_item(newest, self._task_name)
 
     def _follow(self, pod_name: str) -> None:
+        if self._stop.is_set():
+            return
+
         log_e2e(f"Streaming logs for OSMO task {self._task_name} (pod {pod_name})")
         try:
             proc = subprocess.Popen(
@@ -419,6 +434,9 @@ class TaskPodLogStream:
 
         with self._proc_lock:
             self._proc = proc
+            should_stop = self._stop.is_set()
+        if should_stop and proc.poll() is None:
+            proc.terminate()
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
@@ -539,12 +557,21 @@ def submit_osmo_lerobot_training(
 
 _LEROBOT_EVAL_MODEL_ENV = "E2E_LEROBOT_EVAL_MODEL"
 _LEROBOT_EVAL_POLICY_REPO_ENV = "E2E_LEROBOT_EVAL_POLICY_REPO_ID"
+_LEROBOT_EVAL_POLICY_REVISION_ENV = "E2E_LEROBOT_EVAL_POLICY_REVISION"
 
 
 def _lerobot_eval_model_source_args() -> tuple[list[str], str]:
     policy_repo_id = env_value(_LEROBOT_EVAL_POLICY_REPO_ENV)
     if policy_repo_id:
-        return ["--policy-repo-id", policy_repo_id], f"HuggingFace policy repo {policy_repo_id}"
+        policy_revision = env_value(_LEROBOT_EVAL_POLICY_REVISION_ENV)
+        if not policy_revision:
+            pytest.skip(f"{_LEROBOT_EVAL_POLICY_REVISION_ENV} is required when {_LEROBOT_EVAL_POLICY_REPO_ENV} is set")
+        return [
+            "--policy-repo-id",
+            policy_repo_id,
+            "--policy-revision",
+            policy_revision,
+        ], f"HuggingFace policy repo {policy_repo_id}@{policy_revision}"
 
     model = env_value(_LEROBOT_EVAL_MODEL_ENV)
     if not model:
@@ -636,6 +663,7 @@ def submit_osmo_lerobot_eval(
 _VLA_DATASET_BLOB_URL_ENV = "E2E_VLA_DATASET_BLOB_URL"
 _VLA_VERSION_ENV = "E2E_VLA_VERSION"
 _VLA_BASE_MODEL_ENV = "E2E_VLA_BASE_MODEL"
+_VLA_BASE_MODEL_REVISION_ENV = "E2E_VLA_BASE_MODEL_REVISION"
 _VLA_DATA_CONFIG_ENV = "E2E_VLA_DATA_CONFIG"
 _VLA_EMBODIMENT_TAG_ENV = "E2E_VLA_EMBODIMENT_TAG"
 _VLA_PLATFORM_ENV = "E2E_VLA_PLATFORM"
@@ -655,57 +683,6 @@ class _VlaDataset:
     blob_url: str
     data_config: str
     data_config_file: Path | None
-
-
-def _upload_vla_dataset(repo_root: Path, storage_account: str, container: str, prefix: str, dataset_dir: Path) -> None:
-    result = run_command(
-        [
-            "az",
-            "storage",
-            "blob",
-            "upload-batch",
-            "--account-name",
-            storage_account,
-            "--auth-mode",
-            "login",
-            "--destination",
-            container,
-            "--destination-path",
-            prefix,
-            "--source",
-            str(dataset_dir),
-            "--overwrite",
-            "--only-show-errors",
-        ],
-        cwd=repo_root,
-    )
-    if result.returncode != 0:
-        raise AssertionError(
-            f"Failed to upload synthetic VLA dataset to {storage_account}/{container}/{prefix}\n\n"
-            f"{format_command_failure(result)}"
-        )
-
-
-def _delete_vla_dataset(repo_root: Path, storage_account: str, container: str, prefix: str) -> None:
-    log_e2e(f"Deleting staged synthetic VLA dataset under {container}/{prefix}")
-    run_command(
-        [
-            "az",
-            "storage",
-            "blob",
-            "delete-batch",
-            "--account-name",
-            storage_account,
-            "--auth-mode",
-            "login",
-            "--source",
-            container,
-            "--pattern",
-            f"{prefix}/*",
-            "--only-show-errors",
-        ],
-        cwd=repo_root,
-    )
 
 
 def _stage_synthetic_vla_dataset(request: pytest.FixtureRequest, repo_root: Path) -> _VlaDataset:
@@ -732,8 +709,24 @@ def _stage_synthetic_vla_dataset(request: pytest.FixtureRequest, repo_root: Path
 
     prefix = f"e2e-vla-datasets/{e2e_name('vla-finetune')}"
     log_e2e(f"Uploading synthetic GR00T dataset to {storage_account}/{container}/{prefix}")
-    _upload_vla_dataset(repo_root, storage_account, container, prefix, dataset_dir)
-    request.addfinalizer(lambda: _delete_vla_dataset(repo_root, storage_account, container, prefix))
+    # Register cleanup before the upload so a partial upload is still torn down.
+    request.addfinalizer(
+        lambda: delete_blob_prefix(
+            repo_root,
+            storage_account,
+            container,
+            prefix,
+            description="staged synthetic VLA dataset",
+        )
+    )
+    upload_blob_directory(
+        repo_root,
+        storage_account,
+        container,
+        prefix,
+        dataset_dir,
+        description="synthetic VLA dataset",
+    )
 
     blob_url = f"https://{storage_account}.blob.core.windows.net/{container}/{prefix}"
     return _VlaDataset(blob_url=blob_url, data_config=DATA_CONFIG_KEY, data_config_file=data_config_file)
@@ -750,6 +743,24 @@ def _resolve_vla_dataset(request: pytest.FixtureRequest, repo_root: Path) -> _Vl
     return _stage_synthetic_vla_dataset(request, repo_root)
 
 
+def _vla_base_model_args() -> list[str]:
+    base_model = env_value(_VLA_BASE_MODEL_ENV)
+    base_model_revision = env_value(_VLA_BASE_MODEL_REVISION_ENV)
+    args = []
+    if base_model is not None:
+        args.extend(["--base-model", base_model])
+        if base_model_revision is None and not Path(base_model).is_absolute():
+            pytest.skip(
+                f"{_VLA_BASE_MODEL_REVISION_ENV} is required when {_VLA_BASE_MODEL_ENV} points at a remote "
+                "HuggingFace model"
+            )
+        if base_model_revision is not None:
+            args.extend(["--base-model-revision", base_model_revision])
+    elif base_model_revision is not None:
+        pytest.skip(f"{_VLA_BASE_MODEL_REVISION_ENV} is set without {_VLA_BASE_MODEL_ENV}; nothing to pin")
+    return args
+
+
 def submit_osmo_vla_finetune(
     repo_root: Path,
     aml_workspace: AzureMLWorkspace,
@@ -761,9 +772,7 @@ def submit_osmo_vla_finetune(
     dataloader_workers: int,
 ) -> OSMOWorkflow:
     dataset = _resolve_vla_dataset(request, repo_root)
-
     vla_version = env_value(_VLA_VERSION_ENV, _DEFAULT_VLA_VERSION)
-    base_model = env_value(_VLA_BASE_MODEL_ENV)
     embodiment_tag = env_value(_VLA_EMBODIMENT_TAG_ENV, _DEFAULT_VLA_EMBODIMENT_TAG)
     platform = env_value(_VLA_PLATFORM_ENV, _DEFAULT_VLA_PLATFORM)
     job_name = e2e_name("vla-finetune-e2e-osmo")
@@ -801,8 +810,7 @@ def submit_osmo_vla_finetune(
         "--azure-workspace-name",
         aml_workspace.workspace_name,
     ]
-    if base_model is not None:
-        args.extend(["--base-model", base_model])
+    args.extend(_vla_base_model_args())
     if dataset.data_config_file is not None:
         args.extend(["--data-config-file", str(dataset.data_config_file)])
     args.extend(["--", "--format-type", "json"])

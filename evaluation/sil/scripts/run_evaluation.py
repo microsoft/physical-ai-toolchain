@@ -1,5 +1,7 @@
 """LeRobot replay-based inference evaluation."""
 
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -8,6 +10,12 @@ from pathlib import Path
 
 import numpy as np
 import torch
+
+_EVALUATION_ROOT = Path(__file__).resolve().parents[2]
+if str(_EVALUATION_ROOT) not in sys.path:
+    sys.path.insert(0, str(_EVALUATION_ROOT))
+
+from sil.hf_revision import resolve_hf_revision  # noqa: E402
 
 JOINT_NAMES: list[str] = []
 
@@ -299,13 +307,19 @@ def main() -> int:
     import pyarrow.parquet as pq
     from lerobot.policies.act.modeling_act import ACTPolicy
 
-    policy_repo_id = os.environ["POLICY_REPO_ID"]
+    policy_repo_id = os.environ.get("POLICY_REPO_ID", "").strip()
     policy_type = os.environ.get("POLICY_TYPE", "act")
     dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")
+    policy_revision = os.environ.get("POLICY_REVISION", "").strip() or None
+    dataset_revision = os.environ.get("DATASET_REVISION") or None
     eval_episodes = int(os.environ.get("EVAL_EPISODES", "10"))
     output_dir = Path(os.environ.get("OUTPUT_DIR", "/workspace/outputs/eval"))
     job_name = os.environ.get("JOB_NAME", "lerobot-eval")
     mlflow_enable = os.environ.get("MLFLOW_ENABLE", "false") == "true"
+
+    if not policy_repo_id:
+        print("[ERROR] POLICY_REPO_ID is required")
+        return 1
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -318,9 +332,14 @@ def main() -> int:
         dataset_dir = dataset_dir_env
         print(f"[INFO] Using blob-downloaded dataset: {dataset_dir}")
     elif dataset_repo_id and dataset_repo_id != "none":
+        try:
+            dataset_revision = resolve_hf_revision(dataset_repo_id, dataset_revision, revision_name="DATASET_REVISION")
+        except ValueError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
         from huggingface_hub import snapshot_download
 
-        dataset_dir = snapshot_download(repo_id=dataset_repo_id, repo_type="dataset")
+        dataset_dir = snapshot_download(repo_id=dataset_repo_id, repo_type="dataset", revision=dataset_revision)
         print(f"[INFO] Dataset downloaded from HuggingFace: {dataset_dir}")
     else:
         print("[ERROR] Dataset source required: set DATASET_REPO_ID or blob storage params")
@@ -343,7 +362,12 @@ def main() -> int:
 
     # Load policy (normalization is handled internally by select_action)
     print(f"[INFO] Loading policy from: {policy_repo_id}")
-    policy = ACTPolicy.from_pretrained(policy_repo_id)
+    try:
+        policy_revision = resolve_hf_revision(policy_repo_id, policy_revision, revision_name="POLICY_REVISION")
+    except ValueError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
+    policy = ACTPolicy.from_pretrained(policy_repo_id, revision=policy_revision)
     policy.to(device)
 
     # Determine episode range

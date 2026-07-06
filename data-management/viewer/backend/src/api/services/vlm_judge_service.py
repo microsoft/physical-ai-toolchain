@@ -56,6 +56,7 @@ def get_vlm_judge_service(config: AppConfig):
         backend = BackendConfig(
             kind=config.vlm_judge_backend,
             model_id=config.vlm_judge_model_id,
+            revision=config.vlm_judge_model_revision,
             base_url=config.vlm_judge_base_url,
             api_key=config.vlm_judge_api_key,
         )

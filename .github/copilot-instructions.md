@@ -444,13 +444,14 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | `data-management/viewer/backend/**` | `cd data-management/viewer/backend && pytest` and `ruff check src/` |
 | `training/**/*.py` | `cd training && ruff check . && pytest` |
 | `evaluation/**/*.py` | `cd evaluation && ruff check . && pytest` |
+| `*.py`, workflow YAML with HF downloads | `npm run lint:hfpins` (HuggingFace revision-pin guard) |
 | `data-pipeline/**/*.py` | `cd data-pipeline && ruff check .` |
 | `uv.lock`, `pyproject.toml` | `uv lock` (regenerate the lock), `npm run lint:uvlock` (verify lock/manifest consistency) |
 | Any file | `npm run spell-check` |
 
 ### Linting
 
-* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` + `lint:go` + `lint:sh` + `lint:py` + `lint:uvlock` in sequence
+* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` + `lint:go` + `lint:sh` + `lint:py` + `lint:hfpins` + `lint:uvlock` in sequence
 * `npm run spell-check` and `npm run format:tables` are NOT included in `lint:all` — run them separately
 * `npm run lint:md:fix` and `npm run format:tables` auto-fix markdown issues
 * `.copilot-tracking/` is excluded from markdown linting via `.markdownlint-cli2.jsonc`

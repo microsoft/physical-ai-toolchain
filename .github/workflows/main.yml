@@ -534,7 +534,7 @@ jobs:
         shell: bash
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: '3.12'
 
@@ -572,30 +572,30 @@ jobs:
 
       - name: Attest build provenance
         id: attest
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763  # v4.1.1
         with:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
 
       - name: Attest wheel build provenance
         id: attest-wheel
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32  # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
         with:
           subject-path: dist/*.whl
 
       - name: Attest SBOM
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763  # v4.1.1
         with:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
           sbom-path: sbom.spdx.json
 
       - name: Attest dependency SBOM
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763  # v4.1.1
         with:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
           sbom-path: dependencies.spdx.json
 
       - name: Attest SBOM (CycloneDX)
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763  # v4.1.1
         with:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
           sbom-path: sbom.cdx.json
