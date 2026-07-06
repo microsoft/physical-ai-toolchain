@@ -1,0 +1,8 @@
+{
+  "label": "T4 — Scale (advanced)",
+  "position": 5,
+  "link": {
+    "type": "generated-index",
+    "description": "T4 — Scale: the multi-site fleet-delivery terminus, with Azure Arc as the cross-site reachability and identity broker."
+  }
+}
