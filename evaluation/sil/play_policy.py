@@ -7,6 +7,8 @@ model before Azure ML deployment.
 Supports both ONNX and TorchScript (JIT) model formats.
 """
 
+from __future__ import annotations
+
 """Launch Isaac Sim Simulator first."""
 
 import argparse
@@ -17,6 +19,7 @@ from isaaclab.app import AppLauncher
 
 from training.rl import cli_args  # isort: skip
 from training.rl.simulation_shutdown import prepare_for_shutdown
+from training.utils.hashing import verify_sha256_sidecar
 
 parser = argparse.ArgumentParser(description="Run inference using an exported ONNX or TorchScript policy.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during inference.")
@@ -212,6 +215,7 @@ class JitPolicy:
         self.device = device
 
         print(f"[INFO] Loading JIT model from: {jit_path}")
+        verify_sha256_sidecar(jit_path)
         self.model = torch.jit.load(jit_path, map_location=device)
         self.model.eval()
         print(f"[INFO] JIT model loaded on device: {device}")
@@ -251,6 +255,7 @@ class OnnxPolicy:
             providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
         print(f"[INFO] Loading ONNX model from: {onnx_path}")
+        verify_sha256_sidecar(onnx_path)
         self.session = ort.InferenceSession(onnx_path, providers=providers)
 
         active_provider = self.session.get_providers()[0]

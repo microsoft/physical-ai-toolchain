@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -10,6 +11,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from sil.hf_revision import resolve_hf_revision  # noqa: E402
 from sil.policy_runner import InferenceMetrics, PolicyRunner, _resolve_device  # noqa: E402
 from sil.robot_types import NUM_JOINTS, JointPositionCommand, RobotObservation  # noqa: E402
 
@@ -41,6 +43,46 @@ class TestResolveDevice:
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
         monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
         assert _resolve_device("cuda") == "cpu"
+
+
+class TestResolveHfRevision:
+    """HuggingFace revision pinning for remote policy repositories."""
+
+    def test_remote_repo_requires_revision(self) -> None:
+        with pytest.raises(ValueError, match="revision is required"):
+            resolve_hf_revision("owner/policy", None)
+
+    def test_blank_repo_requires_path(self) -> None:
+        with pytest.raises(ValueError, match="repository or local path is required"):
+            resolve_hf_revision(" ", None)
+
+    def test_remote_repo_allows_explicit_revision(self) -> None:
+        assert (
+            resolve_hf_revision("owner/policy", "0123456789abcdef0123456789abcdef01234567")
+            == "0123456789abcdef0123456789abcdef01234567"
+        )
+
+    def test_remote_repo_rejects_non_sha_revision(self) -> None:
+        with pytest.raises(ValueError, match="remote HuggingFace repositories require"):
+            resolve_hf_revision("owner/policy", "main")
+
+    def test_existing_local_path_allows_missing_revision(self, tmp_path: Path) -> None:
+        assert resolve_hf_revision(str(tmp_path), None) is None
+
+    def test_relative_dir_collision_is_treated_as_remote(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A bare "org/name" that coincidentally exists as a local directory must still
+        # require a pin; snapshot_download() would otherwise fetch it from the Hub at HEAD.
+        (tmp_path / "org" / "name").mkdir(parents=True)
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(ValueError, match="revision is required"):
+            resolve_hf_revision("org/name", None)
+
+    def test_explicit_relative_local_path_allows_missing_revision(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "model").mkdir()
+        monkeypatch.chdir(tmp_path)
+        assert resolve_hf_revision("./model", None) is None
 
 
 class TestInferenceMetrics:
@@ -154,31 +196,53 @@ class TestPolicyRunnerFromPretrained:
         monkeypatch.setitem(sys.modules, "lerobot.processor.pipeline", mock_pipeline)
         return mock_act, mock_pipeline
 
-    def test_loads_and_configures_policy(
+    def test_loads_local_path_without_revision(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        lerobot_mocks: tuple[MagicMock, MagicMock],
+        tmp_path: Path,
+    ) -> None:
+        mock_act, mock_pipeline = lerobot_mocks
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+
+        runner = PolicyRunner.from_pretrained(str(tmp_path), device="cuda")
+
+        assert runner.device == "cpu"
+        mock_act.ACTPolicy.from_pretrained.assert_called_once_with(str(tmp_path), revision=None)
+        mock_act.ACTPolicy.from_pretrained.return_value.to.assert_called_once_with("cpu")
+        assert mock_pipeline.PolicyProcessorPipeline.from_pretrained.call_count == 2
+
+    def test_loads_remote_repo_with_revision(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        lerobot_mocks: tuple[MagicMock, MagicMock],
+    ) -> None:
+        mock_act, mock_pipeline = lerobot_mocks
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+        runner = PolicyRunner.from_pretrained("test/repo", revision="0123456789abcdef0123456789abcdef01234567")
+
+        assert runner.device == "cuda"
+        mock_act.ACTPolicy.from_pretrained.assert_called_once_with(
+            "test/repo", revision="0123456789abcdef0123456789abcdef01234567"
+        )
+        mock_act.ACTPolicy.from_pretrained.return_value.to.assert_called_once_with("cuda")
+        assert (
+            mock_pipeline.PolicyProcessorPipeline.from_pretrained.call_args_list[0].kwargs["revision"]
+            == "0123456789abcdef0123456789abcdef01234567"
+        )
+
+    def test_remote_repo_without_revision_raises(
         self,
         monkeypatch: pytest.MonkeyPatch,
         lerobot_mocks: tuple[MagicMock, MagicMock],
     ) -> None:
         mock_act, mock_pipeline = lerobot_mocks
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-        monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
 
-        runner = PolicyRunner.from_pretrained("test/repo", device="cuda")
+        with pytest.raises(ValueError, match="revision is required"):
+            PolicyRunner.from_pretrained("test/repo")
 
-        assert runner.device == "cpu"
-        mock_act.ACTPolicy.from_pretrained.assert_called_once_with("test/repo")
-        mock_act.ACTPolicy.from_pretrained.return_value.to.assert_called_once_with("cpu")
-        assert mock_pipeline.PolicyProcessorPipeline.from_pretrained.call_count == 2
-
-    def test_uses_cuda_when_available(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        lerobot_mocks: tuple[MagicMock, MagicMock],
-    ) -> None:
-        mock_act, _ = lerobot_mocks
-        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-
-        runner = PolicyRunner.from_pretrained("test/repo")
-
-        assert runner.device == "cuda"
-        mock_act.ACTPolicy.from_pretrained.return_value.to.assert_called_once_with("cuda")
+        mock_act.ACTPolicy.from_pretrained.assert_not_called()
+        mock_pipeline.PolicyProcessorPipeline.from_pretrained.assert_not_called()

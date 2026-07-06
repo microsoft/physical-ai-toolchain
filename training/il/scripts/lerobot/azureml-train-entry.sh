@@ -197,7 +197,7 @@ else
   # Multiple sources — merge into a single dataset via lerobot-edit-dataset.
   echo "Merging ${total_sources} dataset sources..."
   MERGE_DEST="${DATASET_ROOT:-/workspace/data}/merged"
-  python3 -c "
+  python3 - "${MERGE_DEST}" "${all_sources[@]}" <<'EOF'
 import shlex, subprocess, shutil, sys
 from pathlib import Path
 
@@ -248,7 +248,7 @@ if missing_keys:
     print(f'Merged dataset info.json is missing required keys {missing_keys}: {info_found}', file=sys.stderr)
     sys.exit(1)
 print(f'Merged dataset at: {dest} (info: {info_found})')
-" "${MERGE_DEST}" "${all_sources[@]}"
+EOF
 
   # Same lerobot flags as the single-source path; see comment above for rationale.
   train_args+=(

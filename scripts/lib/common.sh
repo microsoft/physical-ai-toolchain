@@ -103,6 +103,19 @@ require_tools() {
   [[ ${#missing[@]} -eq 0 ]] || fatal "Missing required tools: ${missing[*]}"
 }
 
+# Require a remote HuggingFace repo reference to be pinned to an immutable 40-hex commit
+# SHA; refuse a mutable HEAD. Absolute on-disk paths (starting with /) are exempt because
+# the workflow resolves them directly without a Hub download.
+#   $1 repo_ref  repo id or local path
+#   $2 revision  revision to validate
+#   $3 arg_name  CLI flag name for the error message (default: "revision")
+require_hf_pin() {
+  local repo_ref="$1" revision="$2" arg_name="${3:-revision}"
+  [[ "$repo_ref" == /* ]] && return 0
+  [[ -z "$revision" ]] && fatal "$arg_name is required for remote repo '$repo_ref' (refusing a mutable HEAD)"
+  [[ "$revision" =~ ^[0-9a-fA-F]{40}$ ]] || fatal "$arg_name '$revision' must be an immutable 40-hex commit SHA for remote repo '$repo_ref'"
+}
+
 find_latest_chart_archive() {
   local output_dir="$1"
   local latest="" chart_archive

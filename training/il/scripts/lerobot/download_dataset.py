@@ -21,6 +21,11 @@ EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 
 
+def _is_excluded_dataset_file(rel: str) -> bool:
+    """True for transient files the downloader skips (cache, lock, and metadata files)."""
+    return ".cache/" in rel or rel.endswith(".lock") or rel.endswith(".metadata")
+
+
 def parse_blob_url(url: str) -> tuple[str, str, str]:
     """Parse blob URL into (account, container, prefix).
 
@@ -92,7 +97,7 @@ def download_dataset(
     dest_dir_resolved = dest_dir.resolve()
     for blob in container_client.list_blobs(name_starts_with=prefix):
         rel = blob.name[len(prefix) :]
-        if ".cache/" in rel or rel.endswith(".lock") or rel.endswith(".metadata"):
+        if _is_excluded_dataset_file(rel):
             continue
 
         # Reject absolute paths and traversal segments to prevent writes outside dest_dir.
@@ -834,5 +839,11 @@ def prepare_dataset() -> Path:
     return final
 
 
+def main() -> int:
+    """CLI entry: run the download/prepare workflow driven by ``BLOB_URLS``/``DATASET_REPO_ID``."""
+    prepare_dataset()
+    return EXIT_SUCCESS
+
+
 if __name__ == "__main__":
-    sys.exit(EXIT_SUCCESS if prepare_dataset() else EXIT_FAILURE)
+    sys.exit(main())

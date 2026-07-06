@@ -184,6 +184,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--model-id",
         default=os.environ.get("VLM_SHIM_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct"),
     )
+    parser.add_argument(
+        "--model-revision",
+        default=os.environ.get("VLM_SHIM_MODEL_REVISION") or None,
+        help="Immutable HF commit SHA to pin the model/processor download",
+    )
     parser.add_argument("--device-map", default=os.environ.get("VLM_SHIM_DEVICE_MAP", "auto"))
     parser.add_argument("--dtype", default=os.environ.get("VLM_SHIM_DTYPE", "bfloat16"))
     args = parser.parse_args(argv)
@@ -195,6 +200,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     _LOGGER.info("Loading %s on device_map=%s dtype=%s", args.model_id, args.device_map, args.dtype)
     backend = Qwen3VLBackend(
         model_id=args.model_id,
+        revision=args.model_revision,
         device_map=args.device_map,
         dtype=args.dtype,
     )

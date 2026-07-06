@@ -176,6 +176,10 @@ def _load_skrl(
     # Create Runner which instantiates models based on config
     runner = Runner(env, agent_dict)
 
+    from training.utils.integrity import safe_load_checkpoint
+
+    safe_load_checkpoint(checkpoint_path, map_location=device)
+
     # Load checkpoint into the runner's agent
     runner.agent.load(checkpoint_path)
     runner.agent.enable_training_mode(enabled=False, apply_to_models=True)
@@ -185,8 +189,19 @@ def _load_skrl(
 
 
 def _load_rsl_rl(checkpoint_path: str, device: str) -> Any:
-    """Load RSL-RL agent from checkpoint."""
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    """Load RSL-RL agent from checkpoint.
+
+    Loads with ``weights_only=True`` so a checkpoint fetched from blob storage,
+    MLflow, or the AzureML registry cannot execute arbitrary code via pickle.
+    The RSL-RL checkpoint holds only tensors (``model_state_dict``) and a
+    primitive ``model_cfg`` mapping, both of which the safe unpickler allows.
+
+    Raises:
+        ValueError: If the safe unpickler rejects the checkpoint.
+    """
+    from training.utils.integrity import safe_load_checkpoint
+
+    checkpoint = safe_load_checkpoint(checkpoint_path, map_location=device)
     from rsl_rl.modules import ActorCritic
 
     policy = ActorCritic(**checkpoint.get("model_cfg", {}))
