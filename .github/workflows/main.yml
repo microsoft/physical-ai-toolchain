@@ -370,22 +370,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          $today = [datetime]::UtcNow.ToString('yyyy-MM-dd')
-          $path = 'CHANGELOG.md'
-          $content = Get-Content -Raw -LiteralPath $path
-          $updated = [regex]::Replace($content, '(?m)^ms\.date:\s.*$', "ms.date: $today")
-          if ($updated -ceq $content) {
-            Write-Host "CHANGELOG.md ms.date already set to $today"
-            exit 0
-          }
-          Set-Content -LiteralPath $path -Value $updated -NoNewline -Encoding utf8NoBOM
-          & git config user.name 'github-actions[bot]'
-          & git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          & git remote set-url origin "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git"
-          & git add $path
-          & git commit -m 'chore: stamp ms.date in CHANGELOG.md'
-          & git push
+        run: ./scripts/ci/Update-ChangelogMsDate.ps1
 
       - name: Checkout default branch for tag signing
         if: ${{ steps.release.outputs.release_created == 'true' }}
@@ -396,40 +381,7 @@ jobs:
 
       - name: Install gitsign
         if: ${{ steps.release.outputs.release_created == 'true' }}
-        run: |
-          $version = 'v0.13.0'
-          $arch = '${{ runner.arch }}'
-
-          switch ($arch) {
-            'X64' {
-              $asset = 'gitsign_0.13.0_linux_amd64'
-              $expectedSha = '011af11d57ad205b4ae4e3f41ecc8c64fbe0043c829190c0cb44fce6fce74bbb'
-            }
-            'ARM64' {
-              $asset = 'gitsign_0.13.0_linux_arm64'
-              $expectedSha = 'f0ec4732696b88f133ab6ef9ac2fe8be843ab9540bd1cc51dc4143142a858372'
-            }
-            default {
-              throw "Unsupported runner architecture: $arch"
-            }
-          }
-
-          $assetUrl = "https://github.com/sigstore/gitsign/releases/download/$version/$asset"
-          $assetPath = Join-Path $env:RUNNER_TEMP $asset
-          Invoke-WebRequest -Uri $assetUrl -OutFile $assetPath
-
-          $actualSha = (Get-FileHash -Path $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actualSha -ne $expectedSha) {
-            throw "Checksum verification failed for $asset. Expected $expectedSha but got $actualSha"
-          }
-
-          $binDir = Join-Path $env:RUNNER_TEMP 'bin'
-          New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-          $gitsign = Join-Path $binDir 'gitsign'
-          Move-Item -Path $assetPath -Destination $gitsign -Force
-          chmod +x $gitsign
-          Add-Content -Path $env:GITHUB_PATH -Value $binDir
-          & $gitsign version
+        run: ./scripts/ci/Install-Gitsign.ps1
 
       # Workaround: release-please with "draft": true uses lazy tag
       # creation. The git tag is not materialized until the release is
@@ -441,30 +393,13 @@ jobs:
       # Replace both workarounds with "force-tag-creation": true in
       # release-please-config.json once release-please-action ships a
       # version that includes googleapis/release-please#2627.
+
       - name: Create signed git tag for draft release
         if: ${{ steps.release.outputs.release_created == 'true' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          git config --global gpg.format x509
-          git config --global gpg.x509.program gitsign
-          git config --global tag.gpgSign true
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git fetch --tags --force
-
-          $tag = '${{ steps.release.outputs.tag_name }}'
-          $existingTag = git tag --list $tag
-          if ($existingTag) {
-            Write-Output "Git tag $tag already exists"
-            exit 0
-          }
-
-          git remote set-url origin "https://x-access-token:${env:GH_TOKEN}@github.com/${env:GITHUB_REPOSITORY}.git"
-          git tag -s $tag $env:GITHUB_SHA -m "Release $tag"
-          git push origin "refs/tags/$tag"
-          Write-Output "Created signed git tag $tag -> $env:GITHUB_SHA"
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+        run: ./scripts/ci/New-SignedReleaseTag.ps1
 
       - name: Verify signed git tag
         if: ${{ steps.release.outputs.release_created == 'true' }}
@@ -670,12 +605,7 @@ jobs:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
           WHEEL_BUNDLE_PATH: ${{ steps.attest-wheel.outputs.bundle-path }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          cp "${BUNDLE_PATH}" "source-${TAG}.sigstore.json"
-          jq -c '.dsseEnvelope' "${BUNDLE_PATH}" > "source-${TAG}.intoto.jsonl"
-          cp "${WHEEL_BUNDLE_PATH}" "wheels-${TAG}.sigstore.json"
-          jq -c '.dsseEnvelope' "${WHEEL_BUNDLE_PATH}" > "wheels-${TAG}.intoto.jsonl"
+        run: shared/ci/create-signing-artifacts.sh
         shell: bash
 
       - name: Upload release assets
@@ -706,6 +636,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
       - name: Download current dependency SBOM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
@@ -734,48 +669,7 @@ jobs:
 
       - name: Generate dependency diff
         if: steps.prev-sbom.outputs.found == 'true'
-        run: |
-          python3 - <<'DIFF_SCRIPT'
-          import json, pathlib
-
-          def load_packages(path):
-              doc = json.loads(pathlib.Path(path).read_text())
-              pkgs = {}
-              for p in doc.get("packages", []):
-                  name = p.get("name", "UNKNOWN")
-                  version = p.get("versionInfo", "unknown")
-                  pkgs[name] = version
-              return pkgs
-
-          current = load_packages("dependencies.spdx.json")
-          previous = load_packages("previous/dependencies.spdx.json")
-          all_names = sorted(set(current) | set(previous))
-
-          added, removed, changed = [], [], []
-          for name in all_names:
-              cur_ver = current.get(name)
-              prev_ver = previous.get(name)
-              if cur_ver and not prev_ver:
-                  added.append(f"| {name} | {cur_ver} |")
-              elif prev_ver and not cur_ver:
-                  removed.append(f"| {name} | {prev_ver} |")
-              elif cur_ver != prev_ver:
-                  changed.append(f"| {name} | {prev_ver} | {cur_ver} |")
-
-          lines = ["# Dependency Diff\n"]
-          if added:
-              lines += ["\n## Added\n", "| Package | Version |", "| --- | --- |"] + added
-          if removed:
-              lines += ["\n## Removed\n", "| Package | Version |", "| --- | --- |"] + removed
-          if changed:
-              lines += ["\n## Changed\n", "| Package | Previous | Current |", "| --- | --- | --- |"] + changed
-          if not (added or removed or changed):
-              lines.append("\nNo dependency changes detected.")
-
-          pathlib.Path("dependency-diff.md").write_text("\n".join(lines) + "\n")
-          print(f"Diff: {len(added)} added, {len(removed)} removed, {len(changed)} changed")
-          DIFF_SCRIPT
-        shell: bash
+        run: python3 shared/ci/generate-dependency-diff.py dependencies.spdx.json previous/dependencies.spdx.json dependency-diff.md
 
       - name: Upload dependency diff to release
         if: steps.prev-sbom.outputs.found == 'true'
@@ -797,45 +691,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
       - name: Append verification instructions
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          body=$(gh release view "${TAG}" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
-
-          verification=$(cat <<'EOF'
-
-          ---
-
-          ## Artifact Verification
-
-          All release artifacts include [Sigstore](https://www.sigstore.dev/) provenance attestations. Verify with the [GitHub CLI](https://cli.github.com/):
-
-          ```bash
-          # Download the source archive
-          gh release download TAG_PLACEHOLDER --repo microsoft/physical-ai-toolchain --pattern 'source-TAG_PLACEHOLDER.tar.gz'
-
-          # Verify build provenance
-          gh attestation verify source-TAG_PLACEHOLDER.tar.gz --repo microsoft/physical-ai-toolchain
-
-          # Verify SBOM attestation
-          gh attestation verify source-TAG_PLACEHOLDER.tar.gz --repo microsoft/physical-ai-toolchain --predicate-type https://spdx.dev/Document
-
-          # Download and verify the signed wheel (identity ends @refs/heads/main: the pipeline runs on push to main)
-          gh release download TAG_PLACEHOLDER --repo microsoft/physical-ai-toolchain --pattern '*.whl' --pattern '*.whl.sigstore.json'
-          sigstore verify identity *.whl --bundle *.whl.sigstore.json --cert-identity 'https://github.com/microsoft/physical-ai-toolchain/.github/workflows/main.yml@refs/heads/main' --cert-oidc-issuer 'https://token.actions.githubusercontent.com'
-
-          # Download the CycloneDX SBOMs (SPDX equivalents also attached)
-          gh release download TAG_PLACEHOLDER --repo microsoft/physical-ai-toolchain --pattern 'sbom.cdx.json' --pattern 'dependencies.cdx.json'
-          ```
-
-          EOF
-          )
-
-          verification="${verification//TAG_PLACEHOLDER/${TAG}}"
-          printf '%s\n%s\n' "$body" "$verification" > notes.md
-          gh release edit "${TAG}" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+        run: shared/ci/append-release-verification-notes.sh
         shell: bash
 
   # Promote draft release to published
@@ -851,6 +716,11 @@ jobs:
       contents: read
       issues: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
       - name: Generate GitHub App Token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
@@ -868,42 +738,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          $milestones = gh api --paginate "repos/$env:GITHUB_REPOSITORY/milestones?per_page=100&state=all" --jq '.[]' 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Output '::warning::API call failed while querying milestones for ${{ needs.release-please.outputs.tag_name }}'
-            exit 0
-          }
-
-          $match = @($milestones | ConvertFrom-Json) | Where-Object { $_.title -eq $env:TAG_NAME }
-          if (-not $match) {
-            Write-Output "::warning::No milestone found matching $env:TAG_NAME"
-            exit 0
-          }
-
-          $msNumber = $match.number
-          $msState = $match.state
-
-          if ($msState -eq 'closed') {
-            Write-Output "Milestone $env:TAG_NAME (#$msNumber) already closed"
-            exit 0
-          }
-
-          $detail = gh api "repos/$env:GITHUB_REPOSITORY/milestones/$msNumber" 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Output "::warning::API call failed while querying milestone details for $env:TAG_NAME (#$msNumber)"
-            exit 0
-          }
-          $openIssues = ($detail | ConvertFrom-Json).open_issues
-
-          if ($openIssues -gt 0) {
-            Write-Output "::warning::Milestone $env:TAG_NAME has $openIssues open issue(s) — triage after closure"
-          }
-
-          $null = gh api "repos/$env:GITHUB_REPOSITORY/milestones/$msNumber" --method PATCH -f state=closed 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Output "::warning::Failed to close milestone $env:TAG_NAME (#$msNumber)"
-            exit 0
-          }
-
-          Write-Output "Closed milestone $env:TAG_NAME (#$msNumber)"
+        run: ./scripts/ci/Close-ReleaseMilestone.ps1
