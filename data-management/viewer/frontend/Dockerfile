@@ -44,7 +44,9 @@ EXPOSE 8080
 
 USER nginx
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -qO- http://localhost:8080/ >/dev/null 2>&1 || exit 1
+# localhost resolves to IPv6 [::1] first in this image, but nginx listens on
+# IPv4 0.0.0.0:8080 only, so probe 127.0.0.1 explicitly.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=3s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1
 
 CMD ["/bin/sh", "-c", "envsubst '${NGINX_BACKEND_HOST} ${NGINX_BACKEND_SCHEME} ${NGINX_RESOLVER}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
