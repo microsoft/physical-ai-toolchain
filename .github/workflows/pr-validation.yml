@@ -31,6 +31,7 @@ jobs:
       fuzz: ${{ steps.filter.outputs.fuzz }}
       docusaurus: ${{ steps.filter.outputs.docusaurus }}
       pester: ${{ steps.filter.outputs.pester }}
+      containers: ${{ steps.filter.outputs.containers }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -66,6 +67,7 @@ jobs:
             echo "fuzz=$(match '^(tests/fuzz|tests/fuzz_harness\.py|tests/generate_fuzz_corpus\.py|data-management/viewer/backend/src/|training/)')"
             echo "docusaurus=$(match '^docs/docusaurus/')"
             echo "pester=$pester_match"
+            echo "containers=$(match '(Dockerfile|^\.github/workflows/container-scan\.yml$|^scripts/security/(discover-base-images|image-slug)\.sh$)')"
           } >> "$GITHUB_OUTPUT"
 
   # GPU-free import smoke gate. CPU import smoke runs for every domain on every
@@ -209,6 +211,23 @@ jobs:
             --no-resolve
             --recursive
             ./
+
+  # Container base-image CVE scan (Trivy). Discovers every digest-pinned base
+  # image across the repo's Dockerfiles and reports fixable CRITICAL/HIGH
+  # vulnerabilities to the Security tab. Runs soft-fail while the shipped base
+  # images still carry fixable CVEs (see #1085). Path-gated to Dockerfile, scan
+  # workflow, or discovery/slug helper changes; a weekly Container Rescan
+  # re-evaluates already-merged base images.
+  container-scan:
+    name: Container Scan
+    needs: changes
+    if: needs.changes.outputs.containers == 'true'
+    uses: ./.github/workflows/container-scan.yml
+    with:
+      soft-fail: true
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
 
   # PowerShell Pester test execution
   pester-tests:
@@ -479,6 +498,7 @@ jobs:
       - shellcheck
       - codeql-analysis
       - smoke
+      - container-scan
     permissions:
       contents: read
     steps:

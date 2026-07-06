@@ -1,10 +1,13 @@
 # GitOps Specification
 
-FluxCD GitOps architecture for fleet deployment: source management, reconciliation, and image automation.
+FluxCD GitOps architecture for the fleet-delivery control plane (T4 — Scale): source management,
+per-site cluster reconciliation, and image automation that delivers validated policies onto robots.
+"Fleet" refers to robots; the Kubernetes layer reconciled here is described as "clusters" and "sites."
+See [tier-model.md](../../docs/design/tier-model.md) for canonical tier and vocabulary definitions.
 
 ## Status
 
-Planned — placeholder for future implementation.
+Planned: placeholder for future implementation.
 
 ## Components
 

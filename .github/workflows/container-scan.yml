@@ -1,0 +1,121 @@
+name: Container Scan
+
+# Trivy CVE scan of the container base images the repo ships. Dependabot bumps
+# base-image digests but never scans the OS/library layers behind them; this
+# workflow discovers every digest-pinned base image referenced across the repo's
+# Dockerfiles and scans each one. Results upload to the Security tab as SARIF.
+#
+# soft-fail=false (PR gate): fail on fixable vulnerabilities at `severity`.
+# soft-fail=true  (scheduled re-scan): never fail; surface newly-disclosed CVEs
+# in already-merged base images via the Security tab.
+
+on:
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: Report findings without failing the job.
+        type: boolean
+        default: false
+      severity:
+        description: Comma-separated Trivy severities that gate the job.
+        type: string
+        default: 'CRITICAL,HIGH'
+
+permissions:
+  contents: read
+
+jobs:
+  # Extract the unique, digest-pinned external base images from every Dockerfile.
+  # Stage aliases and ARG/scratch bases carry no @sha256 digest and are excluded.
+  discover:
+    name: Discover Base Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      images: ${{ steps.extract.outputs.images }}
+      count: ${{ steps.extract.outputs.count }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Extract digest-pinned base images
+        id: extract
+        run: |
+          set -euo pipefail
+          if ! images="$(bash scripts/security/discover-base-images.sh)"; then
+            echo "::error::Failed to discover digest-pinned base images"
+            exit 1
+          fi
+          echo "Discovered base images:"
+          echo "$images"
+          count=$(printf '%s' "$images" | grep -c . || true)
+          if [[ -n "$images" ]]; then
+            matrix=$(printf '%s\n' "$images" | jq -R . | jq -sc .)
+          else
+            matrix='[]'
+          fi
+          {
+            echo "images=$matrix"
+            echo "count=$count"
+          } >> "$GITHUB_OUTPUT"
+        shell: bash
+
+  scan:
+    name: Scan
+    needs: discover
+    if: needs.discover.outputs.count != '0'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.discover.outputs.images) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Compute image slug
+        id: slug
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          slug=$(bash scripts/security/image-slug.sh "$IMAGE")
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      # Trivy writes the SARIF report before applying exit-code, so a gating
+      # failure here still leaves the file for the always() upload below.
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ matrix.image }}
+          # Pin the scanner build for reproducible scan results.
+          version: v0.72.0
+          format: sarif
+          output: trivy-${{ steps.slug.outputs.slug }}.sarif
+          severity: ${{ inputs.severity }}
+          # Scope the scan to the vuln scanner only (no secret / misconfig) over
+          # os+library packages. `vuln-type` is this action version's input name
+          # for Trivy's `--pkg-types` (upstream rename still pending).
+          scanners: vuln
+          vuln-type: os,library
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
+          exit-code: ${{ inputs.soft-fail && '0' || '1' }}
+
+      - name: Upload SARIF to Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e  # v4.36.2
+        continue-on-error: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+        with:
+          sarif_file: trivy-${{ steps.slug.outputs.slug }}.sarif
+          category: trivy-image-${{ steps.slug.outputs.slug }}

@@ -15,7 +15,7 @@ keywords:
 
 Technical documentation for deploying, training, and operating robotics workloads on Azure with NVIDIA Isaac and OSMO. This index organizes every guide, reference, and walkthrough in the repository by topic so you can find what you need based on where you are in the workflow.
 
-Documentation spans the full lifecycle — from provisioning Azure infrastructure with Terraform, through training reinforcement-learning policies with Isaac Lab and AzureML, to running inference on edge devices. Each section targets a specific audience and phase of the project.
+Documentation spans the full lifecycle, from provisioning Azure infrastructure with Terraform, through training reinforcement-learning policies with Isaac Lab and AzureML, to running inference on edge devices. Each section targets a specific audience and phase of the project.
 
 ## 👤 Audience Guide
 
@@ -25,6 +25,24 @@ Documentation spans the full lifecycle — from provisioning Azure infrastructur
 | ML / Robotics engineer | [Training](training/lerobot-training.md) and Inference (coming soon)                            |
 | Platform operator      | [Operations](operations/README.md) and [Security Guide](operations/security-guide.md)           |
 | Contributor            | [Contributing](contributing/README.md)                                                          |
+
+## 🪜 Tier Guide
+
+Adoption is modeled as six graduated tiers (T0-T5), each a legitimate stopping point. **T0 — Dev** is the default starting path (one laptop, one robot, zero cloud, zero Kubernetes). **T2 — Pilot** is the recommended production path. **T3-T5** are advanced and opt-in. Pick the tier that matches your reach, then follow its quick-start and read its infrastructure boundaries. See the canonical [Tier Model](design/tier-model.md) for the authoritative tier table and vocabulary.
+
+| Tier                | Scope                                                     | Quick start                                                | Architecture                                                   |
+|---------------------|-----------------------------------------------------------|------------------------------------------------------------|----------------------------------------------------------------|
+| **T0 — Dev** ⭐      | Laptop + 1 robot, zero cloud, zero Kubernetes            | [Tier 0 — Dev](recipes/tier-0-dev/README.md)               | [T0 — Dev](contributing/architecture.md#t0--dev)               |
+| **T1 — Lab**        | One site, a few robots, shared GPU; first cloud storage   | [Tier 1 — Lab](recipes/tier-1-lab/README.md)               | [T1 — Lab](contributing/architecture.md#t1--lab)               |
+| **T2 — Pilot** ✅    | One site at scale; cloud training default                 | [Tier 2 — Pilot](recipes/tier-2-pilot/README.md)           | [T2 — Pilot](contributing/architecture.md#t2--pilot)           |
+| **T3 — Production** | Single-site declarative deploy (local k3s + Flux, no Arc) | [Tier 3 — Production](recipes/tier-3-production/README.md) | [T3 — Production](contributing/architecture.md#t3--production) |
+| **T4 — Scale**      | Multi-site **fleet delivery**; Arc reachability broker    | [Tier 4 — Scale](recipes/tier-4-scale/README.md)           | [T4 — Scale](contributing/architecture.md#t4--scale)           |
+| **T5 — Operate**    | **Fleet intelligence** for drift detection and retraining | [Tier 5 — Operate](recipes/tier-5-operate/README.md)       | [T5 — Operate](contributing/architecture.md#t5--operate)       |
+
+⭐ default · ✅ recommended production
+
+> [!NOTE]
+> **Roadmap honesty.** T5 (Operate / fleet intelligence) is on the roadmap and not yet available. The fleet-intelligence domain is currently specified, with implementation planned. Today's shipping capability spans T0-T4.
 
 ## 📖 Documentation Index
 

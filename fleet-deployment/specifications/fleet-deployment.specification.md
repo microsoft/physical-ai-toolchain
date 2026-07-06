@@ -1,10 +1,14 @@
 # Fleet Deployment
 
-Domain contracts for deploying trained robot policies to edge fleets via FluxCD GitOps pipelines.
+Domain contracts for the **fleet-delivery control plane (T4 — Scale)**: delivering trained robot
+policies onto robots across sites you cannot directly reach, via FluxCD GitOps pipelines, with a safety
+gate before a policy swaps on a physical arm. "Fleet" means a fleet of robots, not Kubernetes clusters.
+See [tier-model.md](../../docs/design/tier-model.md) for canonical tier and vocabulary definitions.
 
 ## Status
 
-Planned — placeholder for future implementation.
+Planned: placeholder for future implementation. Fleet delivery is the *necessary* multi-site concern
+in the tier model (T4), distinct from the roadmap *fleet intelligence* cognition layer (T5).
 
 ## Components
 

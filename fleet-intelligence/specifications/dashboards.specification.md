@@ -1,10 +1,13 @@
 # Dashboards
 
-Fleet-wide operational dashboards and alerting for robot fleet monitoring.
+Fleet-wide operational dashboards and alerting for monitoring a fleet of robots, the visualization
+surface of the fleet-intelligence cognition layer (T5 — Operate). "Fleet" means a fleet of robots. See
+[tier-model.md](../../docs/design/tier-model.md) for canonical tier and vocabulary definitions.
 
 ## Status
 
-Planned — placeholder for future implementation.
+Planned: placeholder for future implementation. Part of the roadmap **fleet intelligence** layer (T5);
+this domain ships 0 Python files and design specs only.
 
 ## Components
 

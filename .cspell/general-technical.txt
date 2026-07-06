@@ -171,6 +171,7 @@ cheatham
 checkbox
 checkboxes
 checkmarx
+checkov
 checkpointed
 checkpointing
 checksums
@@ -915,6 +916,7 @@ organisations
 organised
 osmoauth
 OSSF
+osv
 otel
 otlp
 overfitting
