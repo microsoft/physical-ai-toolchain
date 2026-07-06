@@ -252,7 +252,7 @@ wheels = [
 
 [[package]]
 name = "azureml-mlflow"
-version = "1.62.0.post2"
+version = "1.62.0.post3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-common", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -268,7 +268,7 @@ dependencies = [
     { name = "pytz", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/0e/20996f1f343aa6b03d45c485f760720ba9d3fd38de036f036f7e6a471985/azureml_mlflow-1.62.0.post2-py3-none-any.whl", hash = "sha256:f703f98831b7be33d653828b027c242a271ef83f36321e616bcb66b6c9182951", size = 1020087, upload-time = "2026-03-27T09:37:28.444Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/fc/0c333ec675e24be4771baca50921403ea76750c06ef7845cec7a8d92467c/azureml_mlflow-1.62.0.post3-py3-none-any.whl", hash = "sha256:06eb6a6439a6c7993bc8c52873311372f62bc15481e1ad63b36c8da2edfdee76", size = 1020089, upload-time = "2026-06-10T16:41:34.055Z" },
 ]
 
 [[package]]
@@ -1534,7 +1534,7 @@ requires-dist = [
     { name = "azure-core", specifier = "==1.41.0" },
     { name = "azure-identity", specifier = "==1.25.3" },
     { name = "azure-storage-blob", specifier = "==12.30.0" },
-    { name = "azureml-mlflow", specifier = "==1.62.0.post2" },
+    { name = "azureml-mlflow", specifier = "==1.62.0.post3" },
     { name = "cryptography", specifier = "==48.0.1" },
     { name = "gitpython", specifier = "==3.1.50" },
     { name = "idna", specifier = "==3.18" },
