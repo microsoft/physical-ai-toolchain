@@ -12,7 +12,7 @@ on:
         description: 'Comma-separated list of dependency types to check'
         required: false
         type: string
-        default: 'github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker'
+        default: 'github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,workflow-npm-commands'
       soft-fail:
         description: 'Whether to continue on compliance violations'
         required: false
