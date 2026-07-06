@@ -1,3 +1,5 @@
+"""Safe checkpoint deserialization helpers for the evaluation/inference load path."""
+
 from __future__ import annotations
 
 import pickle
