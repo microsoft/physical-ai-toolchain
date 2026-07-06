@@ -9,11 +9,11 @@ T4 is the **fleet-delivery** control plane: getting validated policies onto robo
 cannot directly reach, safely, with a gate before a policy swaps on a physical arm. The defining
 difference from T3 is **multiple sites** — which is exactly what makes **Azure Arc** necessary, as the
 cross-site reachability and identity broker that single-site k3s did not need. Here, "fleet" means a
-fleet of robots — not Kubernetes clusters.
+fleet of robots, not Kubernetes clusters.
 
 > [!IMPORTANT]
 > T4 delivers and gates policies. It **excludes** drift detection, automated retraining, and aggregate
-> telemetry analytics — those are *fleet intelligence* at [T5 — Operate](../tier-5-operate/README.md).
+> telemetry analytics. Those are *fleet intelligence* at [T5 — Operate](../tier-5-operate/README.md).
 
 ## 🧱 Minimum Infrastructure
 
@@ -27,17 +27,17 @@ fleet of robots — not Kubernetes clusters.
 ## 🚀 Where to Go
 
 This is a stub. The multi-site fleet-delivery mechanics are documented in the existing deployment
-docs — this recipe deliberately does not duplicate them:
+docs. This recipe deliberately does not duplicate them:
 
-- [Fleet Deployment](../../fleet-deployment/README.md) — the implemented multi-site fleet-delivery
+- [Fleet Deployment](../../fleet-deployment/README.md): the implemented multi-site fleet-delivery
   control plane: FluxCD GitOps, image automation, and the deployment gating service.
 - [Infrastructure: advanced cluster setup](../../infrastructure/cluster-setup-advanced.md) and
-  [node pool management](../../infrastructure/manage-node-pools.md) — multi-site runtime.
+  [node pool management](../../infrastructure/manage-node-pools.md): multi-site runtime.
 
 ## 🎓 Graduate When
 
 - The operator explicitly wants production signals to drive retraining and fleet-wide health
-  analytics — a deliberate decision, not an automatic consequence of scale →
+  analytics. This is a deliberate decision, not an automatic consequence of scale:
   [T5 — Operate](../tier-5-operate/README.md) (roadmap).
 
 ## 🔗 Related Documentation

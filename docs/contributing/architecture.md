@@ -15,7 +15,7 @@ Each tier states the minimum edge and cloud infrastructure required to reach a c
 > [!IMPORTANT]
 > Tier IDs, stage names, boundaries, the autonomy ladder, and the fleet vocabulary rules are defined once in the canonical [Tier Model](../design/tier-model.md). This document cites those definitions rather than redefining them. If a tier boundary or name needs to change, change it there first.
 
-**Reference goal (Goal: Full Training Lifecycle):** capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot — the full loop, one task. Goal: Full Training Lifecycle is fully achievable at `T0`–`T2` with manual deployment and no Kubernetes, Arc, or fleet infrastructure.
+**Reference goal (Goal: Full Training Lifecycle):** capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot, the full loop for one task. Goal: Full Training Lifecycle is fully achievable at `T0`–`T2` with manual deployment and no Kubernetes, Arc, or fleet infrastructure.
 
 ## The Tier Ladder
 
@@ -36,15 +36,15 @@ Each tier states the minimum edge and cloud infrastructure required to reach a c
 - **Intelligence boundary:** falls between `T4` and `T5`. `T4` delivers and gates policies; it does not run drift detection, retraining, or aggregate analytics. Those are `T5`.
 
 > [!NOTE]
-> **Roadmap honesty.** `T5` (Operate / fleet intelligence) is a roadmap direction, not shipped capability: the `fleet-intelligence` domain ships ~0 Python files and 4 placeholder specifications. The two domains that carry the "fleet" identity hold one Python file between them and seven placeholder specifications. The implemented center of gravity is infrastructure provisioning plus training, data management, and evaluation tooling.
+> **Roadmap honesty.** `T5` (Operate / fleet intelligence) is on the roadmap and not yet available. The fleet-intelligence domain is currently specified, with implementation planned. The implemented center of gravity remains infrastructure provisioning plus training, data management, and evaluation tooling.
 
 ### Fleet Vocabulary
 
 This document follows the canonical [vocabulary rules](../design/tier-model.md#vocabulary-rules):
 
-- **"Fleet" means a fleet of robots — only.** It never refers to Kubernetes clusters, nor to Azure Kubernetes Fleet Manager. Cluster-level concerns are written as "clusters" or "sites".
+- **"Fleet" means a fleet of robots only.** It never refers to Kubernetes clusters, nor to Azure Kubernetes Fleet Manager. Cluster-level concerns are written as "clusters" or "sites".
 - **Fleet delivery (`T4`)** is the delivery and connectivity control plane: getting a validated policy onto robots across sites you cannot directly reach, with a safety gate before a policy swaps on a physical arm.
-- **Fleet intelligence (`T5`)** is the cognition layer: drift detection, automated retraining triggers, and aggregate telemetry analytics — the roadmap/placeholder concern.
+- **Fleet intelligence (`T5`)** is the cognition layer: drift detection, automated retraining triggers, and aggregate telemetry analytics. It is the roadmap/placeholder concern.
 
 ## Tiers in Detail
 
@@ -52,14 +52,14 @@ Each tier below adds a defined slice of edge and cloud infrastructure on top of 
 
 ### T0 — Dev
 
-One robot, one laptop. No cloud, no Kubernetes — the honest floor for Goal: Full Training Lifecycle. This path exists in the code today: training detects available CUDA devices at runtime, evaluation has an explicit local path, and the dataviewer defaults to `local` mode.
+One robot, one laptop. No cloud, no Kubernetes. This is the honest floor for Goal: Full Training Lifecycle. This path exists in the code today: training detects available CUDA devices at runtime, evaluation has an explicit local path, and the dataviewer defaults to `local` mode.
 
 | Concern      | Implementation                                                              |
 |--------------|-----------------------------------------------------------------------------|
 | Capture      | ROS 2 bag recording to local disk. No Arc, no ACSA, no PVC.                 |
 | Move data    | `cp` or `rsync` from robot to laptop.                                       |
 | Curate       | Dataviewer in `local` mode on the laptop.                                   |
-| Train        | `lerobot-train` on the laptop — CPU or a local GPU.                         |
+| Train        | `lerobot-train` on the laptop, on CPU or a local GPU.                       |
 | Track        | Training outputs written to local disk; hosted tracking enters at T2.       |
 | Validate     | `run-local-lerobot-eval.py` / `play.py` locally.                            |
 | Run on robot | The ACT inference node as a plain process or container. No Flux, no gating. |
@@ -99,7 +99,7 @@ No Kubernetes, no Arc, no Flux.
 
 ### T2 — Pilot
 
-One site, several robots, real training scale and collaboration. The tier where cloud training genuinely becomes the default rather than an option — the **recommended production** path.
+One site, several robots, real training scale and collaboration. This is the tier where cloud training genuinely becomes the default rather than an option, and it is the **recommended production** path.
 
 | Concern      | Implementation                                                                  | Delta from T1      |
 |--------------|---------------------------------------------------------------------------------|--------------------|
@@ -118,11 +118,11 @@ Still no Kubernetes, no Arc, no fleet plane.
 
 **Domains active:** full Training (RL / IL / VLA), Evaluation (SiL / HiL), Data Management, Synthetic Data.
 
-**Graduate when:** the number of robots or the update cadence makes hand-updating each robot error-prone and version skew becomes a real problem — but all robots are still at one reachable site.
+**Graduate when:** the number of robots or the update cadence makes hand-updating each robot error-prone and version skew becomes a real problem, while all robots are still at one reachable site.
 
 ### T3 — Production
 
-Local k3s + FluxCD, **no Arc**. Several robots at one site you control, updated often enough that manual `docker pull` causes version skew, but all reachable from a single operator network. This tier proves declarative, GitOps-style deployment does not require Azure Arc — single-node k3s idles near zero, and the expensive part of the "fleet" stack (Arc enrollment, identity, policy) is paid only at the multi-site boundary.
+Local k3s + FluxCD, **no Arc**. Several robots at one site you control, updated often enough that manual `docker pull` causes version skew, but all reachable from a single operator network. This tier proves declarative, GitOps-style deployment does not require Azure Arc. Single-node k3s idles near zero, and the expensive part of the "fleet" stack (Arc enrollment, identity, policy) is paid only at the multi-site boundary.
 
 | Concern          | Implementation                                                                    |
 |------------------|-----------------------------------------------------------------------------------|
@@ -139,11 +139,11 @@ Local k3s + FluxCD, **no Arc**. Several robots at one site you control, updated 
 
 **Domains active:** adds `fleet-deployment` (GitOps + gating) at single-site scope.
 
-**Graduate when:** robots span multiple sites, or sites become unreachable from a single operator network — the point at which a cross-site reachability and identity broker becomes genuinely necessary.
+**Graduate when:** robots span multiple sites, or sites become unreachable from a single operator network. That is the point at which a cross-site reachability and identity broker becomes genuinely necessary.
 
 ### T4 — Scale
 
-Multi-site **fleet delivery** — the legitimate top of the necessary ladder. This is the delivery control plane: getting validated policies onto robots across sites you cannot directly reach, safely. The defining difference from `T3` is **multiple sites**, which is exactly what makes Arc necessary as the cross-site reachability and identity broker.
+Multi-site **fleet delivery** is the legitimate top of the necessary ladder. This is the delivery control plane: getting validated policies onto robots across sites you cannot directly reach, safely. The defining difference from `T3` is **multiple sites**, which is exactly what makes Arc necessary as the cross-site reachability and identity broker.
 
 | Concern                   | Implementation                                                                |
 |---------------------------|-------------------------------------------------------------------------------|
@@ -161,12 +161,12 @@ Multi-site **fleet delivery** — the legitimate top of the necessary ladder. Th
 
 **Domains active:** `fleet-deployment` at multi-site scope (fleet delivery terminus).
 
-**Graduate when:** the operator explicitly wants production signals to drive retraining and fleet-wide health analytics — a deliberate decision, not an automatic consequence of scale.
+**Graduate when:** the operator explicitly wants production signals to drive retraining and fleet-wide health analytics. This is a deliberate decision, not an automatic consequence of scale.
 
 ### T5 — Operate
 
 > [!WARNING]
-> **Roadmap / not shipped.** `T5` is **fleet intelligence** — the aspirational cognition layer. The `fleet-intelligence` domain ships ~0 Python files and 4 placeholder specifications. The components below are documented intent, not working capability. Treat this tier as a roadmap direction.
+> **Roadmap / not shipped.** `T5` is **fleet intelligence**, the aspirational cognition layer. The fleet-intelligence domain is currently specified, with implementation planned. The components below are documented intent, not working capability. Treat this tier as a roadmap direction.
 
 Drift detection, automated retraining triggers, aggregate telemetry, and health analytics over the robot fleet.
 
@@ -281,19 +281,19 @@ Isaac Sim connects to the deployed policy endpoint, generating control signals a
 
 ### Fleet delivery
 
-Edge delivery of packaged policy containers to robots through GitOps — the `fleet-deployment` domain. At `T3` this is single-site (local k3s + FluxCD, no Arc); at `T4` it becomes multi-site fleet delivery with Azure Arc as the cross-site reachability and identity broker. This domain includes:
+Edge delivery of packaged policy containers to robots through GitOps, the `fleet-deployment` domain. At `T3` this is single-site (local k3s + FluxCD, no Arc); at `T4` it becomes multi-site fleet delivery with Azure Arc as the cross-site reachability and identity broker. This domain includes:
 
 - [FluxCD](https://fluxcd.io/) GitOps manifests for local k3s (`T3`) or [Azure Arc-enabled Kubernetes](https://learn.microsoft.com/azure/azure-arc/kubernetes/overview) clusters (`T4`) co-located with robots
 - Bootstrap scripts for configuring FluxCD on k3s or Arc-connected clusters
 - A hot-loading workflow deployed alongside the GitOps configuration that pulls new policy container images and stages them for deployment
 - A gating service (running on or near the robot) that explicitly approves staged policies before deployment, with configurable deployment windows
 
-The delivery flow: AzureML model registry publishes a new container image, FluxCD detects the manifest update, the hot-loader pulls and stages the image, and the gating service approves deployment to the robot on the operator's schedule. Fleet delivery delivers and gates policies; it does **not** run drift detection, retraining, or aggregate analytics — those are fleet intelligence (`T5`).
+The delivery flow: AzureML model registry publishes a new container image, FluxCD detects the manifest update, the hot-loader pulls and stages the image, and the gating service approves deployment to the robot on the operator's schedule. Fleet delivery delivers and gates policies; it does **not** run drift detection, retraining, or aggregate analytics. Those are fleet intelligence (`T5`).
 
 ### Fleet intelligence
 
 > [!WARNING]
-> **Roadmap / not shipped.** The `fleet-intelligence` domain ships ~0 Python files and 4 placeholder specifications. The capabilities below are documented intent for `T5`, not working code.
+> **Roadmap / not shipped.** The fleet-intelligence domain is currently specified, with implementation planned. The capabilities below are documented intent for `T5`, not working code.
 
 Production monitoring, robotics telemetry, and on-robot policy performance analytics that close the data flywheel. This domain captures what happens after deployment and feeds insights back into Data Pipeline and Training. Planned capabilities include:
 
@@ -304,7 +304,7 @@ Production monitoring, robotics telemetry, and on-robot policy performance analy
 - Integration with [Azure IoT Operations](https://learn.microsoft.com/azure/iot-operations/) for edge telemetry aggregation, device management, and secure data routing from robots to Azure
 - Automated retraining triggers that connect fleet telemetry back to the Data Pipeline domain, closing the feedback loop from production observations to new training data
 
-This domain distinguishes itself from Evaluation (which validates policies in simulation before deployment) by focusing on real-world, production-time signals from physical robots. Its autonomy decomposes into the [autonomy ladder](ROADMAP.md#the-autonomy-ladder-t50t53) (`T5.0`–`T5.3`); fully autonomous retraining is a foot-gun and human-in-the-loop gating is recommended.
+This domain distinguishes itself from Evaluation (which validates policies in simulation before deployment) by focusing on real-world, production-time signals from physical robots. Its autonomy decomposes into the [autonomy ladder](ROADMAP.md#the-autonomy-ladder-t50t53) (`T5.0`–`T5.3`). Fully autonomous retraining is a foot-gun, and human-in-the-loop gating is recommended.
 
 ### Simulation Guidance
 

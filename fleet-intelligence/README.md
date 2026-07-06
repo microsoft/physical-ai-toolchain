@@ -6,7 +6,7 @@ fleet of robots, not Kubernetes clusters. This is the cognition layer above the 
 [fleet-delivery control plane](../fleet-deployment/README.md) (T4).
 
 > [!WARNING]
-> **Roadmap / placeholder — not shipped.** This domain ships **0 Python files** and design
+> **Roadmap / placeholder, not shipped.** This domain ships **0 Python files** and design
 > specifications only. Everything below describes *intended* capability, not working code. Fully
 > autonomous retraining is a foot-gun: fleet intelligence should default to human-supervised stages
 > (T5.0–T5.1), not the autonomous closed loop (T5.3). See [tier-model.md](../docs/design/tier-model.md)

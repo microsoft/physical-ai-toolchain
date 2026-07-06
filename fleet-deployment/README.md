@@ -4,7 +4,7 @@ The **fleet-delivery control plane (T4)**: deliver trained robot policies onto r
 cannot directly reach, via FluxCD GitOps pipelines, image automation, and a safety gate before a policy
 swaps on a physical arm. "Fleet" here means a fleet of robots, not Kubernetes clusters. This is the
 *implemented, necessary* multi-site concern; the *fleet intelligence* cognition layer (drift,
-retraining, aggregate analytics) is a separate roadmap domain — see
+retraining, aggregate analytics) is a separate roadmap domain. See
 [`fleet-intelligence/`](../fleet-intelligence/README.md). For canonical definitions of the tier model
 and fleet vocabulary, see [tier-model.md](../docs/design/tier-model.md).
 
@@ -24,10 +24,10 @@ and fleet vocabulary, see [tier-model.md](../docs/design/tier-model.md).
 Fleet delivery manages the lifecycle of trained models from the container registry to production
 robots across multiple sites (T4 — Scale). The domain covers:
 
-- **GitOps delivery** — FluxCD reconciles per-site cluster state from Git-declared manifests
-- **Image automation** — Automatic policy updates when new model images are published
-- **Deployment gating** — Validation gates that block rollout until safety criteria are met
-- **Inference runtime** — On-device serving of trained policies via ROS 2 nodes
+- **GitOps delivery:** FluxCD reconciles per-site cluster state from Git-declared manifests
+- **Image automation:** Automatic policy updates when new model images are published
+- **Deployment gating:** Validation gates that block rollout until safety criteria are met
+- **Inference runtime:** On-device serving of trained policies via ROS 2 nodes
 
 ## 🚀 Quick Start
 

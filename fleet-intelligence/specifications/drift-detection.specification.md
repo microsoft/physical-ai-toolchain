@@ -1,13 +1,13 @@
 # Drift Detection
 
 Algorithms and pipelines for detecting policy performance degradation across a fleet of deployed
-robots — a core signal source of the fleet-intelligence cognition layer (T5 — Operate). "Fleet" means a
+robots, a core signal source of the fleet-intelligence cognition layer (T5 — Operate). "Fleet" means a
 fleet of robots. See [tier-model.md](../../docs/design/tier-model.md) for canonical tier and vocabulary
 definitions.
 
 ## Status
 
-Planned — placeholder for future implementation. Part of the roadmap **fleet intelligence** layer (T5);
+Planned: placeholder for future implementation. Part of the roadmap **fleet intelligence** layer (T5);
 this domain ships 0 Python files and design specs only.
 
 > [!NOTE]

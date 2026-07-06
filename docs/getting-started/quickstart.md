@@ -14,7 +14,7 @@ keywords:
 
 ## Quick Start
 
-The **default starting path is local, not cloud.** On T0 — Dev you close the full capture → train → validate → run loop on one laptop and one robot with zero cloud and zero Kubernetes — just `./setup-dev.sh` and the [Tier 0 — Dev recipe](../recipes/tier-0-dev/README.md). Start there; come back here when you graduate.
+The **default starting path is local, not cloud.** On T0 — Dev you close the full capture → train → validate → run loop on one laptop and one robot with zero cloud and zero Kubernetes, using `./setup-dev.sh` and the [Tier 0 — Dev recipe](../recipes/tier-0-dev/README.md). Start there; come back here when you graduate.
 
 This guide is the **cloud path (T2 — Pilot)**: deploy the Azure + NVIDIA stack and submit a cloud training job in ~1.5-2 hours, using full-public networking and Access Keys authentication for the simplest path. Adopt it when training scale, team collaboration, or a shared model registry outgrows the laptop.
 

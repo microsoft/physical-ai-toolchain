@@ -173,7 +173,7 @@ Tiers roll out in three phases based on dependency order and infrastructure read
 | 2     | Q2 2026  | T3 Production            | up to the multi-site boundary       |
 | 3     | Q3 2026  | T4 Scale, T5 Operate     | multi-site + intelligence (roadmap) |
 
-Phase 1 surfaces the already-working local floor (`T0`), then layers the storage-only lab tier (`T1`) and the recommended cloud-training pilot tier (`T2`) — all of which satisfy Goal: Full Training Lifecycle with manual deployment and no Kubernetes.
+Phase 1 surfaces the already-working local floor (`T0`), then layers the storage-only lab tier (`T1`) and the recommended cloud-training pilot tier (`T2`). All of these satisfy Goal: Full Training Lifecycle with manual deployment and no Kubernetes.
 Phase 2 adds single-site declarative deployment (`T3`: local k3s + FluxCD, **no Arc**), proving GitOps does not require a cloud fleet control plane.
 Phase 3 crosses the multi-site boundary into **fleet delivery** (`T4`: Arc + AKS/Flux + gating) and names the **fleet intelligence** roadmap (`T5`).
 
@@ -189,7 +189,7 @@ Phase 3 crosses the multi-site boundary into **fleet delivery** (`T4`: Arc + AKS
 * **T1+:** create `synthetic-data/` with NVIDIA Cosmos Transfer, Predict, and Reason integration
 * **T3 Production:** create single-site `fleet-deployment/` with local k3s + FluxCD GitOps manifests and policy gating service (no Arc)
 * **T4 Scale:** extend `fleet-deployment/` to multi-site fleet delivery with Azure Arc as the cross-site reachability and identity broker
-* **T5 Operate (roadmap):** create `fleet-intelligence/` with Azure IoT Operations telemetry and Fabric RTI dashboards — explicitly labeled roadmap/placeholder
+* **T5 Operate (roadmap):** create `fleet-intelligence/` with Azure IoT Operations telemetry and Fabric RTI dashboards, explicitly labeled roadmap/placeholder
 * Add Agent Skill specification documents (`specifications/`) in each domain directory
 * Add simulation guidance documentation under `docs/simulation/`
 
@@ -198,7 +198,7 @@ Phase 3 crosses the multi-site boundary into **fleet delivery** (`T4`: Arc + AKS
 * Maintain a separate simulation code domain (NVIDIA provides comprehensive OSS tooling)
 * Build custom robot hardware drivers or firmware
 * Implement production SLA monitoring beyond reference dashboard examples
-* Ship `T5` fleet intelligence as production capability in this window — it remains a roadmap direction (~0 Python files, 4 placeholder specifications today)
+* Ship `T5` fleet intelligence as production capability in this window: it remains a roadmap direction today
 
 ## The Autonomy Ladder (T5.0–T5.3)
 
@@ -209,10 +209,10 @@ Fleet intelligence (`T5`) is not a single leap. It decomposes into four ordered 
 
 | Rung | Decision authority                                                                     | Human role                            | Status       |
 |------|----------------------------------------------------------------------------------------|---------------------------------------|--------------|
-| T5.0 | Gated retraining — the system surfaces signals only; humans trigger retraining.        | Human triggers every retraining cycle | Not built    |
-| T5.1 | Human-in-the-loop / active learning — the system proposes what to retrain on and when. | Human approves each cycle             | Ad-hoc (Hex) |
-| T5.2 | Continual learning — the system retrains on a schedule or trigger.                     | Human reviews before deployment       | Not built    |
-| T5.3 | Autonomous closed-loop — the system detects drift, retrains, gates, and deploys.       | None (fully autonomous)               | Not built    |
+| T5.0 | Gated retraining: the system surfaces signals only; humans trigger retraining.          | Human triggers every retraining cycle | Not built    |
+| T5.1 | Human-in-the-loop / active learning: the system proposes what to retrain on and when.   | Human approves each cycle             | Ad-hoc (Hex) |
+| T5.2 | Continual learning: the system retrains on a schedule or trigger.                       | Human reviews before deployment       | Not built    |
+| T5.3 | Autonomous closed-loop: the system detects drift, retrains, gates, and deploys.         | None (fully autonomous)               | Not built    |
 
 > [!WARNING]
 > Fully autonomous retraining on production data is a foot-gun: a legitimate distribution change can cause the loop to bake current degraded behavior into the next dataset, and drift detection needs statistical power that only exists at fleet scale. `T5` should default to human-supervised (`T5.0`–`T5.1`), not closed-loop (`T5.3`). `T5.3` stays a roadmap direction, not a near-term target.
@@ -240,11 +240,11 @@ Fleet intelligence (`T5`) is not a single leap. It decomposes into four ordered 
 ## Timeline Overview
 
 ```text
-Q1 2026 (Jan-Mar) — Foundation
+Q1 2026 (Jan-Mar): Foundation
 ├── Documentation: Complete v0.2.0 contributing guide suite (roadmap, security, maintenance policies)
 └── Release: v0.2.0 (due 2026-02-13)
 
-Q2 2026 (Apr-Jun) — Quality, Governance, Security, and Tier Rollout Phases 1-2
+Q2 2026 (Apr-Jun): Quality, Governance, Security, and Tier Rollout Phases 1-2
 ├── Core Scripts: Verified downloads, linting standardization, frontmatter validation (v0.3.0, due Apr 14)
 ├── Testing: pytest + Pester infrastructure, coverage reporting, CI integration (v0.4.0, due Apr 30)
 ├── CI/CD: Ruff, Bandit, CodeQL PR triggers, workflow orchestration (v0.5.0, due May 14)
@@ -257,20 +257,20 @@ Q2 2026 (Apr-Jun) — Quality, Governance, Security, and Tier Rollout Phases 1-2
 ├── T3 Production: Single-site declarative deployment with local k3s + FluxCD (no Arc)
 └── Release: v0.3.0, v0.4.0, v0.5.0, v0.6.0, v0.7.0, v0.8.0
 
-Q3 2026 (Jul-Sep) — Tier Rollout Phase 3 (multi-site + intelligence boundaries)
-├── T4 Scale: Multi-site fleet delivery — Azure Arc + AKS/Flux GitOps and policy gating
-├── T5 Operate (roadmap): Fleet intelligence — IoT Operations telemetry and Fabric RTI (placeholder)
+Q3 2026 (Jul-Sep): Tier Rollout Phase 3 (multi-site + intelligence boundaries)
+├── T4 Scale: Multi-site fleet delivery, Azure Arc + AKS/Flux GitOps and policy gating
+├── T5 Operate (roadmap): Fleet intelligence, IoT Operations telemetry and Fabric RTI (placeholder)
 ├── Architecture: Agent Skill specification documents for all domains
 ├── OpenSSF: Complete Silver attestation
 ├── Platform: Azure and NVIDIA integration updates (OSMO workload identity)
 └── Community: External contributor onboarding, maintainer documentation
 
-Q4 2026 (Oct-Dec) — Growth
+Q4 2026 (Oct-Dec): Growth
 ├── Community: Conference presentations, partner integrations
 ├── Roadmap: Publish updated 2027-2028 roadmap
 └── Architecture: Production deployment guides, performance benchmarking
 
-Q1 2027 (Jan-Mar) — Sustainability
+Q1 2027 (Jan-Mar): Sustainability
 ├── OpenSSF: Begin Gold-level assessment and gap analysis
 └── Community: Adoption case studies, contributor growth initiatives
 ```

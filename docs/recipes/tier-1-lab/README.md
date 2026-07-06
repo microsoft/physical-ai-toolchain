@@ -1,8 +1,8 @@
 # T1 — Lab: Add Your First Cloud Resource (Storage)
 
-The small-lab and integrator tier. You keep the local Goal: Full Training Lifecycle loop from
+The small-lab and integrator tier. You keep the local training lifecycle loop from
 [T0 — Dev](../tier-0-dev/README.md) and add exactly **one** cloud resource: a single Azure Blob
-storage account. Nothing else moves to the cloud — no Kubernetes, no Arc, no Flux. This is the
+storage account. Nothing else moves to the cloud: no Kubernetes, no Arc, no Flux. This is the
 honest first cloud step for one site, a few robots, and a shared GPU box.
 
 > [!NOTE]
@@ -53,18 +53,18 @@ Run the dataviewer against the Blob container (managed identity or SAS) instead 
 The curation workflow is the same as T0; only the data source changes from local disk to cloud
 storage.
 
-### Step 4: Train — local GPU, or first optional reach to AzureML
+### Step 4: Train locally, or reach to AzureML when needed
 
 Keep training on the shared local GPU box exactly as in T0. When that box saturates, this is the
-first point where reaching to AzureML becomes optional — but it is **not** required at T1. If you do
+first point where reaching to AzureML becomes optional, but it is **not** required at T1. If you do
 submit a cloud job, see [AzureML training](../../training/azureml-training.md) and
 [LeRobot training](../../training/lerobot-training.md). Datasets now live in Blob, so train directly
 from Blob URLs.
 
-### Step 5: Track — keep local, or promote to managed MLflow
+### Step 5: Track locally, or promote to managed MLflow
 
 Keep training outputs on local disk as at [T0 — Dev](../tier-0-dev/README.md#step-5-keep-your-run-outputs-locally).
-When a team needs shared run history, AzureML provides managed MLflow tracking — see
+When a team needs shared run history, AzureML provides managed MLflow tracking. See
 [Experiment tracking](../../training/experiment-tracking.md). Adopting that hosted tracking server plus
 a *model registry* as the default is the [T2 — Pilot](../tier-2-pilot/README.md) concern.
 
@@ -75,7 +75,7 @@ with `docker pull` across 2–3 robots) are unchanged from T0.
 
 ## 🎓 Graduate When
 
-- Training scale or team size **outgrows one GPU box** → cloud training becomes the default at
+- Training scale or team size **outgrows one GPU box**: cloud training becomes the default at
   [T2 — Pilot](../tier-2-pilot/README.md).
 - Dataset governance, versioning, and shared catalogs become necessary.
 

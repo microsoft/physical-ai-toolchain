@@ -29,17 +29,17 @@ T0 is the documented **default** starting path. T2 is the **recommended producti
 
 | T# | Stage name | Operator reach / scope                   | Edge infra              | Cloud infra                                          | One-line purpose                                                             |
 |----|------------|------------------------------------------|-------------------------|------------------------------------------------------|------------------------------------------------------------------------------|
-| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker only     | None                                                 | The honest zero-cloud, zero-Kubernetes floor for Goal: Full Training Lifecycle.                     |
-| T1 | Lab        | One site, a few robots, shared GPU       | Shared disk (NFS/SMB)   | One Blob storage account (optional AzureML / MLflow) | Add the first cloud resource — storage — for a small lab or integrator.      |
+| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker only     | None                                                 | The honest zero-cloud, zero-Kubernetes floor for the full training lifecycle.                       |
+| T1 | Lab        | One site, a few robots, shared GPU       | Shared disk (NFS/SMB)   | One Blob storage account (optional AzureML / MLflow) | Add the first cloud resource, storage, for a small lab or integrator.        |
 | T2 | Pilot      | One site, at scale, team (recommended)   | None beyond Docker      | AzureML + storage + model registry + MLflow          | Cloud training, registry, and shared catalogs become the default.            |
 | T3 | Production | Single site, declarative deployment      | Local k3s + FluxCD      | Same as T2 (no Arc)                                  | GitOps deployment automation at one site, proving Arc is not required.       |
 | T4 | Scale      | Multiple sites you cannot directly reach | Arc + AKS/Flux + gating | T2 + cross-site connectivity / identity              | Multi-site **fleet delivery** terminus; Arc as reachability/identity broker. |
-| T5 | Operate    | Fleet-wide cognition (roadmap)           | + Azure IoT Operations  | + Fabric Real-Time Intelligence + drift/retraining   | **Fleet intelligence** — roadmap/placeholder, mostly unimplemented.          |
+| T5 | Operate    | Fleet-wide cognition (roadmap)           | + Azure IoT Operations  | + Fabric Real-Time Intelligence + drift/retraining   | **Fleet intelligence**: roadmap capability for drift detection and retraining. |
 
-**Goal: Full Training Lifecycle** (the anchor goal): capture demonstrations on a robot, train an imitation policy, validate
-it, and run that policy back on the robot — the full loop, one task. Goal: Full Training Lifecycle is fully achievable at
-T0–T2 with manual deployment and no Kubernetes, Arc, or fleet infrastructure. Data augmentation is a
-separate optional axis (A0–A2), not a step in Goal: Full Training Lifecycle.
+**Full training lifecycle** (the anchor goal): capture demonstrations on a robot, train an imitation policy, validate
+it, and run that policy back on the robot, the full loop for one task. The full training lifecycle is fully achievable at
+T0-T2 with manual deployment and no Kubernetes, Arc, or fleet infrastructure. Data augmentation is a
+separate optional axis (A0-A2), not a step in the full training lifecycle.
 
 ### Boundaries
 
@@ -49,10 +49,9 @@ separate optional axis (A0–A2), not a step in Goal: Full Training Lifecycle.
   drift detection, retraining, or aggregate analytics. Those are T5.
 
 > [!NOTE]
-> **Roadmap honesty.** T5 (Operate / fleet intelligence) is a roadmap direction, not shipped
-> capability: the `fleet-intelligence` domain ships ~0 Python files and 4 placeholder specs. Label
-> this status explicitly in both contributor and user-facing docs, and most prominently in
-> user-facing docs.
+> **Roadmap honesty.** T5 (Operate / fleet intelligence) is on the roadmap and not yet available.
+> The fleet-intelligence domain is currently specified, with implementation planned. Label this
+> status explicitly in both contributor and user-facing docs.
 
 ## The Autonomy Ladder (T5.0–T5.3)
 
@@ -64,10 +63,10 @@ buy.
 
 | Rung | Decision authority                                                                     | Human role                            | Status       |
 |------|----------------------------------------------------------------------------------------|---------------------------------------|--------------|
-| T5.0 | Gated retraining — the system surfaces signals only; humans trigger retraining.        | Human triggers every retraining cycle | Not built    |
-| T5.1 | Human-in-the-loop / active learning — the system proposes what to retrain on and when. | Human approves each cycle             | Ad-hoc (Hex) |
-| T5.2 | Continual learning — the system retrains on a schedule or trigger.                     | Human reviews before deployment       | Not built    |
-| T5.3 | Autonomous closed-loop — the system detects drift, retrains, gates, and deploys.       | None (fully autonomous)               | Not built    |
+| T5.0 | Gated retraining: the system surfaces signals only; humans trigger retraining.          | Human triggers every retraining cycle | Not built    |
+| T5.1 | Human-in-the-loop / active learning: the system proposes what to retrain on and when.   | Human approves each cycle             | Ad-hoc (Hex) |
+| T5.2 | Continual learning: the system retrains on a schedule or trigger.                       | Human reviews before deployment       | Not built    |
+| T5.3 | Autonomous closed-loop: the system detects drift, retrains, gates, and deploys.         | None (fully autonomous)               | Not built    |
 
 > [!WARNING]
 > Fully autonomous retraining on production data is a foot-gun: a legitimate distribution change can
@@ -79,7 +78,7 @@ buy.
 
 These rules are mandatory across all documentation.
 
-- **"Fleet" means a fleet of robots — only.** It never refers to Kubernetes clusters, nor to Azure
+- **"Fleet" means a fleet of robots only.** It never refers to Kubernetes clusters, nor to Azure
   Kubernetes Fleet Manager (a distinct Azure product for managing a fleet of *clusters*, not robots).
   Cluster-level concerns are always written as "clusters" or "sites," never "fleets."
 - **Fleet delivery (T4)** is the delivery and connectivity control plane: getting a validated policy
@@ -95,9 +94,9 @@ These rules are mandatory across all documentation.
 
 ## Link / Anchor Contract
 
-This section defines the canonical file paths and exact heading anchors that WS1–WS4 must create and
-link to. Parallel agents cross-link not-yet-written content by copying paths and anchors from here
-verbatim — do not invent paths for a file another workstream owns.
+This section defines the canonical file paths and exact heading anchors that downstream
+documentation uses when linking across the tier model, architecture, roadmap, and recipe entry
+points.
 
 ### Anchor Convention
 
@@ -115,14 +114,14 @@ hyphens → `t0--dev`. The double hyphen comes from the two spaces that flanked 
 > [!IMPORTANT]
 > Headings in `architecture.md` may carry descriptive trailing text (for example,
 > `### T0 — Dev. One robot, one laptop`). The anchor is computed from the **full heading text**, so a
-> heading with trailing prose produces a longer anchor. To keep anchors deterministic and short, WS1
-> uses the **exact tier headings published below** (`### T# — Name`, nothing after the name) for the
-> linkable tier sections, and puts any descriptive sentence in the body text beneath the heading.
+> heading with trailing prose produces a longer anchor. To keep anchors deterministic and short, the
+> linkable tier sections use the exact headings published below: `### T# — Name`, with any
+> descriptive sentence moved into the body text beneath the heading.
 
 ### Architecture Tier Anchors
 
-**Owner:** WS1. **File:** `docs/contributing/architecture.md`. WS1 creates one `###` heading per tier,
-worded exactly as the "Heading" column, yielding the "Anchor" column. Link as
+File: `docs/contributing/architecture.md`. The architecture document exposes one `###` heading per
+tier, worded exactly as the "Heading" column, yielding the "Anchor" column. Link as
 `docs/contributing/architecture.md#<anchor>`.
 
 | T# | Heading (verbatim)    | Anchor            |
@@ -136,7 +135,7 @@ worded exactly as the "Heading" column, yielding the "Anchor" column. Link as
 
 ### Roadmap Anchors
 
-**Owner:** WS1. **File:** `docs/contributing/ROADMAP.md`. WS1 creates the autonomy-ladder section with
+File: `docs/contributing/ROADMAP.md`. The roadmap document exposes the autonomy-ladder section with
 the heading below. Link as `docs/contributing/ROADMAP.md#<anchor>`.
 
 | Section         | Heading (verbatim)                   | Anchor                        |
@@ -149,18 +148,18 @@ the heading below. Link as `docs/contributing/ROADMAP.md#<anchor>`.
 
 ### Recipe Filenames / Paths
 
-**Owner:** WS4. **Directory:** `docs/recipes/`. Naming scheme: one directory per tier, named
+Directory: `docs/recipes/`. The naming scheme is one directory per tier, named
 `tier-<n>-<slug>/`, each containing a `README.md` entry point. The slug is the lowercased stage name.
-WS3 entry points and WS4 recipes both link to these exact paths.
+Entry pages and cross-links use these exact paths.
 
 | T# | Recipe path                                | Status                    |
 |----|--------------------------------------------|---------------------------|
-| T0 | `docs/recipes/tier-0-dev/README.md`        | WS4 authors (default)     |
-| T1 | `docs/recipes/tier-1-lab/README.md`        | WS4 authors               |
-| T2 | `docs/recipes/tier-2-pilot/README.md`      | WS4 authors (recommended) |
-| T3 | `docs/recipes/tier-3-production/README.md` | WS4 stub (advanced)       |
-| T4 | `docs/recipes/tier-4-scale/README.md`      | WS4 stub (advanced)       |
-| T5 | `docs/recipes/tier-5-operate/README.md`    | WS4 stub (roadmap)        |
+| T0 | `docs/recipes/tier-0-dev/README.md`        | Default tier              |
+| T1 | `docs/recipes/tier-1-lab/README.md`        | Available                 |
+| T2 | `docs/recipes/tier-2-pilot/README.md`      | Recommended               |
+| T3 | `docs/recipes/tier-3-production/README.md` | Advanced                  |
+| T4 | `docs/recipes/tier-4-scale/README.md`      | Advanced                  |
+| T5 | `docs/recipes/tier-5-operate/README.md`    | Roadmap                   |
 
 > [!NOTE]
 > The existing topic-based recipe folders (`docs/recipes/training/`,
@@ -169,9 +168,8 @@ WS3 entry points and WS4 recipes both link to these exact paths.
 
 ### Getting-Started Entry Anchors
 
-**Owner:** WS3. **Files:** `README.md` (repo root), `docs/README.md`, `docs/getting-started/`. WS3
-creates the on-ramp section with the headings below so other docs can deep-link to the tier picker.
-Link as `<file>#<anchor>`.
+Files: `README.md` (repo root), `docs/README.md`, `docs/getting-started/`. These entry points expose
+the headings below so other docs can deep-link to the tier picker. Link as `<file>#<anchor>`.
 
 | Entry point           | File                                 | Heading (verbatim)        | Anchor                |
 |-----------------------|--------------------------------------|---------------------------|-----------------------|
@@ -181,8 +179,8 @@ Link as `<file>#<anchor>`.
 
 ## Cross-Cutting Augmentation Axis (Reference)
 
-Data augmentation is an optional axis orthogonal to T0–T5, recommended only when data is scarce. It is
-**not** part of Goal: Full Training Lifecycle, and the A0–A1 build is a deferred workstream. Listed here for vocabulary
+Data augmentation is an optional axis orthogonal to T0-T5, recommended only when data is scarce. It is
+**not** part of the full training lifecycle, and the A0-A1 build is deferred. Listed here for vocabulary
 completeness only.
 
 | Stage | Approach                                                               | Where it runs                |

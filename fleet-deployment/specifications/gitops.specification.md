@@ -7,7 +7,7 @@ See [tier-model.md](../../docs/design/tier-model.md) for canonical tier and voca
 
 ## Status
 
-Planned — placeholder for future implementation.
+Planned: placeholder for future implementation.
 
 ## Components
 

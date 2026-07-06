@@ -1,6 +1,6 @@
-# T0 — Dev: The Local Goal: Full Training Lifecycle Loop
+# T0 — Dev: The Local Training Lifecycle Loop
 
-Walk the full **Goal: Full Training Lifecycle** loop — capture, curate, train, validate, run on the robot — on **one laptop
+Walk the full training lifecycle loop, capture, curate, train, validate, and run on the robot, on **one laptop
 and one robot**, with **zero cloud** and **zero Kubernetes**. Every step here runs as a plain local
 process against local files. By the end you will have trained an ACT policy, validated it against
 recorded episodes, and be ready to run the policy back on the robot.
@@ -9,8 +9,8 @@ This is the documented **default** starting path. T0 already exists in the code 
 surfaces it.
 
 > [!NOTE]
-> **Goal: Full Training Lifecycle:** capture demonstrations on a robot, train an imitation policy, validate it, and run that
-> policy back on the robot — the full loop, one task. Goal: Full Training Lifecycle is fully achievable at T0 with manual
+> **Full training lifecycle:** capture demonstrations on a robot, train an imitation policy, validate it, and run that
+> policy back on the robot, the full loop for one task. The full training lifecycle is fully achievable at T0 with manual
 > deployment and no Kubernetes, Arc, or fleet infrastructure. For the canonical tier definitions and
 > graduation boundaries, see the [tier model](../../design/tier-model.md) and the
 > [architecture tier detail](../../contributing/architecture.md#t0--dev).
@@ -19,7 +19,7 @@ surfaces it.
 
 | Concern     | What you need                                                                           |
 |-------------|-----------------------------------------------------------------------------------------|
-| Hardware    | One laptop or workstation, one robot. A local GPU is optional — CPU works.              |
+| Hardware    | One laptop or workstation, one robot. A local GPU is optional; CPU works.                |
 | Edge infra  | ROS 2 and Docker only. **No** Kubernetes, **no** Arc, **no** Flux, **no** PVC.          |
 | Cloud infra | **None.** No Azure subscription, no storage account, no AzureML workspace.              |
 | Tooling     | Python 3.12+ with [`uv`](https://docs.astral.sh/uv/), Node.js 18+ (for the dataviewer). |
@@ -40,8 +40,8 @@ Capture ──► Move data ──► Curate ──────► Train ──�
 
 ### Step 1: Capture demonstrations on the robot
 
-Record human demonstrations to a ROS 2 bag on local disk — on the robot or directly on the laptop. No
-edge storage service, no Arc, no PVC is involved — the bag is just a file.
+Record human demonstrations to a ROS 2 bag on local disk, on the robot or directly on the laptop. No
+edge storage service, no Arc, and no PVC are involved; the bag is just a file.
 
 ```bash
 ros2 bag record -o demos/insertion-task /observations /actions
@@ -62,7 +62,7 @@ rsync -av robot@robot.local:~/demos/ ~/datasets/insertion-task/
 
 ### Step 3: Curate with the dataviewer in local mode
 
-Launch the dataviewer against your local datasets directory. In local mode it reads from disk — no
+Launch the dataviewer against your local datasets directory. In local mode it reads from disk, with no
 Azure Blob, no managed identity, no SAS token, and authentication is disabled for local development.
 
 ```bash
@@ -75,7 +75,7 @@ episodes, inspect frames, and drop bad demonstrations before training.
 ### Step 4: Train an imitation policy locally
 
 Train an ACT policy with LeRobot's `lerobot-train` CLI. It runs as a plain local process against your
-on-disk dataset — no Azure, no cluster. Pick the device explicitly: `cpu` on a laptop with no GPU, or
+on-disk dataset, with no Azure and no cluster. Pick the device explicitly: `cpu` on a laptop with no GPU, or
 `cuda` if you have one.
 
 ```bash
@@ -96,14 +96,14 @@ resolved config, and training logs are written under `--output_dir`.
 > The repo also ships an orchestrator at
 > [`training/il/scripts/lerobot/train.py`](https://github.com/microsoft/physical-ai-toolchain/blob/main/training/il/scripts/lerobot/train.py)
 > that wraps `lerobot-train`, parses its metrics, and logs them to MLflow. That orchestrator connects
-> to an AzureML workspace — it requires `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, and
-> `AZUREML_WORKSPACE_NAME` — so it belongs to the cloud-backed path at
+> to an AzureML workspace. It requires `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, and
+> `AZUREML_WORKSPACE_NAME`, so it belongs to the cloud-backed path at
 > [T2 — Pilot](../tier-2-pilot/README.md), not T0. At T0 you call `lerobot-train` directly.
 
 ### Step 5: Keep your run outputs locally
 
-`lerobot-train` writes everything you need to inspect a run — checkpoints, the resolved training
-config, and step-by-step logs — under `--output_dir` on local disk. Nothing leaves the laptop, and no
+`lerobot-train` writes everything you need to inspect a run: checkpoints, the resolved training
+config, and step-by-step logs under `--output_dir` on local disk. Nothing leaves the laptop, and no
 tracking server is required to train or to compare runs by hand.
 
 Hosted experiment tracking is a later concern. The repo's MLflow integration lives inside the
@@ -148,7 +148,7 @@ attribute a regression rather than guess at it.
 ### Step 7: Run the policy back on the robot
 
 Close the loop: run the validated policy on the robot as a plain ACT inference process or container.
-**No Flux, no gating, no GitOps** — you start the inference node by hand against the checkpoint from
+**No Flux, no gating, no GitOps:** you start the inference node by hand against the checkpoint from
 Step 4. That manual run *is* the T0 deployment story; declarative GitOps deployment is the
 [T3 — Production](../tier-3-production/README.md) concern.
 
@@ -156,15 +156,15 @@ Step 4. That manual run *is* the T0 deployment story; declarative GitOps deploym
 
 Move up a tier when any of these become true:
 
-- You have **no local GPU** and training is too slow → add cloud storage at
+- You have **no local GPU** and training is too slow: add cloud storage at
   [T1 — Lab](../tier-1-lab/README.md), or go straight to cloud training at
   [T2 — Pilot](../tier-2-pilot/README.md).
 - The task needs **many training iterations** as conditions vary.
-- **A second person needs the data** → shared storage starts at [T1 — Lab](../tier-1-lab/README.md).
+- **A second person needs the data:** shared storage starts at [T1 — Lab](../tier-1-lab/README.md).
 
 ## 🔗 Related Documentation
 
-- [Tier model (canonical reference)](../../design/tier-model.md) — tier IDs, boundaries, vocabulary.
-- [Architecture: T0 — Dev](../../contributing/architecture.md#t0--dev) — contributor-facing tier detail.
-- [Recipe index](../README.md) — all recipes organized by tier.
-- [T1 — Lab](../tier-1-lab/README.md) — the next tier: add cloud storage.
+- [Tier model (canonical reference)](../../design/tier-model.md): tier IDs, boundaries, vocabulary.
+- [Architecture: T0 — Dev](../../contributing/architecture.md#t0--dev): contributor-facing tier detail.
+- [Recipe index](../README.md): all recipes organized by tier.
+- [T1 — Lab](../tier-1-lab/README.md): the next tier, add cloud storage.

@@ -3,11 +3,11 @@
 The **recommended production** path. This is the tier where cloud training genuinely becomes the
 *default* rather than an option: one site, several robots, real training scale, and a team
 collaborating. You add an AzureML workspace, a model registry, and shared MLflow on top of the T1
-storage account — and still run **no Kubernetes, no Arc, and no fleet control plane**.
+storage account, and still run **no Kubernetes, no Arc, and no fleet control plane**.
 
 > [!NOTE]
-> T2 is the recommended starting point for teams who have outgrown a single GPU box. Goal: Full Training Lifecycle is still
-> fully achievable here with **manual deployment** — robots are hand-updated with `docker pull`. For
+> T2 is the recommended starting point for teams who have outgrown a single GPU box. The full training lifecycle is still
+> achievable here with **manual deployment**. Robots are hand-updated with `docker pull`. For
 > canonical tier definitions, see the [tier model](../../design/tier-model.md) and the
 > [architecture tier detail](../../contributing/architecture.md#t2--pilot).
 
@@ -42,14 +42,14 @@ Land and validate datasets in Blob as at [T1 — Lab](../tier-1-lab/README.md), 
 
 ### Step 3: Train on cloud GPU (default)
 
-Submit a LeRobot behavioral-cloning job to AzureML or OSMO — multi-GPU, queued jobs, multiple people,
+Submit a LeRobot behavioral-cloning job to AzureML or OSMO: multi-GPU, queued jobs, multiple people,
 VLA scale. Use the existing recipes rather than re-deriving the commands here:
 
-- [Your First LeRobot Training Job](../training/your-first-lerobot-training-job.md) — submit a single
+- [Your First LeRobot Training Job](../training/your-first-lerobot-training-job.md): submit a single
   cloud training job.
-- [End-to-End LeRobot Pipeline](../training/end-to-end-lerobot-pipeline.md) — run
+- [End-to-End LeRobot Pipeline](../training/end-to-end-lerobot-pipeline.md): run
   train → evaluate → register in one command.
-- [Your First RL Training Job](../training/your-first-rl-training-job.md) — Isaac Lab RL on OSMO.
+- [Your First RL Training Job](../training/your-first-rl-training-job.md): Isaac Lab RL on OSMO.
 
 Reference docs: [AzureML training](../../training/azureml-training.md),
 [OSMO training](../../training/osmo-training.md), [LeRobot training](../../training/lerobot-training.md).
@@ -57,7 +57,7 @@ Reference docs: [AzureML training](../../training/azureml-training.md),
 ### Step 4: Track and register
 
 Managed MLflow on AzureML is the default tracking backend, and the **model registry becomes
-load-bearing** — trained checkpoints are registered and versioned automatically at job completion.
+load-bearing**. Trained checkpoints are registered and versioned automatically at job completion.
 See [Experiment tracking](../../training/experiment-tracking.md) and
 [MLflow integration](../../training/mlflow-integration.md).
 
@@ -81,8 +81,8 @@ tractable at one site with several robots. Declarative GitOps deployment is the
 ## 🎓 Graduate When
 
 - The number of robots or the **update cadence** makes hand-updating each robot error-prone, and
-  **version skew** across robots becomes a real problem — but all robots are still at one reachable
-  site → [T3 — Production](../tier-3-production/README.md).
+  **version skew** across robots becomes a real problem, while all robots are still at one reachable
+  site: [T3 — Production](../tier-3-production/README.md).
 
 ## 🔗 Related Documentation
 

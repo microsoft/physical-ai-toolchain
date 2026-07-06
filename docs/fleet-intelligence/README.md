@@ -6,7 +6,7 @@ fleet of robots, not Kubernetes clusters. This is the cognition layer that sits 
 [fleet-delivery control plane](../fleet-deployment/README.md) (T4).
 
 > [!WARNING]
-> **Roadmap / placeholder — not shipped.** The `fleet-intelligence` domain ships **0 Python files** and
+> **Roadmap / placeholder, not shipped.** The `fleet-intelligence` domain ships **0 Python files** and
 > design specifications only (4 placeholder specs). Everything below describes *intended* capability,
 > not working code. Treat this domain as a roadmap direction, not an available feature. For the
 > canonical tier model, the autonomy ladder, and fleet vocabulary, see

@@ -5,7 +5,7 @@ sites you cannot directly reach, via FluxCD GitOps pipelines, image automation, 
 before a policy swaps on a physical arm. "Fleet" refers to a fleet of robots, not Kubernetes clusters.
 
 This is the *implemented, necessary* multi-site delivery concern. The *fleet intelligence* cognition
-layer — drift detection, retraining, and aggregate analytics — is a separate, mostly unbuilt roadmap
+layer, drift detection, retraining, and aggregate analytics, is a separate, mostly unbuilt roadmap
 domain ([fleet intelligence](../fleet-intelligence/README.md)). For the canonical tier model and fleet
 vocabulary, see [tier-model.md](../design/tier-model.md).
 

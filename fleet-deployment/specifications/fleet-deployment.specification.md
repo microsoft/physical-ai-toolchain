@@ -7,7 +7,7 @@ See [tier-model.md](../../docs/design/tier-model.md) for canonical tier and voca
 
 ## Status
 
-Planned — placeholder for future implementation. Fleet delivery is the *necessary* multi-site concern
+Planned: placeholder for future implementation. Fleet delivery is the *necessary* multi-site concern
 in the tier model (T4), distinct from the roadmap *fleet intelligence* cognition layer (T5).
 
 ## Components

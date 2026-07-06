@@ -63,8 +63,6 @@
 		"yolov"
 =======
 		"vLLM",
-		"workstreams",
-		"worktree",
 		"xticklabels"
 >>>>>>> e8f1ac7 (refactor(data): restructure dataviewer components)
 	],
