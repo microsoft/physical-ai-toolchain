@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "API for LeRobot episode annotation system"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi==0.138.1",
+    "fastapi==0.138.2",
     "uvicorn[standard]==0.49.0",
     "pydantic==2.13.4",
     "python-multipart==0.0.32",
@@ -50,7 +50,7 @@ export = [
     "h5py==3.16.0",
 ]
 yolo = [
-    "ultralytics==8.4.82",
+    "ultralytics==8.4.83",
 ]
 vlm-judge = [
     "accelerate==1.14.0",
