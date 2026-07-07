@@ -114,6 +114,11 @@ az ml job create \
 | `compute_register`    | `string`     | No       | AML compute target for `register_step` (4-step variant only)                                       |
 | `register_model_name` | `string`     | No       | AML Model Registry name (4-step variant only; required by submission script — fails fast on empty) |
 
+> [!NOTE]
+> To reuse a locked config from a previous run, pass
+> `--preprocessing-config <uri>` to `submit-azureml-lerobot-pipeline.sh`. It is
+> a step-level input on `preprocess_step`, not a top-level pipeline input.
+
 ## 📤 Pipeline Outputs
 
 | Output         | Type         | Description                                                                                 |
