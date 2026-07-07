@@ -292,6 +292,20 @@ if [[ -n "$modality_config_file" && -z "$modality_config_b64" ]]; then
   modality_config_b64="$(base64 < "$modality_config_file" | tr -d '\n')"
 fi
 
+# Base64-encode the workflow entry scripts (lintable repo files under
+# training/vla/scripts/groot/) so the workflow YAML stays script-free; OSMO
+# writes each as a *.b64 file that the task bootstrap decodes.
+groot_scripts_dir="$REPO_ROOT/training/vla/scripts/groot"
+download_blob_py="$groot_scripts_dir/download_blob.py"
+aml_mirror_py="$REPO_ROOT/training/utils/aml_mirror.py"
+train_entry_sh="$groot_scripts_dir/osmo-train-entry.sh"
+for entry_script in "$download_blob_py" "$aml_mirror_py" "$train_entry_sh"; do
+  [[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
+done
+download_blob_b64="$(base64 < "$download_blob_py" | tr -d '\n')"
+aml_mirror_b64="$(base64 < "$aml_mirror_py" | tr -d '\n')"
+train_script_b64="$(base64 < "$train_entry_sh" | tr -d '\n')"
+
 if [[ -z "$azureml_model_name" || "$azureml_model_name" == "groot-model" ]]; then
   azureml_model_name=$(echo "${base_model##*/}" | tr '[:upper:]' '[:lower:]')
 fi
@@ -348,6 +362,9 @@ submit_args=(
   "resume=$resume"
   "azure_upload=$azure_upload"
   "azureml_model_name=$azureml_model_name"
+  "download_blob_b64=$download_blob_b64"
+  "aml_mirror_b64=$aml_mirror_b64"
+  "train_script_b64=$train_script_b64"
 )
 
 [[ -n "$run_id_override" ]]  && submit_args+=("run_id_override=$run_id_override")
