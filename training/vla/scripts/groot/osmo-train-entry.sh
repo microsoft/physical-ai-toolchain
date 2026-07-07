@@ -101,6 +101,13 @@ fi
 cd Isaac-GR00T
 git lfs install --system || true
 
+# Pin Isaac-GR00T to an immutable commit: git tags/branches are mutable, so a
+# non-SHA ref could silently check out new upstream code between runs.
+if ! printf '%s' "${ISAAC_GROOT_REF}" | grep -qzE '^[0-9a-fA-F]{40}$'; then
+  echo "ERROR: isaac_groot_ref '${ISAAC_GROOT_REF}' must be an immutable 40-hex commit SHA" >&2
+  exit 1
+fi
+
 echo "--- checking out ref: ${ISAAC_GROOT_REF} ---"
 if ! git checkout "${ISAAC_GROOT_REF}"; then
   echo "WARN: initial checkout failed; fetching ref then retrying" >&2
@@ -127,6 +134,11 @@ fi
 pip install --upgrade setuptools wheel
 pip install gpustat==1.1.1 wandb==0.19.0 packaging==25.0 ninja==1.13.0
 
+# CUDA stack (torch/torchvision/torchaudio/flash-attn/numpy) is hand-pinned and
+# intentionally outside Dependabot/uv-lock/OSV: versions are chosen at runtime
+# per GPU (cu126 vs cu128 index), flash-attn is source-built against the chosen
+# torch, and gr00t's pins are rewritten to match. Bump these together, never
+# piecemeal, or the ABI breaks.
 GPU_PRODUCT="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
 echo "Detected GPU: ${GPU_PRODUCT}"
 if echo "${GPU_PRODUCT}" | grep -qiE '5090|5080|5070|B100|B200'; then
