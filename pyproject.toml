@@ -47,7 +47,7 @@ override-dependencies = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "training/tests", "data-management/tools/tests", "fleet-deployment/inference/tests"]
+testpaths = ["tests", "training/tests", "data-management/tools/tests", "fleet-deployment/inference/tests", "shared/ci/tests"]
 pythonpath = [".", "data-management/tools"]
 python_files = ["test_*.py", "fuzz_harness.py"]
 addopts = [
@@ -62,6 +62,7 @@ addopts = [
     "--cov=training",
     "--cov=data-management/tools",
     "--cov=fleet-deployment/inference",
+    "--cov=shared/ci",
     "--cov=tests",
     "--cov-report=term-missing",
     "--cov-report=xml:logs/coverage-root.xml",

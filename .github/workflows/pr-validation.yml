@@ -26,6 +26,7 @@ jobs:
       dm_tools: ${{ steps.filter.outputs.dm_tools }}
       data_pipeline: ${{ steps.filter.outputs.data_pipeline }}
       inference: ${{ steps.filter.outputs.inference }}
+      shared_ci: ${{ steps.filter.outputs.shared_ci }}
       dv_backend: ${{ steps.filter.outputs.dv_backend }}
       dv_frontend: ${{ steps.filter.outputs.dv_frontend }}
       fuzz: ${{ steps.filter.outputs.fuzz }}
@@ -62,6 +63,7 @@ jobs:
             echo "dm_tools=$(match '^data-management/tools/')"
             echo "data_pipeline=$(match '^data-pipeline/capture/')"
             echo "inference=$(match '^fleet-deployment/inference/')"
+            echo "shared_ci=$(match '^shared/ci/')"
             echo "dv_backend=$(match '^(data-management/viewer/backend/|data-management/viewer/docker-compose\.yml|shared/ci/smoke-docker\.sh|\.github/workflows/smoke-cpu\.yml)')"
             echo "dv_frontend=$(match '^data-management/viewer/frontend/')"
             echo "fuzz=$(match '^(tests/fuzz|tests/fuzz_harness\.py|tests/generate_fuzz_corpus\.py|data-management/viewer/backend/src/|training/)')"
@@ -314,6 +316,18 @@ jobs:
       contents: read
       id-token: write
 
+  # Pytest: shared CI scripts component
+  pytest-shared-ci:
+    name: Pytest Shared CI
+    needs: changes
+    if: needs.changes.outputs.shared_ci == 'true'
+    uses: ./.github/workflows/pytest-shared-ci.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Dataviewer backend pytest execution
   dataviewer-backend-pytests:
     name: Dataviewer Backend Pytest
@@ -484,6 +498,7 @@ jobs:
       - pytest-dm-tools
       - pytest-data-pipeline
       - pytest-inference
+      - pytest-shared-ci
       - dataviewer-backend-pytests
       - evaluation-pytests
       - fuzz-regression-tests
