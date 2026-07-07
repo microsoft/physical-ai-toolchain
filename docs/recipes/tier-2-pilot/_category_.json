@@ -1,0 +1,8 @@
+{
+  "label": "T2 — Pilot (recommended)",
+  "position": 3,
+  "link": {
+    "type": "generated-index",
+    "description": "T2 — Pilot: the recommended-production path — cloud training on AzureML, a model registry, and shared MLflow."
+  }
+}

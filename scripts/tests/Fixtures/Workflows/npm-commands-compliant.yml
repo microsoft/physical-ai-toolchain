@@ -1,0 +1,19 @@
+# Fixture: compliant workflow — every install uses npm ci, so no violations are expected.
+# Used by Test-DependencyPinning.Tests.ps1 for the workflow-npm-commands ecosystem.
+name: npm-commands-compliant
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: npm ci
+      - name: Build and test
+        run: |
+          npm ci
+          npm run build
+          npm test
+      - run: |
+          npm ci
+        env:
+          NOTE: prefer npm ci over npm install

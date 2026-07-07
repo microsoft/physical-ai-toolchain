@@ -35,7 +35,8 @@
 
 .PARAMETER IncludeTypes
     Comma-separated list of dependency types to check. Options include: github-actions, npm,
-    pip, shell-downloads, shell-inline-pip, gh-extension, powershell-modules, docker. Default is all types.
+    pip, shell-downloads, shell-inline-pip, gh-extension, powershell-modules, docker,
+    workflow-npm-commands. Default is all types.
 
 .PARAMETER Threshold
     Minimum compliance score percentage required for passing grade (0-100).
@@ -110,7 +111,7 @@ param(
     [string]$ExcludePaths = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker",
+    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,workflow-npm-commands",
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 100)]
@@ -187,6 +188,13 @@ $DependencyPatterns = @{
             '**/infrastructure/setup/values/*.yaml', '**/infrastructure/setup/values/*.yml')
         ValidationFunc = 'Get-DockerImageViolations'
         Description    = 'Container image references in workflow YAML, Kubernetes manifests, and Helm values must be digest-pinned (@sha256)'
+    }
+
+    'workflow-npm-commands' = @{
+        FilePatterns   = @('**/.github/workflows/*.yml', '**/.github/workflows/*.yaml',
+            '**/.github/actions/**/*.yml', '**/.github/actions/**/*.yaml')
+        ValidationFunc = 'Get-WorkflowNpmCommandViolations'
+        Description    = 'Workflow run: steps must use npm ci for deterministic installs from the lockfile, not npm install/update'
     }
 }
 
@@ -980,6 +988,148 @@ function Get-DockerImageViolations {
     return $violations
 }
 
+function Test-NpmCommandLine {
+    <#
+    .SYNOPSIS
+        Returns the unpinned npm command found on a line, or $null.
+    .DESCRIPTION
+        Matches npm (and the npm.cmd Windows shim) invocations that mutate the dependency
+        tree: install, i, update, and install-test. Commands that install deterministically
+        from the committed lockfile (ci) or that do not install packages (run, test, audit)
+        are not matched, nor is npx. A trailing non-word, non-hyphen boundary keeps 'i'
+        matching only the standalone alias (not 'install' or 'init') and stops 'install' and
+        'update' from matching longer hyphenated subcommands such as install-ci-test.
+    .PARAMETER Line
+        The command text to inspect.
+    .OUTPUTS
+        System.String matched command, or $null when no unpinned npm command is present.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Line
+    )
+
+    if ($Line -match '\bnpm(?:\.cmd)?\s+(?:install-test|install|update|i)(?![\w-])') {
+        return $Matches[0]
+    }
+
+    return $null
+}
+
+function Get-WorkflowNpmCommandViolations {
+    <#
+    .SYNOPSIS
+        Detects unpinned npm install/update commands in GitHub Actions workflow run: steps.
+    .DESCRIPTION
+        Scans workflow and composite-action YAML for run: steps and flags npm commands that
+        mutate the dependency tree (install, i, update, install-test). npm ci, which installs
+        deterministically from the committed lockfile, is compliant, as are non-installing
+        subcommands (run, test, audit) and npx.
+
+        Indentation-aware parsing confines detection to run: block content — both inline
+        (run: npm install) and block-scalar (run: |) forms, with or without a leading YAML
+        list-item dash — so npm references in step names, other keys, or comments are not
+        flagged. An intentional non-ci install opts out with a '# pinning-ignore' comment on
+        the command line or a dedicated comment line directly above it.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    $lines = @(Get-Content -Path $filePath)
+    $inRunBlock = $false
+    $runBlockIndent = 0
+    $prevWasIgnoreComment = $false
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $trimmed = $line.TrimStart()
+
+        # Blank lines carry no indentation and must not close an open block scalar, but
+        # they do break a preceding `# pinning-ignore`, which exempts only the line below it.
+        if ($trimmed -eq '') { $prevWasIgnoreComment = $false; continue }
+
+        # The marker must sit in a `#` comment, not merely appear after a `#` in an argument.
+        $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
+
+        # A comment line only records whether it exempts the command directly below it.
+        if ($trimmed.StartsWith('#')) {
+            $prevWasIgnoreComment = $hasIgnore
+            continue
+        }
+
+        $currentIndent = $line.Length - $trimmed.Length
+
+        # A run: block ends once indentation returns to or above the run: key.
+        if ($inRunBlock -and $currentIndent -le $runBlockIndent) {
+            $inRunBlock = $false
+            $prevWasIgnoreComment = $false
+        }
+
+        # Candidate command text: the inline run: content, or a line inside a block scalar.
+        # A run:-prefixed line inside an open block scalar is shell content, not a new YAML
+        # key, so match a new key only when not already in a block; otherwise the block would
+        # close early and hide later npm commands in the same step.
+        $candidate = $null
+        if (-not $inRunBlock -and $trimmed -match '^((?:-\s+)?)run:\s*(.*)$') {
+            $runContent = $Matches[2].Trim()
+            # Block-scalar content is indented past the run: key. A `- run:` list item places
+            # the key past the dash, so close the block on the key column (dash indent plus
+            # prefix length), not the dash column; otherwise same-step sibling keys (name:,
+            # env:, with:) would be scanned as shell content.
+            $runBlockIndent = $currentIndent + $Matches[1].Length
+
+            if ($runContent -and $runContent -notmatch '^[|>]') {
+                $candidate = $runContent
+                $inRunBlock = $false
+            }
+            else {
+                $inRunBlock = $true
+            }
+        }
+        elseif ($inRunBlock) {
+            $candidate = $trimmed
+        }
+
+        if ($candidate -and -not ($hasIgnore -or $prevWasIgnoreComment)) {
+            $npmMatch = Test-NpmCommandLine -Line $candidate
+            if ($npmMatch) {
+                $v = [DependencyViolation]::new(
+                    $relativePath,
+                    $i + 1,
+                    $type,
+                    $npmMatch,
+                    'Medium',
+                    "Unpinned npm command '$npmMatch'; use 'npm ci' for deterministic installs from the lockfile."
+                )
+                $v.ViolationType = 'Unpinned'
+                $v.CurrentRef = $candidate
+                $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $candidate }
+                $violations += $v
+            }
+        }
+
+        $prevWasIgnoreComment = $false
+    }
+
+    return $violations
+}
+
 function Get-NpmOverrideViolation {
     <#
     .SYNOPSIS
@@ -1424,6 +1574,11 @@ function Get-RemediationSuggestion {
     $type = $Violation.Type
     $name = $Violation.Name
     $version = $Violation.Version
+
+    # npm command remediation is deterministic (no SHA to resolve), so it is flag-independent.
+    if ($type -eq 'workflow-npm-commands') {
+        return "Replace '$name' with 'npm ci' for deterministic installs from the committed lockfile."
+    }
 
     if (!$Remediate) {
         return "Enable -Remediate flag for specific SHA suggestions"

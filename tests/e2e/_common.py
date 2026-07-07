@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+_MAX_CONSECUTIVE_STATUS_ERRORS = 5
+
 
 def e2e_name(prefix: str) -> str:
     """Generate a collision-resistant resource name for an e2e run."""
@@ -47,6 +49,77 @@ def format_command_failure(result: subprocess.CompletedProcess[str]) -> str:
     if result.stderr.strip():
         parts.append(f"stderr:\n{result.stderr.strip()}")
     return "\n\n".join(parts)
+
+
+def upload_blob_directory(
+    repo_root: Path,
+    storage_account: str,
+    container: str,
+    prefix: str,
+    source_dir: Path,
+    *,
+    description: str,
+) -> None:
+    result = run_command(
+        [
+            "az",
+            "storage",
+            "blob",
+            "upload-batch",
+            "--account-name",
+            storage_account,
+            "--auth-mode",
+            "login",
+            "--destination",
+            container,
+            "--destination-path",
+            prefix,
+            "--source",
+            str(source_dir),
+            "--overwrite",
+            "--only-show-errors",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Failed to upload {description} to {storage_account}/{container}/{prefix}\n\n"
+            f"{format_command_failure(result)}"
+        )
+
+
+def delete_blob_prefix(
+    repo_root: Path,
+    storage_account: str,
+    container: str,
+    prefix: str,
+    *,
+    description: str,
+) -> None:
+    log_e2e(f"Deleting {description} under {container}/{prefix}")
+    result = run_command(
+        [
+            "az",
+            "storage",
+            "blob",
+            "delete-batch",
+            "--account-name",
+            storage_account,
+            "--auth-mode",
+            "login",
+            "--source",
+            container,
+            "--pattern",
+            f"{prefix}/*",
+            "--only-show-errors",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Failed to delete {description} under {storage_account}/{container}/{prefix}\n\n"
+            f"{format_command_failure(result)}"
+        )
 
 
 def parse_json_from_output(output: str) -> Any:
@@ -98,8 +171,20 @@ def wait_for_status(
 
     log_e2e(f"Waiting for {goal_description} for up to {timeout_minutes} minutes (poll every {poll_interval_seconds}s)")
 
+    consecutive_errors = 0
     while time.monotonic() < deadline:
-        last_status = fetch_status()
+        try:
+            last_status = fetch_status()
+        except Exception as error:
+            # A single throttled/blipped status query must not abort a 30-60 minute
+            # live poll; only a persistent failure run is treated as fatal.
+            consecutive_errors += 1
+            log_e2e(f"Status fetch failed ({consecutive_errors}/{_MAX_CONSECUTIVE_STATUS_ERRORS}): {error}")
+            if consecutive_errors >= _MAX_CONSECUTIVE_STATUS_ERRORS:
+                raise
+            time.sleep(poll_interval_seconds)
+            continue
+        consecutive_errors = 0
         normalized_status = last_status.upper()
 
         if log_status_changes and last_status != previous_status:

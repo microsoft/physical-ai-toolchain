@@ -66,6 +66,8 @@ uv pip install "numpy>=1.26,<2.0"  # pinning-ignore
 
 Under the `docker` type, the scanner also flags workflow-YAML `image:` references that are not pinned by an immutable `@sha256` digest. Submission-time templated (`{{ image }}`) and shell-variable references are skipped, as are AzureML `environment:` asset references (versioned assets, not OCI images). Refresh digests with `scripts/update-image-digests.sh`; to exempt an intentional non-pin, add a `# pinning-ignore` comment on the `image:` line.
 
+Under the `workflow-npm-commands` type, the scanner flags `npm install`, `npm i`, `npm update`, and `npm install-test` (and the `npm.cmd` shim) in workflow and composite-action `run:` steps, requiring `npm ci` for reproducible installs from the lockfile. Indentation-aware parsing confines detection to `run:` block content, so npm in step names, keys, or comments is not flagged. Add a `# pinning-ignore` comment on or directly above the command line to exempt an intentional non-`ci` install.
+
 ## 🔗 Related Resources
 
 - [Contributing security review](../contributing/security-review.md): Contributor security checklist for pull requests

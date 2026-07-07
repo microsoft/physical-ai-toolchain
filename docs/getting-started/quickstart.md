@@ -12,10 +12,14 @@ keywords:
   - tutorial
 ---
 
-Deploy the full Azure NVIDIA Robotics stack and submit a training job in ~1.5-2 hours. This guide uses full-public networking and Access Keys authentication for the simplest path.
+## Quick Start
+
+The **default starting path is local, not cloud.** On T0 — Dev you close the full capture → train → validate → run loop on one laptop and one robot with zero cloud and zero Kubernetes, using `./setup-dev.sh` and the [Tier 0 — Dev recipe](../recipes/tier-0-dev/README.md). Start there; come back here when you graduate.
+
+This guide is the **cloud path (T2 — Pilot)**: deploy the Azure + NVIDIA stack and submit a cloud training job in ~1.5-2 hours, using full-public networking and Access Keys authentication for the simplest path. Adopt it when training scale, team collaboration, or a shared model registry outgrows the laptop.
 
 > [!NOTE]
-> This guide expands on the [Getting Started hub](README.md).
+> This guide expands on the [Getting Started hub](README.md). To pick the right tier and see the graduation triggers, see [Choose Your Tier](README.md#choose-your-tier). For the per-tier infrastructure boundaries see the [Architecture Overview](../contributing/architecture.md#t2--pilot) and the canonical [Tier Model](../design/tier-model.md).
 
 ## Prerequisites
 

@@ -249,8 +249,7 @@ describe('VideoPlayer', () => {
     render(<VideoPlayer />)
 
     const onProgress = lastPlayerProps.current?.onProgress as
-      | ((state: { playedSeconds: number }) => void)
-      | undefined
+      ((state: { playedSeconds: number }) => void) | undefined
     expect(onProgress).toBeTypeOf('function')
 
     act(() => {
@@ -277,8 +276,7 @@ describe('VideoPlayer', () => {
     render(<VideoPlayer />)
 
     const onProgress = lastPlayerProps.current?.onProgress as
-      | ((state: { playedSeconds: number }) => void)
-      | undefined
+      ((state: { playedSeconds: number }) => void) | undefined
     expect(onProgress).toBeTypeOf('function')
 
     // fps = meta.length / windowDuration = 45 / 1.5 = 30

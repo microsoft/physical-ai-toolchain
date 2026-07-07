@@ -135,6 +135,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="Hugging Face model id (qwen3-vl) or remote model name (openai-compat)",
     )
     parser.add_argument(
+        "--model-revision",
+        default=None,
+        help="Immutable HF commit SHA to pin the qwen3-vl model/processor download",
+    )
+    parser.add_argument(
         "--base-url",
         default=None,
         help="OpenAI-compatible chat completions base URL (openai-compat backend)",
@@ -243,6 +248,7 @@ def _build_service(args: argparse.Namespace) -> JudgeService:
     backend = BackendConfig(
         kind=args.backend,
         model_id=args.model_id,
+        revision=args.model_revision,
         base_url=args.base_url,
         api_key=args.api_key,
         device_map=args.device_map,

@@ -79,7 +79,9 @@ describe('auth-headers', () => {
       getActiveAccount: vi.fn().mockReturnValue(mockAccount),
       acquireTokenSilent: vi
         .fn()
-        .mockRejectedValue(new InteractionRequiredAuthError('interaction_required')),
+        .mockRejectedValue(
+          new InteractionRequiredAuthError('interaction_required', 'test-correlation-id'),
+        ),
       acquireTokenRedirect: vi.fn().mockResolvedValue(undefined),
     } as unknown as PublicClientApplication
     setMsalInstance(mockInstance)

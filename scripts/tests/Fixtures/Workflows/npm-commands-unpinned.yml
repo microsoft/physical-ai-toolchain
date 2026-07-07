@@ -1,0 +1,29 @@
+# Fixture: non-compliant npm commands in workflow run: steps plus false-positive defenses.
+# Used by Test-DependencyPinning.Tests.ps1 for the workflow-npm-commands ecosystem.
+# Expected violations (3): the block-scalar `npm install`, the block-scalar `npm update`,
+# and the inline `- run: npm i`. Not flagged: `npm ci`, the step name, the comment mention,
+# and the pinning-ignore install.
+name: npm-commands-unpinned
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deterministic install is fine
+        run: npm ci
+      - name: Mutating install in a block scalar
+        run: |
+          npm install
+          npm run build
+      - name: Update dependencies
+        run: |
+          npm update
+      - run: npm i
+      - name: npm install mentioned in a step name is not a command
+        run: echo "noop"
+      - name: Commented command is not scanned
+        run: |
+          # npm install should-not-flag
+          echo "noop"
+      - name: Intentional global tool install opts out
+        run: npm install -g some-tool@1.2.3 # pinning-ignore

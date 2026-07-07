@@ -207,6 +207,11 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default="qwen3-vl",
     )
     parser.add_argument("--model-id", default="Qwen/Qwen3-VL-4B-Instruct")
+    parser.add_argument(
+        "--model-revision",
+        default=None,
+        help="Immutable HF commit SHA to pin the qwen3-vl model/processor download",
+    )
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--n-frames", type=int, default=12)
@@ -242,6 +247,7 @@ def _build_service(args: argparse.Namespace) -> JudgeService:
     backend = BackendConfig(
         kind=args.backend,
         model_id=args.model_id,
+        revision=args.model_revision,
         base_url=args.base_url,
         api_key=args.api_key,
     )

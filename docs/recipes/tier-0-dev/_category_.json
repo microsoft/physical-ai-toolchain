@@ -1,0 +1,8 @@
+{
+  "label": "T0 — Dev (default)",
+  "position": 1,
+  "link": {
+    "type": "generated-index",
+    "description": "T0 — Dev: the zero-cloud, zero-Kubernetes local quick-start for the full training lifecycle loop on one laptop and one robot."
+  }
+}
