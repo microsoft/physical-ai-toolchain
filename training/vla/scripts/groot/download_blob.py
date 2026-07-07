@@ -72,8 +72,10 @@ cred_client = None
 try:
     cred = DefaultAzureCredential()
     cred_client = ContainerClient(endpoint, container, credential=cred)
-except Exception:
-    pass
+except Exception as err:
+    # No managed identity / usable credential in this container; fall through to
+    # the anonymous-access path below rather than aborting the download.
+    print(f"DefaultAzureCredential unavailable ({err}); will try anonymous access")
 
 if cred_client is not None:
     try:
