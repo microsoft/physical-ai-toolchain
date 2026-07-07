@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit LeRobot inference/evaluation to Azure ML
+# Submit LeRobot evaluation to Azure ML
 # Evaluates trained policies from AzureML model registry or HuggingFace Hub
 set -o errexit -o nounset
 
@@ -27,9 +27,9 @@ fi
 
 show_help() {
   cat << 'EOF'
-Usage: submit-azureml-lerobot-inference.sh [OPTIONS] [-- az-ml-job-flags]
+Usage: submit-azureml-lerobot-eval.sh [OPTIONS] [-- az-ml-job-flags]
 
-Submit LeRobot inference/evaluation to Azure ML.
+Submit LeRobot evaluation to Azure ML.
 Evaluates trained policies from AzureML model registry or HuggingFace Hub.
 
 POLICY SOURCE (one required):
@@ -52,7 +52,7 @@ AZUREML ASSET OPTIONS:
         --assets-only             Register environment without submitting job
 
 EVALUATION OPTIONS:
-    -w, --job-file PATH           Job YAML template (default: workflows/azureml/lerobot-infer.yaml)
+    -w, --job-file PATH           Job YAML template (default: evaluation/sil/workflows/azureml/lerobot-eval.yaml)
     -p, --policy-type TYPE        Policy architecture: act, diffusion (default: act)
     -j, --job-name NAME           Job identifier (default: lerobot-eval)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/eval)
@@ -63,7 +63,7 @@ EVALUATION OPTIONS:
 
 LOGGING:
         --mlflow-enable           Enable MLflow logging with trajectory plots to AzureML
-        --experiment-name NAME    MLflow experiment name (default: auto-derived)
+        --experiment-name NAME    MLflow experiment name (default: lerobot-evaluation from the job template)
 
 MODEL REGISTRATION:
     -r, --register-model NAME     Model name for Azure ML registration
@@ -90,7 +90,7 @@ Additional arguments after -- are forwarded to az ml job create.
 
 EXAMPLES:
     # Evaluate an AzureML-registered model against blob dataset
-    submit-azureml-lerobot-inference.sh \
+    submit-azureml-lerobot-eval.sh \
       --from-aml-model \
       --model-name hex-pickup-act \
       --model-version 3 \
@@ -101,12 +101,12 @@ EXAMPLES:
       --eval-episodes 10
 
     # Evaluate a HuggingFace policy
-    submit-azureml-lerobot-inference.sh \
+    submit-azureml-lerobot-eval.sh \
       --policy-repo-id user/trained-act \
       -d lerobot/aloha_sim_insertion_human
 
     # Register environment only (no job submission)
-    submit-azureml-lerobot-inference.sh --assets-only
+    submit-azureml-lerobot-eval.sh --assets-only
 EOF
 }
 
@@ -130,7 +130,7 @@ environment_version_explicit=false
 image="${IMAGE:-$DEFAULT_LEROBOT_EVAL_IMAGE}"
 assets_only=false
 
-job_file="$REPO_ROOT/workflows/azureml/lerobot-infer.yaml"
+job_file="$REPO_ROOT/evaluation/sil/workflows/azureml/lerobot-eval.yaml"
 policy_repo_id="${POLICY_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 dataset_repo_id="${DATASET_REPO_ID:-}"
@@ -303,11 +303,13 @@ az_args=(
   --resource-group "$resource_group"
   --workspace-name "$workspace_name"
   --file "$job_file"
+  --set "code=$REPO_ROOT"
   --set "environment=azureml:${environment_name}:${environment_version}"
 )
 
 [[ -n "$compute" ]] && az_args+=(--set "compute=$compute")
 [[ -n "$instance_type" ]] && az_args+=(--set "resources.instance_type=$instance_type")
+[[ -n "$experiment_name" ]] && az_args+=(--set "experiment_name=$experiment_name")
 [[ -n "$display_name" ]] && az_args+=(--set "display_name=$display_name")
 
 # Input values
@@ -377,7 +379,7 @@ az_args+=(--query "name" -o "tsv")
 # Submit Job
 #------------------------------------------------------------------------------
 
-info "Submitting AzureML LeRobot inference job..."
+info "Submitting AzureML LeRobot evaluation job..."
 info "  Policy: $policy_repo_id"
 info "  Policy Type: $policy_type"
 info "  Job Name: $job_name"

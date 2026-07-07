@@ -19,7 +19,7 @@ display_name: LeRobot Data Preprocess
 version: "1"
 description: >-
   Validate a LeRobot dataset, prepare its on-disk layout for training, and
-  emit a preprocessing_config artifact downstream steps can consume.
+  emit the effective preprocessing configuration as an audit artifact.
 
 code: ../../../scripts/lerobot
 
@@ -40,17 +40,22 @@ outputs:
     type: uri_folder
     description: Dataset layout ready for the train step (preprocessing.yaml + metadata.json + payload).
     mode: upload
-  preprocessing_config:
+  effective_preprocessing_config:
     type: uri_folder
-    description: Effective preprocessing configuration emitted for downstream consumers.
+    description: Effective preprocessing configuration emitted as an audit artifact.
     mode: upload
 
-environment: azureml:lerobot-training-env:latest
+environment:
+  # Digest-pinned base image; keep in sync with DEFAULT_LEROBOT_TRAIN_IMAGE in
+  # scripts/lib/common.sh (both refreshed by scripts/update-image-digests.sh).
+  # An inline image yields an anonymous, content-hashed environment, so a base
+  # image change never collides with an immutable registered environment version.
+  image: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be
 
 command: >-
   python preprocess.py
   --dataset_input ${{inputs.dataset}}
   --dataset_repo_id ${{inputs.dataset_repo_id}}
   --output_dataset ${{outputs.prepared_dataset}}
-  --output_config ${{outputs.preprocessing_config}}
+  --output_config ${{outputs.effective_preprocessing_config}}
   $[[--preprocessing_config ${{inputs.preprocessing_config}}]]

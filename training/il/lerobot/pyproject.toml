@@ -35,6 +35,7 @@ dependencies = [
     "pyperclip==1.11.0",
     "datasets==5.0.0",
     "pyarrow==24.0.0",
+    "matplotlib==3.11.0",
     "huggingface-hub==1.21.0",
     "lerobot==0.5.1",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see

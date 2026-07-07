@@ -39,44 +39,13 @@ settings:
 inputs:
   dataset:
     type: uri_folder
-    description: >-
-      Raw LeRobot dataset asset (e.g. azureml:my-dataset:1). Must contain
-      meta/, data/, and optionally videos/ subfolders.
-  dataset_repo_id:
-    type: string
-    description: >-
-      HuggingFace-style dataset repo id; must match the dataset folder name.
-  preprocessing_config:
-    type: uri_file
-    optional: true
-    description: >-
-      Optional preprocessing_config.yaml from a previous pipeline run.
-  policy_type:
-    type: string
-    default: act
-  job_name:
-    type: string
-    default: lerobot-pipeline
-  register_model_name:
-    type: string
-    default: lerobot-policy
-    description: >-
-      AML Model Registry name used by the register step. Required by the
-      submission script (submit-azureml-lerobot-pipeline.sh fails fast when
-      empty); the register step always runs and writes the model into the
-      AML Model Registry.
-  compute_preprocess:
-    type: string
-    default: azureml:cpu-cluster
-  compute_train:
-    type: string
-    default: azureml:cpu-cluster
-  compute_evaluate:
-    type: string
-    default: azureml:cpu-cluster
-  compute_register:
-    type: string
-    default: azureml:cpu-cluster
+  policy_type: act
+  job_name: lerobot-pipeline
+  register_model_name: lerobot-policy
+  compute_preprocess: azureml:cpu-cluster
+  compute_train: azureml:cpu-cluster
+  compute_evaluate: azureml:cpu-cluster
+  compute_register: azureml:cpu-cluster
 
 outputs:
   checkpoints:
@@ -94,7 +63,6 @@ jobs:
     inputs:
       dataset: ${{parent.inputs.dataset}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
-      preprocessing_config: ${{parent.inputs.preprocessing_config}}
 
   train_step:
     type: command
@@ -114,7 +82,6 @@ jobs:
       DATASET_REPO_ID: ${{parent.inputs.dataset_repo_id}}
       POLICY_TYPE: ${{parent.inputs.policy_type}}
       JOB_NAME: ${{parent.inputs.job_name}}
-      TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
 
   evaluate_step:
     type: command
