@@ -52,7 +52,7 @@ function ConvertTo-JUnitXmlCore {
 
     $results = Get-Content $InputPath -Raw | ConvertFrom-Json
     $totalTests = $results.summary.total_passed + $results.summary.total_failed + $results.summary.total_errors
-    $timestamp = ([datetime]::Parse($results.timestamp)).ToString('yyyy-MM-ddTHH:mm:ss')
+    $timestamp = ([datetime]$results.timestamp).ToString('yyyy-MM-ddTHH:mm:ss')
 
     $xml = [System.Xml.XmlDocument]::new()
     $declaration = $xml.CreateXmlDeclaration('1.0', 'UTF-8', $null)
