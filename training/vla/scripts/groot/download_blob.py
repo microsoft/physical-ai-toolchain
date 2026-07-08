@@ -10,14 +10,20 @@ from azure.core.exceptions import HttpResponseError
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import ContainerClient
 
+
+def _redact(u: str) -> str:
+    # Drop the query string so a SAS signature never reaches the logs.
+    return urlparse(u)._replace(query="").geturl()
+
+
 url = os.environ["BLOB_URL"]
 parsed = urlparse(url)
 if parsed.scheme != "https" or not parsed.netloc:
-    raise SystemExit(f"Invalid BLOB_URL: {url}")
+    raise SystemExit(f"Invalid BLOB_URL: {_redact(url)}")
 
 path_parts = parsed.path.lstrip("/").split("/", 1)
 if len(path_parts) < 2 or not path_parts[0] or not path_parts[1]:
-    raise SystemExit(f"BLOB_URL must include account/container/prefix, got: {url}")
+    raise SystemExit(f"BLOB_URL must include account/container/prefix, got: {_redact(url)}")
 
 container = path_parts[0]
 prefix = path_parts[1].rstrip("/")

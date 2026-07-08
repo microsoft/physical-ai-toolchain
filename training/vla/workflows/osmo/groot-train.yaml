@@ -34,7 +34,9 @@ workflow:
           base64 -d /tmp/download_blob.py.b64 > /tmp/download_blob.py
           base64 -d /tmp/aml_mirror.py.b64 > /tmp/aml_mirror.py
           base64 -d /tmp/train.sh.b64 > /tmp/train.sh
-          [ -s /tmp/train.sh ] || { echo "ERROR: /tmp/train.sh is empty — submit via training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh" >&2; exit 1; }
+          for f in /tmp/download_blob.py /tmp/aml_mirror.py /tmp/train.sh; do
+            [ -s "$f" ] || { echo "ERROR: $f is empty — submit via training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh" >&2; exit 1; }
+          done
           exec bash /tmp/train.sh
       environment:
         BLOB_URL: "{{blob_url}}"
