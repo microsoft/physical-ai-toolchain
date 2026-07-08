@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Submit Azure ML Isaac Lab evaluation job using evaluation/ as the code directory
-# The .amlignore file controls which files are excluded from the code snapshot
+# Submit an Azure ML Isaac Lab evaluation job. The job code snapshot stages the
+# training/rl runtime and training/utils packages alongside evaluation/sil (see
+# "Stage Code Snapshot" below); the staged .amlignore controls snapshot exclusions.
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -81,7 +82,7 @@ environment_version_explicit=false
 model_name=""
 model_version="latest"
 
-task="${TASK:-Isaac-Velocity-Rough-Anymal-C-v0}"
+task="${TASK:-}"
 framework=""
 episodes=100
 num_envs=64

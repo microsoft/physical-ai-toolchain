@@ -112,6 +112,7 @@ def test_aml_rl_lifecycle_e2e(
         repo_root,
         aml_workspace,
         model=model,
+        task=_TASK,
         eval_episodes=2,
         num_envs=4,
     )

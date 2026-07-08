@@ -368,6 +368,7 @@ def submit_aml_isaaclab_eval(
     aml_workspace: AzureMLWorkspace,
     *,
     model: AmlModelRef,
+    task: str,
     eval_episodes: int,
     num_envs: int,
 ) -> AzureMLJob:
@@ -375,7 +376,7 @@ def submit_aml_isaaclab_eval(
     experiment_name = e2e_name("rl-eval-e2e-aml")
     log_e2e(
         "Submitting AzureML Isaac Lab eval job "
-        f"for model={model.name}:{model.version}, eval_episodes={eval_episodes}, num_envs={num_envs}, "
+        f"for model={model.name}:{model.version}, task={task}, eval_episodes={eval_episodes}, num_envs={num_envs}, "
         f"experiment={experiment_name}"
     )
     result = run_command(
@@ -385,6 +386,8 @@ def submit_aml_isaaclab_eval(
             model.name,
             "--model-version",
             model.version,
+            "--task",
+            task,
             "--eval-episodes",
             str(eval_episodes),
             "--num-envs",

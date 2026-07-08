@@ -352,6 +352,7 @@ class TestEvaluate:
         agent.act.assert_called()
         args, kwargs = agent.act.call_args
 
+        # Mirrors skrl 2.1.0's act(observations, states, *, timestep, timesteps) signature.
         # States passed positionally as None at index 1
         assert len(args) >= 2
         assert args[1] is None
