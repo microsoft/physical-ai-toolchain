@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Web-based dataset analysis and annotation tool for robot demonstration datasets"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi==0.138.1",
+    "fastapi==0.138.2",
     "uvicorn[standard]==0.49.0",
     "pydantic==2.13.4",
     "python-multipart==0.0.32",
@@ -43,7 +43,7 @@ export = [
     "Pillow==12.2.0",
 ]
 yolo = [
-    "ultralytics==8.4.82",
+    "ultralytics==8.4.83",
     "numpy==2.5.0",
     "Pillow==12.2.0",
 ]

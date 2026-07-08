@@ -46,6 +46,12 @@
 .PARAMETER Remediate
     Generate remediation suggestions with specific SHA pins for unpinned dependencies.
 
+.PARAMETER Apply
+    Rewrite GitHub Actions 'uses:' references in place, replacing tag or branch refs with
+    the resolved immutable commit SHA and a trailing '# <ref>' comment. Implies SHA
+    resolution. Only github-actions references are auto-applied; other ecosystems are
+    reported for manual pinning. Does not affect the compliance gate or exit code.
+
 .EXAMPLE
     ./Test-DependencyPinning.ps1
     Scan current directory for dependency pinning compliance.
@@ -57,6 +63,10 @@
 .EXAMPLE
     ./Test-DependencyPinning.ps1 -IncludeTypes "github-actions,pip" -Remediate
     Check only GitHub Actions and pip dependencies with remediation suggestions.
+
+.EXAMPLE
+    ./Test-DependencyPinning.ps1 -IncludeTypes "github-actions" -Apply
+    Resolve and write immutable SHA pins for tag-pinned GitHub Actions in place.
 
 .EXAMPLE
     ./Test-DependencyPinning.ps1 -Threshold 90 -FailOnUnpinned
@@ -73,7 +83,7 @@
 .NOTES
     Requires:
     - PowerShell 7.0 or later for cross-platform compatibility
-    - Internet connectivity for SHA resolution (with -Remediate)
+    - Internet connectivity for SHA resolution (with -Remediate or -Apply)
     - GitHub API access for action SHA resolution (optional)
 
     Compatible with:
@@ -118,7 +128,10 @@ param(
     [int]$Threshold = 95,
 
     [Parameter(Mandatory = $false)]
-    [switch]$Remediate
+    [switch]$Remediate,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Apply
 )
 
 $ErrorActionPreference = 'Stop'
@@ -1587,8 +1600,11 @@ function Get-RemediationSuggestion {
     try {
         switch ($type) {
             'github-actions' {
-                # For GitHub Actions, resolve tag to commit SHA
-                $apiUrl = "https://api.github.com/repos/$name/commits/$version"
+                # Resolve the tag or branch to a commit SHA against the owner/repo slug
+                # (first two path segments) so monorepo subpath actions such as
+                # github/codeql-action/init resolve correctly.
+                $repoSlug = ($name -split '/' | Select-Object -First 2) -join '/'
+                $apiUrl = "https://api.github.com/repos/$repoSlug/commits/$version"
                 $headers = @{}
 
                 if ($env:GITHUB_TOKEN) {
@@ -1598,7 +1614,10 @@ function Get-RemediationSuggestion {
                 $response = Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec 30
                 $sha = $response.sha
 
-                if ($sha) {
+                # -Apply persists $sha verbatim into workflow files, so validate it is a real
+                # 40-hex commit SHA (via the shared validator) before ever stashing/writing it.
+                if ($sha -and (Test-SHAPinning -Version $sha -Type 'github-actions')) {
+                    $Violation.Metadata['ResolvedSha'] = $sha
                     return "Pin to SHA: uses: $name@$sha # $version"
                 }
             }
@@ -1613,6 +1632,83 @@ function Get-RemediationSuggestion {
     }
 
     return "Manually research and pin to immutable reference"
+}
+
+function Invoke-ActionShaPinApply {
+    <#
+    .SYNOPSIS
+    Rewrites tag-pinned GitHub Actions references in place with resolved commit SHAs.
+    .DESCRIPTION
+    For each github-actions violation carrying a resolved SHA in Metadata['ResolvedSha'],
+    replaces the 'uses: <name>@<ref>' token on the recorded line with
+    'uses: <name>@<sha> # <ref>'. Files are read and written as raw text so existing line
+    endings are preserved. Returns the number of references rewritten.
+    .PARAMETER Violations
+    Violations to apply. Only github-actions entries with a resolved SHA are acted on.
+    .PARAMETER BasePath
+    Root path the violation file paths are relative to.
+    #>
+    param(
+        [DependencyViolation[]]$Violations,
+        [string]$BasePath = '.'
+    )
+
+    $actionable = @($Violations | Where-Object {
+            $_.Type -eq 'github-actions' -and
+            $_.Metadata.ContainsKey('ResolvedSha') -and
+            $_.Metadata['ResolvedSha']
+        })
+
+    if ($actionable.Count -eq 0) {
+        return 0
+    }
+
+    $applied = 0
+
+    foreach ($fileGroup in ($actionable | Group-Object File)) {
+        $relativePath = $fileGroup.Name
+        $absolutePath = Join-Path $BasePath $relativePath
+
+        if (!(Test-Path -Path $absolutePath)) {
+            Write-Warning "Skipping apply for missing file: $relativePath"
+            continue
+        }
+
+        $content = Get-Content -Path $absolutePath -Raw
+
+        # Split on line terminators but keep them (capturing group) so each line's own
+        # ending survives verbatim on rejoin, even in a mixed CRLF/LF file. Content lines
+        # sit at even indices; captured terminators at the odd indices between them.
+        $parts = $content -split "(`r`n|`n)"
+
+        foreach ($violation in $fileGroup.Group) {
+            $partIndex = ($violation.Line - 1) * 2
+            if ($partIndex -lt 0 -or $partIndex -ge $parts.Count) {
+                Write-Warning "Skipping apply for $relativePath line $($violation.Line): out of range"
+                continue
+            }
+
+            $sha = $violation.Metadata['ResolvedSha']
+            $target = "$($violation.Name)@$($violation.Version)"
+
+            # Bound the match so a shorter action name never matches inside a longer one and
+            # a version prefix (v4) never matches a longer ref (v40).
+            $pattern = "(?<![\w./-])$([regex]::Escape($target))(?![\w./-])"
+            $replacement = "$($violation.Name)@$sha # $($violation.Version)"
+
+            # Insert via a MatchEvaluator so the ref is written verbatim: -replace treats
+            # '$' in a replacement string as a substitution token (e.g. $&, ${n}).
+            $updatedLine = [regex]::Replace($parts[$partIndex], $pattern, { $replacement })
+            if ($updatedLine -ne $parts[$partIndex]) {
+                $parts[$partIndex] = $updatedLine
+                $applied++
+            }
+        }
+
+        Set-Content -Path $absolutePath -Value ($parts -join '') -NoNewline -Encoding utf8
+    }
+
+    return $applied
 }
 
 function Get-ComplianceReportData {
@@ -1885,15 +1981,22 @@ try {
             Write-PinningLog "Scanning: $($fileInfo.RelativePath)" -Level Info
             $violations = @(Get-DependencyViolation -FileInfo $fileInfo)
 
-            # Add remediation suggestions
+            # Resolve SHA remediations when reporting suggestions or applying pins
             foreach ($violation in $violations) {
-                $violation.Remediation = Get-RemediationSuggestion -Violation $violation -Remediate:$Remediate
+                $violation.Remediation = Get-RemediationSuggestion -Violation $violation -Remediate:($Remediate -or $Apply)
             }
 
             $allViolations += $violations
         }
 
         Write-PinningLog "Found $(@($allViolations).Count) dependency pinning violations" -Level Info
+
+        # Auto-apply resolved SHA pins to GitHub Actions references when requested.
+        # This does not alter the compliance report or the exit-code gate below.
+        if ($Apply) {
+            $appliedCount = Invoke-ActionShaPinApply -Violations $allViolations -BasePath $Path
+            Write-PinningLog "Applied $appliedCount GitHub Actions SHA pin(s); re-run without -Apply to verify compliance" -Level Info
+        }
 
         # Generate compliance report
         $report = Get-ComplianceReportData -Violations $allViolations -ScannedFiles $filesToScan -ScanPath $Path -Remediate:$Remediate

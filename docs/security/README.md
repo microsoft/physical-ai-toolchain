@@ -58,6 +58,8 @@ Automated security and freshness checks that run on GitHub Actions schedules and
 
 Script parameters vary by check: `Test-BinaryFreshness.ps1` uses `-SarifFile` and `-ConfigPreview`, `Test-DependencyPinning.ps1` uses `-Format sarif -OutputPath <path>`, and `Test-SHAStaleness.ps1` uses `-OutputFormat` and `-OutputPath`. Run `scripts/update-chart-hashes.sh` locally whenever a pinned Helm chart version is updated so `defaults.conf` stays in sync. Likewise, run `scripts/update-image-digests.sh` after bumping a container image tag so the `@sha256` digest pins stay in sync.
 
+`Test-DependencyPinning.ps1 -Apply` rewrites tag-pinned GitHub Actions references with their resolved commit SHAs in place; run it manually to remediate pinning findings.
+
 `Test-DependencyPinning.ps1` also flags unpinned inline `pip install` / `uv pip install` commands embedded in workflow YAML and shell scripts, scanned under the `shell-inline-pip` type. A compliant install uses an exact `==` pin, a lockfile (`-r`/`--requirement`, or a `uv export | uv pip install` pipe), or an editable local project (`-e .`). To exempt an intentional non-pin, add a `# pinning-ignore` comment on the install line:
 
 ```bash
