@@ -823,6 +823,7 @@ mysql
 namespace
 namespaces
 nant
+nccl
 ncdc
 nei
 Nemotron
@@ -858,8 +859,11 @@ nvarchar
 nvas
 nvcr
 nvidia
+nvjitlink
 nvme
 nvml
+nvshmem
+nvtx
 nygard
 nzlua
 nzplsql
