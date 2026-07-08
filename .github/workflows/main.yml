@@ -616,8 +616,7 @@ jobs:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
           WHEEL_BUNDLE_PATH: ${{ steps.attest-wheel.outputs.bundle-path }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: shared/ci/create-signing-artifacts.sh
-        shell: bash
+        run: ./scripts/ci/New-SigningArtifacts.ps1
 
       - name: Upload release assets
         env:
@@ -711,8 +710,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: shared/ci/append-release-verification-notes.sh
-        shell: bash
+        run: ./scripts/ci/Add-ReleaseVerificationNotes.ps1
 
   # Promote draft release to published
   publish-release:

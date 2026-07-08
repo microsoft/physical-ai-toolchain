@@ -13,6 +13,9 @@ vla/
 │           ├── modality_config.py              # GR00T N1.7+ example modality config
 │           └── README.md                       # How to adapt for a custom embodiment
 ├── scripts/
+│   ├── groot/
+│   │   ├── osmo-train-entry.sh   # Container entry: env setup + fine-tune
+│   │   └── download_blob.py      # Azure Blob dataset downloader
 │   └── submit-osmo-lerobot-vla-fine-tuning.sh  # GR00T submission to OSMO
 ├── workflows/
 │   └── osmo/

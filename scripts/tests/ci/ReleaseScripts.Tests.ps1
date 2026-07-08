@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: MIT
 
 BeforeAll {
+    . $PSScriptRoot/../../ci/Add-ReleaseVerificationNotes.ps1
     . $PSScriptRoot/../../ci/Close-ReleaseMilestone.ps1
     . $PSScriptRoot/../../ci/Install-Gitsign.ps1
     . $PSScriptRoot/../../ci/New-SignedReleaseTag.ps1
+    . $PSScriptRoot/../../ci/New-SigningArtifacts.ps1
     . $PSScriptRoot/../../ci/Update-ChangelogMsDate.ps1
 
     Import-Module (Join-Path $PSScriptRoot '../Mocks/GitMocks.psm1') -Force
@@ -279,5 +281,167 @@ Describe 'Update-ChangelogMsDateCore' -Tag 'Unit' {
         Remove-Item env:GITHUB_REPOSITORY -ErrorAction SilentlyContinue
         { Update-ChangelogMsDateCore -Path $changelog -Today '2026-07-01' -GitHubToken 'token' } |
             Should -Throw -ExpectedMessage 'GITHUB_REPOSITORY is required to push the changelog update.'
+    }
+}
+
+Describe 'New-SigningArtifactsCore' -Tag 'Unit' {
+    BeforeEach {
+        $script:SourceJson = '{"mediaType":"x","dsseEnvelope":{"payload":"cGF5","payloadType":"application/vnd.in-toto+json","signatures":[{"sig":"c2ln","keyid":""}]}}'
+        $script:WheelJson = '{"mediaType":"y","dsseEnvelope":{"payload":"d2hlZWw=","payloadType":"application/vnd.in-toto+json","signatures":[{"sig":"d3NpZw==","keyid":""}]}}'
+        $script:SourceBundle = Join-Path $TestDrive 'source.sigstore.json'
+        $script:WheelBundle = Join-Path $TestDrive 'wheel.sigstore.json'
+        Set-Content -LiteralPath $script:SourceBundle -Value $script:SourceJson -NoNewline -Encoding utf8NoBOM
+        Set-Content -LiteralPath $script:WheelBundle -Value $script:WheelJson -NoNewline -Encoding utf8NoBOM
+    }
+
+    It 'Copies the bundles and writes compact dsseEnvelope intoto lines' {
+        Push-Location $TestDrive
+        try {
+            $result = @(New-SigningArtifactsCore -BundlePath $script:SourceBundle -WheelBundlePath $script:WheelBundle -Tag 'v1.2.3')
+        }
+        finally {
+            Pop-Location
+        }
+
+        $result[-1] | Should -Be 0
+
+        Get-Content -LiteralPath (Join-Path $TestDrive 'source-v1.2.3.sigstore.json') -Raw | Should -Be $script:SourceJson
+        Get-Content -LiteralPath (Join-Path $TestDrive 'wheels-v1.2.3.sigstore.json') -Raw | Should -Be $script:WheelJson
+
+        Get-Content -LiteralPath (Join-Path $TestDrive 'source-v1.2.3.intoto.jsonl') -Raw |
+            Should -Be ('{"payload":"cGF5","payloadType":"application/vnd.in-toto+json","signatures":[{"sig":"c2ln","keyid":""}]}' + "`n")
+        Get-Content -LiteralPath (Join-Path $TestDrive 'wheels-v1.2.3.intoto.jsonl') -Raw |
+            Should -Be ('{"payload":"d2hlZWw=","payloadType":"application/vnd.in-toto+json","signatures":[{"sig":"d3NpZw==","keyid":""}]}' + "`n")
+    }
+
+    It 'Requires both bundle paths and the tag' {
+        { New-SigningArtifactsCore -BundlePath '' -WheelBundlePath 'w' -Tag 'v1.0.0' } |
+            Should -Throw -ExpectedMessage 'BUNDLE_PATH is required.'
+        { New-SigningArtifactsCore -BundlePath 'b' -WheelBundlePath '' -Tag 'v1.0.0' } |
+            Should -Throw -ExpectedMessage 'WHEEL_BUNDLE_PATH is required.'
+        { New-SigningArtifactsCore -BundlePath 'b' -WheelBundlePath 'w' -Tag '' } |
+            Should -Throw -ExpectedMessage 'TAG is required.'
+    }
+}
+
+Describe 'Add-ReleaseVerificationNotesCore' -Tag 'Unit' {
+    It 'Prepends the current body and substitutes the tag into the verification section' {
+        $script:EditArgs = $null
+        Mock gh {
+            if ($args -contains 'view') {
+                $global:LASTEXITCODE = 0
+                return 'Release body line one', '', 'Second paragraph'
+            }
+            if ($args -contains 'edit') {
+                $global:LASTEXITCODE = 0
+                $script:EditArgs = $args -join ' '
+                return ''
+            }
+        }
+
+        Push-Location $TestDrive
+        try {
+            $result = @(Add-ReleaseVerificationNotesCore -Tag 'v9.9.9' -Repository 'owner/repo')
+        }
+        finally {
+            Pop-Location
+        }
+
+        $result[-1] | Should -Be 0
+        $notes = Get-Content -LiteralPath (Join-Path $TestDrive 'notes.md') -Raw
+        $expectedVerification = @'
+
+---
+
+## Artifact Verification
+
+All release artifacts include [Sigstore](https://www.sigstore.dev/) provenance attestations. Verify with the [GitHub CLI](https://cli.github.com/):
+
+```bash
+# Download the source archive
+gh release download v9.9.9 --repo microsoft/physical-ai-toolchain --pattern 'source-v9.9.9.tar.gz'
+
+# Verify build provenance
+gh attestation verify source-v9.9.9.tar.gz --repo microsoft/physical-ai-toolchain
+
+# Verify SBOM attestation
+gh attestation verify source-v9.9.9.tar.gz --repo microsoft/physical-ai-toolchain --predicate-type https://spdx.dev/Document
+
+# Download and verify the signed wheel (identity ends @refs/heads/main: the pipeline runs on push to main)
+gh release download v9.9.9 --repo microsoft/physical-ai-toolchain --pattern '*.whl' --pattern '*.whl.sigstore.json'
+sigstore verify identity *.whl --bundle *.whl.sigstore.json --cert-identity 'https://github.com/microsoft/physical-ai-toolchain/.github/workflows/main.yml@refs/heads/main' --cert-oidc-issuer 'https://token.actions.githubusercontent.com'
+
+# Download the CycloneDX SBOMs (SPDX equivalents also attached)
+gh release download v9.9.9 --repo microsoft/physical-ai-toolchain --pattern 'sbom.cdx.json' --pattern 'dependencies.cdx.json'
+```
+'@
+        $expected = "Release body line one`n`nSecond paragraph`n" + $expectedVerification + "`n"
+        $notes | Should -Be $expected
+        $script:EditArgs | Should -Be 'release edit v9.9.9 --repo owner/repo --notes-file notes.md'
+    }
+
+    It 'Strips trailing newlines from the release body to match the original bash behavior' {
+        Mock gh {
+            if ($args -contains 'view') {
+                $global:LASTEXITCODE = 0
+                return 'Body line one', '', 'Body line two', '', ''
+            }
+            if ($args -contains 'edit') {
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+        }
+
+        Push-Location $TestDrive
+        try {
+            $result = @(Add-ReleaseVerificationNotesCore -Tag 'v9.9.9' -Repository 'owner/repo')
+        }
+        finally {
+            Pop-Location
+        }
+
+        $result[-1] | Should -Be 0
+        $notes = Get-Content -LiteralPath (Join-Path $TestDrive 'notes.md') -Raw
+        $notes.StartsWith("Body line one`n`nBody line two`n`n---") | Should -BeTrue
+        $notes | Should -Not -Match "Body line two`n`n`n---"
+    }
+
+    It 'Requires a tag and repository' {
+        { Add-ReleaseVerificationNotesCore -Tag '' -Repository 'owner/repo' } |
+            Should -Throw -ExpectedMessage 'TAG is required.'
+        { Add-ReleaseVerificationNotesCore -Tag 'v1.0.0' -Repository '' } |
+            Should -Throw -ExpectedMessage 'GITHUB_REPOSITORY is required.'
+    }
+
+    It 'Fails when the release body cannot be read' {
+        Mock gh {
+            $global:LASTEXITCODE = 1
+            return 'not found'
+        }
+
+        { Add-ReleaseVerificationNotesCore -Tag 'v1.0.0' -Repository 'owner/repo' } |
+            Should -Throw -ExpectedMessage 'Failed to read release notes for v1.0.0.'
+    }
+
+    It 'Fails when the release edit does not succeed' {
+        Mock gh {
+            if ($args -contains 'view') {
+                $global:LASTEXITCODE = 0
+                return 'body'
+            }
+            if ($args -contains 'edit') {
+                $global:LASTEXITCODE = 1
+                return 'edit failed'
+            }
+        }
+
+        Push-Location $TestDrive
+        try {
+            { Add-ReleaseVerificationNotesCore -Tag 'v1.0.0' -Repository 'owner/repo' } |
+                Should -Throw -ExpectedMessage 'Failed to update release notes for v1.0.0.'
+        }
+        finally {
+            Pop-Location
+        }
     }
 }
