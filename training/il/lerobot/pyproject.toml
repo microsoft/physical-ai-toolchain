@@ -15,7 +15,7 @@ dependencies = [
     "azure-storage-blob==12.30.0",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.34.0",
-    "azureml-mlflow==1.62.0.post3",
+    "azureml-mlflow==1.62.0.post4",
     # azure-ai-ml allows newer prerelease storage clients when prerelease
     # resolution is enabled for telemetry; keep storage clients on stable rails.
     "azure-storage-file-datalake==12.25.0",
