@@ -180,6 +180,7 @@ def submit_aml_training(
     task: str,
     max_iterations: int,
     num_envs: int,
+    register_model_name: str,
 ) -> AzureMLJob:
     experiment_name = e2e_name("rl-training-e2e-aml")
     log_e2e(
@@ -198,7 +199,8 @@ def submit_aml_training(
             "--experiment-name",
             experiment_name,
             *_submit_workspace_args(aml_workspace),
-            "--skip-register-checkpoint",
+            "--register-checkpoint",
+            register_model_name,
         ],
         cwd=repo_root,
     )
@@ -260,6 +262,7 @@ def submit_aml_lerobot_training(
 
 
 _AML_LEROBOT_EVAL_MODEL_ENV = "E2E_AML_LEROBOT_EVAL_MODEL"
+_AML_ISAAC_EVAL_MODEL_ENV = "E2E_AML_ISAAC_EVAL_MODEL"
 
 
 @dataclass(frozen=True)
@@ -278,6 +281,18 @@ def aml_lerobot_policy_source_from_model(model: AmlModelRef) -> AmlLeRobotEvalPo
     )
 
 
+def _resolve_aml_model_env(env_var: str) -> AmlModelRef | None:
+    model = env_value(env_var)
+    if not model:
+        return None
+    if ":" not in model:
+        pytest.skip(f"{env_var} must use AzureML model name:version syntax")
+    model_name, model_version = (part.strip() for part in model.split(":", 1))
+    if not model_name or not model_version:
+        pytest.skip(f"{env_var} must include a non-empty AzureML model name and version")
+    return AmlModelRef(name=model_name, version=model_version)
+
+
 def resolve_aml_lerobot_eval_policy_override() -> AmlLeRobotEvalPolicySource | None:
     """Resolve an eval policy source from the environment, or ``None`` when unset.
 
@@ -289,17 +304,8 @@ def resolve_aml_lerobot_eval_policy_override() -> AmlLeRobotEvalPolicySource | N
     Returns ``None`` when this is unset: the lifecycle test provisions a freshly
     trained model instead. Malformed values skip.
     """
-    model = env_value(_AML_LEROBOT_EVAL_MODEL_ENV)
-    if not model:
-        return None
-    if ":" not in model:
-        pytest.skip(f"{_AML_LEROBOT_EVAL_MODEL_ENV} must use AzureML model name:version syntax")
-
-    model_name, model_version = (part.strip() for part in model.split(":", 1))
-    if not model_name or not model_version:
-        pytest.skip(f"{_AML_LEROBOT_EVAL_MODEL_ENV} must include a non-empty AzureML model name and version")
-
-    return aml_lerobot_policy_source_from_model(AmlModelRef(name=model_name, version=model_version))
+    ref = _resolve_aml_model_env(_AML_LEROBOT_EVAL_MODEL_ENV)
+    return None if ref is None else aml_lerobot_policy_source_from_model(ref)
 
 
 def submit_aml_lerobot_eval(
@@ -350,6 +356,54 @@ def submit_aml_lerobot_eval(
         raise AssertionError(f"AzureML LeRobot eval e2e submission failed\n\n{format_command_failure(result)}")
 
     return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML LeRobot eval")
+
+
+def resolve_aml_isaac_eval_model_override() -> AmlModelRef | None:
+    """Resolve an AzureML eval model from the environment, or ``None`` when unset."""
+    return _resolve_aml_model_env(_AML_ISAAC_EVAL_MODEL_ENV)
+
+
+def submit_aml_isaaclab_eval(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    model: AmlModelRef,
+    eval_episodes: int,
+    num_envs: int,
+) -> AzureMLJob:
+    """Submit the AzureML Isaac Lab evaluation against a concrete registered model."""
+    experiment_name = e2e_name("rl-eval-e2e-aml")
+    log_e2e(
+        "Submitting AzureML Isaac Lab eval job "
+        f"for model={model.name}:{model.version}, eval_episodes={eval_episodes}, num_envs={num_envs}, "
+        f"experiment={experiment_name}"
+    )
+    result = run_command(
+        [
+            str(repo_root / "evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh"),
+            "--model-name",
+            model.name,
+            "--model-version",
+            model.version,
+            "--eval-episodes",
+            str(eval_episodes),
+            "--num-envs",
+            str(num_envs),
+            # The e2e validates the submission + Isaac Lab eval runtime, not policy
+            # quality, so a 0.0 threshold accepts any success rate and the job
+            # completes regardless of the reference policy's score.
+            "--success-threshold",
+            "0.0",
+            "--experiment-name",
+            experiment_name,
+            *_submit_workspace_args(aml_workspace),
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"AzureML Isaac Lab eval e2e submission failed\n\n{format_command_failure(result)}")
+
+    return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML Isaac Lab eval")
 
 
 def submit_aml_lerobot_pipeline(

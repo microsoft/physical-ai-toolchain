@@ -15,25 +15,13 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
-declare -a python_cmd
-if [[ -n "${PYTHON:-}" ]]; then
-  IFS=' ' read -r -a python_cmd <<< "${PYTHON}"
-else
-  python_cmd=(python)
-fi
-
-python_exec="/isaac-sim/kit/python/bin/python3"
-if [[ ! -x "${python_exec}" ]]; then
-  python_exec="${python_cmd[0]}"
-fi
+ISAAC_PYTHONPATH_ROOT="${SRC_DIR}"
+# shellcheck source=../../training/rl/scripts/isaac_python_prologue.sh
+source "${SRC_DIR}/training/rl/scripts/isaac_python_prologue.sh"
 
 # run_python uses raw Python for pip/dependency operations
 run_python() {
-  if [[ -n "${python_exec}" ]]; then
-    "${python_exec}" "$@"
-  else
-    "${python_cmd[@]}" "$@"
-  fi
+  "${python_exec}" "$@"
 }
 
 # run_isaaclab uses isaaclab.sh -p for simulation scripts that need full env
@@ -119,13 +107,6 @@ done
 if [[ -z "${CHECKPOINT_URI}" ]]; then
   echo "Error: --checkpoint-uri is required" >&2
   exit 1
-fi
-
-prebundle_path="/isaac-sim/exts/omni.pip.compute/pip_prebundle"
-if [[ -d "${prebundle_path}" ]]; then
-  export PYTHONPATH="${prebundle_path}:${SRC_DIR}:${PYTHONPATH:-}"
-else
-  export PYTHONPATH="${SRC_DIR}:${PYTHONPATH:-}"
 fi
 
 INFERENCE_PROJECT="${SRC_DIR}/training/il/lerobot"

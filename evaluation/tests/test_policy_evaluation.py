@@ -342,6 +342,25 @@ class TestEvaluate:
         assert metrics.lengths == [3, 3]
         agent.act.assert_called()
 
+    def test_skrl_act_arguments(self) -> None:
+        env = _StubEnv(num_envs=1, episode_len=1, success=True)
+        agent = MagicMock()
+        agent.act.return_value = (torch.zeros((1, 1)), {})
+
+        evaluate(env, agent, num_episodes=1, framework="skrl")
+
+        agent.act.assert_called()
+        args, kwargs = agent.act.call_args
+
+        # States passed positionally as None at index 1
+        assert len(args) >= 2
+        assert args[1] is None
+
+        # 'inference' removed from kwargs, timestep/timesteps passed
+        assert "inference" not in kwargs
+        assert kwargs.get("timestep") is not None
+        assert "timesteps" in kwargs
+
     def test_rsl_rl_path_uses_act_inference(self) -> None:
         env = _StubEnv(num_envs=2, episode_len=2, success=False)
         agent = MagicMock()
