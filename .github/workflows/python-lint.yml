@@ -53,6 +53,17 @@ jobs:
           }
           exit $exitCode
 
+      - name: HuggingFace revision-pin guard
+        id: hf-pins
+        continue-on-error: true
+        run: |
+          python3 scripts/security/check_hf_pins.py
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            'HF_PINS_FAILED=true' >> $env:GITHUB_ENV
+          }
+          exit $exitCode
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -64,7 +75,7 @@ jobs:
           retention-days: 30
 
       - name: Fail job if errors found
-        if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true') && !inputs.soft-fail
+        if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true' || env.HF_PINS_FAILED == 'true') && !inputs.soft-fail
         run: |
-          Write-Output "::error::Ruff violations detected. Run 'uvx ruff check --fix .' and 'uvx ruff format .' locally."
+          Write-Output "::error::Python lint violations detected. Run 'uvx ruff check --fix .', 'uvx ruff format .', and 'npm run lint:hfpins' locally."
           exit 1

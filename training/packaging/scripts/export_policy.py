@@ -6,6 +6,8 @@ without requiring the full Isaac Lab simulator environment.
 Auto-detects observation and action dimensions from checkpoint weights.
 """
 
+from __future__ import annotations
+
 import argparse
 import copy
 import os
@@ -14,6 +16,9 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
+
+from training.utils.hashing import write_sha256_sidecar
+from training.utils.integrity import safe_load_checkpoint
 
 
 @dataclass
@@ -113,7 +118,7 @@ def infer_architecture_from_checkpoint(checkpoint_path: str) -> PolicyArchitectu
     Raises:
         ValueError: If checkpoint structure is invalid or actor weights not found.
     """
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    checkpoint = safe_load_checkpoint(checkpoint_path)
 
     if "model_state_dict" not in checkpoint:
         raise ValueError("Checkpoint missing 'model_state_dict' key")
@@ -184,7 +189,7 @@ def load_actor_from_checkpoint(
 
     print(f"Policy architecture: {arch}")
 
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    checkpoint = safe_load_checkpoint(checkpoint_path)
     state_dict = checkpoint["model_state_dict"]
 
     # Build actor network
@@ -246,6 +251,7 @@ def export_policy(
         print("Exporting JIT model...")
         exporter = _TorchPolicyExporter(actor, normalizer)
         jit_path = exporter.export(output_dir, "policy.pt")
+        write_sha256_sidecar(jit_path)
         exported["jit"] = jit_path
         print(f"  -> {jit_path}")
 
@@ -253,6 +259,7 @@ def export_policy(
         print("Exporting ONNX model...")
         exporter = _OnnxPolicyExporter(actor, normalizer)
         onnx_path = exporter.export(output_dir, arch.obs_dim, "policy.onnx")
+        write_sha256_sidecar(onnx_path)
         exported["onnx"] = onnx_path
         print(f"  -> {onnx_path}")
 

@@ -12,14 +12,17 @@ keywords:
   - azure
   - nvidia
   - robotics
+  - tier ladder
+  - autonomy ladder
 estimated_reading_time: 8
 ---
 
 This roadmap covers planned work for the Physical AI Toolchain through Q1 2027.
 Six priority areas align to milestones v0.2.0 through v0.7.0, progressing from documentation through security hardening.
 An additional v0.8.0 milestone covers dependency update automation.
-The Architecture Domain Rollout priority phases the repository reorganization around eight lifecycle domains defined in the [Future and Ongoing Architecture](architecture.md#future-and-ongoing-architecture).
+The Tier Ladder Rollout priority phases the repository reorganization around the `T0`–`T5` adoption ladder defined in the [Repository Architecture](architecture.md#the-tier-ladder) and the canonical [Tier Model](../design/tier-model.md).
 Each area lists concrete deliverables with linked issues and explicit items we will not pursue.
+Tier IDs, stage names, boundaries, and the fleet vocabulary are defined once in the canonical [Tier Model](../design/tier-model.md); this roadmap cites them rather than redefining them.
 
 > [!NOTE]
 > This roadmap represents current project intentions and is subject to change.
@@ -158,31 +161,35 @@ OpenSSF Scorecard integration provides continuous security measurement.
 * Penetration testing engagements
 * Hardware security module (HSM) integration
 
-### Architecture Domain Rollout (Q2 2026 – Q3 2026)
+### Tier Ladder Rollout (Q2 2026 – Q3 2026)
 
-All future enhancements, features, and functionality align to the eight lifecycle domains defined in the [Future and Ongoing Architecture](architecture.md#future-and-ongoing-architecture). Each domain represents a distinct functional concern in the physical AI lifecycle, from data capture through fleet-scale production monitoring. New work items target a specific domain and follow the patterns, specifications, and directory structure established in the architecture.
+All future enhancements, features, and functionality align to the `T0`–`T5` adoption ladder defined in the [Repository Architecture](architecture.md#the-tier-ladder) and the canonical [Tier Model](../design/tier-model.md). The eight lifecycle domains are components adopted per tier; new work items target a specific tier and follow the patterns, specifications, and directory structure established in the architecture.
 
-Domains roll out in three phases based on dependency order and infrastructure readiness:
+Tiers roll out in three phases based on dependency order and infrastructure readiness. The phases respect the two canonical boundaries: the **multi-site boundary (Arc)** between `T3` and `T4`, and the **intelligence boundary** between `T4` and `T5`.
 
-| Phase | Timeline | Domains                                        |
-|-------|----------|------------------------------------------------|
-| 1     | Q2 2026  | Infrastructure, Training, Evaluation           |
-| 2     | Q2 2026  | Data Pipeline, Data Management, Synthetic Data |
-| 3     | Q3 2026  | Fleet Deployment, Fleet Intelligence           |
+| Phase | Timeline | Tiers                    | Boundary crossed                    |
+|-------|----------|--------------------------|-------------------------------------|
+| 1     | Q2 2026  | T0 Dev, T1 Lab, T2 Pilot | (single site, manual deployment)    |
+| 2     | Q2 2026  | T3 Production            | up to the multi-site boundary       |
+| 3     | Q3 2026  | T4 Scale, T5 Operate     | multi-site + intelligence (roadmap) |
 
-Phase 1 migrates existing `deploy/` and `src/` content into the Infrastructure and Training domains, then establishes the Evaluation domain for SiL and HiL validation pipelines. Phase 2 introduces data capture from physical robots, episodic data curation, and synthetic data generation using NVIDIA Cosmos. Phase 3 adds edge deployment through FluxCD GitOps and production telemetry through Azure IoT Operations and Fabric Real-Time Intelligence.
+Phase 1 surfaces the already-working local floor (`T0`), then layers the storage-only lab tier (`T1`) and the recommended cloud-training pilot tier (`T2`). All of these satisfy Goal: Full Training Lifecycle with manual deployment and no Kubernetes.
+Phase 2 adds single-site declarative deployment (`T3`: local k3s + FluxCD, **no Arc**), proving GitOps does not require a cloud fleet control plane.
+Phase 3 crosses the multi-site boundary into **fleet delivery** (`T4`: Arc + AKS/Flux + gating) and names the **fleet intelligence** roadmap (`T5`).
 
 **Will Do:**
 
 * ~~Migrate existing Terraform IaC from `deploy/001-iac/` into `infrastructure/terraform/`~~ (complete)
 * ~~Migrate existing setup scripts from `deploy/002-setup/` into `infrastructure/setup/`~~ (complete)
 * ~~Reorganize `src/training/` and `src/inference/` into `training/rl/`, `training/il/`, and `training/vla/`~~ (complete)
-* Establish `evaluation/sil/` and `evaluation/hil/` with Isaac Sim-based evaluation pipelines
-* Create `data-pipeline/` with Azure Arc edge agent setup and ROS 2 episodic capture
-* Create `data-management/` with LeRobot-based episodic data viewer and curation tooling
-* Create `synthetic-data/` with NVIDIA Cosmos Transfer, Predict, and Reason integration
-* Create `fleet-deployment/` with FluxCD GitOps manifests and policy gating service
-* Create `fleet-intelligence/` with Azure IoT Operations telemetry and Fabric RTI dashboards
+* **T0 Dev:** document the zero-cloud, zero-Kubernetes local loop as the sanctioned default starting path
+* **T0–T2:** establish `evaluation/sil/` and `evaluation/hil/` with Isaac Sim-based evaluation pipelines
+* **T0–T1:** create `data-pipeline/` with ROS 2 episodic capture (local at T0, Blob upload at T1)
+* **T0–T2:** create `data-management/` with LeRobot-based episodic data viewer and curation tooling
+* **T1+:** create `synthetic-data/` with NVIDIA Cosmos Transfer, Predict, and Reason integration
+* **T3 Production:** create single-site `fleet-deployment/` with local k3s + FluxCD GitOps manifests and policy gating service (no Arc)
+* **T4 Scale:** extend `fleet-deployment/` to multi-site fleet delivery with Azure Arc as the cross-site reachability and identity broker
+* **T5 Operate (roadmap):** create `fleet-intelligence/` with Azure IoT Operations telemetry and Fabric RTI dashboards, explicitly labeled roadmap/placeholder
 * Add Agent Skill specification documents (`specifications/`) in each domain directory
 * Add simulation guidance documentation under `docs/simulation/`
 
@@ -191,6 +198,24 @@ Phase 1 migrates existing `deploy/` and `src/` content into the Infrastructure a
 * Maintain a separate simulation code domain (NVIDIA provides comprehensive OSS tooling)
 * Build custom robot hardware drivers or firmware
 * Implement production SLA monitoring beyond reference dashboard examples
+* Ship `T5` fleet intelligence as production capability in this window: it remains a roadmap direction today
+
+## The Autonomy Ladder (T5.0–T5.3)
+
+Fleet intelligence (`T5`) is not a single leap. It decomposes into four ordered stages of increasing decision authority, mirroring the canonical [autonomy ladder](../design/tier-model.md#the-autonomy-ladder-t50t53). Each is a legitimate stopping point; three of the four are unbuilt today (modulo an ad-hoc experiment by the team on Hex).
+
+> [!IMPORTANT]
+> Autonomy (`T5.0`–`T5.3`) is a **different axis** from infrastructure reach (`T0`–`T4`). `T0`–`T4` scale on *infrastructure reach* (sites, GPU, collaboration); `T5.0`–`T5.3` scale on *decision authority / loop closure*. They are orthogonal: a single-site `T3` operator can sit at `T5.0`, and a multi-site `T4` operator can remain fully manual. The autonomy stages are how much of the retraining decision a human delegates, not more infrastructure to buy.
+
+| Rung | Decision authority                                                                     | Human role                            | Status       |
+|------|----------------------------------------------------------------------------------------|---------------------------------------|--------------|
+| T5.0 | Gated retraining: the system surfaces signals only; humans trigger retraining.          | Human triggers every retraining cycle | Not built    |
+| T5.1 | Human-in-the-loop / active learning: the system proposes what to retrain on and when.   | Human approves each cycle             | Ad-hoc (Hex) |
+| T5.2 | Continual learning: the system retrains on a schedule or trigger.                       | Human reviews before deployment       | Not built    |
+| T5.3 | Autonomous closed-loop: the system detects drift, retrains, gates, and deploys.         | None (fully autonomous)               | Not built    |
+
+> [!WARNING]
+> Fully autonomous retraining on production data is a foot-gun: a legitimate distribution change can cause the loop to bake current degraded behavior into the next dataset, and drift detection needs statistical power that only exists at fleet scale. `T5` should default to human-supervised (`T5.0`–`T5.1`), not closed-loop (`T5.3`). `T5.3` stays a roadmap direction, not a near-term target.
 
 ## Out of Scope
 
@@ -215,39 +240,37 @@ Phase 1 migrates existing `deploy/` and `src/` content into the Infrastructure a
 ## Timeline Overview
 
 ```text
-Q1 2026 (Jan-Mar) — Foundation
+Q1 2026 (Jan-Mar): Foundation
 ├── Documentation: Complete v0.2.0 contributing guide suite (roadmap, security, maintenance policies)
 └── Release: v0.2.0 (due 2026-02-13)
 
-Q2 2026 (Apr-Jun) — Quality, Governance, Security, and Domain Rollout Phases 1-2
+Q2 2026 (Apr-Jun): Quality, Governance, Security, and Tier Rollout Phases 1-2
 ├── Core Scripts: Verified downloads, linting standardization, frontmatter validation (v0.3.0, due Apr 14)
 ├── Testing: pytest + Pester infrastructure, coverage reporting, CI integration (v0.4.0, due Apr 30)
 ├── CI/CD: Ruff, Bandit, CodeQL PR triggers, workflow orchestration (v0.5.0, due May 14)
 ├── Governance: Governance model, roles, DCO/CLA, OpenSSF N/A documentation (v0.6.0, due May 31)
 ├── Security: OpenSSF Scorecard, release signing, threat model, hardening guidance (v0.7.0, due Jun 14)
 ├── Dependencies: Dependency update automation (v0.8.0, due Jun 30)
-├── Infrastructure: Migrate deploy/ IaC and setup scripts into infrastructure/
-├── Training: Reorganize src/ into training/rl/, training/il/, training/vla/
-├── Evaluation: Establish SiL and HiL evaluation pipelines
-├── Data Pipeline: Azure Arc edge agents and ROS 2 episodic capture
-├── Data Management: LeRobot-based episodic data viewer and curation
-├── Synthetic Data: NVIDIA Cosmos Transfer, Predict, and Reason pipelines
+├── T0 Dev: Surface the zero-cloud, zero-Kubernetes local loop as the sanctioned default
+├── T1 Lab: Blob storage-backed capture and cloud-mode dataviewer; optional AzureML/MLflow
+├── T2 Pilot: Cloud training default (AzureML/OSMO), model registry, hosted viewer, SiL/HiL eval
+├── T3 Production: Single-site declarative deployment with local k3s + FluxCD (no Arc)
 └── Release: v0.3.0, v0.4.0, v0.5.0, v0.6.0, v0.7.0, v0.8.0
 
-Q3 2026 (Jul-Sep) — Domain Rollout Phase 3
-├── Fleet Deployment: FluxCD GitOps manifests and policy gating on Arc-enabled Kubernetes
-├── Fleet Intelligence: Azure IoT Operations telemetry and Fabric RTI dashboards
+Q3 2026 (Jul-Sep): Tier Rollout Phase 3 (multi-site + intelligence boundaries)
+├── T4 Scale: Multi-site fleet delivery, Azure Arc + AKS/Flux GitOps and policy gating
+├── T5 Operate (roadmap): Fleet intelligence, IoT Operations telemetry and Fabric RTI (placeholder)
 ├── Architecture: Agent Skill specification documents for all domains
 ├── OpenSSF: Complete Silver attestation
 ├── Platform: Azure and NVIDIA integration updates (OSMO workload identity)
 └── Community: External contributor onboarding, maintainer documentation
 
-Q4 2026 (Oct-Dec) — Growth
+Q4 2026 (Oct-Dec): Growth
 ├── Community: Conference presentations, partner integrations
 ├── Roadmap: Publish updated 2027-2028 roadmap
 └── Architecture: Production deployment guides, performance benchmarking
 
-Q1 2027 (Jan-Mar) — Sustainability
+Q1 2027 (Jan-Mar): Sustainability
 ├── OpenSSF: Begin Gold-level assessment and gap analysis
 └── Community: Adoption case studies, contributor growth initiatives
 ```
@@ -262,8 +285,9 @@ Q1 2027 (Jan-Mar) — Sustainability
 
 ## Version History
 
-| Date       | Version | Notes                                                    |
-|------------|---------|----------------------------------------------------------|
-| 2026-02-10 | 1.0     | Initial 12-month roadmap                                 |
-| 2026-02-10 | 1.1     | Extend timeline to Q1 2027 for OpenSSF 12-month coverage |
-| 2026-02-24 | 1.2     | Add Architecture Domain Rollout priority and timeline    |
+| Date       | Version | Notes                                                             |
+|------------|---------|-------------------------------------------------------------------|
+| 2026-02-10 | 1.0     | Initial 12-month roadmap                                          |
+| 2026-02-10 | 1.1     | Extend timeline to Q1 2027 for OpenSSF 12-month coverage          |
+| 2026-02-24 | 1.2     | Add Architecture Domain Rollout priority and timeline             |
+| 2026-06-12 | 1.3     | Reframe rollout around the T0–T5 tier ladder; add autonomy ladder |

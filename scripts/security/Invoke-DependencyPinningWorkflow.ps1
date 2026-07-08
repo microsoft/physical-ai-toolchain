@@ -135,15 +135,17 @@ function Invoke-DependencyPinningWorkflowCore {
 
     $status = if ($isCompliant) { 'Compliant' } else { 'Non-Compliant' }
     $actionSection = if ($unpinnedCount -ne 0) {
-        @"
+        @'
 
 ### Action Required
 
-**$unpinnedCount dependencies are not SHA-pinned.**
+**{0} dependencies are not SHA-pinned.**
 
 Review the warnings in the workflow log and pin dependencies to specific SHA commits.
 
-"@
+For `github-actions` references, run `pwsh scripts/security/Test-DependencyPinning.ps1 -IncludeTypes github-actions -Apply` locally to resolve and apply the pins, then commit the result.
+
+'@ -f $unpinnedCount
     }
     else {
         @"

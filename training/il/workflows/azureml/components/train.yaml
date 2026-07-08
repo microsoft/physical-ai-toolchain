@@ -45,27 +45,39 @@ outputs:
     mode: upload
     description: Trained checkpoint folder uploaded by the MLflow training wrapper.
 
-environment: azureml:lerobot-training-env:latest
+environment:
+  # Digest-pinned base image; keep in sync with DEFAULT_LEROBOT_TRAIN_IMAGE in
+  # scripts/lib/common.sh (both refreshed by scripts/update-image-digests.sh).
+  # An inline image yields an anonymous, content-hashed environment, so a base
+  # image change never collides with an immutable registered environment version.
+  image: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be
 
 # Bridge pipeline-mounted `prepared_dataset` input into the existing entry
 # script's `AZURE_ML_INPUT_dataset_asset_N` ABI so the entry script is reused
-# without modification. When `prepared_dataset` is not provided (e.g. when the
-# Component is invoked standalone with DATASET_ASSET_COUNT and DATASET_ASSETS
-# set externally), the bridge is a no-op.
+# without modification. preprocess.py writes the dataset to
+# "{prepared_dataset}/{dataset_repo_id}/", so pass that leaf directory to
+# LeRobot. When `prepared_dataset` is not provided (e.g. when the Component is
+# invoked standalone with DATASET_ASSET_COUNT and DATASET_ASSETS set externally),
+# the bridge is a no-op.
 #
-# train.py writes checkpoints under the OUTPUT_DIR env var (defaulting to
-# /workspace/outputs/train when unset). The MLflow uploader then mirrors
-# OUTPUT_DIR/checkpoints/ into AZURE_ML_OUTPUT_checkpoints at job exit. Without
-# this bridge, checkpoints would land at the default local path and never
-# reach the AzureML `checkpoints` output URI.
+# train.py writes checkpoints under OUTPUT_DIR/checkpoints. Keep OUTPUT_DIR on
+# local container storage because LeRobot refuses to start when the output dir
+# already exists, while AzureML pre-creates output mount directories. Bridge the
+# component's lower-case output env var to the upper-case name the wrapper reads
+# when mirroring checkpoints at job exit.
 command: >-
   bash -c '
   set -euo pipefail;
+  source training/il/scripts/lerobot/lerobot-azureml.sh;
   if [[ -n "${AZURE_ML_INPUT_prepared_dataset:-}" ]]; then
-    export AZURE_ML_INPUT_dataset_asset_0="$AZURE_ML_INPUT_prepared_dataset";
+    require_relative_dataset_repo_id;
+    export AZURE_ML_INPUT_dataset_asset_0="$AZURE_ML_INPUT_prepared_dataset/$DATASET_REPO_ID";
     export DATASET_ASSET_COUNT=1;
     echo "[BRIDGE] Wired prepared_dataset -> AZURE_ML_INPUT_dataset_asset_0=$AZURE_ML_INPUT_dataset_asset_0";
   fi;
-  export OUTPUT_DIR="${AZURE_ML_OUTPUT_checkpoints:-/workspace/outputs/train}";
+  if [[ -n "${AZURE_ML_OUTPUT_checkpoints:-}" ]]; then
+    export AZURE_ML_OUTPUT_CHECKPOINTS="$AZURE_ML_OUTPUT_checkpoints";
+  fi;
+  export OUTPUT_DIR="${OUTPUT_DIR:-/workspace/outputs/train}";
   echo "[BRIDGE] OUTPUT_DIR=$OUTPUT_DIR";
   bash training/il/scripts/lerobot/azureml-train-entry.sh'

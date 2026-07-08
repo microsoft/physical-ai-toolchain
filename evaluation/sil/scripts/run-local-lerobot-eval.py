@@ -26,6 +26,8 @@ Usage:
         --dataset-dir /path/to/dataset
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -37,8 +39,14 @@ import numpy as np
 import pyarrow.parquet as pq
 import torch
 
+_EVALUATION_ROOT = Path(__file__).resolve().parents[2]
+if str(_EVALUATION_ROOT) not in sys.path:
+    sys.path.insert(0, str(_EVALUATION_ROOT))
 
-def _safe_throughput(inf_times: "np.ndarray | list[float]") -> float:
+from sil.hf_revision import resolve_hf_revision  # noqa: E402
+
+
+def _safe_throughput(inf_times: np.ndarray | list[float]) -> float:
     """Return mean inverse latency in Hz, or 0.0 when latency is zero or invalid.
 
     Avoids ``RuntimeWarning: divide by zero`` when test fixtures or
@@ -213,7 +221,10 @@ def run_evaluation(args: argparse.Namespace) -> None:
             print(f"  Stripped incompatible config fields: {removed}")
 
     t0 = time.time()
-    policy = ACTPolicy.from_pretrained(policy_path)
+    policy_revision = resolve_hf_revision(
+        policy_path, getattr(args, "policy_revision", None), revision_name="--policy-revision"
+    )
+    policy = ACTPolicy.from_pretrained(policy_path, revision=policy_revision)
 
     # Load normalization stats from preprocessor files if normalizer buffers are missing
     _load_normalizer_stats(policy, Path(policy_path))
@@ -454,6 +465,11 @@ def main() -> None:
     policy_group.add_argument("--policy-path", help="Local path or HuggingFace repo ID")
     policy_group.add_argument("--model-name", help="AzureML model registry name")
     policy_group.add_argument("--model-version", help="AzureML model registry version")
+    parser.add_argument(
+        "--policy-revision",
+        default=None,
+        help="HuggingFace commit SHA to pin the policy download (ignored for local/AML paths)",
+    )
 
     parser.add_argument("--dataset-dir", required=True, help="Path to LeRobot dataset root")
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to evaluate (default: 5)")

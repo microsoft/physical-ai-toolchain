@@ -66,6 +66,9 @@ class AppConfig:
     vlm_judge_model_id: str = "Qwen/Qwen3-VL-4B-Instruct"
     """Model identifier for the chosen backend."""
 
+    vlm_judge_model_revision: str | None = None
+    """Immutable HF commit SHA pinning the qwen3-vl model download; None uses the mutable default branch."""
+
     vlm_judge_base_url: str | None = None
     """OpenAI-compatible base URL (vLLM, NIM, Azure OpenAI)."""
 
@@ -117,6 +120,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     vlm_judge_enabled = os.environ.get("VLM_JUDGE_ENABLED", "false").lower() == "true"
     vlm_judge_backend = os.environ.get("VLM_JUDGE_BACKEND", "echo").lower()
     vlm_judge_model_id = os.environ.get("VLM_JUDGE_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct")
+    vlm_judge_model_revision = os.environ.get("VLM_JUDGE_MODEL_REVISION") or None
     vlm_judge_base_url = os.environ.get("VLM_JUDGE_BASE_URL") or None
     vlm_judge_api_key = os.environ.get("VLM_JUDGE_API_KEY") or None
     vlm_judge_n_frames = int(os.environ.get("VLM_JUDGE_N_FRAMES", "12"))
@@ -138,6 +142,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         vlm_judge_enabled=vlm_judge_enabled,
         vlm_judge_backend=vlm_judge_backend,
         vlm_judge_model_id=vlm_judge_model_id,
+        vlm_judge_model_revision=vlm_judge_model_revision,
         vlm_judge_base_url=vlm_judge_base_url,
         vlm_judge_api_key=vlm_judge_api_key,
         vlm_judge_n_frames=vlm_judge_n_frames,

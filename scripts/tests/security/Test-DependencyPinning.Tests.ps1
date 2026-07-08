@@ -1755,6 +1755,18 @@ Describe 'Get-RemediationSuggestion' -Tag 'Unit' {
         $result | Should -BeLike '*Research and pin*npm*'
     }
 
+    It 'Returns an npm ci suggestion for workflow-npm-commands regardless of the -Remediate flag' {
+        $npmCmd = [DependencyViolation]::new()
+        $npmCmd.Type = 'workflow-npm-commands'
+        $npmCmd.Name = 'npm install'
+
+        Mock Invoke-RestMethod { throw 'must not be called for npm-command remediation' }
+
+        (Get-RemediationSuggestion -Violation $npmCmd) | Should -BeLike "*Replace 'npm install' with 'npm ci'*"
+        (Get-RemediationSuggestion -Violation $npmCmd -Remediate) | Should -BeLike "*Replace 'npm install' with 'npm ci'*"
+        Should -Invoke -CommandName Invoke-RestMethod -Times 0 -Exactly
+    }
+
     It 'Returns fallback message on API error' {
         Mock Invoke-RestMethod { throw 'API rate limit exceeded' }
 
@@ -1791,6 +1803,208 @@ Describe 'Get-RemediationSuggestion' -Tag 'Unit' {
 
         $result = Get-RemediationSuggestion -Violation $script:BaseViolation -Remediate
         $result | Should -Be 'Manually research and pin to immutable reference'
+    }
+
+    It 'Returns fallback when the API returns a value that is not a commit SHA' {
+        $violation = [DependencyViolation]::new()
+        $violation.Type = 'github-actions'
+        $violation.Name = 'actions/checkout'
+        $violation.Version = 'v4'
+
+        Mock Invoke-RestMethod { return @{ sha = 'not-a-valid-sha' } }
+
+        $result = Get-RemediationSuggestion -Violation $violation -Remediate
+        $result | Should -Be 'Manually research and pin to immutable reference'
+        $violation.Metadata.ContainsKey('ResolvedSha') | Should -BeFalse
+    }
+
+    It 'Resolves subpath actions against the owner/repo slug' {
+        $subpath = [DependencyViolation]::new()
+        $subpath.Type = 'github-actions'
+        $subpath.Name = 'github/codeql-action/init'
+        $subpath.Version = 'v3'
+
+        Mock Invoke-RestMethod {
+            return @{ sha = 'abc123def456abc123def456abc123def456abcd' }
+        } -ParameterFilter {
+            $Uri -eq 'https://api.github.com/repos/github/codeql-action/commits/v3'
+        }
+
+        $result = Get-RemediationSuggestion -Violation $subpath -Remediate
+        $result | Should -Be 'Pin to SHA: uses: github/codeql-action/init@abc123def456abc123def456abc123def456abcd # v3'
+        Should -Invoke -CommandName Invoke-RestMethod -Times 1 -Exactly
+    }
+
+    It 'Stashes the resolved SHA in violation metadata' {
+        $violation = [DependencyViolation]::new()
+        $violation.Type = 'github-actions'
+        $violation.Name = 'actions/checkout'
+        $violation.Version = 'v4'
+
+        Mock Invoke-RestMethod {
+            return @{ sha = 'abc123def456abc123def456abc123def456abcd' }
+        }
+
+        $null = Get-RemediationSuggestion -Violation $violation -Remediate
+        $violation.Metadata['ResolvedSha'] | Should -Be 'abc123def456abc123def456abc123def456abcd'
+    }
+}
+
+Describe 'Invoke-ActionShaPinApply' -Tag 'Unit' {
+    BeforeAll {
+        $script:Sha = 'abc123def456abc123def456abc123def456abcd'
+
+        function New-ActionViolation {
+            param(
+                [string]$Name,
+                [string]$Version,
+                [int]$Line,
+                [string]$Sha,
+                [string]$File = 'ci.yml',
+                [string]$Type = 'github-actions'
+            )
+            $violation = [DependencyViolation]::new()
+            $violation.Type = $Type
+            $violation.File = $File
+            $violation.Line = $Line
+            $violation.Name = $Name
+            $violation.Version = $Version
+            if ($Sha) { $violation.Metadata['ResolvedSha'] = $Sha }
+            return $violation
+        }
+    }
+
+    It 'Rewrites a tag-pinned action to its SHA with a trailing ref comment' {
+        $workflow = Join-Path $TestDrive 'ci.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: actions/checkout@v4`n")
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 1
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`n  - uses: actions/checkout@$script:Sha # v4`n"
+    }
+
+    It 'Does not confuse a v4 ref with a longer v40 ref on adjacent lines' {
+        $workflow = Join-Path $TestDrive 'boundary.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: actions/checkout@v4`n  - uses: actions/setup-node@v40`n")
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'boundary.yml'
+            New-ActionViolation -Name 'actions/setup-node' -Version 'v40' -Line 3 -Sha ('b' * 40) -File 'boundary.yml'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 2
+        $content = [System.IO.File]::ReadAllText($workflow)
+        $content | Should -BeLike "*actions/checkout@$script:Sha # v4*"
+        $content | Should -BeLike ('*actions/setup-node@' + ('b' * 40) + ' # v40*')
+    }
+
+    It 'Preserves the full name for monorepo subpath actions' {
+        $workflow = Join-Path $TestDrive 'subpath.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: github/codeql-action/init@v3`n")
+
+        $null = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'github/codeql-action/init' -Version 'v3' -Line 2 -Sha $script:Sha -File 'subpath.yml'
+        ) -BasePath $TestDrive
+
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`n  - uses: github/codeql-action/init@$script:Sha # v3`n"
+    }
+
+    It 'Preserves LF line endings and the trailing newline' {
+        $workflow = Join-Path $TestDrive 'newline.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: actions/checkout@v4`n")
+
+        $null = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'newline.yml'
+        ) -BasePath $TestDrive
+
+        $content = [System.IO.File]::ReadAllText($workflow)
+        $content.Contains("`r") | Should -BeFalse
+        $content.EndsWith("`n") | Should -BeTrue
+    }
+
+    It 'Preserves CRLF line endings' {
+        $workflow = Join-Path $TestDrive 'crlf.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`r`n  - uses: actions/checkout@v4`r`n")
+
+        $null = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'crlf.yml'
+        ) -BasePath $TestDrive
+
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`r`n  - uses: actions/checkout@$script:Sha # v4`r`n"
+    }
+
+    It 'Preserves each line ending in a mixed CRLF/LF file' {
+        $workflow = Join-Path $TestDrive 'mixed.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`r`n  - uses: actions/checkout@v4`n  - run: echo hi`r`n")
+
+        $null = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'mixed.yml'
+        ) -BasePath $TestDrive
+
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`r`n  - uses: actions/checkout@$script:Sha # v4`n  - run: echo hi`r`n"
+    }
+
+    It 'Is idempotent: a second apply rewrites nothing' {
+        $workflow = Join-Path $TestDrive 'idempotent.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: actions/checkout@v4`n")
+        $violations = @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'idempotent.yml'
+        )
+
+        (Invoke-ActionShaPinApply -Violations $violations -BasePath $TestDrive) | Should -Be 1
+        $afterFirst = [System.IO.File]::ReadAllText($workflow)
+        (Invoke-ActionShaPinApply -Violations $violations -BasePath $TestDrive) | Should -Be 0
+        [System.IO.File]::ReadAllText($workflow) | Should -Be $afterFirst
+    }
+
+    It 'Writes refs containing regex substitution tokens verbatim' {
+        $workflow = Join-Path $TestDrive 'dollar.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: foo/bar@v1`$&2`n")
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'foo/bar' -Version 'v1$&2' -Line 2 -Sha $script:Sha -File 'dollar.yml'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 1
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`n  - uses: foo/bar@$script:Sha # v1`$&2`n"
+    }
+
+    It 'Ignores violations without a resolved SHA and non-actions types' {
+        $workflow = Join-Path $TestDrive 'skip.yml'
+        $original = "steps:`n  - uses: actions/checkout@v4`n"
+        [System.IO.File]::WriteAllText($workflow, $original)
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha '' -File 'skip.yml'
+            New-ActionViolation -Name 'lodash' -Version '^4.17.0' -Line 2 -Sha $script:Sha -File 'skip.yml' -Type 'npm'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 0
+        [System.IO.File]::ReadAllText($workflow) | Should -Be $original
+    }
+
+    It 'Returns zero when the target file is missing' {
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'nope.yml'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 0
+    }
+
+    It 'Skips violations whose line is past the end of the file' {
+        $workflow = Join-Path $TestDrive 'short.yml'
+        $original = "steps:`n  - uses: actions/checkout@v4`n"
+        [System.IO.File]::WriteAllText($workflow, $original)
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 999 -Sha $script:Sha -File 'short.yml'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 0
+        [System.IO.File]::ReadAllText($workflow) | Should -Be $original
     }
 }
 
@@ -1991,6 +2205,283 @@ Describe 'Get-PowerShellModuleViolations' -Tag 'Unit' {
     }
 }
 
+Describe 'Test-NpmCommandLine' -Tag 'Unit' {
+    Context 'Mutating commands are matched' {
+        It 'Matches <Command>' -TestCases @(
+            @{ Command = 'npm install' }
+            @{ Command = 'npm install express' }
+            @{ Command = 'npm i' }
+            @{ Command = 'npm update' }
+            @{ Command = 'npm install-test' }
+            @{ Command = 'npm  install' }
+            @{ Command = 'npm.cmd install' }
+            @{ Command = 'npm.cmd i' }
+            @{ Command = 'npm.cmd update' }
+            @{ Command = 'npm.cmd install-test' }
+            @{ Command = 'run: npm install && npm run build' }
+        ) {
+            param($Command)
+            Test-NpmCommandLine -Line $Command | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Context 'Deterministic and non-installing commands are not matched' {
+        It 'Does not match <Command>' -TestCases @(
+            @{ Command = 'npm ci' }
+            @{ Command = 'npm run build' }
+            @{ Command = 'npm run install' }
+            @{ Command = 'npm test' }
+            @{ Command = 'npm audit' }
+            @{ Command = 'npm init' }
+            @{ Command = 'npm install-ci-test' }
+            @{ Command = 'npx create-react-app' }
+            @{ Command = 'echo installing packages' }
+            @{ Command = '' }
+        ) {
+            param($Command)
+            Test-NpmCommandLine -Line $Command | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Get-WorkflowNpmCommandViolations' -Tag 'Unit' {
+    BeforeAll {
+        $script:FixturesPath = Join-Path $PSScriptRoot '../Fixtures/Workflows'
+    }
+
+    Context 'Compliant workflow' {
+        It 'Returns no violations when every install uses npm ci' {
+            $testFile = Join-Path $script:FixturesPath 'npm-commands-compliant.yml'
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $testFile; Type = 'workflow-npm-commands'; RelativePath = 'npm-commands-compliant.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Unpinned workflow' {
+        BeforeAll {
+            $testFile = Join-Path $script:FixturesPath 'npm-commands-unpinned.yml'
+            $script:NpmResult = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $testFile; Type = 'workflow-npm-commands'; RelativePath = 'npm-commands-unpinned.yml' })
+        }
+
+        It 'Flags only the mutating commands, ignoring npm ci, step names, comments, and pinning-ignore' {
+            $script:NpmResult.Count | Should -Be 3
+            ($script:NpmResult.Name | Sort-Object) | Should -Be @('npm i', 'npm install', 'npm update')
+        }
+
+        It 'Reports violations as workflow-npm-commands type with Medium severity' {
+            $script:NpmResult[0].Type | Should -Be 'workflow-npm-commands'
+            ($script:NpmResult.Severity | Sort-Object -Unique) | Should -Be @('Medium')
+        }
+
+        It 'Reports the line number of each flagged command' {
+            ($script:NpmResult | Sort-Object Line).Line | Should -Be @(16, 20, 21)
+            ($script:NpmResult | Sort-Object Line).Name | Should -Be @('npm install', 'npm update', 'npm i')
+        }
+    }
+
+    Context 'Indentation-aware run: block confinement' {
+        It 'Does not flag an npm command once the run: block has closed' {
+            $content = @'
+jobs:
+  build:
+    steps:
+      - name: install deps
+        run: |
+          npm ci
+      - name: npm install
+        uses: actions/setup-node@v4
+'@
+            $tmp = Join-Path $TestDrive 'closed-block.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'closed-block.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Flags an inline list-item run: step (- run: npm install)' {
+            $tmp = Join-Path $TestDrive 'inline-dash.yml'
+            Set-Content -Path $tmp -Value '      - run: npm install'
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'inline-dash.yml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'npm install'
+        }
+
+        It 'Does not scan same-step sibling keys after a "- run: |" block scalar' {
+            $content = @'
+jobs:
+  build:
+    steps:
+      - run: |
+          echo hi
+        name: run npm install here
+        env:
+          NOTE: please run npm install manually
+'@
+            $tmp = Join-Path $TestDrive 'dash-block-siblings.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'dash-block-siblings.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Flags an npm command inside a "- run: |" block scalar' {
+            $content = @'
+jobs:
+  build:
+    steps:
+      - run: |
+          npm install
+        name: unrelated
+'@
+            $tmp = Join-Path $TestDrive 'dash-block-content.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'dash-block-content.yml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'npm install'
+        }
+
+        It 'Keeps scanning after a block-scalar line that begins with run:' {
+            $content = @'
+jobs:
+  build:
+    steps:
+      - name: build
+        run: |
+          run: echo starting
+          npm install
+'@
+            $tmp = Join-Path $TestDrive 'block-run-prefixed-line.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'block-run-prefixed-line.yml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'npm install'
+        }
+
+        It 'Reports every mutating command in a single block scalar with distinct lines' {
+            $content = @'
+jobs:
+  build:
+    steps:
+      - name: multi
+        run: |
+          npm install
+          npm update
+'@
+            $tmp = Join-Path $TestDrive 'multi-block.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'multi-block.yml' })
+            $result.Count | Should -Be 2
+            ($result | Sort-Object Line).Name | Should -Be @('npm install', 'npm update')
+            ($result | Sort-Object Line).Line | Should -Be @(6, 7)
+        }
+
+        It 'Flags an npm command inside a <Indicator> block scalar' -TestCases @(
+            @{ Indicator = '>' }
+            @{ Indicator = '|-' }
+            @{ Indicator = '>-' }
+            @{ Indicator = '|+' }
+        ) {
+            param($Indicator)
+            $content = @"
+jobs:
+  build:
+    steps:
+      - name: build
+        run: $Indicator
+          npm install
+"@
+            $tmp = Join-Path $TestDrive "block-indicator.yml"
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'block-indicator.yml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'npm install'
+        }
+    }
+
+    Context 'pinning-ignore directive' {
+        It 'Honors a trailing pinning-ignore on the command line' {
+            $tmp = Join-Path $TestDrive 'npm-ignore-sameline.yml'
+            Set-Content -Path $tmp -Value '        run: npm install -g some-tool@1.2.3 # pinning-ignore'
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'npm-ignore-sameline.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Honors a dedicated pinning-ignore comment directly above the command' {
+            $content = @'
+    run: |
+      # pinning-ignore
+      npm install
+'@
+            $tmp = Join-Path $TestDrive 'npm-ignore-prevline.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'npm-ignore-prevline.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Honors a pinning-ignore comment directly above an inline run: command' {
+            $content = @'
+    steps:
+      # pinning-ignore
+      - run: npm install
+'@
+            $tmp = Join-Path $TestDrive 'npm-ignore-prevline-inline.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'npm-ignore-prevline-inline.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Does not leak an above-line pinning-ignore to a subsequent inline command' {
+            $content = @'
+    steps:
+      # pinning-ignore
+      - run: npm install
+      - run: npm update
+'@
+            $tmp = Join-Path $TestDrive 'npm-ignore-noleak-inline.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'npm-ignore-noleak-inline.yml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'npm update'
+        }
+
+        It 'Does not honor a pinning-ignore comment separated from the command by a blank line' {
+            $content = @'
+    run: |
+      # pinning-ignore
+
+      npm install
+'@
+            $tmp = Join-Path $TestDrive 'npm-ignore-blankline.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'npm-ignore-blankline.yml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'npm install'
+        }
+
+        It 'Does not leak a pinning-ignore from inside a block scalar to the next step' {
+            $content = @'
+jobs:
+  build:
+    steps:
+      - run: |
+          npm ci
+          # pinning-ignore
+      - run: npm install
+'@
+            $tmp = Join-Path $TestDrive 'npm-ignore-crossblock.yml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = $tmp; Type = 'workflow-npm-commands'; RelativePath = 'npm-ignore-crossblock.yml' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'npm install'
+        }
+    }
+
+    Context 'File not found' {
+        It 'Returns empty array for non-existent file' {
+            $result = @(Get-WorkflowNpmCommandViolations -FileInfo @{ Path = 'TestDrive:/nope.yml'; Type = 'workflow-npm-commands'; RelativePath = 'nope.yml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Test-ShellDownloadSecurity (workflow run: blocks)' -Tag 'Unit' {
     It 'Flags curl/wget without checksum inside a workflow run: block' {
         $content = @'
@@ -2134,6 +2625,50 @@ tasks:
         & $script:TestScript -Path $root -Recursive -Format json -OutputPath $jsonPath 2>&1 | Out-Null
         $report = Get-Content $jsonPath -Raw | ConvertFrom-Json
         @($report.Violations | Where-Object { $_.Type -eq 'shell-inline-pip' -and $_.Name -eq 'requests' }).Count | Should -BeGreaterThan 0
+    }
+
+    It 'Routes an npm install command in a workflow run: step to the workflow-npm-commands validator' {
+        $root = Join-Path $TestDrive 'e2e-npm-root'
+        New-Item -ItemType Directory -Path (Join-Path $root '.github/workflows') -Force | Out-Null
+        $wf = @'
+name: npm
+on: push
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          npm install
+'@
+        Set-Content -Path (Join-Path $root '.github/workflows/npm.yml') -Value $wf
+
+        $jsonPath = Join-Path $TestDrive 'e2e-npm.json'
+        & $script:TestScript -Path $root -Recursive -Format json -OutputPath $jsonPath 2>&1 | Out-Null
+        $report = Get-Content $jsonPath -Raw | ConvertFrom-Json
+        @($report.Violations | Where-Object { $_.Type -eq 'workflow-npm-commands' -and $_.Name -eq 'npm install' }).Count | Should -BeGreaterThan 0
+    }
+
+    It 'Runs both github-actions and workflow-npm-commands validators on the same workflow file' {
+        $root = Join-Path $TestDrive 'e2e-coexist-root'
+        New-Item -ItemType Directory -Path (Join-Path $root '.github/workflows') -Force | Out-Null
+        $wf = @'
+name: coexist
+on: push
+jobs:
+  x:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          npm install
+'@
+        Set-Content -Path (Join-Path $root '.github/workflows/coexist.yml') -Value $wf
+
+        $jsonPath = Join-Path $TestDrive 'e2e-coexist.json'
+        & $script:TestScript -Path $root -Recursive -Format json -OutputPath $jsonPath 2>&1 | Out-Null
+        $report = Get-Content $jsonPath -Raw | ConvertFrom-Json
+        @($report.Violations | Where-Object { $_.Type -eq 'github-actions' -and $_.File -like '*coexist.yml' }).Count | Should -BeGreaterThan 0
+        @($report.Violations | Where-Object { $_.Type -eq 'workflow-npm-commands' -and $_.Name -eq 'npm install' }).Count | Should -BeGreaterThan 0
     }
 }
 

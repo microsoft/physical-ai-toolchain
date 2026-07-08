@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 
 from ..models.annotations import EpisodeAnnotationFile
 from ..models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, FeatureSchema, TaskInfo
 from .base import StorageAdapter, StorageError
+
+logger = logging.getLogger(__name__)
 
 # Hugging Face SDK imports are optional
 try:
@@ -46,7 +49,9 @@ class HuggingFaceHubAdapter(StorageAdapter):
 
         Args:
             repo_id: Repository ID in format "owner/repo".
-            revision: Git revision (branch, tag, or commit hash).
+            revision: Git revision — pass an immutable commit SHA in production to
+                prevent an upstream repo from silently serving new data. Falls
+                back to the mutable ``"main"`` HEAD (dev-only) when omitted.
             token: Hugging Face API token for private repos.
             cache_dir: Local directory for caching downloaded files.
 
@@ -59,6 +64,11 @@ class HuggingFaceHubAdapter(StorageAdapter):
             )
 
         self.repo_id = repo_id
+        if revision is None:
+            logger.warning(
+                "HuggingFaceHubAdapter for %s pinned to mutable 'main'; supply an immutable commit SHA in production",
+                repo_id,
+            )
         self.revision = revision or "main"
         self.token = token
         self.cache_dir = cache_dir

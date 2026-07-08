@@ -20,6 +20,7 @@ import pytest
 from tests.e2e._aml import AzureMLWorkspace
 from tests.e2e._common import log_e2e
 from tests.e2e._osmo import (
+    _vla_base_model_args,
     assert_workflow_task_succeeded,
     cancel_osmo_workflow,
     start_task_pod_log_stream,
@@ -29,6 +30,41 @@ from tests.e2e._osmo import (
 )
 
 _VLA_TASK_NAME = "train"
+
+
+def test_vla_base_model_forwards_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("E2E_VLA_BASE_MODEL", "nvidia/GR00T-N1.5-3B")
+    monkeypatch.setenv("E2E_VLA_BASE_MODEL_REVISION", "abc123")
+
+    assert _vla_base_model_args() == [
+        "--base-model",
+        "nvidia/GR00T-N1.5-3B",
+        "--base-model-revision",
+        "abc123",
+    ]
+
+
+def test_vla_base_model_requires_revision_for_remote(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("E2E_VLA_BASE_MODEL", "nvidia/GR00T-N1.5-3B")
+    monkeypatch.delenv("E2E_VLA_BASE_MODEL_REVISION", raising=False)
+
+    with pytest.raises(pytest.skip.Exception):
+        _vla_base_model_args()
+
+
+def test_vla_base_model_allows_absolute_path_without_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("E2E_VLA_BASE_MODEL", "/models/local-groot")
+    monkeypatch.delenv("E2E_VLA_BASE_MODEL_REVISION", raising=False)
+
+    assert _vla_base_model_args() == ["--base-model", "/models/local-groot"]
+
+
+def test_vla_base_model_revision_without_model_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("E2E_VLA_BASE_MODEL", raising=False)
+    monkeypatch.setenv("E2E_VLA_BASE_MODEL_REVISION", "abc123")
+
+    with pytest.raises(pytest.skip.Exception):
+        _vla_base_model_args()
 
 
 @pytest.mark.e2e

@@ -11,7 +11,7 @@
 
 ## Overview
 
-Physical AI and robotics are moving from headlines and experimentation into real-world industrial deployment. The shift creates practical implications for how human-robot-AI collaboration becomes an operational capability in manufacturing, logistics, healthcare, and autonomous systems. Operationalizing physical intelligence at scale — across fleets and federations of intelligent systems — is a challenge no single OEM or software vendor can deliver alone.
+Physical AI and robotics are moving from headlines and experimentation into real-world industrial deployment. The shift creates practical implications for how human-robot-AI collaboration becomes an operational capability in manufacturing, logistics, healthcare, and autonomous systems. Operationalizing physical intelligence at scale, across fleets and federations of intelligent systems, is a challenge no single OEM or software vendor can deliver alone.
 
 Physical AI is the strategic inflection point for AI platforms, and robotics is the hero use case. It sits at the intersection of cloud, edge, data, and agentic AI.
 
@@ -19,8 +19,8 @@ Physical AI is the strategic inflection point for AI platforms, and robotics is 
 
 - **Accelerate physical AI innovation.** From edge data capture on NVIDIA Jetson devices through cloud-based training on GPU clusters to model deployment at the edge, every stage of the physical AI lifecycle is addressed with tested, repeatable automation.
 - **Operationalize physical intelligence.** Built on Azure Machine Learning, Azure Kubernetes Service, Azure Arc, and Azure Storage with Entra ID authentication, managed identities, and Infrastructure as Code, so workloads meet the security, compliance, and governance requirements of production environments.
-- **Scale through ecosystem collaboration.** Native support for NVIDIA Isaac Sim and Isaac Lab for simulation and reinforcement learning, NVIDIA OSMO for workflow orchestration, and the NVIDIA Jetson platform for edge inference — a hardware-accelerated path from research to deployment enabled by deep partnership across the ecosystem.
-- **Human-robot-AI agent collaboration.** Agentic engineering lets teams move from isolated machines to coordinated, instruction-driven workflows. AI agents can turn high-level instructions into executed pipelines — but they are a convenience layer, not a requirement. Start with manual workflows, introduce agents when you are ready, and customize their behavior to match your team's trust boundaries.
+- **Scale through ecosystem collaboration.** Native support for NVIDIA Isaac Sim and Isaac Lab for simulation and reinforcement learning, NVIDIA OSMO for workflow orchestration, and the NVIDIA Jetson platform for edge inference provides a hardware-accelerated path from research to deployment, enabled by deep partnership across the ecosystem.
+- **Human-robot-AI agent collaboration.** Agentic engineering lets teams move from isolated machines to coordinated, instruction-driven workflows. AI agents can turn high-level instructions into executed pipelines, but they are a convenience layer, not a requirement. Start with manual workflows, introduce agents when you are ready, and customize their behavior to match your team's trust boundaries.
 - **Broad physical AI applicability.** While robotics is the hero use case, the architecture supports any physical AI workload that follows the simulate → train → evaluate → deploy pattern, including autonomous mobile robots, robotic manipulation, industrial inspection, and embodied AI research.
 
 Whether you are evaluating Azure and NVIDIA as a platform for physical AI, planning a proof of concept, or scaling to production, this toolchain provides a tested solution and working code to accelerate your timeline.
@@ -32,16 +32,44 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 - **Enterprise teams** piloting Jetson + Azure deployments and need security, compliance, and scalability from day one
 
 > [!NOTE]
-> **Who it's not for (yet):** This toolchain targets production and pre-production workloads. It is not currently designed for hobbyist projects, ROS beginners learning the basics, or single-robot desktop demos. We welcome contributions that broaden accessibility over time.
+> **Who it's not for (yet):** This toolchain targets production and pre-production workloads. It is not designed for hobbyist projects, ROS beginners learning the basics, or general-purpose desktop demos. T0 is a first-class single-robot entry point when the goal is a production-oriented capture -> train -> validate -> run workflow.
 
 <!-- -->
 
 > [!TIP]
-> **Get started in under 2 hours.** By the end of the [Quickstart Guide](docs/getting-started/quickstart.md), you will have:
->
-> - A pick-and-place RL policy trained in Isaac Lab on Azure GPU compute
-> - Experiment metrics and checkpoints tracked in MLflow
-> - A containerized model deployed to a Jetson device via GitOps
+> **Start on a laptop, not in the cloud.** The default starting path (T0 — Dev) closes the full capture -> train -> validate -> run loop on **one laptop and one robot**, with **zero cloud and zero Kubernetes**. Cloud, Kubernetes, Arc, and fleet components are tier-gated additions you adopt only when your scale demands them, not prerequisites. See [Start on a Laptop (T0 — Dev)](#-start-on-a-laptop-t0--dev) below.
+
+## 🛫 Start on a Laptop (T0 — Dev)
+
+Adoption is modeled as six graduated tiers (T0-T5). Each tier states the minimum edge and cloud infrastructure required to complete the full training lifecycle: capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot. Each tier is a legitimate stopping point. You adopt only the infrastructure your scale actually demands; the heavy components are opt-in additions, not a baseline you must stand up first.
+
+**T0 — Dev is the default starting path.** One laptop, one robot, and the full loop:
+
+- **Capture:** ROS 2 bag recording to local disk. No Arc, no ACSA, no PVC.
+- **Move data:** `cp` or `rsync` from robot to laptop.
+- **Curate:** the dataviewer in `local` mode on the laptop.
+- **Train:** `lerobot-train` on the laptop, on CPU or a local GPU.
+- **Track:** training writes checkpoints and logs to local disk; hosted tracking enters at T2.
+- **Validate:** `run-local-lerobot-eval.py` / `play.py` locally.
+- **Run on robot:** the inference node as a plain process or container. No Flux, no gating, no GitOps.
+
+**Edge infra:** ROS 2 and Docker only. **Cloud infra:** none.
+
+| Tier                | When to use it                                                             | Quick start                                                            |
+|---------------------|----------------------------------------------------------------------------|------------------------------------------------------------------------|
+| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and zero Kubernetes.            | [Tier 0 — Dev recipe](docs/recipes/tier-0-dev/README.md)               |
+| **T1 — Lab**        | One site, a few robots, a shared GPU box. First cloud: storage.            | [Tier 1 — Lab recipe](docs/recipes/tier-1-lab/README.md)               |
+| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.         | [Tier 2 — Pilot recipe](docs/recipes/tier-2-pilot/README.md)           |
+| **T3 — Production** | Advanced. Single-site declarative deployment (local k3s + Flux, no Arc).   | [Tier 3 — Production recipe](docs/recipes/tier-3-production/README.md) |
+| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc as reachability broker.       | [Tier 4 — Scale recipe](docs/recipes/tier-4-scale/README.md)           |
+| **T5 — Operate**    | Roadmap. **Fleet intelligence** for drift detection and retraining.        | [Tier 5 — Operate recipe](docs/recipes/tier-5-operate/README.md)       |
+
+⭐ default · ✅ recommended production
+
+Cloud training, model registries, Kubernetes (k3s/AKS), Azure Arc, and the fleet delivery/intelligence planes enter the picture only at the tier where they earn their keep. Pick your tier in [Getting Started → Choose Your Tier](docs/getting-started/README.md#choose-your-tier), read the tier-by-tier infrastructure boundaries in the [Architecture Overview](docs/contributing/architecture.md), and consult the canonical [Tier Model](docs/design/tier-model.md) for the authoritative tier table and vocabulary.
+
+> [!NOTE]
+> **Roadmap honesty.** T5 (Operate / fleet intelligence) is on the roadmap and not yet available. The fleet-intelligence domain is currently specified, with implementation planned. Today's shipping capability spans T0-T4.
 
 ## What's Inside
 
@@ -60,15 +88,15 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 
 ## Key Features
 
-- **Infrastructure as Code** — Terraform modules for reproducible Azure deployments
-- **Containerized Workflows** — Docker-based Isaac Lab training with NVIDIA GPU support
-- **MLflow Integration** — Automatic experiment tracking and model versioning
-- **Scalable Compute** — Auto-scaling GPU nodes with pay-per-use cost optimization
-- **Enterprise Security** — Entra ID integration with managed identities
-- **CI/CD Integration** — Automated deployment pipelines with GitHub Actions
-- **Edge-to-Cloud Data Pipeline** — Automated capture, upload, conversion, and validation
-- **Multi-Modal Training** — Support for reinforcement learning and imitation learning workflows
-- **Agentic Pipeline Orchestration** — Describe a task; agents handle data collection through policy deployment
+- **Infrastructure as Code:** Terraform modules for reproducible Azure deployments
+- **Containerized Workflows:** Docker-based Isaac Lab training with NVIDIA GPU support
+- **MLflow Integration:** Automatic experiment tracking and model versioning
+- **Scalable Compute:** Auto-scaling GPU nodes with pay-per-use cost optimization
+- **Enterprise Security:** Entra ID integration with managed identities
+- **CI/CD Integration:** Automated deployment pipelines with GitHub Actions
+- **Edge-to-Cloud Data Pipeline:** Automated capture, upload, conversion, and validation
+- **Multi-Modal Training:** Support for reinforcement learning and imitation learning workflows
+- **Agentic Pipeline Orchestration:** Describe a task; agents handle data collection through policy deployment
 
 ## Quick Start
 
@@ -76,7 +104,9 @@ Whether you are evaluating Azure and NVIDIA as a platform for physical AI, plann
 ./setup-dev.sh
 ```
 
-The setup script installs Python 3.12 via [uv](https://docs.astral.sh/uv/), creates a virtual environment, and installs training dependencies. Follow the [Quickstart Guide](docs/getting-started/quickstart.md) for the full deployment walkthrough.
+The setup script installs Python 3.12 via [uv](https://docs.astral.sh/uv/), creates a virtual environment, and installs training dependencies. This is all the default path (T0 — Dev) needs: train, track, and validate locally on a laptop GPU with no Azure subscription.
+
+Follow the [Quickstart Guide](docs/getting-started/quickstart.md) for the default local-first walkthrough, then [Choose Your Tier](docs/getting-started/README.md#choose-your-tier) when you are ready to graduate to cloud training (T2 — Pilot) or beyond. The cloud, Kubernetes, and fleet steps are opt-in additions layered onto this working local baseline.
 
 ## Documentation
 
@@ -93,18 +123,18 @@ Full documentation is available in the [docs/](docs/README.md) directory.
 
 ## Architecture
 
-This toolchain integrates:
+The architecture is organized as graduated tiers (T0-T5): each component enters at the tier where it earns its keep, rather than as a baseline prerequisite. The default path (T0 — Dev) needs only the local components; everything below is an opt-in addition.
 
-- **NVIDIA OSMO** — Workflow orchestration and job scheduling
-- **NVIDIA Isaac Sim & Isaac Lab** — Physics simulation and RL task environments
-- **NVIDIA Jetson** — Edge inference and demonstration data capture
-- **Azure Machine Learning** — Experiment tracking and model management
-- **Azure Kubernetes Service** — Software in the Loop (SIL) training
-- **Azure Arc for Kubernetes** — Hardware in the Loop (HIL) training and edge fleet management
-- **Azure Storage** — Persistent data and checkpoint storage
-- **Azure Event Grid & Fabric** — Event-driven data pipeline orchestration
+- **NVIDIA Isaac Sim & Isaac Lab:** Physics simulation and RL task environments
+- **NVIDIA Jetson:** Edge inference and demonstration data capture
+- **Azure Storage:** Cloud data and checkpoint storage (opt-in from T1 — Lab)
+- **Azure Machine Learning:** Cloud training, experiment tracking, and model registry (default from T2 — Pilot)
+- **NVIDIA OSMO:** Workflow orchestration and job scheduling (T2 — Pilot)
+- **Local k3s + FluxCD:** Single-site declarative GitOps deployment, no Arc required (T3 — Production)
+- **Azure Arc + AKS:** Cross-site reachability and identity broker for multi-site **fleet delivery** (T4 — Scale)
+- **Azure IoT Operations & Fabric:** Telemetry aggregation and **fleet intelligence** (T5 — Operate, roadmap)
 
-See [Architecture Overview](docs/contributing/architecture.md) for the full design.
+See the [Architecture Overview](docs/contributing/architecture.md) for the per-tier infrastructure boundaries and the canonical [Tier Model](docs/design/tier-model.md) for the authoritative tier table.
 
 ## Agentic Workflows
 
@@ -113,7 +143,7 @@ The toolchain includes agent-driven automation that collapses multi-stage physic
 **How it works:**
 
 1. **Describe the objective.** Provide a natural-language instruction such as "collect 50 demonstrations of an inspection and sorting task and train an IL policy."
-2. **Agent plans and executes.** The agent decomposes the objective into pipeline stages — data collection, conversion, training configuration, compute provisioning, and training launch — then executes each stage using the toolchain's APIs and infrastructure.
+2. **Agent plans and executes.** The agent decomposes the objective into pipeline stages: data collection, conversion, training configuration, compute provisioning, and training launch. It then executes each stage using the toolchain's APIs and infrastructure.
 3. **Evaluate and iterate.** The agent runs evaluation (simulation replay, success-rate metrics) and presents results. If the policy does not meet acceptance criteria, the agent adjusts hyperparameters or collects additional data and re-trains.
 4. **Deploy.** Once a policy passes evaluation, the agent packages it (ONNX/TensorRT), builds a container image, and triggers GitOps deployment to target edge devices.
 
@@ -134,7 +164,7 @@ Agents operate within the same security boundaries, managed identities, and RBAC
 | Question                                         | Answer                                                                                                                                                           |
 |--------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Are agents required?                             | No. Every pipeline stage has a manual CLI and API path. Agents are opt-in.                                                                                       |
-| Can I use agents for some stages but not others? | Yes. Agents are composable — use them for data collection but run training manually, or vice versa.                                                              |
+| Can I use agents for some stages but not others? | Yes. Agents are composable: use them for data collection but run training manually, or vice versa.                                                              |
 | Are agents opinionated or customizable?          | Customizable. Agent behavior is driven by configuration files you control: which stages to automate, compute budgets, approval gates, and evaluation thresholds. |
 | What happens if an agent makes a mistake?        | Agents request human approval before destructive actions (deploying to production, deleting data). All intermediate artifacts are versioned and recoverable.     |
 | How are agent actions audited?                   | Every agent action is logged with the initiating instruction, parameters, and outcome. Logs integrate with Azure Monitor and MLflow.                             |
@@ -145,7 +175,7 @@ Agents operate within the same security boundaries, managed identities, and RBAC
 
 | Directory  | Purpose                                                            |
 |------------|--------------------------------------------------------------------|
-| `src/`     | Core Python modules — conversion, validation, training utilities   |
+| `src/`     | Core Python modules: conversion, validation, training utilities    |
 | `infra/`   | Terraform and Bicep templates for Azure resource provisioning      |
 | `config/`  | YAML configuration schemas for recording, training, and deployment |
 | `scripts/` | Setup, benchmarking, and operational helper scripts                |
@@ -207,10 +237,10 @@ See the [project roadmap](docs/contributing/ROADMAP.md) for priorities, timeline
 
 This toolchain builds upon:
 
-- [NVIDIA Isaac Lab](https://github.com/isaac-sim/IsaacLab) — RL task framework
-- [NVIDIA Isaac Sim](https://developer.nvidia.com/isaac-sim) — Physics simulation
-- [NVIDIA OSMO](https://developer.nvidia.com/osmo) — Workflow orchestration
-- [LeRobot](https://github.com/huggingface/lerobot) — Imitation learning dataset format
+- [NVIDIA Isaac Lab](https://github.com/isaac-sim/IsaacLab): RL task framework
+- [NVIDIA Isaac Sim](https://developer.nvidia.com/isaac-sim): physics simulation
+- [NVIDIA OSMO](https://developer.nvidia.com/osmo): workflow orchestration
+- [LeRobot](https://github.com/huggingface/lerobot): imitation learning dataset format
 - Built with [HVE Core](https://github.com/microsoft/hve-core)
 
 ## 🤖 Responsible AI

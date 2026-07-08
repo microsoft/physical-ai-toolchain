@@ -272,3 +272,26 @@ def assert_osmo_lerobot_eval_has_mlflow_tracking(workflow: OSMOWorkflow, aml_wor
         f"OSMO LeRobot eval MLflow tracking passed: run_id={run_id} "
         f"metrics=[{rendered_metrics}] params=[{rendered_params}]"
     )
+
+
+def assert_aml_lerobot_eval_has_mlflow_tracking(job: AzureMLJob, aml_workspace: AzureMLWorkspace) -> None:
+    """Validate the AzureML LeRobot eval MLflow run.
+
+    The eval entrypoint (``run_evaluation.py``) creates its own MLflow run inside the
+    job, so the run id does not equal the AzureML job name. Resolution is by the
+    per-run-unique experiment name the submission sets, mirroring the OSMO eval path.
+    """
+    run_id = _resolve_latest_mlflow_run_id_by_experiment(aml_workspace, job.experiment_name)
+    tracking = _assert_run_has_expected_tracking(
+        aml_workspace,
+        run_id=run_id,
+        experiment_name=job.experiment_name,
+        required_metrics=_LEROBOT_EVAL_REQUIRED_METRICS,
+        required_params=_LEROBOT_EVAL_REQUIRED_PARAMS,
+    )
+    rendered_metrics = ", ".join(f"{name}={value}" for name, value in tracking.metrics.items())
+    rendered_params = ", ".join(f"{name}={value}" for name, value in tracking.params.items())
+    log_e2e(
+        f"AzureML LeRobot eval MLflow tracking passed: run_id={run_id} "
+        f"metrics=[{rendered_metrics}] params=[{rendered_params}]"
+    )

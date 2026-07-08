@@ -1,10 +1,12 @@
 # Gating Service Specification
 
-Deployment gating service that validates trained models before fleet rollout.
+Deployment gating service that validates trained models before a policy is rolled out to robots, the
+safety gate of the fleet-delivery control plane (T4 — Scale), applied before a policy swaps on a
+physical arm. See [tier-model.md](../../docs/design/tier-model.md) for the canonical tier definitions.
 
 ## Status
 
-Planned — placeholder for future implementation.
+Planned: placeholder for future implementation.
 
 ## Components
 

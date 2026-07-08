@@ -132,8 +132,7 @@ function preserveEpisodeVariableKeys(raw: Record<string, unknown>): EpisodeData 
   if (rawTrajectory && Array.isArray(episode.trajectoryData)) {
     episode.trajectoryData = episode.trajectoryData.map((frame, frameIndex) => {
       const originalVariables = rawTrajectory[frameIndex]?.variables as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
       if (!originalVariables) {
         return frame
       }
