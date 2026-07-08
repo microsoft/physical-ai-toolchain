@@ -264,7 +264,7 @@ wheels = [
 
 [[package]]
 name = "azureml-mlflow"
-version = "1.62.0.post3"
+version = "1.62.0.post4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-common" },
@@ -280,7 +280,7 @@ dependencies = [
     { name = "pytz" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f8/fc/0c333ec675e24be4771baca50921403ea76750c06ef7845cec7a8d92467c/azureml_mlflow-1.62.0.post3-py3-none-any.whl", hash = "sha256:06eb6a6439a6c7993bc8c52873311372f62bc15481e1ad63b36c8da2edfdee76", size = 1020089, upload-time = "2026-06-10T16:41:34.055Z" },
+    { url = "https://files.pythonhosted.org/packages/19/09/7f40d555ebaab35cfe7f19291ea7ae7d1815c15e69914bb9d9ccfe77e0f3/azureml_mlflow-1.62.0.post4-py3-none-any.whl", hash = "sha256:4b7b476575b3206b77309a747b285c2865ea87b654c4ab710abb81448f30ee75", size = 1020087, upload-time = "2026-06-29T07:32:32.719Z" },
 ]
 
 [[package]]
@@ -2030,7 +2030,7 @@ fuzz = [
 [package.metadata.requires-dev]
 dev = [
     { name = "azure-ai-ml", specifier = "==1.34.0" },
-    { name = "azureml-mlflow", specifier = "==1.62.0.post3" },
+    { name = "azureml-mlflow", specifier = "==1.62.0.post4" },
     { name = "hypothesis", specifier = "==6.155.7" },
     { name = "imageio", specifier = "==2.37.3" },
     { name = "imageio-ffmpeg", specifier = "==0.6.0" },
