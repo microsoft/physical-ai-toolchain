@@ -1,0 +1,22 @@
+[project]
+name = "lerobot-register"
+version = "0.1.0"
+description = "AzureML LeRobot register-model component runtime dependencies"
+requires-python = ">=3.12"
+# Direct dependencies for register_model.py, installed by the register.yaml
+# component. Versions are pinned exactly because the component installs with
+# `uv pip install --no-deps` from a build-time export of uv.lock; pip's resolver
+# does NOT run in the container. Regenerate the lock after any change here:
+#   cd workflows/azureml/scripts
+#   uv lock
+dependencies = [
+    "azure-ai-ml==1.34.0",
+    "azure-identity==1.25.3",
+]
+
+[tool.uv]
+# Constrain the universal lock to the AzureML deployment target so resolution
+# yields a single marker per package, suitable for `--no-deps` installs and a
+# deterministic build-time `uv export`.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+package = false

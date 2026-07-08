@@ -209,6 +209,28 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: uv
+  directory: /workflows/azureml/scripts
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+    semver-major-days: 14
+  groups:
+    azureml-register-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - python
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: uv
   directory: /workflows/osmo
   schedule:
     interval: weekly

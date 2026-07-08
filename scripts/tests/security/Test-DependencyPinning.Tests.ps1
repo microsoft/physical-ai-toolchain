@@ -1804,6 +1804,208 @@ Describe 'Get-RemediationSuggestion' -Tag 'Unit' {
         $result = Get-RemediationSuggestion -Violation $script:BaseViolation -Remediate
         $result | Should -Be 'Manually research and pin to immutable reference'
     }
+
+    It 'Returns fallback when the API returns a value that is not a commit SHA' {
+        $violation = [DependencyViolation]::new()
+        $violation.Type = 'github-actions'
+        $violation.Name = 'actions/checkout'
+        $violation.Version = 'v4'
+
+        Mock Invoke-RestMethod { return @{ sha = 'not-a-valid-sha' } }
+
+        $result = Get-RemediationSuggestion -Violation $violation -Remediate
+        $result | Should -Be 'Manually research and pin to immutable reference'
+        $violation.Metadata.ContainsKey('ResolvedSha') | Should -BeFalse
+    }
+
+    It 'Resolves subpath actions against the owner/repo slug' {
+        $subpath = [DependencyViolation]::new()
+        $subpath.Type = 'github-actions'
+        $subpath.Name = 'github/codeql-action/init'
+        $subpath.Version = 'v3'
+
+        Mock Invoke-RestMethod {
+            return @{ sha = 'abc123def456abc123def456abc123def456abcd' }
+        } -ParameterFilter {
+            $Uri -eq 'https://api.github.com/repos/github/codeql-action/commits/v3'
+        }
+
+        $result = Get-RemediationSuggestion -Violation $subpath -Remediate
+        $result | Should -Be 'Pin to SHA: uses: github/codeql-action/init@abc123def456abc123def456abc123def456abcd # v3'
+        Should -Invoke -CommandName Invoke-RestMethod -Times 1 -Exactly
+    }
+
+    It 'Stashes the resolved SHA in violation metadata' {
+        $violation = [DependencyViolation]::new()
+        $violation.Type = 'github-actions'
+        $violation.Name = 'actions/checkout'
+        $violation.Version = 'v4'
+
+        Mock Invoke-RestMethod {
+            return @{ sha = 'abc123def456abc123def456abc123def456abcd' }
+        }
+
+        $null = Get-RemediationSuggestion -Violation $violation -Remediate
+        $violation.Metadata['ResolvedSha'] | Should -Be 'abc123def456abc123def456abc123def456abcd'
+    }
+}
+
+Describe 'Invoke-ActionShaPinApply' -Tag 'Unit' {
+    BeforeAll {
+        $script:Sha = 'abc123def456abc123def456abc123def456abcd'
+
+        function New-ActionViolation {
+            param(
+                [string]$Name,
+                [string]$Version,
+                [int]$Line,
+                [string]$Sha,
+                [string]$File = 'ci.yml',
+                [string]$Type = 'github-actions'
+            )
+            $violation = [DependencyViolation]::new()
+            $violation.Type = $Type
+            $violation.File = $File
+            $violation.Line = $Line
+            $violation.Name = $Name
+            $violation.Version = $Version
+            if ($Sha) { $violation.Metadata['ResolvedSha'] = $Sha }
+            return $violation
+        }
+    }
+
+    It 'Rewrites a tag-pinned action to its SHA with a trailing ref comment' {
+        $workflow = Join-Path $TestDrive 'ci.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: actions/checkout@v4`n")
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 1
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`n  - uses: actions/checkout@$script:Sha # v4`n"
+    }
+
+    It 'Does not confuse a v4 ref with a longer v40 ref on adjacent lines' {
+        $workflow = Join-Path $TestDrive 'boundary.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: actions/checkout@v4`n  - uses: actions/setup-node@v40`n")
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'boundary.yml'
+            New-ActionViolation -Name 'actions/setup-node' -Version 'v40' -Line 3 -Sha ('b' * 40) -File 'boundary.yml'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 2
+        $content = [System.IO.File]::ReadAllText($workflow)
+        $content | Should -BeLike "*actions/checkout@$script:Sha # v4*"
+        $content | Should -BeLike ('*actions/setup-node@' + ('b' * 40) + ' # v40*')
+    }
+
+    It 'Preserves the full name for monorepo subpath actions' {
+        $workflow = Join-Path $TestDrive 'subpath.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: github/codeql-action/init@v3`n")
+
+        $null = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'github/codeql-action/init' -Version 'v3' -Line 2 -Sha $script:Sha -File 'subpath.yml'
+        ) -BasePath $TestDrive
+
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`n  - uses: github/codeql-action/init@$script:Sha # v3`n"
+    }
+
+    It 'Preserves LF line endings and the trailing newline' {
+        $workflow = Join-Path $TestDrive 'newline.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: actions/checkout@v4`n")
+
+        $null = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'newline.yml'
+        ) -BasePath $TestDrive
+
+        $content = [System.IO.File]::ReadAllText($workflow)
+        $content.Contains("`r") | Should -BeFalse
+        $content.EndsWith("`n") | Should -BeTrue
+    }
+
+    It 'Preserves CRLF line endings' {
+        $workflow = Join-Path $TestDrive 'crlf.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`r`n  - uses: actions/checkout@v4`r`n")
+
+        $null = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'crlf.yml'
+        ) -BasePath $TestDrive
+
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`r`n  - uses: actions/checkout@$script:Sha # v4`r`n"
+    }
+
+    It 'Preserves each line ending in a mixed CRLF/LF file' {
+        $workflow = Join-Path $TestDrive 'mixed.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`r`n  - uses: actions/checkout@v4`n  - run: echo hi`r`n")
+
+        $null = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'mixed.yml'
+        ) -BasePath $TestDrive
+
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`r`n  - uses: actions/checkout@$script:Sha # v4`n  - run: echo hi`r`n"
+    }
+
+    It 'Is idempotent: a second apply rewrites nothing' {
+        $workflow = Join-Path $TestDrive 'idempotent.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: actions/checkout@v4`n")
+        $violations = @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'idempotent.yml'
+        )
+
+        (Invoke-ActionShaPinApply -Violations $violations -BasePath $TestDrive) | Should -Be 1
+        $afterFirst = [System.IO.File]::ReadAllText($workflow)
+        (Invoke-ActionShaPinApply -Violations $violations -BasePath $TestDrive) | Should -Be 0
+        [System.IO.File]::ReadAllText($workflow) | Should -Be $afterFirst
+    }
+
+    It 'Writes refs containing regex substitution tokens verbatim' {
+        $workflow = Join-Path $TestDrive 'dollar.yml'
+        [System.IO.File]::WriteAllText($workflow, "steps:`n  - uses: foo/bar@v1`$&2`n")
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'foo/bar' -Version 'v1$&2' -Line 2 -Sha $script:Sha -File 'dollar.yml'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 1
+        [System.IO.File]::ReadAllText($workflow) | Should -Be "steps:`n  - uses: foo/bar@$script:Sha # v1`$&2`n"
+    }
+
+    It 'Ignores violations without a resolved SHA and non-actions types' {
+        $workflow = Join-Path $TestDrive 'skip.yml'
+        $original = "steps:`n  - uses: actions/checkout@v4`n"
+        [System.IO.File]::WriteAllText($workflow, $original)
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha '' -File 'skip.yml'
+            New-ActionViolation -Name 'lodash' -Version '^4.17.0' -Line 2 -Sha $script:Sha -File 'skip.yml' -Type 'npm'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 0
+        [System.IO.File]::ReadAllText($workflow) | Should -Be $original
+    }
+
+    It 'Returns zero when the target file is missing' {
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 2 -Sha $script:Sha -File 'nope.yml'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 0
+    }
+
+    It 'Skips violations whose line is past the end of the file' {
+        $workflow = Join-Path $TestDrive 'short.yml'
+        $original = "steps:`n  - uses: actions/checkout@v4`n"
+        [System.IO.File]::WriteAllText($workflow, $original)
+
+        $applied = Invoke-ActionShaPinApply -Violations @(
+            New-ActionViolation -Name 'actions/checkout' -Version 'v4' -Line 999 -Sha $script:Sha -File 'short.yml'
+        ) -BasePath $TestDrive
+
+        $applied | Should -Be 0
+        [System.IO.File]::ReadAllText($workflow) | Should -Be $original
+    }
 }
 
 Describe 'Export-CICDArtifact' -Tag 'Unit' {

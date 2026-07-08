@@ -7,11 +7,12 @@
 # contract and is out of scope for the OSS port.
 #
 # register_model.py reads model artifacts from $OUTPUT_DIR/model_artifacts.
-# The train Component uploads checkpoints directly to ${{outputs.checkpoints}}
-# (no model_artifacts/ subdir), so this wrapper stages the input into the
-# layout register_model.py expects via a temporary OUTPUT_DIR. eval_metrics
-# is an optional input that expresses the DAG data dependency on the evaluate
-# step without being consumed by the registration logic.
+# The train Component uploads the full checkpoints tree to ${{outputs.checkpoints}}
+# (numbered checkpoint dirs plus a dereferenced `last`), so this wrapper resolves
+# the final checkpoint's pretrained_model leaf (the loadable policy root, matching
+# the training-path registration) and stages only that into a temporary
+# OUTPUT_DIR/model_artifacts. eval_metrics is an optional input that expresses the
+# DAG data dependency on the evaluate step without being consumed by registration.
 #
 # Compute and environment_variables (REGISTER_MODEL, POLICY_TYPE, JOB_NAME,
 # AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZUREML_WORKSPACE_NAME) are
@@ -26,7 +27,7 @@ description: >-
   Register a trained LeRobot policy checkpoint to the Azure ML Model Registry.
   Opt-in: include in lerobot-pipeline-with-register.yaml only.
 
-code: ../../scripts
+code: ../scripts
 
 inputs:
   model_checkpoint:
@@ -39,13 +40,42 @@ inputs:
       Evaluation output from the evaluate step. Not consumed by the
       registration logic — present only to express the DAG data dependency.
 
-environment: azureml:lerobot-inference-env:latest
+environment:
+  # Digest-pinned base image; keep in sync with DEFAULT_LEROBOT_EVAL_IMAGE in
+  # scripts/lib/common.sh (both refreshed by scripts/update-image-digests.sh).
+  # An inline image yields an anonymous, content-hashed environment, so a base
+  # image change never collides with an immutable registered environment version.
+  image: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime@sha256:0a3b9fedefe1f61ac4d5a9de9015c0863db27ca0fde2d4e37e6268147980b726
 
+# Runtime deps are locked in workflows/azureml/scripts/{pyproject.toml,uv.lock}
+# and installed with `uv pip install --no-deps` from a build-time export, so
+# pip's resolver never runs in the container and transitive deps stay pinned.
+# Regenerate the lock with `uv lock` in that directory after editing the manifest.
 command: >-
   bash -c '
   set -euo pipefail;
+  pip install --quiet --break-system-packages uv==0.7.12;
+  uv python install 3.12;
+  uv venv --python 3.12 /opt/register-venv;
+  source /opt/register-venv/bin/activate;
+  uv export --frozen --no-hashes --no-emit-project | uv pip install --no-cache-dir --no-deps -r -;
   STAGING_DIR="$(mktemp -d)";
   mkdir -p "$STAGING_DIR/model_artifacts";
-  cp -r "${{inputs.model_checkpoint}}"/. "$STAGING_DIR/model_artifacts/";
+  SRC="${{inputs.model_checkpoint}}";
+  checkpoint_config="";
+  if [[ -f "$SRC/config.json" ]]; then
+    checkpoint_config="$SRC/config.json";
+  elif [[ -f "$SRC/last/pretrained_model/config.json" ]]; then
+    checkpoint_config="$SRC/last/pretrained_model/config.json";
+  else
+    checkpoint_config="$(find "$SRC" -maxdepth 4 -type f -name config.json | sort | tail -n 1 || true)";
+  fi;
+  if [[ -z "$checkpoint_config" ]]; then
+    echo "ERROR: no config.json found under $SRC; cannot register a loadable policy" >&2;
+    exit 1;
+  fi;
+  policy_leaf="$(dirname "$checkpoint_config")";
+  echo "[REGISTER] Staging policy leaf: $policy_leaf";
+  cp -r "$policy_leaf"/. "$STAGING_DIR/model_artifacts/";
   export OUTPUT_DIR="$STAGING_DIR";
   python register_model.py'

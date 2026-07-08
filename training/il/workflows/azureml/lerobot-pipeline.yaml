@@ -35,56 +35,19 @@ settings:
 inputs:
   dataset:
     type: uri_folder
-    description: >-
-      Raw LeRobot dataset asset (e.g. azureml:my-dataset:1). Must contain
-      meta/, data/, and optionally videos/ subfolders.
-  dataset_repo_id:
-    type: string
-    description: >-
-      HuggingFace-style dataset repo id; must match the dataset folder name
-      (e.g. "user/koch-pick-place-5-lego-random-pose").
-  preprocessing_config:
-    type: uri_file
-    optional: true
-    description: >-
-      Optional preprocessing_config.yaml from a previous pipeline run, used
-      to lock down preprocessing parameters across runs.
-  policy_type:
-    type: string
-    default: act
-    description: >-
-      LeRobot policy type forwarded to both train and evaluate steps
-      (act / diffusion / pi0).
-  job_name:
-    type: string
-    default: lerobot-pipeline
-    description: >-
-      Display name used for MLflow run naming and step labels.
-  compute_preprocess:
-    type: string
-    default: azureml:cpu-cluster
-    description: AML compute target for the preprocess step.
-  compute_train:
-    type: string
-    default: azureml:cpu-cluster
-    description: AML compute target for the train step.
-  compute_evaluate:
-    type: string
-    default: azureml:cpu-cluster
-    description: AML compute target for the evaluate step.
+  policy_type: act
+  job_name: lerobot-pipeline
+  compute_preprocess: azureml:cpu-cluster
+  compute_train: azureml:cpu-cluster
+  compute_evaluate: azureml:cpu-cluster
 
 outputs:
   checkpoints:
     type: uri_folder
     mode: upload
-    description: Trained checkpoint folder uploaded by the MLflow training wrapper.
   eval_metrics:
     type: uri_folder
     mode: upload
-    description: >-
-      Evaluation artifacts: metrics.json + failure_cases.jsonl (VLA
-      evaluation_schema_version=1), eval_results.json (toolchain legacy),
-      plus trajectory plots.
 
 jobs:
   preprocess_step:
@@ -94,7 +57,6 @@ jobs:
     inputs:
       dataset: ${{parent.inputs.dataset}}
       dataset_repo_id: ${{parent.inputs.dataset_repo_id}}
-      preprocessing_config: ${{parent.inputs.preprocessing_config}}
 
   train_step:
     type: command
@@ -114,7 +76,6 @@ jobs:
       DATASET_REPO_ID: ${{parent.inputs.dataset_repo_id}}
       POLICY_TYPE: ${{parent.inputs.policy_type}}
       JOB_NAME: ${{parent.inputs.job_name}}
-      TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
 
   evaluate_step:
     type: command

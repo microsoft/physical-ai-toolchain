@@ -34,7 +34,16 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from tests.e2e._common import delete_blob_prefix, e2e_name, env_value, log_e2e, upload_blob_directory
+from tests.e2e._aml import AzureMLWorkspace, aml_workspace_args, archive_aml_asset
+from tests.e2e._common import (
+    delete_blob_prefix,
+    e2e_name,
+    env_value,
+    format_command_failure,
+    log_e2e,
+    run_command,
+    upload_blob_directory,
+)
 
 # --- Embodiment spec (single source of truth) -------------------------------
 # A self-contained ACT-compatible embodiment: one RGB camera ``observation.image``
@@ -398,6 +407,17 @@ class StagedDataset:
         return f"https://{self.storage_account}.blob.core.windows.net/{self.container}/{self.prefix}"
 
 
+def _materialize_synthetic_dataset(request: pytest.FixtureRequest, *, prefix: str, log_message: str) -> Path:
+    work_dir = Path(tempfile.mkdtemp(prefix=prefix))
+    request.addfinalizer(lambda: shutil.rmtree(work_dir, ignore_errors=True))
+
+    dataset_dir = work_dir / "dataset"
+    log_e2e(log_message)
+    build_synthetic_dataset(dataset_dir)
+    validate_synthetic_dataset(dataset_dir)
+    return dataset_dir
+
+
 def stage_synthetic_lerobot_dataset(
     request: pytest.FixtureRequest, repo_root: Path, storage_account: str
 ) -> StagedDataset:
@@ -408,13 +428,9 @@ def stage_synthetic_lerobot_dataset(
     """
     container = env_value(_IL_DATASET_CONTAINER_ENV, _DEFAULT_IL_DATASET_CONTAINER) or _DEFAULT_IL_DATASET_CONTAINER
 
-    work_dir = Path(tempfile.mkdtemp(prefix="il-e2e-dataset-"))
-    request.addfinalizer(lambda: shutil.rmtree(work_dir, ignore_errors=True))
-
-    dataset_dir = work_dir / "dataset"
-    log_e2e("Generating synthetic LeRobot v3.0 dataset")
-    build_synthetic_dataset(dataset_dir)
-    validate_synthetic_dataset(dataset_dir)
+    dataset_dir = _materialize_synthetic_dataset(
+        request, prefix="il-e2e-dataset-", log_message="Generating synthetic LeRobot v3.0 dataset"
+    )
 
     prefix = f"e2e-il-datasets/{e2e_name('lerobot')}"
     log_e2e(f"Uploading synthetic LeRobot dataset to {storage_account}/{container}/{prefix}")
@@ -438,3 +454,55 @@ def stage_synthetic_lerobot_dataset(
     )
 
     return StagedDataset(storage_account=storage_account, container=container, prefix=prefix)
+
+
+# --- AzureML data asset staging ---------------------------------------------
+# The AzureML LeRobot pipeline (submit-azureml-lerobot-pipeline.sh) consumes a
+# registered uri_folder data asset (azureml:NAME:VERSION), not a blob URL. The
+# pipeline's preprocess step accepts a raw LeRobot dataset (meta/, data/, videos/),
+# which is exactly what the synthetic generator produces.
+
+
+def register_synthetic_lerobot_data_asset(
+    request: pytest.FixtureRequest, repo_root: Path, aml_workspace: AzureMLWorkspace
+) -> str:
+    """Register the synthetic LeRobot dataset as an AzureML uri_folder data asset.
+
+    Returns the ``azureml:NAME:VERSION`` reference for the pipeline's ``--dataset-asset``
+    input and registers teardown that archives the asset. Version is a canonical integer
+    (``"1"``) with no leading zeros, as the pipeline submission validation requires.
+    """
+    dataset_dir = _materialize_synthetic_dataset(
+        request,
+        prefix="il-e2e-pipeline-dataset-",
+        log_message="Generating synthetic LeRobot v3.0 dataset for AzureML data asset",
+    )
+
+    name = e2e_name("e2e-lerobot-pipeline")
+    version = "1"
+    log_e2e(f"Registering AzureML data asset {name}:{version} from {dataset_dir}")
+    result = run_command(
+        [
+            "az",
+            "ml",
+            "data",
+            "create",
+            "--name",
+            name,
+            "--version",
+            version,
+            "--type",
+            "uri_folder",
+            "--path",
+            str(dataset_dir),
+            *aml_workspace_args(aml_workspace),
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Failed to register AzureML data asset {name}:{version}\n\n{format_command_failure(result)}"
+        )
+    request.addfinalizer(lambda: archive_aml_asset(repo_root, aml_workspace, "data", name, version))
+
+    return f"azureml:{name}:{version}"

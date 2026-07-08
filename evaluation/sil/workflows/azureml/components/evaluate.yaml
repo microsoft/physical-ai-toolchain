@@ -53,7 +53,12 @@ outputs:
       (VLA schema v1 aggregate verdict), failure_cases.jsonl (VLA schema v1
       per-episode failure records), plus trajectory plots.
 
-environment: azureml:lerobot-inference-env:latest
+environment:
+  # Digest-pinned base image; keep in sync with DEFAULT_LEROBOT_EVAL_IMAGE in
+  # scripts/lib/common.sh (both refreshed by scripts/update-image-digests.sh).
+  # An inline image yields an anonymous, content-hashed environment, so a base
+  # image change never collides with an immutable registered environment version.
+  image: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime@sha256:0a3b9fedefe1f61ac4d5a9de9015c0863db27ca0fde2d4e37e6268147980b726
 
 # Bridge pipeline-mounted inputs/output into the env-var ABI run_evaluation.py
 # expects:
@@ -69,12 +74,26 @@ environment: azureml:lerobot-inference-env:latest
 command: >-
   bash -c '
   set -euo pipefail;
+  source training/il/scripts/lerobot/lerobot-azureml.sh;
+  ensure_lerobot_runtime "${LEROBOT_VENV:-/opt/lerobot-venv}" training/il/lerobot av pyarrow lerobot;
   export POLICY_REPO_ID="$AZURE_ML_INPUT_model_checkpoint";
+  if [[ ! -f "$POLICY_REPO_ID/config.json" ]]; then
+    checkpoint_config="";
+    for candidate in "$POLICY_REPO_ID/checkpoints/last/pretrained_model" "$POLICY_REPO_ID/last/pretrained_model"; do
+      if [[ -f "$candidate/config.json" ]]; then
+        checkpoint_config="$candidate/config.json";
+        break;
+      fi;
+    done;
+    if [[ -z "$checkpoint_config" ]]; then
+      checkpoint_config="$(find "$POLICY_REPO_ID" -maxdepth 4 -type f -name config.json | sort | tail -n 1 || true)";
+    fi;
+    if [[ -n "$checkpoint_config" ]]; then
+      export POLICY_REPO_ID="$(dirname "$checkpoint_config")";
+    fi;
+  fi;
   if [[ -n "${AZURE_ML_INPUT_prepared_dataset:-}" ]]; then
-    : "${DATASET_REPO_ID:?DATASET_REPO_ID required when prepared_dataset is provided}";
-    case "$DATASET_REPO_ID" in
-      /*|*..*) echo "DATASET_REPO_ID must be relative (no /, no ..): $DATASET_REPO_ID" >&2; exit 1 ;;
-    esac;
+    require_relative_dataset_repo_id;
     export DATASET_DIR="$AZURE_ML_INPUT_prepared_dataset/$DATASET_REPO_ID";
     echo "[BRIDGE] DATASET_DIR=$DATASET_DIR";
   fi;

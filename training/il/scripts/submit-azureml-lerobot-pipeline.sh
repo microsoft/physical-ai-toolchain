@@ -188,6 +188,9 @@ workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
 mlflow_retries="${MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES:-3}"
 mlflow_timeout="${MLFLOW_HTTP_REQUEST_TIMEOUT:-60}"
 
+# Pipeline component base images are defined inline (digest-pinned) in each
+# component's `environment:` block, so no named environment is registered here.
+
 experiment_name=""
 display_name=""
 stream_logs=false
@@ -372,7 +375,7 @@ az_args=(
 
 # Pipeline-level inputs (visible in AML Studio UI)
 az_args+=(
-  --set "inputs.dataset=$dataset_asset"
+  --set "inputs.dataset.path=$dataset_asset"
   --set "inputs.dataset_repo_id=$dataset_repo_id"
   --set "inputs.policy_type=$policy_type"
   --set "inputs.job_name=$job_name"
@@ -380,7 +383,9 @@ az_args+=(
   --set "inputs.compute_train=$compute_train"
   --set "inputs.compute_evaluate=$compute_evaluate"
 )
-[[ -n "$preprocessing_config" ]] && az_args+=(--set "inputs.preprocessing_config=$preprocessing_config")
+# preprocessing_config is an optional input on the preprocess component (not a
+# pipeline-level input, which cannot be optional), so override the step input directly.
+[[ -n "$preprocessing_config" ]] && az_args+=(--set "jobs.preprocess_step.inputs.preprocessing_config.path=$preprocessing_config")
 
 if [[ "$with_register" == "true" ]]; then
   az_args+=(
