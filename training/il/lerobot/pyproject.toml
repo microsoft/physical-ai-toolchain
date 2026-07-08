@@ -29,7 +29,7 @@ dependencies = [
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
     "pydantic==2.13.4",
-    "sentry-sdk==2.63.0",
+    "sentry-sdk==2.64.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
