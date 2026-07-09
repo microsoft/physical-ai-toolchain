@@ -1,0 +1,72 @@
+# Kyverno admission-controller HelmRelease.
+# Replica counts and per-controller PDBs use a Helm ternary against
+# `.Values.singleNode` so a parent chart (or per-cluster overlay rendering this
+# HelmRelease through Helm) selects single-node (1 replica, no PDB) vs
+# multi-node (3 replicas, PDB on).
+# Webhook failurePolicy: Fail is owned by the ClusterPolicy `spec.failurePolicy` in
+# fleet-deployment/gitops/clusters/base/admission/kyverno-{sigstore,notation}-policy.yaml,
+# not by a chart value.
+#
+# Private-ACR signature fetch: the admission and background controllers resolve
+# imageRegistryCredentials.providers: [azure] through Azure workload identity. The
+# managed identity behind ${AZURE_ACR_PULL_CLIENT_ID} must hold AcrPull on the
+# target registry; ${AZURE_ACR_PULL_CLIENT_ID} is substituted by Flux
+# postBuild.substituteFrom from the workflow-config ConfigMap shipped per cluster.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kyverno
+  namespace: kyverno
+spec:
+  interval: 15m
+  chart:
+    spec:
+      chart: kyverno
+      version: ~3.8.0
+      sourceRef:
+        kind: HelmRepository
+        name: kyverno
+        namespace: flux-system
+      interval: 1h
+  install:
+    createNamespace: true
+  values:
+    # Upgrade and migrate CRDs on reconcile; the post-upgrade hook runs the
+    # 1.13 stored-version migration for dropped CRD API versions.
+    crds:
+      install: true
+      migration:
+        enabled: true
+    features:
+      policyExceptions:
+        # Retain cluster-wide policy-exception scope; CVE-2024-48921 narrowed the
+        # 1.13 default to the controller namespace.
+        namespace: "*"
+    admissionController:
+      replicas: "{{ .Values.singleNode | ternary 1 3 }}"
+      podDisruptionBudget:
+        enabled: "{{ .Values.singleNode | ternary false true }}"
+      # Azure workload identity for imageRegistryCredentials.providers: [azure].
+      podLabels:
+        azure.workload.identity/use: "true"
+      serviceAccount:
+        annotations:
+          azure.workload.identity/client-id: "${AZURE_ACR_PULL_CLIENT_ID}"
+    backgroundController:
+      replicas: "{{ .Values.singleNode | ternary 1 3 }}"
+      podDisruptionBudget:
+        enabled: "{{ .Values.singleNode | ternary false true }}"
+      # Background image checks (verifyImages) also fetch from the private ACR.
+      podLabels:
+        azure.workload.identity/use: "true"
+      serviceAccount:
+        annotations:
+          azure.workload.identity/client-id: "${AZURE_ACR_PULL_CLIENT_ID}"
+    cleanupController:
+      replicas: "{{ .Values.singleNode | ternary 1 3 }}"
+      podDisruptionBudget:
+        enabled: "{{ .Values.singleNode | ternary false true }}"
+    reportsController:
+      replicas: "{{ .Values.singleNode | ternary 1 3 }}"
+      podDisruptionBudget:
+        enabled: "{{ .Values.singleNode | ternary false true }}"

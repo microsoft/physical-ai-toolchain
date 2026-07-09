@@ -20,6 +20,18 @@ terraform {
       source  = "hashicorp/tls"
       version = ">= 4.0.6"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = ">= 2.17.0"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = ">= 2.35.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.6.0"
+    }
     fabric = {
       source  = "microsoft/fabric"
       version = ">= 1.3.0"
@@ -35,3 +47,19 @@ provider "azurerm" {
 }
 
 provider "azapi" {}
+
+provider "kubernetes" {
+  host                   = try(module.sil.aks_kube_config.host, null)
+  cluster_ca_certificate = try(base64decode(module.sil.aks_kube_config.cluster_ca_certificate), null)
+  client_certificate     = try(base64decode(module.sil.aks_kube_config.client_certificate), null)
+  client_key             = try(base64decode(module.sil.aks_kube_config.client_key), null)
+}
+
+provider "helm" {
+  kubernetes = {
+    host                   = try(module.sil.aks_kube_config.host, null)
+    cluster_ca_certificate = try(base64decode(module.sil.aks_kube_config.cluster_ca_certificate), null)
+    client_certificate     = try(base64decode(module.sil.aks_kube_config.client_certificate), null)
+    client_key             = try(base64decode(module.sil.aks_kube_config.client_key), null)
+  }
+}

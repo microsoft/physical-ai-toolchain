@@ -1,0 +1,78 @@
+# Helm values for kyverno/kyverno upstream chart.
+#
+# Two profiles ship as separate value blocks at the bottom of the file. The
+# deploy script selects one via --set-string flags or by passing one of the
+# helm -f overrides under values/kyverno-overrides/.
+#
+# Profile selection:
+#   singleNode = true  -> 1 replica per controller, no PDB
+#   singleNode = false -> 3 replicas per controller, PDB minAvailable=1
+#
+# Image verification webhook MUST run with failurePolicy=Fail; the webhook
+# configuration is owned by the Kyverno ClusterPolicy resources (see
+# clusters/base/admission/kyverno-*-policy.yaml), not by the chart.
+
+# Match-conditions evaluation requires the v2 webhook config the chart enables
+# by default for >= v1.13. Pin to a known-good chart version in defaults.conf.
+
+# Upgrade and migrate CRDs on reconcile; the post-upgrade hook runs the 1.13
+# stored-version migration for dropped CRD API versions.
+crds:
+  install: true
+  migration:
+    enabled: true
+
+admissionController:
+  replicas: 3
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  resources:
+    limits:
+      memory: 768Mi
+    requests:
+      cpu: 100m
+      memory: 384Mi
+  # Image-verification cache flags. Chart 3.8.x removed the
+  # features.imageVerifyCache* value keys; these are now passed as admission
+  # controller CLI args. Reduce the TTL to force re-verification after a
+  # trusted-root refresh; balance against Rekor/AKV call volume.
+  container:
+    extraArgs:
+      imageVerifyCacheEnabled: true
+      imageVerifyCacheTTLDuration: 60m
+      imageVerifyCacheMaxSize: 1000
+
+backgroundController:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+cleanupController:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+reportsController:
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# Image-verification cache TTL is configured via admissionController container
+# args above (chart 3.8.x dropped the features.imageVerifyCache* keys).
+features:
+  policyExceptions:
+    # Retain cluster-wide policy-exception scope; CVE-2024-48921 narrowed the
+    # 1.13 default to the controller namespace.
+    namespace: "*"
+# Default per-controller RBAC covers the pods/configmaps reads this
+# image-verification setup needs; the 1.13 wildcard view-RBAC removal requires
+# no extraResources here.
+
+# Notation plugin sidecar is provisioned by the trusted-root Kustomization;
+# Kyverno reaches it via the in-cluster service. No chart change required.
+# Per-controller RBAC (created by chart default) reads the
+# notation-akv-cert-chain ConfigMap; no top-level rbac key exists.

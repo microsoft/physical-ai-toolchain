@@ -1,0 +1,9 @@
+# Staging cluster admission overlay.
+# Mode: Sigstore keyless. Mirrors dev so promotion exercises the same
+# verification path before crossing the Notation boundary in production.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../base/admission/kyverno-sigstore-policy.yaml
+  - ../../../base/admission/trusted-root-kustomization.yaml

@@ -1,0 +1,3 @@
+global:
+  values:
+    ACR_LOGIN_SERVER: acrtest.azurecr.io

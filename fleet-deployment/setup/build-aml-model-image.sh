@@ -66,6 +66,9 @@ OPTIONS:
                                  Terraform notation_akv.value.signing_key_uri)
     --akv-tenant ID              AKV tenant       (default: same as ACR tenant)
     --akv-subscription ID        AKV subscription (default: same as ACR subscription)
+    --akv-self-signed            Use a self-signed AKV certificate (notation mode).
+                                 Sets the azure-kv plugin self_signed=true; default
+                                 is false (CA-issued certificate chain). Dev/test only.
     --skip-self-verify           Skip the verify-image.sh self-check
     --config-preview             Print configuration and exit
 
@@ -129,6 +132,7 @@ verify_mode=""
 akv_key_uri=""
 akv_tenant=""
 akv_subscription=""
+akv_self_signed=""
 skip_self_verify=false
 config_preview=false
 
@@ -153,6 +157,7 @@ while [[ $# -gt 0 ]]; do
     --akv-key-id)         akv_key_uri="$2"; shift 2 ;;
     --akv-tenant)         akv_tenant="$2"; shift 2 ;;
     --akv-subscription)   akv_subscription="$2"; shift 2 ;;
+    --akv-self-signed)    akv_self_signed=true; shift ;;
     --skip-self-verify)   skip_self_verify=true; shift ;;
     --config-preview)     config_preview=true; shift ;;
     *)                    fatal "Unknown option: $1" ;;
@@ -293,6 +298,12 @@ akv_subscription=$(resolve_value "AKV subscription"   "$akv_subscription" "${DEF
 if [[ "$verify_mode" == "notation" ]]; then
   akv_key_uri=$(resolve_value "AKV signing key URI" "$akv_key_uri" "${DEFAULT_AKV_KEY_URI:-}" "$tf_output" "notation_akv.value.signing_key_uri" "" true)
 fi
+# self_signed defaults to false (CA-issued chain). CLI --akv-self-signed wins; otherwise DEFAULT_AKV_SELF_SIGNED.
+akv_self_signed="${akv_self_signed:-${DEFAULT_AKV_SELF_SIGNED:-false}}"
+case "$akv_self_signed" in
+  true|false) ;;
+  *) fatal "Invalid --akv-self-signed value: $akv_self_signed (expected true | false)" ;;
+esac
 
 # Resolve 'latest' against the live AML workspace (one round-trip).
 # Skip the lookup under --config-preview so the script never contacts Azure in preview mode
@@ -363,6 +374,7 @@ if [[ "$verify_mode" == "notation" ]]; then
   print_kv "AKV Tenant"        "$akv_tenant"
   print_kv "AKV Subscription"  "$akv_subscription"
   print_kv "AKV Key URI"       "$akv_key_uri"
+  print_kv "AKV Self-Signed"   "$akv_self_signed"
 fi
 
 if [[ "$config_preview" == "true" ]]; then
@@ -473,7 +485,7 @@ case "$verify_mode" in
     fi
     notation sign \
       --plugin azure-kv \
-      --plugin-config self_signed=false \
+      --plugin-config self_signed="$akv_self_signed" \
       --plugin-config credential_type=azurecli \
       --id "$akv_key_uri" \
       "$image_digest_ref"

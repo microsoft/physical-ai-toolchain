@@ -1,0 +1,10 @@
+# Production cluster admission overlay.
+# Mode: Notation v1 with AKV-HSM-backed RSA-3072 signing certificate.
+# The cert chain and trusted-identity values are injected via Flux
+# postBuild substitution from infrastructure/setup/config/workflow-config.json.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../../base/admission/kyverno-notation-policy.yaml
+  - ../../../base/admission/trusted-root-kustomization.yaml

@@ -1,0 +1,10 @@
+# Kyverno Helm chart repository for the admission-controller HelmRelease in
+# fleet-deployment/gitops/clusters/base/admission/kyverno-helmrelease.yaml.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kyverno
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://kyverno.github.io/kyverno/
