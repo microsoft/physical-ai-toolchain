@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Prerequisites and Build Validation
 description: Required tools, Azure access, NGC credentials, and build validation commands for contributing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-25
+ms.date: 2026-07-10
 ms.topic: how-to
 keywords:
   - prerequisites
