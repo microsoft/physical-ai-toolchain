@@ -48,13 +48,13 @@ variable "vpn_gateway_config" {
   default     = {}
 
   validation {
-    condition     = contains(["VpnGw1AZ", "VpnGw2AZ", "VpnGw3AZ"], var.vpn_gateway_config.sku)
-    error_message = "vpn_gateway_config.sku must be an AZ VPN Gateway SKU: VpnGw1AZ, VpnGw2AZ, or VpnGw3AZ."
+    condition     = contains(["VpnGw1", "VpnGw2", "VpnGw3", "VpnGw1AZ", "VpnGw2AZ", "VpnGw3AZ"], var.vpn_gateway_config.sku)
+    error_message = "vpn_gateway_config.sku must be VpnGw1, VpnGw2, VpnGw3, VpnGw1AZ, VpnGw2AZ, or VpnGw3AZ."
   }
 
   validation {
-    condition     = length(var.vpn_gateway_config.zones) > 0
-    error_message = "vpn_gateway_config.zones must contain at least one availability zone."
+    condition     = endswith(var.vpn_gateway_config.sku, "AZ") ? length(var.vpn_gateway_config.zones) > 0 : length(var.vpn_gateway_config.zones) == 0
+    error_message = "vpn_gateway_config.zones must be non-empty for AZ SKUs and empty for non-AZ SKUs."
   }
 }
 

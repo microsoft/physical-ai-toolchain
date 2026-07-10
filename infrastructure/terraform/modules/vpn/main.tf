@@ -58,6 +58,10 @@ resource "azurerm_public_ip" "vpn_gateway" {
   sku                 = "Standard"
   zones               = var.vpn_gateway_config.zones
   tags                = local.tags
+
+  lifecycle {
+    ignore_changes = [ip_tags]
+  }
 }
 
 // ============================================================
