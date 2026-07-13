@@ -16,7 +16,7 @@ dependencies = [
     "azure-identity==1.25.3",
     "azure-ai-ml==1.34.0",
     "matplotlib==3.11.0",
-    "azureml-mlflow==1.62.0.post3",
+    "azureml-mlflow==1.62.0.post5",
     "mlflow==3.14.0",
     # av is resolved transitively through lerobot. The legacy flat file pinned
     # av==17.1.0, which violates lerobot==0.5.1's av>=15.0.0,<16.0.0 cap (the
