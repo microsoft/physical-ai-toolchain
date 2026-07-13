@@ -29,15 +29,15 @@ dependencies = [
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
     "pydantic==2.13.4",
-    "sentry-sdk==2.63.0",
+    "sentry-sdk==2.64.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
     "datasets==5.0.0",
     "pyarrow==24.0.0",
     "matplotlib==3.11.0",
-    "huggingface-hub==1.21.0",
-    "lerobot==0.5.1",
+    "huggingface-hub==1.22.0",
+    "lerobot==0.6.0",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
