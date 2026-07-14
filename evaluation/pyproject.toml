@@ -21,9 +21,13 @@ dependencies = [
     "toml==0.10.2",
     "gymnasium==1.3.0",
     "torch==2.10.0",
-    "transformers==5.12.1",
+    "transformers==5.13.0",
     "tensordict==0.13.0",
-    "lerobot==0.5.1",
+    # lerobot 0.6.0 ships a minimal facade: the base install no longer bundles
+    # dataset dependencies. The SIL evaluation reads LeRobot dataset videos/parquet
+    # (av, pyarrow) and loads ACT checkpoints, so the [dataset] extra is required to
+    # restore av, pyarrow, pandas, datasets, and torchcodec.
+    "lerobot[dataset]==0.6.0",
 ]
 
 [build-system]
@@ -31,10 +35,6 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-override-dependencies = [
-    # Override lerobot's vulnerable diffusers transitive range for GHSA-98h9-4798-4q5v.
-    "diffusers==0.38.0",
-]
 package = false
 
 [tool.uv.pip]
@@ -45,7 +45,7 @@ dev = [
     "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
-    "hypothesis==6.155.7",
+    "hypothesis==6.156.1",
     "matplotlib==3.11.0",
     "numpy==2.2.6",
     "torch==2.10.0",
