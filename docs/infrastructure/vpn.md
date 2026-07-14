@@ -3,7 +3,7 @@ sidebar_position: 7
 title: VPN Gateway Configuration
 description: Point-to-site and site-to-site VPN setup for private AKS cluster access
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-07-13
 ms.topic: how-to
 keywords:
   - vpn
@@ -46,20 +46,21 @@ Deployment takes 20-30 minutes for the VPN Gateway.
 
 ## ⚙️ Configuration
 
-| Variable                                 | Description                  | Default                |
-|------------------------------------------|------------------------------|------------------------|
-| `gateway_subnet_address_prefix`          | GatewaySubnet CIDR (min /27) | `10.0.3.0/27`          |
-| `vpn_gateway_config.sku`                 | Gateway SKU                  | `VpnGw1AZ`             |
-| `vpn_gateway_config.client_address_pool` | P2S client IP range          | `["192.168.200.0/24"]` |
-| `aad_auth_config.should_enable`          | Enable Azure AD auth         | `true`                 |
+| Variable                                 | Description                                              | Default                |
+|------------------------------------------|----------------------------------------------------------|------------------------|
+| `gateway_subnet_address_prefix`          | GatewaySubnet CIDR (min /27)                             | `10.0.3.0/27`          |
+| `vpn_gateway_config.sku`                 | Gateway SKU                                              | `VpnGw1AZ`             |
+| `vpn_gateway_config.client_address_pool` | P2S client IP range                                      | `["192.168.200.0/24"]` |
+| `aad_auth_config.should_enable`          | Enable Microsoft Entra ID auth                           | `true`                 |
+| `revoked_client_certificates`            | Public SHA-1 thumbprints for revoked client certificates | `[]`                   |
 
 Non-AZ VPN Gateway SKUs are being deprecated by Azure. Use the AZ equivalents (`VpnGw1AZ`, `VpnGw2AZ`, `VpnGw3AZ`) to avoid portal warnings and unplanned SKU updates outside Terraform.
 
 ## 🔐 Authentication Options
 
-### Azure AD (Recommended)
+### Microsoft Entra ID
 
-Enabled by default. Users authenticate with their Azure AD credentials via the Azure VPN Client.
+Enabled by default for supported Azure VPN Client platforms.
 
 ```hcl
 aad_auth_config = {
@@ -69,7 +70,7 @@ aad_auth_config = {
 
 ### Certificate
 
-For environments without Azure AD integration:
+Use certificate authentication for Ubuntu strongSwan or environments without Microsoft Entra ID integration:
 
 ```hcl
 aad_auth_config = {
@@ -80,13 +81,16 @@ root_certificate_public_data = "MIIC5jCCAc6g..." # Base64-encoded cert
 
 ## 💻 VPN Client Setup
 
-### Install Azure VPN Client
+### Select a Client
 
-| Platform           | Installation                                                                                                                      |
-|--------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| Windows            | [Microsoft Store](https://apps.microsoft.com/detail/9NP355QT2SQB)                                                                 |
-| macOS              | [App Store](https://apps.apple.com/us/app/azure-vpn-client/id1553936137)                                                          |
-| Ubuntu 20.04/22.04 | [Microsoft Docs](https://learn.microsoft.com/azure/vpn-gateway/point-to-site-entra-vpn-client-linux#install-the-azure-vpn-client) |
+| Platform | Client           | Authentication                    |
+|----------|------------------|-----------------------------------|
+| Windows  | Azure VPN Client | Microsoft Entra ID or certificate |
+| macOS    | Azure VPN Client | Microsoft Entra ID or certificate |
+| Ubuntu   | strongSwan       | Certificate with IKEv2            |
+
+> [!WARNING]
+> Microsoft retires Azure VPN Client for Linux on August 31, 2026. Use strongSwan with certificate authentication for the supported Ubuntu edge path.
 
 ### Download VPN Configuration
 
@@ -98,7 +102,7 @@ root_certificate_public_data = "MIIC5jCCAc6g..." # Base64-encoded cert
 4. Click **Download VPN client** button
 5. Save and extract the downloaded ZIP file
 
-### Import Configuration
+### Import Azure VPN Client Configuration
 
 1. Open the Azure VPN Client application
 2. Click the **+** (Import) button in the bottom left
@@ -107,7 +111,7 @@ root_certificate_public_data = "MIIC5jCCAc6g..." # Base64-encoded cert
 5. Select `azurevpnconfig_aad.xml` (for Azure AD authentication)
 6. Click **Save**
 
-### Connect
+### Connect with Azure VPN Client
 
 1. Select the imported connection profile
 2. Click **Connect**
@@ -115,6 +119,21 @@ root_certificate_public_data = "MIIC5jCCAc6g..." # Base64-encoded cert
 4. Verify connection status shows "Connected"
 
 Once connected, you can access private endpoints including OSMO UI, PostgreSQL, and Redis.
+
+### Configure Ubuntu strongSwan
+
+Use the repository script to generate a host-local private key and CSR, validate the returned certificate, install strongSwan, preserve the Internet default route, and validate the P2S address and private OSMO endpoint.
+
+Follow [Ubuntu Edge K3s Setup](../data-pipeline/edge-k3s-setup.md#configure-certificate-vpn). The root CA private key remains on the external signing system.
+
+Revoke a compromised leaf certificate by adding its public SHA-1 thumbprint:
+
+```hcl
+revoked_client_certificates = [{
+  name       = "hil-lab-01"
+  thumbprint = "0123456789ABCDEF0123456789ABCDEF01234567"
+}]
+```
 
 ## 🏢 Site-to-Site VPN
 

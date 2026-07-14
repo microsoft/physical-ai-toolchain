@@ -29,6 +29,8 @@ deliberately does not duplicate them:
   and the deployment gating service used to swap policies safely.
 - [Infrastructure: cluster setup](../../infrastructure/cluster-setup.md) and
   [advanced cluster setup](../../infrastructure/cluster-setup-advanced.md): standing up the runtime.
+- [Ubuntu HiL OSMO Backend](ubuntu-hil-osmo-backend.md): connect a private Ubuntu K3s compute
+  plane to OSMO in AKS and run CPU/no-command validation gates.
 
 ## 🎓 Graduate When
 

@@ -25,6 +25,8 @@ OPTIONS:
     --cluster-resource-group NAME   Resource group of Arc cluster (or ARC_RESOURCE_GROUP)
     --storage-account NAME          Storage account name override
     --storage-resource-group NAME   Storage account resource group (or STORAGE_ACCOUNT_RESOURCE_GROUP)
+    --kubeconfig PATH               Explicit edge kubeconfig (required for direct mode)
+    --context NAME                  Explicit edge context (required for direct mode)
     --connectivity-mode MODE        direct|proxy (default: direct)
     --proxy-port PORT               Arc proxy port (default: 47011)
     --config-preview                Print configuration and exit
@@ -80,9 +82,12 @@ start_arc_proxy() {
 
   proxy_pid=$!
   export KUBECONFIG="$kubeconfig_file"
+  proxy_context=""
 
   for ((attempt = 1; attempt <= 20; attempt++)); do
-    if kubectl cluster-info >/dev/null 2>&1; then
+    proxy_context=$(command kubectl config current-context --kubeconfig "$kubeconfig_file" 2>/dev/null || true)
+    if [[ -n "$proxy_context" ]] && \
+       command kubectl --kubeconfig "$kubeconfig_file" --context "$proxy_context" cluster-info >/dev/null 2>&1; then
       info "Arc proxy connectivity established"
       return 0
     fi
@@ -156,6 +161,8 @@ cluster_resource_group="${ARC_RESOURCE_GROUP:-}"
 storage_account_name="${STORAGE_ACCOUNT_NAME:-}"
 storage_account_resource_group="${STORAGE_ACCOUNT_RESOURCE_GROUP:-}"
 storage_scope=""
+kubeconfig="${EDGE_KUBECONFIG:-}"
+context="${EDGE_K3S_CONTEXT:-}"
 connectivity_mode="${ACSA_CONNECTIVITY_MODE:-direct}"
 proxy_port="${ACSA_PROXY_PORT:-47011}"
 config_preview=false
@@ -173,6 +180,8 @@ while [[ $# -gt 0 ]]; do
     --cluster-resource-group)     cluster_resource_group="$2"; shift 2 ;;
     --storage-account)            storage_account_name="$2"; shift 2 ;;
     --storage-resource-group)     storage_account_resource_group="$2"; shift 2 ;;
+    --kubeconfig)                 kubeconfig="$2"; shift 2 ;;
+    --context)                    context="$2"; shift 2 ;;
     --connectivity-mode)          connectivity_mode="$2"; shift 2 ;;
     --proxy-port)                 proxy_port="$2"; shift 2 ;;
     --config-preview)             config_preview=true; shift ;;
@@ -181,8 +190,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_tools az terraform jq kubectl envsubst
-require_az_extension k8s-extension
-require_az_extension connectedk8s
 
 #------------------------------------------------------------------------------
 # Gather Configuration
@@ -225,6 +232,8 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Storage Account" "${storage_account_name:-<required>}"
   print_kv "Storage RG" "${storage_account_resource_group:-<cluster-rg>}"
   print_kv "Connectivity" "$connectivity_mode"
+  print_kv "Kubeconfig" "${kubeconfig:-<required for direct mode>}"
+  print_kv "Context" "${context:-<required for direct mode>}"
   print_kv "Edge Namespace" "$EDGE_NAMESPACE"
   print_kv "ACSA Extension" "$ACSA_EXTENSION_NAME@$ACSA_EXTENSION_VERSION ($ACSA_RELEASE_TRAIN)"
   print_kv "Cert Extension" "$cert_manager_extension_name@$cert_manager_extension_version ($cert_manager_release_train)"
@@ -241,11 +250,25 @@ fi
 [[ -n "$cluster_name" ]] || fatal "Cluster name is required (--cluster-name or ARC_CLUSTER_NAME)"
 [[ -n "$cluster_resource_group" ]] || fatal "Cluster resource group is required (--cluster-resource-group or ARC_RESOURCE_GROUP)"
 [[ -n "$storage_account_name" ]] || fatal "Storage account name is required (--storage-account or terraform output)"
+if [[ "$connectivity_mode" == "direct" ]]; then
+  [[ -n "$kubeconfig" ]] || fatal "--kubeconfig is required for direct connectivity"
+  [[ -n "$context" ]] || fatal "--context is required for direct connectivity"
+fi
+
+require_az_extension k8s-extension
+require_az_extension connectedk8s
 
 subscription_id=$(az account show --query id -o tsv)
 if [[ -z "$storage_scope" ]]; then
   storage_scope="/subscriptions/${subscription_id}/resourceGroups/${storage_account_resource_group:-$cluster_resource_group}/providers/Microsoft.Storage/storageAccounts/${storage_account_name}"
 fi
+container_scope="${storage_scope}/blobServices/default/containers/${BLOB_CONTAINER_NAME}"
+
+az storage container create \
+  --account-name "$storage_account_name" \
+  --name "$BLOB_CONTAINER_NAME" \
+  --auth-mode login \
+  --output none
 
 #------------------------------------------------------------------------------
 # Prepare Cluster Connectivity
@@ -263,11 +286,17 @@ if [[ "$connectivity_mode" == "proxy" ]]; then
   proxy_kubeconfig=$(mktemp)
   proxy_log_file=$(mktemp)
   start_arc_proxy "$proxy_kubeconfig" "$proxy_log_file"
+  kubeconfig="$proxy_kubeconfig"
+  context="$proxy_context"
+  [[ -n "$context" ]] || fatal "Arc proxy kubeconfig does not contain a current context"
+  verify_kube_target "$kubeconfig" "$context" k3s
+  activate_kube_target "$kubeconfig" "$context"
 else
-  verify_cluster_connectivity
+  verify_kube_target "$kubeconfig" "$context" k3s
+  activate_kube_target "$kubeconfig" "$context"
 fi
 
-ensure_namespace "$EDGE_NAMESPACE"
+ensure_namespace "$kubeconfig" "$context" "$EDGE_NAMESPACE"
 
 #------------------------------------------------------------------------------
 # Install cert-manager and ACSA Extensions
@@ -319,16 +348,16 @@ role_assignment_error_file=$(mktemp)
 if az role assignment create \
   --assignee-object-id "$acsa_principal_id" \
   --assignee-principal-type ServicePrincipal \
-  --role "Storage Blob Data Owner" \
-  --scope "$storage_scope" \
+  --role "Storage Blob Data Contributor" \
+  --scope "$container_scope" \
   --output none 2>"$role_assignment_error_file"; then
-  info "Storage Blob Data Owner role assigned"
+  info "Storage Blob Data Contributor role assigned"
 else
   if grep -qi "already exists" "$role_assignment_error_file"; then
-    info "Storage Blob Data Owner role assignment already exists"
+    info "Storage Blob Data Contributor role assignment already exists"
   else
     cat "$role_assignment_error_file" >&2
-    fatal "Failed to assign Storage Blob Data Owner role"
+    fatal "Failed to assign Storage Blob Data Contributor role"
   fi
 fi
 
@@ -336,12 +365,6 @@ fi
 # Create Container and Apply ACSA Manifests
 #------------------------------------------------------------------------------
 section "Create Container and Apply ACSA Manifests"
-
-az storage container create \
-  --account-name "$storage_account_name" \
-  --name "$BLOB_CONTAINER_NAME" \
-  --auth-mode login \
-  --output none
 
 render_dir=$(mktemp -d)
 

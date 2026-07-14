@@ -74,6 +74,28 @@ variable "root_certificate_public_data" {
   default     = null
 }
 
+variable "revoked_client_certificates" {
+  type = list(object({
+    name       = string
+    thumbprint = string
+  }))
+  description = "Revoked P2S client certificates identified by public SHA-1 thumbprint; private key and CA material are not accepted"
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for certificate in var.revoked_client_certificates :
+      can(regex("^[0-9A-Fa-f]{40}$", certificate.thumbprint))
+    ])
+    error_message = "Each revoked client certificate thumbprint must contain exactly 40 hexadecimal characters."
+  }
+
+  validation {
+    condition     = length(distinct([for certificate in var.revoked_client_certificates : certificate.name])) == length(var.revoked_client_certificates)
+    error_message = "Each revoked client certificate name must be unique."
+  }
+}
+
 /*
  * P2S Azure AD Authentication - Optional
  */

@@ -1,0 +1,26 @@
+workflow:
+  name: "{{ workflow_name }}"
+  resources:
+    default:
+      cpu: 1
+      memory: 128Mi
+      storage: 128Mi
+      gpu: 0
+      platform: hil_cpu
+  timeout:
+    exec_timeout: 5m
+    queue_timeout: 10m
+  tasks:
+    - name: cpu-smoke
+      image: "{{ image }}"
+      command: [sh]
+      args:
+        - -ceu
+        - |
+          test "$(id -u)" -ne 0
+          test ! -e /dev/nvidia0
+          printf 'HIL_CPU_RESULT={"schema_version":1,"kind":"osmo-hil-cpu-smoke","workflow_name":"{{ workflow_name }}","status":"passed","gpu_requested":0,"gpu_device_present":false}\n'
+
+default-values:
+  workflow_name: hil-cpu-smoke
+  image: alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1

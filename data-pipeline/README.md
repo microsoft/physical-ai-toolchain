@@ -16,7 +16,7 @@ data-pipeline/
 │   ├── scripts/                       # Service lifecycle and upload scripts
 │   └── tests/                         # Unit tests for config models
 ├── arc/                               # Arc Kubernetes manifests and policies
-├── setup/                             # Arc agent provisioning scripts
+├── setup/                             # Ubuntu VPN, K3s, Arc, and ACSA setup
 ├── examples/                          # Example configurations overview
 └── specifications/                    # Domain and config specifications
 ```
@@ -40,3 +40,5 @@ data-pipeline/
 ## ⚙️ Configuration
 
 Recording behavior is controlled by YAML configuration validated against a JSON Schema. See the [configuration reference](capture/config/README.md) for field definitions and platform examples.
+
+Reusable Ubuntu edge setup is documented in [Ubuntu Edge K3s Setup](../docs/data-pipeline/edge-k3s-setup.md).

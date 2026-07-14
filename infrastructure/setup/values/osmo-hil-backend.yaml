@@ -1,0 +1,82 @@
+services:
+  configs:
+    backends:
+      ${OSMO_HIL_BACKEND_NAME}:
+        description: "Private Ubuntu K3s HiL backend"
+        k8s_namespace: "${OSMO_HIL_WORKFLOW_NAMESPACE}"
+        router_address: "${OSMO_HIL_ROUTER_URL}"
+        node_conditions:
+          prefix: ""
+          ignore_node_conditions: []
+          additional_node_conditions: []
+        scheduler_settings:
+          scheduler_type: kai
+          scheduler_name: kai-scheduler
+          coscheduling: true
+          scheduler_timeout: 30
+
+    podTemplates:
+      hil_ctrl:
+        metadata:
+          labels:
+            physical-ai.microsoft.com/no-command: "true"
+        spec:
+          imagePullSecrets:
+            - name: ${OSMO_HIL_PULL_SECRET}
+          containers:
+            - name: osmo-ctrl
+              resources:
+                requests: { cpu: "100m", memory: "256Mi", ephemeral-storage: "256Mi" }
+                limits: { cpu: "500m", memory: "1Gi", ephemeral-storage: "1Gi" }
+      hil_user:
+        metadata:
+          labels:
+            physical-ai.microsoft.com/no-command: "true"
+        spec:
+          imagePullSecrets:
+            - name: ${OSMO_HIL_PULL_SECRET}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: "{{USER_CONTAINER_NAME}}"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests: { cpu: "{{USER_CPU}}", memory: "{{USER_MEMORY}}", ephemeral-storage: "{{USER_STORAGE}}" }
+                limits: { cpu: "{{USER_CPU}}", memory: "{{USER_MEMORY}}", ephemeral-storage: "{{USER_STORAGE}}" }
+
+    pools:
+      ${OSMO_HIL_POOL_NAME}:
+        description: "Private CPU-only HiL pool"
+        backend: "${OSMO_HIL_BACKEND_NAME}"
+        default_platform: hil_cpu
+        common_pod_template: [hil_ctrl, hil_user]
+        common_resource_validations: [static_cpu, static_memory, static_storage, static_gpu_non_negative]
+        common_default_variables:
+          USER_CPU: 1
+          USER_GPU: 0
+          USER_MEMORY: "1Gi"
+          USER_STORAGE: "1Gi"
+        action_permissions:
+          rsync: PRIVATE
+          cancel: PRIVATE
+          execute: PRIVATE
+          portforward: PRIVATE
+        platforms:
+          hil_cpu:
+            description: "CPU-only no-command HiL dry run"
+            host_network_allowed: false
+            privileged_allowed: false
+            allowed_mounts: []
+            resource_validations: [default_gpu_zero]
+
+gateway:
+  envoy:
+    defaultIdentity:
+      allowedPools: "default,${OSMO_HIL_POOL_NAME}"

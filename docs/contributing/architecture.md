@@ -2,7 +2,7 @@
 sidebar_position: 2
 title: Repository Architecture
 description: Tiered architecture for the Physical AI Toolchain, organized around the T0–T5 adoption ladder with the eight lifecycle domains presented as components adopted per tier.
-ms.date: 2026-06-12
+ms.date: 2026-07-13
 ms.topic: concept
 ---
 
@@ -139,6 +139,11 @@ Local k3s + FluxCD, **no Arc**. Several robots at one site you control, updated 
 
 **Domains active:** adds `fleet-deployment` (GitOps + gating) at single-site scope.
 
+T3 can also host a HiL compute plane on local K3s. When the site uses the OSMO
+control plane in Azure, the local cluster runs only the backend operator and
+HiL workloads; it does not run a second OSMO control plane. Azure Arc remains
+optional at T3 and becomes the management and identity broker at T4.
+
 **Graduate when:** robots span multiple sites, or sites become unreachable from a single operator network. That is the point at which a cross-site reachability and identity broker becomes genuinely necessary.
 
 ### T4 — Scale
@@ -162,6 +167,36 @@ Multi-site **fleet delivery** is the legitimate top of the necessary ladder. Thi
 **Domains active:** `fleet-deployment` at multi-site scope (fleet delivery terminus).
 
 **Graduate when:** the operator explicitly wants production signals to drive retraining and fleet-wide health analytics. This is a deliberate decision, not an automatic consequence of scale.
+
+## Cloud OSMO Control Plane and Edge HiL
+
+The supported edge shape keeps the OSMO control plane in AKS and deploys the
+backend operator to a separate Ubuntu K3s cluster. The backend operator
+initiates an outbound connection to OSMO, so the AKS service does not need to
+initiate connections into the HiL site.
+
+| Mode | OSMO endpoint | Edge requirement | Use |
+|------|---------------|------------------|-----|
+| Public | Dedicated trusted HTTPS ingress or load balancer | Outbound Internet access and endpoint policy | Simplest onboarding path without VPN |
+| Private | Internal OSMO load balancer over VPN/private routing | Route and private DNS resolution from the Ubuntu site | Preferred restricted-network path |
+
+Making the AKS API server public does not expose the OSMO application endpoint.
+Public mode requires a separate, authenticated HTTPS OSMO endpoint. Private
+mode requires a route, DNS resolution, and firewall policy from the edge site
+to the internal load balancer. Arc SSH and workstation port forwarding are
+operator access mechanisms, not the backend transport.
+
+Identity responsibilities remain separate:
+
+- An Arc onboarding service principal registers the server and K3s cluster and
+    is not used by runtime workloads.
+- The Arc-enabled server system-assigned managed identity authenticates host
+    processes such as recording upload processes when Azure RBAC grants storage access.
+- Arc Kubernetes workload identity federates a user-assigned managed identity
+    to selected K3s ServiceAccounts for storage and other Azure APIs.
+- The OSMO backend uses an expiring service token with the `osmo-backend` role.
+- A narrowly scoped HTTPS SAS is a storage-upload fallback, not OSMO
+    authentication, and managed identity remains the preferred storage path.
 
 ### T5 — Operate
 
@@ -208,7 +243,7 @@ Shared Azure services required from `T1` upward. Terraform modules provision AKS
 
 Tooling and infrastructure for capturing real-world robot data and transmitting it to Azure. At `T0` this is purely local (ROS 2 bag recording plus `cp`/`rsync`); Azure Arc edge agents enter only at the multi-site `T4` boundary. This domain covers:
 
-- Setup scripts for deploying Azure Arc, Arc-enabled Kubernetes, and data transfer components to edge devices (multi-site only)
+- Setup scripts for deploying Ubuntu/K3s, Azure Arc, Arc-enabled Kubernetes, and data transfer components to edge devices (multi-site only)
 - ROS 2 episodic data capture scripts for imitation learning (IL) training datasets
 - Data transfer orchestration from edge storage to Azure Blob Storage
 - Example programs demonstrating episodic recording from physical robot hardware
@@ -267,7 +302,7 @@ Software-in-the-loop (SiL) and hardware-in-the-loop (HiL) evaluation pipelines f
 | Approach | Infrastructure                                                                                         | Policy Host                     |
 |----------|--------------------------------------------------------------------------------------------------------|---------------------------------|
 | SiL      | Any available compute that can serve the policy as an inference endpoint                               | AzureML managed endpoint or AKS |
-| HiL      | Target deployment hardware (typically NVIDIA Jetson) running the containerized TensorRT or ONNX policy | Edge device matching production |
+| HiL      | Target deployment hardware, including an Ubuntu K3s HiL host, running the containerized TensorRT or ONNX policy | Edge device matching production |
 
 Evaluation metrics capture to:
 

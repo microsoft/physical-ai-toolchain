@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shared functions for deployment and submission scripts
 # Follows k3s/Docker/Homebrew conventions for user-facing scripts
+# cspell:ignore readyz dockerconfigjson managedclusters tolower
 
 # Source repo-root .env.local for local environment overrides (not committed to git)
 _common_sh_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -257,6 +258,37 @@ stage_and_upload_code() {
   echo "$uri"
 }
 
+wait_for_osmo_workflow() {
+  local workflow_name="${1:?workflow name required}"
+  local timeout_seconds="${2:-600}" poll_seconds="${3:-5}"
+  local elapsed=0 status=""
+
+  while (( elapsed < timeout_seconds )); do
+    status=$(osmo workflow query "$workflow_name" --output json 2>/dev/null | \
+      jq -r '.status // .state // empty' 2>/dev/null || true)
+    case "$status" in
+      COMPLETED|completed|Completed|SUCCEEDED|succeeded|Succeeded)
+        info "OSMO workflow $workflow_name completed successfully"
+        return 0
+        ;;
+      FAILED|failed|Failed|ERROR|error|Error)
+        error "OSMO workflow $workflow_name failed"
+        error "Inspect logs with: osmo workflow logs $workflow_name"
+        return 1
+        ;;
+      CANCELLED|cancelled|Canceled|CANCELED|canceled)
+        error "OSMO workflow $workflow_name was cancelled"
+        return 1
+        ;;
+    esac
+    sleep "$poll_seconds"
+    elapsed=$((elapsed + poll_seconds))
+  done
+
+  error "OSMO workflow $workflow_name did not complete within ${timeout_seconds}s (last status: ${status:-unknown})"
+  return 1
+}
+
 # Ensure Azure CLI extension is installed
 require_az_extension() {
   local ext="${1:?extension name required}"
@@ -340,43 +372,207 @@ tf_require() {
   echo "$val"
 }
 
-# Connect to AKS cluster
-connect_aks() {
-  local rg="${1:?resource group required}" name="${2:?cluster name required}" context_name
-  info "Connecting to AKS cluster $name..."
-  az aks get-credentials --resource-group "$rg" --name "$name" --overwrite-existing
-  # AAD-managed clusters (especially with disableLocalAccounts=true) require kubelogin
-  # to exchange Azure CLI tokens for the cluster API. Convert idempotently when available.
-  if command -v kubelogin >/dev/null 2>&1; then
-    context_name=$(kubectl config current-context 2>/dev/null || true)
-    [[ -n "$context_name" ]] || fatal "Could not determine current kubeconfig context after az aks get-credentials"
-    kubelogin convert-kubeconfig --context "$context_name" -l azurecli >/dev/null
-  fi
-  verify_cluster_connectivity
+# Run kubectl against an explicit kubeconfig and context.
+kube_kubectl() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  shift 2
+  command kubectl --kubeconfig "$kubeconfig" --context "$context" "$@"
 }
 
-# Verify kubectl can reach the cluster API server
-verify_cluster_connectivity() {
-  info "Verifying cluster connectivity..."
-  if ! kubectl cluster-info &>/dev/null; then
-    error "Cannot connect to Kubernetes cluster"
-    error "For private clusters, connect via VPN first. See: infrastructure/terraform/vpn/README.md"
+# Run Helm against an explicit kubeconfig and context.
+kube_helm() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  shift 2
+  command helm --kubeconfig "$kubeconfig" --kube-context "$context" "$@"
+}
+
+kube_api_server() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  command kubectl config view --kubeconfig "$kubeconfig" --context "$context" --minify \
+    -o jsonpath='{.clusters[0].cluster.server}'
+}
+
+kube_system_namespace_uid() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  kube_kubectl "$kubeconfig" "$context" get namespace kube-system -o jsonpath='{.metadata.uid}'
+}
+
+kube_cluster_identity() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  local server namespace_uid
+  server=$(kube_api_server "$kubeconfig" "$context")
+  namespace_uid=$(kube_system_namespace_uid "$kubeconfig" "$context")
+  printf '%s\n' "$(printf '%s\n%s\n' "$server" "$namespace_uid" | calculate_sha256 /dev/stdin)"
+}
+
+# Validate that a context is reachable and represents the declared cluster role.
+# Usage: verify_kube_target <kubeconfig> <context> <aks|k3s>
+verify_kube_target() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  local role="${3:?cluster role required}" server namespace_uid node_json
+
+  [[ -f "$kubeconfig" ]] || fatal "Kubeconfig not found: $kubeconfig"
+  [[ "$role" == "aks" || "$role" == "k3s" ]] || fatal "Unsupported Kubernetes target role: $role"
+  command kubectl config get-contexts "$context" --kubeconfig "$kubeconfig" -o name 2>/dev/null | grep -qx "$context" || \
+    fatal "Context '$context' not found in $kubeconfig"
+
+  server=$(kube_api_server "$kubeconfig" "$context")
+  [[ -n "$server" ]] || fatal "Context '$context' has no API server"
+  if ! kube_kubectl "$kubeconfig" "$context" get --raw=/readyz >/dev/null 2>&1; then
+    error "Cannot connect to Kubernetes context '$context' at $server"
+    error "For private clusters, connect through the configured VPN first"
     fatal "Cluster connectivity check failed"
   fi
+
+  namespace_uid=$(kube_system_namespace_uid "$kubeconfig" "$context")
+  [[ -n "$namespace_uid" ]] || fatal "Unable to resolve kube-system namespace UID for '$context'"
+  node_json=$(kube_kubectl "$kubeconfig" "$context" get nodes -o json)
+
+  if [[ "$role" == "aks" ]]; then
+    jq -e '.items | length > 0 and all(.[]; (.spec.providerID // "") | startswith("azure://"))' \
+      <<< "$node_json" >/dev/null || fatal "Context '$context' does not identify an AKS cluster"
+  else
+    jq -e '.items | length > 0 and all(.[]; (.status.nodeInfo.kubeletVersion // "") | contains("+k3s"))' \
+      <<< "$node_json" >/dev/null || fatal "Context '$context' does not identify a K3s cluster"
+  fi
+
+  info "Verified $(printf '%s' "$role" | tr '[:lower:]' '[:upper:]') context '$context' at $server (kube-system UID: $namespace_uid)"
+}
+
+verify_distinct_kube_targets() {
+  local first_kubeconfig="${1:?first kubeconfig required}" first_context="${2:?first context required}"
+  local second_kubeconfig="${3:?second kubeconfig required}" second_context="${4:?second context required}"
+  local first_identity second_identity
+
+  first_identity=$(kube_cluster_identity "$first_kubeconfig" "$first_context")
+  second_identity=$(kube_cluster_identity "$second_kubeconfig" "$second_context")
+  [[ "$first_identity" != "$second_identity" ]] || \
+    fatal "Contexts '$first_context' and '$second_context' identify the same Kubernetes cluster"
+}
+
+# Verify Terraform and Azure resolve the same expected AKS resource before credential writes.
+verify_aks_resource_id() {
+  local tf_output="${1:?terraform output required}" expected_id="${2:?expected AKS resource ID required}"
+  local state_id live_id resource_group cluster normalized_expected
+
+  state_id=$(tf_require "$tf_output" "aks_cluster.value.id" "AKS cluster resource ID")
+  resource_group=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
+  cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster")
+  live_id=$(az aks show --resource-group "$resource_group" --name "$cluster" --query id -o tsv)
+  normalized_expected=$(printf '%s' "$expected_id" | tr '[:upper:]' '[:lower:]')
+
+  [[ "$(printf '%s' "$state_id" | tr '[:upper:]' '[:lower:]')" == "$normalized_expected" ]] || \
+    fatal "Terraform AKS resource ID does not match the expected target"
+  [[ "$(printf '%s' "$live_id" | tr '[:upper:]' '[:lower:]')" == "$normalized_expected" ]] || \
+    fatal "Azure AKS resource ID does not match the expected target"
+  info "Verified expected AKS resource ID: $live_id"
+}
+
+require_no_symlink_path() {
+  local path="${1:?path required}" current component
+  local path_components=()
+
+  if [[ "$path" == /* ]]; then
+    current="/"
+    path="${path#/}"
+  else
+    current="$PWD"
+  fi
+
+  IFS='/' read -r -a path_components <<< "$path"
+  for component in "${path_components[@]}"; do
+    case "$component" in
+      ""|.) continue ;;
+      ..) current=$(dirname "$current") ;;
+      *)
+        current="${current%/}/$component"
+        [[ ! -L "$current" ]] || fatal "Protected path must not contain symlinks: $current"
+        ;;
+    esac
+  done
+}
+
+# Reject an existing context that points to a different API server before overwrite.
+verify_existing_aks_kubeconfig() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  local expected_id="${3:?expected AKS resource ID required}"
+  local resource_group cluster aks_json expected_host configured_server configured_host
+
+  [[ ! -L "$kubeconfig" ]] || fatal "Kubeconfig must not be a symlink: $kubeconfig"
+  [[ -f "$kubeconfig" ]] || return 0
+  command kubectl config get-contexts "$context" --kubeconfig "$kubeconfig" -o name 2>/dev/null | grep -qx "$context" || return 0
+
+  resource_group=$(awk -F/ '{for (i = 1; i <= NF; i++) if (tolower($i) == "resourcegroups") {print $(i+1); exit}}' <<< "$expected_id")
+  cluster=$(awk -F/ '{for (i = 1; i <= NF; i++) if (tolower($i) == "managedclusters") {print $(i+1); exit}}' <<< "$expected_id")
+  aks_json=$(az aks show --resource-group "$resource_group" --name "$cluster" -o json)
+  expected_host=$(jq -r '.privateFqdn // .fqdn // empty' <<< "$aks_json")
+  configured_server=$(kube_api_server "$kubeconfig" "$context")
+  configured_host="${configured_server#*://}"
+  configured_host="${configured_host%%:*}"
+  configured_host="${configured_host%/}"
+
+  [[ -n "$expected_host" && \
+    "$(printf '%s' "$configured_host" | tr '[:upper:]' '[:lower:]')" == \
+    "$(printf '%s' "$expected_host" | tr '[:upper:]' '[:lower:]')" ]] || \
+    fatal "Existing context '$context' points to $configured_server, not expected AKS resource $expected_id"
+  info "Verified existing AKS context '$context' at $configured_server before credential refresh"
+}
+
+# Bind direct kubectl and Helm calls in the current script to one explicit target.
+activate_kube_target() {
+  KUBE_TARGET_KUBECONFIG="${1:?kubeconfig required}"
+  KUBE_TARGET_CONTEXT="${2:?context required}"
+  export KUBE_TARGET_KUBECONFIG KUBE_TARGET_CONTEXT
+
+  # shellcheck disable=SC2329  # invoked by callers after target activation
+  kubectl() {
+    command kubectl --kubeconfig "$KUBE_TARGET_KUBECONFIG" --context "$KUBE_TARGET_CONTEXT" "$@"
+  }
+  # shellcheck disable=SC2329  # invoked by callers after target activation
+  helm() {
+    command helm --kubeconfig "$KUBE_TARGET_KUBECONFIG" --kube-context "$KUBE_TARGET_CONTEXT" "$@"
+  }
+}
+
+# Connect to AKS using an isolated kubeconfig and explicit context.
+# Usage: connect_aks <resource-group> <cluster-name> <kubeconfig> [context]
+connect_aks() {
+  local rg="${1:?resource group required}" name="${2:?cluster name required}"
+  local kubeconfig="${3:?isolated kubeconfig required}" context="${4:-$name}"
+  local kubeconfig_dir
+
+  kubeconfig_dir=$(dirname "$kubeconfig")
+  require_no_symlink_path "$kubeconfig"
+  [[ ! -L "$kubeconfig" ]] || fatal "Kubeconfig must not be a symlink: $kubeconfig"
+  [[ ! -L "$kubeconfig_dir" ]] || fatal "Kubeconfig directory must not be a symlink: $kubeconfig_dir"
+  mkdir -p "$kubeconfig_dir"
+  chmod 700 "$kubeconfig_dir"
+  info "Writing AKS credentials for $name to isolated kubeconfig $kubeconfig..."
+  KUBECONFIG="$kubeconfig" az aks get-credentials --resource-group "$rg" --name "$name" \
+    --context "$context" --overwrite-existing >/dev/null
+  chmod 600 "$kubeconfig"
+
+  if command -v kubelogin >/dev/null 2>&1; then
+    kubelogin convert-kubeconfig --kubeconfig "$kubeconfig" --context "$context" -l azurecli >/dev/null
+  fi
+  verify_kube_target "$kubeconfig" "$context" aks
+  activate_kube_target "$kubeconfig" "$context"
+}
+
+# Verify kubectl can reach an explicitly selected cluster API server.
+verify_cluster_connectivity() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  info "Verifying cluster connectivity for context $context..."
+  kube_kubectl "$kubeconfig" "$context" cluster-info >/dev/null || fatal "Cluster connectivity check failed"
   info "Cluster connectivity verified"
 }
 
-# Ensure Kubernetes namespace exists
+# Ensure a namespace exists on an explicit cluster target.
 ensure_namespace() {
-  local ns="${1:?namespace required}"
-  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-}
-
-# Login to Azure Container Registry
-login_acr() {
-  local acr="${1:?acr name required}"
-  info "Logging into ACR $acr..."
-  az acr login --name "$acr"
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  local ns="${3:?namespace required}"
+  kube_kubectl "$kubeconfig" "$context" create namespace "$ns" --dry-run=client -o yaml | \
+    kube_kubectl "$kubeconfig" "$context" apply -f - >/dev/null
 }
 
 # Auto-detect ACR name from terraform outputs
@@ -388,23 +584,52 @@ detect_acr_name() {
   echo "$acr_name"
 }
 
+verify_acr_image_manifest() {
+  local manifest="${1:?image manifest required}" expected_login_server="${2:?login server required}"
+  local expected_version="${3:?image version required}" registry login_server version name repository digest live_login_server
+  local actual_digest attributes
+
+  [[ -f "$manifest" ]] || fatal "ACR image manifest not found: $manifest"
+  jq -e '
+    .schema_version == 1 and
+    (.registry | type == "string" and length > 0) and
+    (.login_server | type == "string" and length > 0) and
+    (.image_version | type == "string" and length > 0) and
+    (["agent", "backend-listener", "backend-worker", "client", "delayed-job-monitor", "init-container", "logger", "router", "service", "web-ui", "worker"] - (.images | keys) | length == 0) and
+    all(.images[]; (.repository | type == "string" and length > 0) and (.digest | test("^sha256:[0-9a-f]{64}$")))
+  ' "$manifest" >/dev/null || fatal "Invalid ACR image manifest: $manifest"
+
+  registry=$(jq -r '.registry' "$manifest")
+  login_server=$(jq -r '.login_server' "$manifest")
+  version=$(jq -r '.image_version' "$manifest")
+  [[ "$registry" == "${expected_login_server%%.*}" ]] || fatal "Image manifest registry does not match $expected_login_server"
+  [[ "$login_server" == "$expected_login_server" ]] || fatal "Image manifest login server does not match $expected_login_server"
+  [[ "$version" == "$expected_version" ]] || fatal "Image manifest version does not match $expected_version"
+  live_login_server=$(az acr show --name "$registry" --query loginServer -o tsv)
+  [[ "$live_login_server" == "$expected_login_server" ]] || fatal "Azure registry login server does not match $expected_login_server"
+
+  while IFS=$'\t' read -r name repository digest; do
+    actual_digest=$(az acr manifest show-metadata --registry "$registry" \
+      --name "${repository}:${version}" --query digest -o tsv)
+    [[ "$actual_digest" == "$digest" ]] || fatal "ACR digest mismatch for $name (${repository}:${version})"
+    attributes=$(az acr repository show --name "$registry" --image "${repository}:${version}" \
+      --query '[changeableAttributes.writeEnabled,changeableAttributes.deleteEnabled]' -o json)
+    jq -e '.[0] == false and .[1] == false' <<< "$attributes" >/dev/null || \
+      fatal "ACR tag must disable writes and deletes: ${repository}:${version}"
+  done < <(jq -r '.images | to_entries[] | [.key, .value.repository, .value.digest] | @tsv' "$manifest")
+
+  info "Verified immutable ACR image manifest for $expected_login_server:$expected_version"
+}
+
 # Detect OSMO service URL from cluster (for CLI and external access)
 detect_service_url() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
   local url=""
-  # Try internal load balancer first
   local lb_ip
-  lb_ip=$(kubectl get svc azureml-ingress-nginx-internal-lb -n azureml \
+  lb_ip=$(kube_kubectl "$kubeconfig" "$context" get svc azureml-ingress-nginx-internal-lb -n azureml \
     -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
   if [[ -n "$lb_ip" ]]; then
     url="http://${lb_ip}"
-  else
-    # Fallback to ClusterIP
-    local cluster_ip
-    cluster_ip=$(kubectl get svc azureml-ingress-nginx-controller -n azureml \
-      -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
-    if [[ -n "$cluster_ip" && "$cluster_ip" != "None" ]]; then
-      url="http://${cluster_ip}"
-    fi
   fi
   echo "$url"
 }
@@ -424,15 +649,86 @@ print_kv() {
 
 # Create NVCR image pull secret for NGC-authenticated registries
 create_nvcr_pull_secret() {
-  local ns="${1:?namespace required}" api_key="${2:?NGC API key required}" name="${3:-nvcr-pull-secret}"
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  local ns="${3:?namespace required}" api_key_file="${4:?NGC API key file required}"
+  local name="${5:-nvcr-pull-secret}" api_key auth docker_config
+  require_protected_file "$api_key_file"
+  api_key=$(<"$api_key_file")
+  [[ -n "$api_key" ]] || fatal "NGC API key file is empty: $api_key_file"
+  # shellcheck disable=SC2016  # NVCR requires the literal username $oauthtoken
+  auth=$(printf '$oauthtoken:%s' "$api_key" | base64 | tr -d '\n')
+  docker_config=$(mktemp)
+  chmod 0600 "$docker_config"
+  jq -n --arg auth "$auth" \
+    '{auths: {"nvcr.io": {username: "$oauthtoken", auth: $auth}}}' > "$docker_config"
   info "Creating NVCR pull secret $name in namespace $ns..."
-  # shellcheck disable=SC2016
-  kubectl create secret docker-registry "$name" \
+  if ! kube_kubectl "$kubeconfig" "$context" create secret generic "$name" \
     --namespace="$ns" \
-    --docker-server=nvcr.io \
-    --docker-username='$oauthtoken' \
-    --docker-password="$api_key" \
-    --dry-run=client -o yaml | kubectl apply -f -
+    --type=kubernetes.io/dockerconfigjson \
+    --from-file=.dockerconfigjson="$docker_config" \
+    --dry-run=client -o yaml | kube_kubectl "$kubeconfig" "$context" apply -f -; then
+    rm -f "$docker_config"
+    unset api_key auth
+    fatal "Failed to create NVCR pull secret $name in namespace $ns"
+  fi
+  rm -f "$docker_config"
+  unset api_key auth
+}
+
+create_registry_pull_secret() {
+  local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
+  local ns="${3:?namespace required}" docker_config_file="${4:?Docker config file required}"
+  local name="${5:-registry-pull-secret}" registry_host="${6:?registry host required}"
+
+  require_protected_file "$docker_config_file"
+  jq -e --arg host "$registry_host" '
+    .auths | type == "object" and
+    .[$host] | type == "object" and
+    (.auth | type == "string" and length > 0)
+  ' "$docker_config_file" >/dev/null || \
+    fatal "Registry Docker config has no auth entry for $registry_host"
+
+  info "Creating registry pull secret $name in namespace $ns..."
+  kube_kubectl "$kubeconfig" "$context" create secret generic "$name" \
+    --namespace="$ns" \
+    --type=kubernetes.io/dockerconfigjson \
+    --from-file=.dockerconfigjson="$docker_config_file" \
+    --dry-run=client -o yaml | kube_kubectl "$kubeconfig" "$context" apply -f -
+}
+
+require_protected_directory() {
+  local directory="${1:?protected directory required}" permissions owner current_user
+  [[ -d "$directory" && ! -L "$directory" ]] || fatal "Protected directory must be a non-symlink directory: $directory"
+  permissions=$(stat -c '%a' "$directory" 2>/dev/null || stat -f '%Lp' "$directory")
+  owner=$(stat -c '%u' "$directory" 2>/dev/null || stat -f '%u' "$directory")
+  current_user=$(id -u)
+  [[ "$owner" == "0" || "$owner" == "$current_user" ]] || fatal "Protected directory has an unexpected owner: $directory"
+  (( (8#$permissions & 8#077) == 0 )) || fatal "Protected directory must not be accessible by group or other users: $directory ($permissions)"
+}
+
+is_rfc1918_ipv4() {
+  python3 - "$1" <<'PYTHON'
+import ipaddress
+import sys
+
+address = ipaddress.ip_address(sys.argv[1])
+networks = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+)
+raise SystemExit(0 if isinstance(address, ipaddress.IPv4Address) and any(address in network for network in networks) else 1)
+PYTHON
+}
+
+require_protected_file() {
+  local file="${1:?protected file required}" permissions owner current_user
+  [[ -f "$file" && ! -L "$file" ]] || fatal "Protected input must be a regular non-symlink file: $file"
+  permissions=$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file")
+  owner=$(stat -c '%u' "$file" 2>/dev/null || stat -f '%u' "$file")
+  current_user=$(id -u)
+  [[ "$owner" == "0" || "$owner" == "$current_user" ]] || fatal "Protected input has an unexpected owner: $file"
+  (( (8#$permissions & 8#077) == 0 )) || fatal "Protected input must not be accessible by group or other users: $file ($permissions)"
 }
 
 # // ===================================================================

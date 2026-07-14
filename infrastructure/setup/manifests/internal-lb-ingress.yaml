@@ -7,7 +7,6 @@
 # NOTE: The azureml-fe service is reserved for AzureML inference endpoints.
 # OSMO uses this dedicated internal LoadBalancer to avoid conflicts.
 #
-# To use a specific IP, add: spec.loadBalancerIP: <your-ip>
 apiVersion: v1
 kind: Service
 metadata:
@@ -17,6 +16,7 @@ metadata:
     service.beta.kubernetes.io/azure-load-balancer-internal: "true"
 spec:
   type: LoadBalancer
+  loadBalancerIP: ${OSMO_PRIVATE_SERVICE_IP}
   selector:
     app.kubernetes.io/name: azureml-ingress-nginx
     app.kubernetes.io/instance: azureml-ingress-nginx

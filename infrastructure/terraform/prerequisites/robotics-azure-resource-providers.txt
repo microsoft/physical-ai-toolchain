@@ -1,6 +1,10 @@
 Microsoft.ExtendedLocation
 Microsoft.Kubernetes
 Microsoft.KubernetesConfiguration
+Microsoft.HybridCompute
+Microsoft.GuestConfiguration
+Microsoft.HybridConnectivity
+Microsoft.AzureArcData
 Microsoft.IoTOperations
 Microsoft.DeviceRegistry
 Microsoft.SecretSyncController

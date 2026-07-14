@@ -44,8 +44,15 @@ output "p2s_connection_info" {
   description = "Point-to-Site VPN connection information"
   value = {
     client_address_pool = var.vpn_gateway_config.client_address_pool
-    protocols           = ["OpenVPN", "IkeV2"]
+    protocols           = local.vpn_client_protocols
+    authentication      = local.vpn_auth_types
     gateway_public_ip   = azurerm_public_ip.vpn_gateway.ip_address
+    revoked_certificates = [
+      for certificate in var.revoked_client_certificates : {
+        name       = certificate.name
+        thumbprint = upper(certificate.thumbprint)
+      }
+    ]
   }
 }
 

@@ -21,7 +21,11 @@ Install Azure Machine Learning extension on AKS and attach as compute target.
 OPTIONS:
     -h, --help                Show this help message
     -t, --tf-dir DIR          Terraform directory (default: $DEFAULT_TF_DIR)
+    --kubeconfig PATH         Isolated AKS kubeconfig output
+    --context NAME            Explicit AKS context (default: cluster name)
     --compute-name NAME       Compute target name (default: k8s-<suffix>)
+    --instance-types-manifest PATH
+                  InstanceType manifest (default: manifests/azureml-instance-types.yaml)
     --fast-prod               Set cluster purpose to FastProd with HA inference router
     --enforce-resource-validation
                               Enforce aml-operator resource validation (default: disabled).
@@ -51,7 +55,10 @@ EOF
 
 # Defaults
 tf_dir="$SCRIPT_DIR/$DEFAULT_TF_DIR"
+kubeconfig=""
+context=""
 compute_name=""
+instance_types_manifest="$MANIFESTS_DIR/azureml-instance-types.yaml"
 cluster_purpose="DevTest"
 inference_ha="false"
 allow_insecure="true"
@@ -67,7 +74,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                       show_help; exit 0 ;;
     -t|--tf-dir)                     tf_dir="$2"; shift 2 ;;
+    --kubeconfig)                    kubeconfig="$2"; shift 2 ;;
+    --context)                       context="$2"; shift 2 ;;
     --compute-name)                  compute_name="$2"; shift 2 ;;
+    --instance-types-manifest)       instance_types_manifest="$2"; shift 2 ;;
     --fast-prod)                     cluster_purpose="FastProd"; inference_ha="true"; allow_insecure="false"; shift ;;
     --enforce-resource-validation)   skip_resource_validation="false"; shift ;;
     --enforce-volcano-capacity-check) enforce_volcano_capacity_check=true; shift ;;
@@ -79,8 +89,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_tools az terraform kubectl jq envsubst
-require_az_extension k8s-extension
-require_az_extension ml
 
 #------------------------------------------------------------------------------
 # Gather Configuration
@@ -92,6 +100,8 @@ tf_output=$(read_terraform_outputs "$tf_dir")
 cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster name")
 cluster_id=$(tf_require "$tf_output" "aks_cluster.value.id" "AKS cluster ID")
 rg=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
+kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${cluster}.yaml}"
+context="${context:-$cluster}"
 ml_workspace=$(tf_get "$tf_output" "azureml_workspace.value.name")
 ml_identity_id=$(tf_get "$tf_output" "ml_workload_identity.value.id")
 
@@ -106,6 +116,8 @@ fi
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Cluster" "$cluster"
+  print_kv "Kubeconfig" "$kubeconfig"
+  print_kv "Context" "$context"
   print_kv "Resource Group" "$rg"
   print_kv "Extension Name" "$extension_name"
   print_kv "Compute Name" "$compute_name"
@@ -114,18 +126,24 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Enforce Volcano Capacity Check" "$enforce_volcano_capacity_check"
   print_kv "ML Workspace" "${ml_workspace:-<not configured>}"
   print_kv "ML Identity" "${ml_identity_name:-<not configured>}"
+  print_kv "Instance Types" "$instance_types_manifest"
   exit 0
 fi
+
+verify_aks_resource_id "$tf_output" "$cluster_id"
+verify_existing_aks_kubeconfig "$kubeconfig" "$context" "$cluster_id"
+require_az_extension k8s-extension
+require_az_extension ml
 
 #------------------------------------------------------------------------------
 # Validate Required Files
 #------------------------------------------------------------------------------
 
 config_template="$CONFIG_DIR/azureml-aks-config.template.json"
-instance_types_manifest="$MANIFESTS_DIR/azureml-instance-types.yaml"
 
 [[ -f "$config_template" ]] || fatal "Config template not found: $config_template"
-[[ "$skip_instance_types" == "true" || -f "$instance_types_manifest" ]] || fatal "Instance types manifest not found: $instance_types_manifest"
+[[ "$skip_instance_types" == "true" || (-f "$instance_types_manifest" && ! -L "$instance_types_manifest") ]] || \
+  fatal "Instance types manifest must be a regular non-symlink file: $instance_types_manifest"
 
 mkdir -p "$CONFIG_DIR/out"
 
@@ -134,7 +152,7 @@ mkdir -p "$CONFIG_DIR/out"
 #------------------------------------------------------------------------------
 section "Connect to Cluster"
 
-connect_aks "$rg" "$cluster"
+connect_aks "$rg" "$cluster" "$kubeconfig" "$context"
 
 #------------------------------------------------------------------------------
 # Install AzureML Extension
@@ -291,6 +309,7 @@ print_kv "Purpose" "$cluster_purpose"
 print_kv "Skip Resource Validation" "$skip_resource_validation"
 print_kv "Enforce Volcano Capacity Check" "$enforce_volcano_capacity_check"
 print_kv "ML Workspace" "${ml_workspace:-<not configured>}"
+print_kv "Instance Types" "$instance_types_manifest"
 echo
 kubectl get pods -n "$NS_AZUREML" --no-headers 2>/dev/null | head -5 || true
 

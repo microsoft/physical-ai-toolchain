@@ -3,7 +3,7 @@ sidebar_position: 2
 title: ACSA Setup for ROS 2 Bag Sync
 description: Deploy Azure Container Storage enabled by Azure Arc (ACSA) on edge clusters to sync ROS 2 bag files to Azure Blob Storage
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-13
+ms.date: 2026-07-13
 ms.topic: how-to
 keywords:
   - acsa
@@ -50,14 +50,14 @@ Recording pods mount the `recording-data` PVC and write bag files to it. The ACS
 
 ## 📋 Prerequisites
 
-| Requirement                     | Details                                                                                       |
-|---------------------------------|-----------------------------------------------------------------------------------------------|
-| Azure Arc-connected K8s cluster | Edge cluster registered with Azure Arc (`az connectedk8s show`)                               |
-| Azure CLI 2.60+                 | With `k8s-extension` and `connectedk8s` extensions                                            |
-| Terraform outputs               | Infrastructure deployed via `infrastructure/terraform/` with a storage account                |
-| kubectl + envsubst              | For manifest rendering and application                                                        |
-| Azure RBAC                      | Contributor on the Arc cluster resource group; Storage Blob Data Owner on the storage account |
-| Network connectivity            | Direct kubectl access or Arc proxy for private clusters                                       |
+| Requirement                     | Details                                                                                              |
+|---------------------------------|------------------------------------------------------------------------------------------------------|
+| Azure Arc-connected K8s cluster | Edge cluster registered with Azure Arc (`az connectedk8s show`)                                      |
+| Azure CLI 2.60+                 | With `k8s-extension` and `connectedk8s` extensions                                                   |
+| Terraform outputs               | Infrastructure deployed via `infrastructure/terraform/` with a storage account                       |
+| kubectl + envsubst              | For manifest rendering and application                                                               |
+| Azure RBAC                      | Contributor on the Arc cluster resource group; Storage Blob Data Contributor on the target container |
+| Network connectivity            | Direct kubectl access or Arc proxy for private clusters                                              |
 
 > [!NOTE]
 > The deploy script automatically installs missing Azure CLI extensions (`k8s-extension`, `connectedk8s`).
@@ -71,13 +71,17 @@ cd data-pipeline/setup
 ./deploy-acsa.sh --config-preview \
   --cluster-name <arc-cluster> \
   --cluster-resource-group <rg> \
-  --storage-account <storage-account>
+  --storage-account <storage-account> \
+  --kubeconfig <edge-kubeconfig> \
+  --context <edge-context>
 
 # Deploy ACSA with Terraform auto-discovery
 ./deploy-acsa.sh \
   --cluster-name <arc-cluster> \
   --cluster-resource-group <rg> \
-  --storage-account <storage-account>
+  --storage-account <storage-account> \
+  --kubeconfig <edge-kubeconfig> \
+  --context <edge-context>
 ```
 
 The script reads storage account details from `infrastructure/terraform/terraform.tfstate`. Override any value via CLI arguments or environment variables.
@@ -93,6 +97,8 @@ The script reads storage account details from `infrastructure/terraform/terrafor
 | `-t, --tf-dir`             | `DEFAULT_TF_DIR`                 | `../../infrastructure/terraform` | Terraform directory for output discovery |
 | `--storage-account`        | `STORAGE_ACCOUNT_NAME`           | Auto-discovered from Terraform   | Storage account name override            |
 | `--storage-resource-group` | `STORAGE_ACCOUNT_RESOURCE_GROUP` | Same as cluster resource group   | Storage account resource group           |
+| `--kubeconfig`             | `EDGE_KUBECONFIG`                | Required in direct mode          | Explicit edge kubeconfig                 |
+| `--context`                | `EDGE_K3S_CONTEXT`               | Required in direct mode          | Explicit edge context                    |
 | `--connectivity-mode`      | `ACSA_CONNECTIVITY_MODE`         | `direct`                         | `direct` or `proxy`                      |
 | `--proxy-port`             | `ACSA_PROXY_PORT`                | `47011`                          | Arc proxy port (proxy mode only)         |
 | `--config-preview`         | —                                | —                                | Print configuration and exit             |
@@ -142,8 +148,8 @@ The `deploy-acsa.sh` script executes these steps in order:
 6. Install the `azure-arc-containerstorage` extension
 7. Wait for ACSA extension to reach `Succeeded` state
 8. Retrieve the ACSA managed identity principal ID
-9. Assign `Storage Blob Data Owner` role to the ACSA identity on the storage account
-10. Create the `datasets` Blob container
+9. Create the `datasets` Blob container
+10. Assign `Storage Blob Data Contributor` to the ACSA identity on that container
 11. Render and apply the PVC and IngestSubvolume manifests
 12. Wait for the PVC to bind and EdgeVolume to deploy
 
@@ -157,7 +163,9 @@ Use when `kubectl` can reach the cluster API server directly — either via VPN,
 ./deploy-acsa.sh \
   --cluster-name my-edge-cluster \
   --cluster-resource-group rg-edge \
-  --storage-account mystorageaccount
+  --storage-account mystorageaccount \
+  --kubeconfig /protected/edge.yaml \
+  --context physical-ai-edge
 ```
 
 ### Proxy Mode
@@ -326,14 +334,14 @@ az k8s-extension show \
 ### Files Not Syncing
 
 1. Confirm the IngestSubvolume exists and has the correct storage account endpoint
-2. Verify the ACSA managed identity has `Storage Blob Data Owner` on the storage account
+2. Verify the ACSA managed identity has `Storage Blob Data Contributor` on the target container
 3. Check that files are older than `ACSA_INGEST_MIN_DELAY_SEC` (30s default)
 
 ```bash
 # Check ACSA identity role assignment
 az role assignment list \
-  --scope "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<account>" \
-  --query "[?roleDefinitionName=='Storage Blob Data Owner'].{principal:principalId, role:roleDefinitionName}" \
+  --scope "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Storage/storageAccounts/<account>/blobServices/default/containers/datasets" \
+  --query "[?roleDefinitionName=='Storage Blob Data Contributor'].{principal:principalId, role:roleDefinitionName}" \
   -o table
 ```
 

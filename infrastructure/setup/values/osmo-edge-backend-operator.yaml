@@ -1,0 +1,47 @@
+global:
+  osmoImageLocation: nvcr.io/nvidia/osmo
+  osmoImageTag: "6.3.0"
+  serviceUrl: ""
+  agentNamespace: osmo-hil-operator
+  backendNamespace: osmo-hil-workflows
+  backendName: hil-edge
+  accountTokenSecret: osmo-hil-operator-token
+  accountTokenSecretKey: token
+  loginMethod: token
+  nodeSelector:
+    kubernetes.io/os: linux
+  includeNamespaceUsage: osmo-hil-workflows
+  enableClusterRoles: true
+  enableNonClusterRoles: true
+  tolerations: []
+  networkPolicy:
+    enabled: false
+  priorityClasses:
+    enabled: true
+
+podMonitor:
+  enabled: false
+
+services:
+  backendListener:
+    enableNodeLabelUpdate: false
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+  backendWorker:
+    imagePullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+backendTestRunner:
+  enabled: false

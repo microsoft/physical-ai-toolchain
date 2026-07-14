@@ -1,0 +1,44 @@
+workflow:
+  name: "{{ workflow_name }}"
+  resources:
+    default:
+      cpu: 1
+      memory: 512Mi
+      storage: 1Gi
+      gpu: 0
+      platform: hil_cpu
+  timeout:
+    exec_timeout: 10m
+    queue_timeout: 10m
+  tasks:
+    - name: ur10e-no-command
+      image: "{{ image }}"
+      command: [sh]
+      args:
+        - -ceu
+        - |
+          mkdir -p /tmp/hil/config /tmp/hil/results
+          base64 -d /tmp/no_command_runner.py.b64 > /tmp/hil/no_command_runner.py
+          base64 -d /tmp/ur10e-no-command.json.b64 > /tmp/hil/config/ur10e-no-command.json
+          base64 -d /tmp/ur10e-observations.jsonl.b64 > /tmp/hil/config/ur10e-observations.jsonl
+          python3 /tmp/hil/no_command_runner.py \
+            --config /tmp/hil/config/ur10e-no-command.json \
+            --output-dir /tmp/hil/results
+          jq_unavailable=0
+          python3 -c 'import json; value=json.load(open("/tmp/hil/results/summary.json")); assert value["status"] == "passed" and value["applied_actions"] == 0 and value["negative_command_probe"] == "passed"' || jq_unavailable=1
+          test "$jq_unavailable" -eq 0
+          python3 -c 'import json; value=json.load(open("/tmp/hil/results/summary.json")); print("HIL_NO_COMMAND_RESULT=" + json.dumps({"workflow_name": "{{ workflow_name }}", "status": value["status"], "command_transport": value["command_transport"], "proposed_actions": value["proposed_actions"], "applied_actions": value["applied_actions"], "negative_command_probe": value["negative_command_probe"], "rejection_code": value["rejection_code"]}, separators=(",", ":")))'
+      files:
+        - path: /tmp/no_command_runner.py.b64
+          contents: "{{ runner_b64 }}"
+        - path: /tmp/ur10e-no-command.json.b64
+          contents: "{{ config_b64 }}"
+        - path: /tmp/ur10e-observations.jsonl.b64
+          contents: "{{ observations_b64 }}"
+
+default-values:
+  workflow_name: ur10e-no-command
+  image: python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
+  runner_b64: ""
+  config_b64: ""
+  observations_b64: ""

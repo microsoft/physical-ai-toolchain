@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-11
+ms.date: 2026-07-14
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -17,23 +17,67 @@ AKS cluster configuration for robotics workloads. Deploys NVIDIA GPU operator, K
 
 ## 🚀 Quick Start
 
-```bash
-az aks get-credentials --resource-group <rg> --name <aks>
-kubectl cluster-info
-```
+Each script writes AKS credentials to an isolated kubeconfig and requires an explicit context for Kubernetes and Helm operations.
 
 Deployment order:
 
 1. `./01-deploy-robotics-charts.sh` — GPU Operator, KAI Scheduler
 2. `./02-deploy-azureml-extension.sh` — AzureML K8s extension, compute attach
 3. `./03-deploy-osmo.sh` — OSMO control plane and backend operator
+4. `./04-deploy-osmo-external-backend.sh` — Optional external Ubuntu K3s backend
+
+## 📦 Environment Bundles
+
+Generate environment-specific deployment details with the `environment-deployment` agent skill. The skill reads Terraform outputs and uses available Azure CLI, kubectl, Helm, and OSMO read-only commands to create a validated bundle under the gitignored `infrastructure/setup/generated/<environment>/` directory.
+
+The bundle contains non-secret metadata and generated manifests. It never contains Terraform state, kubeconfigs, OSMO profiles, tokens, registry credentials, or VPN credentials.
+
+Run each deployment preview with explicit generated inputs:
+
+```bash
+./02-deploy-azureml-extension.sh \
+  --instance-types-manifest generated/<environment>/azureml-instance-types.yaml \
+  --config-preview
+
+./03-deploy-osmo.sh \
+  --platform-values generated/<environment>/osmo-platforms.yaml \
+  --use-acr \
+  --image-manifest generated/<environment>/osmo-images.json \
+  --config-preview
+```
+
+Upload the allowlisted bundle to Key Vault from the trusted deployment host:
+
+```bash
+./upload-environment-bundle.sh --environment <environment> --config-preview
+./upload-environment-bundle.sh --environment <environment>
+```
+
+Download it to a protected directory on the HiL host, then configure isolated AKS and OSMO profiles:
+
+```bash
+./download-environment-bundle.sh \
+  --environment <environment> \
+  --resource-group <resource-group> \
+  --config-preview
+
+./download-environment-bundle.sh \
+  --environment <environment> \
+  --resource-group <resource-group>
+
+./connect-environment.sh --environment <environment> --config-preview
+./connect-environment.sh --environment <environment>
+```
+
+The upload identity requires Key Vault secret write permission. The HiL identity requires the Key Vault Secrets User role and network access to private Azure endpoints. These scripts do not grant roles or modify deployed services.
 
 ## 📖 Documentation
 
-| Guide                                                                     | Description                                       |
-|---------------------------------------------------------------------------|---------------------------------------------------|
-| [Cluster Setup](../../docs/infrastructure/cluster-setup.md)               | Full setup walkthrough and deployment scenarios   |
-| [Cluster Operations](../../docs/infrastructure/cluster-setup-advanced.md) | Advanced operations, scaling, and troubleshooting |
+| Guide                                                                                      | Description                                       |
+|--------------------------------------------------------------------------------------------|---------------------------------------------------|
+| [Cluster Setup](../../docs/infrastructure/cluster-setup.md)                                | Full setup walkthrough and deployment scenarios   |
+| [Cluster Operations](../../docs/infrastructure/cluster-setup-advanced.md)                  | Advanced operations, scaling, and troubleshooting |
+| [Ubuntu HiL OSMO Backend](../../docs/recipes/tier-3-production/ubuntu-hil-osmo-backend.md) | Private external K3s backend                      |
 
 ## ☁️ Azure ML Mirror (Optional)
 
@@ -73,12 +117,12 @@ Submit a replay for any completed run:
 
 ### Troubleshooting
 
-| Symptom                          | Cause                            | Fix                                                                                                     |
-|----------------------------------|----------------------------------|---------------------------------------------------------------------------------------------------------|
+| Symptom                          | Cause                              | Fix                                                                                                   |
+|----------------------------------|------------------------------------|-------------------------------------------------------------------------------------------------------|
 | `aml_mirror: missing env vars`   | Workflow YAML missing AzureML vars | Add `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`, `AZUREML_WORKSPACE_NAME` to workflow environment |
-| `AuthorizationFailed` on storage | Identity missing data-plane role | Re-apply Terraform                                                                                      |
-| Upload timeout                   | Default 7200s exceeded           | Set `AZUREML_ARTIFACTS_DEFAULT_TIMEOUT` env var on submission                                           |
-| `DefaultAzureCredential` failed  | Workload Identity not enabled    | Verify `azure.workload.identity/use: "true"` label and `osmo-workflow` SA                               |
+| `AuthorizationFailed` on storage | Identity missing data-plane role   | Re-apply Terraform                                                                                    |
+| Upload timeout                   | Default 7200s exceeded             | Set `AZUREML_ARTIFACTS_DEFAULT_TIMEOUT` env var on submission                                         |
+| `DefaultAzureCredential` failed  | Workload Identity not enabled      | Verify `azure.workload.identity/use: "true"` label and `osmo-workflow` SA                             |
 
 ## ➡️ Next Step
 

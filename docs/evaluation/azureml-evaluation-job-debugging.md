@@ -4,7 +4,7 @@ sidebar_label: Evaluation Job Debugging
 sidebar_position: 2
 description: Troubleshooting guide for AzureML evaluation job failures and common issues.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-01
+ms.date: 2026-07-14
 ms.topic: troubleshooting
 ---
 
@@ -109,15 +109,13 @@ The evaluation script handles `auto` as "detect from model metadata".
 
    Result: `Storage Blob Data Contributor` ✅ assigned
 
-2. **Checked Federated Identity Credentials**:
+1. **Checked Federated Identity Credentials**:
 
-   ```bash
-   az identity federated-credential list --identity-name id-ml-osmorobo-tst-001
-   ```
+  Ran `az identity federated-credential list --identity-name "$ML_IDENTITY_NAME"`.
 
    Result: Empty `[]` - **No federated credentials existed!**
 
-3. **Checked Terraform State**:
+1. **Checked Terraform State**:
 
    ```bash
    terraform state list | grep federated
@@ -125,7 +123,8 @@ The evaluation script handles `auto` as "detect from model metadata".
 
    Result: No matches - federated credentials weren't being created
 
-4. **Root Cause Discovery**: The `azureml_config` object in `main.tf` was missing:
+1. **Root Cause Discovery**: The `azureml_config` object in `main.tf` was missing:
+
    - `should_install_extension` (defaults to `false`)
    - `should_federate_ml_identity` (defaults to `false`)
 
@@ -136,11 +135,11 @@ The evaluation script handles `auto` as "detect from model metadata".
 **Action**: Manually created federated credentials via Azure CLI:
 
 ```bash
-AKS_OIDC_ISSUER=$(az aks show --name aks-osmorobo-tst-001 ... --query oidcIssuerProfile.issuerUrl)
+AKS_OIDC_ISSUER=$(az aks show --name <aks-cluster> ... --query oidcIssuerProfile.issuerUrl)
 
 az identity federated-credential create \
   --name "aml-default-fic" \
-  --identity-name "id-ml-osmorobo-tst-001" \
+  --identity-name "<ml-identity-name>" \
   --issuer "$AKS_OIDC_ISSUER" \
   --subject "system:serviceaccount:azureml:default" \
   --audiences "api://AzureADTokenExchange"
@@ -212,7 +211,7 @@ This revealed that the data-capability container is trying to use certificate-ba
 **Investigation**: Tried to enable shared key access as a workaround:
 
 ```bash
-az storage account update --name stosmorobotst001 --allow-shared-key-access true
+az storage account update --name <storage-account> --allow-shared-key-access true
 ```
 
 **Result**: Setting remains `false` - controlled by Terraform configuration (`should_enable_storage_shared_access_key = false` by default).
@@ -261,17 +260,17 @@ Fixed input schema to comply with AzureML command job requirements:
 ```bash
 az identity federated-credential create \
   --name "aml-default-fic" \
-  --identity-name "id-ml-osmorobo-tst-001" \
-  --resource-group "rg-osmorobo-tst-001" \
-  --issuer "https://westus3.oic.prod-aks.azure.com/..." \
+  --identity-name "<ml-identity-name>" \
+  --resource-group "<resource-group>" \
+  --issuer "$AKS_OIDC_ISSUER" \
   --subject "system:serviceaccount:azureml:default" \
   --audiences "api://AzureADTokenExchange"
 
 az identity federated-credential create \
   --name "aml-training-fic" \
-  --identity-name "id-ml-osmorobo-tst-001" \
-  --resource-group "rg-osmorobo-tst-001" \
-  --issuer "https://westus3.oic.prod-aks.azure.com/..." \
+  --identity-name "<ml-identity-name>" \
+  --resource-group "<resource-group>" \
+  --issuer "$AKS_OIDC_ISSUER" \
   --subject "system:serviceaccount:azureml:training" \
   --audiences "api://AzureADTokenExchange"
 ```
@@ -280,20 +279,20 @@ az identity federated-credential create \
 
 ```bash
 az k8s-extension update \
-  --cluster-name aks-osmorobo-tst-001 \
+  --cluster-name <aks-cluster> \
   --cluster-type managedClusters \
-  --resource-group rg-osmorobo-tst-001 \
-  --name azureml-aks-osmorobo-tst-001 \
+  --resource-group <resource-group> \
+  --name <azureml-extension-name> \
   --configuration-settings \
     "identityType=UserAssigned" \
-    "userAssignedIdentityResourceId=/subscriptions/.../id-ml-osmorobo-tst-001"
+    "userAssignedIdentityResourceId=<ml-identity-resource-id>"
 ```
 
 #### Kubernetes Service Account Annotations
 
 ```bash
 kubectl annotate serviceaccount -n azureml default \
-  azure.workload.identity/client-id="afbecdd1-1eb2-4fed-8043-b88a15f25154" --overwrite
+  azure.workload.identity/client-id="$ML_CLIENT_ID" --overwrite
 kubectl label serviceaccount -n azureml default \
   azure.workload.identity/use=true --overwrite
 ```

@@ -23,6 +23,8 @@ locals {
     local.has_certificate_auth ? "Certificate" : "",
   ])
 
+  vpn_client_protocols = local.has_certificate_auth && !local.has_aad_auth ? ["OpenVPN", "IkeV2"] : ["OpenVPN"]
+
   // Site name slugs for resource naming (alphanumeric only)
   site_name_slugs = {
     for site in var.vpn_site_connections :
@@ -92,8 +94,8 @@ resource "azurerm_virtual_network_gateway" "main" {
   vpn_client_configuration {
     address_space = var.vpn_gateway_config.client_address_pool
 
-    // OpenVPN always enabled; IKEv2 added when certificate auth is available
-    vpn_client_protocols = local.has_certificate_auth ? ["OpenVPN", "IkeV2"] : ["OpenVPN"]
+    // OpenVPN is required for Entra ID; certificate authentication also enables IKEv2.
+    vpn_client_protocols = local.vpn_client_protocols
 
     // Specify auth types when using multiple methods or Azure AD
     vpn_auth_types = length(local.vpn_auth_types) > 0 ? local.vpn_auth_types : null
@@ -109,6 +111,14 @@ resource "azurerm_virtual_network_gateway" "main" {
       content {
         name             = var.root_certificate_name
         public_cert_data = var.root_certificate_public_data
+      }
+    }
+
+    dynamic "revoked_certificate" {
+      for_each = { for certificate in var.revoked_client_certificates : certificate.name => certificate }
+      content {
+        name       = revoked_certificate.value.name
+        thumbprint = upper(revoked_certificate.value.thumbprint)
       }
     }
   }
