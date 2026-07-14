@@ -1,4 +1,15 @@
-# Your First LeRobot Training Job
+---
+title: Your First LeRobot Training Job
+description: Submit and verify a LeRobot behavioral cloning training job on OSMO
+author: Microsoft Robotics-AI Team
+ms.date: 2026-07-14
+ms.topic: tutorial
+keywords:
+  - lerobot
+  - training
+  - osmo
+  - azure ml
+---
 
 Submit a LeRobot behavioral cloning training job to OSMO using a HuggingFace or Azure Blob dataset and verify that the trained policy appears in Azure ML. By the end of this recipe, you will have a trained ACT policy for the ALOHA sim insertion task.
 
@@ -119,12 +130,15 @@ The recipe succeeded when:
 | `--register-checkpoint`    | (none)                                               | Model name for Azure ML registration                                                                |
 | `--init-from-policy-model` | (none)                                               | Warm-start from a registered AzureML model (`azureml:NAME:VERSION`); AzureML submission script only |
 
+Registered checkpoints trained with LeRobot before 0.6 must be [migrated to the processor-based format](../../training/lerobot-checkpoint-migration.md) before warm-starting.
+
 See [Scripts Reference](../../reference/scripts.md) for the full parameter table.
 
 ## 🔗 Related Recipes
 
 - [End-to-End LeRobot Pipeline](end-to-end-lerobot-pipeline.md) — automated train → evaluate → register
 - [Preparing Datasets for Training](../data-collection/preparing-datasets-for-training.md) — dataset download and validation
+- [Migrate LeRobot Checkpoints](../../training/lerobot-checkpoint-migration.md) for pre-0.6 checkpoint conversion and validation
 - [Your First RL Training Job](your-first-rl-training-job.md) — reinforcement learning alternative
 - [LeRobot Training Guide](../../training/lerobot-training.md) — detailed IL reference documentation
 

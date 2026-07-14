@@ -3,7 +3,7 @@ sidebar_position: 5
 title: LeRobot Training
 description: Behavioral cloning training with ACT and Diffusion policies on Azure ML and OSMO platforms
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-01
+ms.date: 2026-07-14
 ms.topic: how-to
 keywords:
   - lerobot
@@ -139,6 +139,12 @@ The cluster must provide a node pool with a multi-GPU SKU and a matching OSMO pl
   --batch-size 16
 ```
 
+### Checkpoint Compatibility
+
+LeRobot checkpoints trained before 0.6 store normalization inside the model. LeRobot 0.6 requires external preprocessor and postprocessor artifacts. Migrate legacy checkpoints before using `--policy-repo-id` or `--init-from-policy-model` with the LeRobot 0.6 runtime.
+
+See [Migrate LeRobot Checkpoints](lerobot-checkpoint-migration.md) for the conversion and validation procedure.
+
 ### Warm-Starting from a Registered AzureML Model (AzureML only)
 
 After a previous AzureML run has registered a checkpoint with `--register-checkpoint NAME`, a follow-up AzureML run can seed weights from that model. Optimizer state, scheduler state, and the step counter are not restored — only the policy weights — so this is "warm-start" rather than "resume". Not yet supported by the OSMO submission script.
@@ -157,6 +163,8 @@ Accepted URI forms:
 - `https://...blob.core.windows.net/...` — direct blob URL pointing at a folder containing `config.json` and `model.safetensors`.
 
 The MLflow run for the new job is tagged with `warm_start.source`, and (for `azureml:NAME:VERSION` inputs) `warm_start.model_name` and `warm_start.model_version` so runs can be filtered by upstream model in the MLflow UI.
+
+The registered model must contain `config.json`, `model.safetensors`, both processor JSON files, and their processor tensor files. Register migrated checkpoints as new immutable model versions rather than replacing legacy artifacts.
 
 ## 🔑 Credential Setup
 
@@ -427,6 +435,7 @@ Reference templates live in [`training/vla/configs/groot/examples/`](https://git
 
 ## 🔗 Related Documentation
 
+- [Migrate LeRobot Checkpoints](lerobot-checkpoint-migration.md) for pre-0.6 checkpoint conversion
 - [Experiment Tracking](experiment-tracking.md) for MLflow configuration
 - [AzureML Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/README.md) for job template reference
 - [OSMO Workflows](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/osmo/README.md) for workflow template reference
