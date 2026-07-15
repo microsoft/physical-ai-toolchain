@@ -2,9 +2,11 @@
 title: Ubuntu Edge K3s Setup
 description: Configure certificate VPN access, pinned K3s, and optional Azure Arc registration on an Ubuntu HiL host.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-13
+ms.date: 2026-07-15
 ms.topic: how-to
 ---
+
+<!-- cspell:ignore inotify nofile -->
 
 Configure an Ubuntu 22.04 or 24.04 desktop as a private K3s compute plane. This guide covers host preflight, strongSwan certificate VPN access, pinned K3s installation, and optional Azure Arc registration.
 
@@ -62,12 +64,14 @@ data-pipeline/setup/edge/01-preflight.sh \
 The script rejects:
 
 - Unsupported Ubuntu releases
-- Active swap
+- Non-unified cgroup configuration
 - Insufficient memory, disk, or file-system entries
 - System time that is not synchronized
 - Overlapping LAN, Azure, P2S, pod, or service CIDRs
 - Unknown kubeadm, MicroK8s, K3s, containerd, or CNI ownership
 - Occupied K3s API or kubelet ports
+
+Active Ubuntu host swap is supported. Kubelet uses `failSwapOn: false` with `memorySwap.swapBehavior: NoSwap`, so host services can use swap while Pods cannot. Kubernetes recommends encrypted swap for any host that keeps swap enabled.
 
 ## Configure Certificate VPN
 
@@ -203,6 +207,13 @@ The script configures:
 | Service CIDR       | `10.43.0.0/16`     |
 | Kubeconfig mode    | `0600`             |
 | Secrets encryption | Enabled            |
+| Host swap          | Allowed             |
+| Pod swap           | `NoSwap`            |
+| Inotify instances  | At least `8192`     |
+| Inotify watches    | At least `524288`   |
+| System file handles | At least `100000`  |
+| Per-process file ceiling | At least `1048576` |
+| K3s `LimitNOFILE`  | `1048576`           |
 | Traefik            | Disabled           |
 | ServiceLB          | Disabled           |
 | Local-path storage | Enabled and tested |

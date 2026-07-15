@@ -65,6 +65,8 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "P2S CIDR" "$p2s_cidr"
   print_kv "K3s Pod CIDR" "$pod_cidr"
   print_kv "K3s Service CIDR" "$service_cidr"
+  print_kv "Host Swap" "allowed"
+  print_kv "Pod Swap" "$EDGE_KUBELET_SWAP_BEHAVIOR"
   print_kv "LAN CIDRs" "${lan_cidrs[*]:-auto-detect}"
   print_kv "Inventory" "$inventory"
   print_kv "Allow Battery" "$allow_battery"
@@ -79,6 +81,9 @@ source /etc/os-release
 [[ "${ID:-}" == "ubuntu" ]] || fatal "Unsupported Linux distribution: ${ID:-unknown}"
 [[ "${VERSION_ID:-}" == "22.04" || "${VERSION_ID:-}" == "24.04" ]] || \
   fatal "Supported Ubuntu releases are 22.04 and 24.04; found ${VERSION_ID:-unknown}"
+[[ -f /sys/fs/cgroup/cgroup.controllers ]] || fatal "K3s swap support requires unified cgroup v2"
+[[ "$EDGE_KUBELET_SWAP_BEHAVIOR" == "NoSwap" ]] || fatal "Supported Pod swap behavior is NoSwap"
+cgroup_version="v2"
 
 if [[ ${#lan_cidrs[@]} -eq 0 ]]; then
   default_interface=$(ip -4 route show default | awk 'NR == 1 {print $5}')
@@ -133,8 +138,26 @@ if [[ ! -f /etc/rancher/k3s/.physical-ai-toolchain-managed ]]; then
   done
 fi
 
-swap_devices=$(awk 'NR > 1 {count++} END {print count + 0}' /proc/swaps)
-(( swap_devices == 0 )) || fatal "Active swap is unsupported by this K3s setup path"
+swap_device_count=$(awk 'NR > 1 {count++} END {print count + 0}' /proc/swaps)
+swap_active=false
+(( swap_device_count > 0 )) && swap_active=true
+swap_total_mib=$(awk 'NR > 1 {total += $3} END {printf "%d", total / 1024}' /proc/swaps)
+swap_used_mib=$(awk 'NR > 1 {total += $4} END {printf "%d", total / 1024}' /proc/swaps)
+swap_devices_json=$(awk 'NR > 1 {printf "%s\t%s\t%s\t%s\t%s\n", $1, $2, $3, $4, $5}' /proc/swaps | jq -R -s '
+  split("\n") |
+  map(select(length > 0) | split("\t") | {
+    name: .[0],
+    type: .[1],
+    size_kib: (.[2] | tonumber),
+    used_kib: (.[3] | tonumber),
+    priority: (.[4] | tonumber)
+  })
+')
+if (( swap_device_count > 0 )); then
+  while read -r name type size used priority; do
+    info "Active host swap: $name (type=$type, size=${size}KiB, used=${used}KiB, priority=$priority)"
+  done < <(awk 'NR > 1 {print $1, $2, $3, $4, $5}' /proc/swaps)
+fi
 
 memory_mib=$(awk '/MemTotal/ {printf "%d", $2 / 1024}' /proc/meminfo)
 (( memory_mib >= EDGE_MIN_MEMORY_MIB )) || fatal "Host memory ${memory_mib}MiB is below ${EDGE_MIN_MEMORY_MIB}MiB"
@@ -169,7 +192,13 @@ jq -n \
   --arg ubuntu_version "$VERSION_ID" \
   --arg architecture "$(uname -m)" \
   --arg kernel "$(uname -r)" \
+  --arg cgroup_version "$cgroup_version" \
+  --arg kubelet_swap_behavior "$EDGE_KUBELET_SWAP_BEHAVIOR" \
   --argjson memory_mib "$memory_mib" \
+  --argjson swap_active "$swap_active" \
+  --argjson swap_total_mib "$swap_total_mib" \
+  --argjson swap_used_mib "$swap_used_mib" \
+  --argjson swap_devices "$swap_devices_json" \
   --argjson root_free_gib "$root_free_gib" \
   --argjson root_free_inodes_percent "$root_free_inodes_percent" \
   --arg time_synchronized "$time_status" \
@@ -181,7 +210,7 @@ jq -n \
   --arg service_cidr "$service_cidr" \
   --argjson lan_cidrs "$(printf '%s\n' "${lan_cidrs[@]}" | jq -R . | jq -s .)" \
   --argjson gpu_present "$gpu_present" \
-  '{schema_version: 1, generated_at: $generated_at, host: {ubuntu_version: $ubuntu_version, architecture: $architecture, kernel: $kernel, memory_mib: $memory_mib, root_free_gib: $root_free_gib, root_free_inodes_percent: $root_free_inodes_percent, time_synchronized: $time_synchronized, power_source: $power_source, firewall_backend: $firewall_backend, gpu_present: $gpu_present}, network: {lan_cidrs: $lan_cidrs, azure_vnet_cidr: $azure_vnet_cidr, p2s_cidr: $p2s_cidr, k3s_pod_cidr: $pod_cidr, k3s_service_cidr: $service_cidr}, checks: {cidrs_non_overlapping: true, runtime_ownership_known: true, swap_disabled: true}}' \
+  '{schema_version: 2, generated_at: $generated_at, host: {ubuntu_version: $ubuntu_version, architecture: $architecture, kernel: $kernel, cgroup_version: $cgroup_version, memory_mib: $memory_mib, root_free_gib: $root_free_gib, root_free_inodes_percent: $root_free_inodes_percent, time_synchronized: $time_synchronized, power_source: $power_source, firewall_backend: $firewall_backend, gpu_present: $gpu_present, swap: {active: $swap_active, total_mib: $swap_total_mib, used_mib: $swap_used_mib, devices: $swap_devices, kubelet_behavior: $kubelet_swap_behavior}}, network: {lan_cidrs: $lan_cidrs, azure_vnet_cidr: $azure_vnet_cidr, p2s_cidr: $p2s_cidr, k3s_pod_cidr: $pod_cidr, k3s_service_cidr: $service_cidr}, checks: {cidrs_non_overlapping: true, runtime_ownership_known: true, swap_supported: true}}' \
   > "$tmp_inventory"
 chmod 0600 "$tmp_inventory"
 if [[ "$inventory" == /var/* ]]; then
@@ -197,6 +226,9 @@ rm -f "$tmp_inventory"
 section "Deployment Summary"
 print_kv "Ubuntu" "$VERSION_ID ($(uname -m))"
 print_kv "Memory" "${memory_mib}MiB"
+print_kv "Host Swap" "$([[ $swap_active == true ]] && echo "${swap_used_mib}MiB / ${swap_total_mib}MiB" || echo disabled)"
+print_kv "Pod Swap" "$EDGE_KUBELET_SWAP_BEHAVIOR"
+print_kv "Cgroup" "$cgroup_version"
 print_kv "Root Free" "${root_free_gib}GiB"
 print_kv "Free Inodes" "${root_free_inodes_percent}%"
 print_kv "Time Sync" "$time_status"
