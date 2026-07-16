@@ -179,12 +179,73 @@ data-pipeline/setup/edge/02-configure-vpn.sh \
 
 The strongSwan configuration installs only the Azure VNet route. The normal Internet default route remains unchanged.
 
+## Connect Arc-enabled Server
+
+Arc-enabled Server is optional. Connect it after VPN setup when the Ubuntu host needs Azure management or a system-assigned managed identity. Skip this connection and continue to K3s when host-level Arc capabilities are not required.
+
+### Register Azure providers
+
+Run from the Azure operator workstation before either Arc onboarding step:
+
+```bash
+source infrastructure/terraform/prerequisites/az-sub-init.sh
+```
+
+The canonical provider list includes:
+
+- Microsoft.HybridCompute
+- Microsoft.GuestConfiguration
+- Microsoft.HybridConnectivity
+- Microsoft.AzureArcData
+- Microsoft.Kubernetes
+- Microsoft.KubernetesConfiguration
+- Microsoft.ManagedIdentity
+- Microsoft.ExtendedLocation
+
+### Authenticate the Ubuntu host
+
+Install Azure CLI using the Microsoft signed apt repository, then authenticate with the target tenant and subscription. Do not place a service-principal secret in shell history.
+
+```bash
+az login --tenant "<tenant-id>" --use-device-code
+az account set --subscription "<subscription-id>"
+```
+
+### Connect the server
+
+Preview from the Ubuntu host:
+
+```bash
+data-pipeline/setup/edge/03-connect-arc-server.sh \
+  --subscription-id "<subscription-id>" \
+  --tenant-id "<tenant-id>" \
+  --resource-group "<arc-resource-group>" \
+  --location "<azure-location>" \
+  --server-name "$EDGE_NODE_NAME" \
+  --config-preview
+```
+
+Connect and verify the server:
+
+```bash
+data-pipeline/setup/edge/03-connect-arc-server.sh \
+  --subscription-id "<subscription-id>" \
+  --tenant-id "<tenant-id>" \
+  --resource-group "<arc-resource-group>" \
+  --location "<azure-location>" \
+  --server-name "$EDGE_NODE_NAME"
+
+sudo azcmagent show --json | jq '{status, resourceId}'
+```
+
+Expected Arc-enabled Server status is `Connected`.
+
 ## Install K3s
 
 Preview from the Ubuntu host:
 
 ```bash
-data-pipeline/setup/edge/03-install-k3s.sh \
+data-pipeline/setup/edge/04-install-k3s.sh \
   --node-name "$EDGE_NODE_NAME" \
   --kubeconfig-out "$EDGE_KUBECONFIG" \
   --config-preview
@@ -193,7 +254,7 @@ data-pipeline/setup/edge/03-install-k3s.sh \
 Install the pinned K3s binary and run the local-path PVC smoke test:
 
 ```bash
-data-pipeline/setup/edge/03-install-k3s.sh \
+data-pipeline/setup/edge/04-install-k3s.sh \
   --node-name "$EDGE_NODE_NAME" \
   --kubeconfig-out "$EDGE_KUBECONFIG"
 ```
@@ -242,85 +303,53 @@ data-pipeline/setup/edge/02-configure-vpn.sh \
 
 K3s does not depend on the VPN systemd unit. VPN interruptions stop the external OSMO connection but do not stop the local cluster.
 
-## Enable Azure Arc
+## Connect Arc-enabled Kubernetes
 
-Arc is optional for the private OSMO backend. Enable it for Azure management, Arc extensions, or workload identity after VPN, K3s, and the external backend pass their CPU validation.
-
-### Register Azure providers
-
-Run from the Azure operator workstation before onboarding:
-
-```bash
-source infrastructure/terraform/prerequisites/az-sub-init.sh
-```
-
-The canonical provider list includes:
-
-- Microsoft.HybridCompute
-- Microsoft.GuestConfiguration
-- Microsoft.HybridConnectivity
-- Microsoft.AzureArcData
-- Microsoft.Kubernetes
-- Microsoft.KubernetesConfiguration
-- Microsoft.ExtendedLocation
-
-### Authenticate the Ubuntu host
-
-Install Azure CLI using the Microsoft signed apt repository, then authenticate with the target tenant and subscription. Do not place a service-principal secret in shell history.
-
-```bash
-az login --tenant "<tenant-id>" --use-device-code
-az account set --subscription "<subscription-id>"
-```
-
-### Connect Arc server and Arc Kubernetes
+Arc-enabled Kubernetes is optional for the private OSMO backend. Connect it after K3s when the cluster needs Azure management, Arc extensions, or workload identity. Complete the shared provider registration and Azure CLI authentication from the Arc-enabled Server section even when server onboarding was skipped.
 
 Preview from the Ubuntu host:
 
 ```bash
-data-pipeline/setup/edge/04-connect-arc.sh \
+data-pipeline/setup/edge/05-connect-arc-kubernetes.sh \
   --subscription-id "<subscription-id>" \
   --tenant-id "<tenant-id>" \
   --resource-group "<arc-resource-group>" \
   --location "<azure-location>" \
-  --server-name "$EDGE_NODE_NAME" \
   --cluster-name "${EDGE_NODE_NAME}-k3s" \
   --kubeconfig "$EDGE_KUBECONFIG" \
   --context physical-ai-edge \
-  --enable-server \
-  --enable-kubernetes \
+  --enable-workload-identity \
   --config-preview
 ```
 
-Connect both resources:
+Connect and verify the cluster:
 
 ```bash
-data-pipeline/setup/edge/04-connect-arc.sh \
+data-pipeline/setup/edge/05-connect-arc-kubernetes.sh \
   --subscription-id "<subscription-id>" \
   --tenant-id "<tenant-id>" \
   --resource-group "<arc-resource-group>" \
   --location "<azure-location>" \
-  --server-name "$EDGE_NODE_NAME" \
   --cluster-name "${EDGE_NODE_NAME}-k3s" \
   --kubeconfig "$EDGE_KUBECONFIG" \
   --context physical-ai-edge \
-  --enable-server \
-  --enable-kubernetes
+  --enable-workload-identity
 ```
 
-Add `--enable-workload-identity` only when a named K3s workload needs direct Azure SDK access. This option configures the Arc OIDC issuer in K3s and restarts K3s.
+The workload identity option enables the Arc-hosted OIDC issuer and mutating admission webhook, configures the K3s service-account issuer through an additive config drop-in, and validates a signed service-account token. It requires Azure CLI 2.64.0 or later and connectedk8s 1.10.0 or later.
 
-Verify independently:
+Enabling the cluster feature does not grant a workload Azure access. For each workload:
 
-```bash
-sudo azcmagent show --json | jq '{status, resourceId}'
-```
+1. Create or select a user-assigned managed identity.
+2. Create a federated identity credential using the Arc OIDC issuer, audience `api://AzureADTokenExchange`, and subject `system:serviceaccount:<namespace>:<service-account>`.
+3. Annotate the Kubernetes ServiceAccount with `azure.workload.identity/client-id: <managed-identity-client-id>`.
+4. Set `azure.workload.identity/use: "true"` on the Pod template labels.
 
 ```bash
 az connectedk8s show \
   --name "${EDGE_NODE_NAME}-k3s" \
   --resource-group "<arc-resource-group>" \
-  --query '{id:id,state:provisioningState,connectivity:connectivityStatus}'
+  --query '{id:id,state:provisioningState,connectivity:connectivityStatus,oidc:oidcIssuerProfile,workloadIdentity:securityProfile.workloadIdentity}'
 ```
 
 > [!NOTE]

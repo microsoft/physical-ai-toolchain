@@ -18,8 +18,9 @@ Deployment scripts for Ubuntu edge hosts, K3s clusters, optional Azure Arc regis
 |--------------------------------------|-----------------------------------------------------------------------------------------|
 | `edge/01-preflight.sh`               | Validate Ubuntu host and network safety                                                 |
 | `edge/02-configure-vpn.sh`           | Generate a client CSR and configure certificate-authenticated strongSwan                |
-| `edge/03-install-k3s.sh`             | Install pinned K3s and validate local storage                                           |
-| `edge/04-connect-arc.sh`             | Optionally connect Arc-enabled server and Arc-enabled Kubernetes                        |
+| `edge/03-connect-arc-server.sh`      | Optionally connect the Ubuntu host as an Arc-enabled server                             |
+| `edge/04-install-k3s.sh`             | Install pinned K3s and validate local storage                                           |
+| `edge/05-connect-arc-kubernetes.sh`  | Optionally connect K3s as Arc-enabled Kubernetes with workload identity                 |
 | `create-arc-onboarding-principal.sh` | Create an RG-scoped onboarding principal for approved headless automation               |
 | `deploy-acsa.sh`                     | Install cert-manager + ACSA extensions, assign Blob role, apply PVC/subvolume manifests |
 
