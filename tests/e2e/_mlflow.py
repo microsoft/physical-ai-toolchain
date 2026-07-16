@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING
@@ -9,7 +10,7 @@ from tests.e2e._common import log_e2e
 from tests.e2e._osmo import OSMOWorkflow
 
 if TYPE_CHECKING:
-    from mlflow.entities import Experiment
+    from mlflow.entities import Run
     from mlflow.tracking import MlflowClient
 
 REQUIRED_METRICS = (
@@ -70,11 +71,51 @@ def _mlflow_client(aml_workspace: AzureMLWorkspace) -> MlflowClient:
     )
 
 
-def _experiment_by_name(client: MlflowClient, experiment_name: str) -> Experiment:
-    experiment = client.get_experiment_by_name(experiment_name)
-    if experiment is None:
-        raise AssertionError(f"MLflow experiment {experiment_name!r} was not found")
-    return experiment
+_MLFLOW_SEARCH_TIMEOUT_SECONDS = 300
+_MLFLOW_SEARCH_POLL_INTERVAL_SECONDS = 10
+
+
+def _search_experiment_runs_with_retry(
+    client: MlflowClient,
+    experiment_name: str,
+    *,
+    filter_string: str = "",
+    max_results: int = 1,
+    criteria: str | None = None,
+) -> list[Run]:
+    """Search an experiment's runs, tolerating AzureML search-index lag.
+
+    AzureML's MLflow ``get_experiment_by_name`` and ``search_runs`` are eventually
+    consistent: a just-finished run (or even its experiment) can trail the search
+    index by tens of seconds, so a single query races the index. Poll until a run
+    is visible or the budget is spent.
+    """
+    deadline = time.monotonic() + _MLFLOW_SEARCH_TIMEOUT_SECONDS
+    waited = False
+    while True:
+        experiment = client.get_experiment_by_name(experiment_name)
+        if experiment is not None:
+            runs = client.search_runs(
+                [experiment.experiment_id],
+                filter_string=filter_string,
+                order_by=["attributes.start_time DESC"],
+                max_results=max_results,
+            )
+            if runs:
+                return runs
+        if time.monotonic() >= deadline:
+            suffix = f" matching {criteria}" if criteria else ""
+            raise AssertionError(
+                f"No MLflow runs{suffix} appeared in experiment {experiment_name!r} "
+                f"within {_MLFLOW_SEARCH_TIMEOUT_SECONDS}s"
+            )
+        if not waited:
+            log_e2e(
+                f"Waiting up to {_MLFLOW_SEARCH_TIMEOUT_SECONDS}s for AzureML MLflow search to index "
+                f"{criteria or 'a run'} in experiment {experiment_name!r}"
+            )
+            waited = True
+        time.sleep(_MLFLOW_SEARCH_POLL_INTERVAL_SECONDS)
 
 
 def _resolve_mlflow_run_id_by_correlation_id(
@@ -82,19 +123,14 @@ def _resolve_mlflow_run_id_by_correlation_id(
     experiment_name: str,
     correlation_id: str,
 ) -> str:
-    experiment = _experiment_by_name(client, experiment_name)
     escaped_correlation_id = correlation_id.replace("'", "\\'")
-    runs = client.search_runs(
-        [experiment.experiment_id],
+    runs = _search_experiment_runs_with_retry(
+        client,
+        experiment_name,
         filter_string=f"tags.correlation_id = '{escaped_correlation_id}'",
-        order_by=["attributes.start_time DESC"],
         max_results=2,
+        criteria=f"correlation_id {correlation_id!r}",
     )
-
-    if not runs:
-        raise AssertionError(
-            f"No MLflow runs were found in experiment {experiment_name!r} for correlation_id {correlation_id!r}"
-        )
 
     if len(runs) > 1:
         raise AssertionError(
@@ -226,15 +262,7 @@ def _resolve_latest_mlflow_run_id_by_experiment(aml_workspace: AzureMLWorkspace,
     unambiguous (a single run lands in each experiment).
     """
     client = _mlflow_client(aml_workspace)
-    experiment = _experiment_by_name(client, experiment_name)
-    runs = client.search_runs(
-        [experiment.experiment_id],
-        order_by=["attributes.start_time DESC"],
-        max_results=1,
-    )
-    if not runs:
-        raise AssertionError(f"No MLflow runs were found in experiment {experiment_name!r}")
-
+    runs = _search_experiment_runs_with_retry(client, experiment_name, max_results=1)
     run_id = runs[0].info.run_id
     log_e2e(f"Resolved latest MLflow run in experiment {experiment_name}: run_id={run_id}")
     return run_id

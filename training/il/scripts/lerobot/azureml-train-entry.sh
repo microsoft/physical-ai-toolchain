@@ -5,12 +5,6 @@ set -euo pipefail
 
 echo "=== LeRobot AzureML Training ==="
 
-# wandb is a transitive dependency of lerobot==0.4.4 (hard pin in upstream
-# pyproject.toml). Setting WANDB_MODE=disabled prevents the client from
-# initializing or making network calls; logging goes to MLflow / Azure ML only.
-export WANDB_MODE=disabled
-export WANDB_DISABLED=true
-
 # Restore `training/` prefix so absolute references (training/il/...) and python -m
 # `training.il.scripts...` resolve when cwd is the contents of training/.
 if [[ ! -e training ]]; then ln -s . training; fi

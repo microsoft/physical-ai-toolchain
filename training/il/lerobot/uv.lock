@@ -16,7 +16,6 @@ overrides = [
     { name = "azure-storage-blob", specifier = "==12.30.0" },
     { name = "cryptography", specifier = "==49.0.0" },
     { name = "datasets", specifier = "==5.0.0" },
-    { name = "diffusers", specifier = "==0.38.0" },
     { name = "mlflow-skinny", specifier = "==3.14.0" },
     { name = "numpy", specifier = "==2.4.6" },
     { name = "packaging", specifier = "==26.2" },
@@ -333,7 +332,7 @@ wheels = [
 
 [[package]]
 name = "azureml-mlflow"
-version = "1.62.0.post4"
+version = "1.62.0.post5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-common", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -349,7 +348,7 @@ dependencies = [
     { name = "pytz", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/09/7f40d555ebaab35cfe7f19291ea7ae7d1815c15e69914bb9d9ccfe77e0f3/azureml_mlflow-1.62.0.post4-py3-none-any.whl", hash = "sha256:4b7b476575b3206b77309a747b285c2865ea87b654c4ab710abb81448f30ee75", size = 1020087, upload-time = "2026-06-29T07:32:32.719Z" },
+    { url = "https://files.pythonhosted.org/packages/b6/08/8a678bc72525111e4a8e24ad7105797c2a42bc04ab80316f79f0a04592c1/azureml_mlflow-1.62.0.post5-py3-none-any.whl", hash = "sha256:0523090f20ce27f24e5d19744bc1b377d854f34f3cc5ce268338a7e3d05de455", size = 1020089, upload-time = "2026-07-01T22:25:58.736Z" },
 ]
 
 [[package]]
@@ -1955,7 +1954,7 @@ requires-dist = [
     { name = "azure-storage-blob", specifier = "==12.30.0" },
     { name = "azure-storage-file-datalake", specifier = "==12.25.0" },
     { name = "azure-storage-file-share", specifier = "==12.26.0" },
-    { name = "azureml-mlflow", specifier = "==1.62.0.post4" },
+    { name = "azureml-mlflow", specifier = "==1.62.0.post5" },
     { name = "cryptography", specifier = "==49.0.0" },
     { name = "datasets", specifier = "==5.0.0" },
     { name = "gitpython", specifier = "==3.1.50" },

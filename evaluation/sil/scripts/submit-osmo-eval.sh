@@ -217,7 +217,7 @@ fi
 
 CODE_URL=$(stage_and_upload_code "$REPO_ROOT" \
   "azure://${AZURE_STORAGE_ACCOUNT_VALUE}/${OSMO_CONTAINER_VALUE}/osmo-code" \
-  training/rl training/__init__.py training/utils evaluation/sil) \
+  training/__init__.py training/rl training/packaging training/utils evaluation/sil evaluation/metrics) \
   || fatal "Failed to stage and upload evaluation payload"
 
 submit_args=(

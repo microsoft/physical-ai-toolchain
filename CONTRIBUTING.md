@@ -347,11 +347,11 @@ Run these commands from the repository root:
 Each system under test has its own `tests/e2e/test_e2e_*.py` file.
 
 ```bash
-# Azure ML RL submission path only
-uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_rl_training.py
+# Azure ML RL train->eval lifecycle
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_aml_rl_lifecycle.py
 
-# OSMO RL submission path only
-uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_rl_training.py
+# OSMO RL train->eval lifecycle
+uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_rl_lifecycle.py
 
 # Full e2e suite
 uv run pytest -vv -s -m e2e tests/e2e/

@@ -5,9 +5,9 @@ workflow:
   resources:
     default:
       gpu: 1
-      cpu: 120
-      memory: 480Gi
-      storage: 200Gi
+      cpu: 20
+      memory: 180Gi
+      storage: 100Gi
       platform: gpu_platform
   tasks:
     - name: isaac-inference

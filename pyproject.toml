@@ -41,8 +41,8 @@ constraint-dependencies = [
     "pygments==2.20.0",
 ]
 override-dependencies = [
-    # cryptography: azureml-mlflow caps cryptography<47.0.0; override to the
-    # 48.0.1 release that patches GHSA-537c-gmf6-5ccf.
+    # cryptography: azureml-mlflow==1.62.0.post5 caps cryptography<49.0.0;
+    # override to the 48.0.1 release that patches GHSA-537c-gmf6-5ccf.
     "cryptography==48.0.1",
 ]
 

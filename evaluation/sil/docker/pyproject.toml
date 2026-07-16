@@ -38,10 +38,10 @@ override-dependencies = [
     # diffusers: lerobot==0.5.1 pins a range that includes versions vulnerable
     # to GHSA-98h9-4798-4q5v; force the patched release.
     "diffusers==0.38.0",
-    # azure-storage-blob: azureml-mlflow==1.62.0.post3 caps below 12.29.0; we
+    # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; we
     # need 12.30.0 for the AzureCliCredential fix shipped in that release.
     "azure-storage-blob==12.30.0",
-    # mlflow-skinny: azureml-mlflow==1.62.0.post3 caps at <=3.13.0; mlflow 3.14.0
+    # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mlflow 3.14.0
     # requires mlflow-skinny==3.14.0. Override the cap to allow the newer pair.
     "mlflow-skinny==3.14.0",
     # cryptography: transitively resolved below 48.0.1, whose wheels bundle a

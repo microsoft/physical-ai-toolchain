@@ -1,7 +1,7 @@
-"""Standalone policy export script for RSL-RL checkpoints.
+"""Standalone policy export script for RSL-RL and SKRL checkpoints.
 
-Exports RSL-RL trained policy checkpoints to JIT (TorchScript) and ONNX formats
-without requiring the full Isaac Lab simulator environment.
+Exports trained policy checkpoints to JIT (TorchScript) and ONNX formats without
+requiring the full Isaac Lab simulator environment.
 
 Auto-detects observation and action dimensions from checkpoint weights.
 """
@@ -12,6 +12,7 @@ import argparse
 import copy
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import torch
@@ -103,8 +104,63 @@ def build_mlp(
     return nn.Sequential(*layers)
 
 
+def _extract_actor_state(checkpoint: Mapping[str, object]) -> tuple[dict[str, torch.Tensor], PolicyArchitecture]:
+    """Return actor weights re-keyed for ``build_mlp`` plus the inferred architecture.
+
+    Supports two trained-checkpoint layouts:
+
+    - RSL-RL ActorCritic: a top-level ``model_state_dict`` whose ``actor.<i>.{weight,bias}``
+      keys form an ``nn.Sequential`` MLP.
+    - SKRL shared model (Isaac Lab): a top-level ``policy`` module with a ``net_container``
+      trunk and a ``policy_layer`` mean head.
+
+    Both are normalized to ``build_mlp`` Sequential indices (``0.weight``, ``2.weight``, ...).
+
+    Raises:
+        ValueError: If the checkpoint matches neither layout or lacks actor weights.
+    """
+    if "model_state_dict" in checkpoint:
+        state_dict = checkpoint["model_state_dict"]
+        actor_weights = sorted(
+            [(k, v) for k, v in state_dict.items() if k.startswith("actor.") and "weight" in k],
+            key=lambda kv: int(kv[0].split(".")[1]),
+        )
+        if not actor_weights:
+            raise ValueError("No actor weights found in RSL-RL checkpoint")
+        actor_state = {k[len("actor.") :]: v for k, v in state_dict.items() if k.startswith("actor.")}
+        obs_dim = actor_weights[0][1].shape[1]
+        action_dim = actor_weights[-1][1].shape[0]
+        hidden_dims = [w.shape[0] for _, w in actor_weights[:-1]]
+        return actor_state, PolicyArchitecture(obs_dim, action_dim, hidden_dims)
+
+    policy = checkpoint.get("policy")
+    if isinstance(policy, Mapping) and any(k.startswith("net_container.") for k in policy):
+        trunk_layers = sorted(
+            int(k.split(".")[1]) for k in policy if k.startswith("net_container.") and k.endswith(".weight")
+        )
+        if not trunk_layers or "policy_layer.weight" not in policy:
+            raise ValueError("SKRL policy missing net_container trunk or policy_layer head")
+
+        actor_state: dict[str, torch.Tensor] = {}
+        hidden_dims = []
+        for position, layer in enumerate(trunk_layers):
+            weight = policy[f"net_container.{layer}.weight"]
+            actor_state[f"{2 * position}.weight"] = weight
+            actor_state[f"{2 * position}.bias"] = policy[f"net_container.{layer}.bias"]
+            hidden_dims.append(weight.shape[0])
+        head_index = 2 * len(trunk_layers)
+        actor_state[f"{head_index}.weight"] = policy["policy_layer.weight"]
+        actor_state[f"{head_index}.bias"] = policy["policy_layer.bias"]
+
+        obs_dim = policy[f"net_container.{trunk_layers[0]}.weight"].shape[1]
+        action_dim = policy["policy_layer.weight"].shape[0]
+        return actor_state, PolicyArchitecture(obs_dim, action_dim, hidden_dims)
+
+    raise ValueError("Unsupported checkpoint: expected RSL-RL 'model_state_dict' or SKRL 'policy' module")
+
+
 def infer_architecture_from_checkpoint(checkpoint_path: str) -> PolicyArchitecture:
-    """Infer policy architecture from RSL-RL checkpoint weights.
+    """Infer policy architecture from an RSL-RL or SKRL checkpoint.
 
     Automatically detects observation dimension, action dimension, and hidden layer
     sizes by inspecting the actor network weight shapes in the checkpoint.
@@ -119,38 +175,8 @@ def infer_architecture_from_checkpoint(checkpoint_path: str) -> PolicyArchitectu
         ValueError: If checkpoint structure is invalid or actor weights not found.
     """
     checkpoint = safe_load_checkpoint(checkpoint_path)
-
-    if "model_state_dict" not in checkpoint:
-        raise ValueError("Checkpoint missing 'model_state_dict' key")
-
-    state_dict = checkpoint["model_state_dict"]
-
-    # Find all actor layer weights (excluding biases)
-    actor_weights = sorted(
-        [(k, v) for k, v in state_dict.items() if k.startswith("actor.") and "weight" in k],
-        key=lambda x: int(x[0].split(".")[1]),  # Sort by layer index
-    )
-
-    if not actor_weights:
-        raise ValueError("No actor weights found in checkpoint")
-
-    # First layer input dim = obs_dim
-    _first_layer_key, first_layer_weight = actor_weights[0]
-    obs_dim = first_layer_weight.shape[1]
-
-    # Last layer output dim = action_dim
-    _last_layer_key, last_layer_weight = actor_weights[-1]
-    action_dim = last_layer_weight.shape[0]
-
-    # Hidden dims = output dims of all layers except the last
-    hidden_dims = [w.shape[0] for _, w in actor_weights[:-1]]
-
-    return PolicyArchitecture(
-        obs_dim=obs_dim,
-        action_dim=action_dim,
-        hidden_dims=hidden_dims,
-        activation="elu",  # RSL-RL default
-    )
+    _actor_state, arch = _extract_actor_state(checkpoint)
+    return arch
 
 
 def load_actor_from_checkpoint(
@@ -160,7 +186,7 @@ def load_actor_from_checkpoint(
     hidden_dims: list[int] | None = None,
     activation: str = "elu",
 ) -> tuple[nn.Module, nn.Module | None, PolicyArchitecture]:
-    """Load actor network from RSL-RL checkpoint.
+    """Load actor network from an RSL-RL or SKRL checkpoint.
 
     If obs_dim, action_dim, or hidden_dims are not provided, they are automatically
     inferred from the checkpoint weights.
@@ -175,8 +201,8 @@ def load_actor_from_checkpoint(
     Returns:
         Tuple of (actor_network, normalizer_or_none, architecture).
     """
-    # Auto-detect architecture if not fully specified
-    arch = infer_architecture_from_checkpoint(checkpoint_path)
+    checkpoint = safe_load_checkpoint(checkpoint_path)
+    actor_state, arch = _extract_actor_state(checkpoint)
 
     # Override with user-provided values if specified
     if obs_dim is not None:
@@ -189,29 +215,11 @@ def load_actor_from_checkpoint(
 
     print(f"Policy architecture: {arch}")
 
-    checkpoint = safe_load_checkpoint(checkpoint_path)
-    state_dict = checkpoint["model_state_dict"]
-
-    # Build actor network
     actor = build_mlp(arch.obs_dim, arch.action_dim, arch.hidden_dims, arch.activation)
-
-    # Load actor weights
-    actor_state = {}
-    for key in state_dict:
-        if key.startswith("actor."):
-            new_key = key.replace("actor.", "")
-            actor_state[new_key] = state_dict[key]
-
     actor.load_state_dict(actor_state)
     actor.eval()
 
-    # Check for normalizer
-    normalizer = None
-    normalizer_keys = [k for k in state_dict if "normalizer" in k.lower()]
-    if normalizer_keys:
-        print(f"Found normalizer keys: {normalizer_keys}")
-
-    return actor, normalizer, arch
+    return actor, None, arch
 
 
 def export_policy(
@@ -224,7 +232,7 @@ def export_policy(
     export_jit: bool = True,
     export_onnx: bool = True,
 ) -> dict[str, str]:
-    """Export RSL-RL checkpoint to JIT and/or ONNX formats.
+    """Export an RSL-RL or SKRL checkpoint to JIT and/or ONNX formats.
 
     Automatically detects observation and action dimensions from the checkpoint
     if not explicitly provided.
@@ -257,17 +265,25 @@ def export_policy(
 
     if export_onnx:
         print("Exporting ONNX model...")
-        exporter = _OnnxPolicyExporter(actor, normalizer)
-        onnx_path = exporter.export(output_dir, arch.obs_dim, "policy.onnx")
-        write_sha256_sidecar(onnx_path)
-        exported["onnx"] = onnx_path
-        print(f"  -> {onnx_path}")
+        try:
+            exporter = _OnnxPolicyExporter(actor, normalizer)
+            onnx_path = exporter.export(output_dir, arch.obs_dim, "policy.onnx")
+            write_sha256_sidecar(onnx_path)
+            exported["onnx"] = onnx_path
+            print(f"  -> {onnx_path}")
+        except Exception as exc:  # ONNX export is best-effort; JIT is the primary format
+            print(f"  ONNX export unavailable, skipping: {exc}")
+
+    if (export_jit or export_onnx) and not exported:
+        raise RuntimeError("No policy formats were exported (all requested exports failed)")
 
     return exported
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Export RSL-RL checkpoint to JIT/ONNX (auto-detects dimensions)")
+    parser = argparse.ArgumentParser(
+        description="Export an RSL-RL or SKRL checkpoint to JIT/ONNX (auto-detects dimensions)"
+    )
     parser.add_argument("--checkpoint", required=True, help="Path to checkpoint file")
     parser.add_argument("--output-dir", help="Output directory (default: checkpoint_dir/exported)")
     parser.add_argument(

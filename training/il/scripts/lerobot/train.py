@@ -549,7 +549,7 @@ def main() -> int:
         "TRAINING_STEPS": "--steps",
         "BATCH_SIZE": "--batch_size",
         "LEARNING_RATE": "--policy.optimizer_lr",
-        "EVAL_FREQ": "--eval_freq",
+        "EVAL_FREQ": "--env_eval_freq",
         "SAVE_FREQ": "--save_freq",
         "LOG_FREQ": "--log_freq",
     }
