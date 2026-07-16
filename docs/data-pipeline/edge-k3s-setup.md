@@ -2,7 +2,7 @@
 title: Ubuntu Edge K3s Setup
 description: Configure certificate VPN access, pinned K3s, and optional Azure Arc registration on an Ubuntu HiL host.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-15
+ms.date: 2026-07-16
 ms.topic: how-to
 ---
 
@@ -306,6 +306,10 @@ K3s does not depend on the VPN systemd unit. VPN interruptions stop the external
 ## Connect Arc-enabled Kubernetes
 
 Arc-enabled Kubernetes is optional for the private OSMO backend. Connect it after K3s when the cluster needs Azure management, Arc extensions, or workload identity. Complete the shared provider registration and Azure CLI authentication from the Arc-enabled Server section even when server onboarding was skipped.
+
+The connection script verifies that both the Ubuntu host and a restricted K3s Pod can resolve and reach `https://mcr.microsoft.com` before invoking Azure CLI. The [Azure Arc-enabled Kubernetes network requirements](https://learn.microsoft.com/azure/azure-arc/kubernetes/network-requirements?tabs=azure-cloud) classify MCR access as mandatory for Arc agent images.
+
+Keep a working public DNS resolver available to the host and CoreDNS. Do not replace the LAN resolver with a private Azure DNS address that is reachable only while the VPN is established. The regional `*.obo.arc.azure.com:8084` endpoint is required only for Cluster Connect and Azure RBAC scenarios.
 
 Preview from the Ubuntu host:
 

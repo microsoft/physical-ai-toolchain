@@ -46,6 +46,80 @@ context="$EDGE_K3S_CONTEXT"
 enable_workload_identity=false
 config_preview=false
 oidc_issuer=""
+arc_probe_namespace="physical-ai-arc-smoke-$$"
+arc_probe_pod="arc-egress-smoke"
+
+cleanup_arc_network_probe() {
+  kube_kubectl "$kubeconfig" "$context" delete namespace "$arc_probe_namespace" \
+    --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1 || true
+}
+
+verify_arc_network_requirements() {
+  local phase="" attempt
+
+  curl -fsS --connect-timeout 10 --max-time 20 https://mcr.microsoft.com >/dev/null || \
+    fatal "Host cannot resolve or reach https://mcr.microsoft.com; restore public DNS and outbound HTTPS before Arc onboarding"
+
+  trap cleanup_arc_network_probe EXIT
+  cleanup_arc_network_probe
+  ensure_namespace "$kubeconfig" "$context" "$arc_probe_namespace"
+  cat <<EOF | kube_kubectl "$kubeconfig" "$context" apply -f - >/dev/null
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: $arc_probe_pod
+  namespace: $arc_probe_namespace
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $arc_probe_pod
+  namespace: $arc_probe_namespace
+spec:
+  serviceAccountName: $arc_probe_pod
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: network-check
+      image: alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1
+      command:
+        - sh
+        - -ceu
+        - nslookup mcr.microsoft.com >/dev/null && wget -q --spider --timeout=15 https://mcr.microsoft.com
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+EOF
+
+  for ((attempt = 1; attempt <= 30; attempt++)); do
+    phase=$(kube_kubectl "$kubeconfig" "$context" get pod "$arc_probe_pod" \
+      -n "$arc_probe_namespace" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    [[ "$phase" == "Succeeded" || "$phase" == "Failed" ]] && break
+    sleep 2
+  done
+
+  if [[ "$phase" != "Succeeded" ]]; then
+    error "Arc network preflight pod phase: ${phase:-unknown}"
+    kube_kubectl "$kubeconfig" "$context" logs "$arc_probe_pod" \
+      -n "$arc_probe_namespace" >&2 2>/dev/null || true
+    kube_kubectl "$kubeconfig" "$context" describe pod "$arc_probe_pod" \
+      -n "$arc_probe_namespace" >&2 2>/dev/null || true
+    cleanup_arc_network_probe
+    trap - EXIT
+    fatal "K3s pods cannot resolve or reach https://mcr.microsoft.com; restore a working public DNS upstream for CoreDNS and allow outbound HTTPS before Arc onboarding"
+  fi
+
+  cleanup_arc_network_probe
+  trap - EXIT
+  info "Verified host and K3s pod HTTPS connectivity to mcr.microsoft.com"
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -80,11 +154,14 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Kubeconfig" "$kubeconfig"
   print_kv "Context" "$context"
   print_kv "Workload Identity" "$enable_workload_identity"
+  print_kv "Network Preflight" "host and K3s pod HTTPS to mcr.microsoft.com"
   print_kv "Authentication" "Azure CLI session; device-code login supported"
   exit 0
 fi
 
-require_tools az jq sudo
+require_tools az curl jq kubectl sudo
+verify_kube_target "$kubeconfig" "$context" k3s
+verify_arc_network_requirements
 az account show >/dev/null 2>&1 || \
   fatal "Authenticate Azure CLI with device-code login before Arc onboarding"
 active_subscription=$(az account show --query id -o tsv)
@@ -95,8 +172,6 @@ az group show --name "$resource_group" --subscription "$subscription_id" >/dev/n
   fatal "Resource group not found: $resource_group"
 
 section "Connect Arc-Enabled Kubernetes"
-require_tools kubectl
-verify_kube_target "$kubeconfig" "$context" k3s
 require_az_extension connectedk8s
 if [[ "$enable_workload_identity" == "true" ]]; then
   require_tools cmp curl find python3 sed sort
