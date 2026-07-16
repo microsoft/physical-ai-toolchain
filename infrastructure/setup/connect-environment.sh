@@ -112,6 +112,8 @@ is_rfc1918_ipv4 "$osmo_service_host" || fatal "OSMO service URL must use an RFC1
 kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${aks_cluster}.yaml}"
 context="${context:-$aks_cluster}"
 osmo_config_dir="${osmo_config_dir:-$HOME/.config/physical-ai-toolchain/osmo/$environment}"
+require_external_runtime_path "$kubeconfig" "$bundle_dir"
+require_external_runtime_path "$osmo_config_dir" "$bundle_dir"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"

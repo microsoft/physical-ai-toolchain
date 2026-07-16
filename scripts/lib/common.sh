@@ -492,6 +492,62 @@ require_no_symlink_path() {
   done
 }
 
+normalize_absolute_path() {
+  local path="${1:?path required}" component
+  local components=() normalized_components=()
+
+  [[ "$path" == /* ]] || fatal "Path must be absolute: $path"
+  IFS='/' read -r -a components <<< "${path#/}"
+  for component in "${components[@]}"; do
+    case "$component" in
+      ""|.) continue ;;
+      ..)
+        (( ${#normalized_components[@]} > 0 )) || fatal "Path escapes the filesystem root: $path"
+        unset 'normalized_components[${#normalized_components[@]}-1]'
+        ;;
+      *) normalized_components+=("$component") ;;
+    esac
+  done
+
+  if (( ${#normalized_components[@]} == 0 )); then
+    printf '/\n'
+  else
+    printf '/%s\n' "$(IFS=/; echo "${normalized_components[*]}")"
+  fi
+}
+
+# Require secret-bearing or mutable runtime state to live outside repository and bundle roots.
+# Usage: require_external_runtime_path <absolute-path> [additional-forbidden-root ...]
+require_external_runtime_path() {
+  local path="${1:?runtime path required}" normalized_path repo_root default_bundle_root root normalized_root
+  local forbidden_roots=()
+  shift
+
+  normalized_path=$(normalize_absolute_path "$path")
+  [[ "$path" == "$normalized_path" ]] || fatal "Runtime path must be absolute and normalized: $path"
+  require_no_symlink_path "$normalized_path"
+
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || \
+    (cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd))
+  default_bundle_root="$HOME/.config/physical-ai-toolchain/environments"
+  forbidden_roots=(
+    "$repo_root"
+    "$repo_root/.copilot-tracking"
+    "$repo_root/infrastructure/setup/generated"
+    "$default_bundle_root"
+    "$@"
+  )
+
+  for root in "${forbidden_roots[@]}"; do
+    [[ -n "$root" ]] || continue
+    normalized_root=$(normalize_absolute_path "$root")
+    require_no_symlink_path "$normalized_root"
+    if [[ "$normalized_path" == "$normalized_root" || "$normalized_path" == "$normalized_root/"* ]]; then
+      fatal "Runtime path must be outside protected repository and environment-bundle roots: $path"
+    fi
+  done
+}
+
 # Reject an existing context that points to a different API server before overwrite.
 verify_existing_aks_kubeconfig() {
   local kubeconfig="${1:?kubeconfig required}" context="${2:?context required}"
