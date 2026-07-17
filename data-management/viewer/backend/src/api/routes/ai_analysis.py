@@ -18,6 +18,7 @@ from ..services import (
     TrajectoryAnalyzer,
     TrajectoryMetrics,
 )
+from ..services.trajectory_analysis import DEFAULT_SMOOTHNESS_MODE, SmoothnessMode
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -31,12 +32,17 @@ class TrajectoryData(BaseModel):
     positions: list[list[float]] = Field(description="Joint positions array of shape (N, num_joints)")
     timestamps: list[float] = Field(description="Timestamps for each position")
     gripper_states: list[float] | None = Field(default=None, description="Optional gripper states")
+    smoothness_mode: SmoothnessMode = Field(
+        default=DEFAULT_SMOOTHNESS_MODE,
+        description="Normalization for normalized_smoothness: 'log-scaled' (default) or 'radian-based'",
+    )
 
 
 class TrajectoryMetricsResponse(BaseModel):
     """Response with computed trajectory metrics."""
 
     smoothness: float = Field(description="Smoothness score (0-1)")
+    normalized_smoothness: float = Field(description="Rescaled smoothness (0-1) that discriminates across episodes")
     efficiency: float = Field(description="Path efficiency score (0-1)")
     jitter: float = Field(description="Jitter level (lower is better)")
     hesitation_count: int = Field(description="Number of hesitation events")
@@ -49,6 +55,7 @@ class TrajectoryMetricsResponse(BaseModel):
         """Create from TrajectoryMetrics dataclass."""
         return cls(
             smoothness=metrics.smoothness,
+            normalized_smoothness=metrics.normalized_smoothness,
             efficiency=metrics.efficiency,
             jitter=metrics.jitter,
             hesitation_count=metrics.hesitation_count,
@@ -172,7 +179,7 @@ async def analyze_trajectory(data: TrajectoryData) -> TrajectoryMetricsResponse:
     timestamps = np.array(data.timestamps)
     gripper_states = np.array(data.gripper_states) if data.gripper_states else None
 
-    analyzer = TrajectoryAnalyzer()
+    analyzer = TrajectoryAnalyzer(smoothness_mode=data.smoothness_mode)
     metrics = analyzer.analyze(positions, timestamps, gripper_states)
 
     return TrajectoryMetricsResponse.from_metrics(metrics)

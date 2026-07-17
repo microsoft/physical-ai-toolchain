@@ -5,6 +5,8 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 
+import type { EpisodeAnalysisRecord } from '@/types/api'
+
 interface LabelState {
   /** Available label options for the current dataset */
   availableLabels: string[]
@@ -12,6 +14,8 @@ interface LabelState {
   episodeLabels: Record<number, string[]>
   /** Saved labels per episode from the last persisted dataset state */
   savedEpisodeLabels: Record<number, string[]>
+  /** Structured analysis record per episode (VLM labels + motion metrics) */
+  episodeAnalysis: Record<number, EpisodeAnalysisRecord>
   /** Whether the label data has been loaded */
   isLoaded: boolean
   /** Label filter: only show episodes with these labels (empty = show all) */
@@ -27,6 +31,8 @@ interface LabelActions {
   removeLabelOption: (label: string) => void
   /** Set all episode labels at once (bulk load) */
   setAllEpisodeLabels: (episodes: Record<string, string[]>) => void
+  /** Set all episode analysis records at once (bulk load) */
+  setAllEpisodeAnalysis: (analysis: Record<string, EpisodeAnalysisRecord>) => void
   /** Set labels for a specific episode */
   setEpisodeLabels: (episodeIndex: number, labels: string[]) => void
   /** Commit the saved baseline for a specific episode */
@@ -51,6 +57,7 @@ const initialState: LabelState = {
   availableLabels: DEFAULT_LABELS,
   episodeLabels: {},
   savedEpisodeLabels: {},
+  episodeAnalysis: {},
   isLoaded: false,
   filterLabels: [],
 }
@@ -109,6 +116,14 @@ export const useLabelStore = create<LabelStore>()(
           parsed[Number(key)] = labels
         }
         set({ episodeLabels: parsed, savedEpisodeLabels: parsed }, false, 'setAllEpisodeLabels')
+      },
+
+      setAllEpisodeAnalysis: (analysis) => {
+        const parsed: Record<number, EpisodeAnalysisRecord> = {}
+        for (const [key, record] of Object.entries(analysis)) {
+          parsed[Number(key)] = record
+        }
+        set({ episodeAnalysis: parsed }, false, 'setAllEpisodeAnalysis')
       },
 
       setEpisodeLabels: (episodeIndex, labels) => {

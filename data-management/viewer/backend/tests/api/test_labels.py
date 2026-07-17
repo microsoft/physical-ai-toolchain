@@ -173,6 +173,52 @@ def test_delete_label_option_rejects_empty(client):
     assert response.json()["detail"] == "Label cannot be empty"
 
 
+def test_get_episode_analysis_unknown_returns_null(client):
+    """GET episode analysis returns null when no record exists."""
+    response = client.get("/api/datasets/test/episodes/4/analysis")
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+def test_set_and_get_episode_analysis_roundtrip(client, monkeypatch):
+    """PUT analysis persists a structured record, invalidates cache, and rides along /labels."""
+    invalidations: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "src.api.services.dataset_service.DatasetService.invalidate_episode_cache",
+        lambda self, dataset_id, episode_idx: invalidations.append((dataset_id, episode_idx)),
+    )
+
+    record = {
+        "pick_from": "front",
+        "object": "black cloth",
+        "grasp_success": True,
+        "place_success": False,
+        "movement_quality": "Smooth approach then a missed release.",
+        "notes": "Gripper opened early.",
+        "normalized_smoothness": 0.2,
+        "motion_score": 2,
+        "motion_flags": ["jittery"],
+        "source": "qwen3-vl",
+    }
+
+    put_resp = client.put("/api/datasets/test/episodes/5/analysis", json=record)
+    assert put_resp.status_code == 200
+    assert put_resp.json()["object"] == "black cloth"
+    assert invalidations == [("test", 5)]
+
+    get_resp = client.get("/api/datasets/test/episodes/5/analysis")
+    assert get_resp.status_code == 200
+    body = get_resp.json()
+    assert body["pick_from"] == "front"
+    assert body["grasp_success"] is True
+    assert body["place_success"] is False
+    assert body["motion_flags"] == ["jittery"]
+
+    # The full labels file carries the analysis map so it auto-loads with the dataset.
+    labels = client.get("/api/datasets/test/labels").json()
+    assert labels["analysis"]["5"]["object"] == "black cloth"
+
+
 # ---------------------------------------------------------------------------
 # Storage backend unit tests
 # ---------------------------------------------------------------------------
