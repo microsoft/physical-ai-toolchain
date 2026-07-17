@@ -527,11 +527,12 @@ class TestMain:
                 "--steps=10",
                 "--batch_size=2",
                 "--policy.optimizer_lr=1e-3",
-                "--eval_freq=5",
+                "--env_eval_freq=5",
                 "--save_freq=5",
             ],
         )
         monkeypatch.setenv("DATASET_REPO_ID", "env/ds")
+        monkeypatch.setenv("EVAL_FREQ", "99")
         captured = {}
 
         def fake_run(cmd, source="x", num_gpus=1):
@@ -542,6 +543,9 @@ class TestMain:
         _MOD.main()
         # Should NOT contain env-derived dataset
         assert not any("env/ds" in c for c in captured["cmd"])
+        # CLI-supplied --env_eval_freq should win over EVAL_FREQ env override
+        assert "--env_eval_freq=5" in captured["cmd"]
+        assert not any(c == "--env_eval_freq=99" for c in captured["cmd"])
 
     def test_auto_derives_policy_repo_id(self, monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap):
         self._setup(monkeypatch, tmp_path, fake_mlflow, fake_checkpoints, fake_bootstrap)
