@@ -2,13 +2,15 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-14
+ms.date: 2026-07-17
 ms.topic: how-to
 keywords:
   - cluster-setup
   - kubernetes
   - azureml
 ---
+
+<!-- cspell:ignore kubeconfigs -->
 
 AKS cluster configuration for robotics workloads. Deploys NVIDIA GPU operator, KAI Scheduler, AzureML extension, and OSMO components onto the AKS cluster provisioned in the infrastructure phase.
 
@@ -24,7 +26,8 @@ Deployment order:
 1. `./01-deploy-robotics-charts.sh` — GPU Operator, KAI Scheduler
 2. `./02-deploy-azureml-extension.sh` — AzureML K8s extension, compute attach
 3. `./03-deploy-osmo.sh` — OSMO control plane and backend operator
-4. `./04-deploy-osmo-external-backend.sh` — Optional external Ubuntu K3s backend
+
+After an existing OSMO backend and pool are ready, a trusted environment owner uses `./04-prepare-osmo-hil-node.sh` to publish exact host-bound inputs. The Ubuntu path deploys only the local backend resources.
 
 ## 📦 Environment Bundles
 
@@ -53,31 +56,36 @@ Upload the allowlisted bundle to Key Vault from the trusted deployment host:
 ./upload-environment-bundle.sh --environment <environment>
 ```
 
-Download it to a protected directory on the HiL host, then configure isolated AKS and OSMO profiles:
+The generic bundle remains non-secret. Credentials, registry access, and public VPN exchange material use a separate host-bound HiL catalog rather than widening this allowlist.
+
+Prepare the exact catalog from a trusted environment-operator host:
 
 ```bash
-./download-environment-bundle.sh \
+./04-prepare-osmo-hil-node.sh \
   --environment <environment> \
-  --resource-group <resource-group> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault> \
+  --bundle-dir generated/<environment> \
+  --service-url <approved-osmo-url> \
+  --backend-name <existing-backend> \
+  --pool-name <existing-pool> \
+  --osmo-config-dir <protected-osmo-profile> \
+  --registry-config-file <protected-pull-config> \
+  --token-expiry <yyyy-mm-dd> \
   --config-preview
-
-./download-environment-bundle.sh \
-  --environment <environment> \
-  --resource-group <resource-group>
-
-./connect-environment.sh --environment <environment> --config-preview
-./connect-environment.sh --environment <environment>
 ```
 
-The upload identity requires Key Vault secret write permission. The HiL identity requires the Key Vault Secrets User role and network access to private Azure endpoints. These scripts do not grant roles or modify deployed services.
+The publisher verifies the existing backend and pool, writes exact artifacts, and publishes the catalog last. It does not grant roles, change Key Vault networking, or create remote desired state. The Ubuntu journey consumes these inputs through `data-pipeline/setup/hil/02-connect-osmo-backend.sh`.
 
 ## 📖 Documentation
 
-| Guide                                                                                      | Description                                       |
-|--------------------------------------------------------------------------------------------|---------------------------------------------------|
-| [Cluster Setup](../../docs/infrastructure/cluster-setup.md)                                | Full setup walkthrough and deployment scenarios   |
-| [Cluster Operations](../../docs/infrastructure/cluster-setup-advanced.md)                  | Advanced operations, scaling, and troubleshooting |
-| [Ubuntu HiL OSMO Backend](../../docs/recipes/tier-3-production/ubuntu-hil-osmo-backend.md) | Private external K3s backend                      |
+| Guide                                                                                      | Description                                                        |
+|--------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
+| [Cluster Setup](../../docs/infrastructure/cluster-setup.md)                                | Full setup walkthrough and deployment scenarios                    |
+| [Cluster Operations](../../docs/infrastructure/cluster-setup-advanced.md)                  | Advanced operations, scaling, and troubleshooting                  |
+| [Ubuntu HiL OSMO Backend](../../docs/recipes/tier-3-production/ubuntu-hil-osmo-backend.md) | Progressive T3 host, optional VPN, backend, and validation journey |
 
 ## ☁️ Azure ML Mirror (Optional)
 

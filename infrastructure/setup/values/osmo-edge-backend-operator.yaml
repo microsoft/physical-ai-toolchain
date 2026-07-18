@@ -11,7 +11,7 @@ global:
   nodeSelector:
     kubernetes.io/os: linux
   includeNamespaceUsage: osmo-hil-workflows
-  enableClusterRoles: true
+  enableClusterRoles: false
   enableNonClusterRoles: true
   tolerations: []
   networkPolicy:

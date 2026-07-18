@@ -28,8 +28,9 @@ Submit a LeRobot evaluation:
 evaluation/sil/scripts/submit-azureml-lerobot-eval.sh
 ```
 
-Run the UR10E-shaped no-command HiL gate:
+Run the progressive HiL validation after connecting the local OSMO backend:
 
 ```sh
-evaluation/hil/scripts/run-hil-evaluation.sh --mode local
+data-pipeline/setup/hil/03-run-cpu-smoke.sh --connection-file <connection-receipt>
+data-pipeline/setup/hil/04-run-no-command-check.sh --connection-file <connection-receipt>
 ```

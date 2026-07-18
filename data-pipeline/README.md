@@ -16,7 +16,7 @@ data-pipeline/
 │   ├── scripts/                       # Service lifecycle and upload scripts
 │   └── tests/                         # Unit tests for config models
 ├── arc/                               # Arc Kubernetes manifests and policies
-├── setup/                             # Ubuntu VPN, K3s, Arc, and ACSA setup
+├── setup/                             # Progressive Ubuntu HiL, optional VPN, and separate ACSA setup
 ├── examples/                          # Example configurations overview
 └── specifications/                    # Domain and config specifications
 ```
@@ -41,4 +41,4 @@ data-pipeline/
 
 Recording behavior is controlled by YAML configuration validated against a JSON Schema. See the [configuration reference](capture/config/README.md) for field definitions and platform examples.
 
-Reusable Ubuntu edge setup is documented in [Ubuntu Edge K3s Setup](../docs/data-pipeline/edge-k3s-setup.md).
+Reusable Ubuntu host and local K3s setup is documented in [Ubuntu Edge K3s Setup](../docs/data-pipeline/edge-k3s-setup.md). The complete T3 HiL journey is in [Ubuntu HiL OSMO Backend](../docs/recipes/tier-3-production/ubuntu-hil-osmo-backend.md).

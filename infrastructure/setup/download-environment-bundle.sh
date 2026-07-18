@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Download a non-secret environment bundle from Azure Key Vault to a protected directory.
+# cspell:ignore kvphysicalaidev
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,13 +54,23 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-require_tools az jq
-
 [[ -n "$environment" ]] || fatal "--environment is required"
 [[ "$environment" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || \
   fatal "Environment must use lowercase letters, numbers, and internal hyphens"
 [[ -n "$resource_group" || -n "$vault_name" ]] || fatal "--resource-group or --vault-name is required"
 output_dir="${output_dir:-$HOME/.config/physical-ai-toolchain/environments/$environment}"
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Environment" "$environment"
+  print_kv "Subscription" "${subscription_id:-active account during execution}"
+  print_kv "Resource Group" "${resource_group:-not supplied}"
+  print_kv "Key Vault" "${vault_name:-one vault discovered during execution}"
+  print_kv "Output" "$output_dir"
+  exit 0
+fi
+
+require_tools az jq
 
 #------------------------------------------------------------------------------
 # Gather Configuration
@@ -81,16 +92,6 @@ if [[ -z "$vault_name" ]]; then
   (( ${#vault_names[@]} == 1 )) || \
     fatal "Resource group must contain exactly one Key Vault; pass --vault-name when it contains ${#vault_names[@]}"
   vault_name="${vault_names[0]}"
-fi
-
-if [[ "$config_preview" == "true" ]]; then
-  section "Configuration Preview"
-  print_kv "Environment" "$environment"
-  print_kv "Subscription" "$subscription_id"
-  print_kv "Resource Group" "${resource_group:-validated after download}"
-  print_kv "Key Vault" "$vault_name"
-  print_kv "Output" "$output_dir"
-  exit 0
 fi
 
 require_no_symlink_path "$output_dir"

@@ -7,12 +7,32 @@ description: "Generate, transfer, and consume environment-specific Azure, AKS, O
 
 Generate non-secret deployment details from Terraform desired state and read-only Azure, Kubernetes, and OSMO discovery. Store generated artifacts under the gitignored `infrastructure/setup/generated/<environment>/` directory.
 
+## Goal
+
+Produce a validated non-secret environment bundle or a host-bound HiL handoff whose target, ownership, transfer, and next operation are explicit. Keep discovery read-only and keep generated environment values outside tracked source.
+
+## Flow
+
+1. Resolve the environment, desired-state sources, available read-only tools, and requested bundle consumers.
+2. Verify target identities and generate only the required allowlisted artifacts under the gitignored environment directory.
+3. Validate hashes, immutable references, file safety, and the absence of credentials before use.
+4. Preview the selected deployment or, for HiL, publish the exact host-bound catalog and hand off to the local consumer.
+
+## Inputs
+
+- Environment name and Terraform directory
+- Existing isolated Kubernetes context when live cluster verification is available
+- Optional isolated authenticated OSMO profile for read-only service verification
+- Requested deployment consumers and explicit version overrides
+- For HiL publication, the host identity, existing backend and pool, approved service URL, protected registry configuration, transfer choice, and optional public VPN inputs
+
 ## Safety Boundaries
 
 Follow these rules for every environment bundle:
 
 - Do not modify Azure resources, Kubernetes resources, OSMO configuration, or the active OSMO profile during discovery.
 - Do not run `terraform apply`, `kubectl apply`, Helm upgrade/install, OSMO update/set/delete commands, or Azure create/update/delete commands while generating a bundle.
+- Do not upload artifacts or publish credentials during read-only discovery.
 - Do not write discovered values into tracked files, documentation, examples, tests, or source defaults.
 - Do not replace instructional RFC1918 addresses or example resource shapes solely because they differ from the deployed environment.
 - Do not include Terraform state, secret values, kubeconfig contents, OSMO profiles, tokens, registry credentials, VPN keys, certificates, or absolute local paths in a bundle.
@@ -40,14 +60,14 @@ Use lowercase letters, numbers, and hyphens for `<environment>`. Keep artifact f
 
 Use every available discovery tool. Record unavailable tools and skipped checks in `deployment.json`.
 
-| Tool | Purpose | Required |
-|------|---------|----------|
-| Terraform | Read desired resources and node-pool configuration | Yes |
-| Azure CLI | Verify Azure identity and live resource metadata | Yes |
-| jq | Select explicit non-secret fields and write JSON | Yes |
-| kubectl | Verify AKS nodes, labels, taints, GPU capacity, and OSMO endpoint | When AKS is reachable |
-| osmo | Verify the authenticated service and available pools | When an isolated profile is supplied |
-| Helm | Read the deployed OSMO image version and values | When OSMO is deployed |
+| Tool      | Purpose                                                           | Required                             |
+|-----------|-------------------------------------------------------------------|--------------------------------------|
+| Terraform | Read desired resources and node-pool configuration                | Yes                                  |
+| Azure CLI | Verify Azure identity and live resource metadata                  | Yes                                  |
+| jq        | Select explicit non-secret fields and write JSON                  | Yes                                  |
+| kubectl   | Verify AKS nodes, labels, taints, GPU capacity, and OSMO endpoint | When AKS is reachable                |
+| osmo      | Verify the authenticated service and available pools              | When an isolated profile is supplied |
+| Helm      | Read the deployed OSMO image version and values                   | When OSMO is deployed                |
 
 For private resources, connect to the VPN before live Azure, AKS, Key Vault, or OSMO checks.
 
@@ -74,15 +94,15 @@ Run `terraform output -json` from the Terraform directory. Select only explicit 
 
 Read these values when present:
 
-| Terraform output | Bundle use |
-|------------------|------------|
-| `resource_group` | Resource group name and location |
-| `key_vault_name` | Key Vault bundle transfer |
-| `aks_cluster` | AKS name and resource ID |
-| `node_pools` | GPU pool VM sizes, priority, labels, and taints |
-| `container_registry` | ACR name and login server |
-| `storage_account` | Storage account name |
-| `azureml_workspace` | Azure ML workspace name |
+| Terraform output     | Bundle use                                      |
+|----------------------|-------------------------------------------------|
+| `resource_group`     | Resource group name and location                |
+| `key_vault_name`     | Key Vault bundle transfer                       |
+| `aks_cluster`        | AKS name and resource ID                        |
+| `node_pools`         | GPU pool VM sizes, priority, labels, and taints |
+| `container_registry` | ACR name and login server                       |
+| `storage_account`    | Storage account name                            |
+| `azureml_workspace`  | Azure ML workspace name                         |
 
 Fail when the resource group, Key Vault, or requested AKS/ACR values are missing. Do not infer names from naming conventions when Terraform exposes them.
 
@@ -249,15 +269,14 @@ Before using or uploading the bundle:
 
 Pass generated artifacts explicitly; do not copy them back into tracked `values/` or `manifests/` directories.
 
-| Deployment | Generated argument |
-|------------|--------------------|
-| Azure ML extension | `02-deploy-azureml-extension.sh --instance-types-manifest <bundle>/azureml-instance-types.yaml` |
+| Deployment         | Generated argument                                                                                                      |
+|--------------------|-------------------------------------------------------------------------------------------------------------------------|
+| Azure ML extension | `02-deploy-azureml-extension.sh --instance-types-manifest <bundle>/azureml-instance-types.yaml`                         |
 | OSMO control plane | `03-deploy-osmo.sh --platform-values <bundle>/osmo-platforms.yaml --use-acr --image-manifest <bundle>/osmo-images.json` |
-| External HiL backend | `04-deploy-osmo-external-backend.sh --image-manifest <bundle>/osmo-images.json` |
 
 Read the image version, service URL, AKS resource ID, and resource names from `deployment.json`. Run each deployment script with `--config-preview` first. Deployment scripts may change Azure or Kubernetes resources; obtain user confirmation before continuing from discovery into deployment.
 
-## Transfer Through Key Vault
+## Transfer a Generic Non-Secret Bundle
 
 Upload the allowlisted bundle from the trusted deployment host:
 
@@ -270,9 +289,9 @@ The uploader requires Key Vault secret write permission. It never changes RBAC.
 
 Each UTF-8 artifact must be no larger than 24,000 bytes. Omit an optional file and its `deployment.json` artifact entry together. Existing Key Vault versions may remain, but consumers follow the current `deployment.json` allowlist.
 
-Do not run concurrent uploads for the same environment. The uploader publishes artifacts first and `deployment.json` last so downloaders either receive a coherent bundle or fail its digest checks.
+Do not run concurrent uploads for the same environment. The uploader publishes artifacts first and `deployment.json` last so consumers either receive a coherent bundle or fail its digest checks.
 
-On the HiL host, authenticate to Azure, connect to the private network or VPN, and download the bundle:
+For a generic, non-HiL consumer, authenticate to Azure, connect to the private network or VPN, and download the bundle:
 
 ```bash
 infrastructure/setup/download-environment-bundle.sh --environment <environment> --resource-group <resource-group> --config-preview
@@ -289,3 +308,55 @@ infrastructure/setup/connect-environment.sh --environment <environment>
 ```
 
 Use `--osmo-method dev --osmo-username <user>` only for an explicitly approved development deployment. Use protected files with `--password-file` or `--token-file` for service authentication.
+
+`download-environment-bundle.sh` and `connect-environment.sh` remain generic non-HiL utilities. They do not retrieve or configure host-bound HiL credentials.
+
+## Prepare and Connect an Ubuntu HiL Host
+
+Complete this journey when an existing OSMO backend and pool are ready: the environment owner publishes the generic non-secret bundle separately from the host-bound protected inputs, then the Ubuntu consumer connects only its owned local K3s target with the catalog-bound artifacts.
+
+### Publish Host-Bound Inputs
+
+The environment owner runs `infrastructure/setup/04-prepare-osmo-hil-node.sh` after verifying the existing OSMO backend and pool. Supply the generated bundle, approved service URL, existing backend and pool, protected OSMO profile, pull-only registry configuration, and token expiry. The script publishes the generic bundle and the exact host-bound catalog separately, writing the catalog last.
+
+Key Vault is the default transport. Before publication, the environment owner manually creates the exact secret resources and grants the Ubuntu identity data-plane access to each named inbound secret only. Use `Key Vault Secrets User` for inbound secrets and `Key Vault Secrets Officer` only for the host-specific CSR secret. Verify that the Ubuntu identity has no direct or inherited vault-wide data-plane role.
+
+Key Vault networking and RBAC are manual environment-owner actions. The publisher does not assign roles, modify Key Vault networking, or make a private vault reachable. Complete any bounded network-access window and restore private-only access before the consumer continues.
+
+SCP is a deliberate transport choice made before host preparation, not a Key Vault fallback. When SCP is selected, the environment owner passes `--output-dir` to `04-prepare-osmo-hil-node.sh`. The resulting protected directory contains the same exact catalog, artifact names, versions, and digests that Key Vault consumers retrieve.
+
+### Connect the Ubuntu Consumer
+
+After the Ubuntu host and any required VPN are ready, run the consumer boundary:
+
+```bash
+data-pipeline/setup/hil/02-connect-osmo-backend.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault>
+```
+
+For the preselected SCP opt-out, use the same consumer with `--transport scp --scp-source-dir <protected-artifact-directory>`. A Key Vault access, network, target, or integrity failure stops the run. It never selects SCP automatically.
+
+The consumer validates the exact catalog-bound inputs and changes only the owned local K3s target. It does not administer Azure resources, AKS, Key Vault networking or RBAC, or remote OSMO desired state. Do not use `download-environment-bundle.sh` or `connect-environment.sh` as the Ubuntu HiL path.
+
+## Success Criteria
+
+- Generated bundle files contain only the approved non-secret fields and remain under the gitignored environment directory.
+- Every available read-only target check passes or is recorded as unavailable without a false verification claim.
+- Deployment consumers receive explicit validated artifact paths instead of copied tracked values.
+- A HiL publication uses the exact host-bound catalog, publishes it last, and keeps Key Vault and SCP on the same consumer boundary.
+- No discovery action mutates Azure, Kubernetes, OSMO, Key Vault, or a client profile.
+
+## Stop Rules
+
+- Stop when Terraform, Azure, AKS, ACR, Key Vault, or OSMO identity does not match the selected environment.
+- Stop when a generated artifact contains a credential, private key, kubeconfig, profile, absolute home path, or unverified mutable reference.
+- Stop before deployment, publication, role assignment, network change, or credential issuance unless the caller requested that separate action and its owner prerequisites are satisfied.
+- Stop a Key Vault path on access, network, target, or integrity failure. Do not change transport automatically.
+
+## Handoff
+
+Return the generated bundle path, validation results, unavailable checks, and the exact next preview command. For HiL preparation, identify the trusted publisher command, the selected transfer, the local consumer command, and any environment-owner RBAC or network checkpoint that remains.

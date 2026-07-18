@@ -21,6 +21,21 @@ _JOINT_ORDER = (
     "wrist_3_joint",
 )
 _REJECTION_CODE = "NO_COMMAND_TRANSPORT"
+_CONFIG_KEYS = {"execution", "kind", "observations", "policy", "robot", "safety", "schema_version"}
+_ROBOT_KEYS = {
+    "command_endpoint",
+    "command_transport",
+    "device_paths",
+    "joint_order",
+    "model",
+    "position_unit",
+    "robot_network_cidrs",
+    "velocity_unit",
+}
+_OBSERVATION_KEYS = {"fixture", "source"}
+_POLICY_KEYS = {"image", "kind"}
+_EXECUTION_KEYS = {"max_steps", "mode", "period_ms"}
+_SAFETY_KEYS = {"allow_command_transport", "allow_motion", "require_negative_command_probe"}
 
 
 class NoCommandTransportError(RuntimeError):
@@ -65,11 +80,23 @@ def _sha256(path: Path) -> str:
 
 def _load_config(path: Path) -> dict[str, Any]:
     config = json.loads(path.read_text(encoding="utf-8"))
+    if set(config) != _CONFIG_KEYS:
+        raise ValueError("configuration contains unknown or missing top-level fields")
     if config.get("schema_version") != 1 or config.get("kind") != "ur10e-no-command-dry-run":
         raise ValueError("unsupported HiL configuration schema")
     robot = config.get("robot", {})
+    if set(robot) != _ROBOT_KEYS:
+        raise ValueError("robot configuration contains unknown or missing fields")
     if robot.get("model") != "UR10E" or robot.get("joint_order") != list(_JOINT_ORDER):
         raise ValueError("configuration must use the canonical UR10E joint order")
+    if set(config.get("observations", {})) != _OBSERVATION_KEYS:
+        raise ValueError("observations configuration contains unknown or missing fields")
+    if set(config.get("policy", {})) != _POLICY_KEYS:
+        raise ValueError("policy configuration contains unknown or missing fields")
+    if set(config.get("execution", {})) != _EXECUTION_KEYS:
+        raise ValueError("execution configuration contains unknown or missing fields")
+    if set(config.get("safety", {})) != _SAFETY_KEYS:
+        raise ValueError("safety configuration contains unknown or missing fields")
     forbidden_values = (
         robot.get("command_transport"),
         robot.get("command_endpoint"),
@@ -145,7 +172,12 @@ def _write_jsonl(path: Path, values: list[dict[str, Any]]) -> None:
 def run(config_path: Path, output_dir: Path) -> dict[str, Any]:
     """Run the deterministic evaluation and return its summary."""
     config = _load_config(config_path)
-    fixture_path = (config_path.parent / config["observations"]["fixture"]).resolve()
+    fixture_name = config["observations"]["fixture"]
+    if Path(fixture_name).name != fixture_name:
+        raise ValueError("observation fixture must be a filename in the configuration directory")
+    fixture_path = (config_path.parent / fixture_name).resolve()
+    if fixture_path.parent != config_path.parent.resolve():
+        raise ValueError("observation fixture escapes the configuration directory")
     max_steps = int(config["execution"]["max_steps"])
     period_ms = int(config["execution"]["period_ms"])
     observations = _load_observations(fixture_path, max_steps)
@@ -258,9 +290,26 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--workflow-name")
+    parser.add_argument("--backend-name")
+    parser.add_argument("--pool-name")
     args = parser.parse_args()
     result = run(args.config.resolve(), args.output_dir.resolve())
-    print(json.dumps(result, sort_keys=True))
+    if args.workflow_name:
+        remote_result = {
+            "workflow_name": args.workflow_name,
+            "backend_name": args.backend_name,
+            "pool_name": args.pool_name,
+            "status": result["status"],
+            "command_transport": result["command_transport"],
+            "proposed_actions": result["proposed_actions"],
+            "applied_actions": result["applied_actions"],
+            "negative_command_probe": result["negative_command_probe"],
+            "rejection_code": result["rejection_code"],
+        }
+        print("HIL_NO_COMMAND_RESULT=" + json.dumps(remote_result, separators=(",", ":"), sort_keys=True))
+    else:
+        print(json.dumps(result, sort_keys=True))
     return 0
 
 

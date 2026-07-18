@@ -1,339 +1,373 @@
 ---
 title: Ubuntu HiL OSMO Backend
-description: Connect an Ubuntu K3s compute plane to the private OSMO control plane in AKS and run CPU and no-command HiL gates.
+description: Prepare one Ubuntu T3 HiL node, optionally establish private reachability, connect it to an existing OSMO environment, and prove CPU and no-command outcomes.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-15
+ms.date: 2026-07-17
 ms.topic: tutorial
 ---
 
-Connect one Ubuntu K3s cluster to the existing private OSMO control plane in AKS. Complete the CPU smoke and independently non-commanding UR10E-shaped dry run before adding Arc workload identity, GPU execution, storage transfer, or physical motion.
-
-## Prerequisites
-
-| Requirement                                                    | Runs from                  | Purpose                                  |
-|----------------------------------------------------------------|----------------------------|------------------------------------------|
-| [Ubuntu Edge K3s Setup](../../data-pipeline/edge-k3s-setup.md) | Ubuntu host                | VPN and pinned K3s                       |
-| Existing OSMO 6.3 control plane                                | AKS                        | Workflow API and ConfigMap desired state |
-| Private RFC1918 frontend IP                                    | Azure VNet                 | Stable OSMO endpoint                     |
-| Azure CLI, Terraform, Helm, kubectl, OSMO CLI                  | Dual-cluster operator host | AKS and OSMO administration              |
-| Explicit AKS kubeconfig/context                                | Dual-cluster operator host | Control-plane target safety              |
-| Explicit K3s kubeconfig/context                                | Dual-cluster operator host | Edge target safety                       |
-| Protected OSMO profile directory                               | Dual-cluster operator host | Isolated login and pool selection        |
-
-This recipe uses private `http://` and `ws://` inside the certificate-authenticated VPN. Do not expose this profile publicly.
-
-## Configure Operator Values
-
-Run from a VPN-connected host that can reach both Kubernetes APIs. For the initial single-host path, run on the Ubuntu desktop after installing Azure CLI, Helm, and OSMO CLI; its protected K3s kubeconfig uses the local API endpoint.
-
-```bash
-export OSMO_PRIVATE_IP="<reserved-rfc1918-ip>"
-export OSMO_PRIVATE_URL="http://${OSMO_PRIVATE_IP}"
-export HIL_BACKEND_NAME="<unique-site-backend-name>"
-export HIL_POOL_NAME="$HIL_BACKEND_NAME"
-export HIL_OPERATOR_NAMESPACE="osmo-hil-operator"
-export HIL_WORKFLOW_NAMESPACE="osmo-hil-workflows"
-export AKS_KUBECONFIG="$HOME/.kube/physical-ai-toolchain/<aks-name>.yaml"
-export AKS_CONTEXT="<aks-context-name>"
-export AKS_RESOURCE_ID="<full-aks-resource-id>"
-export EDGE_KUBECONFIG="<protected-k3s-kubeconfig-path>"
-export EDGE_CONTEXT="<edge-context-name>"
-export EDGE_NODE_NAME="<unique-edge-node-name>"
-export EDGE_K3S_VERSION="v1.32.6+k3s1"
-export OSMO_LOGIN_METHOD="<approved-osmo-login-method>"
-export OSMO_USERNAME="<approved-osmo-username>"
-export OSMO_PROFILE_DIR="$HOME/.config/physical-ai-toolchain/osmo-hil"
-export OSMO_TOKEN_DIR="$HOME/.local/share/physical-ai-toolchain/osmo-secrets"
-export REGISTRY_CONFIG_FILE="$OSMO_TOKEN_DIR/registry-config.json"
-export HIL_RESULTS_DIR="$HOME/.local/share/physical-ai-toolchain/results"
-```
-
-Create protected directories:
-
-```bash
-install -d -m 0700 "$OSMO_PROFILE_DIR" "$OSMO_TOKEN_DIR" "$HIL_RESULTS_DIR"
-```
-
-Place a Docker `config.json` containing read credentials for the OSMO image registry at
-`$REGISTRY_CONFIG_FILE` through the approved secret-management handoff, then set its mode to `0600`.
-Do not paste the credential into a command line or `.env.local`.
-
-## Reserve the Private Endpoint
-
-Set `OSMO_PRIVATE_IP` to an unused address in the AzureML ingress subnet. Confirm Azure does not already assign the address to another interface or LoadBalancer before applying the OSMO Service.
-
-The Service remains private because `internal-lb-ingress.yaml` retains the Azure internal LoadBalancer annotation. The script rejects non-RFC1918 addresses.
-
-## Apply the AKS HiL Backend Overlay
-
-Preview from the dual-cluster operator host:
-
-```bash
-infrastructure/setup/03-deploy-osmo.sh \
-  --kubeconfig "$AKS_KUBECONFIG" \
-  --context "$AKS_CONTEXT" \
-  --expected-aks-resource-id "$AKS_RESOURCE_ID" \
-  --private-service-ip "$OSMO_PRIVATE_IP" \
-  --hil-backend-name "$HIL_BACKEND_NAME" \
-  --hil-pool-name "$HIL_POOL_NAME" \
-  --hil-workflow-namespace "$HIL_WORKFLOW_NAMESPACE" \
-  --config-preview
-```
-
-Apply the control-plane release and additive ConfigMap state:
-
-```bash
-infrastructure/setup/03-deploy-osmo.sh \
-  --kubeconfig "$AKS_KUBECONFIG" \
-  --context "$AKS_CONTEXT" \
-  --expected-aks-resource-id "$AKS_RESOURCE_ID" \
-  --private-service-ip "$OSMO_PRIVATE_IP" \
-  --hil-backend-name "$HIL_BACKEND_NAME" \
-  --hil-pool-name "$HIL_POOL_NAME" \
-  --hil-workflow-namespace "$HIL_WORKFLOW_NAMESPACE"
-```
-
-The overlay adds the HiL backend and pool beside the existing `default` backend and pool. It does not use `osmo config update`; OSMO 6.3 ConfigMap mode owns this desired state through Helm.
-
-Validate the private Service:
-
-```bash
-kubectl --kubeconfig "$AKS_KUBECONFIG" \
-  --context "$AKS_CONTEXT" \
-  get service azureml-ingress-nginx-internal-lb \
-  --namespace azureml \
-  -o jsonpath='{.metadata.annotations.service\.beta\.kubernetes\.io/azure-load-balancer-internal}{" "}{.spec.loadBalancerIP}{"\n"}'
-```
-
-Expected output starts with `true` and ends with `$OSMO_PRIVATE_IP`.
-
-## Prepare an Isolated OSMO Profile
-
-Run from the dual-cluster operator host:
-
-```bash
-XDG_CONFIG_HOME="$OSMO_PROFILE_DIR" osmo login "$OSMO_PRIVATE_URL" \
-  --method "$OSMO_LOGIN_METHOD" \
-  --username "$OSMO_USERNAME"
-```
-
-Use the authentication method and username approved for the target OSMO deployment. Keep the endpoint private. Do not use development authentication for public, multi-user, or production exposure.
-
-## Issue the External Backend Token
-
-Preview from the dual-cluster operator host:
-
-```bash
-infrastructure/setup/04-deploy-osmo-external-backend.sh \
-  --aks-kubeconfig "$AKS_KUBECONFIG" \
-  --aks-context "$AKS_CONTEXT" \
-  --aks-resource-id "$AKS_RESOURCE_ID" \
-  --edge-kubeconfig "$EDGE_KUBECONFIG" \
-  --edge-context "$EDGE_CONTEXT" \
-  --edge-node-name "$EDGE_NODE_NAME" \
-  --edge-k3s-version "$EDGE_K3S_VERSION" \
-  --service-url "$OSMO_PRIVATE_URL" \
-  --backend-name "$HIL_BACKEND_NAME" \
-  --pool-name "$HIL_POOL_NAME" \
-  --operator-namespace "$HIL_OPERATOR_NAMESPACE" \
-  --workflow-namespace "$HIL_WORKFLOW_NAMESPACE" \
-  --token-file "$OSMO_TOKEN_DIR/${HIL_BACKEND_NAME}.token" \
-  --token-metadata-file "$OSMO_TOKEN_DIR/${HIL_BACKEND_NAME}.metadata.json" \
-  --osmo-config-dir "$OSMO_PROFILE_DIR" \
-  --registry-config-file "$REGISTRY_CONFIG_FILE" \
-  --issue-token \
-  --token-expiry "$(date -u -d '+7 days' +%F)" \
-  --config-preview
-```
-
-Set an expiry that matches the validation window. Issue the token and deploy the edge operator:
-
-```bash
-infrastructure/setup/04-deploy-osmo-external-backend.sh \
-  --aks-kubeconfig "$AKS_KUBECONFIG" \
-  --aks-context "$AKS_CONTEXT" \
-  --aks-resource-id "$AKS_RESOURCE_ID" \
-  --edge-kubeconfig "$EDGE_KUBECONFIG" \
-  --edge-context "$EDGE_CONTEXT" \
-  --edge-node-name "$EDGE_NODE_NAME" \
-  --edge-k3s-version "$EDGE_K3S_VERSION" \
-  --service-url "$OSMO_PRIVATE_URL" \
-  --backend-name "$HIL_BACKEND_NAME" \
-  --pool-name "$HIL_POOL_NAME" \
-  --operator-namespace "$HIL_OPERATOR_NAMESPACE" \
-  --workflow-namespace "$HIL_WORKFLOW_NAMESPACE" \
-  --token-file "$OSMO_TOKEN_DIR/${HIL_BACKEND_NAME}.token" \
-  --token-metadata-file "$OSMO_TOKEN_DIR/${HIL_BACKEND_NAME}.metadata.json" \
-  --osmo-config-dir "$OSMO_PROFILE_DIR" \
-  --registry-config-file "$REGISTRY_CONFIG_FILE" \
-  --issue-token \
-  --token-expiry "$(date -u -d '+7 days' +%F)"
-```
-
-This generic recipe uses the chart and image versions pinned in `infrastructure/setup/defaults.conf`.
-
-The script:
-
-1. Verifies the AKS and K3s contexts and rejects equal cluster identities.
-2. Verifies the OSMO endpoint version matches the configured 6.3 image.
-3. Verifies the AKS release contains the matching backend, pool, namespace, service URL, and router URL.
-4. Installs the checksum-pinned KAI chart on K3s.
-5. Creates the token Secret from a protected file.
-6. Renders and rejects privileged, host-networked, host-mounted, or `cluster-admin` operator resources.
-7. Deploys the OSMO backend listener and worker.
-8. Verifies the listener and worker deployments reach a ready state.
-
-Do not copy the token into command arguments, `.env.local`, Helm values, or Git.
-
-## Verify Backend Health
-
-Run from the dual-cluster operator host:
-
-```bash
-XDG_CONFIG_HOME="$OSMO_PROFILE_DIR" osmo config show BACKEND "$HIL_BACKEND_NAME"
-```
-
-Confirm:
-
-| Field                               | Expected value            |
-|-------------------------------------|---------------------------|
-| `name`                              | `$HIL_BACKEND_NAME`       |
-| `k8s_namespace`                     | `$HIL_WORKFLOW_NAMESPACE` |
-| `router_address`                    | `ws://$OSMO_PRIVATE_IP`   |
-| `scheduler_settings.scheduler_name` | `kai-scheduler`           |
-| `online`                            | `true`                    |
-
-Verify the edge operator on K3s:
-
-```bash
-kubectl --kubeconfig "$EDGE_KUBECONFIG" \
-  --context "$EDGE_CONTEXT" \
-  get deployments,pods \
-  --namespace "$HIL_OPERATOR_NAMESPACE"
-```
-
-## Run the CPU Gate
-
-Preview from the dual-cluster operator host:
-
-```bash
-evaluation/hil/scripts/run-cpu-smoke.sh \
-  --pool "$HIL_POOL_NAME" \
-  --service-url "$OSMO_PRIVATE_URL" \
-  --osmo-config-dir "$OSMO_PROFILE_DIR" \
-  --config-preview
-```
-
-Submit and wait for terminal success:
-
-```bash
-evaluation/hil/scripts/run-cpu-smoke.sh \
-  --pool "$HIL_POOL_NAME" \
-  --service-url "$OSMO_PRIVATE_URL" \
-  --osmo-config-dir "$OSMO_PROFILE_DIR"
-```
-
-The workflow requests one CPU, 128 MiB memory, and zero GPUs. It runs as a non-root user and fails if `/dev/nvidia0` is present in the container.
-
-Do not continue if this workflow times out, fails, or runs on the wrong cluster.
-
-## Run the No-Command HiL Gate
-
-### Local validation
-
-Run first on the Ubuntu host:
-
-```bash
-evaluation/hil/scripts/run-hil-evaluation.sh \
-  --mode local \
-  --output-dir "$HIL_RESULTS_DIR/ur10e-no-command" \
-  --config-preview
-```
-
-Run and verify artifacts:
-
-```bash
-evaluation/hil/scripts/run-hil-evaluation.sh \
-  --mode local \
-  --output-dir "$HIL_RESULTS_DIR/ur10e-no-command"
-```
-
-Expected summary fields:
-
-| Field                    | Expected value         |
-|--------------------------|------------------------|
-| `status`                 | `passed`               |
-| `proposed_actions`       | `10`                   |
-| `applied_actions`        | `0`                    |
-| `negative_command_probe` | `passed`               |
-| `command_transport`      | `none`                 |
-| `rejection_code`         | `NO_COMMAND_TRANSPORT` |
-
-### OSMO validation
-
-Run from the dual-cluster operator host:
-
-```bash
-evaluation/hil/scripts/run-hil-evaluation.sh \
-  --mode osmo \
-  --pool "$HIL_POOL_NAME" \
-  --service-url "$OSMO_PRIVATE_URL" \
-  --osmo-config-dir "$OSMO_PROFILE_DIR" \
-  --workflow-name "${HIL_BACKEND_NAME}-ur10e-no-command" \
-  --config-preview
-```
-
-Submit and wait for terminal success:
-
-```bash
-evaluation/hil/scripts/run-hil-evaluation.sh \
-  --mode osmo \
-  --pool "$HIL_POOL_NAME" \
-  --service-url "$OSMO_PRIVATE_URL" \
-  --osmo-config-dir "$OSMO_PROFILE_DIR" \
-  --workflow-name "${HIL_BACKEND_NAME}-ur10e-no-command"
-```
-
-The dry-run adapter contains no RTDE control client, ROS command publisher, serial interface, USB device, CAN interface, host mount, or robot endpoint. Every proposed action is deliberately sent to the adapter boundary and must raise `NO_COMMAND_TRANSPORT`.
+Move one Ubuntu desktop through four T3 HiL milestones: host-ready, reachable when private routing is required, connected to an existing OSMO backend and pool, and validated for CPU and no-command workloads. Key Vault is the default transfer. SCP is a deliberate preselected opt-out that supplies the same protected catalog and artifacts to the same consumers.
 
 > [!WARNING]
-> Stop after this gate. This implementation does not support physical motion. Select the exact robot/controller, policy, command owner, limits, operator, safe pose, and independent E-stop procedure before adding a bounded-motion adapter.
+> The CPU and no-command proofs complete this journey. No command transport or physical motion is supported.
 
-## Enable Optional Arc
+## Responsibilities
 
-Arc is independent of the OSMO path. Complete the private backend and CPU gate first, then follow [Enable Azure Arc](../../data-pipeline/edge-k3s-setup.md#enable-azure-arc) when Azure management or workload identity is required.
+| Owner             | Responsibilities                                                                                                                                 | Excluded work                                                                                                   |
+|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| Environment owner | Verify the existing OSMO endpoint, backend, pool, charts, images, registry access, Key Vault secrets, per-secret roles, and coherent publication | Local K3s or Ubuntu mutation                                                                                    |
+| Ubuntu user       | Select transport, prepare the host, install owned K3s, optionally connect VPN, consume exact inputs, and run validation                          | AKS credentials, Azure resource administration, Key Vault networking or RBAC changes, remote OSMO desired state |
+| VPN CA owner      | Sign the Ubuntu CSR and publish only the signed leaf and public chain                                                                            | Moving the CA private key or Ubuntu private key                                                                 |
 
-The initial CPU and no-command workflows require no Arc extension and no storage identity.
+## Select the Transfer
 
-## Reconnect Validation
+Choose one transport before host preparation:
 
-On the Ubuntu host, disconnect and reconnect strongSwan during a maintenance window:
+| Transport | Host preparation                    | Artifact source                                                       | Failure behavior                                              |
+|-----------|-------------------------------------|-----------------------------------------------------------------------|---------------------------------------------------------------|
+| Key Vault | Default; installs Azure CLI         | Exact secret names and immutable versions from the host-bound catalog | Stop on login, access, network, target, or integrity failure  |
+| SCP       | Deliberate opt-out; omits Azure CLI | Exact catalog and artifact directory emitted by the trusted publisher | Stop on missing, protected-path, target, or integrity failure |
+
+A Key Vault error never invokes SCP. Both transports use the same catalog schema, file names, digests, protected local directory, validation, and local mutation code. For SCP publication, pass `--transport scp --output-dir <protected-scp-handoff-directory>`.
+
+## Prepare the Environment
+
+Complete these actions from a trusted environment-operator host. The existing OSMO control plane must already contain the intended backend and pool.
+
+### Create the Exchange Secrets
+
+Pre-create the exact secret resources before assigning roles. Use these names, where `<environment>` and `<host>` use lowercase letters, numbers, and hyphens:
+
+| Secret                                     | Ubuntu access                     | Content owner                              |
+|--------------------------------------------|-----------------------------------|--------------------------------------------|
+| `<environment>-<host>-hil-catalog`         | Secrets User                      | Environment owner; published last          |
+| `<environment>-deployment`                 | Secrets User                      | Generic non-secret bundle publisher        |
+| `<environment>-osmo-images`                | Secrets User                      | Generic non-secret bundle publisher        |
+| `<environment>-<host>-osmo-token`          | Secrets User                      | Environment owner                          |
+| `<environment>-<host>-osmo-token-metadata` | Secrets User                      | Environment owner                          |
+| `<environment>-<host>-registry-config`     | Secrets User                      | Environment owner                          |
+| `<environment>-<host>-osmo-artifacts`      | Secrets User                      | Environment owner                          |
+| `<environment>-<host>-vpn-config`          | Secrets User when VPN is required | Environment owner                          |
+| `<environment>-<host>-vpn-settings`        | Secrets User when VPN is required | Environment owner                          |
+| `<environment>-<host>-vpn-server-root`     | Secrets User when VPN is required | Environment owner                          |
+| `<environment>-<host>-vpn-client-root`     | Secrets User when VPN is required | Environment owner                          |
+| `<environment>-<host>-vpn-csr`             | Secrets Officer only              | Ubuntu user                                |
+| `<environment>-<host>-vpn-response`        | Secrets User when VPN is required | VPN CA owner through the trusted publisher |
+
+Use Key Vault Secrets User only on each named inbound secret. Use Key Vault Secrets Officer only on the host-specific CSR secret. Verify the Ubuntu identity has no direct or inherited vault-wide data-plane role before onboarding.
+
+Role assignment remains a manual environment-owner operation. The following shape scopes an assignment to one secret resource:
 
 ```bash
-sudo ipsec down "$VPN_CONNECTION_NAME"
-sudo ipsec up "$VPN_CONNECTION_NAME"
+SECRET_ID="$(az keyvault secret show \
+  --vault-name <vault> \
+  --name <exact-secret-name> \
+  --query id \
+  --output tsv)"
+
+az role assignment create \
+  --assignee-object-id <ubuntu-user-object-id> \
+  --assignee-principal-type User \
+  --role 'Key Vault Secrets User' \
+  --scope "$SECRET_ID"
 ```
 
-Re-run VPN status:
+Use `Key Vault Secrets Officer` only for the host-specific CSR secret. Review direct and inherited assignments separately before continuing.
+
+### Publish the Host-Bound Artifacts
+
+Generate the non-secret environment bundle under `infrastructure/setup/generated/<environment>/` with the `environment-deployment` skill. Prepare a protected pull-only registry configuration and, when VPN is required, a protected directory containing `vpn.json`, `VpnSettings.xml`, `VpnServerRoot.pem`, and `ClientRoot.pem`.
+
+When `vpn.json` configures private DNS, use exactly `server`, `zones`, and `probes`. Each probe is an object such as `{"host":"vault.example","expected_cidr":"10.0.0.0/16"}`. The VPN connection rejects answers outside the expected private CIDR.
+
+Preview publication:
 
 ```bash
-data-pipeline/setup/edge/02-configure-vpn.sh \
-  --status \
-  --connection-name "$VPN_CONNECTION_NAME" \
-  --azure-vnet-cidr "$AZURE_VNET_CIDR" \
-  --p2s-cidr "$P2S_CLIENT_CIDR" \
-  --osmo-url "$OSMO_PRIVATE_URL"
+infrastructure/setup/04-prepare-osmo-hil-node.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault> \
+  --bundle-dir infrastructure/setup/generated/<environment> \
+  --service-url <approved-osmo-url> \
+  --backend-name <existing-backend> \
+  --pool-name <existing-pool> \
+  --osmo-config-dir <protected-operator-osmo-profile> \
+  --registry-config-file <protected-pull-config> \
+  --token-expiry <yyyy-mm-dd> \
+  --chart-version <deployed-chart-version> \
+  --backend-chart-ref <approved-backend-chart-reference> \
+  --backend-chart-sha256 <approved-backend-chart-sha256> \
+  --image-version <deployed-image-version> \
+  --image-location <approved-image-prefix> \
+  --vpn-input-dir <protected-public-vpn-inputs> \
+  --output-dir <protected-scp-handoff-directory> \
+  --config-preview
 ```
 
-Confirm the existing backend returns online without reinstalling K3s or the operator.
+Run the same command without `--config-preview`. Omit `--vpn-input-dir` when private routing is unnecessary. Omit `--output-dir` unless a user deliberately selected SCP.
 
-## Troubleshooting
+The publisher:
 
-| Symptom                                       | Check                                                                              |
-|-----------------------------------------------|------------------------------------------------------------------------------------|
-| OSMO endpoint unreachable from host           | strongSwan status, P2S address, Azure route, internal LoadBalancer IP              |
-| Host reaches OSMO but backend remains offline | K3s pod egress, token expiry metadata, listener logs, `ws://` router URL           |
-| Backend values mismatch                       | Re-run `03-deploy-osmo.sh` with identical backend, pool, namespace, and private IP |
-| KAI workloads stay pending                    | `schedulingshard/default`, KAI operator rollout, workflow namespace events         |
-| Arc agents fail                               | Arc outbound endpoints, Azure CLI tenant/subscription, `azure-arc` namespace       |
-| No-command run reports an applied action      | Stop immediately; do not add robot access or physical motion                       |
+* Verifies the active Azure account and existing OSMO backend and pool
+* Issues a current-identity service token with only the `osmo-backend` role
+* Preserves the generic non-secret environment-bundle allowlist
+* Publishes credentials, registry access, immutable artifacts, and public VPN material through separate exact secrets
+* Writes every artifact before the host-bound catalog
+* Never assigns roles or changes Key Vault networking
+
+Record these environment gates separately as passed with authorization or not run:
+
+1. Every named inbound secret and the CSR secret has the intended individual-secret role.
+2. The Ubuntu identity has no inherited or direct vault-wide data-plane role.
+3. The complete exact artifact set was published before the catalog.
+
+## Prepare Ubuntu and K3s
+
+Preview and run host preparation with the chosen transport:
+
+```bash
+data-pipeline/setup/hil/00-prepare-ubuntu.sh \
+  --transport keyvault \
+  --config-preview
+
+data-pipeline/setup/hil/00-prepare-ubuntu.sh \
+  --transport keyvault
+```
+
+Use `--transport scp` for the deliberate opt-out.
+
+Install the local compute plane without VPN:
+
+```bash
+data-pipeline/setup/hil/01-install-k3s.sh \
+  --node-name <host> \
+  --config-preview
+
+data-pipeline/setup/hil/01-install-k3s.sh \
+  --node-name <host>
+```
+
+## Optional Private Reachability
+
+Run this branch only when the approved OSMO endpoint or private Key Vault requires private routing.
+
+### Open a Bounded Key Vault Window
+
+When the vault is private and the VPN is not yet available, record its current network state. Identify the Ubuntu desktop's current public egress IPv4 address, not its LAN address. Configure deny-by-default access with only that `/32` rule before enabling the public endpoint.
+
+Portal sequence:
+
+1. Record public access, firewall default, bypass, IP rules, and virtual-network rules.
+2. Continue only when public access is disabled, bypass is `None`, and both rule lists are empty. Stop for an environment-specific restoration plan otherwise.
+3. Select the option that permits public access only from selected networks.
+4. Set the firewall default to deny.
+5. Add only the Ubuntu public egress IPv4 address as a `/32` rule.
+6. Verify the selected rule and deny-default posture.
+7. Enable the public endpoint for the bounded transfer.
+
+Manual Azure CLI sequence:
+
+```bash
+set -o errexit -o nounset -o pipefail
+install -d -m 0700 "$HOME/.local/state/physical-ai-toolchain/hil"
+az keyvault show \
+  --name <vault> \
+  --query 'properties.{publicNetworkAccess:publicNetworkAccess,defaultAction:networkAcls.defaultAction,bypass:networkAcls.bypass,ipRules:networkAcls.ipRules[].value,vnetRules:networkAcls.virtualNetworkRules[].id}' \
+  --output json > "$HOME/.local/state/physical-ai-toolchain/hil/key-vault-network-before.json"
+
+UBUNTU_PUBLIC_IPV4="<ubuntu-public-egress-ipv4>"
+jq -e '
+  .publicNetworkAccess == "Disabled" and .defaultAction == "Deny" and .bypass == "None" and
+  ((.ipRules // []) | length) == 0 and ((.vnetRules // []) | length) == 0
+' "$HOME/.local/state/physical-ai-toolchain/hil/key-vault-network-before.json" >/dev/null
+az keyvault update --name <vault> --default-action Deny --output none
+az keyvault network-rule add --name <vault> --ip-address "${UBUNTU_PUBLIC_IPV4}/32" --output none
+WINDOW_STATE="$(az keyvault show \
+  --name <vault> \
+  --query 'properties.{publicNetworkAccess:publicNetworkAccess,defaultAction:networkAcls.defaultAction,bypass:networkAcls.bypass,ipRules:networkAcls.ipRules[].value,vnetRules:networkAcls.virtualNetworkRules[].id}' \
+  --output json)"
+jq -e --arg rule "${UBUNTU_PUBLIC_IPV4}/32" '
+  .publicNetworkAccess == "Disabled" and .defaultAction == "Deny" and .bypass == "None" and .ipRules == [$rule] and
+  ((.vnetRules // []) | length) == 0
+' <<< "$WINDOW_STATE" >/dev/null
+az keyvault update --name <vault> --public-network-access Enabled --output none
+```
+
+Verify `defaultAction` is `Deny` and the only temporary rule is the current Ubuntu public IPv4 `/32` before enabling public access. Setup scripts never execute these commands.
+
+### Request VPN Access
+
+Preview and run the request stage:
+
+```bash
+data-pipeline/setup/hil/vpn/00-request-vpn-access.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault> \
+  --config-preview
+
+data-pipeline/setup/hil/vpn/00-request-vpn-access.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault>
+```
+
+The private key is generated on Ubuntu and never leaves it. Only the host-bound CSR request is published.
+
+Close the public window immediately after this transfer:
+
+```bash
+set -o errexit -o nounset -o pipefail
+az keyvault update --name <vault> --public-network-access Disabled --output none
+[[ "$(az keyvault show --name <vault> --query properties.publicNetworkAccess --output tsv)" == "Disabled" ]]
+az keyvault network-rule remove --name <vault> --ip-address "${UBUNTU_PUBLIC_IPV4}/32" --output none
+FINAL_STATE="$(az keyvault show --name <vault> \
+  --query 'properties.{publicNetworkAccess:publicNetworkAccess,defaultAction:networkAcls.defaultAction,bypass:networkAcls.bypass,ipRules:networkAcls.ipRules[].value,vnetRules:networkAcls.virtualNetworkRules[].id}' \
+  --output json)"
+jq -e '.publicNetworkAccess == "Disabled" and .defaultAction == "Deny" and .bypass == "None" and ((.ipRules // []) | length) == 0 and ((.vnetRules // []) | length) == 0' \
+  <<< "$FINAL_STATE" >/dev/null
+```
+
+Continue only when verification returns `Disabled`. Remove the temporary rule or restore the recorded ACL only after public access is disabled and verified.
+
+### Publish and Retrieve the Signed Response
+
+The CA owner signs the CSR outside Ubuntu and creates a protected response JSON containing only `schema_version`, `kind`, `environment`, `host_name`, `csr_sha256`, `client_certificate_pem`, and `client_ca_certificate_pem`. Neither private key nor any additional field enters the response. The publisher validates the CSR, trust fingerprint, and leaf key, then publishes a sanitized target-bound response.
+
+The environment owner validates and publishes it:
+
+```bash
+infrastructure/setup/04-prepare-osmo-hil-node.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault> \
+  --publish-vpn-response <protected-vpn-response.json> \
+  --catalog-file <protected-current-catalog.json>
+```
+
+For the preselected SCP opt-out, `vpn/00-request-vpn-access.sh` writes `vpn-request.json` into the protected copied directory. Transfer only that request back to the environment owner. Publish the response with `--transport scp --csr-file <protected-vpn-request.json>` and the same `--output-dir <protected-scp-handoff-directory>` used during initial publication. Copy only the updated catalog and public response through the approved SSH channel. The Ubuntu private key is never part of the SCP handoff.
+
+Open the same bounded public window again when the vault is still unreachable. Retrieve the response:
+
+```bash
+data-pipeline/setup/hil/vpn/01-retrieve-vpn-certificate.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault>
+```
+
+This command validates and installs the public response, prints the required private-only checkpoint, and exits. Disable and verify public access before removing the temporary rule or restoring the recorded ACL.
+
+### Connect After the Checkpoint
+
+Run a separate command only after private-only access is verified:
+
+```bash
+data-pipeline/setup/hil/vpn/02-connect-vpn.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --transport keyvault \
+  --subscription <subscription-id> \
+  --vault-name <vault> \
+  --private-vault-verified \
+  --config-preview
+
+data-pipeline/setup/hil/vpn/02-connect-vpn.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --transport keyvault \
+  --subscription <subscription-id> \
+  --vault-name <vault> \
+  --private-vault-verified
+```
+
+The connection command performs no Key Vault access before VPN. It consumes local protected material, preserves the public default route, applies private routes and optional route-only DNS, verifies public DNS, and then checks private Key Vault reachability.
+
+## Connect the Local Backend
+
+Key Vault path:
+
+```bash
+data-pipeline/setup/hil/02-connect-osmo-backend.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault> \
+  --config-preview
+
+data-pipeline/setup/hil/02-connect-osmo-backend.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault>
+```
+
+SCP opt-out:
+
+```bash
+data-pipeline/setup/hil/02-connect-osmo-backend.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault> \
+  --transport scp \
+  --scp-source-dir <protected-copied-artifact-directory>
+```
+
+The stage authenticates the end user by OSMO code login, retrieves or copies the exact catalog-bound artifacts, and changes only the owned local K3s target. It writes a non-secret connection receipt only after the backend reports online.
+
+## Validate the Journey
+
+Use the connection receipt printed by the connection stage.
+
+CPU scheduling proof:
+
+```bash
+data-pipeline/setup/hil/03-run-cpu-smoke.sh \
+  --connection-file <connection-receipt> \
+  --config-preview
+
+data-pipeline/setup/hil/03-run-cpu-smoke.sh \
+  --connection-file <connection-receipt>
+```
+
+The result must identify the connected backend and pool, request zero GPUs, report no GPU device, and complete on the owned local node.
+
+No-command proof:
+
+```bash
+data-pipeline/setup/hil/04-run-no-command-check.sh \
+  --connection-file <connection-receipt> \
+  --config-preview
+
+data-pipeline/setup/hil/04-run-no-command-check.sh \
+  --connection-file <connection-receipt>
+```
+
+The result must contain representative proposed actions, zero applied actions, `command_transport: none`, a passed negative probe, `NO_COMMAND_TRANSPORT`, and the owned local node identity.
+
+## Failure and Rerun Behavior
+
+Each script stops at the first failed required operation, preserves the native command error, names the incomplete milestone, and exits nonzero. The scripts do not diagnose an unproven external cause or switch transport automatically.
+
+Rerun with the same target. Owned matching K3s, VPN, and connection state is verified or reconciled within its local boundary. Foreign, partial, symlinked, identity-mismatched, or drifted state stops for inspection rather than destructive cleanup.
+
+<!-- markdownlint-disable MD036 -->
+*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
+then carefully refined by our team of discerning human reviewers.*
+<!-- markdownlint-enable MD036 -->

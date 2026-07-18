@@ -1,3 +1,4 @@
+# cspell:ignore nvidiactl
 workflow:
   name: "{{ workflow_name }}"
   resources:
@@ -19,8 +20,12 @@ workflow:
         - |
           test "$(id -u)" -ne 0
           test ! -e /dev/nvidia0
-          printf 'HIL_CPU_RESULT={"schema_version":1,"kind":"osmo-hil-cpu-smoke","workflow_name":"{{ workflow_name }}","status":"passed","gpu_requested":0,"gpu_device_present":false}\n'
+          test ! -e /dev/nvidiactl
+          test ! -e /dev/dri/renderD128
+          printf 'HIL_CPU_RESULT={"schema_version":1,"kind":"osmo-hil-cpu-smoke","workflow_name":"{{ workflow_name }}","backend_name":"{{ backend_name }}","pool_name":"{{ pool_name }}","status":"passed","gpu_requested":0,"gpu_device_present":false}\n'
 
 default-values:
   workflow_name: hil-cpu-smoke
+  backend_name: hil-edge
+  pool_name: hil-edge
   image: alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1

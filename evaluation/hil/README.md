@@ -4,32 +4,35 @@ CPU-only and independently non-commanding validation for the Ubuntu K3s HiL comp
 
 ## 🚀 Quick Start
 
-Run the local UR10E-shaped no-command gate:
+After `02-connect-osmo-backend.sh` reports a connection receipt, run the two independent validation milestones:
 
 ```bash
-evaluation/hil/scripts/run-hil-evaluation.sh --mode local \
-  --output-dir "$HOME/.local/share/physical-ai-toolchain/results/ur10e-no-command"
+data-pipeline/setup/hil/03-run-cpu-smoke.sh \
+  --connection-file <connection-receipt>
+
+data-pipeline/setup/hil/04-run-no-command-check.sh \
+  --connection-file <connection-receipt>
 ```
 
-The run proposes ten deterministic six-axis actions. `NoCommandUr10eAdapter.apply_action()` rejects every action with `NO_COMMAND_TRANSPORT`; the expected applied-action count is zero.
+The CPU proof requests zero GPUs and must complete on the owned local node. The no-command proof proposes ten deterministic six-axis actions. `NoCommandUr10eAdapter.apply_action()` rejects every action with `NO_COMMAND_TRANSPORT`; the expected applied-action count is zero.
 
 ## 📦 Components
 
-| Path                                 | Purpose                                                                      |
-|--------------------------------------|------------------------------------------------------------------------------|
-| `no_command_runner.py`               | Deterministic observation, proposal, rejection, timing, and artifact runtime |
-| `config/ur10e-no-command.json`       | UR10E joint order and no-command safety contract                             |
-| `config/ur10e-observations.jsonl`    | Deterministic six-axis observation fixture                                   |
-| `workflows/osmo/cpu-smoke.yaml`      | CPU-only OSMO scheduling gate                                                |
-| `workflows/osmo/hil-evaluation.yaml` | OSMO no-command gate                                                         |
-| `scripts/run-cpu-smoke.sh`           | Submit and wait for the CPU workflow                                         |
-| `scripts/run-hil-evaluation.sh`      | Run locally or submit and wait through OSMO                                  |
+| Path                                                 | Purpose                                                                      |
+|------------------------------------------------------|------------------------------------------------------------------------------|
+| `no_command_runner.py`                               | Deterministic observation, proposal, rejection, timing, and artifact runtime |
+| `config/ur10e-no-command.json`                       | UR10E joint order and no-command safety contract                             |
+| `config/ur10e-observations.jsonl`                    | Deterministic six-axis observation fixture                                   |
+| `workflows/osmo/cpu-smoke.yaml`                      | CPU-only OSMO scheduling gate                                                |
+| `workflows/osmo/hil-evaluation.yaml`                 | OSMO no-command gate                                                         |
+| `data-pipeline/setup/hil/03-run-cpu-smoke.sh`        | Public CPU scheduling milestone                                              |
+| `data-pipeline/setup/hil/04-run-no-command-check.sh` | Public no-command safety milestone                                           |
 
 ## 🛡️ Safety Boundary
 
 The implemented adapter contains no RTDE control client, ROS command publisher, serial interface, USB device, CAN interface, host mount, or robot endpoint. The OSMO pool rejects privileged and host-networked workloads.
 
-Do not interpret this pipeline validation as evidence that physical execution is safe. Add physical motion only after defining the exact command owner, robot limits, safe pose, local operator confirmation, and independently verified E-stop procedure.
+The CPU and no-command proofs complete this journey. No command transport or physical motion is supported.
 
 ## 📚 Documentation
 

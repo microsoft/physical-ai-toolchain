@@ -3,7 +3,7 @@ sidebar_position: 7
 title: VPN Gateway Configuration
 description: Point-to-site and site-to-site VPN setup for private AKS cluster access
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-13
+ms.date: 2026-07-17
 ms.topic: how-to
 keywords:
   - vpn
@@ -122,9 +122,9 @@ Once connected, you can access private endpoints including OSMO UI, PostgreSQL, 
 
 ### Configure Ubuntu strongSwan
 
-Use the repository script to generate a host-local private key and CSR, validate the returned certificate, install strongSwan, preserve the Internet default route, and validate the P2S address and private OSMO endpoint.
+The Ubuntu HiL journey uses VPN only when the approved endpoint requires private routing. Local host and K3s readiness remain independent of VPN.
 
-Follow [Ubuntu Edge K3s Setup](../data-pipeline/edge-k3s-setup.md#configure-certificate-vpn). The root CA private key remains on the external signing system.
+Follow [Optional Private Reachability](../recipes/tier-3-production/ubuntu-hil-osmo-backend.md#optional-private-reachability). The request command generates the Ubuntu private key locally and publishes only the CSR. The response command retrieves and validates public material, then exits for private-only Key Vault restoration. A separate connection command installs strongSwan and preserves the Internet default route. The root CA private key remains on the external signing system.
 
 Revoke a compromised leaf certificate by adding its public SHA-1 thumbprint:
 

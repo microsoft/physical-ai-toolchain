@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Upload a generated non-secret environment bundle to Azure Key Vault.
+# cspell:ignore Kubeconfigs
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,13 +50,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-require_tools az terraform jq
-
 [[ -n "$environment" ]] || fatal "--environment is required"
 [[ "$environment" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || \
   fatal "Environment must use lowercase letters, numbers, and internal hyphens"
 bundle_dir="${bundle_dir:-$SCRIPT_DIR/generated/$environment}"
 [[ -d "$bundle_dir" && ! -L "$bundle_dir" ]] || fatal "Bundle directory not found or is a symlink: $bundle_dir"
+
+if [[ "$config_preview" == "true" ]]; then
+  section "Configuration Preview"
+  print_kv "Environment" "$environment"
+  print_kv "Bundle" "$bundle_dir"
+  print_kv "Terraform" "$tf_dir"
+  print_kv "Key Vault" "${vault_name:-resolved from Terraform during execution}"
+  for file_name in deployment.json osmo-platforms.yaml osmo-images.json azureml-instance-types.yaml; do
+    [[ -f "$bundle_dir/$file_name" ]] && print_kv "Artifact" "$file_name"
+  done
+  exit 0
+fi
+
+require_tools az terraform jq
 
 #------------------------------------------------------------------------------
 # Gather Configuration
@@ -153,18 +166,6 @@ if [[ -f "$bundle_dir/osmo-images.json" ]]; then
   expected_login_server=$(jq -r '.acr_login_server' "$deployment_file")
   expected_image_version=$(jq -r '.osmo_image_version' "$deployment_file")
   verify_acr_image_manifest "$bundle_dir/osmo-images.json" "$expected_login_server" "$expected_image_version"
-fi
-
-if [[ "$config_preview" == "true" ]]; then
-  section "Configuration Preview"
-  print_kv "Environment" "$environment"
-  print_kv "Bundle" "$bundle_dir"
-  print_kv "Key Vault" "$vault_name"
-  for entry in "${upload_entries[@]}"; do
-    IFS='|' read -r artifact file_name _ _ <<< "$entry"
-    print_kv "Artifact" "$artifact ($file_name)"
-  done
-  exit 0
 fi
 
 #------------------------------------------------------------------------------
