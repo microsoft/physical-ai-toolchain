@@ -3,6 +3,7 @@
 # cspell:ignore crio microk nofile readyz servicelb
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load shared helpers plus the pinned local K3s defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 # shellcheck source=../../../scripts/lib/common.sh
@@ -10,6 +11,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../defaults.conf
 source "$SCRIPT_DIR/../defaults.conf"
 
+# Describe the local-only K3s installation inputs and the protected kubeconfig it produces.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -33,6 +35,7 @@ EXAMPLES:
 EOF
 }
 
+# Initialize the requested K3s version, node identity, network ranges, and kubeconfig destination.
 version="$EDGE_K3S_VERSION"
 node_name="${EDGE_NODE_NAME:-$(hostname -s 2>/dev/null || echo physical-ai-edge)}"
 context="$EDGE_K3S_CONTEXT"
@@ -42,6 +45,7 @@ data_dir="$EDGE_K3S_DATA_DIR"
 kubeconfig_out="${HIL_KUBECONFIG:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/kubeconfig.yaml}"
 config_preview=false
 
+# Apply command-line overrides before validating the local host and K3s ownership boundary.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)          show_help; exit 0 ;;
@@ -56,6 +60,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Show the intended local compute configuration and exit without inspecting or changing the host.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Milestone" "host-ready"
@@ -72,6 +77,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Validate names, platform support, network ranges, and the tools required for an owned K3s install.
 operation="validate local K3s target"
 report_failure() {
   local status=$?
@@ -87,6 +93,7 @@ trap report_failure ERR
 require_tools awk curl install ip jq python3 sha256sum ss sudo systemctl
 python3 "$SCRIPT_DIR/check-network.py" "$pod_cidr" "$service_cidr"
 
+# Refuse to mutate hosts with foreign Kubernetes, runtime, CNI, or port ownership.
 managed_marker=/etc/rancher/k3s/.physical-ai-toolchain-managed
 if command -v kubeadm >/dev/null 2>&1 || command -v microk8s >/dev/null 2>&1; then
   fatal "A foreign Kubernetes installation is present; refusing to mutate the host"
@@ -112,6 +119,7 @@ if ! sudo test -f "$managed_marker"; then
   done
 fi
 
+# Protect every managed path from symlink replacement and select the architecture-specific K3s binary.
 for protected_path in "$managed_marker" /etc/rancher/k3s/config.yaml /etc/systemd/system/k3s.service \
   /usr/local/bin/k3s /usr/local/bin/kubectl "$kubeconfig_out"; do
   [[ ! -L "$protected_path" ]] || fatal "Managed K3s path must not be a symlink: $protected_path"
@@ -136,6 +144,7 @@ case "$architecture" in
   *) fatal "Unsupported K3s architecture: $architecture" ;;
 esac
 
+# Build the requested K3s configuration, service unit, and temporary workspace with private permissions.
 tmp_dir=$(mktemp -d)
 cleanup() {
   rm -rf "$tmp_dir"
@@ -179,6 +188,7 @@ ExecStart=/usr/local/bin/k3s server --config /etc/rancher/k3s/config.yaml
 WantedBy=multi-user.target
 EOF
 
+# Reuse only an owned installation that exactly matches the requested configuration; otherwise install it once.
 if sudo test -f "$managed_marker"; then
   operation="verify owned K3s configuration"
   sudo cmp --silent "$tmp_dir/config.yaml" /etc/rancher/k3s/config.yaml || \
@@ -208,6 +218,7 @@ else
   sudo install -m 0600 "$tmp_dir/managed" "$managed_marker"
 fi
 
+# Install the local kubectl wrapper when needed, then start K3s and wait for its API to become ready.
 if [[ ! -e /usr/local/bin/kubectl ]]; then
   cat > "$tmp_dir/kubectl" <<'EOF'
 #!/usr/bin/env bash
@@ -229,6 +240,7 @@ for ((attempt = 1; attempt <= 60; attempt++)); do
   sleep 2
 done
 
+# Copy and rename the protected operator kubeconfig, then verify node identity, version, and readiness.
 operation="install protected operator kubeconfig"
 sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$(dirname "$kubeconfig_out")"
 sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" /etc/rancher/k3s/k3s.yaml "$kubeconfig_out"
@@ -259,6 +271,7 @@ jq -n --arg kubeconfig "$kubeconfig_out" --arg context "$context" \
    node_name: $node, k3s_version: $version}
 ' > "$identity_tmp"
 chmod 0600 "$identity_tmp"
+# Preserve a root-owned identity receipt so later scripts can prove they are using this K3s installation.
 if sudo test -f "$identity_file"; then
   sudo cmp --silent "$identity_tmp" "$identity_file" || fatal "Root-owned local K3s identity has drifted"
 else
@@ -266,6 +279,7 @@ else
   sudo install -m 0600 "$identity_tmp" "$identity_file"
 fi
 
+# Summarize the ready local compute plane and identify the next connection step.
 trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "host-ready local compute"

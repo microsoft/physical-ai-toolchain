@@ -3,6 +3,7 @@
 # cspell:ignore ahosts ahostsv cacerts closeaction dpdaction ikev keyexchange keyingtries leftcert leftfirewall leftid leftsourceip libstrongswan nameopt noout outform pkey pubin pubout resolvectl rightca rightid rightsubnet strongswan xfrm
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load shared helpers plus the VPN and K3s defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../../.." && pwd))"
 # shellcheck source=../../../../scripts/lib/common.sh
@@ -12,6 +13,7 @@ source "$REPO_ROOT/scripts/lib/hil.sh"
 # shellcheck source=../../defaults.conf
 source "$SCRIPT_DIR/../../defaults.conf"
 
+# Describe the explicit private-access checkpoint and the protected local inputs used for connection.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") --environment NAME --host-name NAME --private-vault-verified [OPTIONS]
@@ -57,6 +59,7 @@ connection_name=""
 private_vault_verified=false
 config_preview=false
 
+# Apply command-line values before deriving paths and validating the private-access checkpoint.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                  show_help; exit 0 ;;
@@ -90,6 +93,7 @@ request_dir="${request_dir:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-too
 response_dir="${response_dir:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/vpn/${environment}-${host_name}/returned}"
 azure_config_dir="${azure_config_dir:-${XDG_CONFIG_HOME:-$HOME/.config}/physical-ai-toolchain/hil/azure/${environment}-${host_name}}"
 
+# Show the planned connection and protected files, then exit before changing networking or DNS.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Milestone" "reachable: VPN connected"
@@ -107,9 +111,11 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Require explicit confirmation that private-only Key Vault access was restored before connecting.
 [[ "$private_vault_verified" == "true" ]] || \
   fatal "Complete the documented private-only Key Vault verification, then pass --private-vault-verified"
 
+# Track network mutations and define a verified rollback path for VPN, DNS, routes, and owned files.
 operation="validate protected local VPN inputs"
 vpn_mutation_started=false
 rollback_vpn_mutation() {
@@ -153,6 +159,8 @@ rollback_vpn_mutation() {
   set -o errexit
   [[ "$rollback_failed" == "false" ]]
 }
+
+# Restore prior state when a failure occurs after the VPN or DNS mutation begins.
 report_failure() {
   local status=$?
   trap - ERR
@@ -170,6 +178,7 @@ report_failure() {
 }
 trap report_failure ERR
 
+# Validate protected local catalogs, certificates, private key material, and the expected target-bound response.
 require_tools apt-get getent ip jq openssl python3 sudo
 require_external_runtime_path "$input_dir"
 require_external_runtime_path "$request_dir"
@@ -253,6 +262,7 @@ jq -e --arg environment "$environment" --arg host "$host_name" --arg gateway "$g
   .server_root_sha256 == $server_root and .csr_sha256 == $csr_sha
 ' "$response_file" >/dev/null || fatal "Installed VPN response does not match the selected CSR, gateway, and trust roots"
 
+# Validate DNS settings, route overlap, and public name resolution before changing the host network.
 dns_server=$(jq -r '.private_dns.server // empty' "$vpn_config")
 mapfile -t dns_zones < <(jq -r '.private_dns.zones[]? // empty' "$vpn_config")
 mapfile -t private_probes < <(jq -r '.private_dns.probes[]? | [.host, .expected_cidr] | @tsv' "$vpn_config")
@@ -269,11 +279,13 @@ if [[ -n "$dns_server" ]]; then
   [[ "$dns_in_route" == "true" ]] || fatal "Private DNS server is outside the approved VPN routes"
 fi
 
+# Install the strongSwan packages needed to create and operate the certificate-authenticated tunnel.
 operation="install optional VPN packages"
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends strongswan libstrongswan-extra-plugins
 require_tools ipsec
 
+# Prepare owned system paths, temporary state, and cleanup behavior for an idempotent VPN installation.
 operation="install owned strongSwan connection"
 state_dir=/var/lib/physical-ai-toolchain/vpn
 owner_file="$state_dir/${connection_name}.json"
@@ -335,6 +347,8 @@ elif [[ "$had_config" == "true" || "$had_secret" == "true" ]] || \
      sudo test -e "$installed_client_certificate" || sudo test -e "$installed_private_key"; then
   fatal "Existing VPN files are not owned by this setup path"
 fi
+
+# Build the requested strongSwan connection, secret, and ownership receipt from validated inputs.
 cat > "$work_dir/connection.conf" <<EOF
 conn $connection_name
     keyexchange=ikev2
@@ -373,6 +387,7 @@ if sudo test -e "$owner_file"; then
   sudo cmp --silent "$work_dir/connection.conf" "$config_file" || fatal "Owned VPN configuration has drifted"
 fi
 
+# Snapshot existing VPN and DNS state, then install only files owned by this setup path.
 default_route_before=$(ip -4 route show default)
 sudo cp -p /etc/ipsec.conf "$work_dir/ipsec.conf.before"
 sudo cp -p /etc/ipsec.secrets "$work_dir/ipsec.secrets.before"
@@ -399,6 +414,7 @@ sudo grep -Fqx 'include /etc/ipsec.secrets.d/*.secrets' /etc/ipsec.secrets || \
   printf '\ninclude /etc/ipsec.secrets.d/*.secrets\n' | sudo tee -a /etc/ipsec.secrets >/dev/null
 sudo chmod 0600 /etc/ipsec.secrets
 
+# Start the tunnel and verify its address, protected routes, and unchanged public default route.
 operation="start and validate the owned VPN connection"
 sudo ipsec restart
 sudo ipsec up "$connection_name"
@@ -420,6 +436,7 @@ for route in "${private_routes[@]}"; do
   ip route get "$route_host" >/dev/null
 done
 
+# Configure route-only private DNS when the VPN contract supplies it and verify public and private lookups.
 if [[ -n "$dns_server" ]]; then
   operation="install and validate route-only private DNS"
   require_tools resolvectl systemctl
@@ -482,6 +499,7 @@ else
   getent ahosts "$public_canary" >/dev/null
 fi
 
+# Confirm the expected Key Vault hostname resolves and the data-plane request uses an approved private route.
 if [[ "$transport" == "keyvault" ]]; then
   operation="verify private Key Vault data-plane reachability"
   require_tools az
@@ -507,6 +525,7 @@ fi
 
 vpn_mutation_started=false
 trap - ERR
+# Report the established tunnel, preserved public connectivity, and private service reachability.
 section "Deployment Summary"
 print_kv "Milestone" "reachable: VPN connected"
 print_kv "Connection" "$connection_name"

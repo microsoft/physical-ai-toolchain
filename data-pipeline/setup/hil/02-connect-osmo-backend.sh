@@ -3,6 +3,7 @@
 # cspell:ignore crdupgrader deletecollection dockerconfigjson fromdateiso rolebindings serviceaccounts slurpfile upgrader
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load the shared safety helpers and pinned setup values.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 # shellcheck source=../../../scripts/lib/common.sh
@@ -14,6 +15,7 @@ source "$SCRIPT_DIR/../defaults.conf"
 # shellcheck source=../../../infrastructure/setup/defaults.conf
 source "$REPO_ROOT/infrastructure/setup/defaults.conf"
 
+# Explain the target identity, transport choices, and protected outputs accepted by this command.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") --environment NAME --host-name NAME [OPTIONS]
@@ -48,6 +50,7 @@ EXAMPLES:
 EOF
 }
 
+# Set defaults for the environment, local K3s target, transfer method, and isolated client state.
 environment=""
 host_name=""
 tenant_id=""
@@ -63,6 +66,7 @@ osmo_config_dir=""
 connection_file=""
 config_preview=false
 
+# Apply explicit command-line values before resolving derived paths and validating the target.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)            show_help; exit 0 ;;
@@ -84,6 +88,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Validate the target identity and choose protected local locations for downloaded artifacts and receipts.
 hil_require_name "Environment" "$environment"
 hil_require_name "Host name" "$host_name"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
@@ -98,6 +103,7 @@ osmo_config_dir="${osmo_config_dir:-${XDG_CONFIG_HOME:-$HOME/.config}/physical-a
 connection_file="${connection_file:-${XDG_STATE_HOME:-$HOME/.local/state}/physical-ai-toolchain/hil/${environment}-${host_name}-connection.json}"
 catalog_secret="${environment}-${host_name}-hil-catalog"
 
+# Show the resolved connection plan and exit without authenticating, downloading, or changing Kubernetes.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Milestone" "connected"
@@ -120,6 +126,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Establish failure reporting, confirm the owned K3s identity, and reject unsafe input locations.
 operation="validate local connection inputs"
 report_failure() {
   local status=$?
@@ -141,6 +148,7 @@ if [[ "$transport" == "scp" ]]; then
   require_protected_directory "$scp_source_dir"
 fi
 
+# Reuse an existing receipt only when it describes this exact environment, host, and K3s target.
 if [[ -e "$connection_file" ]]; then
   require_protected_file "$connection_file"
   jq -e --arg environment "$environment" --arg host "$host_name" \
@@ -154,17 +162,20 @@ if [[ -e "$connection_file" ]]; then
   ' "$connection_file" >/dev/null || fatal "Existing connection receipt identifies a different target"
 fi
 
+# Authenticate to the expected Azure tenant and subscription only when Key Vault is the transfer source.
 if [[ "$transport" == "keyvault" ]]; then
   operation="authenticate to the expected Azure account"
   hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
 fi
 
+# Retrieve the catalog and all approved OSMO, registry, image, and deployment artifacts into protected storage.
 operation="retrieve exact HiL artifacts"
 hil_fetch_artifacts "$transport" "$catalog_secret" "$environment" "$host_name" \
   "$tenant_id" "$subscription_id" "$vault_name" "$input_dir" "$scp_source_dir" \
   deployment image_manifest osmo_token osmo_token_metadata registry_config osmo_artifacts
 
 catalog="$input_dir/catalog.json"
+# Resolve catalog-declared filenames instead of accepting arbitrary paths from external input.
 artifact_path() {
   local key="${1:?artifact key required}" file
   file=$(jq -r --arg key "$key" '.artifacts[$key].file // empty' "$catalog")
@@ -172,6 +183,7 @@ artifact_path() {
   printf '%s/%s\n' "$input_dir" "$file"
 }
 
+# Load the protected files that the remaining validation and deployment steps will consume.
 deployment_file=$(artifact_path deployment)
 image_manifest=$(artifact_path image_manifest)
 token_file=$(artifact_path osmo_token)
@@ -182,6 +194,7 @@ for file in "$deployment_file" "$image_manifest" "$token_file" "$token_metadata"
   require_protected_file "$file"
 done
 
+# Check that every artifact is bound to the selected environment, host, service, backend, registry, and image set.
 operation="validate target-bound HiL artifacts"
 jq -e --arg environment "$environment" --arg host "$host_name" '
   .schema_version == 1 and .kind == "physical-ai-hil-osmo" and
@@ -242,6 +255,7 @@ jq -e --arg host "$registry_host" --arg version "$image_version" '
   all(.images[]; (.digest | test("^sha256:[0-9a-f]{64}$")))
 ' "$image_manifest" >/dev/null || fatal "OSMO image manifest does not match the expected registry and version"
 
+# Log in with an isolated OSMO profile, select the approved pool, and verify the remote service contract.
 operation="authenticate the isolated OSMO client"
 hil_prepare_directory "$osmo_config_dir"
 export XDG_CONFIG_HOME="$osmo_config_dir"
@@ -263,6 +277,7 @@ jq -e --arg pool "$pool_name" --arg backend "$backend_name" '
 ' <<< "$pool_json" >/dev/null || fatal "OSMO pool response does not identify the expected backend relationship"
 osmo profile set pool "$pool_name" >/dev/null
 
+# Keep downloaded charts and rendered manifests in a private temporary directory that is removed on exit.
 work_dir=$(mktemp -d)
 cleanup() {
   rm -rf "$work_dir"
@@ -270,6 +285,7 @@ cleanup() {
 trap cleanup EXIT
 chmod 0700 "$work_dir"
 
+# Pull both charts and verify their content against the catalog's pinned references, versions, and digests.
 operation="pull and verify local scheduler and backend charts"
 kai_chart=$(pull_and_verify_chart "$kai_ref" "$kai_version" "$kai_sha" "$work_dir/kai")
 if [[ "$backend_ref" == oci://* ]]; then
@@ -286,6 +302,7 @@ if [[ "$backend_ref" == oci://* ]]; then
 fi
 backend_chart=$(pull_and_verify_chart "$backend_ref" "$backend_version" "$backend_sha" "$work_dir/backend")
 
+# Render and install KAI Scheduler with architecture-specific immutable images, then verify its running digests.
 operation="install KAI Scheduler on local K3s"
 case "$(uname -m)" in
   x86_64)
@@ -333,6 +350,7 @@ jq -e '
     (.imageID // "") | endswith("@" + $digest))
 ' <<< "$kai_pods" >/dev/null || fatal "KAI workloads are not running their declared immutable image digests"
 
+# Create only the namespaces and pull secrets needed by the local operator and workflow workloads.
 operation="prepare local backend namespaces and protected inputs"
 ensure_namespace "$kubeconfig" "$context" "$operator_namespace"
 ensure_namespace "$kubeconfig" "$context" "$workflow_namespace"
@@ -358,6 +376,7 @@ helm_args=(
   --set-string "global.imagePullSecret=$OSMO_HIL_PULL_SECRET"
 )
 
+# Render the backend first and reject privileged containers, host access, wildcard permissions, and cluster-wide RBAC.
 operation="render and inspect the local backend"
 kube_helm "$kubeconfig" "$context" template osmo-hil-operator "$backend_chart" \
   "${helm_args[@]}" > "$work_dir/rendered-backend.yaml"
@@ -376,10 +395,12 @@ grep -Eq "^[[:space:]]*-[[:space:]]*['\"]?\\*['\"]?[[:space:]]*$" \
 grep -Eq '^kind:[[:space:]]+ClusterRole(Binding)?[[:space:]]*$' "$work_dir/rendered-backend.yaml" && \
   fatal "Rendered backend contains cluster-scoped RBAC"
 
+# Install or update the backend with the approved values and wait for Helm's deployment-level readiness checks.
 operation="deploy the local backend"
 kube_helm "$kubeconfig" "$context" upgrade --install osmo-hil-operator "$backend_chart" \
   "${helm_args[@]}" --wait --timeout "$TIMEOUT_DEPLOY"
 
+# Confirm both backend deployments roll out and that every running image matches the approved immutable manifest.
 operation="verify local backend rollout"
 kube_kubectl "$kubeconfig" "$context" rollout status deployment/osmo-hil-operator-osmo-backend-listener \
   -n "$operator_namespace" --timeout "$TIMEOUT_DEPLOY"
@@ -399,6 +420,7 @@ jq -e --slurpfile manifest "$image_manifest" '
     ($manifest[0].images[$component].digest // "") as $digest |
     $digest != "" and ((.imageID // "") | endswith("@" + $digest)))
 ' <<< "$backend_pods" >/dev/null || fatal "Declared or running backend images do not match the approved immutable set"
+# Inspect effective permissions for every service account and reject secret access, escalation, and unrestricted scope.
 for namespace in "$operator_namespace" "$workflow_namespace" "$NS_KAI_SCHEDULER"; do
   mapfile -t service_accounts < <(kube_kubectl "$kubeconfig" "$context" get serviceaccounts \
     -n "$namespace" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
@@ -433,6 +455,7 @@ for namespace in "$operator_namespace" "$workflow_namespace" "$NS_KAI_SCHEDULER"
   done
 done
 
+# Wait until the existing remote OSMO backend reports that it is online and ready to receive workflows.
 operation="verify existing OSMO backend is online"
 backend_online=false
 for ((attempt = 1; attempt <= 60; attempt++)); do
@@ -448,6 +471,7 @@ for ((attempt = 1; attempt <= 60; attempt++)); do
 done
 [[ "$backend_online" == "true" ]] || fatal "OSMO backend $backend_name did not report online"
 
+# Record the successful, non-secret connection details so later smoke checks can verify the same target.
 operation="record successful non-secret connection"
 hil_prepare_directory "$(dirname "$connection_file")"
 receipt_tmp=$(mktemp "$(dirname "$connection_file")/.connection.XXXXXX")
@@ -468,6 +492,7 @@ jq -n --arg environment "$environment" --arg host "$host_name" --arg tenant "$te
 chmod 0600 "$receipt_tmp"
 mv "$receipt_tmp" "$connection_file"
 
+# Summarize the connected target and identify the next local validation command.
 trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "connected"

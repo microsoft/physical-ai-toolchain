@@ -3,6 +3,7 @@
 # cspell:ignore coreutils dearmor diffutils keyrings procps
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load shared helpers plus the HiL version and digest defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 # shellcheck source=../../../scripts/lib/common.sh
@@ -10,6 +11,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../defaults.conf
 source "$SCRIPT_DIR/../defaults.conf"
 
+# Describe the supported transfer modes and the next milestone reached by host preparation.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -28,9 +30,11 @@ EXAMPLES:
 EOF
 }
 
+# Initialize the transfer mode and preview flag before parsing any explicit overrides.
 transport="keyvault"
 config_preview=false
 
+# Apply command-line choices and reject transfer modes that this setup path cannot handle.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)         show_help; exit 0 ;;
@@ -43,6 +47,7 @@ done
 [[ "$transport" == "keyvault" || "$transport" == "scp" ]] || \
   fatal "--transport must be keyvault or scp"
 
+# Select architecture-specific Helm and OSMO artifacts and their pinned SHA-256 digests.
 base_packages=(ca-certificates coreutils curl diffutils gawk gnupg iproute2 jq openssl procps python3 sudo tar)
 
 case "$(uname -m 2>/dev/null || true)" in
@@ -69,6 +74,7 @@ case "$(uname -m 2>/dev/null || true)" in
     ;;
 esac
 
+# Show the package and artifact plan, then exit before making changes or authenticating.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Milestone" "host-ready"
@@ -84,6 +90,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Validate the Ubuntu host, protect installation paths, and arrange cleanup for temporary files.
 operation="validate supported host"
 report_failure() {
   local status=$?
@@ -114,11 +121,13 @@ cleanup() {
 trap cleanup EXIT
 chmod 0700 "$work_dir"
 
+# Install the common Ubuntu utilities required by every supported transfer path.
 operation="install Ubuntu packages"
 section "Install Ubuntu Packages"
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends "${base_packages[@]}"
 
+# For Key Vault transfer, install Azure CLI from Microsoft's fingerprint-verified signed repository.
 if [[ "$transport" == "keyvault" ]]; then
   operation="install Azure CLI"
   section "Install Azure CLI"
@@ -159,6 +168,7 @@ EOF
   sudo apt-get install -y --no-install-recommends azure-cli
 fi
 
+# Download, verify, extract, and install the pinned Helm client for the host architecture.
 operation="install pinned Helm"
 section "Install Pinned Helm"
 helm_archive="$work_dir/helm.tar.gz"
@@ -168,6 +178,7 @@ printf '%s  %s\n' "$helm_sha256" "$helm_archive" | sha256sum -c -
 tar -xzf "$helm_archive" -C "$work_dir"
 sudo install -m 0755 "$work_dir/$helm_target/helm" /usr/local/bin/helm
 
+# Download, verify, and run the pinned OSMO client installer for the host architecture.
 operation="install pinned OSMO client"
 section "Install Pinned OSMO Client"
 osmo_installer="osmo-client-installer-${EDGE_OSMO_VERSION}-linux-${osmo_arch}.sh"
@@ -178,6 +189,7 @@ curl --fail --silent --show-error --location \
 printf '%s  %s\n' "$osmo_sha256" "$osmo_installer_path" | sha256sum -c -
 sudo bash "$osmo_installer_path"
 
+# Confirm the installed clients are callable and summarize the host-ready result and next steps.
 operation="verify installed clients"
 require_tools helm osmo
 [[ "$transport" != "keyvault" ]] || require_tools az

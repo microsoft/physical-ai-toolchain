@@ -2,6 +2,7 @@
 # Prove representative actions cannot cross the no-command boundary.
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load the shared helpers used for receipt and node validation.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 # shellcheck source=../../../scripts/lib/common.sh
@@ -9,6 +10,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../../../scripts/lib/hil.sh
 source "$REPO_ROOT/scripts/lib/hil.sh"
 
+# Describe the connection receipt and the intentionally command-free workflow this check submits.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -26,6 +28,7 @@ EXAMPLES:
 EOF
 }
 
+# Create a unique workflow identity and pin every reviewed no-command asset by SHA-256.
 connection_file="${HIL_CONNECTION_FILE:-}"
 workflow_name="hil-no-command-$(date -u +%Y%m%dt%H%M%S)-${RANDOM}${RANDOM}"
 config="$REPO_ROOT/evaluation/hil/config/ur10e-no-command.json"
@@ -38,6 +41,7 @@ fixture_sha256="952af3e1794165370193433e05122f523624bc7e4ed531d2feb973e13c64f12d
 workflow_sha256="a69f3fdbcb842f9b5648fe04bc1b73f606a0fd521acf99ea6f40c6186da9d311"
 config_preview=false
 
+# Apply the optional receipt override before validating the no-command configuration and image.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)           show_help; exit 0 ;;
@@ -47,11 +51,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Require a connection receipt and reject a mutable policy image before any remote work begins.
 [[ -n "$connection_file" ]] || fatal "--connection-file is required"
 [[ "$workflow_name" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || fatal "Invalid workflow name: $workflow_name"
 image=$(jq -r '.policy.image // empty' "$config")
 [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] || fatal "No-command image must use an immutable sha256 digest"
 
+# Show the zero-action plan and exit without contacting OSMO or encoding local assets.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Milestone" "validated: no-command safety"
@@ -68,6 +74,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Validate the protected connection receipt and prove that its K3s identity matches the local host.
 operation="validate successful OSMO connection"
 report_failure() {
   local status=$?
@@ -103,6 +110,7 @@ hil_require_local_k3s_identity "$identity_file" "$kubeconfig" "$context" "$node_
 export XDG_CONFIG_HOME="$osmo_config_dir"
 osmo profile set pool "$pool_name" >/dev/null
 
+# Verify every reviewed configuration, fixture, runner, and workflow asset before packaging it for submission.
 operation="validate package-free no-command assets"
 for file in "$config" "$fixture" "$runner" "$workflow"; do
   [[ -f "$file" && ! -L "$file" ]] || fatal "Required no-command asset is unavailable: $file"
@@ -124,6 +132,7 @@ runner_b64=$(base64 < "$runner" | tr -d '\n')
 config_b64=$(base64 < "$config" | tr -d '\n')
 observations_b64=$(base64 < "$fixture" | tr -d '\n')
 
+# Submit the command-free evaluation with the reviewed assets and no robot transport capability.
 operation="submit no-command OSMO workflow"
 submitted_at=$(date -u +%s)
 submission_json=$(osmo workflow submit "$workflow" --format-type json --pool "$pool_name" \
@@ -138,6 +147,7 @@ unset runner_b64 config_b64 observations_b64
 workflow_id=$(jq -r '.id // .workflow_id // .uuid // empty' <<< "$submission_json")
 [[ -n "$workflow_id" ]] || fatal "OSMO submission response did not contain a workflow ID"
 
+# Wait for completion and verify that proposed actions were rejected without applying any action.
 operation="wait for no-command OSMO workflow"
 hil_wait_for_workflow "$workflow_id" 600
 
@@ -151,6 +161,7 @@ jq -e --arg workflow "$workflow_name" --arg backend "$backend_name" --arg pool "
   .rejection_code == "NO_COMMAND_TRANSPORT"
 ' <<< "$remote_result" >/dev/null || fatal "No-command result does not prove the connected zero-action boundary"
 
+# Find the submitted Pod on the owned node and verify its digest, exit status, and restricted permissions.
 operation="verify no-command workflow ran on the owned local node"
 matched_node=""
 matched_pod=""
@@ -182,6 +193,7 @@ pod_service_account=$(jq -r '.spec.serviceAccountName // "default"' <<< "$pod_js
   --as "system:serviceaccount:${workflow_namespace}:${pod_service_account}" --all-namespaces)" != "yes" ]] || \
   fatal "No-command workflow service account has unrestricted cluster permissions"
 
+# Report the passed no-command boundary and the explicit physical-motion limitation.
 trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "validated: no-command safety"

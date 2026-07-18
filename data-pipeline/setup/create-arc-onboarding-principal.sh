@@ -2,6 +2,7 @@
 # Create a resource-group-scoped service principal for optional Azure Arc onboarding.
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load the shared helpers and Azure setup defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"
 # shellcheck source=../../scripts/lib/common.sh
@@ -9,6 +10,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=defaults.conf
 source "$SCRIPT_DIR/defaults.conf"
 
+# Describe the required identity inputs and the protected files produced by this command.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -36,6 +38,7 @@ EXAMPLES:
 EOF
 }
 
+# Initialize required Azure identifiers, output paths, and the optional Kubernetes onboarding role.
 subscription_id="${AZURE_SUBSCRIPTION_ID:-}"
 resource_group="${ARC_RESOURCE_GROUP:-}"
 principal_name=""
@@ -44,6 +47,7 @@ metadata_file=""
 include_kubernetes=false
 config_preview=false
 
+# Apply command-line values before checking that the principal target and output files are safe to use.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)              show_help; exit 0 ;;
@@ -58,6 +62,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Reject incomplete targets and prevent the secret and metadata documents from overwriting one another.
 [[ -n "$subscription_id" ]] || fatal "--subscription-id is required"
 [[ -n "$resource_group" ]] || fatal "--resource-group is required"
 [[ -n "$principal_name" ]] || fatal "--principal-name is required"
@@ -65,6 +70,7 @@ done
 [[ -n "$metadata_file" ]] || fatal "--metadata-file is required"
 [[ "$credential_file" != "$metadata_file" ]] || fatal "Credential and metadata files must be different"
 
+# Show the planned scope and output locations, then exit before authenticating or creating Azure resources.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Subscription" "$subscription_id"
@@ -77,6 +83,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Verify Azure authentication, subscription selection, resource-group existence, and required local tools.
 require_tools az jq
 az account show >/dev/null 2>&1 || fatal "Azure CLI is not authenticated"
 active_subscription=$(az account show --query id -o tsv)
@@ -88,6 +95,7 @@ umask 077
 mkdir -p "$(dirname "$credential_file")" "$(dirname "$metadata_file")"
 [[ ! -e "$credential_file" ]] || fatal "Credential file already exists: $credential_file"
 
+# Create the resource-group-scoped service principal and write its secret with owner-only permissions.
 section "Create Arc Onboarding Principal"
 credential_json=$(az ad sp create-for-rbac --name "$principal_name" \
   --role "Azure Connected Machine Onboarding" --scopes "$scope" --output json)
@@ -98,6 +106,7 @@ tenant_id=$(jq -r '.tenant' <<< "$credential_json")
 [[ -n "$application_id" && "$application_id" != "null" ]] || fatal "Service principal response omitted appId"
 principal_id=$(az ad sp show --id "$application_id" --query id -o tsv)
 
+# Add the optional Kubernetes Arc role while retaining the required server onboarding role.
 roles=("Azure Connected Machine Onboarding")
 if [[ "$include_kubernetes" == "true" ]]; then
   az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
@@ -105,6 +114,7 @@ if [[ "$include_kubernetes" == "true" ]]; then
   roles+=("Kubernetes Cluster - Azure Arc Onboarding")
 fi
 
+# Write non-secret metadata that lets later setup steps identify the principal and granted roles.
 jq -n \
   --arg subscription_id "$subscription_id" \
   --arg tenant_id "$tenant_id" \
@@ -118,6 +128,7 @@ jq -n \
 chmod 0600 "$metadata_file"
 unset credential_json
 
+# Report the created principal and protected output locations without printing the credential contents.
 section "Deployment Summary"
 print_kv "Principal" "$principal_name"
 print_kv "Application ID" "$application_id"

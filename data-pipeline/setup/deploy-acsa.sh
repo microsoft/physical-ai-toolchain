@@ -2,6 +2,7 @@
 # Deploy Azure Container Storage for Arc (ACSA) resources for ROS2 recording sync
 set -o errexit -o nounset
 
+# Resolve repository paths and load shared helpers plus the ACSA deployment defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"
 # shellcheck source=../../scripts/lib/common.sh
@@ -11,6 +12,7 @@ source "$SCRIPT_DIR/defaults.conf"
 
 ARC_DIR="$SCRIPT_DIR/../arc"
 
+# Describe the cluster, storage, connectivity, and manifest options supported by this deployment.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -37,6 +39,7 @@ EXAMPLES:
 EOF
 }
 
+# Poll an Arc extension until it succeeds, fails, or reaches the configured timeout.
 wait_for_extension_state() {
   local extension_name="${1:?extension name required}"
   local desired_state="${2:?desired state required}"
@@ -68,6 +71,7 @@ wait_for_extension_state() {
   fatal "Timed out waiting for extension $extension_name to reach state $desired_state"
 }
 
+# Start a temporary Arc proxy and wait until kubectl can reach the connected cluster through it.
 start_arc_proxy() {
   local kubeconfig_file="${1:?kubeconfig file required}"
   local log_file="${2:?log file required}"
@@ -97,6 +101,7 @@ start_arc_proxy() {
   fatal "Failed to establish kubectl connectivity through Arc proxy (log: $log_file)"
 }
 
+# Remove temporary proxy processes, kubeconfig files, rendered manifests, and error logs on exit.
 cleanup_proxy() {
   if [[ -n "${proxy_pid:-}" ]] && kill -0 "$proxy_pid" >/dev/null 2>&1; then
     pkill -P "$proxy_pid" >/dev/null 2>&1 || true
@@ -121,6 +126,7 @@ cleanup_proxy() {
   fi
 }
 
+# Create a missing extension or update an existing one with the requested immutable configuration.
 install_or_update_extension() {
   local extension_name="${1:?extension name required}"
   local extension_type="${2:?extension type required}"
@@ -154,7 +160,7 @@ install_or_update_extension() {
   fi
 }
 
-# Defaults
+# Set defaults for Terraform discovery, cluster access, extension versions, and retry behavior.
 tf_dir="$SCRIPT_DIR/$DEFAULT_TF_DIR"
 cluster_name="${ARC_CLUSTER_NAME:-}"
 cluster_resource_group="${ARC_RESOURCE_GROUP:-}"
@@ -172,6 +178,7 @@ cert_manager_release_train="${CERT_MANAGER_RELEASE_TRAIN:-stable}"
 principal_id_max_retries="${ACSA_PRINCIPAL_ID_MAX_RETRIES:-12}"
 principal_id_retry_seconds="${ACSA_PRINCIPAL_ID_RETRY_SECONDS:-10}"
 
+# Apply command-line overrides before discovering resource names and validating the connection mode.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                    show_help; exit 0 ;;
@@ -189,12 +196,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Confirm the external tools required to discover Azure resources and apply Kubernetes manifests exist.
 require_tools az terraform jq kubectl envsubst
 
 #------------------------------------------------------------------------------
 # Gather Configuration
 #------------------------------------------------------------------------------
 
+# Discover cluster and storage values from Terraform state when explicit options did not provide them.
 if [[ -f "$tf_dir/terraform.tfstate" ]]; then
   info "Reading terraform outputs from $tf_dir..."
   tf_output=$(read_terraform_outputs "$tf_dir")
@@ -220,6 +229,7 @@ else
   warn "terraform.tfstate not found in $tf_dir; skipping terraform output discovery"
 fi
 
+# Reject unsupported connectivity modes and show the complete plan when preview mode is requested.
 if [[ "$connectivity_mode" != "direct" && "$connectivity_mode" != "proxy" ]]; then
   fatal "Invalid connectivity mode: $connectivity_mode (expected: direct|proxy)"
 fi
@@ -247,6 +257,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Require the target identifiers, verify Azure extensions, and derive the Blob container resource scope.
 [[ -n "$cluster_name" ]] || fatal "Cluster name is required (--cluster-name or ARC_CLUSTER_NAME)"
 [[ -n "$cluster_resource_group" ]] || fatal "Cluster resource group is required (--cluster-resource-group or ARC_RESOURCE_GROUP)"
 [[ -n "$storage_account_name" ]] || fatal "Storage account name is required (--storage-account or terraform output)"
@@ -264,6 +275,7 @@ if [[ -z "$storage_scope" ]]; then
 fi
 container_scope="${storage_scope}/blobServices/default/containers/${BLOB_CONTAINER_NAME}"
 
+# Ensure the destination Blob container exists before the cluster-side storage integration is installed.
 az storage container create \
   --account-name "$storage_account_name" \
   --name "$BLOB_CONTAINER_NAME" \
@@ -275,6 +287,7 @@ az storage container create \
 #------------------------------------------------------------------------------
 section "Prepare Cluster Connectivity"
 
+# Select direct kubeconfig access or establish a temporary Arc proxy, then verify the K3s target.
 proxy_pid=""
 proxy_kubeconfig=""
 proxy_log_file=""
@@ -303,6 +316,7 @@ ensure_namespace "$kubeconfig" "$context" "$EDGE_NAMESPACE"
 #------------------------------------------------------------------------------
 section "Install cert-manager and ACSA Extensions"
 
+# Install or update both required Arc extensions and wait for each provisioning operation to succeed.
 install_or_update_extension \
   "$cert_manager_extension_name" \
   "microsoft.certmanagement" \
@@ -325,6 +339,7 @@ wait_for_extension_state "$ACSA_EXTENSION_NAME" "Succeeded"
 #------------------------------------------------------------------------------
 section "Assign Blob Role to ACSA Managed Identity"
 
+# Wait for the ACSA identity to appear, then grant it least-privilege access to the target container.
 acsa_principal_id=""
 for ((attempt = 1; attempt <= principal_id_max_retries; attempt++)); do
   acsa_principal_id=$(az k8s-extension show \
@@ -366,6 +381,7 @@ fi
 #------------------------------------------------------------------------------
 section "Create Container and Apply ACSA Manifests"
 
+# Render the repository manifests with the selected storage values, apply them, and wait for readiness.
 render_dir=$(mktemp -d)
 
 export EDGE_NAMESPACE
@@ -399,6 +415,7 @@ fi
 # Deployment Summary
 #------------------------------------------------------------------------------
 section "Deployment Summary"
+# Report the connected cluster, storage target, and applied ACSA resources for operator follow-up.
 print_kv "Cluster" "$cluster_name"
 print_kv "Cluster RG" "$cluster_resource_group"
 print_kv "Connectivity" "$connectivity_mode"

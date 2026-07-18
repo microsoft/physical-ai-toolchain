@@ -3,6 +3,7 @@
 # cspell:ignore jwks
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load shared helpers plus the Arc and K3s defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 # shellcheck source=../../../scripts/lib/common.sh
@@ -10,6 +11,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../defaults.conf
 source "$SCRIPT_DIR/../defaults.conf"
 
+# Describe the Azure Arc target, protected kubeconfig, and optional workload identity behavior.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -36,6 +38,7 @@ EXAMPLES:
 EOF
 }
 
+# Initialize Azure identifiers, the K3s target, and the optional OIDC/workload identity switch.
 subscription_id="${AZURE_SUBSCRIPTION_ID:-}"
 tenant_id="${AZURE_TENANT_ID:-}"
 resource_group="${ARC_RESOURCE_GROUP:-}"
@@ -49,11 +52,13 @@ oidc_issuer=""
 arc_probe_namespace="physical-ai-arc-smoke-$$"
 arc_probe_pod="arc-egress-smoke"
 
+# Remove the temporary namespace used by the Kubernetes outbound-connectivity preflight.
 cleanup_arc_network_probe() {
   kube_kubectl "$kubeconfig" "$context" delete namespace "$arc_probe_namespace" \
     --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1 || true
 }
 
+# Prove both the host and a restricted K3s Pod can resolve and reach the public Arc endpoint.
 verify_arc_network_requirements() {
   local phase="" attempt
 
@@ -121,6 +126,7 @@ EOF
   info "Verified host and K3s pod HTTPS connectivity to mcr.microsoft.com"
 }
 
+# Apply command-line values before validating the Azure, K3s, and workload identity targets.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                   show_help; exit 0 ;;
@@ -137,6 +143,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Reject incomplete Azure and kubeconfig targets before the network preflight or Arc mutation.
 [[ -n "$subscription_id" ]] || fatal "--subscription-id is required"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
 [[ -n "$resource_group" ]] || fatal "--resource-group is required"
@@ -144,6 +151,7 @@ done
 [[ -n "$cluster_name" ]] || fatal "--cluster-name is required"
 [[ -n "$kubeconfig" ]] || fatal "--kubeconfig is required"
 
+# Show the planned Arc connection and preflight behavior, then exit without contacting Azure or Kubernetes.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Subscription" "$subscription_id"
@@ -159,6 +167,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Verify tools, K3s access, outbound connectivity, Azure authentication, and the target resource group.
 require_tools az curl jq kubectl sudo
 verify_kube_target "$kubeconfig" "$context" k3s
 verify_arc_network_requirements
@@ -171,6 +180,7 @@ active_tenant=$(az account show --query tenantId -o tsv)
 az group show --name "$resource_group" --subscription "$subscription_id" >/dev/null || \
   fatal "Resource group not found: $resource_group"
 
+  # Connect or update the Arc-enabled Kubernetes resource using the selected workload identity options.
 section "Connect Arc-Enabled Kubernetes"
 require_az_extension connectedk8s
 if [[ "$enable_workload_identity" == "true" ]]; then
@@ -208,6 +218,7 @@ else
   az "${connect_args[@]}" --output none
 fi
 
+# When requested, align K3s token settings with the Arc OIDC issuer and verify discovery end to end.
 if [[ "$enable_workload_identity" == "true" ]]; then
   for ((attempt = 1; attempt <= 60; attempt++)); do
     oidc_issuer=$(az connectedk8s show --name "$cluster_name" --resource-group "$resource_group" \
@@ -298,6 +309,7 @@ print(json.loads(base64.urlsafe_b64decode(payload)).get("iss", ""))
     fatal "K3s service-account token issuer does not match the Arc OIDC issuer"
 fi
 
+# Wait for Azure and Arc workloads to report healthy, then verify workload identity webhooks when enabled.
 cluster_json=""
 for ((attempt = 1; attempt <= 60; attempt++)); do
   cluster_json=$(az connectedk8s show --name "$cluster_name" --resource-group "$resource_group" \
@@ -333,6 +345,7 @@ if [[ "$enable_workload_identity" == "true" ]]; then
     -n arc-workload-identity --timeout=300s
 fi
 
+# Report the connected Arc Kubernetes resource and whether workload identity was enabled.
 section "Deployment Summary"
 print_kv "Subscription" "$subscription_id"
 print_kv "Resource Group" "$resource_group"

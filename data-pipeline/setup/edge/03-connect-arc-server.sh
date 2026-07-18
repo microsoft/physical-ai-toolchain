@@ -2,6 +2,7 @@
 # Connect the Ubuntu host to Azure Arc using interactive device-code authentication.
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load shared helpers plus the Arc setup defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 # shellcheck source=../../../scripts/lib/common.sh
@@ -9,6 +10,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../defaults.conf
 source "$SCRIPT_DIR/../defaults.conf"
 
+# Describe the Azure identity and Arc server resource required by this onboarding step.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -32,6 +34,7 @@ EXAMPLES:
 EOF
 }
 
+# Initialize Azure identifiers and the target Arc server resource before parsing overrides.
 subscription_id="${AZURE_SUBSCRIPTION_ID:-}"
 tenant_id="${AZURE_TENANT_ID:-}"
 resource_group="${ARC_RESOURCE_GROUP:-}"
@@ -39,6 +42,7 @@ location="${ARC_LOCATION:-}"
 server_name="${ARC_SERVER_NAME:-}"
 config_preview=false
 
+# Apply command-line values and preserve environment-provided defaults for unattended setup wrappers.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)            show_help; exit 0 ;;
@@ -52,12 +56,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Reject an incomplete Arc target before checking Azure authentication or touching the host.
 [[ -n "$subscription_id" ]] || fatal "--subscription-id is required"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
 [[ -n "$resource_group" ]] || fatal "--resource-group is required"
 [[ -n "$location" ]] || fatal "--location is required"
 [[ -n "$server_name" ]] || fatal "--server-name is required"
 
+# Show the planned Arc resource and authentication mode, then exit without making changes.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Subscription" "$subscription_id"
@@ -69,6 +75,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Verify local tools, the active Azure tenant and subscription, and the target resource group.
 require_tools az jq sudo
 az account show >/dev/null 2>&1 || \
   fatal "Authenticate Azure CLI with device-code login before Arc onboarding"
@@ -79,6 +86,7 @@ active_tenant=$(az account show --query tenantId -o tsv)
 az group show --name "$resource_group" --subscription "$subscription_id" >/dev/null || \
   fatal "Resource group not found: $resource_group"
 
+  # Install the Arc agent only when absent, then connect or verify the expected server resource.
 section "Connect Arc-Enabled Server"
 if ! command -v azcmagent >/dev/null 2>&1; then
   [[ -r /etc/os-release ]] || fatal "/etc/os-release is unavailable"
@@ -110,6 +118,7 @@ server_status=$(sudo azcmagent show --json | jq -r '.status // empty')
 [[ "$(printf '%s' "$server_status" | tr '[:upper:]' '[:lower:]')" == "connected" ]] || \
   fatal "Arc-enabled server status is not Connected"
 
+# Report the connected Arc server and the Azure scope used for onboarding.
 section "Deployment Summary"
 print_kv "Subscription" "$subscription_id"
 print_kv "Resource Group" "$resource_group"

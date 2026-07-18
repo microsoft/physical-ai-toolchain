@@ -8,6 +8,7 @@ import ipaddress
 from typing import cast
 
 
+# Normalize an input as an IPv4 network and reject IPv6 values early.
 def _network(value: str) -> ipaddress.IPv4Network:
     network = ipaddress.ip_network(value, strict=False)
     if not isinstance(network, ipaddress.IPv4Network):
@@ -15,6 +16,7 @@ def _network(value: str) -> ipaddress.IPv4Network:
     return network
 
 
+# Parse the requested network operation, reject unsafe overlaps, and report the requested result.
 def main() -> int:
     """Validate all supplied networks and report the first overlap."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -26,11 +28,13 @@ def main() -> int:
     if not args.cidr and not args.address_in and not args.first_host:
         parser.error("provide CIDRs, --address-in, or --first-host")
 
+    # Reject any pair of supplied networks that would overlap on the host or in the VPN address plan.
     for index, left in enumerate(args.cidr):
         for right in args.cidr[index + 1 :]:
             if left.overlaps(right):
                 parser.error(f"CIDR overlap: {left} and {right}")
 
+    # Confirm that a supplied address belongs to the requested network.
     if args.address_in:
         address_value, network_value = cast(tuple[str, str], args.address_in)
         try:
@@ -41,6 +45,7 @@ def main() -> int:
         if address not in network:
             parser.error(f"address {address} is outside {network}")
 
+    # Return the first usable host address when the caller requests a route probe target.
     if args.first_host:
         try:
             print(next(args.first_host.hosts()))

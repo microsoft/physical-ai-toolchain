@@ -3,6 +3,7 @@
 # cspell:ignore checkend noout outform pkey pubin pubout
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load shared helpers used for protected VPN artifact handling.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../../.." && pwd))"
 # shellcheck source=../../../../scripts/lib/common.sh
@@ -10,6 +11,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../../../../scripts/lib/hil.sh
 source "$REPO_ROOT/scripts/lib/hil.sh"
 
+# Describe the public certificate retrieval and the private-only access checkpoint that follows it.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") --environment NAME --host-name NAME [OPTIONS]
@@ -38,6 +40,7 @@ EXAMPLES:
 EOF
 }
 
+# Initialize the target identity, transfer method, and local request/response directories.
 environment=""
 host_name=""
 tenant_id=""
@@ -50,6 +53,7 @@ response_dir=""
 azure_config_dir=""
 config_preview=false
 
+# Apply command-line values before deriving paths and validating the response target.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)           show_help; exit 0 ;;
@@ -68,6 +72,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Validate the environment and host names, credentials, transport, and required SCP response directory.
 hil_require_name "Environment" "$environment"
 hil_require_name "Host name" "$host_name"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
@@ -81,6 +86,7 @@ response_dir="${response_dir:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-t
 azure_config_dir="${azure_config_dir:-${XDG_CONFIG_HOME:-$HOME/.config}/physical-ai-toolchain/hil/azure/${environment}-${host_name}}"
 catalog_secret="${environment}-${host_name}-hil-catalog"
 
+# Show the expected certificate locations and security checkpoint, then exit without retrieving anything.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Milestone" "reachable: VPN response"
@@ -96,6 +102,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Establish failure reporting and verify the protected request state and required transfer tools.
 operation="validate VPN response inputs"
 report_failure() {
   local status=$?
@@ -124,6 +131,7 @@ else
   require_protected_directory "$scp_source_dir"
 fi
 
+# Retrieve the catalog-declared signed response for this exact environment and host.
 operation="retrieve exact signed public response"
 hil_fetch_artifacts "$transport" "$catalog_secret" "$environment" "$host_name" \
   "$tenant_id" "$subscription_id" "$vault_name" "$response_dir" "$scp_source_dir" vpn_response
@@ -133,6 +141,7 @@ response_name=$(jq -r '.artifacts.vpn_response.file // empty' "$catalog")
 response_file="$response_dir/$response_name"
 require_protected_file "$response_file"
 
+# Verify the response binds to this CSR, gateway, and trust roots and contains no private-key material.
 operation="validate signed public response"
 jq -e --arg environment "$environment" --arg host "$host_name" --arg csr_sha "$(calculate_sha256 "$csr_file")" '
   (keys | sort) == (["client_ca_certificate_pem", "client_certificate_pem", "client_root_sha256",
@@ -172,9 +181,12 @@ csr_key=$(openssl req -in "$csr_file" -pubkey -noout | openssl pkey -pubin -outf
 client_root_sha=$(openssl x509 -in "$ca_tmp" -outform der | calculate_sha256 /dev/stdin)
 [[ "$client_root_sha" == "$(jq -r '.client_root_sha256' "$response_file")" ]] || \
   fatal "Returned client chain does not match the requested client root"
+
+# Install the verified public certificate and CA files with owner-only permissions for the VPN step.
 mv "$client_tmp" "$response_dir/client.pem"
 mv "$ca_tmp" "$response_dir/client-ca.pem"
 
+# Report the installed public response and remind the operator to restore private-only Key Vault access.
 trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "reachable: VPN response"

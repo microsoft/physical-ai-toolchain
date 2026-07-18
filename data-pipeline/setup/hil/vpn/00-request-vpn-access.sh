@@ -3,6 +3,7 @@
 # cspell:ignore addext noout outform pkey pubin pubout
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load shared helpers plus the VPN input defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../../.." && pwd))"
 # shellcheck source=../../../../scripts/lib/common.sh
@@ -12,6 +13,7 @@ source "$REPO_ROOT/scripts/lib/hil.sh"
 # shellcheck source=../../defaults.conf
 source "$SCRIPT_DIR/../../defaults.conf"
 
+# Describe the public-input retrieval, local key generation, and CSR handoff performed by this step.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") --environment NAME --host-name NAME [OPTIONS]
@@ -40,6 +42,7 @@ EXAMPLES:
 EOF
 }
 
+# Initialize the target identity, transfer method, and protected local directories.
 environment=""
 host_name=""
 tenant_id=""
@@ -52,6 +55,7 @@ request_dir=""
 azure_config_dir=""
 config_preview=false
 
+# Apply command-line values before deriving paths and validating the VPN request target.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)           show_help; exit 0 ;;
@@ -70,6 +74,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Validate the environment and host names, credentials, transport, and required SCP handoff directory.
 hil_require_name "Environment" "$environment"
 hil_require_name "Host name" "$host_name"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
@@ -84,6 +89,7 @@ azure_config_dir="${azure_config_dir:-${XDG_CONFIG_HOME:-$HOME/.config}/physical
 catalog_secret="${environment}-${host_name}-hil-catalog"
 csr_secret="${environment}-${host_name}-vpn-csr"
 
+# Show the planned transfer and key/CSR locations, then exit before reading or writing any secret material.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Milestone" "reachable: VPN request"
@@ -102,6 +108,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Establish failure reporting, authenticate only for Key Vault transfer, and verify required local tools.
 operation="validate VPN request inputs"
 report_failure() {
   local status=$?
@@ -121,11 +128,13 @@ else
   require_protected_directory "$scp_source_dir"
 fi
 
+# Retrieve only the catalog-declared public VPN inputs for this environment and host.
 operation="retrieve exact public VPN inputs"
 hil_fetch_artifacts "$transport" "$catalog_secret" "$environment" "$host_name" \
   "$tenant_id" "$subscription_id" "$vault_name" "$input_dir" "$scp_source_dir" \
   vpn_config vpn_settings vpn_server_root vpn_client_root
 catalog="$input_dir/catalog.json"
+# Resolve safe catalog filenames so external metadata cannot select arbitrary local paths.
 artifact_path() {
   local key="${1:?artifact key required}" file
   file=$(jq -r --arg key "$key" '.artifacts[$key].file // empty' "$catalog")
@@ -137,6 +146,7 @@ vpn_settings=$(artifact_path vpn_settings)
 vpn_server_root=$(artifact_path vpn_server_root)
 vpn_client_root=$(artifact_path vpn_client_root)
 
+# Validate the gateway, routes, trust roots, and local networks before creating a VPN request.
 operation="validate target-bound public VPN inputs"
 jq -e --arg environment "$environment" --arg host "$host_name" '
   .schema_version == 1 and .kind == "physical-ai-vpn-inputs" and
@@ -179,6 +189,7 @@ if [[ -n "$dns_server" ]]; then
   [[ "$dns_in_route" == "true" ]] || fatal "Private DNS server is outside the approved VPN routes"
 fi
 
+# Generate or reuse the host-owned private key and CSR, then record their hashes in a protected request document.
 operation="generate the Ubuntu-owned private key and CSR"
 hil_prepare_directory "$request_dir"
 private_key="$request_dir/client.key"
@@ -229,6 +240,7 @@ request_key=$(openssl req -in "$csr_file" -pubkey -noout | openssl pkey -pubin -
 private_key_hash=$(openssl pkey -in "$private_key" -pubout -outform der | openssl sha256)
 [[ "$request_key" == "$private_key_hash" ]] || fatal "VPN CSR does not match the Ubuntu private key"
 
+# Publish only the signed-request payload through the selected handoff; the private key never leaves the host.
 if [[ "$transport" == "keyvault" ]]; then
   operation="publish only the host-bound CSR request"
   [[ "$(jq -r '.csr_secret_name' "$catalog")" == "$csr_secret" ]] || fatal "Catalog CSR destination does not match"
@@ -240,6 +252,7 @@ else
   install -m 0600 "$request_file" "$scp_source_dir/vpn-request.json"
 fi
 
+# Report the CSR handoff and the checkpoint required before the CA response is retrieved.
 trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "reachable: VPN request"

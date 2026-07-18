@@ -2,6 +2,7 @@
 # Prove CPU-only OSMO scheduling through the connected local backend.
 set -o errexit -o nounset -o pipefail
 
+# Resolve repository paths and load the shared helpers used for receipt and node validation.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../../.." && pwd))"
 # shellcheck source=../../../scripts/lib/common.sh
@@ -9,6 +10,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=../../../scripts/lib/hil.sh
 source "$REPO_ROOT/scripts/lib/hil.sh"
 
+# Describe the connection receipt required to submit a CPU-only proof workflow.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -25,6 +27,7 @@ EXAMPLES:
 EOF
 }
 
+# Create a unique workflow identity and pin the test image and reviewed workflow template.
 connection_file="${HIL_CONNECTION_FILE:-}"
 workflow_name="hil-cpu-$(date -u +%Y%m%dt%H%M%S)-${RANDOM}${RANDOM}"
 image="alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1"
@@ -32,6 +35,7 @@ workflow="$REPO_ROOT/evaluation/hil/workflows/osmo/cpu-smoke.yaml"
 workflow_sha256="2af6657a82049a799902e0c1deedc1e19aaf6e711ea561d6ac993388d907be2c"
 config_preview=false
 
+# Apply the optional receipt override before validating the immutable test inputs.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)           show_help; exit 0 ;;
@@ -41,10 +45,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Require a connection receipt and reject mutable workflow or image references before any submission.
 [[ -n "$connection_file" ]] || fatal "--connection-file is required"
 [[ "$workflow_name" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || fatal "Invalid workflow name: $workflow_name"
 [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] || fatal "CPU image pin is invalid"
 
+# Show the planned workflow and its zero-GPU contract, then exit without contacting OSMO.
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Milestone" "validated: CPU scheduling"
@@ -58,6 +64,7 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+# Validate the protected connection receipt and prove that its K3s identity matches the local host.
 operation="validate successful OSMO connection"
 report_failure() {
   local status=$?
@@ -97,6 +104,7 @@ hil_require_local_k3s_identity "$identity_file" "$kubeconfig" "$context" "$node_
 export XDG_CONFIG_HOME="$osmo_config_dir"
 osmo profile set pool "$pool_name" >/dev/null
 
+# Submit the reviewed CPU-only workflow to the pool selected by the connection receipt.
 operation="submit CPU-only OSMO workflow"
 submitted_at=$(date -u +%s)
 submission_json=$(osmo workflow submit "$workflow" --format-type json --pool "$pool_name" \
@@ -107,6 +115,7 @@ submission_json=$(osmo workflow submit "$workflow" --format-type json --pool "$p
 workflow_id=$(jq -r '.id // .workflow_id // .uuid // empty' <<< "$submission_json")
 [[ -n "$workflow_id" ]] || fatal "OSMO submission response did not contain a workflow ID"
 
+# Wait for completion and verify the remote result reports success with no GPU requested or present.
 operation="wait for CPU-only OSMO workflow"
 hil_wait_for_workflow "$workflow_id" 600
 
@@ -118,6 +127,7 @@ jq -e --arg workflow "$workflow_name" --arg backend "$backend_name" --arg pool "
   .status == "passed" and .gpu_requested == 0 and .gpu_device_present == false
 ' <<< "$cpu_result" >/dev/null || fatal "CPU workflow result does not match the connected backend and zero-GPU contract"
 
+# Find the submitted Pod on the owned node and verify its digest, exit status, and restricted permissions.
 operation="verify CPU workflow ran on the owned local node"
 matched_node=""
 matched_pod=""
@@ -149,6 +159,7 @@ pod_service_account=$(jq -r '.spec.serviceAccountName // "default"' <<< "$pod_js
   --as "system:serviceaccount:${workflow_namespace}:${pod_service_account}" --all-namespaces)" != "yes" ]] || \
   fatal "CPU workflow service account has unrestricted cluster permissions"
 
+# Report the successful scheduling proof and point to the next no-command safety check.
 trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "validated: CPU scheduling"
