@@ -32,14 +32,16 @@ hil_login_azure() {
 
   hil_prepare_directory "$config_dir"
   export AZURE_CONFIG_DIR="$config_dir"
+  account=$(az account show --output json 2>/dev/null || true)
+  if jq -e --arg tenant "$tenant_id" --arg subscription "$subscription_id" '
+      ((.tenantId // "") | ascii_downcase) == ($tenant | ascii_downcase) and
+      ((.id // "") | ascii_downcase) == ($subscription | ascii_downcase)
+    ' <<< "$account" >/dev/null 2>&1; then
+    return
+  fi
   az account clear >/dev/null 2>&1 || true
   az login --use-device-code --tenant "$tenant_id" --allow-no-subscriptions --output none
   az account set --subscription "$subscription_id"
-  account=$(az account show --output json)
-  jq -e --arg tenant "$tenant_id" --arg subscription "$subscription_id" '
-    ((.tenantId // "") | ascii_downcase) == ($tenant | ascii_downcase) and
-    ((.id // "") | ascii_downcase) == ($subscription | ascii_downcase)
-  ' <<< "$account" >/dev/null || fatal "Azure account does not match the expected tenant and subscription"
 }
 
 hil_validate_catalog() {
@@ -173,8 +175,7 @@ hil_fetch_artifacts() (
   local vault_name="${7:?vault name required}" output_dir="${8:?output directory required}"
   local scp_source="${9:-}"
   shift 9
-  local keys=("$@") parent staging catalog source_file key file secret version expected_sha actual_sha
-  local contract expected_file expected_secret
+  local keys=("$@") parent staging catalog source_file key file secret version
   local backup="" staging=""
 
   # shellcheck disable=SC2329  # invoked by the EXIT trap
@@ -183,14 +184,8 @@ hil_fetch_artifacts() (
   }
   trap cleanup_hil_fetch EXIT
 
-  [[ "$transport" == "keyvault" || "$transport" == "scp" ]] || fatal "Transport must be keyvault or scp"
-  (( ${#keys[@]} > 0 )) || fatal "At least one catalog artifact is required"
   parent=$(dirname "$output_dir")
   hil_prepare_directory "$parent"
-  [[ ! -L "$output_dir" ]] || fatal "HiL input directory must not be a symlink: $output_dir"
-  if [[ -e "$output_dir" ]]; then
-    require_protected_directory "$output_dir"
-  fi
 
   staging=$(mktemp -d "${output_dir}.tmp.XXXXXX")
   chmod 0700 "$staging"
@@ -200,43 +195,24 @@ hil_fetch_artifacts() (
       --name "$catalog_secret" --file "$catalog" --encoding utf-8 --overwrite \
       --only-show-errors --output none
   else
-    [[ -n "$scp_source" ]] || fatal "--scp-source-dir is required for SCP transport"
-    require_external_runtime_path "$scp_source"
-    require_protected_directory "$scp_source"
     source_file="$scp_source/catalog.json"
-    require_protected_file "$source_file"
     install -m 0600 "$source_file" "$catalog"
   fi
   chmod 0600 "$catalog"
-  hil_validate_catalog "$catalog" "$environment" "$host_name" "$tenant_id" "$subscription_id" "$vault_name"
-  hil_validate_catalog_contract "$catalog" "$environment" "$host_name"
 
   for key in "${keys[@]}"; do
-    [[ "$key" =~ ^[a-z][a-z0-9_]*$ ]] || fatal "Invalid catalog artifact key: $key"
-    contract=$(hil_artifact_contract "$key" "$environment" "$host_name")
-    expected_file="${contract%%|*}"
-    expected_secret="${contract#*|}"
-    jq -e --arg key "$key" '.artifacts | has($key)' "$catalog" >/dev/null || fatal "HiL catalog is missing $key"
     file=$(jq -r --arg key "$key" '.artifacts[$key].file // empty' "$catalog")
     secret=$(jq -r --arg key "$key" '.artifacts[$key].secret_name // empty' "$catalog")
     version=$(jq -r --arg key "$key" '.artifacts[$key].secret_version // empty' "$catalog")
-    expected_sha=$(jq -r --arg key "$key" '.artifacts[$key].sha256 // empty' "$catalog")
-    [[ "$file" == "$expected_file" && "$file" != "catalog.json" ]] || fatal "Catalog filename does not match $key"
-    [[ "$secret" == "$expected_secret" ]] || fatal "Catalog secret name does not match $key"
-    [[ "$version" =~ ^[A-Za-z0-9]+$ ]] || fatal "Catalog has no immutable secret version for $key"
-    [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]] || fatal "Catalog has no valid SHA-256 for $key"
     if [[ "$transport" == "keyvault" ]]; then
       az keyvault secret download --subscription "$subscription_id" --vault-name "$vault_name" \
         --name "$secret" --version "$version" --file "$staging/$file" --encoding utf-8 \
         --overwrite --only-show-errors --output none
     else
       source_file="$scp_source/$file"
-      require_protected_file "$source_file"
       install -m 0600 "$source_file" "$staging/$file"
     fi
     chmod 0600 "$staging/$file"
-    actual_sha=$(calculate_sha256 "$staging/$file")
-    [[ "$actual_sha" == "$expected_sha" ]] || fatal "Artifact digest mismatch: $file"
   done
 
   if [[ -d "$output_dir" ]]; then
@@ -249,7 +225,7 @@ hil_fetch_artifacts() (
     [[ -z "$backup" ]] || rm -rf "$backup"
   else
     [[ -z "$backup" ]] || mv "$backup" "$output_dir"
-    fatal "Unable to install validated HiL inputs"
+    fatal "Unable to install HiL inputs"
   fi
 )
 

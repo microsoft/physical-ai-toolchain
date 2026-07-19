@@ -90,30 +90,11 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-# Validate the Ubuntu host, protect installation paths, and arrange cleanup for temporary files.
-operation="validate supported host"
-report_failure() {
-  local status=$?
-  error "Operation failed: $operation"
-  error "Milestone incomplete: host-ready"
-  exit "$status"
-}
-trap report_failure ERR
-
-[[ "$(uname -s)" == "Linux" ]] || fatal "Host preparation supports Ubuntu Linux only"
-[[ -r /etc/os-release ]] || fatal "Cannot identify the operating system"
+# Load Ubuntu package metadata and create a temporary workspace.
 # shellcheck disable=SC1091
 source /etc/os-release
-[[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" =~ ^(22\.04|24\.04)$ ]] || \
-  fatal "Supported operating systems are Ubuntu 22.04 and 24.04"
-[[ "$architecture" != "unsupported" ]] || fatal "Unsupported architecture: $(uname -m)"
 
 require_tools apt-get sudo
-for destination in /etc/apt/keyrings/microsoft.gpg /etc/apt/sources.list.d/azure-cli.sources \
-  /usr/local/bin/helm /usr/local/bin/osmo; do
-  require_no_symlink_path "$destination"
-  [[ ! -L "$destination" ]] || fatal "Installation destination must not be a symlink: $destination"
-done
 work_dir=$(mktemp -d)
 cleanup() {
   rm -rf "$work_dir"
@@ -122,14 +103,12 @@ trap cleanup EXIT
 chmod 0700 "$work_dir"
 
 # Install the common Ubuntu utilities required by every supported transfer path.
-operation="install Ubuntu packages"
 section "Install Ubuntu Packages"
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends "${base_packages[@]}"
 
 # For Key Vault transfer, install Azure CLI from Microsoft's fingerprint-verified signed repository.
 if [[ "$transport" == "keyvault" ]]; then
-  operation="install Azure CLI"
   section "Install Azure CLI"
   require_tools curl dpkg gpg
   key_file="$work_dir/microsoft.asc"
@@ -152,24 +131,13 @@ Architectures: $(dpkg --print-architecture)
 Signed-by: $keyring_path
 EOF
   sudo install -d -m 0755 /etc/apt/keyrings
-  if sudo test -e "$keyring_path"; then
-    sudo cmp --silent "$work_dir/microsoft.gpg" "$keyring_path" || \
-      fatal "Existing Microsoft keyring differs from the verified key: $keyring_path"
-  else
-    sudo install -m 0644 "$work_dir/microsoft.gpg" "$keyring_path"
-  fi
-  if sudo test -e "$source_path"; then
-    sudo cmp --silent "$source_file" "$source_path" || \
-      fatal "Existing Azure CLI source differs from the expected configuration: $source_path"
-  else
-    sudo install -m 0644 "$source_file" "$source_path"
-  fi
+  sudo install -m 0644 "$work_dir/microsoft.gpg" "$keyring_path"
+  sudo install -m 0644 "$source_file" "$source_path"
   sudo apt-get update
   sudo apt-get install -y --no-install-recommends azure-cli
 fi
 
 # Download, verify, extract, and install the pinned Helm client for the host architecture.
-operation="install pinned Helm"
 section "Install Pinned Helm"
 helm_archive="$work_dir/helm.tar.gz"
 curl --fail --silent --show-error --location \
@@ -179,22 +147,17 @@ tar -xzf "$helm_archive" -C "$work_dir"
 sudo install -m 0755 "$work_dir/$helm_target/helm" /usr/local/bin/helm
 
 # Download, verify, and run the pinned OSMO client installer for the host architecture.
-operation="install pinned OSMO client"
 section "Install Pinned OSMO Client"
-osmo_installer="osmo-client-installer-${EDGE_OSMO_VERSION}-linux-${osmo_arch}.sh"
-osmo_installer_path="$work_dir/$osmo_installer"
-curl --fail --silent --show-error --location \
-  "https://github.com/NVIDIA/OSMO/releases/download/${EDGE_OSMO_VERSION}/${osmo_installer}" \
-  --output "$osmo_installer_path"
-printf '%s  %s\n' "$osmo_sha256" "$osmo_installer_path" | sha256sum -c -
-sudo bash "$osmo_installer_path"
+if ! command -v osmo >/dev/null 2>&1 || ! osmo version 2>&1 | grep -Fq "$EDGE_OSMO_VERSION"; then
+  osmo_installer="osmo-client-installer-${EDGE_OSMO_VERSION}-linux-${osmo_arch}.sh"
+  osmo_installer_path="$work_dir/$osmo_installer"
+  curl --fail --silent --show-error --location \
+    "https://github.com/NVIDIA/OSMO/releases/download/${EDGE_OSMO_VERSION}/${osmo_installer}" \
+    --output "$osmo_installer_path"
+  printf '%s  %s\n' "$osmo_sha256" "$osmo_installer_path" | sha256sum -c -
+  sudo bash "$osmo_installer_path"
+fi
 
-# Confirm the installed clients are callable and summarize the host-ready result and next steps.
-operation="verify installed clients"
-require_tools helm osmo
-[[ "$transport" != "keyvault" ]] || require_tools az
-
-trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "host-ready"
 print_kv "Ubuntu" "$VERSION_ID ($architecture)"

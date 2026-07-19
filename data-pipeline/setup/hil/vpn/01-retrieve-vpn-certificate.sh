@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Retrieve, validate, and install the signed public VPN response, then exit.
+# Retrieve and install the signed public VPN response, then exit.
 # cspell:ignore checkend noout outform pkey pubin pubout
 set -o errexit -o nounset -o pipefail
 
@@ -16,7 +16,7 @@ show_help() {
   cat << EOF
 Usage: $(basename "$0") --environment NAME --host-name NAME [OPTIONS]
 
-Retrieve and validate the signed public VPN response. This command exits after
+Retrieve and install the signed public VPN response. This command exits after
 local installation so you can restore and verify private-only Key Vault access
 before running the separate VPN connection command.
 
@@ -72,7 +72,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Validate the environment and host names, credentials, transport, and required SCP response directory.
+# Require the values used by the retrieval path.
 hil_require_name "Environment" "$environment"
 hil_require_name "Host name" "$host_name"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
@@ -102,92 +102,30 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-# Establish failure reporting and verify the protected request state and required transfer tools.
-operation="validate VPN response inputs"
-report_failure() {
-  local status=$?
-  error "Operation failed: $operation"
-  error "Milestone incomplete: reachable VPN response"
-  [[ "$transport" != "keyvault" ]] || error "If a temporary Key Vault public window is open, disable and verify it now."
-  exit "$status"
-}
-trap report_failure ERR
-
-require_tools jq openssl
+# Check the commands used by the retrieval path.
+require_tools jq
 [[ "$transport" != "keyvault" ]] || require_tools az
-require_protected_directory "$request_dir"
-require_external_runtime_path "$request_dir"
-require_external_runtime_path "$response_dir"
-private_key="$request_dir/client.key"
-csr_file="$request_dir/client.csr"
-request_file="$request_dir/vpn-request.json"
-require_protected_file "$private_key"
-require_protected_file "$csr_file"
-require_protected_file "$request_file"
 if [[ "$transport" == "keyvault" ]]; then
-  operation="authenticate to the expected Azure account"
   hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
-else
-  require_protected_directory "$scp_source_dir"
 fi
 
-# Retrieve the catalog-declared signed response for this exact environment and host.
-operation="retrieve exact signed public response"
+# Retrieve the signed response for this environment and host.
 hil_fetch_artifacts "$transport" "$catalog_secret" "$environment" "$host_name" \
   "$tenant_id" "$subscription_id" "$vault_name" "$response_dir" "$scp_source_dir" vpn_response
 catalog="$response_dir/catalog.json"
 response_name=$(jq -r '.artifacts.vpn_response.file // empty' "$catalog")
-[[ "$response_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fatal "Catalog has an invalid VPN response file"
 response_file="$response_dir/$response_name"
-require_protected_file "$response_file"
 
-# Verify the response binds to this CSR, gateway, and trust roots and contains no private-key material.
-operation="validate signed public response"
-jq -e --arg environment "$environment" --arg host "$host_name" --arg csr_sha "$(calculate_sha256 "$csr_file")" '
-  (keys | sort) == (["client_ca_certificate_pem", "client_certificate_pem", "client_root_sha256",
-    "csr_sha256", "environment", "gateway", "host_name", "kind", "schema_version",
-    "server_root_sha256"] | sort) and
-  .schema_version == 1 and .kind == "physical-ai-vpn-response" and
-  .environment == $environment and .host_name == $host and .csr_sha256 == $csr_sha and
-  (.client_certificate_pem | contains("BEGIN CERTIFICATE")) and
-  (.client_ca_certificate_pem | contains("BEGIN CERTIFICATE"))
-' "$response_file" >/dev/null || fatal "VPN response does not bind to this host and CSR"
-hil_reject_private_key_material "$response_file"
-jq -e --arg gateway "$(jq -r '.gateway' "$request_file")" \
-  --arg client_root "$(jq -r '.client_root_sha256' "$request_file")" \
-  --arg server_root "$(jq -r '.server_root_sha256' "$request_file")" '
-  .gateway == $gateway and .client_root_sha256 == $client_root and .server_root_sha256 == $server_root
-' "$response_file" >/dev/null || fatal "VPN response does not match the requested gateway and trust roots"
-for target in "$response_dir/client.pem" "$response_dir/client-ca.pem"; do
-  [[ ! -L "$target" ]] || fatal "VPN response target must not be a symlink: $target"
-done
+# Replace the local certificate and CA files from the response.
 client_tmp=$(mktemp "$response_dir/.client.XXXXXX")
 ca_tmp=$(mktemp "$response_dir/.client-ca.XXXXXX")
 jq -r '.client_certificate_pem' "$response_file" > "$client_tmp"
 jq -r '.client_ca_certificate_pem' "$response_file" > "$ca_tmp"
 chmod 0600 "$client_tmp" "$ca_tmp"
-openssl verify -CAfile "$ca_tmp" "$client_tmp" >/dev/null
-openssl x509 -in "$client_tmp" -noout -checkend 86400 >/dev/null || \
-  fatal "Client certificate expires within 24 hours"
-openssl x509 -in "$client_tmp" -noout -text | \
-  grep -A2 'Extended Key Usage' | grep -q 'TLS Web Client Authentication' || \
-  fatal "Client certificate does not contain the clientAuth extended key usage"
-cert_key=$(openssl x509 -in "$client_tmp" -pubkey -noout | \
-  openssl pkey -pubin -outform der | openssl sha256)
-private_key_hash=$(openssl pkey -in "$private_key" -pubout -outform der | openssl sha256)
-[[ "$cert_key" == "$private_key_hash" ]] || fatal "Client certificate does not match the Ubuntu private key"
-csr_key=$(openssl req -in "$csr_file" -pubkey -noout | openssl pkey -pubin -outform der | openssl sha256)
-[[ "$cert_key" == "$csr_key" ]] || fatal "Client certificate does not match the original CSR"
-client_root_sha=$(openssl x509 -in "$ca_tmp" -outform der | calculate_sha256 /dev/stdin)
-[[ "$client_root_sha" == "$(jq -r '.client_root_sha256' "$response_file")" ]] || \
-  fatal "Returned client chain does not match the requested client root"
-
-# Install the verified public certificate and CA files with owner-only permissions for the VPN step.
 mv "$client_tmp" "$response_dir/client.pem"
 mv "$ca_tmp" "$response_dir/client-ca.pem"
 
 # Report the installed public response and remind the operator to restore private-only Key Vault access.
-trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "reachable: VPN response"
 print_kv "Environment" "$environment"

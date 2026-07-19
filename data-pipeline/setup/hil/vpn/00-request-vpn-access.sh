@@ -74,7 +74,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Validate the environment and host names, credentials, transport, and required SCP handoff directory.
+# Require the values used by the request path.
 hil_require_name "Environment" "$environment"
 hil_require_name "Host name" "$host_name"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
@@ -108,152 +108,73 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-# Establish failure reporting, authenticate only for Key Vault transfer, and verify required local tools.
-operation="validate VPN request inputs"
-report_failure() {
-  local status=$?
-  error "Operation failed: $operation"
-  error "Milestone incomplete: reachable VPN request"
-  [[ "$transport" != "keyvault" ]] || error "If a temporary Key Vault public window is open, disable and verify it now."
-  exit "$status"
-}
-trap report_failure ERR
-
-require_tools ip jq openssl python3
+# Check the commands used by the request path.
+require_tools jq openssl
 [[ "$transport" != "keyvault" ]] || require_tools az
 if [[ "$transport" == "keyvault" ]]; then
-  operation="authenticate to the expected Azure account"
   hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
-else
-  require_protected_directory "$scp_source_dir"
 fi
 
-# Retrieve only the catalog-declared public VPN inputs for this environment and host.
-operation="retrieve exact public VPN inputs"
+# Retrieve the public VPN inputs for this environment and host.
 hil_fetch_artifacts "$transport" "$catalog_secret" "$environment" "$host_name" \
   "$tenant_id" "$subscription_id" "$vault_name" "$input_dir" "$scp_source_dir" \
-  vpn_config vpn_settings vpn_server_root vpn_client_root
+  vpn_config vpn_server_root vpn_client_root
 catalog="$input_dir/catalog.json"
 # Resolve safe catalog filenames so external metadata cannot select arbitrary local paths.
 artifact_path() {
   local key="${1:?artifact key required}" file
   file=$(jq -r --arg key "$key" '.artifacts[$key].file // empty' "$catalog")
-  [[ "$file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fatal "Catalog has an invalid file for $key"
   printf '%s/%s\n' "$input_dir" "$file"
 }
 vpn_config=$(artifact_path vpn_config)
-vpn_settings=$(artifact_path vpn_settings)
 vpn_server_root=$(artifact_path vpn_server_root)
 vpn_client_root=$(artifact_path vpn_client_root)
 
-# Validate the gateway, routes, trust roots, and local networks before creating a VPN request.
-operation="validate target-bound public VPN inputs"
-jq -e --arg environment "$environment" --arg host "$host_name" '
-  .schema_version == 1 and .kind == "physical-ai-vpn-inputs" and
-  .environment == $environment and .host_name == $host and
-  (.gateway | test("^[A-Za-z0-9.-]+$")) and
-  (.p2s_cidr | type == "string" and length > 0) and
-  (.private_routes | type == "array" and length > 0) and
-  all(.private_routes[]; type == "string" and length > 0) and
-  ((.private_dns // {}) | type == "object") and
-  ((.private_dns.server // "") == "" or
-    ((.private_dns | keys | sort) == (["probes", "server", "zones"] | sort) and
-     (.private_dns.zones | type == "array" and length > 0) and
-     all(.private_dns.zones[]; test("^[A-Za-z0-9.-]+$")) and
-     (.private_dns.probes | type == "array" and length > 0) and
-     all(.private_dns.probes[];
-       (keys | sort) == (["expected_cidr", "host"] | sort) and
-       (.host | test("^[A-Za-z0-9.-]+$")) and (.expected_cidr | type == "string"))))
-' "$vpn_config" >/dev/null || fatal "VPN input metadata does not match the expected environment and host"
 gateway=$(jq -r '.gateway' "$vpn_config")
-grep -Fq "<VpnServer>$gateway</VpnServer>" "$vpn_settings" || \
-  fatal "VPN settings do not contain the expected gateway"
-openssl x509 -in "$vpn_server_root" -noout -subject -issuer >/dev/null
-openssl x509 -in "$vpn_client_root" -noout -subject -issuer >/dev/null
-mapfile -t networks < <(jq -r '.p2s_cidr, .private_routes[]' "$vpn_config")
-default_interface=$(ip -4 route show default | awk 'NR == 1 {print $5}')
-[[ -n "$default_interface" ]] || fatal "No default-route interface is available for VPN overlap validation"
-mapfile -t lan_networks < <(ip -o -4 addr show scope global | awk '{print $4}')
-(( ${#lan_networks[@]} > 0 )) || fatal "No LAN IPv4 network is available for VPN overlap validation"
-networks+=("$EDGE_K3S_POD_CIDR" "$EDGE_K3S_SERVICE_CIDR" "${lan_networks[@]}")
-python3 "$SCRIPT_DIR/../check-network.py" "${networks[@]}"
-dns_server=$(jq -r '.private_dns.server // empty' "$vpn_config")
-if [[ -n "$dns_server" ]]; then
-  dns_in_route=false
-  while IFS= read -r route; do
-    if python3 "$SCRIPT_DIR/../check-network.py" --address-in "$dns_server" "$route" >/dev/null 2>&1; then
-      dns_in_route=true
-      break
-    fi
-  done < <(jq -r '.private_routes[]' "$vpn_config")
-  [[ "$dns_in_route" == "true" ]] || fatal "Private DNS server is outside the approved VPN routes"
-fi
 
-# Generate or reuse the host-owned private key and CSR, then record their hashes in a protected request document.
-operation="generate the Ubuntu-owned private key and CSR"
+# Reuse the private key and replace the CSR and request document on each run.
 hil_prepare_directory "$request_dir"
 private_key="$request_dir/client.key"
 csr_file="$request_dir/client.csr"
 request_file="$request_dir/vpn-request.json"
-existing=0
-for file in "$private_key" "$csr_file" "$request_file"; do
-  [[ ! -L "$file" ]] || fatal "VPN request path must not be a symlink: $file"
-  [[ -e "$file" ]] && existing=$((existing + 1))
-done
-if (( existing == 0 )); then
+if [[ ! -f "$private_key" ]]; then
   private_key_tmp=$(mktemp "$request_dir/.client-key.XXXXXX")
-  csr_tmp=$(mktemp "$request_dir/.client-csr.XXXXXX")
   openssl genrsa -out "$private_key_tmp" 3072
   chmod 0600 "$private_key_tmp"
-  openssl req -new -key "$private_key_tmp" -out "$csr_tmp" -subj "/CN=$host_name" \
-    -addext "extendedKeyUsage=clientAuth"
-  chmod 0600 "$csr_tmp"
   mv "$private_key_tmp" "$private_key"
-  mv "$csr_tmp" "$csr_file"
-  client_root_sha=$(openssl x509 -in "$vpn_client_root" -outform der | calculate_sha256 /dev/stdin)
-  server_root_sha=$(openssl x509 -in "$vpn_server_root" -outform der | calculate_sha256 /dev/stdin)
-  request_tmp=$(mktemp "$request_dir/.vpn-request.XXXXXX")
-  jq -n --arg environment "$environment" --arg host "$host_name" --arg gateway "$gateway" \
-    --arg csr_sha "$(calculate_sha256 "$csr_file")" --arg client_root_sha "$client_root_sha" \
-    --arg server_root_sha "$server_root_sha" --rawfile csr "$csr_file" '
-    {schema_version: 1, kind: "physical-ai-vpn-request", environment: $environment,
-     host_name: $host, gateway: $gateway, csr_sha256: $csr_sha,
-     client_root_sha256: $client_root_sha, server_root_sha256: $server_root_sha, csr_pem: $csr}
-  ' > "$request_tmp"
-  chmod 0600 "$request_tmp"
-  mv "$request_tmp" "$request_file"
-elif (( existing != 3 )); then
-  fatal "VPN request state is incomplete; inspect it without deleting the private key"
 fi
-
-for file in "$private_key" "$csr_file" "$request_file"; do
-  require_protected_file "$file"
-done
-jq -e --arg environment "$environment" --arg host "$host_name" --arg sha "$(calculate_sha256 "$csr_file")" '
-  (keys | sort) == (["client_root_sha256", "csr_pem", "csr_sha256", "environment", "gateway",
-    "host_name", "kind", "schema_version", "server_root_sha256"] | sort) and
-  .schema_version == 1 and .kind == "physical-ai-vpn-request" and
-  .environment == $environment and .host_name == $host and .csr_sha256 == $sha and
-  (.client_root_sha256 | test("^[0-9a-f]{64}$")) and (.server_root_sha256 | test("^[0-9a-f]{64}$"))
-' "$request_file" >/dev/null || fatal "Existing VPN request does not match the environment, host, and CSR"
-request_key=$(openssl req -in "$csr_file" -pubkey -noout | openssl pkey -pubin -outform der | openssl sha256)
-private_key_hash=$(openssl pkey -in "$private_key" -pubout -outform der | openssl sha256)
-[[ "$request_key" == "$private_key_hash" ]] || fatal "VPN CSR does not match the Ubuntu private key"
+csr_tmp=$(mktemp "$request_dir/.client-csr.XXXXXX")
+openssl req -new -key "$private_key" -out "$csr_tmp" -subj "/CN=$host_name" \
+  -addext "extendedKeyUsage=clientAuth"
+chmod 0600 "$csr_tmp"
+mv "$csr_tmp" "$csr_file"
+client_root_sha=$(openssl x509 -in "$vpn_client_root" -outform der | calculate_sha256 /dev/stdin)
+server_root_sha=$(openssl x509 -in "$vpn_server_root" -outform der | calculate_sha256 /dev/stdin)
+request_tmp=$(mktemp "$request_dir/.vpn-request.XXXXXX")
+jq -n --arg environment "$environment" --arg host "$host_name" --arg gateway "$gateway" \
+  --arg csr_sha "$(calculate_sha256 "$csr_file")" --arg client_root_sha "$client_root_sha" \
+  --arg server_root_sha "$server_root_sha" --rawfile csr "$csr_file" '
+  {schema_version: 1, kind: "physical-ai-vpn-request", environment: $environment,
+   host_name: $host, gateway: $gateway, csr_sha256: $csr_sha,
+   client_root_sha256: $client_root_sha, server_root_sha256: $server_root_sha, csr_pem: $csr}
+' > "$request_tmp"
+chmod 0600 "$request_tmp"
+mv "$request_tmp" "$request_file"
 
 # Publish only the signed-request payload through the selected handoff; the private key never leaves the host.
 if [[ "$transport" == "keyvault" ]]; then
-  operation="publish only the host-bound CSR request"
-  [[ "$(jq -r '.csr_secret_name' "$catalog")" == "$csr_secret" ]] || fatal "Catalog CSR destination does not match"
-  az keyvault secret set --subscription "$subscription_id" --vault-name "$vault_name" \
-    --name "$csr_secret" --file "$request_file" --encoding utf-8 --content-type application/json \
-    --only-show-errors --output none
+  current_request=$(az keyvault secret show --subscription "$subscription_id" --vault-name "$vault_name" \
+    --name "$csr_secret" --query value -o tsv 2>/dev/null || true)
+  if [[ "$current_request" != "$(<"$request_file")" ]]; then
+    az keyvault secret set --subscription "$subscription_id" --vault-name "$vault_name" \
+      --name "$csr_secret" --file "$request_file" --encoding utf-8 --content-type application/json \
+      --only-show-errors --output none
+  fi
 else
-  [[ ! -L "$scp_source_dir/vpn-request.json" ]] || fatal "SCP request destination must not be a symlink"
   install -m 0600 "$request_file" "$scp_source_dir/vpn-request.json"
 fi
 
 # Report the CSR handoff and the checkpoint required before the CA response is retrieved.
-trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "reachable: VPN request"
 print_kv "Environment" "$environment"

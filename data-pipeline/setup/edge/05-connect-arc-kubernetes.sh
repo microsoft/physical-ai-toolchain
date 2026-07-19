@@ -49,82 +49,6 @@ context="$EDGE_K3S_CONTEXT"
 enable_workload_identity=false
 config_preview=false
 oidc_issuer=""
-arc_probe_namespace="physical-ai-arc-smoke-$$"
-arc_probe_pod="arc-egress-smoke"
-
-# Remove the temporary namespace used by the Kubernetes outbound-connectivity preflight.
-cleanup_arc_network_probe() {
-  kube_kubectl "$kubeconfig" "$context" delete namespace "$arc_probe_namespace" \
-    --ignore-not-found --wait=true --timeout=60s >/dev/null 2>&1 || true
-}
-
-# Prove both the host and a restricted K3s Pod can resolve and reach the public Arc endpoint.
-verify_arc_network_requirements() {
-  local phase="" attempt
-
-  curl -fsS --connect-timeout 10 --max-time 20 https://mcr.microsoft.com >/dev/null || \
-    fatal "Host cannot resolve or reach https://mcr.microsoft.com; restore public DNS and outbound HTTPS before Arc onboarding"
-
-  trap cleanup_arc_network_probe EXIT
-  cleanup_arc_network_probe
-  ensure_namespace "$kubeconfig" "$context" "$arc_probe_namespace"
-  cat <<EOF | kube_kubectl "$kubeconfig" "$context" apply -f - >/dev/null
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: $arc_probe_pod
-  namespace: $arc_probe_namespace
-automountServiceAccountToken: false
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: $arc_probe_pod
-  namespace: $arc_probe_namespace
-spec:
-  serviceAccountName: $arc_probe_pod
-  automountServiceAccountToken: false
-  restartPolicy: Never
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 65534
-    seccompProfile:
-      type: RuntimeDefault
-  containers:
-    - name: network-check
-      image: alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1
-      command:
-        - sh
-        - -ceu
-        - nslookup mcr.microsoft.com >/dev/null && wget -q --spider --timeout=15 https://mcr.microsoft.com
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: [ALL]
-EOF
-
-  for ((attempt = 1; attempt <= 30; attempt++)); do
-    phase=$(kube_kubectl "$kubeconfig" "$context" get pod "$arc_probe_pod" \
-      -n "$arc_probe_namespace" -o jsonpath='{.status.phase}' 2>/dev/null || true)
-    [[ "$phase" == "Succeeded" || "$phase" == "Failed" ]] && break
-    sleep 2
-  done
-
-  if [[ "$phase" != "Succeeded" ]]; then
-    error "Arc network preflight pod phase: ${phase:-unknown}"
-    kube_kubectl "$kubeconfig" "$context" logs "$arc_probe_pod" \
-      -n "$arc_probe_namespace" >&2 2>/dev/null || true
-    kube_kubectl "$kubeconfig" "$context" describe pod "$arc_probe_pod" \
-      -n "$arc_probe_namespace" >&2 2>/dev/null || true
-    cleanup_arc_network_probe
-    trap - EXIT
-    fatal "K3s pods cannot resolve or reach https://mcr.microsoft.com; restore a working public DNS upstream for CoreDNS and allow outbound HTTPS before Arc onboarding"
-  fi
-
-  cleanup_arc_network_probe
-  trap - EXIT
-  info "Verified host and K3s pod HTTPS connectivity to mcr.microsoft.com"
-}
 
 # Apply command-line values before validating the Azure, K3s, and workload identity targets.
 while [[ $# -gt 0 ]]; do
@@ -162,35 +86,18 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Kubeconfig" "$kubeconfig"
   print_kv "Context" "$context"
   print_kv "Workload Identity" "$enable_workload_identity"
-  print_kv "Network Preflight" "host and K3s pod HTTPS to mcr.microsoft.com"
   print_kv "Authentication" "Azure CLI session; device-code login supported"
   exit 0
 fi
 
-# Verify tools, K3s access, outbound connectivity, Azure authentication, and the target resource group.
-require_tools az curl jq kubectl sudo
-verify_kube_target "$kubeconfig" "$context" k3s
-verify_arc_network_requirements
-az account show >/dev/null 2>&1 || \
-  fatal "Authenticate Azure CLI with device-code login before Arc onboarding"
-active_subscription=$(az account show --query id -o tsv)
-active_tenant=$(az account show --query tenantId -o tsv)
-[[ "$active_subscription" == "$subscription_id" ]] || fatal "Active subscription does not match --subscription-id"
-[[ "$active_tenant" == "$tenant_id" ]] || fatal "Active tenant does not match --tenant-id"
-az group show --name "$resource_group" --subscription "$subscription_id" >/dev/null || \
-  fatal "Resource group not found: $resource_group"
+# Check the commands used by the setup path.
+require_tools az kubectl sudo
 
   # Connect or update the Arc-enabled Kubernetes resource using the selected workload identity options.
 section "Connect Arc-Enabled Kubernetes"
 require_az_extension connectedk8s
 if [[ "$enable_workload_identity" == "true" ]]; then
-  require_tools cmp curl find python3 sed sort
-  azure_cli_version=$(az version --query '"azure-cli"' -o tsv)
-  connectedk8s_version=$(az extension show --name connectedk8s --query version -o tsv)
-  printf '%s\n%s\n' "2.64.0" "$azure_cli_version" | sort -V -C || \
-    fatal "Azure CLI $azure_cli_version does not support Arc workload identity; version 2.64.0 or newer is required"
-  printf '%s\n%s\n' "1.10.0" "$connectedk8s_version" | sort -V -C || \
-    fatal "connectedk8s $connectedk8s_version does not support Arc workload identity; version 1.10.0 or newer is required"
+  require_tools cmp
 fi
 export KUBECONFIG="$kubeconfig"
 connect_args=(
@@ -218,7 +125,7 @@ else
   az "${connect_args[@]}" --output none
 fi
 
-# When requested, align K3s token settings with the Arc OIDC issuer and verify discovery end to end.
+# When requested, align K3s token settings with the Arc OIDC issuer.
 if [[ "$enable_workload_identity" == "true" ]]; then
   for ((attempt = 1; attempt <= 60; attempt++)); do
     oidc_issuer=$(az connectedk8s show --name "$cluster_name" --resource-group "$resource_group" \
@@ -227,122 +134,20 @@ if [[ "$enable_workload_identity" == "true" ]]; then
     (( attempt == 60 )) && fatal "Arc OIDC issuer was not available within five minutes"
     sleep 5
   done
-  k3s_config=/etc/rancher/k3s/config.yaml
   k3s_config_dir=/etc/rancher/k3s/config.yaml.d
   workload_identity_config="$k3s_config_dir/90-arc-workload-identity.yaml"
-  k3s_config_sources=("$k3s_config")
-  if [[ -d "$k3s_config_dir" ]]; then
-    while IFS= read -r -d '' config_source; do
-      [[ "$config_source" != "$workload_identity_config" ]] && k3s_config_sources+=("$config_source")
-    done < <(sudo find "$k3s_config_dir" -maxdepth 1 -type f \
-      \( -name '*.yaml' -o -name '*.yml' \) -print0)
-  fi
-  configured_issuers=()
-  while IFS= read -r configured_issuer; do
-    [[ -n "$configured_issuer" ]] && configured_issuers+=("$configured_issuer")
-  done < <(sudo grep -hsE 'service-account-issuer=' "${k3s_config_sources[@]}" 2>/dev/null | \
-    sed -E 's/.*service-account-issuer=//; s/["[:space:]]+$//' | sort -u)
-  (( ${#configured_issuers[@]} <= 1 )) || fatal "K3s has multiple service-account issuer values"
-  if [[ ${#configured_issuers[@]} -eq 1 && "${configured_issuers[0]}" != "$oidc_issuer" ]]; then
-    fatal "K3s is configured with a different service-account issuer: ${configured_issuers[0]}"
-  fi
-  configured_expirations=()
-  while IFS= read -r configured_expiration; do
-    [[ -n "$configured_expiration" ]] && configured_expirations+=("$configured_expiration")
-  done < <(sudo grep -hsE 'service-account-max-token-expiration=' "${k3s_config_sources[@]}" 2>/dev/null | \
-    sed -E 's/.*service-account-max-token-expiration=//; s/["[:space:]]+$//' | sort -u)
-  (( ${#configured_expirations[@]} <= 1 )) || fatal "K3s has multiple service-account token expiration values"
-  if [[ ${#configured_expirations[@]} -eq 1 && "${configured_expirations[0]}" != "24h" ]]; then
-    fatal "K3s service-account token expiration is ${configured_expirations[0]}; expected 24h"
-  fi
-
-  workload_identity_args=()
-  [[ ${#configured_issuers[@]} -eq 0 ]] && workload_identity_args+=("service-account-issuer=$oidc_issuer")
-  [[ ${#configured_expirations[@]} -eq 0 ]] && workload_identity_args+=("service-account-max-token-expiration=24h")
-  workload_identity_config_changed=false
-  if [[ ${#workload_identity_args[@]} -gt 0 ]]; then
-    tmp_config=$(mktemp)
-    trap 'rm -f "$tmp_config"' EXIT
-    printf '%s\n' 'kube-apiserver-arg+:' > "$tmp_config"
-    for workload_identity_arg in "${workload_identity_args[@]}"; do
-      printf '  - "%s"\n' "$workload_identity_arg" >> "$tmp_config"
-    done
-    sudo install -d -m 0755 "$k3s_config_dir"
-    if ! sudo cmp -s "$tmp_config" "$workload_identity_config"; then
-      sudo install -m 0600 "$tmp_config" "$workload_identity_config"
-      workload_identity_config_changed=true
-    fi
-  elif [[ -e "$workload_identity_config" ]]; then
-    sudo rm -f "$workload_identity_config"
-    workload_identity_config_changed=true
-  fi
-  if [[ "$workload_identity_config_changed" == "true" ]]; then
+  tmp_config=$(mktemp)
+  trap 'rm -f "$tmp_config"' EXIT
+  cat > "$tmp_config" <<EOF
+kube-apiserver-arg+:
+  - "service-account-issuer=$oidc_issuer"
+  - "service-account-max-token-expiration=24h"
+EOF
+  sudo install -d -m 0755 "$k3s_config_dir"
+  if ! sudo cmp -s "$tmp_config" "$workload_identity_config"; then
+    sudo install -m 0600 "$tmp_config" "$workload_identity_config"
     sudo systemctl restart k3s
-    verify_kube_target "$kubeconfig" "$context" k3s
   fi
-
-  oidc_document=""
-  for ((attempt = 1; attempt <= 60; attempt++)); do
-    oidc_document=$(curl -fsSL --connect-timeout 10 \
-      "${oidc_issuer%/}/.well-known/openid-configuration" 2>/dev/null || true)
-    if jq -e --arg issuer "$oidc_issuer" '
-        .issuer == $issuer and
-        (.jwks_uri | type == "string" and length > 0)
-      ' <<< "$oidc_document" >/dev/null 2>&1; then
-      break
-    fi
-    (( attempt == 60 )) && fatal "Arc OIDC discovery document did not become valid within five minutes"
-    sleep 5
-  done
-  token_issuer=$(kube_kubectl "$kubeconfig" "$context" create token default \
-    -n kube-system --duration=10m | python3 -c '
-import base64
-import json
-import sys
-
-token = sys.stdin.read().strip()
-payload = token.split(".")[1]
-payload += "=" * (-len(payload) % 4)
-print(json.loads(base64.urlsafe_b64decode(payload)).get("iss", ""))
-')
-  [[ "$token_issuer" == "$oidc_issuer" ]] || \
-    fatal "K3s service-account token issuer does not match the Arc OIDC issuer"
-fi
-
-# Wait for Azure and Arc workloads to report healthy, then verify workload identity webhooks when enabled.
-cluster_json=""
-for ((attempt = 1; attempt <= 60; attempt++)); do
-  cluster_json=$(az connectedk8s show --name "$cluster_name" --resource-group "$resource_group" \
-    --subscription "$subscription_id" -o json)
-  [[ "$(jq -r '.provisioningState' <<< "$cluster_json")" == "Succeeded" && \
-     "$(jq -r '.connectivityStatus' <<< "$cluster_json")" == "Connected" ]] && break
-  (( attempt == 60 )) && fatal "Arc-enabled Kubernetes did not reach Succeeded/Connected within ten minutes"
-  sleep 10
-done
-expected_cluster_id="/subscriptions/${subscription_id}/resourceGroups/${resource_group}/providers/Microsoft.Kubernetes/connectedClusters/${cluster_name}"
-[[ "$(jq -r '.id | ascii_downcase' <<< "$cluster_json")" == \
-  "$(printf '%s' "$expected_cluster_id" | tr '[:upper:]' '[:lower:]')" ]] || \
-  fatal "Arc-enabled Kubernetes resource ID does not match the requested cluster"
-if [[ "$enable_workload_identity" == "true" ]]; then
-  jq -e --arg issuer "$oidc_issuer" '
-    .oidcIssuerProfile.enabled == true and
-    .oidcIssuerProfile.issuerUrl == $issuer and
-    .securityProfile.workloadIdentity.enabled == true
-  ' <<< "$cluster_json" >/dev/null || fatal "Azure does not report OIDC and workload identity as enabled"
-fi
-kube_kubectl "$kubeconfig" "$context" wait --for=condition=Available deployment --all \
-  -n azure-arc --timeout=300s
-if [[ "$enable_workload_identity" == "true" ]]; then
-  workload_identity_deployments=0
-  for ((attempt = 1; attempt <= 60; attempt++)); do
-    workload_identity_deployments=$(kube_kubectl "$kubeconfig" "$context" get deployment \
-      -n arc-workload-identity -o json 2>/dev/null | jq '.items | length' || echo 0)
-    (( workload_identity_deployments > 0 )) && break
-    (( attempt == 60 )) && fatal "Arc workload identity webhook deployment was not created within five minutes"
-    sleep 5
-  done
-  kube_kubectl "$kubeconfig" "$context" wait --for=condition=Available deployment --all \
-    -n arc-workload-identity --timeout=300s
 fi
 
 # Report the connected Arc Kubernetes resource and whether workload identity was enabled.

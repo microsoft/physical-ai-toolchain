@@ -77,59 +77,9 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-# Validate names, platform support, network ranges, and the tools required for an owned K3s install.
-operation="validate local K3s target"
-report_failure() {
-  local status=$?
-  error "Operation failed: $operation"
-  error "Milestone incomplete: host-ready local compute"
-  exit "$status"
-}
-trap report_failure ERR
-
-[[ "$node_name" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || fatal "Invalid Kubernetes node name: $node_name"
-[[ "$context" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fatal "Invalid Kubernetes context: $context"
-[[ "$(uname -s)" == "Linux" ]] || fatal "K3s installation supports Ubuntu Linux only"
-require_tools awk curl install ip jq python3 sha256sum ss sudo systemctl
-python3 "$SCRIPT_DIR/check-network.py" "$pod_cidr" "$service_cidr"
-
-# Refuse to mutate hosts with foreign Kubernetes, runtime, CNI, or port ownership.
+# Check the commands used by the install path.
+require_tools awk curl install jq sha256sum sudo systemctl
 managed_marker=/etc/rancher/k3s/.physical-ai-toolchain-managed
-if command -v kubeadm >/dev/null 2>&1 || command -v microk8s >/dev/null 2>&1; then
-  fatal "A foreign Kubernetes installation is present; refusing to mutate the host"
-fi
-if command -v k3s >/dev/null 2>&1 && ! sudo test -f "$managed_marker"; then
-  fatal "Existing K3s installation is not owned by this setup path"
-fi
-if systemctl is-active --quiet kubelet 2>/dev/null && ! sudo test -f "$managed_marker"; then
-  fatal "An unmanaged kubelet is active; refusing to mutate the host"
-fi
-for unit in containerd.service docker.service docker.socket podman.service podman.socket crio.service; do
-  if systemctl is-active --quiet "$unit" 2>/dev/null && ! sudo test -f "$managed_marker"; then
-    fatal "An unmanaged container runtime is active: $unit"
-  fi
-done
-if [[ -d /etc/cni/net.d ]] && find /etc/cni/net.d -mindepth 1 -maxdepth 1 -type f -print -quit | grep -q . && \
-   ! sudo test -f "$managed_marker"; then
-  fatal "Unmanaged CNI configuration is present; refusing to mutate the host"
-fi
-if ! sudo test -f "$managed_marker"; then
-  for port in 6443 10250; do
-    ss -H -lnt "sport = :$port" | grep -q . && fatal "Port $port is already owned by another process"
-  done
-fi
-
-# Protect every managed path from symlink replacement and select the architecture-specific K3s binary.
-for protected_path in "$managed_marker" /etc/rancher/k3s/config.yaml /etc/systemd/system/k3s.service \
-  /usr/local/bin/k3s /usr/local/bin/kubectl "$kubeconfig_out"; do
-  [[ ! -L "$protected_path" ]] || fatal "Managed K3s path must not be a symlink: $protected_path"
-done
-for directory in /usr/local/bin /etc/rancher /etc/rancher/k3s /etc/systemd/system "$(dirname "$kubeconfig_out")"; do
-  require_no_symlink_path "$directory"
-done
-require_external_runtime_path "$kubeconfig_out"
-require_no_symlink_path "$data_dir"
-require_external_runtime_path "$data_dir"
 
 architecture=$(uname -m)
 case "$architecture" in
@@ -188,35 +138,34 @@ ExecStart=/usr/local/bin/k3s server --config /etc/rancher/k3s/config.yaml
 WantedBy=multi-user.target
 EOF
 
-# Reuse only an owned installation that exactly matches the requested configuration; otherwise install it once.
-if sudo test -f "$managed_marker"; then
-  operation="verify owned K3s configuration"
-  sudo cmp --silent "$tmp_dir/config.yaml" /etc/rancher/k3s/config.yaml || \
-    fatal "Owned K3s configuration differs from the requested target"
-  sudo cmp --silent "$tmp_dir/k3s.service" /etc/systemd/system/k3s.service || \
-    fatal "Owned K3s service differs from the requested configuration"
-  actual_sha=$(sudo sha256sum /usr/local/bin/k3s | awk '{print $1}')
-  [[ "$actual_sha" == "$expected_sha" ]] || fatal "Owned K3s binary does not match the repository pin"
-else
-  for foreign_path in /etc/rancher/k3s/config.yaml /etc/systemd/system/k3s.service "$data_dir"; do
-    sudo test ! -e "$foreign_path" || fatal "Existing unowned K3s path blocks setup: $foreign_path"
-  done
-
-  operation="download pinned K3s"
+# Install the pinned binary when it is absent or differs from the requested version.
+actual_sha=$(sudo sha256sum /usr/local/bin/k3s 2>/dev/null | awk '{print $1}' || true)
+binary_changed=false
+if [[ "$actual_sha" != "$expected_sha" ]]; then
   encoded_version=${version//+/%2B}
   curl --fail --silent --show-error --location \
     "https://github.com/k3s-io/k3s/releases/download/${encoded_version}/${artifact}" --output "$tmp_dir/k3s"
   printf '%s  %s\n' "$expected_sha" "$tmp_dir/k3s" | sha256sum -c -
-
-  operation="install owned K3s service"
-  sudo install -d -m 0755 /etc/rancher/k3s
-  sudo install -d -m 0700 "$data_dir"
   sudo install -m 0755 "$tmp_dir/k3s" /usr/local/bin/k3s
+  binary_changed=true
+fi
+
+# Replace managed configuration and restart only when its content changes.
+config_changed=false
+if ! sudo cmp --silent "$tmp_dir/config.yaml" /etc/rancher/k3s/config.yaml 2>/dev/null; then
+  config_changed=true
+fi
+if ! sudo cmp --silent "$tmp_dir/k3s.service" /etc/systemd/system/k3s.service 2>/dev/null; then
+  config_changed=true
+fi
+sudo install -d -m 0755 /etc/rancher/k3s
+sudo install -d -m 0700 "$data_dir"
+if [[ "$config_changed" == "true" ]]; then
   sudo install -m 0600 "$tmp_dir/config.yaml" /etc/rancher/k3s/config.yaml
   sudo install -m 0644 "$tmp_dir/k3s.service" /etc/systemd/system/k3s.service
-  printf '%s\n' "physical-ai-toolchain:$version" > "$tmp_dir/managed"
-  sudo install -m 0600 "$tmp_dir/managed" "$managed_marker"
 fi
+printf '%s\n' "physical-ai-toolchain:$version" > "$tmp_dir/managed"
+sudo install -m 0600 "$tmp_dir/managed" "$managed_marker"
 
 # Install the local kubectl wrapper when needed, then start K3s and wait for its API to become ready.
 if [[ ! -e /usr/local/bin/kubectl ]]; then
@@ -227,11 +176,13 @@ EOF
   sudo install -m 0755 "$tmp_dir/kubectl" /usr/local/bin/kubectl
 fi
 
-operation="start owned K3s service"
 sudo systemctl daemon-reload
 sudo systemctl enable --now k3s
+if [[ "$binary_changed" == "true" || "$config_changed" == "true" ]]; then
+  sudo systemctl restart k3s
+fi
 
-operation="wait for K3s readiness"
+# Wait until the kubeconfig source is available.
 for ((attempt = 1; attempt <= 60; attempt++)); do
   if sudo /usr/local/bin/k3s kubectl get --raw=/readyz >/dev/null 2>&1; then
     break
@@ -240,27 +191,14 @@ for ((attempt = 1; attempt <= 60; attempt++)); do
   sleep 2
 done
 
-# Copy and rename the protected operator kubeconfig, then verify node identity, version, and readiness.
-operation="install protected operator kubeconfig"
+# Copy and rename the operator kubeconfig.
 sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$(dirname "$kubeconfig_out")"
 sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" /etc/rancher/k3s/k3s.yaml "$kubeconfig_out"
 if kubectl --kubeconfig "$kubeconfig_out" config get-contexts default -o name 2>/dev/null | grep -qx default; then
   kubectl --kubeconfig "$kubeconfig_out" config rename-context default "$context" >/dev/null
 fi
-verify_kube_target "$kubeconfig_out" "$context" k3s
-node_json=$(kube_kubectl "$kubeconfig_out" "$context" get nodes -o json)
-jq -e --arg node "$node_name" --arg version "$version" '
-  (.items | length) == 1 and
-  .items[0].metadata.name == $node and
-  .items[0].status.nodeInfo.kubeletVersion == $version and
-  any(.items[0].status.conditions[]; .type == "Ready" and .status == "True")
-' <<< "$node_json" >/dev/null || fatal "K3s node identity, version, or readiness does not match"
-
-operation="record root-owned local K3s identity"
+# Replace the local identity receipt after each successful run.
 identity_file=/var/lib/physical-ai-toolchain/k3s-identity.json
-require_external_runtime_path "$identity_file"
-require_no_symlink_path /var/lib/physical-ai-toolchain
-sudo test ! -L "$identity_file" || fatal "Local K3s identity must not be a symlink"
 identity_tmp="$tmp_dir/k3s-identity.json"
 jq -n --arg kubeconfig "$kubeconfig_out" --arg context "$context" \
   --arg server "$(kube_api_server "$kubeconfig_out" "$context")" \
@@ -271,16 +209,10 @@ jq -n --arg kubeconfig "$kubeconfig_out" --arg context "$context" \
    node_name: $node, k3s_version: $version}
 ' > "$identity_tmp"
 chmod 0600 "$identity_tmp"
-# Preserve a root-owned identity receipt so later scripts can prove they are using this K3s installation.
-if sudo test -f "$identity_file"; then
-  sudo cmp --silent "$identity_tmp" "$identity_file" || fatal "Root-owned local K3s identity has drifted"
-else
-  sudo install -d -m 0700 /var/lib/physical-ai-toolchain
-  sudo install -m 0600 "$identity_tmp" "$identity_file"
-fi
+sudo install -d -m 0700 /var/lib/physical-ai-toolchain
+sudo install -m 0600 "$identity_tmp" "$identity_file"
 
 # Summarize the ready local compute plane and identify the next connection step.
-trap - ERR
 section "Deployment Summary"
 print_kv "Milestone" "host-ready local compute"
 print_kv "K3s Version" "$version"

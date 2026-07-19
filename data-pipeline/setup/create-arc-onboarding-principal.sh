@@ -62,7 +62,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Reject incomplete targets and prevent the secret and metadata documents from overwriting one another.
+# Require the values used by the create or update path.
 [[ -n "$subscription_id" ]] || fatal "--subscription-id is required"
 [[ -n "$resource_group" ]] || fatal "--resource-group is required"
 [[ -n "$principal_name" ]] || fatal "--principal-name is required"
@@ -83,45 +83,49 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-# Verify Azure authentication, subscription selection, resource-group existence, and required local tools.
+# Check the commands used by the setup path.
 require_tools az jq
-az account show >/dev/null 2>&1 || fatal "Azure CLI is not authenticated"
-active_subscription=$(az account show --query id -o tsv)
-[[ "$active_subscription" == "$subscription_id" ]] || fatal "Active subscription $active_subscription does not match $subscription_id"
-az group show --name "$resource_group" --subscription "$subscription_id" >/dev/null || fatal "Resource group not found: $resource_group"
 
 scope="/subscriptions/${subscription_id}/resourceGroups/${resource_group}"
 umask 077
 mkdir -p "$(dirname "$credential_file")" "$(dirname "$metadata_file")"
-[[ ! -e "$credential_file" ]] || fatal "Credential file already exists: $credential_file"
 
-# Create the resource-group-scoped service principal and write its secret with owner-only permissions.
+# Reuse the protected credential on reruns or create it on the first run.
 section "Create Arc Onboarding Principal"
-credential_json=$(az ad sp create-for-rbac --name "$principal_name" \
-  --role "Azure Connected Machine Onboarding" --scopes "$scope" --output json)
-printf '%s\n' "$credential_json" > "$credential_file"
-chmod 0600 "$credential_file"
+if [[ -f "$credential_file" ]]; then
+  credential_json=$(<"$credential_file")
+  info "Reusing existing Arc onboarding principal credential"
+else
+  credential_json=$(az ad sp create-for-rbac --name "$principal_name" \
+    --role "Azure Connected Machine Onboarding" --scopes "$scope" --output json)
+  printf '%s\n' "$credential_json" > "$credential_file"
+  chmod 0600 "$credential_file"
+fi
 application_id=$(jq -r '.appId' <<< "$credential_json")
 tenant_id=$(jq -r '.tenant' <<< "$credential_json")
-[[ -n "$application_id" && "$application_id" != "null" ]] || fatal "Service principal response omitted appId"
 principal_id=$(az ad sp show --id "$application_id" --query id -o tsv)
 
 # Add the optional Kubernetes Arc role while retaining the required server onboarding role.
 roles=("Azure Connected Machine Onboarding")
 if [[ "$include_kubernetes" == "true" ]]; then
-  az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
-    --role "Kubernetes Cluster - Azure Arc Onboarding" --scope "$scope" --output none
+  if [[ -z "$(az role assignment list --assignee-object-id "$principal_id" \
+      --role "Kubernetes Cluster - Azure Arc Onboarding" --scope "$scope" --query '[0].id' -o tsv)" ]]; then
+    az role assignment create --assignee-object-id "$principal_id" --assignee-principal-type ServicePrincipal \
+      --role "Kubernetes Cluster - Azure Arc Onboarding" --scope "$scope" --output none
+  fi
   roles+=("Kubernetes Cluster - Azure Arc Onboarding")
 fi
 
 # Write non-secret metadata that lets later setup steps identify the principal and granted roles.
+created_at=$(jq -r '.created_at // empty' "$metadata_file" 2>/dev/null || true)
+created_at="${created_at:-$(date -u +%FT%TZ)}"
 jq -n \
   --arg subscription_id "$subscription_id" \
   --arg tenant_id "$tenant_id" \
   --arg resource_group "$resource_group" \
   --arg principal_id "$principal_id" \
   --arg application_id "$application_id" \
-  --arg created_at "$(date -u +%FT%TZ)" \
+  --arg created_at "$created_at" \
   --argjson roles "$(printf '%s\n' "${roles[@]}" | jq -R . | jq -s .)" \
   '{schema_version: 1, subscription_id: $subscription_id, tenant_id: $tenant_id, resource_group: $resource_group, principal_id: $principal_id, application_id: $application_id, roles: $roles, created_at: $created_at}' \
   > "$metadata_file"

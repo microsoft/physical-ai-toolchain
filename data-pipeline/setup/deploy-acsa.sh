@@ -121,9 +121,6 @@ cleanup_proxy() {
     rm -rf "$render_dir"
   fi
 
-  if [[ -n "${role_assignment_error_file:-}" && -f "$role_assignment_error_file" ]]; then
-    rm -f "$role_assignment_error_file"
-  fi
 }
 
 # Create a missing extension or update an existing one with the requested immutable configuration.
@@ -196,15 +193,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Confirm the external tools required to discover Azure resources and apply Kubernetes manifests exist.
-require_tools az terraform jq kubectl envsubst
-
 #------------------------------------------------------------------------------
 # Gather Configuration
 #------------------------------------------------------------------------------
 
 # Discover cluster and storage values from Terraform state when explicit options did not provide them.
 if [[ -f "$tf_dir/terraform.tfstate" ]]; then
+  require_tools terraform jq
   info "Reading terraform outputs from $tf_dir..."
   tf_output=$(read_terraform_outputs "$tf_dir")
 
@@ -257,6 +252,8 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+require_tools az kubectl envsubst
+
 # Require the target identifiers, verify Azure extensions, and derive the Blob container resource scope.
 [[ -n "$cluster_name" ]] || fatal "Cluster name is required (--cluster-name or ARC_CLUSTER_NAME)"
 [[ -n "$cluster_resource_group" ]] || fatal "Cluster resource group is required (--cluster-resource-group or ARC_RESOURCE_GROUP)"
@@ -292,7 +289,6 @@ proxy_pid=""
 proxy_kubeconfig=""
 proxy_log_file=""
 render_dir=""
-role_assignment_error_file=""
 trap cleanup_proxy EXIT
 
 if [[ "$connectivity_mode" == "proxy" ]]; then
@@ -302,10 +298,8 @@ if [[ "$connectivity_mode" == "proxy" ]]; then
   kubeconfig="$proxy_kubeconfig"
   context="$proxy_context"
   [[ -n "$context" ]] || fatal "Arc proxy kubeconfig does not contain a current context"
-  verify_kube_target "$kubeconfig" "$context" k3s
   activate_kube_target "$kubeconfig" "$context"
 else
-  verify_kube_target "$kubeconfig" "$context" k3s
   activate_kube_target "$kubeconfig" "$context"
 fi
 
@@ -339,7 +333,7 @@ wait_for_extension_state "$ACSA_EXTENSION_NAME" "Succeeded"
 #------------------------------------------------------------------------------
 section "Assign Blob Role to ACSA Managed Identity"
 
-# Wait for the ACSA identity to appear, then grant it least-privilege access to the target container.
+# Wait for the ACSA identity to appear, then ensure its Blob role assignment exists.
 acsa_principal_id=""
 for ((attempt = 1; attempt <= principal_id_max_retries; attempt++)); do
   acsa_principal_id=$(az k8s-extension show \
@@ -359,21 +353,14 @@ done
 
 [[ -n "$acsa_principal_id" && "$acsa_principal_id" != "null" ]] || fatal "ACSA managed identity principal ID is unavailable"
 
-role_assignment_error_file=$(mktemp)
-if az role assignment create \
-  --assignee-object-id "$acsa_principal_id" \
-  --assignee-principal-type ServicePrincipal \
-  --role "Storage Blob Data Contributor" \
-  --scope "$container_scope" \
-  --output none 2>"$role_assignment_error_file"; then
-  info "Storage Blob Data Contributor role assigned"
-else
-  if grep -qi "already exists" "$role_assignment_error_file"; then
-    info "Storage Blob Data Contributor role assignment already exists"
-  else
-    cat "$role_assignment_error_file" >&2
-    fatal "Failed to assign Storage Blob Data Contributor role"
-  fi
+if [[ -z "$(az role assignment list --assignee-object-id "$acsa_principal_id" \
+    --role "Storage Blob Data Contributor" --scope "$container_scope" --query '[0].id' -o tsv)" ]]; then
+  az role assignment create \
+    --assignee-object-id "$acsa_principal_id" \
+    --assignee-principal-type ServicePrincipal \
+    --role "Storage Blob Data Contributor" \
+    --scope "$container_scope" \
+    --output none
 fi
 
 #------------------------------------------------------------------------------
@@ -381,7 +368,7 @@ fi
 #------------------------------------------------------------------------------
 section "Create Container and Apply ACSA Manifests"
 
-# Render the repository manifests with the selected storage values, apply them, and wait for readiness.
+# Render and apply the repository manifests.
 render_dir=$(mktemp -d)
 
 export EDGE_NAMESPACE
@@ -402,14 +389,6 @@ envsubst < "$ARC_DIR/acsa-pvc.yaml" > "$render_dir/acsa-pvc.yaml"
 envsubst < "$ARC_DIR/acsa-ingest-subvolume.yaml" > "$render_dir/acsa-ingest-subvolume.yaml"
 kubectl apply -f "$render_dir/acsa-pvc.yaml"
 kubectl apply -f "$render_dir/acsa-ingest-subvolume.yaml"
-
-kubectl -n "$EDGE_NAMESPACE" wait --for=jsonpath='{.status.phase}'=Bound "pvc/$ACSA_PVC_NAME" --timeout=180s
-
-if kubectl -n "$EDGE_NAMESPACE" get "edgevolumes/$ACSA_PVC_NAME" >/dev/null 2>&1; then
-  kubectl -n "$EDGE_NAMESPACE" wait --for=jsonpath='{.status.state}'=deployed "edgevolumes/$ACSA_PVC_NAME" --timeout=180s
-else
-  warn "EdgeVolume $ACSA_PVC_NAME not found yet; skipping deployed-state wait"
-fi
 
 #------------------------------------------------------------------------------
 # Deployment Summary

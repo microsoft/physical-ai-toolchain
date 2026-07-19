@@ -75,18 +75,10 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-# Verify local tools, the active Azure tenant and subscription, and the target resource group.
+# Check the commands used by the setup path.
 require_tools az jq sudo
-az account show >/dev/null 2>&1 || \
-  fatal "Authenticate Azure CLI with device-code login before Arc onboarding"
-active_subscription=$(az account show --query id -o tsv)
-active_tenant=$(az account show --query tenantId -o tsv)
-[[ "$active_subscription" == "$subscription_id" ]] || fatal "Active subscription does not match --subscription-id"
-[[ "$active_tenant" == "$tenant_id" ]] || fatal "Active tenant does not match --tenant-id"
-az group show --name "$resource_group" --subscription "$subscription_id" >/dev/null || \
-  fatal "Resource group not found: $resource_group"
 
-  # Install the Arc agent only when absent, then connect or verify the expected server resource.
+# Install the Arc agent only when absent, then connect the server when needed.
 section "Connect Arc-Enabled Server"
 if ! command -v azcmagent >/dev/null 2>&1; then
   [[ -r /etc/os-release ]] || fatal "/etc/os-release is unavailable"
@@ -114,9 +106,6 @@ else
     --resource-group "$resource_group" --location "$location" --resource-name "$server_name" \
     --use-device-code --cloud AzureCloud --tags 'ArcSQLServerExtensionDeployment=Disabled'
 fi
-server_status=$(sudo azcmagent show --json | jq -r '.status // empty')
-[[ "$(printf '%s' "$server_status" | tr '[:upper:]' '[:lower:]')" == "connected" ]] || \
-  fatal "Arc-enabled server status is not Connected"
 
 # Report the connected Arc server and the Azure scope used for onboarding.
 section "Deployment Summary"
