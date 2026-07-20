@@ -54,7 +54,7 @@ yolo = [
 ]
 vlm-judge = [
     "accelerate==1.14.0",
-    "torch==2.12.1",
+    "torch==2.13.0",
     "transformers==5.13.0",
 ]
 
