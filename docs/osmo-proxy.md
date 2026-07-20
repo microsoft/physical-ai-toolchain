@@ -30,7 +30,7 @@ flowchart TD
 
 ```bash
 # Using the submission wrapper (resolves workspace from Terraform outputs)
-training/utils/submit-osmo-proxy-job.sh
+workflows/azureml/submit-osmo-proxy-job.sh
 
 # Or directly with az ml job create
 az ml job create \
