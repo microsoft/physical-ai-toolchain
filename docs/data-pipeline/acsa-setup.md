@@ -366,3 +366,5 @@ lsof -i :47011
 | [Chunking and Compression Configuration](chunking-compression-config.md)                                                              | ROS 2 bag chunking and compression settings for edge recording |
 | [Azure Container Storage enabled by Azure Arc](https://learn.microsoft.com/azure/azure-arc/container-storage/)                        | Microsoft documentation for ACSA                               |
 | [IngestSubvolume specification](https://learn.microsoft.com/azure/azure-arc/container-storage/cloud-ingest-edge-volume-configuration) | CRD reference for `IngestSubvolume`                            |
+
+*🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.*

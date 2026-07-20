@@ -550,3 +550,5 @@ physical-ai-toolchain/
 | [FluxCD](https://fluxcd.io/)                                                                                                | GitOps toolkit for Kubernetes continuous delivery                   |
 | [Azure Monitor](https://learn.microsoft.com/azure/azure-monitor/)                                                           | Observability and metrics for Azure and hybrid workloads            |
 | [Microsoft Fabric RTI](https://learn.microsoft.com/fabric/real-time-intelligence/)                                          | Streaming telemetry analysis for fleet intelligence                 |
+
+*🤖 Crafted with precision by ✨Copilot following brilliant human instruction, then carefully refined by our team of discerning human reviewers.*
