@@ -14,7 +14,7 @@ dependencies = [
     "numpy==2.5.1",
     "pyarrow==24.0.0",
     "Pillow==12.2.0",
-    "av==17.1.0",
+    "av==18.0.0",
 ]
 
 [project.optional-dependencies]
