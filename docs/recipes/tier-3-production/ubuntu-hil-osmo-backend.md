@@ -2,11 +2,13 @@
 title: Ubuntu HiL OSMO Backend
 description: Prepare one Ubuntu T3 HiL node, optionally establish private reachability, connect it to an existing OSMO environment, and prove CPU and no-command outcomes.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-17
+ms.date: 2026-07-21
 ms.topic: tutorial
 ---
 
 Move one Ubuntu desktop through four T3 HiL milestones: host-ready, reachable when private routing is required, connected to an existing OSMO backend and pool, and validated for CPU and no-command workloads. Key Vault is the default transfer. SCP is a deliberate preselected opt-out that supplies the same protected catalog and artifacts to the same consumers.
+
+Complete the direct [T0 target-policy-hardware HiL](../tier-0-dev/README.md#step-7-run-target-policy-hardware-hil) workflow first. This T3 guide adds OSMO/K3s orchestration and passive artifact delivery; it does not change the selected policy, scene or task, ROS 2 semantics, or local result contract.
 
 > [!WARNING]
 > The CPU and no-command proofs complete this journey. No command transport or physical motion is supported.

@@ -68,10 +68,9 @@ When a team needs shared run history, AzureML provides managed MLflow tracking. 
 [Experiment tracking](../../training/experiment-tracking.md). Adopting that hosted tracking server plus
 a *model registry* as the default is the [T2 — Pilot](../tier-2-pilot/README.md) concern.
 
-### Step 6: Validate and run on robot
+### Step 6: Validate, run HiL, and run on robot
 
-Validation (`run-local-lerobot-eval.py`) and deployment (a plain container per robot, hand-updated
-with `docker pull` across 2–3 robots) are unchanged from T0.
+Offline replay, software-in-the-loop, and the direct two-host HiL commands are unchanged from T0. Policies and scene artifacts are materialized locally before either command starts. Deployment remains a plain container per robot, hand-updated with `docker pull` across 2–3 robots.
 
 ## 🎓 Graduate When
 

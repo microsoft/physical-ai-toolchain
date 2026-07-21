@@ -1,0 +1,29 @@
+{
+    "usd_path": "/replace/with/local/ur10e_scene.usd",
+    "articulation_prim_path": "/World/UR10E",
+    "camera_prim_path": "/World/UR10E/Camera",
+    "joint_names": [
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "elbow_joint",
+        "wrist_1_joint",
+        "wrist_2_joint",
+        "wrist_3_joint"
+    ],
+    "reset_joint_positions": [
+        0.0,
+        -1.57079632679,
+        1.57079632679,
+        -1.57079632679,
+        -1.57079632679,
+        0.0
+    ],
+    "image_width": 848,
+    "image_height": 480,
+    "image_encoding": "rgb8",
+    "physics_dt": 0.008333333333333333,
+    "rendering_dt": 0.033333333333333333,
+    "seed": 42,
+    "steps": 100,
+    "response_timeout_s": 5.0
+}

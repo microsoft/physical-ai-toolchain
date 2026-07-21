@@ -9,7 +9,7 @@ ms.topic: overview
 > [!NOTE]
 > **Advanced tier.** Most teams should run the full training lifecycle at [T0 — Dev](../tier-0-dev/README.md) or
 > [T2 — Pilot](../tier-2-pilot/README.md) first. T3 adds declarative, GitOps-style deployment at a
-> single site. It does **not** change how you train or validate.
+> single site. It does **not** change policy, task, replay, SiL, or local HiL semantics.
 
 T3 proves that declarative, GitOps-style deployment does **not** require Azure Arc. Several robots at
 one site you control, all reachable from a single operator network, are reconciled to a Git-declared
@@ -37,6 +37,8 @@ deliberately does not duplicate them:
   [advanced cluster setup](../../infrastructure/cluster-setup-advanced.md): standing up the runtime.
 - [Ubuntu HiL OSMO Backend](ubuntu-hil-osmo-backend.md): move one Ubuntu desktop through host-ready,
   optional private reachability, connected, and CPU/no-command validated milestones.
+
+The OSMO/K3s route is the T3 orchestrated HiL mode. It adds scheduling and passive ACR artifact delivery after the direct T0 simulator-to-policy loop is understood. The current T3 gate is CPU-only and independently no-commanding; it does not replace T0 target-hardware HiL or prove physical motion.
 
 ## 🎓 Graduate When
 

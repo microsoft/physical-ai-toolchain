@@ -31,9 +31,8 @@ data you copy off the robot with `cp` or `rsync`.
 ## 🔁 The Loop at a Glance
 
 ```text
-Capture ──► Move data ──► Curate ──────► Train ──────► Validate ────────► Run on robot
-(ROS 2 bag)  (rsync/cp)  (dataviewer     (lerobot-     (run-local-        (inference node,
-                          local mode)     train)        lerobot-eval)      plain process)
+Capture ──► Move data ──► Curate ──► Train ──► Replay/SiL ──► HiL ──► Run on robot
+(ROS 2 bag)  (rsync/cp)   (local)    (local)    (local)     (2 hosts)  (manual)
 ```
 
 ## 🚀 Steps
@@ -145,7 +144,26 @@ attribute a regression rather than guess at it.
 > [`evaluation/sil/play.py`](https://github.com/microsoft/physical-ai-toolchain/blob/main/evaluation/sil/play.py),
 > which loads a trained RSL-RL checkpoint and runs it in the Isaac Sim simulator on the same machine.
 
-### Step 7: Run the policy back on the robot
+### Step 7: Run target-policy-hardware HiL
+
+Run policy inference on deployment-representative hardware while Isaac stays on the development workstation. This checks the target runtime, ROS 2 exchange, and simulator outcomes without commanding the robot.
+
+Build the CPU policy-host image:
+
+```bash
+docker build --platform linux/amd64 \
+  --file evaluation/hil/docker/Dockerfile.policy-host \
+  --tag physical-ai-hil-policy-host:local \
+  .
+```
+
+Use the direct IL or RL two-host commands in [Hardware-in-the-Loop Evaluation](../../evaluation/hil-evaluation.md). The IL path requires a matching local UR10E dataset, ACT policy, and user-supplied Isaac scene. The RL path requires a matching Anymal-C `policy.pt` and `policy_io.json`.
+
+The public `lerobot/aloha_sim_insertion_human` dataset remains an offline training/replay example. It does not provide a compatible public Isaac task for this UR10E HiL path.
+
+The default target profile is x86_64 CPU. Jetson GPU support is deferred until one model and JetPack/L4T release are pinned.
+
+### Step 8: Run the policy back on the robot
 
 Close the loop: run the validated policy on the robot as a plain ACT inference process or container.
 **No Flux, no gating, no GitOps:** you start the inference node by hand against the checkpoint from

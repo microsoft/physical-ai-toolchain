@@ -297,12 +297,14 @@ A complete example pipeline demonstrates the full path from trained checkpoint t
 
 ### Evaluation
 
-Software-in-the-loop (SiL) and hardware-in-the-loop (HiL) evaluation pipelines for trained policies. SiL runs locally at `T0`; both approaches use Isaac Sim to emulate the target robot, with the trained policy controlling the simulation.
+Offline replay, software-in-the-loop (SiL), and hardware-in-the-loop (HiL) are separate evaluation topologies. Replay runs a policy against recorded observations. SiL keeps Isaac and policy inference on the development compute path. T0 HiL keeps Isaac on the workstation and runs policy inference on separate deployment-representative hardware over ROS 2. T3 adds OSMO/K3s orchestration for the current no-command gate.
 
-| Approach | Infrastructure                                                                                         | Policy Host                     |
-|----------|--------------------------------------------------------------------------------------------------------|---------------------------------|
-| SiL      | Any available compute that can serve the policy as an inference endpoint                               | AzureML managed endpoint or AKS |
-| HiL      | Target deployment hardware, including an Ubuntu K3s HiL host, running the containerized TensorRT or ONNX policy | Edge device matching production |
+| Approach | Infrastructure | Policy host | Simulator |
+|----------|----------------|-------------|-----------|
+| Offline replay | Local files | Development compute | None |
+| SiL | Local process | Development compute | Same development compute path |
+| T0 HiL | ROS 2 and Docker | Separate target hardware | Isaac workstation |
+| T3 orchestrated HiL | Local K3s and OSMO | K3s workload | No simulator in current no-command gate |
 
 Evaluation metrics capture to:
 
@@ -310,9 +312,7 @@ Evaluation metrics capture to:
 - Azure Monitor for operational dashboards and Grafana visualization
 - Microsoft Fabric Real-Time Intelligence for streaming telemetry analysis
 
-Setup scripts deploy evaluation pipelines to OSMO and AzureML compute targets. Full end-to-end evaluation pipelines orchestrate policy loading, simulation execution, metric collection, and result publishing as a single workflow.
-
-Isaac Sim connects to the deployed policy endpoint, generating control signals and receiving observations to produce evaluation episodes that the Data Management domain can review.
+T0 uses direct framework-specific commands and local artifacts. T2 may materialize an exact Azure Machine Learning model version before invoking the unchanged local command. T3 may carry selected model files through ACR and orchestrate the no-command workload through OSMO/K3s. None of these paths implies physical robot command transport.
 
 ### Fleet delivery
 

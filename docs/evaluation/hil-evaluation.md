@@ -1,94 +1,98 @@
 ---
 title: Hardware-in-the-Loop Evaluation
-description: Run CPU-only and independently no-command HiL validation on an Ubuntu K3s OSMO backend.
+description: Run local target-policy-hardware HiL or T3 OSMO no-command validation.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-17
+ms.date: 2026-07-21
 ms.topic: how-to
 ---
 
-Validate the HiL scheduling and policy boundary without physical motion. The implemented `ur10e-no-command` adapter uses deterministic six-axis observations and contains no robot command transport.
+Evaluate deployment-representative policy hardware against Isaac simulation without commanding a physical robot. T0 uses two direct ROS 2 processes. T3 adds OSMO/K3s scheduling and retains the independently no-command gate.
 
-## Prerequisites
+## Evaluation Modes
 
-| Requirement             | Purpose                                                       |
-|-------------------------|---------------------------------------------------------------|
-| Ubuntu K3s edge plane   | Runs OSMO workflows                                           |
-| Online HiL OSMO backend | Selects the edge pool                                         |
-| Completed CPU smoke     | Proves CPU scheduling before HiL                              |
-| Connection receipt      | Binds backend, pool, local node, K3s target, and OSMO profile |
+| Mode | Simulator and policy topology | Infrastructure | Evidence |
+|------|-------------------------------|----------------|----------|
+| Offline replay | Recorded data and policy in one process | Local files | Prediction error against recorded actions |
+| Software-in-the-loop | Isaac and policy on development compute | Local process | In-process simulator behavior |
+| T0 HiL | Isaac workstation plus separate target policy host | ROS 2 and Docker | Bounded target-hardware control of simulation |
+| T3 orchestrated HiL | OSMO workload on local K3s | T2 cloud plus T3 K3s/OSMO | Scheduling and no-command boundary |
+| Real-robot execution | Policy commands a physical robot | Robot-specific | Physical task and safety outcomes |
 
-Complete [Ubuntu HiL OSMO Backend](../recipes/tier-3-production/ubuntu-hil-osmo-backend.md) through the CPU gate first.
+Results from one mode do not substitute for another. T0 final acceptance requires distinct simulator and policy-host identities.
 
-## Safety Contract
+## T0 Prerequisites
 
-| Boundary              | Implemented behavior                                  |
-|-----------------------|-------------------------------------------------------|
-| Adapter               | `apply_action()` always raises `NO_COMMAND_TRANSPORT` |
-| Applied actions       | Must remain zero                                      |
-| Robot endpoint        | Not accepted by configuration                         |
-| Host devices          | None                                                  |
-| Host mounts           | None                                                  |
-| Host network          | Disabled                                              |
-| Privileged containers | Disabled                                              |
-| Physical mode         | No CLI option or implementation exists                |
+| Requirement | Purpose |
+|-------------|---------|
+| x86_64 ROS 2 Jazzy policy host | Runs the checked-in CPU policy image |
+| RTX simulator workstation | Runs the pinned Isaac Lab 2.3.2 image |
+| Direct ROS 2 reachability | Connects the two commands without orchestration |
+| Matching local artifacts | Ensures policy, task or scene, and I/O semantics agree |
 
-The deterministic policy proposes a small zero-seeking action for each fixture observation. The proposal exercises the same boundary a real policy would use without importing any command-capable robot library.
+Build the target image and run the IL or RL command pair from [evaluation/hil/README.md](../../evaluation/hil/README.md#-tier-0-quick-start). Use one `ROS_DOMAIN_ID`, `--run-id`, and exchange count on both hosts.
 
-## Run CPU Scheduling Proof
+### IL Inputs
 
-Preview and run the CPU-only workflow:
+| Input | Contract |
+|-------|----------|
+| ACT policy directory | LeRobot 0.6 policy, preprocessor, and postprocessor files |
+| UR10E scene | User-supplied local USD |
+| Scene configuration | Six canonical joints, RGB8 `480x848`, reset pose, 30 Hz cadence, timeout |
+
+The target publishes six delta-radian actions. Isaac Sim applies them only to the configured simulated articulation. The public ALOHA checkpoint does not satisfy this UR10E contract.
+
+### RL Inputs
+
+| Input | Contract |
+|-------|----------|
+| `policy.pt` | JIT policy for `Isaac-Velocity-Rough-Anymal-C-v0` |
+| `policy_io.json` | Exact ordered policy observation/action terms and control period |
+
+The simulator and target exchange descriptor-ordered `Float32MultiArray` messages. `layout.data_offset` carries the one-based exchange sequence so a retained subscriber value cannot satisfy a later step.
+
+## T0 Results
+
+The simulator writes `summary.json` only after a successful bounded run. It includes policy and task identity, seed, requested/completed exchanges, framework outcomes, latency statistics, simulated and wall seconds, and real-time factor.
+
+At invocation start the runner removes only the prior `summary.json`. A failed run re-raises the originating error and leaves no success summary.
+
+## T2 Artifact Handoff
+
+T0 consumes local paths. To evaluate an exact Azure Machine Learning model version at a directly reachable site, materialize it first:
+
+```bash
+az ml model download \
+  --name <model-name> \
+  --version <model-version> \
+  --download-path <local-download-root> \
+  --resource-group <resource-group> \
+  --workspace-name <workspace-name>
+```
+
+Pass `<local-download-root>/<model-name>` or the exact downloaded artifact path to the unchanged T0 command. T0 does not contact Azure or pull the passive ACR carrier.
+
+## T3 OSMO Gates
+
+Complete [Ubuntu HiL OSMO Backend](../recipes/tier-3-production/ubuntu-hil-osmo-backend.md), then run:
 
 ```bash
 data-pipeline/setup/hil/03-run-cpu-smoke.sh \
-  --connection-file <connection-receipt> \
-  --config-preview
-
-data-pipeline/setup/hil/03-run-cpu-smoke.sh \
   --connection-file <connection-receipt>
-```
-
-The stage creates a unique workflow, requests zero GPUs, validates the result identity, and verifies the matching completed Pod ran on the owned local K3s node.
-
-## Run No-Command Proof
-
-Preview and run the independently non-commanding workload:
-
-```bash
-data-pipeline/setup/hil/04-run-no-command-check.sh \
-  --connection-file <connection-receipt> \
-  --config-preview
 
 data-pipeline/setup/hil/04-run-no-command-check.sh \
   --connection-file <connection-receipt>
 ```
 
-Expected remote result:
+The no-command adapter proposes deterministic actions and rejects all of them with `NO_COMMAND_TRANSPORT`. Expected applied actions remain zero. Physical motion is not implemented.
 
-```json
-{
-  "status": "passed",
-  "proposed_actions": 10,
-  "applied_actions": 0,
-  "negative_command_probe": "passed",
-  "command_transport": "none",
-  "rejection_code": "NO_COMMAND_TRANSPORT"
-}
-```
+## Deferred Profiles
 
-## Payload Assets
+* Jetson GPU hosting requires one exact Jetson model, JetPack/L4T release, and compatible NVIDIA PyTorch artifact.
+* ALOHA Isaac HiL requires a separate adapter, locally prepared scene, Isaac-collected data, and ACT retraining.
+* Policy-promotion thresholds require task- and hardware-specific baseline runs.
 
-The public stage packages these tracked assets for the OSMO workflow:
+## Related Documentation
 
-| Artifact                                            | Content                               |
-|-----------------------------------------------------|---------------------------------------|
-| `evaluation/hil/no_command_runner.py`               | Focused standalone no-command runtime |
-| `evaluation/hil/config/ur10e-no-command.json`       | Safety and fixture contract           |
-| `evaluation/hil/config/ur10e-observations.jsonl`    | Deterministic observations            |
-| `evaluation/hil/workflows/osmo/hil-evaluation.yaml` | CPU-only remote workflow              |
-
-The stage also verifies the matching completed Pod ran on the owned local node. Stop when either proof fails. No physical-motion path follows this validation.
-
-<!-- markdownlint-disable MD036 -->
-*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
-then carefully refined by our team of discerning human reviewers.*
-<!-- markdownlint-enable MD036 -->
+* [HiL Runtime Components](../../evaluation/hil/README.md)
+* [T0 Dev Recipe](../recipes/tier-0-dev/README.md)
+* [HiL Evaluation Specification](../../evaluation/specifications/hil-evaluation.specification.md)

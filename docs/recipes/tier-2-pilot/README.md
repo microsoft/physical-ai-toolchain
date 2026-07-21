@@ -68,9 +68,18 @@ and annotates the same catalogs.
 
 ### Step 6: Validate
 
-Validate registered models directly from the registry. The local entry point
-(`run-local-lerobot-eval.py`) accepts `--model-name` / `--model-version` to pull a registered model,
-and [Evaluation](../../evaluation/README.md) covers the cloud and batch evaluation paths.
+Materialize one exact registered model version to local storage before evaluation:
+
+```bash
+az ml model download \
+  --name <model-name> \
+  --version <model-version> \
+  --download-path <local-download-root> \
+  --resource-group <resource-group> \
+  --workspace-name <workspace-name>
+```
+
+Pass the resulting local policy directory to the unchanged replay, SiL, or T0 HiL command. The HiL mechanics remain two directly launched processes at the reachable site. T0 commands do not contact Azure or pull an ACR carrier. See [Evaluation](../../evaluation/README.md).
 
 ### Step 7: Run on robot (manual `docker pull`)
 

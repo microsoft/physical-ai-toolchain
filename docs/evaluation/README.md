@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Evaluation Guide
 description: Evaluate trained robotics policies in simulation and on physical hardware using Azure ML and NVIDIA OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-13
+ms.date: 2026-07-21
 ms.topic: overview
 keywords:
   - evaluation
@@ -14,7 +14,7 @@ keywords:
   - Azure ML
 ---
 
-Evaluate trained robotics policies using local environments, Azure ML compute, or NVIDIA OSMO workflows. This guide covers LeRobot ACT policy evaluation and OSMO-managed evaluation for Isaac Lab and LeRobot workloads.
+Evaluate trained robotics policies with offline replay, Isaac software-in-the-loop, separate target-policy-hardware HiL, Azure Machine Learning, or NVIDIA OSMO workflows.
 
 ## 📖 Evaluation Guides
 
@@ -22,17 +22,16 @@ Evaluate trained robotics policies using local environments, Azure ML compute, o
 |--------------------------------------------------------|----------------------------------------------------------|
 | [LeRobot ACT Policy Evaluation](lerobot-evaluation.md) | Run LeRobot ACT policies locally with ROS2 deployment    |
 | [OSMO Evaluation Workflows](osmo-evaluation.md)        | Execute Isaac Lab and LeRobot evaluation via NVIDIA OSMO |
-| [HiL Evaluation](hil-evaluation.md)                    | Run CPU and independently no-command HiL gates           |
+| [HiL Evaluation](hil-evaluation.md)                    | Run local target-hardware or T3 no-command HiL           |
 
 ## ⚖️ Evaluation Comparison
 
-| Feature              | Local / Azure ML        | OSMO                        |
-|----------------------|-------------------------|-----------------------------|
-| Orchestration        | Manual or Azure ML jobs | OSMO workflow engine        |
-| Checkpoint source    | MLflow, HuggingFace     | MLflow, Azure Blob, HTTP(S) |
-| Supported frameworks | LeRobot                 | Isaac Lab, LeRobot          |
-| GPU management       | User-managed            | KAI Scheduler               |
-| Monitoring           | Local logs              | `osmo workflow logs`        |
+| Mode | Policy location | Simulator location | Infrastructure |
+|------|-----------------|--------------------|----------------|
+| Offline replay | Development compute | None | Local files |
+| Software-in-the-loop | Development compute | Development compute | Local process |
+| T0 HiL | Deployment-representative host | Development workstation | ROS 2 and Docker |
+| T3 orchestrated HiL | Local K3s workload | No simulator in current gate | OSMO and K3s |
 
 ## 🚀 Quick Start
 
@@ -43,6 +42,17 @@ python lerobot/scripts/eval.py \
   --policy.path=<path-to-checkpoint> \
   -p lerobot/configs/policy/act.yaml
 ```
+
+Tier 0 HiL command pairs:
+
+```bash
+docker build --platform linux/amd64 \
+  --file evaluation/hil/docker/Dockerfile.policy-host \
+  --tag physical-ai-hil-policy-host:local \
+  .
+```
+
+See [Hardware-in-the-Loop Evaluation](hil-evaluation.md) for the direct policy-host and simulator-host commands.
 
 OSMO evaluation submission:
 

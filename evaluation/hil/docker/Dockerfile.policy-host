@@ -1,0 +1,28 @@
+FROM ros:jazzy-ros-base-noble@sha256:567b81bc54f44479e16ef1b75e4984d132f154b6511ea4fc851ee6bde76c30f8
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y \
+      python3-opencv \
+      ros-jazzy-cv-bridge \
+      ros-jazzy-sensor-msgs \
+      ros-jazzy-std-msgs \
+      ros-jazzy-trajectory-msgs && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 \
+    /uv /uvx /bin/
+
+WORKDIR /opt/physical-ai-toolchain
+
+COPY evaluation/hil/docker/pyproject.toml evaluation/hil/docker/uv.lock ./
+RUN UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-dev --no-install-project
+
+COPY evaluation/hil/scripts/run-local-lerobot-policy.py evaluation/hil/scripts/run-local-jit-policy.py \
+    evaluation/hil/scripts/
+
+ENV PATH="/opt/venv/bin:${PATH}" \
+    PYTHONUNBUFFERED=1
+
+CMD ["bash"]
