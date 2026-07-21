@@ -170,7 +170,7 @@ class TrajectoryAnalyzer:
 
         Raw ``smoothness`` (``1 / (1 + rms_jerk)``) saturates near zero for real
         degree-scale joint trajectories because jerk divides by ``dt**3``. Two
-        rescalings are offered via ``smoothness_mode``:
+        normalization methods are offered via ``smoothness_mode``:
 
         * ``log-scaled`` (default): ``1 / (1 + log10(1 + rms_jerk))`` compresses
           the wide jerk dynamic range so scores spread across (0, 1].

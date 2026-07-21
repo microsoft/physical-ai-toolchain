@@ -219,6 +219,120 @@ def test_set_and_get_episode_analysis_roundtrip(client, monkeypatch):
     assert labels["analysis"]["5"]["object"] == "black cloth"
 
 
+def test_import_analysis_labels_handles_scalar_boolean_and_list_values(client, monkeypatch):
+    """Analysis imports normalize supported value types and invalidate the dataset cache."""
+    invalidations: list[tuple[str, int | None]] = []
+    monkeypatch.setattr(
+        "src.api.services.dataset_service.DatasetService.invalidate_episode_cache",
+        lambda self, dataset_id, episode_idx=None: invalidations.append((dataset_id, episode_idx)),
+    )
+
+    client.put(
+        "/api/datasets/test/episodes/0/analysis",
+        json={"object": "Black Cloth", "grasp_success": True, "motion_flags": ["jittery", "hesitation"]},
+    )
+    client.put(
+        "/api/datasets/test/episodes/1/analysis",
+        json={"object": "Black Cloth", "grasp_success": False, "motion_flags": []},
+    )
+    invalidations.clear()
+
+    object_response = client.post(
+        "/api/datasets/test/labels/import-from-analysis",
+        json={"field": "object", "prefix": "item"},
+    )
+    assert object_response.status_code == 200
+    assert object_response.json()["labels_added"] == ["ITEM: BLACK CLOTH"]
+    assert object_response.json()["episodes_updated"] == 2
+
+    grasp_response = client.post(
+        "/api/datasets/test/labels/import-from-analysis",
+        json={"field": "grasp_success"},
+    )
+    assert grasp_response.status_code == 200
+    assert grasp_response.json()["labels_added"] == ["GRASP: YES", "GRASP: NO"]
+    assert grasp_response.json()["episodes_updated"] == 2
+
+    flags_response = client.post(
+        "/api/datasets/test/labels/import-from-analysis",
+        json={"field": "motion_flags"},
+    )
+    assert flags_response.status_code == 200
+    assert flags_response.json()["labels_added"] == ["FLAG: JITTERY", "FLAG: HESITATION"]
+    assert flags_response.json()["episodes_updated"] == 1
+    assert invalidations == [("test", None), ("test", None), ("test", None)]
+
+
+def test_import_analysis_labels_overwrites_stale_namespace_and_is_idempotent(client, monkeypatch):
+    """Overwrite removes stale namespace values and repeated imports make no changes."""
+    invalidations: list[tuple[str, int | None]] = []
+    monkeypatch.setattr(
+        "src.api.services.dataset_service.DatasetService.invalidate_episode_cache",
+        lambda self, dataset_id, episode_idx=None: invalidations.append((dataset_id, episode_idx)),
+    )
+
+    client.put("/api/datasets/test/episodes/2/labels", json={"labels": ["SUCCESS", "OBJECT: OLD"]})
+    client.put("/api/datasets/test/episodes/2/analysis", json={"object": "new"})
+    invalidations.clear()
+
+    response = client.post(
+        "/api/datasets/test/labels/import-from-analysis",
+        json={"field": "object", "overwrite": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["episodes"]["2"] == ["SUCCESS", "OBJECT: NEW"]
+    assert response.json()["episodes_updated"] == 1
+    assert invalidations == [("test", None)]
+
+    invalidations.clear()
+    repeated = client.post(
+        "/api/datasets/test/labels/import-from-analysis",
+        json={"field": "object", "overwrite": True},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["labels_added"] == []
+    assert repeated.json()["episodes_updated"] == 0
+    assert invalidations == []
+
+
+def test_import_analysis_labels_rejects_unsupported_field(client):
+    """Free-text and unknown analysis fields cannot become dataset labels."""
+    response = client.post(
+        "/api/datasets/test/labels/import-from-analysis",
+        json={"field": "movement_quality"},
+    )
+    assert response.status_code == 400
+    assert "is not importable" in response.json()["detail"]
+
+
+def test_analysis_value_labels_ignores_absent_and_blank_values():
+    """Missing and blank analysis values do not produce filter labels."""
+    assert labels_mod._analysis_value_labels("OBJECT", None) == []
+    assert labels_mod._analysis_value_labels("OBJECT", [" ", None]) == []
+
+
+def test_import_analysis_labels_without_values_does_not_persist(client, monkeypatch):
+    """An import with no populated values is a no-op."""
+    save = AsyncMock()
+    invalidations: list[tuple[str, int | None]] = []
+    monkeypatch.setattr(labels_mod, "_save_labels", save)
+    monkeypatch.setattr(
+        "src.api.services.dataset_service.DatasetService.invalidate_episode_cache",
+        lambda self, dataset_id, episode_idx=None: invalidations.append((dataset_id, episode_idx)),
+    )
+
+    response = client.post(
+        "/api/datasets/test/labels/import-from-analysis",
+        json={"field": "source"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["labels_added"] == []
+    assert response.json()["episodes_updated"] == 0
+    save.assert_not_awaited()
+    assert invalidations == []
+
+
 # ---------------------------------------------------------------------------
 # Storage backend unit tests
 # ---------------------------------------------------------------------------

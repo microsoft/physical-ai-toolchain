@@ -100,7 +100,7 @@ class AddLabelOption(SanitizedModel):
 # Analysis fields that make sensible categorical labels, mapped to their default
 # label prefix. Free-text fields (movement_quality, notes, instruction) are
 # intentionally excluded because they produce unbounded, unfilterable labels.
-ANALYSIS_LABELABLE_FIELDS: dict[str, str] = {
+ANALYSIS_IMPORT_FIELDS: dict[str, str] = {
     "object": "OBJECT",
     "pick_from": "PICK",
     "grasp_success": "GRASP",
@@ -432,11 +432,11 @@ async def import_analysis_labels(
     set, labels sharing the prefix are cleared first so stale values drop out.
     """
     field = body.field.strip()
-    if field not in ANALYSIS_LABELABLE_FIELDS:
-        allowed = ", ".join(sorted(ANALYSIS_LABELABLE_FIELDS))
+    if field not in ANALYSIS_IMPORT_FIELDS:
+        allowed = ", ".join(sorted(ANALYSIS_IMPORT_FIELDS))
         raise HTTPException(status_code=400, detail=f"Field '{field}' is not importable. Allowed: {allowed}")
 
-    prefix = _normalize_label(body.prefix) if body.prefix else ANALYSIS_LABELABLE_FIELDS[field]
+    prefix = _normalize_label(body.prefix) if body.prefix else ANALYSIS_IMPORT_FIELDS[field]
     namespace = f"{prefix}:"
     labels_file = await _load_labels(dataset_id)
 

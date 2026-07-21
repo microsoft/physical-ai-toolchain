@@ -33,6 +33,8 @@ from evaluation.vlm_judge.backend import GenerationConfig, Qwen3VLBackend
 from evaluation.vlm_judge.dataset import iter_episodes, load_dataset_spec
 from evaluation.vlm_judge.frames import FrameWindow, extract_frames, tile_horizontally
 
+# cspell:ignore extrasaction
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -65,7 +67,7 @@ CSV_FIELDS = (
 )
 
 SYSTEM_PROMPT = (
-    "You are a meticulous robotics data annotator reviewing teleoperated "
+    "You are a meticulous robotics data annotator reviewing remotely operated "
     "robot-arm manipulation episodes. You analyze multi-view camera frames and "
     "report precise, objective labels. You never guess wildly: when the "
     "evidence is ambiguous you say so. You always answer with a single strict "
@@ -87,9 +89,7 @@ def build_user_prompt(
         view_desc = f"Each image is a single camera view: {views[0]}."
     else:
         ordered = ", ".join(f"{i + 1}) {view}" for i, view in enumerate(views))
-        view_desc = (
-            f"Each image tiles {len(views)} camera views side by side, left to right: {ordered}."
-        )
+        view_desc = f"Each image tiles {len(views)} camera views side by side, left to right: {ordered}."
     task_line = (
         f'The task for this episode is: "{instruction}".'
         if instruction
