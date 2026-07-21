@@ -3,10 +3,7 @@ revision = 3
 requires-python = ">=3.12"
 
 [manifest]
-constraints = [
-    { name = "gitpython", specifier = "==3.1.50" },
-    { name = "pygments", specifier = "==2.20.0" },
-]
+constraints = [{ name = "pygments", specifier = "==2.20.0" }]
 overrides = [{ name = "cryptography", specifier = "==48.0.1" }]
 
 [[package]]
