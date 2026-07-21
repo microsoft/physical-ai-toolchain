@@ -10,7 +10,7 @@ requires-python = ">=3.12"
 #   cd evaluation/sil/docker
 #   uv lock
 dependencies = [
-    "lerobot==0.5.1",
+    "lerobot==0.6.0",
     "pyarrow==24.0.0",
     "azure-storage-blob==12.30.0",
     "azure-identity==1.25.3",
