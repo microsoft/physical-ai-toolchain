@@ -28,43 +28,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate workflow permissions
-        shell: bash
+      - name: Install powershell-yaml module
+        shell: pwsh
         run: |
-          set -euo pipefail
+          Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -SkipPublisherCheck -Scope CurrentUser
 
-          VIOLATIONS=0
-          TOTAL=0
+      - name: Validate workflow permissions
+        shell: pwsh
+        env:
+          PERMISSIONS_SOFT_FAIL: ${{ inputs.soft-fail }}
+        run: |
+          $failOnViolation = $env:PERMISSIONS_SOFT_FAIL -ne 'true'
+          ./scripts/security/Test-WorkflowPermissions.ps1 -Path .github/workflows -Format console -FailOnViolation:$failOnViolation
 
-          # nullglob: no *.yaml workflow exists today, so an unmatched glob must expand to nothing, not a literal path
-          shopt -s nullglob
-
-          echo "Scanning workflow files for top-level permissions blocks..."
-          for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
-            TOTAL=$((TOTAL + 1))
-            if ! grep -q "^permissions:" "$wf"; then
-              echo "::warning file=${wf}::Missing top-level permissions block: ${wf}"
-              VIOLATIONS=$((VIOLATIONS + 1))
-            fi
-          done
-
-          COMPLIANT=$((TOTAL - VIOLATIONS))
-          if [ "$TOTAL" -gt 0 ]; then
-            SCORE=$(( (COMPLIANT * 100) / TOTAL ))
-          else
-            SCORE=100
-          fi
-
-          echo "Total workflows: $TOTAL"
-          echo "Compliant: $COMPLIANT"
-          echo "Violations: $VIOLATIONS"
-          echo "Compliance score: ${SCORE}%"
-
-          if [ "$VIOLATIONS" -gt 0 ]; then
-            echo "::error::${VIOLATIONS} workflow(s) missing top-level permissions blocks"
-            if [ "${{ inputs.soft-fail }}" != "true" ]; then
-              exit 1
-            fi
-          else
-            echo "All workflows have top-level permissions blocks."
-          fi
+      - name: Validate dangerous workflow patterns
+        shell: pwsh
+        env:
+          DANGEROUS_WORKFLOW_SOFT_FAIL: ${{ inputs.soft-fail }}
+        run: |
+          $failOnViolation = $env:DANGEROUS_WORKFLOW_SOFT_FAIL -ne 'true'
+          ./scripts/security/Test-DangerousWorkflow.ps1 -Path .github/workflows -Format console -FailOnViolation:$failOnViolation
