@@ -443,6 +443,15 @@ def test_blob_label_storage_save_failure_raises_500(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def test_labels_path_resolves_nested_dataset_id(monkeypatch, tmp_path):
+    """Nested dataset IDs resolve to the expected labels metadata path."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    path = labels_mod._labels_path("owner--dataset")
+
+    assert path == tmp_path / "owner" / "dataset" / "meta" / "episode_labels.json"
+
+
 def test_create_label_storage_returns_local_when_no_provider():
     """Default backend yields LocalLabelStorage."""
     storage = labels_mod._create_label_storage("local", None)
@@ -475,5 +484,25 @@ def test_get_label_storage_singleton(monkeypatch):
     second = labels_mod._get_label_storage()
     assert first is second
     assert isinstance(first, labels_mod.LocalLabelStorage)
+
+    monkeypatch.setattr(labels_mod, "_label_storage", None)
+
+
+def test_get_label_storage_creates_azure_provider_once(monkeypatch):
+    """Azure label storage creates one provider and caches the resulting adapter."""
+    monkeypatch.setattr(labels_mod, "_label_storage", None)
+    fake_config = SimpleNamespace(storage_backend="azure")
+    provider = SimpleNamespace()
+    create_provider = MagicMock(return_value=provider)
+    monkeypatch.setattr("src.api.config.get_app_config", lambda: fake_config)
+    monkeypatch.setattr("src.api.config.create_blob_dataset_provider", create_provider)
+
+    first = labels_mod._get_label_storage()
+    second = labels_mod._get_label_storage()
+
+    assert first is second
+    assert isinstance(first, labels_mod.BlobLabelStorage)
+    assert first._provider is provider
+    create_provider.assert_called_once_with(fake_config)
 
     monkeypatch.setattr(labels_mod, "_label_storage", None)
