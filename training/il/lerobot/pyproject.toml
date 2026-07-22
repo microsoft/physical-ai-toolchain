@@ -48,7 +48,7 @@ dependencies = [
     "accelerate==1.14.0",
     "torchcodec==0.14.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
-    "gitpython==3.1.51",
+    "gitpython==3.1.52",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
     # Pin cryptography to 49.0.0, the current release (Dependabot-tracked in the
