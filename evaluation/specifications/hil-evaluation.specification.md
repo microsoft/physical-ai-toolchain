@@ -112,6 +112,8 @@ The RL slice supports `Isaac-Velocity-Rough-Anymal-C-v0` with one environment, t
 
 Both commands require `--policy-path` and `--io-descriptor`. `--io-descriptor` points to the `policy_io.json` adjacent to `policy.pt`.
 
+Generate the sidecar with `evaluation/hil/scripts/generate-policy-io.py` inside the pinned Isaac Lab image. The generator reads the live manager term order and shapes, records the task control period, and verifies the JIT input/output dimensions before publishing the file.
+
 ### I/O Descriptor
 
 | Field | Contract |

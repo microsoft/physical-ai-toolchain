@@ -42,6 +42,7 @@ The existing topic recipes assume the tier shown below. They are unchanged by th
 | Configure edge recording                      | [Configuring Edge Data Recording](data-collection/configuring-edge-data-recording.md) | 20 min |
 | Prepare a dataset for training                | [Preparing Datasets for Training](data-collection/preparing-datasets-for-training.md) | 30 min |
 | Run target-policy-hardware HiL                | [T0 — Dev](tier-0-dev/README.md#step-7-run-target-policy-hardware-hil)                 | 30 min |
+| Continue HiL validation on Ubuntu             | [Ubuntu Tier 0 HiL Validation](tier-0-dev/ubuntu-hil-validation.md)                    | 60 min |
 
 ## 📖 Recipe Catalog
 

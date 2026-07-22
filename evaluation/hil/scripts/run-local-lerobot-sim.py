@@ -78,6 +78,8 @@ from isaacsim.core.api import SimulationContext
 from isaacsim.core.experimental.utils.stage import is_stage_loading
 from isaacsim.core.prims import Articulation
 
+from training.rl.simulation_shutdown import prepare_for_shutdown
+
 
 @dataclass(frozen=True)
 class Ur10eSceneConfig:
@@ -475,4 +477,5 @@ if __name__ == "__main__":
     try:
         main()
     finally:
+        prepare_for_shutdown()
         simulation_app.close()

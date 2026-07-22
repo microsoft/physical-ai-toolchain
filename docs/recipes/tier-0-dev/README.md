@@ -157,7 +157,7 @@ docker build --platform linux/amd64 \
   .
 ```
 
-Use the direct IL or RL two-host commands in [Hardware-in-the-Loop Evaluation](../../evaluation/hil-evaluation.md). The IL path requires a matching local UR10E dataset, ACT policy, and user-supplied Isaac scene. The RL path requires a matching Anymal-C `policy.pt` and `policy_io.json`.
+Use the direct IL or RL two-host commands in [Hardware-in-the-Loop Evaluation](../../evaluation/hil-evaluation.md). Follow [Ubuntu Tier 0 HiL Validation](ubuntu-hil-validation.md) to gather external resources, prepare the hosts, generate `policy_io.json`, run both acceptance pairs, and return the evidence. The IL path requires a matching local UR10E dataset, ACT policy, and user-supplied Isaac scene. The RL path requires a matching Anymal-C `policy.pt` and generated `policy_io.json`.
 
 The public `lerobot/aloha_sim_insertion_human` dataset remains an offline training/replay example. It does not provide a compatible public Isaac task for this UR10E HiL path.
 

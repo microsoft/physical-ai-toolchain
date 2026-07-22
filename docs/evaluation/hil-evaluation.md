@@ -31,6 +31,8 @@ Results from one mode do not substitute for another. T0 final acceptance require
 
 Build the target image and run the IL or RL command pair from [evaluation/hil/README.md](../../evaluation/hil/README.md#-tier-0-quick-start). Use one `ROS_DOMAIN_ID`, `--run-id`, and exchange count on both hosts.
 
+Use [Ubuntu Tier 0 HiL Validation](../recipes/tier-0-dev/ubuntu-hil-validation.md) to prepare the hosts and external artifacts, run both acceptance pairs, and collect the evidence needed to complete implementation.
+
 ### IL Inputs
 
 | Input | Contract |
