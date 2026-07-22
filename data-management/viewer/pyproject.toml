@@ -5,7 +5,7 @@ description = "Web-based dataset analysis and annotation tool for robot demonstr
 requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.139.0",
-    "uvicorn[standard]==0.50.2",
+    "uvicorn[standard]==0.51.0",
     "pydantic==2.13.4",
     "python-multipart==0.0.32",
     "python-dotenv==1.2.2",
@@ -16,12 +16,12 @@ dependencies = [
     "pandas==3.0.3",
     "pyarrow==24.0.0",
     "Pillow==12.2.0",
-    "opencv-python-headless==4.13.0.92",
+    "opencv-python-headless==5.0.0.93",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.15.20",
+    "ruff==0.15.21",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "httpx==0.28.1",
@@ -32,7 +32,7 @@ azure = [
     "azure-identity==1.25.3",
 ]
 huggingface = [
-    "huggingface-hub==1.22.0",
+    "huggingface-hub==1.23.0",
 ]
 hdf5 = [
     "h5py==3.16.0",
@@ -43,7 +43,7 @@ export = [
     "Pillow==12.2.0",
 ]
 yolo = [
-    "ultralytics==8.4.89",
+    "ultralytics==8.4.95",
     "numpy==2.5.1",
     "Pillow==12.2.0",
 ]
