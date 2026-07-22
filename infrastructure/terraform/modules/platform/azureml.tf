@@ -16,7 +16,7 @@
 
 resource "azapi_resource" "ml_workspace" {
   type      = "Microsoft.MachineLearningServices/workspaces@2024-04-01"
-  name      = "mlw-${local.resource_name_suffix}"
+  name      = "mlw-${local.resource_name_suffix}${var.workspace_name_suffix}"
   location  = var.resource_group.location
   parent_id = var.resource_group.id
 

@@ -270,13 +270,32 @@ if [[ "$skip_attach" == "false" ]]; then
 
   section "Attach Compute Target"
 
-  if az ml compute show --name "$compute_name" -g "$rg" -w "$ml_workspace" &>/dev/null; then
+  compute_state=$(az ml compute show --name "$compute_name" -g "$rg" -w "$ml_workspace" --query "provisioning_state" -o tsv 2>/dev/null || echo "NotFound")
+  if [[ "$compute_state" == "Succeeded" ]]; then
     info "Compute '$compute_name' already attached"
   else
+    if [[ "$compute_state" == "Failed" ]]; then
+      info "Detaching failed compute '$compute_name'..."
+      az ml compute detach --name "$compute_name" -g "$rg" -w "$ml_workspace" -y
+    fi
+
+    # az ml compute attach calls listClusterAdminCredential on the AML backend,
+    # which requires local accounts. Temporarily enable if disabled.
+    local_accounts_disabled=$(az aks show -g "$rg" -n "$cluster" --query "disableLocalAccounts" -o tsv 2>/dev/null || echo "false")
+    if [[ "$local_accounts_disabled" == "true" ]]; then
+      info "Temporarily enabling local accounts for compute attachment..."
+      az aks update -g "$rg" -n "$cluster" --enable-local-accounts -o none
+    fi
+
     info "Attaching AKS cluster as compute target..."
     attach_args=(-g "$rg" -w "$ml_workspace" --type Kubernetes --name "$compute_name" --resource-id "$cluster_id" --namespace "$NS_AZUREML")
     [[ -n "$ml_identity_id" ]] && attach_args+=(--identity-type UserAssigned --user-assigned-identities "$ml_identity_id") || attach_args+=(--identity-type SystemAssigned)
     az ml compute attach "${attach_args[@]}"
+
+    if [[ "$local_accounts_disabled" == "true" ]]; then
+      info "Re-disabling local accounts..."
+      az aks update -g "$rg" -n "$cluster" --disable-local-accounts -o none
+    fi
   fi
 fi
 

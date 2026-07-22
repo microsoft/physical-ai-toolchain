@@ -216,15 +216,14 @@ kubectl apply -f "$internal_lb_manifest"
 #------------------------------------------------------------------------------
 
 section "Configure Storage"
-if az storage container show --account-name "$storage_account" --name "$container" --auth-mode login &>/dev/null; then
+storage_account_id=$(az storage account show -n "$storage_account" --query "id" -o tsv)
+container_url="https://management.azure.com${storage_account_id}/blobServices/default/containers/${container}?api-version=2023-01-01"
+if az rest --method get --url "$container_url" &>/dev/null; then
     info "Container '$container' already exists"
 else
     info "Creating container '$container'..."
-    az storage container create \
-        --account-name "$storage_account" \
-        --name "$container" \
-        --auth-mode login \
-        --public-access off >/dev/null
+    az rest --method put --url "$container_url" \
+        --body '{"properties":{"publicAccess":"None"}}' >/dev/null
 fi
 
 #------------------------------------------------------------------------------
@@ -241,7 +240,14 @@ kubectl annotate sa router -n "$NS_OSMO_CONTROL_PLANE" "azure.workload.identity/
 tenant_id=$(az account show --query tenantId -o tsv)
 
 # Admin password (needed for osmo login token — K8s secret, not CSI-mounted)
-admin_password=$(az keyvault secret show --vault-name "$kv_name" --name osmo-admin-password --query value -o tsv)
+# Try Key Vault first; fall back to the Terraform output when KV public network
+# access is blocked by subscription policy (private-endpoint-only deployments).
+if admin_password=$(az keyvault secret show --vault-name "$kv_name" --name osmo-admin-password --query value -o tsv 2>/dev/null) && [[ -n "$admin_password" ]]; then
+    info "Read OSMO admin password from Key Vault"
+else
+    warn "Key Vault unreachable; falling back to terraform output for OSMO admin password"
+    admin_password=$(tf_require "$tf_output" "osmo_admin_password.value" "OSMO admin password")
+fi
 kubectl create secret generic osmo-default-admin -n "$NS_OSMO_CONTROL_PLANE" \
     --from-file=password=<(printf '%s' "$admin_password") \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -252,9 +258,15 @@ pg_password=""
 include_postgres_secret=true
 if [[ "$use_incluster_postgres" == "true" ]]; then
     include_postgres_secret=false
-    warn "In-cluster PostgreSQL runs without a managed password. Use only for development."
+    # Check if secret already has a non-empty password (idempotent re-runs).
+    pg_password=$(kubectl get secret db-secret -n "$NS_OSMO_CONTROL_PLANE" \
+        --ignore-not-found -o jsonpath='{.data.db-password}' 2>/dev/null | base64 --decode)
+    if [[ -z "$pg_password" ]]; then
+        pg_password=$(openssl rand -base64 24)
+        warn "In-cluster PostgreSQL: generated ephemeral dev password for db-secret."
+    fi
     kubectl create secret generic db-secret -n "$NS_OSMO_CONTROL_PLANE" \
-        --from-literal=db-password="" \
+        --from-literal=db-password="$pg_password" \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 else
     pg_password=$(az keyvault secret show --vault-name "$kv_name" --name psql-admin-password --query value -o tsv)
@@ -357,9 +369,8 @@ fi
 service_helm_args=(
     --version "$chart_version"
     --namespace "$NS_OSMO_CONTROL_PLANE"
-    --rollback-on-failure
+    --atomic
     --timeout "$TIMEOUT_DEPLOY"
-    --force-conflicts
     -f "$service_values"
     -f "$service_identity_values"
     -f "$platform_values"
@@ -382,6 +393,9 @@ if [[ -n "$pg_fqdn" ]]; then
 else
     service_helm_args+=(
         --set "services.postgres.enabled=true"
+        --set-string "services.postgres.serviceName=postgres"
+        --set-string "services.postgres.user=postgres"
+        --set-string "services.postgres.password=$pg_password"
         --set "services.postgres.storageClassName=default"
         --set "services.postgres.storageSize=10Gi"
     )
@@ -401,6 +415,7 @@ if [[ -n "$redis_hostname" ]]; then
 else
     service_helm_args+=(
         --set "services.redis.enabled=true"
+        --set-string "services.redis.serviceName=redis"
         --set "services.redis.tlsEnabled=false"
         --set "services.redis.storageClassName=default"
         --set "services.redis.storageSize=1Gi"
@@ -586,7 +601,7 @@ PYTHON_EOF
     backend_helm_args=(
         --version "$backend_chart_version"
         --namespace "$NS_OSMO_OPERATOR"
-        --rollback-on-failure
+        --atomic
         --timeout "$TIMEOUT_DEPLOY"
         -f "$backend_values"
         -f "$backend_identity_values"

@@ -254,6 +254,12 @@ output "osmo_admin_secret_name" {
   value       = try(azapi_resource.osmo_admin_password[0].name, null)
 }
 
+output "osmo_admin_password" {
+  description = "OSMO admin password (sensitive). Used as fallback when Key Vault is not reachable from the deploy host."
+  value       = try(random_password.osmo_admin[0].result, null)
+  sensitive   = true
+}
+
 output "redis" {
   description = "Azure Managed Redis for OSMO (if deployed)."
   value = try({
