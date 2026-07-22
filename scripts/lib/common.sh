@@ -478,21 +478,30 @@ validate_version_pair() {
 # // ===================================================================
 
 # Apply SecretProviderClass for Azure Key Vault secrets sync
-# Usage: apply_secret_provider_class <namespace> <keyvault> <client_id> <tenant_id> [include_redis_secret]
+# Usage: apply_secret_provider_class <namespace> <keyvault> <client_id> <tenant_id> [include_redis_secret] [include_postgres_secret]
 apply_secret_provider_class() {
   local namespace="${1:?namespace required}"
   local keyvault="${2:?keyvault name required}"
   local client_id="${3:?client_id required}"
   local tenant_id="${4:?tenant_id required}"
   local include_redis_secret="${5:-true}"
+  local include_postgres_secret="${6:-true}"
 
   local manifest_dir
   local _repo_root
   _repo_root="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd))"
   manifest_dir="${_repo_root}/infrastructure/setup/manifests"
-  local manifest_name="aks-secret-provider-class.yaml"
+  local manifest_name
 
-  [[ "$include_redis_secret" == "true" ]] && manifest_name="aks-secret-provider-class-external-redis.yaml"
+  if [[ "$include_redis_secret" == "true" && "$include_postgres_secret" == "true" ]]; then
+    manifest_name="aks-secret-provider-class-external-redis.yaml"
+  elif [[ "$include_redis_secret" == "true" && "$include_postgres_secret" == "false" ]]; then
+    manifest_name="aks-secret-provider-class-external-redis-incluster-postgres.yaml"
+  elif [[ "$include_redis_secret" == "false" && "$include_postgres_secret" == "false" ]]; then
+    manifest_name="aks-secret-provider-class-incluster-postgres.yaml"
+  else
+    manifest_name="aks-secret-provider-class.yaml"
+  fi
 
   export NAMESPACE="$namespace"
   export KEY_VAULT_NAME="$keyvault"
