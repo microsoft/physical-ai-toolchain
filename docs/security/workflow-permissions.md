@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Workflow Permissions
 description: GitHub Actions permission scopes and OSSF Scorecard Token-Permissions exception rationale
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-03
+ms.date: 2026-07-06
 ms.topic: reference
 keywords:
   - security
@@ -20,6 +20,9 @@ All GitHub Actions workflows in this repository follow the [OpenSSF Scorecard To
 - Top-level `permissions:` is `contents: read` (read-only by default).
 - Write-scoped permissions are declared at the **job level** only when a specific step requires them.
 - No workflow grants `permissions: write-all` or omits an explicit top-level `permissions:` block.
+
+> [!NOTE]
+> `scripts/security/Test-WorkflowPermissions.ps1` fails any workflow missing a top-level `permissions:` block, and `scripts/security/Test-DangerousWorkflow.ps1` flags untrusted interpolation (including `${{ github.head_ref }}` and selected `${{ github.event.* }}` contexts) in `run:` steps and `pull_request_target` checkouts of untrusted pull-request code. Both linters run under `npm run test:ps` (and in CI via the Pester suite); both linters also run standalone in `workflow-permissions-scan.yml`.
 
 This document enumerates every job-scoped `security-events`, `contents`, and `attestations` write grant across `.github/workflows/` and records the justification so security auditors and Scorecard reviewers can verify each exception.
 
