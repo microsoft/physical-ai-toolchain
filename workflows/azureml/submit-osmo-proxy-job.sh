@@ -71,6 +71,7 @@ subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
 storage_account="$(get_storage_account)"
+compute_name="${AZUREML_COMPUTE_NAME:-$(get_compute_target 2>/dev/null || echo "k8s-compute")}"
 azure_client_id="$(get_output '.ml_workload_identity.value.client_id' 2>/dev/null || echo "")"
 
 output_url="azure://${storage_account}/proxy-smoke-test/"
@@ -84,6 +85,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Subscription"     "${subscription_id:-<not set>}"
   print_kv "Storage Account"  "${storage_account:-<not set>}"
   print_kv "Output URL"       "$output_url"
+  print_kv "Compute"          "${compute_name:-<not set>}"
   print_kv "Client ID"        "${azure_client_id:-<not set>}"
   exit 0
 fi
@@ -100,6 +102,7 @@ section "Submit AML → OSMO Proxy Job"
 print_kv "Workflow YAML"  "$workflow_yaml"
 print_kv "AML Workspace"  "$workspace_name"
 print_kv "Resource Group" "$resource_group"
+print_kv "Compute"        "$compute_name"
 print_kv "Output URL"     "$output_url"
 
 job_file="$REPO_ROOT/workflows/azureml/osmo-proxy-job.yaml"
@@ -111,6 +114,8 @@ az_args=(
   --workspace-name "$workspace_name"
   --resource-group "$resource_group"
   --subscription "$subscription_id"
+  --set "compute=azureml:${compute_name}"
+  --set "resources.instance_type=defaultinstancetype"
   --set "environment_variables.WORKFLOW_YAML=${workflow_yaml}"
   --set "environment_variables.AML_SUBSCRIPTION_ID=${subscription_id}"
   --set "environment_variables.AML_RESOURCE_GROUP=${resource_group}"

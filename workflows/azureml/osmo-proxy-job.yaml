@@ -29,19 +29,6 @@ code: ../..
 
 environment:
   image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:latest
-  conda_file:
-    name: osmo-proxy
-    channels: [conda-forge, defaults]
-    dependencies:
-      - python=3.12
-      - pip
-      - pip:
-          - requests>=2.31
-          - pyyaml>=6.0
-          - mlflow>=2.10
-          - azureml-mlflow>=1.0
-          - azure-ai-ml>=1.13
-          - azure-identity>=1.15
 
 compute: azureml:k8s-compute
 
@@ -49,7 +36,10 @@ resources:
   instance_type: cpu-standard
   shm_size: 512m
 
-command: python workflows/azureml/osmo-proxy/osmo_proxy.py --workflow-yaml ${WORKFLOW_YAML}
+command: >-
+  pip install --quiet requests>=2.31 pyyaml>=6.0 mlflow>=2.10 azureml-mlflow>=1.0
+  azure-ai-ml>=1.13 azure-identity>=1.15 &&
+  python workflows/azureml/osmo-proxy/osmo_proxy.py --workflow-yaml ${WORKFLOW_YAML}
 
 environment_variables:
   # Auth mode: dev (default, uses x-osmo-user header) or token (Bearer from KV).
