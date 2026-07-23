@@ -31,6 +31,22 @@ def _write_checkpoint(path: Path) -> None:
     torch.save(_checkpoint_state(), path)
 
 
+def _skrl_checkpoint_state() -> dict[str, object]:
+    # SKRL shared-model layout: a net_container MLP trunk feeding a policy_layer mean head.
+    # Dimensions mirror _checkpoint_state (obs 3 -> 5 -> 4 -> action 2) so both layouts
+    # normalize to the same PolicyArchitecture.
+    return {
+        "policy": {
+            "net_container.0.weight": torch.arange(15, dtype=torch.float32).reshape(5, 3),
+            "net_container.0.bias": torch.arange(5, dtype=torch.float32),
+            "net_container.2.weight": torch.arange(20, dtype=torch.float32).reshape(4, 5),
+            "net_container.2.bias": torch.arange(4, dtype=torch.float32),
+            "policy_layer.weight": torch.arange(8, dtype=torch.float32).reshape(2, 4),
+            "policy_layer.bias": torch.arange(2, dtype=torch.float32),
+        }
+    }
+
+
 class TestPolicyArchitecture:
     def test_str_formats_layer_dimensions(self) -> None:
         arch = _MOD.PolicyArchitecture(obs_dim=3, action_dim=2, hidden_dims=[5, 4])
@@ -152,6 +168,49 @@ class TestLoadActorFromCheckpoint:
         assert isinstance(actor[1], torch.nn.Tanh)
 
 
+class TestSkrlCheckpointSupport:
+    def test_infers_skrl_actor_dimensions_from_checkpoint(self, tmp_path: Path) -> None:
+        checkpoint_path = tmp_path / "skrl-policy.pt"
+        torch.save(_skrl_checkpoint_state(), checkpoint_path)
+
+        arch = _MOD.infer_architecture_from_checkpoint(str(checkpoint_path))
+
+        assert arch == _MOD.PolicyArchitecture(obs_dim=3, action_dim=2, hidden_dims=[5, 4], activation="elu")
+
+    def test_loads_skrl_actor_rekeying_trunk_and_head(self, tmp_path: Path) -> None:
+        checkpoint_path = tmp_path / "skrl-policy.pt"
+        torch.save(_skrl_checkpoint_state(), checkpoint_path)
+
+        actor, normalizer, arch = _MOD.load_actor_from_checkpoint(str(checkpoint_path))
+
+        policy = _skrl_checkpoint_state()["policy"]
+        assert normalizer is None
+        assert arch == _MOD.PolicyArchitecture(obs_dim=3, action_dim=2, hidden_dims=[5, 4], activation="elu")
+        assert isinstance(actor, torch.nn.Sequential)
+        # net_container trunk -> Sequential indices 0, 2; policy_layer head -> index 4.
+        assert torch.equal(actor[0].weight, policy["net_container.0.weight"])
+        assert torch.equal(actor[2].weight, policy["net_container.2.weight"])
+        assert torch.equal(actor[4].weight, policy["policy_layer.weight"])
+        assert not actor.training
+
+    def test_rejects_skrl_policy_without_head(self, tmp_path: Path) -> None:
+        checkpoint_path = tmp_path / "headless-skrl.pt"
+        torch.save(
+            {"policy": {"net_container.0.weight": torch.zeros(5, 3), "net_container.0.bias": torch.zeros(5)}},
+            checkpoint_path,
+        )
+
+        with pytest.raises(ValueError, match="policy_layer head"):
+            _MOD.infer_architecture_from_checkpoint(str(checkpoint_path))
+
+    def test_rejects_checkpoint_matching_no_known_layout(self, tmp_path: Path) -> None:
+        checkpoint_path = tmp_path / "unknown.pt"
+        torch.save({"policy": {"value_layer.weight": torch.zeros(1, 3)}}, checkpoint_path)
+
+        with pytest.raises(ValueError, match="Unsupported checkpoint"):
+            _MOD.infer_architecture_from_checkpoint(str(checkpoint_path))
+
+
 class TestPolicyExporters:
     def test_torch_export_saves_scripted_policy(self, mocker: MockerFixture, tmp_path: Path) -> None:
         actor = torch.nn.Linear(3, 2)
@@ -209,6 +268,30 @@ class TestExportPolicy:
         jit_export.assert_called_once_with(str(tmp_path), "policy.pt")
         onnx_export.assert_called_once_with(str(tmp_path), 3, "policy.onnx")
         assert sidecar.call_args_list == [mocker.call("/exports/policy.pt"), mocker.call("/exports/policy.onnx")]
+
+    def test_onnx_failure_still_exports_jit(self, mocker: MockerFixture, tmp_path: Path) -> None:
+        actor = torch.nn.Linear(3, 2)
+        arch = _MOD.PolicyArchitecture(obs_dim=3, action_dim=2, hidden_dims=[])
+        mocker.patch.object(_MOD, "load_actor_from_checkpoint", return_value=(actor, None, arch))
+        sidecar = mocker.patch.object(_MOD, "write_sha256_sidecar")
+        mocker.patch.object(_MOD._TorchPolicyExporter, "export", return_value=str(tmp_path / "policy.pt"))
+        mocker.patch.object(_MOD._OnnxPolicyExporter, "export", side_effect=RuntimeError("no onnx"))
+
+        exported = _MOD.export_policy(checkpoint_path="checkpoint.pt", output_dir=str(tmp_path))
+
+        assert exported == {"jit": str(tmp_path / "policy.pt")}
+        assert "onnx" not in exported
+        sidecar.assert_called_once_with(str(tmp_path / "policy.pt"))
+
+    def test_raises_when_all_requested_exports_fail(self, mocker: MockerFixture, tmp_path: Path) -> None:
+        actor = torch.nn.Linear(3, 2)
+        arch = _MOD.PolicyArchitecture(obs_dim=3, action_dim=2, hidden_dims=[])
+        mocker.patch.object(_MOD, "load_actor_from_checkpoint", return_value=(actor, None, arch))
+        mocker.patch.object(_MOD, "write_sha256_sidecar")
+        mocker.patch.object(_MOD._OnnxPolicyExporter, "export", side_effect=RuntimeError("no onnx"))
+
+        with pytest.raises(RuntimeError, match="No policy formats were exported"):
+            _MOD.export_policy(checkpoint_path="checkpoint.pt", output_dir=str(tmp_path), export_jit=False)
 
     def test_skips_disabled_export_formats(self, mocker: MockerFixture, tmp_path: Path) -> None:
         actor = torch.nn.Linear(3, 2)

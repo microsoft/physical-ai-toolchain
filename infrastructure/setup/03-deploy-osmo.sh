@@ -188,6 +188,7 @@ if [[ "$config_preview" == "true" ]]; then
     print_kv "Image Version" "$image_version"
     print_kv "Storage Endpoint" "$endpoint"
     print_kv "Container" "$container"
+    print_kv "Dataset Bucket" "training -> ${endpoint}/datasets"
     print_kv "PostgreSQL" "${pg_fqdn:-in-cluster}"
     print_kv "Redis" "${redis_hostname:-in-cluster}"
     print_kv "Registry" "$([[ $use_acr == true ]] && echo "$acr_login_server" || echo 'nvcr.io')"
@@ -381,6 +382,8 @@ service_helm_args=(
     --set-string "services.configs.workflow.workflow_data.base_url=$workflow_base_url"
     --set-string "services.configs.workflow.workflow_log.credential.endpoint=${endpoint}/workflows/logs"
     --set-string "services.configs.workflow.workflow_app.credential.endpoint=${endpoint}/apps"
+    --set-string "services.configs.dataset.default_bucket=training"
+    --set-string "services.configs.dataset.buckets.training.dataset_path=${endpoint}/datasets"
     --set-string "services.configs.workflow.backend_images.init=${osmo_image_location}/init-container:${image_version}"
     --set-string "services.configs.workflow.backend_images.client=${osmo_image_location}/client:${image_version}"
 )

@@ -1,0 +1,9 @@
+name: Empty Permissions
+on:
+  push:
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "ok"

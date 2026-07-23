@@ -42,7 +42,7 @@ RESOURCE OPTIONS:
 DATASET OPTIONS:
         --dataset-bucket NAME     OSMO bucket name (default: training)
         --dataset-name NAME       Dataset name (default: training-code)
-        --training-path PATH      Local path to upload (default: training/rl)
+        --training-path PATH      Local RL package path to upload (default: training/rl)
 
 CHECKPOINT OPTIONS:
     -c, --checkpoint-uri URI      MLflow checkpoint artifact URI
@@ -180,6 +180,7 @@ require_tools osmo rsync
 
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
 [[ -d "$training_path" ]] || fatal "Training directory not found: $training_path"
+[[ -f "$training_path/scripts/train.sh" ]] || fatal "Training path must contain scripts/train.sh: $training_path"
 
 checkpoint_mode="$(normalize_checkpoint_mode "$checkpoint_mode")"
 
@@ -231,14 +232,17 @@ if [[ -f "$amlignore_file" ]]; then
   done < <(build_rsync_excludes "$amlignore_file")
 fi
 
-rsync -a --delete "${rsync_excludes[@]}" "$training_path/" "$STAGING_DIR/training/"
+mkdir -p "$STAGING_DIR/training/rl" "$STAGING_DIR/training/utils"
+rsync -a --delete "${rsync_excludes[@]}" "$training_path/" "$STAGING_DIR/training/rl/"
+rsync -a --delete "${rsync_excludes[@]}" "$REPO_ROOT/training/utils/" "$STAGING_DIR/training/utils/"
+rsync -a "$REPO_ROOT/training/__init__.py" "$REPO_ROOT/training/stream.py" "$STAGING_DIR/training/"
 
 #------------------------------------------------------------------------------
 # Build Submission Command
 #------------------------------------------------------------------------------
 
 info "Submitting workflow with dataset folder injection..."
-info "  Training path: $training_path (staged)"
+info "  Training path: $training_path (staged as training/rl)"
 info "  Dataset: $dataset_bucket/$dataset_name"
 info "  Task: $task"
 info "  Backend: $backend"

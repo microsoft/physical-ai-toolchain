@@ -1,0 +1,72 @@
+name: hve-core Upstream Freshness
+
+on:
+  schedule:
+    # Weekly: Mondays at 09:30 UTC (after binary integrity 09:00)
+    - cron: "30 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-hve-core-freshness
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  check-freshness:
+    name: Check hve-core Upstream Freshness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check hve-core-derived files against latest release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/security/Test-HveCoreFreshness.ps1
+
+      - name: Create or update tracking issue
+        if: steps.check.outputs.stale-count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STALE_COUNT: ${{ steps.check.outputs.stale-count }}
+        run: |
+          . ./scripts/security/Test-HveCoreFreshness.ps1
+          $data = Get-Content 'hve-core-freshness-results.json' -Raw | ConvertFrom-Json
+          $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $checkDate = Get-Date -Format 'yyyy-MM-dd' -AsUTC
+          $body = Format-HveCoreIssueBody -Result $data -RunUrl $runUrl -CheckDate $checkDate
+          $title = "security: hve-core upstream updates available ($env:STALE_COUNT stale)"
+          $existing = Get-HveCoreTrackingIssue
+          if ($existing) { gh issue edit $existing --title $title --body $body; gh issue comment $existing --body "🔄 Weekly scan: $env:STALE_COUNT item(s) stale as of $checkDate. [Workflow run]($runUrl)." }
+          else { gh issue create --title $title --body $body --label "dependencies,automated,needs-triage" }
+
+      - name: Close resolved tracking issue
+        if: steps.check.outputs.stale-count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . ./scripts/security/Test-HveCoreFreshness.ps1
+          $existing = Get-HveCoreTrackingIssue
+          if ($existing) { $checkDate = Get-Date -Format 'yyyy-MM-dd' -AsUTC; gh issue close $existing --comment "✅ hve-core-derived files are current as of $checkDate." }
+          else { Write-Host "All current, no open tracking issue." }
+
+      - name: Write job summary
+        if: always()
+        run: |
+          if (-not (Test-Path 'hve-core-freshness-results.json')) { "## hve-core Upstream Freshness`n`n⚠️ Check did not complete." >> $env:GITHUB_STEP_SUMMARY; return }
+          . ./scripts/security/Test-HveCoreFreshness.ps1
+          $data = Get-Content 'hve-core-freshness-results.json' -Raw | ConvertFrom-Json
+          Format-HveCoreJobSummary -Result $data >> $env:GITHUB_STEP_SUMMARY

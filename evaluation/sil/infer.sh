@@ -15,6 +15,9 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
+# python_cmd (array), python_exec, and PYTHONPATH come from the Isaac runtime prologue,
+# sourced here so run_python/run_isaaclab can reference them. The dependency install runs
+# later via setup_isaac_runtime.sh, deferred until after argument parsing.
 ISAAC_PYTHONPATH_ROOT="${SRC_DIR}"
 # shellcheck source=../../training/rl/scripts/isaac_python_prologue.sh
 source "${SRC_DIR}/training/rl/scripts/isaac_python_prologue.sh"
@@ -109,39 +112,17 @@ if [[ -z "${CHECKPOINT_URI}" ]]; then
   exit 1
 fi
 
-INFERENCE_PROJECT="${SRC_DIR}/training/il/lerobot"
-INFERENCE_REQS=""
 cleanup() {
   rm -rf "${CHECKPOINT_DIR:-}"
-  rm -f "${INFERENCE_REQS:-}"
 }
 trap cleanup EXIT
 
-if [[ ! -f "${INFERENCE_PROJECT}/uv.lock" ]]; then
-  echo "Error: LeRobot lockfile not found at ${INFERENCE_PROJECT}/uv.lock" >&2
-  exit 1
-fi
-
-if command -v uv &>/dev/null; then
-  echo "Installing inference workflow dependencies from the exported lockfile..."
-  # Export the fully-resolved set from the committed lock, then install with the
-  # IL project as context so its override-dependencies and prerelease settings
-  # apply during full resolution (the SIL path does not use --no-deps).
-  INFERENCE_REQS="$(mktemp)"
-  uv export --frozen --no-hashes --no-emit-project --project "${INFERENCE_PROJECT}" -o "${INFERENCE_REQS}"
-  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --project "${INFERENCE_PROJECT}" --requirement "${INFERENCE_REQS}" || \
-      uv pip install --no-cache-dir --project "${INFERENCE_PROJECT}" --requirement "${INFERENCE_REQS}" --index-strategy first-index \
-        --extra-index-url https://download.pytorch.org/whl/cu124
-  else
-    uv pip install --no-cache-dir --system --project "${INFERENCE_PROJECT}" --requirement "${INFERENCE_REQS}" || \
-      uv pip install --no-cache-dir --system --project "${INFERENCE_PROJECT}" --requirement "${INFERENCE_REQS}" --index-strategy first-index \
-        --extra-index-url https://download.pytorch.org/whl/cu124
-  fi
-else
-  echo "Error: uv is required to install workflow dependencies" >&2
-  exit 1
-fi
+# Install the locked RL dependencies and configure the Isaac Sim runtime (uv, PYTHONPATH,
+# python_cmd/python_exec) via the shared helper that the training entrypoint also sources.
+ISAAC_PROJECT_DIR="${SRC_DIR}/training/rl"
+ISAAC_PYTHONPATH_ROOT="${SRC_DIR}"
+# shellcheck source=../../training/rl/scripts/setup_isaac_runtime.sh
+source "${SRC_DIR}/training/rl/scripts/setup_isaac_runtime.sh"
 
 CHECKPOINT_DIR=$(mktemp -d)
 echo "=============================================="
@@ -154,26 +135,36 @@ download_checkpoint() {
   local uri="$1"
   local dst_dir="$2"
 
-  if [[ "${uri}" == runs:/* ]] || [[ "${uri}" == models:/* ]]; then
-    echo "Detected MLflow artifact URI"
+  if [[ "${uri}" == models:/* ]]; then
+    echo "Detected AzureML registered model URI"
+    run_python << MODEL_DOWNLOAD
+import os
+
+from training.utils import bootstrap_azure_ml
+
+# A registered checkpoint is a custom_model pointing at a single .pt artifact, not
+# an MLflow-format model, so mlflow.artifacts.download_artifacts("models:/...")
+# rejects it ("must be a directory containing an mlflow MLmodel"). Download via the
+# AzureML SDK, which handles arbitrary model artifacts.
+_, _, remainder = "${uri}".partition("models:/")
+name, _, version = remainder.partition("/")
+ctx = bootstrap_azure_ml(experiment_name=f"inference-{os.environ.get('TASK', 'unknown')}")
+ctx.client.models.download(name=name, version=version, download_path="${dst_dir}")
+print(f"Downloaded model {name}:{version} to ${dst_dir}")
+MODEL_DOWNLOAD
+  elif [[ "${uri}" == runs:/* ]]; then
+    echo "Detected MLflow run artifact URI"
     run_python << MLFLOW_DOWNLOAD
 import os
+
 import mlflow
 
-sub_id = os.environ.get("AZURE_SUBSCRIPTION_ID", "")
-rg = os.environ.get("AZURE_RESOURCE_GROUP", "")
-ws = os.environ.get("AZUREML_WORKSPACE_NAME", "")
+from training.utils import bootstrap_azure_ml
 
-if sub_id and rg and ws:
-    tracking_uri = (
-        f"azureml://westus3.api.azureml.ms/mlflow/v1.0/subscriptions/{sub_id}"
-        f"/resourceGroups/{rg}/providers/Microsoft.MachineLearningServices"
-        f"/workspaces/{ws}"
-    )
-    print(f"Setting MLflow tracking URI: {tracking_uri}")
-    mlflow.set_tracking_uri(tracking_uri)
-else:
-    print("Warning: Azure ML environment variables not set, using default MLflow tracking")
+# Resolve the workspace's own MLflow tracking URI (region aware) and
+# authenticate via the pod's workload identity, matching the artifact upload
+# step. A hard-coded region endpoint 404s for workspaces in other regions.
+bootstrap_azure_ml(experiment_name=f"inference-{os.environ.get('TASK', 'unknown')}")
 
 local_path = mlflow.artifacts.download_artifacts(artifact_uri="${uri}", dst_path="${dst_dir}")
 print(f"Downloaded to: {local_path}")
@@ -255,7 +246,9 @@ mkdir -p "${EXPORT_DIR}"
 echo "=============================================="
 echo "Exporting policy to: ${EXPORT_DIR}"
 echo "=============================================="
-run_python "${SCRIPT_DIR}/export_policy.py" \
+# export_policy imports torch, so it runs under the Isaac Sim interpreter that ships the
+# container's torch/CUDA stack (the locked torch is intentionally not installed).
+run_isaaclab "${SRC_DIR}/training/packaging/scripts/export_policy.py" \
     --checkpoint "${CHECKPOINT_FILE}" \
     --output-dir "${EXPORT_DIR}"
 
@@ -277,7 +270,7 @@ run_onnx_inference() {
     return 1
   fi
 
-  if run_isaaclab -m inference.scripts.play_policy \
+  if run_isaaclab "${SCRIPT_DIR}/play_policy.py" \
       --task "${TASK}" \
       --model "${onnx_model}" \
       --format onnx \
@@ -305,7 +298,7 @@ run_jit_inference() {
     return 1
   fi
 
-  if run_isaaclab -m inference.scripts.play_policy \
+  if run_isaaclab "${SCRIPT_DIR}/play_policy.py" \
       --task "${TASK}" \
       --model "${jit_model}" \
       --format jit \
@@ -356,7 +349,7 @@ export MAX_STEPS
 export VIDEO_LENGTH
 export INFERENCE_FORMAT
 
-run_python -m inference.scripts.upload_artifacts
+run_python "${SRC_DIR}/evaluation/metrics/upload_artifacts.py"
 
 echo "=============================================="
 echo "Inference workflow complete"
@@ -364,3 +357,21 @@ echo "=============================================="
 echo "  ONNX: $( [[ ${ONNX_SUCCESS} -eq 1 ]] && echo 'SUCCESS' || echo 'SKIPPED/FAILED' )"
 echo "  JIT:  $( [[ ${JIT_SUCCESS} -eq 1 ]] && echo 'SUCCESS' || echo 'SKIPPED/FAILED' )"
 echo "=============================================="
+
+# Fail the job when the requested inference format did not run. ONNX is best-effort under
+# "both" (JIT is the primary format), so only JIT gates "both"; an explicit onnx/jit request
+# must produce a successful run of that format rather than exiting green with nothing run.
+case "${INFERENCE_FORMAT}" in
+  onnx)
+    if [[ ${ONNX_SUCCESS} -ne 1 ]]; then
+      echo "Error: ONNX inference did not complete successfully" >&2
+      exit 1
+    fi
+    ;;
+  jit | both)
+    if [[ ${JIT_SUCCESS} -ne 1 ]]; then
+      echo "Error: JIT inference did not complete successfully" >&2
+      exit 1
+    fi
+    ;;
+esac

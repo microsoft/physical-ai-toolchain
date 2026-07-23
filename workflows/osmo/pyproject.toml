@@ -20,8 +20,9 @@ package = false
 # so the exported mirror matches the original linux-only `uv pip compile`
 # (drops Windows-only pywin32/waitress and platform markers).
 environments = ["sys_platform == 'linux'"]
-# cryptography: azureml-mlflow caps below 47.0.0, but wheels before 48.0.1 bundle
-# a vulnerable OpenSSL (GHSA-537c-gmf6-5ccf); force the patched release.
+# cryptography: azureml-mlflow==1.62.0.post5 caps below 49.0.0, but wheels
+# before 48.0.1 bundle a vulnerable OpenSSL (GHSA-537c-gmf6-5ccf); force the
+# patched release.
 override-dependencies = [
     "cryptography==48.0.1",
 ]

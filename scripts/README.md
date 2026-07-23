@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-02
+ms.date: 2026-07-06
 ms.topic: reference
 keywords:
   - scripts
@@ -71,10 +71,13 @@ Security scanning and dependency management scripts.
 | `security/Test-DependencyPinning.ps1` | Validate dependency pinning compliance                                                        |
 | `security/Test-SHAStaleness.ps1`      | Check for outdated SHA pins                                                                   |
 | `security/Test-BinaryFreshness.ps1`   | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab    |
+| `security/Test-HveCoreFreshness.ps1`  | Check hve-core-derived modules against the latest upstream release                            |
 | `security/zap-to-sarif.py`            | Convert ZAP results to SARIF format                                                           |
 | `update-chart-hashes.sh`              | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
 
 The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the values pinned in `.devcontainer/install-dev-deps.sh` and `.devcontainer/devcontainer.json`, and queries upstream Helm repositories for chart version drift. Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script.
+
+The `Test-HveCoreFreshness.ps1` script is invoked by the `check-hve-core-freshness.yml` workflow on a weekly schedule. For every hve-core-derived module, it compares the **upstream** blob SHA at the pinned `UPSTREAM_REF` (the last reviewed upstream ref) against the newest non-draft `microsoft/hve-core` release. Comparing blobs, not release tags, means a stale signal is a real upstream change rather than an unrelated prerelease.
 
 ### 🔗 Where Pins Live
 
