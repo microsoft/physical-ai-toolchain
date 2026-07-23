@@ -54,21 +54,23 @@ _DEFAULT_GATEWAY_URL = "http://osmo-gateway.osmo-control-plane.svc.cluster.local
 _DEFAULT_WORKFLOW_YAML = "workflows/osmo/smoke-test-proxy-e2e.yaml"
 _DEFAULT_POLL_INTERVAL_SECS = 30
 
-_TERMINAL_STATUSES: frozenset[str] = frozenset({
-    "COMPLETED",
-    "FAILED",
-    "FAILED_SUBMISSION",
-    "FAILED_SERVER_ERROR",
-    "FAILED_EXEC_TIMEOUT",
-    "FAILED_QUEUE_TIMEOUT",
-    "FAILED_CANCELED",
-    "FAILED_BACKEND_ERROR",
-    "FAILED_IMAGE_PULL",
-    "FAILED_EVICTED",
-    "FAILED_START_ERROR",
-    "FAILED_START_TIMEOUT",
-    "FAILED_PREEMPTED",
-})
+_TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {
+        "COMPLETED",
+        "FAILED",
+        "FAILED_SUBMISSION",
+        "FAILED_SERVER_ERROR",
+        "FAILED_EXEC_TIMEOUT",
+        "FAILED_QUEUE_TIMEOUT",
+        "FAILED_CANCELED",
+        "FAILED_BACKEND_ERROR",
+        "FAILED_IMAGE_PULL",
+        "FAILED_EVICTED",
+        "FAILED_START_ERROR",
+        "FAILED_START_TIMEOUT",
+        "FAILED_PREEMPTED",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +111,9 @@ def _version_check(gateway_url: str, headers: dict[str, str]) -> None:
         ver = resp.json()
         _LOGGER.info(
             "OSMO gateway reachable. Version: %s.%s.%s",
-            ver.get("major"), ver.get("minor"), ver.get("revision"),
+            ver.get("major"),
+            ver.get("minor"),
+            ver.get("revision"),
         )
     except Exception as exc:
         raise RuntimeError(f"Cannot reach OSMO gateway at {gateway_url}: {exc}") from exc
@@ -168,7 +172,8 @@ def _poll_until_done(
         if resp.status_code != 200:
             _LOGGER.warning(
                 "Poll returned HTTP %s — will retry: %s",
-                resp.status_code, resp.text[:200],
+                resp.status_code,
+                resp.text[:200],
             )
             time.sleep(poll_interval)
             continue
@@ -296,7 +301,7 @@ def _fetch_blob_json(azure_url: str, client_id: str = "") -> dict[str, Any] | No
     """
     if not azure_url.startswith("azure://"):
         return None
-    rest = azure_url[len("azure://"):]
+    rest = azure_url[len("azure://") :]
     parts = rest.split("/", 2)
     if len(parts) < 3:
         return None
@@ -447,7 +452,7 @@ def _extract_tier2_metrics(
     import fnmatch
 
     def _parse_azure_url(url: str) -> tuple[str | None, str | None, str]:
-        rest = url[len("azure://"):]
+        rest = url[len("azure://") :]
         parts = rest.split("/", 2)
         if len(parts) < 2:
             return None, None, ""
@@ -479,7 +484,7 @@ def _extract_tier2_metrics(
 
             matched: list[str] = []
             for blob in all_blobs:
-                rel = blob[len(base_prefix):].lstrip("/")
+                rel = blob[len(base_prefix) :].lstrip("/")
                 source_simple = source.replace("**/", "").replace("**", "*")
                 if fnmatch.fnmatch(rel, source) or fnmatch.fnmatch(rel, source_simple):
                     matched.append(blob)
@@ -570,12 +575,8 @@ def _log_to_mlflow(
         groups = query.get("groups", [])
         all_tasks = [t for g in groups for t in g.get("tasks", [])]
         task_count = len(all_tasks)
-        completed_tasks = sum(
-            1 for t in all_tasks if str(t.get("status", "")) == "COMPLETED"
-        )
-        failed_tasks = sum(
-            1 for t in all_tasks if str(t.get("status", "")).startswith("FAILED")
-        )
+        completed_tasks = sum(1 for t in all_tasks if str(t.get("status", "")) == "COMPLETED")
+        failed_tasks = sum(1 for t in all_tasks if str(t.get("status", "")).startswith("FAILED"))
         success_rate = completed_tasks / task_count if task_count else 0.0
         duration = query.get("duration")
 
@@ -589,11 +590,7 @@ def _log_to_mlflow(
             None,
         )
         if first_failed:
-            error_msg = (
-                first_failed.get("error")
-                or first_failed.get("message")
-                or first_failed.get("status", "")
-            )
+            error_msg = first_failed.get("error") or first_failed.get("message") or first_failed.get("status", "")
             mlflow.set_tag("osmo.first_error", str(error_msg)[:500])
 
         # --- Tier 1 metrics ---
@@ -608,12 +605,8 @@ def _log_to_mlflow(
         for i, group in enumerate(groups):
             g_tasks = group.get("tasks", [])
             g_name = group.get("name") or str(i)
-            g_completed = sum(
-                1 for t in g_tasks if str(t.get("status", "")) == "COMPLETED"
-            )
-            g_failed = sum(
-                1 for t in g_tasks if str(t.get("status", "")).startswith("FAILED")
-            )
+            g_completed = sum(1 for t in g_tasks if str(t.get("status", "")) == "COMPLETED")
+            g_failed = sum(1 for t in g_tasks if str(t.get("status", "")).startswith("FAILED"))
             mlflow.log_metric(f"osmo.group.{g_name}.task_count", len(g_tasks))
             mlflow.log_metric(f"osmo.group.{g_name}.completed", g_completed)
             mlflow.log_metric(f"osmo.group.{g_name}.failed", g_failed)
@@ -650,9 +643,7 @@ def _log_to_mlflow(
                             try:
                                 return datetime.fromisoformat(s)
                             except ValueError:
-                                return datetime.strptime(
-                                    str(s).rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f"
-                                ).replace(tzinfo=UTC)
+                                return datetime.strptime(str(s).rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=UTC)
 
                         delta = _parse_ts(str(end_raw)) - _parse_ts(str(start_raw))
                         return max(0.0, delta.total_seconds())
@@ -676,7 +667,8 @@ def _log_to_mlflow(
             if workflow_metrics:
                 _LOGGER.info(
                     "Logged %d spec-driven workflow metric(s): %s",
-                    len(workflow_metrics), ", ".join(workflow_metrics),
+                    len(workflow_metrics),
+                    ", ".join(workflow_metrics),
                 )
         elif metrics_spec and not azure_client_id:
             _LOGGER.debug("AZURE_CLIENT_ID not set — skipping spec-driven metrics extraction")
@@ -685,17 +677,23 @@ def _log_to_mlflow(
         _LOGGER.info(
             "Logged MLflow metrics — workflow: %s, status: %s, "
             "tasks: %d (completed: %d failed: %d rate: %.2f), groups: %d, duration: %ss",
-            workflow_id, status, task_count, completed_tasks, failed_tasks,
-            success_rate, len(groups), duration_str,
+            workflow_id,
+            status,
+            task_count,
+            completed_tasks,
+            failed_tasks,
+            success_rate,
+            len(groups),
+            duration_str,
         )
     except ImportError:
         _LOGGER.info("mlflow not installed — skipping MLflow logging")
     except Exception as exc:
         tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "<not set>")
         _LOGGER.warning(
-            "MLflow logging failed (non-fatal): %s  "
-            "[MLFLOW_TRACKING_URI=%s — ensure azureml-mlflow is in conda deps]",
-            exc, tracking_uri,
+            "MLflow logging failed (non-fatal): %s  [MLFLOW_TRACKING_URI=%s — ensure azureml-mlflow is in conda deps]",
+            exc,
+            tracking_uri,
         )
 
 
@@ -716,7 +714,7 @@ def _to_aml_url(url: str) -> str:
       abfss://... → unchanged
     """
     if url.startswith("azure://"):
-        rest = url[len("azure://"):]
+        rest = url[len("azure://") :]
         parts = rest.split("/", 2)
         if len(parts) >= 2:
             account = parts[0]
@@ -774,7 +772,9 @@ def _register_aml_data_assets(
             created = client.data.create_or_update(data_asset)
             _LOGGER.info(
                 "Registered AML data asset: %s v%s → %s",
-                created.name, created.version, aml_url,
+                created.name,
+                created.version,
+                aml_url,
             )
     except Exception as exc:
         _LOGGER.warning("AML data asset registration failed (non-fatal): %s", exc)
@@ -791,9 +791,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    parser = argparse.ArgumentParser(
-        description="AML → OSMO proxy: submit OSMO workflow, poll, log to MLflow"
-    )
+    parser = argparse.ArgumentParser(description="AML → OSMO proxy: submit OSMO workflow, poll, log to MLflow")
     parser.add_argument(
         "--workflow-yaml",
         default=os.environ.get("WORKFLOW_YAML", _DEFAULT_WORKFLOW_YAML),
@@ -839,10 +837,7 @@ def main() -> None:
         action="append",
         dest="set_variables",
         default=[],
-        help=(
-            "Set a workflow template variable (may repeat). "
-            "Format: --set dataset=vda-demo --set run_id=run-001."
-        ),
+        help=("Set a workflow template variable (may repeat). Format: --set dataset=vda-demo --set run_id=run-001."),
     )
     args = parser.parse_args()
 
@@ -888,7 +883,8 @@ def main() -> None:
                 _mlflow.log_metric(f"osmo.workflow.{key}", value)
             _LOGGER.info(
                 "metrics-only: logged %d metric(s): %s",
-                len(workflow_metrics), ", ".join(workflow_metrics) or "(none)",
+                len(workflow_metrics),
+                ", ".join(workflow_metrics) or "(none)",
             )
         except Exception as exc:
             _LOGGER.warning("metrics-only logging failed (non-fatal): %s", exc)
@@ -917,16 +913,15 @@ def main() -> None:
         set_vars.extend(cli_additions)
         _LOGGER.info(
             "Applied %d --set override(s): %s",
-            len(cli_additions), ", ".join(cli_additions),
+            len(cli_additions),
+            ", ".join(cli_additions),
         )
 
     output_urls = _extract_output_urls(workflow_yaml)
 
     if args.output_urls:
         output_urls = [u.strip() for u in args.output_urls.split(",") if u.strip()]
-        _LOGGER.info(
-            "Using %d output URL(s) from --output-urls / OSMO_OUTPUT_URLS", len(output_urls)
-        )
+        _LOGGER.info("Using %d output URL(s) from --output-urls / OSMO_OUTPUT_URLS", len(output_urls))
     elif output_urls:
         _LOGGER.info("Detected %d output URL(s) in workflow spec", len(output_urls))
 
@@ -936,9 +931,7 @@ def main() -> None:
     _version_check(args.gateway_url, headers)
 
     # 2. Submit
-    workflow_id = _submit_workflow(
-        args.gateway_url, args.pool, workflow_yaml, headers, set_vars or None
-    )
+    workflow_id = _submit_workflow(args.gateway_url, args.pool, workflow_yaml, headers, set_vars or None)
 
     # 3. Poll until done
     _LOGGER.info("Polling every %ds until workflow finishes...", args.poll_interval)
@@ -954,7 +947,9 @@ def main() -> None:
     # 4. Set up MLflow and log metrics
     _setup_mlflow()
     _log_to_mlflow(
-        workflow_id, status, query,
+        workflow_id,
+        status,
+        query,
         output_urls=output_urls or None,
         azure_client_id=os.environ.get("AZURE_CLIENT_ID", ""),
         metrics_spec=metrics_spec,
@@ -966,9 +961,7 @@ def main() -> None:
 
     # 6. Exit with appropriate code
     if status != "COMPLETED":
-        _LOGGER.error(
-            "OSMO workflow %s did not complete successfully: %s", workflow_id, status
-        )
+        _LOGGER.error("OSMO workflow %s did not complete successfully: %s", workflow_id, status)
         sys.exit(1)
 
     _LOGGER.info("Done. OSMO workflow %s COMPLETED.", workflow_id)
