@@ -35,7 +35,7 @@ jobs:
         id: ruff-check
         continue-on-error: true
         run: |
-          uvx ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
+          uv run --frozen --isolated --only-group lint ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_CHECK_FAILED=true' >> $env:GITHUB_ENV
@@ -46,7 +46,7 @@ jobs:
         id: ruff-format
         continue-on-error: true
         run: |
-          uvx ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
+          uv run --frozen --isolated --only-group lint ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_FORMAT_FAILED=true' >> $env:GITHUB_ENV
@@ -77,5 +77,5 @@ jobs:
       - name: Fail job if errors found
         if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true' || env.HF_PINS_FAILED == 'true') && !inputs.soft-fail
         run: |
-          Write-Output "::error::Python lint violations detected. Run 'uvx ruff check --fix .', 'uvx ruff format .', and 'npm run lint:hfpins' locally."
+          Write-Output "::error::Python lint violations detected. Run 'npm run lint:py' and 'npm run lint:hfpins' locally."
           exit 1
