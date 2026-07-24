@@ -25,6 +25,8 @@ Optional component - only needed for complex batch scheduling scenarios.
 OPTIONS:
     -h, --help                 Show this help message
     -t, --tf-dir DIR           Terraform directory (default: $DEFAULT_TF_DIR)
+    --kubeconfig PATH          Isolated AKS kubeconfig output
+    --context NAME             Explicit AKS context (default: cluster name)
     --volcano-version VERSION  Volcano version (default: $VOLCANO_VERSION)
     --config-preview           Print configuration and exit
 
@@ -37,6 +39,8 @@ EOF
 
 # Defaults
 tf_dir="$SCRIPT_DIR/../$DEFAULT_TF_DIR"
+kubeconfig=""
+context=""
 volcano_version="$VOLCANO_VERSION"
 config_preview=false
 
@@ -44,6 +48,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)           show_help; exit 0 ;;
     -t|--tf-dir)         tf_dir="$2"; shift 2 ;;
+    --kubeconfig)        kubeconfig="$2"; shift 2 ;;
+    --context)           context="$2"; shift 2 ;;
     --volcano-version)   volcano_version="$2"; shift 2 ;;
     --config-preview)    config_preview=true; shift ;;
     *)                   fatal "Unknown option: $1" ;;
@@ -61,10 +67,14 @@ tf_output=$(read_terraform_outputs "$tf_dir")
 
 cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster name")
 rg=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
+kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${cluster}.yaml}"
+context="${context:-$cluster}"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Cluster" "$cluster"
+  print_kv "Kubeconfig" "$kubeconfig"
+  print_kv "Context" "$context"
   print_kv "Resource Group" "$rg"
   print_kv "Volcano Scheduler" "$volcano_version"
   print_kv "Namespace" "$NS_AZUREML"
@@ -83,9 +93,9 @@ volcano_values="$VALUES_DIR/volcano-sh-values.yaml"
 #------------------------------------------------------------------------------
 section "Connect and Prepare Cluster"
 
-connect_aks "$rg" "$cluster"
+connect_aks "$rg" "$cluster" "$kubeconfig" "$context"
 
-ensure_namespace "$NS_AZUREML"
+ensure_namespace "$kubeconfig" "$context" "$NS_AZUREML"
 kubectl create serviceaccount azureml-workload -n "$NS_AZUREML" --dry-run=client -o yaml | kubectl apply -f -
 
 #------------------------------------------------------------------------------

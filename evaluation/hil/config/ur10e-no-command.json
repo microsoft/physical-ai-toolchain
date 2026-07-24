@@ -1,0 +1,39 @@
+{
+    "schema_version": 1,
+    "kind": "ur10e-no-command-dry-run",
+    "robot": {
+        "model": "UR10E",
+        "joint_order": [
+            "shoulder_pan_joint",
+            "shoulder_lift_joint",
+            "elbow_joint",
+            "wrist_1_joint",
+            "wrist_2_joint",
+            "wrist_3_joint"
+        ],
+        "position_unit": "rad",
+        "velocity_unit": "rad_per_second",
+        "command_transport": "none",
+        "command_endpoint": null,
+        "device_paths": [],
+        "robot_network_cidrs": []
+    },
+    "observations": {
+        "source": "deterministic-fixture",
+        "fixture": "ur10e-observations.jsonl"
+    },
+    "policy": {
+        "kind": "deterministic-zero-seeking-fixture",
+        "image": "python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf"
+    },
+    "execution": {
+        "mode": "dry-run",
+        "max_steps": 10,
+        "period_ms": 100
+    },
+    "safety": {
+        "allow_motion": false,
+        "allow_command_transport": false,
+        "require_negative_command_probe": true
+    }
+}

@@ -19,6 +19,8 @@ Note: Does NOT delete azureml namespace - ML extension uses it.
 OPTIONS:
     -h, --help              Show this help message
     -t, --tf-dir DIR        Terraform directory (default: $DEFAULT_TF_DIR)
+    --kubeconfig PATH       Isolated AKS kubeconfig output
+    --context NAME          Explicit AKS context (default: cluster name)
     --delete-namespace      Also delete the azureml namespace
     --config-preview        Print configuration and exit
 
@@ -31,6 +33,8 @@ EOF
 
 # Defaults
 tf_dir="$SCRIPT_DIR/../$DEFAULT_TF_DIR"
+kubeconfig=""
+context=""
 delete_namespace=false
 config_preview=false
 
@@ -38,6 +42,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)           show_help; exit 0 ;;
     -t|--tf-dir)         tf_dir="$2"; shift 2 ;;
+    --kubeconfig)        kubeconfig="$2"; shift 2 ;;
+    --context)           context="$2"; shift 2 ;;
     --delete-namespace)  delete_namespace=true; shift ;;
     --config-preview)    config_preview=true; shift ;;
     *)                   fatal "Unknown option: $1" ;;
@@ -55,10 +61,14 @@ tf_output=$(read_terraform_outputs "$tf_dir")
 
 cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster name")
 rg=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
+kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${cluster}.yaml}"
+context="${context:-$cluster}"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Cluster" "$cluster"
+  print_kv "Kubeconfig" "$kubeconfig"
+  print_kv "Context" "$context"
   print_kv "Resource Group" "$rg"
   print_kv "Namespace" "$NS_AZUREML"
   print_kv "Delete Namespace" "$delete_namespace"
@@ -70,7 +80,7 @@ fi
 #------------------------------------------------------------------------------
 section "Connect to Cluster"
 
-connect_aks "$rg" "$cluster"
+connect_aks "$rg" "$cluster" "$kubeconfig" "$context"
 
 #------------------------------------------------------------------------------
 # Uninstall Volcano Scheduler

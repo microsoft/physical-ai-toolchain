@@ -19,6 +19,8 @@ detach compute target, and clean up federated identity credentials.
 OPTIONS:
     -h, --help              Show this help message
     -t, --tf-dir DIR        Terraform directory (default: $DEFAULT_TF_DIR)
+    --kubeconfig PATH       Isolated AKS kubeconfig output
+    --context NAME          Explicit AKS context (default: cluster name)
     --extension-name NAME   Extension name (default: azureml-<cluster>)
     --compute-name NAME     Compute target name (default: k8s-<suffix>)
     --skip-compute-detach   Skip detaching compute target
@@ -36,6 +38,8 @@ EOF
 
 # Defaults
 tf_dir="$SCRIPT_DIR/../$DEFAULT_TF_DIR"
+kubeconfig=""
+context=""
 extension_name=""
 compute_name=""
 skip_compute_detach=false
@@ -48,6 +52,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)            show_help; exit 0 ;;
     -t|--tf-dir)          tf_dir="$2"; shift 2 ;;
+    --kubeconfig)         kubeconfig="$2"; shift 2 ;;
+    --context)            context="$2"; shift 2 ;;
     --extension-name)     extension_name="$2"; shift 2 ;;
     --compute-name)       compute_name="$2"; shift 2 ;;
     --skip-compute-detach) skip_compute_detach=true; shift ;;
@@ -60,8 +66,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 require_tools az terraform kubectl jq
-require_az_extension k8s-extension
-require_az_extension ml
 
 #------------------------------------------------------------------------------
 # Gather Configuration
@@ -72,6 +76,8 @@ tf_output=$(read_terraform_outputs "$tf_dir")
 
 cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster name")
 rg=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
+kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${cluster}.yaml}"
+context="${context:-$cluster}"
 ml_workspace=$(tf_get "$tf_output" "azureml_workspace.value.name")
 ml_identity_id=$(tf_get "$tf_output" "ml_workload_identity.value.id")
 
@@ -83,6 +89,8 @@ ml_identity_id=$(tf_get "$tf_output" "ml_workload_identity.value.id")
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Cluster" "$cluster"
+  print_kv "Kubeconfig" "$kubeconfig"
+  print_kv "Context" "$context"
   print_kv "Resource Group" "$rg"
   print_kv "Extension Name" "$extension_name"
   print_kv "Compute Name" "$compute_name"
@@ -92,12 +100,15 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+require_az_extension k8s-extension
+require_az_extension ml
+
 #------------------------------------------------------------------------------
 # Connect to Cluster
 #------------------------------------------------------------------------------
 section "Connect to Cluster"
 
-connect_aks "$rg" "$cluster"
+connect_aks "$rg" "$cluster" "$kubeconfig" "$context"
 
 #------------------------------------------------------------------------------
 # Detach Compute Target

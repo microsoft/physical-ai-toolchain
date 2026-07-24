@@ -13,6 +13,12 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 
 **Artifacts:** Do not create or modify tests, scripts, or one-off markdown docs unless explicitly requested.
 
+**Environment-specific artifacts:** Never commit values discovered from a deployed environment, including Azure resource identifiers, subscription or tenant identifiers, service endpoints, cluster or registry names, generated OSMO platform values, image digest manifests, kubeconfigs, OSMO profiles, and credential files.
+
+* Generate non-secret deployment details under `infrastructure/setup/generated/<environment>/`, which is gitignored, by following `.github/skills/environment-deployment/SKILL.md`.
+* Keep kubeconfigs, OSMO profiles, tokens, registry credentials, Terraform state, and other secrets outside the generated bundle and outside Git.
+* Treat checked-in RFC1918 addresses, resource shapes, and other clearly documented values as instructional defaults or examples. Do not remove or replace them solely because they resemble environment configuration.
+
 **Comment policy:** Never include thought processes, step-by-step reasoning, or narrative comments in code.
 
 * Keep comments brief and factual; describe **behavior/intent, invariants, edge cases**.

@@ -25,11 +25,14 @@ locals {
     key_vault         = "privatelink.vaultcore.azure.net"
     storage_blob      = "privatelink.blob.core.windows.net"
     storage_file      = "privatelink.file.core.windows.net"
-    storage_dfs       = "privatelink.dfs.core.windows.net"
     acr               = "privatelink.azurecr.io"
     azureml_api       = "privatelink.api.azureml.ms"
     azureml_notebooks = "privatelink.notebooks.azure.net"
   }
+
+  data_lake_dns_zones = var.should_create_data_lake_storage ? {
+    storage_dfs = "privatelink.dfs.core.windows.net"
+  } : {}
 
   // AKS DNS zone (conditional)
   aks_dns_zones = var.should_include_aks_dns_zone ? {
@@ -45,5 +48,5 @@ locals {
   } : {}
 
   // Merged core DNS zones
-  core_dns_zones = merge(local.base_dns_zones, local.aks_dns_zones, local.monitor_dns_zones)
+  core_dns_zones = merge(local.base_dns_zones, local.data_lake_dns_zones, local.aks_dns_zones, local.monitor_dns_zones)
 }

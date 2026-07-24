@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Deploy OSMO 6.3 control plane and backend operator
+# cspell:ignore envoyproxy
 #
 # Prerequisites:
 #   - AKS cluster deployed (infrastructure/terraform/)
@@ -41,10 +42,20 @@ Deploy OSMO 6.3 control plane and backend operator.
 OPTIONS:
     -h, --help              Show this help message
     -t, --tf-dir DIR        Terraform directory (default: $DEFAULT_TF_DIR)
+    --kubeconfig PATH       Isolated AKS kubeconfig output
+    --context NAME          Explicit AKS context (default: cluster name)
+    --expected-aks-resource-id ID
+                            Required AKS resource ID safety boundary
     --chart-version VER     Helm chart version (default: $OSMO_CHART_VERSION)
+    --service-chart-sha256 SHA
+                            Expected service chart SHA-256
+    --backend-chart-sha256 SHA
+                            Expected backend chart SHA-256
     --image-version TAG     OSMO image tag (default: $OSMO_IMAGE_VERSION)
+    --platform-values PATH  OSMO platform values file (default: values/osmo-platforms.yaml)
     --use-acr               Pull images from ACR deployed by Terraform
     --acr-name NAME         Pull images from specified ACR
+    --image-manifest PATH   Required immutable ACR image manifest with --use-acr
     --skip-backend          Skip backend operator deployment
     --use-incluster-redis   Use in-cluster Redis instead of Azure Managed Redis
                             (unauthenticated, non-TLS; suitable for development)
@@ -54,6 +65,11 @@ OPTIONS:
     --force-mek             Replace existing MEK (data loss warning)
     --mek-config-file PATH  Use existing MEK config file
     --service-url URL       OSMO control plane URL (default: auto-detect)
+    --private-service-ip IP Stable RFC1918 frontend IP for the internal LoadBalancer
+    --hil-backend-name NAME Add an external HiL backend and CPU pool
+    --hil-pool-name NAME    HiL pool name (default: backend name)
+    --hil-workflow-namespace NAME
+                            Edge workflow namespace (default: $OSMO_HIL_WORKFLOW_NAMESPACE)
     --backend-name NAME     Backend identifier (default: default)
     --container-name NAME   Blob container name (default: osmo)
     --skip-preflight        Skip preflight version checks
@@ -72,12 +88,19 @@ EOF
 # Defaults
 
 tf_dir="$SCRIPT_DIR/$DEFAULT_TF_DIR"
+kubeconfig=""
+kubeconfig_set=false
+context=""
+expected_aks_resource_id=""
 chart_version="$OSMO_CHART_VERSION"
 image_version="$OSMO_IMAGE_VERSION"
+service_chart_sha256="$OSMO_SERVICE_CHART_SHA256"
+backend_chart_sha256="$OSMO_BACKEND_CHART_SHA256"
 [[ "$OSMO_USE_PRERELEASE" == "true" ]] && chart_version="$OSMO_PRERELEASE_CHART_VERSION"
 [[ "$OSMO_USE_PRERELEASE" == "true" ]] && image_version="$OSMO_PRERELEASE_IMAGE_VERSION"
 use_acr=false
 acr_name=""
+image_manifest=""
 skip_backend=false
 use_incluster_redis=false
 use_incluster_postgres=false
@@ -85,6 +108,10 @@ skip_mek=false
 force_mek=false
 mek_config_file=""
 service_url=""
+private_service_ip="${OSMO_PRIVATE_SERVICE_IP:-}"
+hil_backend_name=""
+hil_pool_name=""
+hil_workflow_namespace="$OSMO_HIL_WORKFLOW_NAMESPACE"
 skip_preflight=false
 use_local_osmo=false
 config_preview=false
@@ -92,15 +119,23 @@ chart_version_set=false
 image_version_set=false
 backend_name="default"
 container="${OSMO_WORKFLOW_BUCKET:-osmo}"
+platform_values_override=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)             show_help; exit 0 ;;
         -t|--tf-dir)           tf_dir="$2"; shift 2 ;;
+        --kubeconfig)          kubeconfig="$2"; kubeconfig_set=true; shift 2 ;;
+        --context)             context="$2"; shift 2 ;;
+        --expected-aks-resource-id) expected_aks_resource_id="$2"; shift 2 ;;
         --chart-version)       chart_version="$2"; chart_version_set=true; shift 2 ;;
+        --service-chart-sha256) service_chart_sha256="$2"; shift 2 ;;
+        --backend-chart-sha256) backend_chart_sha256="$2"; shift 2 ;;
         --image-version)       image_version="$2"; image_version_set=true; shift 2 ;;
+        --platform-values)     platform_values_override="$2"; shift 2 ;;
         --use-acr)             use_acr=true; shift ;;
         --acr-name)            acr_name="$2"; use_acr=true; shift 2 ;;
+        --image-manifest)      image_manifest="$2"; shift 2 ;;
         --skip-backend)        skip_backend=true; shift ;;
         --use-incluster-redis)     use_incluster_redis=true; shift ;;
         --use-incluster-postgres) use_incluster_postgres=true; shift ;;
@@ -108,6 +143,10 @@ while [[ $# -gt 0 ]]; do
         --force-mek)           force_mek=true; shift ;;
         --mek-config-file)     mek_config_file="$2"; shift 2 ;;
         --service-url)         service_url="$2"; shift 2 ;;
+        --private-service-ip)  private_service_ip="$2"; shift 2 ;;
+        --hil-backend-name)    hil_backend_name="$2"; shift 2 ;;
+        --hil-pool-name)       hil_pool_name="$2"; shift 2 ;;
+        --hil-workflow-namespace) hil_workflow_namespace="$2"; shift 2 ;;
         --backend-name)        backend_name="$2"; shift 2 ;;
         --container-name)      container="$2"; shift 2 ;;
         --skip-preflight)      skip_preflight=true; shift ;;
@@ -134,6 +173,11 @@ fi
 
 section "Read Terraform Outputs"
 tf_output=$(read_terraform_outputs "$tf_dir")
+if [[ "$kubeconfig_set" == "true" && -z "$expected_aks_resource_id" ]]; then
+    fatal "--expected-aks-resource-id is required with --kubeconfig"
+fi
+expected_aks_resource_id="${expected_aks_resource_id:-$(tf_require "$tf_output" "aks_cluster.value.id" "AKS cluster resource ID")}"
+verify_aks_resource_id "$tf_output" "$expected_aks_resource_id"
 storage_account=$(tf_require "$tf_output" "storage_account.value.name" "Storage account")
 osmo_identity_client_id=$(tf_require "$tf_output" "osmo_workload_identity.value.client_id" "OSMO identity")
 resource_group=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
@@ -144,6 +188,9 @@ pg_user=$(tf_get "$tf_output" "postgresql_connection_info.value.admin_username" 
 if [[ -z "$pg_fqdn" && "$use_incluster_postgres" != "true" ]]; then
     fatal "PostgreSQL FQDN not found in Terraform outputs. Use --use-incluster-postgres for non-production deployments."
 fi
+kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${aks_cluster}.yaml}"
+context="${context:-$aks_cluster}"
+verify_existing_aks_kubeconfig "$kubeconfig" "$context" "$expected_aks_resource_id"
 kv_name=$(tf_require "$tf_output" "key_vault_name.value" "Key Vault name")
 redis_hostname=$(tf_get "$tf_output" "managed_redis_connection_info.value.hostname" "")
 redis_port=$(tf_get "$tf_output" "managed_redis_connection_info.value.port" "10000")
@@ -157,16 +204,30 @@ workflow_base_url="https://${storage_account}.blob.core.windows.net:443/${contai
 service_values="$VALUES_DIR/osmo-control-plane.yaml"
 service_identity_values="$VALUES_DIR/osmo-control-plane-identity.yaml"
 platform_values="$VALUES_DIR/osmo-platforms.yaml"
+[[ -n "$platform_values_override" ]] && platform_values="$platform_values_override"
 backend_values="$VALUES_DIR/osmo-backend-operator.yaml"
 backend_identity_values="$VALUES_DIR/osmo-backend-operator-identity.yaml"
 workflow_sa_manifest="$MANIFESTS_DIR/osmo-workflow-sa.yaml"
 internal_lb_manifest="$MANIFESTS_DIR/internal-lb-ingress.yaml"
+hil_backend_values="$VALUES_DIR/osmo-hil-backend.yaml"
 
 required_files=("$service_values" "$service_identity_values" "$platform_values" "$internal_lb_manifest")
 [[ "$skip_backend" == "false" ]] && required_files+=("$backend_values" "$backend_identity_values" "$workflow_sa_manifest")
+[[ -n "$hil_backend_name" ]] && required_files+=("$hil_backend_values")
 for file in "${required_files[@]}"; do
     [[ -f "$file" ]] || fatal "Required file not found: $file"
 done
+
+if [[ -n "$hil_backend_name" ]]; then
+    [[ -n "$private_service_ip" ]] || fatal "--private-service-ip is required with --hil-backend-name"
+    is_rfc1918_ipv4 "$private_service_ip" || fatal "--private-service-ip must be an RFC1918 IPv4 address"
+    hil_pool_name="${hil_pool_name:-$hil_backend_name}"
+    [[ "$hil_backend_name" != "default" && "$hil_pool_name" != "default" ]] || \
+        fatal "HiL backend and pool names must not replace the reserved default desired state"
+    [[ "$hil_backend_name" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || fatal "Invalid HiL backend name"
+    [[ "$hil_pool_name" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || fatal "Invalid HiL pool name"
+    service_url="http://${private_service_ip}"
+fi
 
 acr_login_server=""
 osmo_image_location="nvcr.io/nvidia/osmo"
@@ -183,23 +244,67 @@ fi
 if [[ "$config_preview" == "true" ]]; then
     section "Configuration Preview"
     print_kv "Cluster" "$aks_cluster"
+    print_kv "Kubeconfig" "$kubeconfig"
+    print_kv "Context" "$context"
     print_kv "Resource Group" "$resource_group"
+    print_kv "AKS Resource ID" "$expected_aks_resource_id"
     print_kv "Service Chart" "$chart_version"
+    print_kv "Service Chart SHA" "$service_chart_sha256"
+    print_kv "Backend Chart SHA" "$backend_chart_sha256"
     print_kv "Image Version" "$image_version"
+    print_kv "Platform Values" "$platform_values"
     print_kv "Storage Endpoint" "$endpoint"
     print_kv "Container" "$container"
     print_kv "Dataset Bucket" "training -> ${endpoint}/datasets"
     print_kv "PostgreSQL" "${pg_fqdn:-in-cluster}"
     print_kv "Redis" "${redis_hostname:-in-cluster}"
     print_kv "Registry" "$([[ $use_acr == true ]] && echo "$acr_login_server" || echo 'nvcr.io')"
+    print_kv "Image Manifest" "${image_manifest:-not used}"
     print_kv "Auth Mode" "workload-identity"
     print_kv "Backend Name" "$backend_name"
+    print_kv "Private Service IP" "${private_service_ip:-<required for HiL>}"
+    print_kv "HiL Backend" "${hil_backend_name:-not configured}"
+    print_kv "HiL Pool" "${hil_pool_name:-not configured}"
     print_kv "Backend" "$([[ $skip_backend == true ]] && echo 'skipped' || echo 'deployed')"
     print_kv "MEK" "$([[ $skip_mek == true ]] && echo 'skipped' || echo 'configured')"
     exit 0
 fi
 
-connect_aks "$resource_group" "$aks_cluster"
+if [[ "$use_acr" == "true" && -n "$image_manifest" ]]; then
+    verify_acr_image_manifest "$image_manifest" "$acr_login_server" "$image_version"
+fi
+
+section "Preflight OSMO Charts"
+if [[ "$use_acr" == "false" ]]; then
+    helm repo add osmo "$HELM_REPO_OSMO" >/dev/null 2>&1 || true
+    helm repo update osmo >/dev/null
+fi
+if [[ -n "$service_chart_sha256" ]]; then
+    service_chart_ref=$(pull_and_verify_chart "$service_chart_ref" "$chart_version" \
+        "$service_chart_sha256" "$_WORK_DIR/service-chart")
+fi
+if [[ "$skip_backend" == "false" && -n "$backend_chart_sha256" ]]; then
+    backend_chart_ref=$(pull_and_verify_chart "$backend_chart_ref" "$chart_version" \
+        "$backend_chart_sha256" "$_WORK_DIR/backend-chart")
+fi
+
+connect_aks "$resource_group" "$aks_cluster" "$kubeconfig" "$context"
+
+if [[ -n "$hil_backend_name" ]] && helm status osmo -n "$NS_OSMO_CONTROL_PLANE" >/dev/null 2>&1; then
+        current_values=$(helm get values osmo -n "$NS_OSMO_CONTROL_PLANE" -o json --all)
+        if jq -e --arg name "$hil_backend_name" '.services.configs.backends[$name] != null' <<< "$current_values" >/dev/null; then
+                jq -e --arg name "$hil_backend_name" --arg namespace "$hil_workflow_namespace" \
+                    --arg router "ws://${private_service_ip}" '
+                        .services.configs.backends[$name].k8s_namespace == $namespace and
+                        .services.configs.backends[$name].router_address == $router
+                    ' <<< "$current_values" >/dev/null || fatal "Existing HiL backend name collides with different desired state"
+        fi
+        if jq -e --arg name "$hil_pool_name" '.services.configs.pools[$name] != null' <<< "$current_values" >/dev/null; then
+                jq -e --arg name "$hil_pool_name" --arg backend "$hil_backend_name" \
+                    '.services.configs.pools[$name].backend == $backend' <<< "$current_values" >/dev/null || \
+                    fatal "Existing HiL pool name collides with a different backend"
+        fi
+fi
 
 #------------------------------------------------------------------------------
 # Phase 1a: Configure Internal LoadBalancer
@@ -210,7 +315,21 @@ connect_aks "$resource_group" "$aks_cluster"
 
 section "Configure Internal LoadBalancer"
 info "Applying internal LoadBalancer ingress service..."
-kubectl apply -f "$internal_lb_manifest"
+if [[ -z "$private_service_ip" ]]; then
+    private_service_ip=$(kubectl get svc azureml-ingress-nginx-internal-lb -n azureml \
+    -o jsonpath='{.metadata.annotations.service\.beta\.kubernetes\.io/azure-load-balancer-ipv4}' 2>/dev/null || true)
+fi
+[[ -n "$private_service_ip" ]] || fatal "A stable private service IP is required; pass --private-service-ip"
+is_rfc1918_ipv4 "$private_service_ip" || fatal "Private service IP must be an RFC1918 IPv4 address"
+export OSMO_PRIVATE_SERVICE_IP="$private_service_ip"
+envsubst < "$internal_lb_manifest" | kubectl apply -f -
+for ((attempt = 1; attempt <= 60; attempt++)); do
+    assigned_private_ip=$(kubectl get svc azureml-ingress-nginx-internal-lb -n azureml \
+        -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+    [[ "$assigned_private_ip" == "$private_service_ip" ]] && break
+    (( attempt == 60 )) && fatal "Internal LoadBalancer did not acquire requested IP $private_service_ip"
+    sleep 5
+done
 
 #------------------------------------------------------------------------------
 # Phase 1b: Configure Storage
@@ -232,7 +351,7 @@ fi
 #------------------------------------------------------------------------------
 
 section "Configure Secrets"
-ensure_namespace "$NS_OSMO_CONTROL_PLANE"
+ensure_namespace "$kubeconfig" "$context" "$NS_OSMO_CONTROL_PLANE"
 
 # Create service accounts required by the chart (router and UI use separate SAs)
 kubectl create sa router -n "$NS_OSMO_CONTROL_PLANE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -267,12 +386,12 @@ if [[ "$use_incluster_postgres" == "true" ]]; then
         warn "In-cluster PostgreSQL: generated ephemeral dev password for db-secret."
     fi
     kubectl create secret generic db-secret -n "$NS_OSMO_CONTROL_PLANE" \
-        --from-literal=db-password="$pg_password" \
+        --from-file=db-password=<(printf '%s' "$pg_password") \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 else
     pg_password=$(az keyvault secret show --vault-name "$kv_name" --name psql-admin-password --query value -o tsv)
     kubectl create secret generic db-secret -n "$NS_OSMO_CONTROL_PLANE" \
-        --from-literal=db-password="$pg_password" \
+        --from-file=db-password=<(printf '%s' "$pg_password") \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 fi
 
@@ -281,12 +400,12 @@ if [[ "$use_incluster_redis" == "true" ]]; then
     include_redis_secret=false
     warn "In-cluster Redis runs without TLS or authentication. Use only for development."
     kubectl create secret generic redis-secret -n "$NS_OSMO_CONTROL_PLANE" \
-        --from-literal=redis-password="" \
+        --from-file=redis-password=<(printf '') \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 else
     redis_key=$(az keyvault secret show --vault-name "$kv_name" --name redis-primary-key --query value -o tsv)
     kubectl create secret generic redis-secret -n "$NS_OSMO_CONTROL_PLANE" \
-        --from-literal=redis-password="$redis_key" \
+        --from-file=redis-password=<(printf '%s' "$redis_key") \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 fi
 
@@ -335,14 +454,35 @@ if [[ "$skip_mek" == "false" ]]; then
         # Clear service_auth from DB — it was encrypted with the old MEK and is now
         # undecryptable. The service regenerates a fresh keypair on next start.
         info "Clearing stale service_auth from database..."
-        # Pass the password via PGPASSWORD env, not the psql connection string:
-        # kubectl stores command args in the pod spec (etcd + audit log), but not env values.
-        kubectl run osmo-clear-auth --rm -i --restart=Never -n "$NS_OSMO_CONTROL_PLANE" \
-            --image=postgres:16 \
-            --env="PGPASSWORD=${pg_password}" \
-            -- psql "host=${pg_fqdn} port=5432 dbname=osmo user=${pg_user} sslmode=require" \
-            -c "DELETE FROM configs WHERE key='service_auth' AND type='SERVICE'" 2>/dev/null || \
-            warn "Could not clear service_auth (DB may not be initialized yet — safe on first deploy)"
+                kubectl delete pod osmo-clear-auth -n "$NS_OSMO_CONTROL_PLANE" --ignore-not-found >/dev/null
+                cat <<EOF | kubectl apply -f - >/dev/null
+apiVersion: v1
+kind: Pod
+metadata:
+    name: osmo-clear-auth
+    namespace: $NS_OSMO_CONTROL_PLANE
+spec:
+    restartPolicy: Never
+    containers:
+        - name: psql
+            image: postgres:16@sha256:eb4759788a2182f08257135e61a34f2cfc3c2914079f3465d64ee62350f4d081
+            env:
+                - name: PGPASSWORD
+                    valueFrom:
+                        secretKeyRef:
+                            name: db-secret
+                            key: db-password
+            command: [psql]
+            args:
+                - "host=$pg_fqdn port=5432 dbname=osmo user=$pg_user sslmode=require"
+                - -c
+                - "DELETE FROM configs WHERE key='service_auth' AND type='SERVICE'"
+EOF
+                if ! kubectl wait pod/osmo-clear-auth -n "$NS_OSMO_CONTROL_PLANE" \
+                        --for=jsonpath='{.status.phase}'=Succeeded --timeout=60s >/dev/null 2>&1; then
+                        warn "Could not clear service_auth (DB may not be initialized yet — safe on first deploy)"
+                fi
+                kubectl delete pod osmo-clear-auth -n "$NS_OSMO_CONTROL_PLANE" --ignore-not-found >/dev/null
 
         # Ensure the service pod restarts to pick up the new MEK and regenerate service_auth.
         # Helm upgrade may not trigger a rollout if values are unchanged.
@@ -356,15 +496,12 @@ fi
 
 section "Deploy OSMO Service"
 if [[ "$use_acr" == "true" ]]; then
-    login_acr "$acr_name"
-else
-    helm repo add osmo "$HELM_REPO_OSMO" >/dev/null 2>&1 || true
-    helm repo update osmo >/dev/null
+    info "Using existing Helm registry credentials for $acr_login_server"
 fi
 
 if [[ "$use_acr" == "false" ]] && is_prerelease_tag "$image_version"; then
-    [[ -n "$NGC_API_KEY" ]] || fatal "NGC_API_KEY required for prerelease images from nvcr.io. Export NGC_API_KEY or use --use-acr."
-    create_nvcr_pull_secret "$NS_OSMO_CONTROL_PLANE" "$NGC_API_KEY" "$NVCR_PULL_SECRET"
+    [[ -n "${NGC_API_KEY_FILE:-}" ]] || fatal "NGC_API_KEY_FILE is required for prerelease images from nvcr.io"
+    create_nvcr_pull_secret "$kubeconfig" "$context" "$NS_OSMO_CONTROL_PLANE" "$NGC_API_KEY_FILE" "$NVCR_PULL_SECRET"
 fi
 
 service_helm_args=(
@@ -386,6 +523,7 @@ service_helm_args=(
     --set-string "services.configs.dataset.buckets.training.dataset_path=${endpoint}/datasets"
     --set-string "services.configs.workflow.backend_images.init=${osmo_image_location}/init-container:${image_version}"
     --set-string "services.configs.workflow.backend_images.client=${osmo_image_location}/client:${image_version}"
+    --set-string "gateway.envoy.image=envoyproxy/envoy@sha256:4e3c734cbe9892a3513c97cf3974ff73cfef5d784f5cceed9ea758a2b80e0c31"
 )
 
 if [[ -n "$pg_fqdn" ]]; then
@@ -401,6 +539,20 @@ else
         --set-string "services.postgres.password=$pg_password"
         --set "services.postgres.storageClassName=default"
         --set "services.postgres.storageSize=10Gi"
+    )
+fi
+
+if [[ -n "$hil_backend_name" ]]; then
+    export OSMO_HIL_BACKEND_NAME="$hil_backend_name"
+    export OSMO_HIL_POOL_NAME="$hil_pool_name"
+    export OSMO_HIL_WORKFLOW_NAMESPACE="$hil_workflow_namespace"
+    export OSMO_HIL_ROUTER_URL="ws://${private_service_ip}"
+    export OSMO_HIL_PULL_SECRET
+    rendered_hil_values="$_WORK_DIR/osmo-hil-backend.yaml"
+    envsubst < "$hil_backend_values" > "$rendered_hil_values"
+    service_helm_args+=(
+        -f "$rendered_hil_values"
+        --set-string "services.configs.service.service_base_url=$service_url"
     )
 fi
 
@@ -425,10 +577,9 @@ else
     )
 fi
 
-if [[ "$use_acr" == "false" && -n "${OSMO_SERVICE_CHART_SHA256:-}" ]]; then
-    service_chart_ref=$(pull_and_verify_chart "$service_chart_ref" "$chart_version" "$OSMO_SERVICE_CHART_SHA256" "$_WORK_DIR/service-chart")
+if [[ "$use_acr" == "true" && -n "$image_manifest" ]]; then
+    verify_acr_image_manifest "$image_manifest" "$acr_login_server" "$image_version"
 fi
-
 helm upgrade --install osmo "$service_chart_ref" "${service_helm_args[@]}"
 
 # oauth2-proxy is always deployed by the gateway sub-chart but crashes without
@@ -444,13 +595,32 @@ for deploy in osmo-gateway-envoy osmo-service osmo-agent osmo-worker osmo-logger
     fi
 done
 
+if [[ "$use_acr" == "true" ]]; then
+        invalid_images=$(kubectl get pods -n "$NS_OSMO_CONTROL_PLANE" -o json | jq -r \
+                --arg prefix "${acr_login_server}/osmo/" --arg suffix ":${image_version}" '
+                [
+                    .items[] |
+                    (.spec.initContainers // []) + (.spec.containers // []) |
+                    .[] |
+                    select(.image | startswith($prefix)) |
+                    select((.image | endswith($suffix)) | not) |
+                    .image
+                ] | unique | .[]
+                ')
+        [[ -z "$invalid_images" ]] || fatal "Running OSMO Pods use unexpected image references: $invalid_images"
+        kubectl get pods -n "$NS_OSMO_CONTROL_PLANE" -o json | jq -e '
+            any(.items[]; any(.spec.containers[]?; .name == "envoy" and .image == "envoyproxy/envoy@sha256:4e3c734cbe9892a3513c97cf3974ff73cfef5d784f5cceed9ea758a2b80e0c31")) and
+            all(.items[].status.containerStatuses[]?; (.imageID // "") | test("sha256:[0-9a-f]{64}"))
+        ' >/dev/null || fatal "Running OSMO Pods do not report the approved image references and runtime image IDs"
+fi
+
 #------------------------------------------------------------------------------
 # Phase 3: Post-deploy Smoke Test
 #------------------------------------------------------------------------------
 
 section "Post-deploy Smoke Test"
 if [[ -z "$service_url" ]]; then
-    service_url=$(detect_service_url)
+    service_url=$(detect_service_url "$kubeconfig" "$context")
 fi
 
 expected_major="${image_version%%.*}"
@@ -499,7 +669,8 @@ fi
 info "Assigning backend roles to admin user..."
 service_pod=$(kubectl get pods -n "$NS_OSMO_CONTROL_PLANE" -l app=osmo-service --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
 if [[ -n "$service_pod" ]]; then
-    timeout 30 kubectl exec "$service_pod" -n "$NS_OSMO_CONTROL_PLANE" -- python3 -c "
+    timeout 30 kubectl --kubeconfig "$kubeconfig" --context "$context" \
+        exec "$service_pod" -n "$NS_OSMO_CONTROL_PLANE" -- python3 -c "
 import urllib.request, json, ssl
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
@@ -527,11 +698,11 @@ if [[ "$skip_backend" == "true" ]]; then
     info "Skipping backend operator deployment (--skip-backend)"
 else
     section "Deploy Backend Operator"
-    ensure_namespace "$NS_OSMO_OPERATOR"
-    ensure_namespace "$NS_OSMO_WORKFLOWS"
+    ensure_namespace "$kubeconfig" "$context" "$NS_OSMO_OPERATOR"
+    ensure_namespace "$kubeconfig" "$context" "$NS_OSMO_WORKFLOWS"
 
     if [[ "$use_acr" == "false" ]] && is_prerelease_tag "$image_version"; then
-        create_nvcr_pull_secret "$NS_OSMO_OPERATOR" "$NGC_API_KEY" "$NVCR_PULL_SECRET"
+        create_nvcr_pull_secret "$kubeconfig" "$context" "$NS_OSMO_OPERATOR" "$NGC_API_KEY_FILE" "$NVCR_PULL_SECRET"
     fi
 
     export WORKFLOWS_NAMESPACE="$NS_OSMO_WORKFLOWS"
@@ -622,10 +793,6 @@ PYTHON_EOF
         backend_helm_args+=(--set-string "global.imagePullSecret=$NVCR_PULL_SECRET")
     fi
 
-    if [[ "$use_acr" == "false" && -n "${OSMO_BACKEND_CHART_SHA256:-}" ]]; then
-        backend_chart_ref=$(pull_and_verify_chart "$backend_chart_ref" "$backend_chart_version" "$OSMO_BACKEND_CHART_SHA256" "$_WORK_DIR/backend-chart")
-    fi
-
     helm upgrade --install osmo-operator "$backend_chart_ref" "${backend_helm_args[@]}"
 fi
 
@@ -643,6 +810,9 @@ print_kv "Redis" "${redis_hostname:-in-cluster}"
 print_kv "Service URL" "$service_url"
 print_kv "Auth Mode" "workload-identity"
 print_kv "Backend Name" "$backend_name"
+print_kv "Private Service IP" "$private_service_ip"
+print_kv "HiL Backend" "${hil_backend_name:-not configured}"
+print_kv "HiL Pool" "${hil_pool_name:-not configured}"
 print_kv "Backend" "$([[ $skip_backend == true ]] && echo 'skipped' || echo 'deployed')"
 
 info "OSMO deployment complete"
