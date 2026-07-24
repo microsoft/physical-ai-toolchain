@@ -39,7 +39,7 @@ resources:
 command: >-
   pip install --quiet uv &&
   uv --directory workflows/azureml/osmo-proxy export --frozen --no-hashes --no-emit-project |
-  uv pip install --no-deps --quiet -r /dev/stdin &&
+  uv pip install --no-deps --quiet --system -r /dev/stdin &&
   python workflows/azureml/osmo-proxy/osmo_proxy.py --workflow-yaml ${WORKFLOW_YAML}
 
 environment_variables:
