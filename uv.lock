@@ -2067,9 +2067,6 @@ dev = [
 fuzz = [
     { name = "atheris" },
 ]
-lint = [
-    { name = "ruff" },
-]
 
 [package.metadata]
 
@@ -2094,7 +2091,6 @@ dev = [
     { name = "tqdm", specifier = "==4.68.4" },
 ]
 fuzz = [{ name = "atheris", specifier = "==3.1.0" }]
-lint = [{ name = "ruff", specifier = "==0.15.21" }]
 
 [[package]]
 name = "pillow"

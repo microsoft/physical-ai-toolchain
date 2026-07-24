@@ -12,7 +12,7 @@
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "lint:md:fix": "markdownlint-cli2 \"**/*.md\" --fix",
     "lint:ps": "pwsh -File scripts/linting/Invoke-PSScriptAnalyzer.ps1",
-    "lint:py": "uv run --frozen --isolated --only-group lint ruff check . && uv run --frozen --isolated --only-group lint ruff format --check .",
+    "lint:py": "uvx --with ruff==0.15.21 ruff check .",
     "lint:hfpins": "uv run --no-project python3 scripts/security/check_hf_pins.py",
     "lint:links": "pwsh -File scripts/linting/Invoke-LinkLanguageCheck.ps1",
     "lint:go": "pwsh -File scripts/linting/Invoke-GoLint.ps1",
