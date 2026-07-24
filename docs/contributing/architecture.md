@@ -2,7 +2,7 @@
 sidebar_position: 2
 title: Repository Architecture
 description: Tiered architecture for the Physical AI Toolchain, organized around the T0–T5 adoption ladder with the eight lifecycle domains presented as components adopted per tier.
-ms.date: 2026-07-13
+ms.date: 2026-07-23
 ms.topic: concept
 ---
 
@@ -195,8 +195,7 @@ Identity responsibilities remain separate:
 - Arc Kubernetes workload identity federates a user-assigned managed identity
     to selected K3s ServiceAccounts for storage and other Azure APIs.
 - The OSMO backend uses an expiring service token with the `osmo-backend` role.
-- A narrowly scoped HTTPS SAS is a storage-upload fallback, not OSMO
-    authentication, and managed identity remains the preferred storage path.
+- HiL storage upload uses the federated managed identity only.
 
 ### T5 — Operate
 

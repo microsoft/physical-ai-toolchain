@@ -20,7 +20,9 @@ services:
         metadata:
           labels:
             physical-ai.microsoft.com/no-command: "true"
+            azure.workload.identity/use: "true"
         spec:
+          serviceAccountName: osmo-workflow
           imagePullSecrets:
             - name: ${OSMO_HIL_PULL_SECRET}
           containers:

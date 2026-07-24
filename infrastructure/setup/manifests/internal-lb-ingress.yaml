@@ -14,9 +14,9 @@ metadata:
   namespace: azureml
   annotations:
     service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    service.beta.kubernetes.io/azure-load-balancer-ipv4: "${OSMO_PRIVATE_SERVICE_IP}"
 spec:
   type: LoadBalancer
-  loadBalancerIP: ${OSMO_PRIVATE_SERVICE_IP}
   selector:
     app.kubernetes.io/name: azureml-ingress-nginx
     app.kubernetes.io/instance: azureml-ingress-nginx

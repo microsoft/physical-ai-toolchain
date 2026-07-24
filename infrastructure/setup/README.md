@@ -2,7 +2,7 @@
 title: Cluster Setup
 description: AKS cluster configuration with NVIDIA GPU operator, KAI Scheduler, and AzureML extension
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-17
+ms.date: 2026-07-23
 ms.topic: how-to
 keywords:
   - cluster-setup
@@ -77,7 +77,11 @@ Prepare the exact catalog from a trusted environment-operator host:
   --config-preview
 ```
 
-The publisher verifies the existing backend and pool, writes exact artifacts, and publishes the catalog last. It does not grant roles, change Key Vault networking, or create remote desired state. The Ubuntu journey consumes these inputs through `data-pipeline/setup/hil/02-connect-osmo-backend.sh`.
+Key Vault is the only scripted protected-artifact transfer for the Ubuntu HiL journey. The publisher verifies the existing backend and pool, publishes exact artifacts, and writes the catalog last. It reuses the exact catalog-pinned OSMO token and token-metadata versions while they remain valid and unexpired.
+
+`--renew-token` forces issuance, while an absent catalog or valid expired metadata issues a new token. A malformed or inaccessible catalog, or a token binding or digest mismatch, stops publication. The publisher does not delete token versions, grant roles, change Key Vault networking, or create remote desired state.
+
+The Ubuntu consumer validates catalog structure, artifact digests, token metadata, token digest, backend binding, and expiry before changing local Kubernetes resources.
 
 ## 📖 Documentation
 

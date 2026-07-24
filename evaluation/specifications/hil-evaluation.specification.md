@@ -29,7 +29,7 @@ The AKS API endpoint and OSMO application endpoint are separate. Public AKS API 
 - Use the Arc server system-assigned managed identity for host-side Azure access when the upload process runs directly on Ubuntu.
 - Use an Arc Kubernetes OIDC issuer, workload identity webhook, user-assigned managed identity, and federated credential for Kubernetes workloads that access Azure Blob.
 - Use an expiring OSMO service token with the `osmo-backend` role for the external backend operator. Store it in a Kubernetes Secret created through a protected handoff.
-- Support a container-scoped HTTPS user-delegation SAS as a fallback for upload processes that cannot use managed identity. Do not use storage account keys.
+- Use the existing OSMO user-assigned managed identity as the only approved identity for durable edge-result upload. Bind `osmo-workflow` to the Arc issuer with the exact `system:serviceaccount:<workflow-namespace>:osmo-workflow` subject.
 
 ## Execution Modes
 
@@ -46,7 +46,7 @@ The AKS API endpoint and OSMO application endpoint are separate. Public AKS API 
 - Sensor and observation configuration
 - OSMO backend name and endpoint mode
 - Kubernetes namespace and ServiceAccount configuration
-- Storage account/container and selected authentication mode
+- Storage account/container and managed identity configuration
 - Safety limits, operator identity, and E-stop procedure
 - Run duration, task definition, and success criteria
 
@@ -61,7 +61,11 @@ Each run records:
 - Per-episode outcome metrics
 - Storage upload status and artifact checksums
 
-Write artifacts to local durable storage first. Upload only after files are complete and quiescent. Redact tokens, SAS query strings, private keys, and other credentials from logs and metadata.
+Write artifacts to OSMO's declared `{{output}}` directory. Use a unique URI below `azure://<account>/<container>/workflows/data/hil/no-command/`. Validate task upload completion, artifact checksums, manifest paths, summary contract, and credential absence after `osmo data download` completes.
+
+Durable output to Azure storage is implemented through OSMO and the managed identity before physical evaluation. Static validation proves the repository contract only; live Arc federation, runtime upload, and OSMO retrieval remain required environment validation. Do not use SAS, storage account keys, direct upload mechanisms, or alternate upload paths.
+
+Redact tokens, private keys, and other credentials from logs and metadata.
 
 ## Acceptance Criteria
 
@@ -70,6 +74,7 @@ Write artifacts to local durable storage first. Upload only after files are comp
 - A CPU-only workflow runs on the edge before GPU or robot tests.
 - A GPU workflow runs only after the actual driver, device plugin, and scheduler resources pass validation.
 - A dry-run policy evaluation completes without physical motion.
+- Durable evaluation output uploads through the approved managed identity before physical evaluation.
 - An operator confirms the first bounded physical run.
 - E-stop behavior is verified independently of the software pipeline.
 - The result identifies the exact policy, robot, sensors, safety events, and artifact locations.
@@ -85,6 +90,6 @@ The repository implements:
 - Stable private OSMO endpoint and additive HiL backend/pool desired state
 - Token-authenticated OSMO external backend deployment to K3s
 - CPU-only OSMO smoke workflow
-- UR10E-shaped no-command dry run with local artifact checksums
+- UR10E-shaped no-command dry run with managed-identity OSMO durable output verification
 
-Local no-command behavior is validated. VPN, K3s, external backend, Arc, GPU, and robot validation require user-owned infrastructure and hardware. GPU and physical motion remain deferred.
+Static repository checks validate the no-command behavior, durable-output template, publisher and consumer contracts, and downloaded artifact verifier. VPN, K3s, Arc federation, OSMO upload and retrieval, GPU, and robot validation require user-owned infrastructure and hardware. GPU and physical motion remain deferred.

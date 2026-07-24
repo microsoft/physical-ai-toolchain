@@ -2,7 +2,7 @@
 title: Ubuntu HiL Host and K3s Setup
 description: Prepare Ubuntu and install one owned local K3s compute plane for the progressive T3 HiL journey.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-17
+ms.date: 2026-07-23
 ms.topic: how-to
 ---
 
@@ -10,18 +10,18 @@ Prepare Ubuntu 22.04 or 24.04 and install one pinned, owned K3s node. Local comp
 
 ## Prerequisites
 
-| Requirement                              | Purpose                                                    |
-|------------------------------------------|------------------------------------------------------------|
-| Ubuntu 22.04 or 24.04 on x86_64 or ARM64 | Supported host and client packages                         |
-| Repository checkout                      | Pinned scripts and configuration                           |
-| Root access                              | Package, K3s binary, and systemd installation              |
-| Transfer choice                          | Select Key Vault by default or SCP before host preparation |
+| Requirement                              | Purpose                                             |
+|------------------------------------------|-----------------------------------------------------|
+| Ubuntu 22.04 or 24.04 on x86_64 or ARM64 | Supported host and client packages                  |
+| Repository checkout                      | Pinned scripts and configuration                    |
+| Root access                              | Package, K3s binary, and systemd installation       |
+| Key Vault access                         | Retrieves the exact protected catalog and artifacts |
 
-The Key Vault path installs Azure CLI for later device-code authentication and exact secret transfer. The SCP opt-out omits Azure CLI unless another operation outside this journey requires it.
+Host preparation always installs Azure CLI for later device-code authentication and exact Key Vault transfer. Repository HiL scripts do not support SCP as a transfer path.
 
 ## Prepare Ubuntu
 
-Preview the default Key Vault path:
+Preview host preparation:
 
 ```bash
 data-pipeline/setup/hil/00-prepare-ubuntu.sh --config-preview
@@ -33,18 +33,7 @@ Prepare the host:
 data-pipeline/setup/hil/00-prepare-ubuntu.sh
 ```
 
-Select SCP before setup only when the environment owner provides the exact protected catalog and artifacts through that transport:
-
-```bash
-data-pipeline/setup/hil/00-prepare-ubuntu.sh \
-  --transport scp \
-  --config-preview
-
-data-pipeline/setup/hil/00-prepare-ubuntu.sh \
-  --transport scp
-```
-
-Host preparation installs the common Ubuntu packages, checksum-pinned Helm and OSMO clients, and Azure CLI only for Key Vault. It does not authenticate, access Key Vault, discover Azure resources, or change remote state.
+Host preparation installs the common Ubuntu packages, checksum-pinned Helm and OSMO clients, and Azure CLI. It does not authenticate, access Key Vault, discover Azure resources, or change remote state.
 
 ## Install Local K3s
 

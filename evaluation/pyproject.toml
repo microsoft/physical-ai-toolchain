@@ -59,6 +59,7 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--cov=sil",
+    "--cov=hil",
     "--cov=metrics",
     "--cov-report=term-missing",
     "--cov-report=xml:logs/coverage.xml",
@@ -70,7 +71,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["sil", "metrics"]
+source = ["sil", "hil", "metrics"]
 branch = true
 omit = [
     "**/conftest.py",

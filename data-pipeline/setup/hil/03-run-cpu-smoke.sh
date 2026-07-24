@@ -63,6 +63,7 @@ fi
 
 # Load the connection details used for submission.
 require_tools jq osmo
+hil_validate_connection_receipt "$connection_file"
 service_url=$(jq -r '.service_url' "$connection_file")
 backend_name=$(jq -r '.backend_name' "$connection_file")
 pool_name=$(jq -r '.pool_name' "$connection_file")
@@ -76,8 +77,8 @@ submission_json=$(osmo workflow submit "$workflow" --format-type json --pool "$p
   --set-string "backend_name=$backend_name" \
   --set-string "pool_name=$pool_name" \
   --set-string "image=$image")
-workflow_id=$(jq -r '.id // .workflow_id // .uuid // empty' <<< "$submission_json")
-[[ -n "$workflow_id" ]] || fatal "OSMO submission response did not contain a workflow ID"
+workflow_id=$(jq -r '.name // empty' <<< "$submission_json")
+[[ -n "$workflow_id" ]] || fatal "OSMO submission response did not contain a workflow name"
 
 # Wait for the submitted workflow to finish.
 hil_wait_for_workflow "$workflow_id" 600

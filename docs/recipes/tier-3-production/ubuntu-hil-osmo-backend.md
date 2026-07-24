@@ -2,11 +2,11 @@
 title: Ubuntu HiL OSMO Backend
 description: Prepare one Ubuntu T3 HiL node, optionally establish private reachability, connect it to an existing OSMO environment, and prove CPU and no-command outcomes.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-17
+ms.date: 2026-07-23
 ms.topic: tutorial
 ---
 
-Move one Ubuntu desktop through four T3 HiL milestones: host-ready, reachable when private routing is required, connected to an existing OSMO backend and pool, and validated for CPU and no-command workloads. Key Vault is the default transfer. SCP is a deliberate preselected opt-out that supplies the same protected catalog and artifacts to the same consumers.
+Move one Ubuntu desktop through four T3 HiL milestones: host-ready, reachable when private routing is required, connected to an existing OSMO backend and pool, and validated for CPU and no-command workloads. Key Vault is the only scripted protected-artifact transfer.
 
 > [!WARNING]
 > The CPU and no-command proofs complete this journey. No command transport or physical motion is supported.
@@ -15,20 +15,21 @@ Move one Ubuntu desktop through four T3 HiL milestones: host-ready, reachable wh
 
 | Owner             | Responsibilities                                                                                                                                 | Excluded work                                                                                                   |
 |-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-| Environment owner | Verify the existing OSMO endpoint, backend, pool, charts, images, registry access, Key Vault secrets, per-secret roles, and coherent publication | Local K3s or Ubuntu mutation                                                                                    |
-| Ubuntu user       | Select transport, prepare the host, install owned K3s, optionally connect VPN, consume exact inputs, and run validation                          | AKS credentials, Azure resource administration, Key Vault networking or RBAC changes, remote OSMO desired state |
+| Environment owner | Verify the existing OSMO endpoint, backend, pool, charts, images, registry access, Key Vault secrets, per-secret roles, Arc workload identity, and coherent publication | Local K3s or Ubuntu mutation                                                                                    |
+| Ubuntu user       | Prepare the host, install owned K3s, optionally connect VPN, consume exact Key Vault inputs, and run validation                                  | AKS credentials, Azure resource administration, Key Vault networking or RBAC changes, remote OSMO desired state |
 | VPN CA owner      | Sign the Ubuntu CSR and publish only the signed leaf and public chain                                                                            | Moving the CA private key or Ubuntu private key                                                                 |
 
-## Select the Transfer
+## Transfer Protected Artifacts
 
-Choose one transport before host preparation:
+Repository HiL scripts publish and consume protected artifacts only through Key Vault.
 
-| Transport | Host preparation                    | Artifact source                                                       | Failure behavior                                              |
-|-----------|-------------------------------------|-----------------------------------------------------------------------|---------------------------------------------------------------|
-| Key Vault | Default; installs Azure CLI         | Exact secret names and immutable versions from the host-bound catalog | Stop on login, access, network, target, or integrity failure  |
-| SCP       | Deliberate opt-out; omits Azure CLI | Exact catalog and artifact directory emitted by the trusted publisher | Stop on missing, protected-path, target, or integrity failure |
+| Transport | Host preparation   | Artifact source                                                       | Failure behavior                                                             |
+|-----------|--------------------|-----------------------------------------------------------------------|------------------------------------------------------------------------------|
+| Key Vault | Installs Azure CLI | Exact secret names and immutable versions from the host-bound catalog | Stop on login, access, network, target, catalog, token, or integrity failure |
 
-A Key Vault error never invokes SCP. Both transports use the same catalog schema, file names, digests, protected local directory, validation, and local mutation code. For SCP publication, pass `--transport scp --output-dir <protected-scp-handoff-directory>`.
+A Key Vault failure stops the journey. The consumer validates the catalog, artifact digests, token metadata, token digest, backend binding, and expiry before any Kubernetes mutation.
+
+Manual SCP is permitted only as an out-of-band operator procedure. It must not invoke repository HiL publisher, VPN, or consumer scripts, and it must not use retired transfer arguments. Re-establish the Key Vault catalog workflow before running repository HiL scripts.
 
 ## Prepare the Environment
 
@@ -96,26 +97,30 @@ infrastructure/setup/04-prepare-osmo-hil-node.sh \
   --osmo-config-dir <protected-operator-osmo-profile> \
   --registry-config-file <protected-pull-config> \
   --token-expiry <yyyy-mm-dd> \
+  --arc-cluster-resource-id /subscriptions/<subscription-id>/resourceGroups/<arc-resource-group>/providers/Microsoft.Kubernetes/connectedClusters/<arc-cluster-name> \
   --chart-version <deployed-chart-version> \
   --backend-chart-ref <approved-backend-chart-reference> \
   --backend-chart-sha256 <approved-backend-chart-sha256> \
   --image-version <deployed-image-version> \
   --image-location <approved-image-prefix> \
   --vpn-input-dir <protected-public-vpn-inputs> \
-  --output-dir <protected-scp-handoff-directory> \
   --config-preview
 ```
 
-Run the same command without `--config-preview`. Omit `--vpn-input-dir` when private routing is unnecessary. Omit `--output-dir` unless a user deliberately selected SCP.
+Run the same command without `--config-preview`. Omit `--vpn-input-dir` when private routing is unnecessary.
 
 The publisher:
 
 * Verifies the active Azure account and existing OSMO backend and pool
-* Issues a current-identity service token with only the `osmo-backend` role
+* Reuses the exact catalog-pinned token and token metadata versions when they are valid and unexpired
+* Issues a new `osmo-backend` token when the catalog is absent, valid metadata has expired, or `--renew-token` is supplied
 * Preserves the generic non-secret environment-bundle allowlist
+* Verifies the exact Arc resource, OIDC issuer, and workload-identity configuration
+* Verifies the existing OSMO user-assigned managed identity and creates or verifies one host-bound federated credential for `osmo-workflow`
 * Publishes credentials, registry access, immutable artifacts, and public VPN material through separate exact secrets
 * Writes every artifact before the host-bound catalog
-* Never assigns roles or changes Key Vault networking
+* Stops on malformed or inaccessible catalog data, or token-metadata binding or digest mismatch
+* Never deletes token versions, assigns roles, or changes Key Vault networking
 
 Record these environment gates separately as passed with authorization or not run:
 
@@ -125,18 +130,16 @@ Record these environment gates separately as passed with authorization or not ru
 
 ## Prepare Ubuntu and K3s
 
-Preview and run host preparation with the chosen transport:
+Preview and run host preparation:
 
 ```bash
 data-pipeline/setup/hil/00-prepare-ubuntu.sh \
-  --transport keyvault \
   --config-preview
 
-data-pipeline/setup/hil/00-prepare-ubuntu.sh \
-  --transport keyvault
+data-pipeline/setup/hil/00-prepare-ubuntu.sh
 ```
 
-Use `--transport scp` for the deliberate opt-out.
+Host preparation always installs Azure CLI for the Key Vault connection.
 
 Install the local compute plane without VPN:
 
@@ -249,11 +252,8 @@ infrastructure/setup/04-prepare-osmo-hil-node.sh \
   --tenant-id <tenant-id> \
   --subscription <subscription-id> \
   --vault-name <vault> \
-  --publish-vpn-response <protected-vpn-response.json> \
-  --catalog-file <protected-current-catalog.json>
+  --publish-vpn-response <protected-vpn-response.json>
 ```
-
-For the preselected SCP opt-out, `vpn/00-request-vpn-access.sh` writes `vpn-request.json` into the protected copied directory. Transfer only that request back to the environment owner. Publish the response with `--transport scp --csr-file <protected-vpn-request.json>` and the same `--output-dir <protected-scp-handoff-directory>` used during initial publication. Copy only the updated catalog and public response through the approved SSH channel. The Ubuntu private key is never part of the SCP handoff.
 
 Open the same bounded public window again when the vault is still unreachable. Retrieve the response:
 
@@ -277,7 +277,6 @@ data-pipeline/setup/hil/vpn/02-connect-vpn.sh \
   --environment <environment> \
   --host-name <host> \
   --tenant-id <tenant-id> \
-  --transport keyvault \
   --subscription <subscription-id> \
   --vault-name <vault> \
   --private-vault-verified \
@@ -287,7 +286,6 @@ data-pipeline/setup/hil/vpn/02-connect-vpn.sh \
   --environment <environment> \
   --host-name <host> \
   --tenant-id <tenant-id> \
-  --transport keyvault \
   --subscription <subscription-id> \
   --vault-name <vault> \
   --private-vault-verified
@@ -297,17 +295,7 @@ The connection command performs no Key Vault access before VPN. It consumes loca
 
 ## Connect the Local Backend
 
-Key Vault path:
-
 ```bash
-data-pipeline/setup/hil/02-connect-osmo-backend.sh \
-  --environment <environment> \
-  --host-name <host> \
-  --tenant-id <tenant-id> \
-  --subscription <subscription-id> \
-  --vault-name <vault> \
-  --config-preview
-
 data-pipeline/setup/hil/02-connect-osmo-backend.sh \
   --environment <environment> \
   --host-name <host> \
@@ -316,20 +304,7 @@ data-pipeline/setup/hil/02-connect-osmo-backend.sh \
   --vault-name <vault>
 ```
 
-SCP opt-out:
-
-```bash
-data-pipeline/setup/hil/02-connect-osmo-backend.sh \
-  --environment <environment> \
-  --host-name <host> \
-  --tenant-id <tenant-id> \
-  --subscription <subscription-id> \
-  --vault-name <vault> \
-  --transport scp \
-  --scp-source-dir <protected-copied-artifact-directory>
-```
-
-The stage authenticates the end user by OSMO code login, retrieves or copies the exact catalog-bound artifacts, and changes only the owned local K3s target. It writes a non-secret connection receipt only after the backend reports online.
+The stage authenticates the end user by OSMO code login, retrieves the exact catalog-bound artifacts from Key Vault, validates them before Kubernetes mutation, creates and verifies the local `osmo-workflow` ServiceAccount workload-identity metadata, and changes only the owned local K3s target. The non-secret connection receipt records the workflow-data URI, managed-identity client ID, and isolated Azure CLI path.
 
 ## Validate the Journey
 
@@ -359,7 +334,9 @@ data-pipeline/setup/hil/04-run-no-command-check.sh \
   --connection-file <connection-receipt>
 ```
 
-The result must contain representative proposed actions, zero applied actions, `command_transport: none`, a passed negative probe, `NO_COMMAND_TRANSPORT`, and the owned local node identity.
+The result must contain representative proposed actions, zero applied actions, `command_transport: none`, a passed negative probe, `NO_COMMAND_TRANSPORT`, and the owned local node identity. The no-command check also requires the managed-identity OSMO upload timestamp, retrieves its unique output URI with `osmo data download`, and verifies the exact result manifest.
+
+Static validation covers the repository contracts only. Run live Arc federation, runtime upload, and OSMO download validation against the target environment before treating durable output as operational.
 
 ## Failure and Rerun Behavior
 

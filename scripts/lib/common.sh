@@ -258,37 +258,6 @@ stage_and_upload_code() {
   echo "$uri"
 }
 
-wait_for_osmo_workflow() {
-  local workflow_name="${1:?workflow name required}"
-  local timeout_seconds="${2:-600}" poll_seconds="${3:-5}"
-  local elapsed=0 status=""
-
-  while (( elapsed < timeout_seconds )); do
-    status=$(osmo workflow query "$workflow_name" --output json 2>/dev/null | \
-      jq -r '.status // .state // empty' 2>/dev/null || true)
-    case "$status" in
-      COMPLETED|completed|Completed|SUCCEEDED|succeeded|Succeeded)
-        info "OSMO workflow $workflow_name completed successfully"
-        return 0
-        ;;
-      FAILED|failed|Failed|ERROR|error|Error)
-        error "OSMO workflow $workflow_name failed"
-        error "Inspect logs with: osmo workflow logs $workflow_name"
-        return 1
-        ;;
-      CANCELLED|cancelled|Canceled|CANCELED|canceled)
-        error "OSMO workflow $workflow_name was cancelled"
-        return 1
-        ;;
-    esac
-    sleep "$poll_seconds"
-    elapsed=$((elapsed + poll_seconds))
-  done
-
-  error "OSMO workflow $workflow_name did not complete within ${timeout_seconds}s (last status: ${status:-unknown})"
-  return 1
-}
-
 # Ensure Azure CLI extension is installed
 require_az_extension() {
   local ext="${1:?extension name required}"
@@ -738,9 +707,9 @@ create_registry_pull_secret() {
 
   require_protected_file "$docker_config_file"
   jq -e --arg host "$registry_host" '
-    .auths | type == "object" and
-    .[$host] | type == "object" and
-    (.auth | type == "string" and length > 0)
+    (.auths | type == "object") and
+    (.auths[$host] | type == "object") and
+    (.auths[$host].auth | type == "string" and length > 0)
   ' "$docker_config_file" >/dev/null || \
     fatal "Registry Docker config has no auth entry for $registry_host"
 

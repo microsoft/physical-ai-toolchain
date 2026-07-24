@@ -2,7 +2,7 @@
 title: Hardware-in-the-Loop Evaluation
 description: Run CPU-only and independently no-command HiL validation on an Ubuntu K3s OSMO backend.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-17
+ms.date: 2026-07-23
 ms.topic: how-to
 ---
 
@@ -87,6 +87,14 @@ The public stage packages these tracked assets for the OSMO workflow:
 | `evaluation/hil/workflows/osmo/hil-evaluation.yaml` | CPU-only remote workflow              |
 
 The stage also verifies the matching completed Pod ran on the owned local node. Stop when either proof fails. No physical-motion path follows this validation.
+
+## Result Durability
+
+The no-command workflow declares a unique output URI below the configured OSMO workflow-data endpoint and writes artifacts to OSMO's `{{output}}` directory. The local Arc K3s runtime controller uses the existing OSMO user-assigned managed identity through the `osmo-workflow` ServiceAccount.
+
+The check requires a completed task upload timestamp, retrieves the declared URI through `osmo data download`, verifies the exact five-file result set and manifest integrity, confirms the no-command summary, and rejects credential-shaped content.
+
+Static validation covers the workflow template, publisher/consumer contracts, and output verifier. Live Arc federation, managed-identity upload, and OSMO retrieval remain required environment validation. Do not add a SAS, storage key, direct uploader, or alternate output path.
 
 <!-- markdownlint-disable MD036 -->
 *🤖 Crafted with precision by ✨Copilot following brilliant human instruction,

@@ -16,6 +16,14 @@ data-pipeline/setup/hil/04-run-no-command-check.sh \
 
 The CPU proof requests zero GPUs and must complete on the owned local node. The no-command proof proposes ten deterministic six-axis actions. `NoCommandUr10eAdapter.apply_action()` rejects every action with `NO_COMMAND_TRANSPORT`; the expected applied-action count is zero.
 
+## 📤 Result Durability
+
+The no-command workflow declares a unique `azure://<account>/<container>/workflows/data/hil/no-command/<workflow>` output URI and writes through OSMO's `{{output}}` directory. The Arc-connected K3s runtime controller uses the existing OSMO user-assigned managed identity through the `osmo-workflow` ServiceAccount.
+
+The check queries the completed OSMO task upload record, downloads the declared URI with `osmo data download`, and verifies the exact artifact set, manifest bytes and digests, safety summary, and absence of credential-shaped content.
+
+Static checks validate the workflow and artifact contract. Live Arc federation, runtime upload, and OSMO download validation require the target environment. Do not add a SAS, storage key, direct uploader, or alternate output path.
+
 ## 📦 Components
 
 | Path                                                 | Purpose                                                                      |

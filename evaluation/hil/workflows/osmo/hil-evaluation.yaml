@@ -13,17 +13,19 @@ workflow:
   tasks:
     - name: ur10e-no-command
       image: "{{ image }}"
+      outputs:
+        - url: "{{ output_uri }}"
       command: [sh]
       args:
         - -ceu
         - |
-          mkdir -p /tmp/hil/config /tmp/hil/results
+          mkdir -p /tmp/hil/config
           base64 -d /tmp/no_command_runner.py.b64 > /tmp/hil/no_command_runner.py
           base64 -d /tmp/ur10e-no-command.json.b64 > /tmp/hil/config/ur10e-no-command.json
           base64 -d /tmp/ur10e-observations.jsonl.b64 > /tmp/hil/config/ur10e-observations.jsonl
           python3 /tmp/hil/no_command_runner.py \
             --config /tmp/hil/config/ur10e-no-command.json \
-            --output-dir /tmp/hil/results \
+            --output-dir "{{output}}" \
             --workflow-name "{{ workflow_name }}" \
             --backend-name "{{ backend_name }}" \
             --pool-name "{{ pool_name }}"
@@ -43,3 +45,4 @@ default-values:
   runner_b64: ""
   config_b64: ""
   observations_b64: ""
+  output_uri: ""

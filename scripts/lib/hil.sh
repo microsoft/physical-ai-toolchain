@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Shared protected-transfer helpers for direct HiL setup scripts.
+# cspell:ignore fromdateiso
 
 hil_require_name() {
   local label="${1:?label required}" value="${2:?value required}"
@@ -24,6 +25,41 @@ hil_reject_private_key_material() {
   if grep -Eqi -- 'BEGIN (RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY' "$file"; then
     fatal "Public HiL artifact contains private-key material: $file"
   fi
+}
+
+hil_reject_credential_material() {
+  local file="${1:?file required}" scan_status
+  local pattern="BEGIN (RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY|bearer[[:space:]]+[A-Za-z0-9._~-]+|[?&](sig|se|sp|sv)=[^[:space:]&]+|[\"']?(password|token|api[-_]?key)[\"']?[[:space:]]*[:=][[:space:]]*[\"']?[A-Za-z0-9._~+/%=-]{8,}"
+
+  if grep -Eqi -- "$pattern" "$file"; then
+    fatal "HiL artifact contains credential-like content: $file"
+  else
+    scan_status=$?
+    (( scan_status == 1 )) || fatal "Unable to scan HiL artifact for credential-like content: $file"
+  fi
+}
+
+hil_validate_connection_receipt() {
+  local receipt="${1:?connection receipt required}"
+
+  require_protected_file "$receipt"
+  jq -e '
+    .schema_version == 1 and .kind == "physical-ai-hil-connection" and
+    (.backend_name | type == "string" and length > 0) and
+    (.pool_name | type == "string" and length > 0) and
+    (.service_url | type == "string" and test("^https?://[^[:space:]]+$")) and
+    (.osmo_config_dir | type == "string" and length > 0) and
+    (.azure_config_dir | type == "string" and length > 0) and
+    (.osmo_workflow_data_uri | type == "string" and
+      test("^azure://[a-z0-9]{3,24}/[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?/workflows/data$")) and
+    (.osmo_workload_identity_client_id | type == "string" and length > 0)
+  ' "$receipt" >/dev/null || fatal "Connection receipt does not match the HiL connection contract"
+}
+
+hil_key_vault_secret_not_found() {
+  local error_file="${1:?Azure error file required}"
+
+  grep -Eq '(^|[[:space:]])\(SecretNotFound\)([[:space:]]|$)' "$error_file"
 }
 
 hil_login_azure() {
@@ -168,14 +204,53 @@ hil_require_local_k3s_identity() {
   ' <<< "$identity_json" >/dev/null || fatal "K3s target does not match the root-owned local identity"
 }
 
-hil_fetch_artifacts() (
-  local transport="${1:?transport required}" catalog_secret="${2:?catalog secret required}"
+hil_validate_osmo_token_metadata_fields() {
+  local metadata_file="${1:?metadata file required}" token_file="${2:?token file required}"
   local environment="${3:?environment required}" host_name="${4:?host name required}"
-  local tenant_id="${5:?tenant ID required}" subscription_id="${6:?subscription ID required}"
-  local vault_name="${7:?vault name required}" output_dir="${8:?output directory required}"
-  local scp_source="${9:-}"
-  shift 9
-  local keys=("$@") parent staging catalog source_file key file secret version
+  local backend_name="${5:?backend name required}"
+
+  require_protected_file "$metadata_file"
+  require_protected_file "$token_file"
+  [[ -s "$token_file" ]] || fatal "OSMO token file is empty"
+  jq -e --arg environment "$environment" --arg host "$host_name" --arg backend "$backend_name" '
+    (keys | sort) == (["backend_name", "environment", "expires_at", "host_name", "kind",
+      "roles", "schema_version", "service", "token_name", "token_sha256"] | sort) and
+    .schema_version == 1 and .kind == "physical-ai-osmo-service-token" and
+    .environment == $environment and .host_name == $host and .backend_name == $backend and
+    (.token_name | type == "string" and length > 0) and .service == true and
+    .roles == ["osmo-backend"] and
+    (.expires_at | type == "string" and
+      test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$") and
+      (fromdateiso8601 | type == "number")) and
+    (.token_sha256 | type == "string" and test("^[0-9a-f]{64}$"))
+  ' "$metadata_file" >/dev/null || fatal "OSMO token metadata does not match the expected host and backend"
+  [[ "$(calculate_sha256 "$token_file")" == "$(jq -r '.token_sha256' "$metadata_file")" ]] || \
+    fatal "OSMO token metadata digest does not match the token"
+}
+
+hil_token_metadata_is_unexpired() {
+  local metadata_file="${1:?metadata file required}"
+
+  jq -e '.expires_at | fromdateiso8601 > now' "$metadata_file" >/dev/null
+}
+
+hil_validate_osmo_token_metadata() {
+  local metadata_file="${1:?metadata file required}" token_file="${2:?token file required}"
+  local environment="${3:?environment required}" host_name="${4:?host name required}"
+  local backend_name="${5:?backend name required}"
+
+  hil_validate_osmo_token_metadata_fields "$metadata_file" "$token_file" \
+    "$environment" "$host_name" "$backend_name"
+  hil_token_metadata_is_unexpired "$metadata_file" || fatal "OSMO token metadata has expired"
+}
+
+hil_fetch_artifacts() (
+  local catalog_secret="${1:?catalog secret required}" environment="${2:?environment required}"
+  local host_name="${3:?host name required}" tenant_id="${4:?tenant ID required}"
+  local subscription_id="${5:?subscription ID required}" vault_name="${6:?vault name required}"
+  local output_dir="${7:?output directory required}"
+  shift 7
+  local keys=("$@") parent staging catalog key file secret version expected_sha
   local backup="" staging=""
 
   # shellcheck disable=SC2329  # invoked by the EXIT trap
@@ -190,29 +265,25 @@ hil_fetch_artifacts() (
   staging=$(mktemp -d "${output_dir}.tmp.XXXXXX")
   chmod 0700 "$staging"
   catalog="$staging/catalog.json"
-  if [[ "$transport" == "keyvault" ]]; then
-    az keyvault secret download --subscription "$subscription_id" --vault-name "$vault_name" \
-      --name "$catalog_secret" --file "$catalog" --encoding utf-8 --overwrite \
-      --only-show-errors --output none
-  else
-    source_file="$scp_source/catalog.json"
-    install -m 0600 "$source_file" "$catalog"
-  fi
+  az keyvault secret download --subscription "$subscription_id" --vault-name "$vault_name" \
+    --name "$catalog_secret" --file "$catalog" --encoding utf-8 --overwrite \
+    --only-show-errors --output none
   chmod 0600 "$catalog"
+  hil_validate_catalog "$catalog" "$environment" "$host_name" "$tenant_id" "$subscription_id" "$vault_name"
+  hil_validate_catalog_contract "$catalog" "$environment" "$host_name"
 
   for key in "${keys[@]}"; do
     file=$(jq -r --arg key "$key" '.artifacts[$key].file // empty' "$catalog")
     secret=$(jq -r --arg key "$key" '.artifacts[$key].secret_name // empty' "$catalog")
     version=$(jq -r --arg key "$key" '.artifacts[$key].secret_version // empty' "$catalog")
-    if [[ "$transport" == "keyvault" ]]; then
-      az keyvault secret download --subscription "$subscription_id" --vault-name "$vault_name" \
-        --name "$secret" --version "$version" --file "$staging/$file" --encoding utf-8 \
-        --overwrite --only-show-errors --output none
-    else
-      source_file="$scp_source/$file"
-      install -m 0600 "$source_file" "$staging/$file"
-    fi
+    expected_sha=$(jq -r --arg key "$key" '.artifacts[$key].sha256 // empty' "$catalog")
+    [[ -n "$file" && -n "$secret" && -n "$version" ]] || fatal "Catalog has no artifact for $key"
+    az keyvault secret download --subscription "$subscription_id" --vault-name "$vault_name" \
+      --name "$secret" --version "$version" --file "$staging/$file" --encoding utf-8 \
+      --overwrite --only-show-errors --output none
     chmod 0600 "$staging/$file"
+    [[ "$(calculate_sha256 "$staging/$file")" == "$expected_sha" ]] || \
+      fatal "Downloaded HiL artifact digest mismatch: $file"
   done
 
   if [[ -d "$output_dir" ]]; then
@@ -235,8 +306,19 @@ hil_wait_for_workflow() {
 
   started_at=$(date +%s)
   while (( $(date +%s) - started_at < timeout_seconds )); do
-    status_json=$(osmo workflow query "$workflow_id" --format-type json)
-    status=$(jq -r '.status // .state // empty' <<< "$status_json")
+    if ! status_json=$(osmo workflow query "$workflow_id" --format-type json); then
+      error "OSMO workflow query failed: $workflow_id"
+      return 1
+    fi
+    if ! status=$(jq -er '
+      if type == "object" and ((.status // .state // "") | type == "string" and length > 0)
+      then .status // .state
+      else error("missing workflow status")
+      end
+    ' <<< "$status_json"); then
+      error "OSMO workflow query returned an invalid JSON status: $workflow_id"
+      return 1
+    fi
     case "$status" in
       COMPLETED|completed|Completed|SUCCEEDED|succeeded|Succeeded)
         return 0

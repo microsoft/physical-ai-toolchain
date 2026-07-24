@@ -164,6 +164,13 @@ jq -e --arg environment "$environment" --arg vault "$vault_name" --arg subscript
   (.aks_cluster | type == "string" and length > 0) and
   (.aks_resource_id | type == "string" and length > 0) and
   (.osmo_service_url | type == "string" and test("^https?://[^[:space:]]+$")) and
+  (. as $deployment | .osmo_workflow_data_uri | type == "string" and
+    test("^azure://" + $deployment.storage_account + "/[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?/workflows/data$")) and
+  (.osmo_workload_identity | type == "object" and
+    (.id | type == "string" and test("^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft.ManagedIdentity/userAssignedIdentities/[^/]+$"; "i")) and
+    (.principal_id | type == "string" and length > 0) and
+    (.client_id | type == "string" and length > 0) and
+    (.tenant_id | type == "string" and length > 0)) and
   (.artifacts | type == "object") and
   ((.artifacts | keys) - ["osmo_platforms", "osmo_images", "azureml_instance_types"] | length == 0)
 ' "$deployment_file" >/dev/null || fatal "Downloaded deployment metadata does not match the selected Azure environment"
@@ -244,6 +251,8 @@ section "Deployment Summary"
 print_kv "Environment" "$environment"
 print_kv "Resource Group" "$(jq -r '.resource_group' "$output_dir/deployment.json")"
 print_kv "Key Vault" "$vault_name"
+print_kv "Workflow Data URI" "$(jq -r '.osmo_workflow_data_uri' "$output_dir/deployment.json")"
+print_kv "OSMO Identity Client ID" "$(jq -r '.osmo_workload_identity.client_id' "$output_dir/deployment.json")"
 print_kv "Output" "$output_dir"
 print_kv "Artifacts" "$downloaded"
 info "Environment bundle download complete"

@@ -27,7 +27,6 @@ OPTIONS:
     -e, --environment NAME        Existing environment name (required)
     --host-name NAME              Host identity in the HiL catalog (required)
     --tenant-id ID                Expected Microsoft Entra tenant (required)
-    --transport TRANSPORT         keyvault|scp (default: keyvault)
     --vault-name NAME             Expected Key Vault for post-VPN verification
     --subscription ID             Expected subscription for post-VPN verification
     --azure-config-dir DIR        Existing isolated Azure CLI state
@@ -40,15 +39,13 @@ OPTIONS:
 
 EXAMPLES:
     $(basename "$0") --environment dev-001 --host-name hil-lab-01 \
-      --transport keyvault --vault-name <vault> --subscription <subscription> \
-      --private-vault-verified
+      --vault-name <vault> --subscription <subscription> --private-vault-verified
 EOF
 }
 
 environment=""
 host_name=""
 tenant_id=""
-transport="keyvault"
 vault_name=""
 subscription_id=""
 azure_config_dir=""
@@ -66,7 +63,6 @@ while [[ $# -gt 0 ]]; do
     -e|--environment)           environment="$2"; shift 2 ;;
     --host-name)                host_name="$2"; shift 2 ;;
     --tenant-id)                tenant_id="$2"; shift 2 ;;
-    --transport)                transport="$2"; shift 2 ;;
     --vault-name)               vault_name="$2"; shift 2 ;;
     --subscription)             subscription_id="$2"; shift 2 ;;
     --azure-config-dir)         azure_config_dir="$2"; shift 2 ;;
@@ -85,7 +81,7 @@ hil_require_name "Host name" "$host_name"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
 [[ -n "$subscription_id" ]] || fatal "--subscription is required"
 [[ -n "$vault_name" ]] || fatal "--vault-name is required"
-[[ "$transport" == "keyvault" || "$transport" == "scp" ]] || fatal "--transport must be keyvault or scp"
+[[ "$private_vault_verified" == "true" ]] || fatal "--private-vault-verified is required"
 connection_name="${connection_name:-physical-ai-${host_name}}"
 [[ "$connection_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fatal "Invalid connection name: $connection_name"
 input_dir="${input_dir:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/vpn/${environment}-${host_name}/public}"
@@ -101,7 +97,6 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Host" "$host_name"
   print_kv "Tenant" "$tenant_id"
   print_kv "Connection" "$connection_name"
-  print_kv "Transport" "$transport"
   print_kv "Private Vault Verified" "$private_vault_verified"
   print_kv "Public Inputs" "$input_dir"
   print_kv "Private Key" "$request_dir/client.key"
@@ -112,18 +107,35 @@ if [[ "$config_preview" == "true" ]]; then
 fi
 
 # Load the files and settings used to render the local connection.
-require_tools apt-get jq openssl sudo
+require_tools apt-get az jq openssl sudo
 catalog="$input_dir/catalog.json"
-vpn_config="$input_dir/$(jq -r '.artifacts.vpn_config.file' "$catalog")"
-vpn_server_root="$input_dir/$(jq -r '.artifacts.vpn_server_root.file' "$catalog")"
+hil_validate_catalog "$catalog" "$environment" "$host_name" "$tenant_id" "$subscription_id" "$vault_name"
+hil_validate_catalog_contract "$catalog" "$environment" "$host_name"
+vpn_config=$(hil_require_local_artifact "$catalog" vpn_config "$environment" "$host_name" "$input_dir")
+vpn_server_root=$(hil_require_local_artifact "$catalog" vpn_server_root "$environment" "$host_name" "$input_dir")
+response_catalog="$response_dir/catalog.json"
+hil_validate_catalog "$response_catalog" "$environment" "$host_name" "$tenant_id" "$subscription_id" "$vault_name"
+hil_validate_catalog_contract "$response_catalog" "$environment" "$host_name"
+vpn_response=$(hil_require_local_artifact "$response_catalog" vpn_response "$environment" "$host_name" "$response_dir")
 private_key="$request_dir/client.key"
 client_certificate="$response_dir/client.pem"
 client_ca="$response_dir/client-ca.pem"
+require_protected_file "$private_key"
+require_protected_file "$client_certificate"
+require_protected_file "$client_ca"
+cmp -s <(jq -r '.client_certificate_pem' "$vpn_response") "$client_certificate" || \
+  fatal "Local VPN client certificate does not match the cataloged response"
+cmp -s <(jq -r '.client_ca_certificate_pem' "$vpn_response") "$client_ca" || \
+  fatal "Local VPN client CA does not match the cataloged response"
 gateway=$(jq -r '.gateway' "$vpn_config")
-mapfile -t private_routes < <(jq -r '.private_routes[]' "$vpn_config")
 server_root_dn=$(openssl x509 -in "$vpn_server_root" -noout -subject -nameopt RFC2253 | sed 's/^subject=//')
 dns_server=$(jq -r '.private_dns.server // empty' "$vpn_config")
-mapfile -t dns_zones < <(jq -r '.private_dns.zones[]? // empty' "$vpn_config")
+vpn_routes=$(jq -er '.private_routes | if type == "array" and length > 0 then .[] else error("missing routes") end' \
+  "$vpn_config") || fatal "VPN configuration does not contain private routes"
+mapfile -t private_routes <<< "$vpn_routes"
+vpn_dns_zones=$(jq -ec '(.private_dns.zones // []) | if type == "array" then . else error("invalid DNS zones") end' \
+  "$vpn_config") || fatal "VPN configuration contains invalid private DNS zones"
+mapfile -t dns_zones < <(jq -r '.[]' <<< "$vpn_dns_zones")
 
 # Install strongSwan and create or replace the local connection files.
 sudo apt-get update
@@ -219,6 +231,10 @@ fi
 # Restart strongSwan and bring up the requested connection.
 sudo ipsec restart
 sudo ipsec up "$connection_name"
+hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
+catalog_secret="${environment}-${host_name}-hil-catalog"
+az keyvault secret show --subscription "$subscription_id" --vault-name "$vault_name" \
+  --name "$catalog_secret" --query id -o tsv >/dev/null
 
 # Report the configured tunnel.
 section "Deployment Summary"
@@ -226,5 +242,6 @@ print_kv "Milestone" "reachable: VPN connected"
 print_kv "Connection" "$connection_name"
 print_kv "Gateway" "$gateway"
 print_kv "Private Routes" "${private_routes[*]}"
+print_kv "Key Vault Verification" "passed"
 print_kv "Next" "$REPO_ROOT/data-pipeline/setup/hil/02-connect-osmo-backend.sh"
 info "Optional private reachability is ready"

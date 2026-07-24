@@ -15,7 +15,6 @@ source "$SCRIPT_DIR/../defaults.conf"
 # shellcheck source=../../../infrastructure/setup/defaults.conf
 source "$REPO_ROOT/infrastructure/setup/defaults.conf"
 
-# Explain the target identity, transport choices, and protected outputs accepted by this command.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") --environment NAME --host-name NAME [OPTIONS]
@@ -31,8 +30,6 @@ OPTIONS:
     --tenant-id ID                Expected Microsoft Entra tenant (required)
     --subscription ID             Expected Azure subscription (required)
     --vault-name NAME             Expected Key Vault (required)
-    --transport TRANSPORT         keyvault|scp (default: keyvault)
-    --scp-source-dir DIR          Protected artifact directory for SCP transport
     --kubeconfig PATH             Owned local K3s kubeconfig
     --context NAME                Local K3s context (default: $EDGE_K3S_CONTEXT)
     --input-dir DIR               Protected local artifact directory
@@ -44,20 +41,14 @@ OPTIONS:
 EXAMPLES:
     $(basename "$0") --environment dev-001 --host-name hil-lab-01 \
       --tenant-id <tenant> --subscription <subscription> --vault-name <vault>
-    $(basename "$0") --environment dev-001 --host-name hil-lab-01 \
-      --tenant-id <tenant> --subscription <subscription> --vault-name <vault> \
-      --transport scp --scp-source-dir /protected/hil-inputs
 EOF
 }
 
-# Set defaults for the environment, local K3s target, transfer method, and isolated client state.
 environment=""
 host_name=""
 tenant_id=""
 subscription_id=""
 vault_name=""
-transport="keyvault"
-scp_source_dir=""
 kubeconfig="${HIL_KUBECONFIG:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/kubeconfig.yaml}"
 context="$EDGE_K3S_CONTEXT"
 input_dir=""
@@ -66,7 +57,6 @@ osmo_config_dir=""
 connection_file=""
 config_preview=false
 
-# Apply explicit command-line values before resolving derived paths and validating the target.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)            show_help; exit 0 ;;
@@ -75,8 +65,6 @@ while [[ $# -gt 0 ]]; do
     --tenant-id)          tenant_id="$2"; shift 2 ;;
     --subscription)       subscription_id="$2"; shift 2 ;;
     --vault-name)         vault_name="$2"; shift 2 ;;
-    --transport)          transport="$2"; shift 2 ;;
-    --scp-source-dir)     scp_source_dir="$2"; shift 2 ;;
     --kubeconfig)         kubeconfig="$2"; shift 2 ;;
     --context)            context="$2"; shift 2 ;;
     --input-dir)          input_dir="$2"; shift 2 ;;
@@ -94,8 +82,6 @@ hil_require_name "Host name" "$host_name"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
 [[ -n "$subscription_id" ]] || fatal "--subscription is required"
 [[ -n "$vault_name" ]] || fatal "--vault-name is required"
-[[ "$transport" == "keyvault" || "$transport" == "scp" ]] || fatal "--transport must be keyvault or scp"
-[[ "$transport" != "scp" || -n "$scp_source_dir" ]] || fatal "--scp-source-dir is required for SCP transport"
 
 input_dir="${input_dir:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/environment/${environment}-${host_name}}"
 azure_config_dir="${azure_config_dir:-${XDG_CONFIG_HOME:-$HOME/.config}/physical-ai-toolchain/hil/azure/${environment}-${host_name}}"
@@ -113,10 +99,8 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Subscription" "$subscription_id"
   print_kv "Key Vault" "$vault_name"
   print_kv "Catalog" "$catalog_secret"
-  print_kv "Transfer" "$transport"
-  print_kv "SCP Source" "${scp_source_dir:-not used}"
   print_kv "Input Directory" "$input_dir"
-  print_kv "Azure Config" "$([[ $transport == keyvault ]] && echo "$azure_config_dir" || echo 'not used')"
+  print_kv "Azure Config" "$azure_config_dir"
   print_kv "OSMO Config" "$osmo_config_dir"
   print_kv "K3s Context" "$context"
   print_kv "Kubeconfig" "$kubeconfig"
@@ -126,46 +110,76 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-# Check the commands used by the deployment path.
-require_tools base64 helm jq kubectl osmo
-[[ "$transport" != "keyvault" ]] || require_tools az
+require_tools az base64 helm jq kubectl osmo
 identity_file=/var/lib/physical-ai-toolchain/k3s-identity.json
 
-# Authenticate to the expected Azure tenant and subscription only when Key Vault is the transfer source.
-if [[ "$transport" == "keyvault" ]]; then
-  hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
-fi
+hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
 
-# Retrieve the OSMO, registry, and deployment artifacts.
-hil_fetch_artifacts "$transport" "$catalog_secret" "$environment" "$host_name" \
-  "$tenant_id" "$subscription_id" "$vault_name" "$input_dir" "$scp_source_dir" \
-  osmo_token registry_config osmo_artifacts
+hil_fetch_artifacts "$catalog_secret" "$environment" "$host_name" \
+  "$tenant_id" "$subscription_id" "$vault_name" "$input_dir" \
+  osmo_token osmo_token_metadata registry_config osmo_artifacts
 
 catalog="$input_dir/catalog.json"
-# Resolve catalog-declared filenames instead of accepting arbitrary paths from external input.
-artifact_path() {
-  local key="${1:?artifact key required}" file
-  file=$(jq -r --arg key "$key" '.artifacts[$key].file // empty' "$catalog")
-  [[ "$file" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fatal "Catalog has an invalid file for $key"
-  printf '%s/%s\n' "$input_dir" "$file"
-}
+# Artifact filenames are fixed by the validated catalog contract, so consumers do not reparse external paths.
+token_file="$input_dir/osmo-token"
+token_metadata="$input_dir/osmo-token-metadata.json"
+registry_config="$input_dir/registry-config.json"
+osmo_artifacts="$input_dir/osmo-artifacts.json"
 
-# Load the files consumed by the deployment steps.
-token_file=$(artifact_path osmo_token)
-registry_config=$(artifact_path registry_config)
-osmo_artifacts=$(artifact_path osmo_artifacts)
-service_url=$(jq -r '.service_url' "$osmo_artifacts")
-backend_name=$(jq -r '.backend_name' "$osmo_artifacts")
-pool_name=$(jq -r '.pool_name' "$osmo_artifacts")
-operator_namespace=$(jq -r '.operator_namespace' "$osmo_artifacts")
-workflow_namespace=$(jq -r '.workflow_namespace' "$osmo_artifacts")
-kai_ref=$(jq -r '.kai_chart.ref' "$osmo_artifacts")
-kai_version=$(jq -r '.kai_chart.version' "$osmo_artifacts")
-backend_ref=$(jq -r '.backend_chart.ref' "$osmo_artifacts")
-backend_version=$(jq -r '.backend_chart.version' "$osmo_artifacts")
-image_location=$(jq -r '.images.location' "$osmo_artifacts")
-image_version=$(jq -r '.images.version' "$osmo_artifacts")
-registry_host=$(jq -r '.images.registry_host' "$osmo_artifacts")
+# Validate and extract the host-bound OSMO contract in one pass before using any value.
+osmo_contract=$(jq -er --arg environment "$environment" --arg host "$host_name" '
+  if (.schema_version == 1 and .kind == "physical-ai-hil-osmo" and
+  .environment == $environment and .host_name == $host and
+  (.service_url | type == "string" and length > 0) and
+  (.backend_name | type == "string" and length > 0) and
+  (.pool_name | type == "string" and length > 0) and
+  (.operator_namespace | type == "string" and length > 0) and
+  (.workflow_namespace | type == "string" and length > 0) and
+  (.workflow_data_uri | type == "string" and
+    test("^azure://[a-z0-9]{3,24}/[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?/workflows/data$")) and
+  (.workload_identity | type == "object" and
+    (keys | sort) == (["client_id", "federated_credential_name", "id", "tenant_id"] | sort) and
+    (.id | type == "string" and length > 0) and
+    (.client_id | type == "string" and length > 0) and
+    (.tenant_id | type == "string" and length > 0) and
+    (.federated_credential_name | type == "string" and length > 0)) and
+  (.arc_cluster | type == "object" and
+    (keys | sort) == (["oidc_issuer", "resource_id"] | sort) and
+    (.resource_id | type == "string" and
+      test("^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft.Kubernetes/connectedClusters/[^/]+$"; "i")) and
+    (.oidc_issuer | type == "string" and test("^https://[^[:space:]]+$"))) and
+  (. as $contract | .workflow_service_account | type == "object" and
+    (keys | sort) == (["name", "namespace", "subject"] | sort) and
+    .name == "osmo-workflow" and .namespace == $contract.workflow_namespace and
+    .subject == ("system:serviceaccount:" + $contract.workflow_namespace + ":osmo-workflow")) and
+  (.kai_chart.ref | type == "string" and length > 0) and
+  (.kai_chart.version | type == "string" and length > 0) and
+  (.kai_chart.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+  (.backend_chart.ref | type == "string" and length > 0) and
+  (.backend_chart.version | type == "string" and length > 0) and
+  (.backend_chart.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+  (.images.location | type == "string" and length > 0) and
+  (.images.version | type == "string" and length > 0) and
+  (.images.registry_host | type == "string" and length > 0))
+  then [
+    .service_url, .backend_name, .pool_name, .operator_namespace, .workflow_namespace,
+    .workflow_data_uri, .workload_identity.client_id, .workflow_service_account.name,
+    .kai_chart.ref, .kai_chart.version, .kai_chart.sha256,
+    .backend_chart.ref, .backend_chart.version, .backend_chart.sha256,
+    .images.location, .images.version, .images.registry_host
+  ] | @tsv
+  else error("invalid OSMO artifact contract")
+  end
+' "$osmo_artifacts") || fatal "OSMO artifact contract does not match the expected host"
+IFS=$'\t' read -r service_url backend_name pool_name operator_namespace workflow_namespace \
+  workflow_data_uri workload_identity_client_id workflow_service_account \
+  kai_ref kai_version kai_sha backend_ref backend_version backend_sha \
+  image_location image_version registry_host <<< "$osmo_contract"
+hil_validate_osmo_token_metadata "$token_metadata" "$token_file" \
+  "$environment" "$host_name" "$backend_name"
+
+# Bind all later Kubernetes and Helm mutations to the root-owned K3s identity created during host preparation.
+hil_require_local_k3s_identity "$identity_file" "$kubeconfig" "$context"
 
 # Log in with an isolated OSMO profile and select the pool.
 hil_prepare_directory "$osmo_config_dir"
@@ -183,10 +197,8 @@ cleanup() {
 trap cleanup EXIT
 chmod 0700 "$work_dir"
 
-# Pull both charts used by the local scheduler and backend.
-mkdir -p "$work_dir/kai"
-helm pull "$kai_ref" --version "$kai_version" --destination "$work_dir/kai"
-kai_chart=$(find "$work_dir/kai" -maxdepth 1 -type f -name '*.tgz' -print -quit)
+# Pull the exact cataloged chart content; versions alone are not immutable.
+kai_chart=$(pull_and_verify_chart "$kai_ref" "$kai_version" "$kai_sha" "$work_dir/kai")
 if [[ "$backend_ref" == oci://* ]]; then
   chart_registry_host="${backend_ref#oci://}"
   chart_registry_host="${chart_registry_host%%/*}"
@@ -199,9 +211,25 @@ if [[ "$backend_ref" == oci://* ]]; then
     --username "$registry_username" --password-stdin >/dev/null
   unset registry_auth registry_credentials registry_username registry_password
 fi
-mkdir -p "$work_dir/backend"
-helm pull "$backend_ref" --version "$backend_version" --destination "$work_dir/backend"
-backend_chart=$(find "$work_dir/backend" -maxdepth 1 -type f -name '*.tgz' -print -quit)
+backend_chart=$(pull_and_verify_chart "$backend_ref" "$backend_version" "$backend_sha" "$work_dir/backend")
+
+# Create the workflow identity before any local Helm mutation.
+ensure_namespace "$kubeconfig" "$context" "$workflow_namespace"
+kube_kubectl "$kubeconfig" "$context" create serviceaccount "$workflow_service_account" \
+  --namespace "$workflow_namespace" --dry-run=client -o yaml | \
+  kube_kubectl "$kubeconfig" "$context" apply -f - >/dev/null
+kube_kubectl "$kubeconfig" "$context" label serviceaccount "$workflow_service_account" \
+  --namespace "$workflow_namespace" azure.workload.identity/use=true --overwrite >/dev/null
+kube_kubectl "$kubeconfig" "$context" annotate serviceaccount "$workflow_service_account" \
+  --namespace "$workflow_namespace" \
+  "azure.workload.identity/client-id=$workload_identity_client_id" --overwrite >/dev/null
+workflow_service_account_json=$(kube_kubectl "$kubeconfig" "$context" get serviceaccount "$workflow_service_account" \
+  --namespace "$workflow_namespace" --output json)
+jq -e --arg client_id "$workload_identity_client_id" '
+  .metadata.labels["azure.workload.identity/use"] == "true" and
+  .metadata.annotations["azure.workload.identity/client-id"] == $client_id
+' <<< "$workflow_service_account_json" >/dev/null || \
+  fatal "Local OSMO workflow service account does not have the required workload identity metadata"
 
 # Install or update KAI Scheduler with architecture-specific immutable images.
 case "$(uname -m)" in
@@ -226,9 +254,9 @@ kube_helm "$kubeconfig" "$context" upgrade --install kai-scheduler "$kai_chart" 
   --namespace "$NS_KAI_SCHEDULER" --create-namespace \
   "${kai_helm_args[@]}" \
   --wait --timeout "$TIMEOUT_DEPLOY"
+
 # Create or update the namespaces and secrets used by local workloads.
 ensure_namespace "$kubeconfig" "$context" "$operator_namespace"
-ensure_namespace "$kubeconfig" "$context" "$workflow_namespace"
 create_registry_pull_secret "$kubeconfig" "$context" "$operator_namespace" \
   "$registry_config" "$OSMO_HIL_PULL_SECRET" "$registry_host"
 create_registry_pull_secret "$kubeconfig" "$context" "$workflow_namespace" \
@@ -263,13 +291,17 @@ jq -n --arg environment "$environment" --arg host "$host_name" --arg tenant "$te
   --arg subscription "$subscription_id" --arg vault "$vault_name" --arg service_url "$service_url" \
   --arg backend "$backend_name" --arg pool "$pool_name" --arg kubeconfig "$kubeconfig" \
   --arg context "$context" --arg identity "$identity_file" --arg node "$node_name" --arg workflow_namespace "$workflow_namespace" \
-  --arg osmo_config "$osmo_config_dir" --arg input_sha "$(calculate_sha256 "$catalog")" \
+  --arg osmo_config "$osmo_config_dir" --arg azure_config "$azure_config_dir" \
+  --arg workflow_data_uri "$workflow_data_uri" --arg workload_identity_client_id "$workload_identity_client_id" \
+  --arg input_sha "$(calculate_sha256 "$catalog")" \
   --arg connected_at "$(date -u +%FT%TZ)" '
   {schema_version: 1, kind: "physical-ai-hil-connection", environment: $environment,
    host_name: $host, tenant_id: $tenant, subscription_id: $subscription, vault_name: $vault,
    service_url: $service_url, backend_name: $backend, pool_name: $pool,
   kubeconfig: $kubeconfig, context: $context, node_name: $node,
   k3s_identity_file: $identity, workflow_namespace: $workflow_namespace, osmo_config_dir: $osmo_config,
+   azure_config_dir: $azure_config, osmo_workflow_data_uri: $workflow_data_uri,
+   osmo_workload_identity_client_id: $workload_identity_client_id,
    catalog_sha256: $input_sha, connected_at: $connected_at}
 ' > "$receipt_tmp"
 chmod 0600 "$receipt_tmp"
@@ -281,6 +313,8 @@ print_kv "Milestone" "connected"
 print_kv "Environment" "$environment"
 print_kv "Backend" "$backend_name"
 print_kv "Pool" "$pool_name"
+print_kv "Workflow Data URI" "$workflow_data_uri"
+print_kv "OSMO Identity Client ID" "$workload_identity_client_id"
 print_kv "Service URL" "$service_url"
 print_kv "K3s Context" "$context"
 print_kv "Connection Receipt" "$connection_file"

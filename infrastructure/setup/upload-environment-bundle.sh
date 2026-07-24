@@ -80,6 +80,11 @@ terraform_vault=$(tf_require "$tf_output" "key_vault_name.value" "Key Vault name
 terraform_resource_group=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
 terraform_aks_cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster")
 terraform_aks_resource_id=$(tf_require "$tf_output" "aks_cluster.value.id" "AKS resource ID")
+terraform_storage_account=$(tf_require "$tf_output" "storage_account.value.name" "Storage account")
+terraform_osmo_identity_id=$(tf_require "$tf_output" "osmo_workload_identity.value.id" "OSMO workload identity ID")
+terraform_osmo_identity_principal_id=$(tf_require "$tf_output" "osmo_workload_identity.value.principal_id" "OSMO workload identity principal ID")
+terraform_osmo_identity_client_id=$(tf_require "$tf_output" "osmo_workload_identity.value.client_id" "OSMO workload identity client ID")
+terraform_osmo_identity_tenant_id=$(tf_require "$tf_output" "osmo_workload_identity.value.tenant_id" "OSMO workload identity tenant ID")
 vault_name="${vault_name:-$terraform_vault}"
 [[ "$vault_name" == "$terraform_vault" ]] || fatal "--vault-name does not match the Terraform Key Vault output"
 
@@ -90,7 +95,12 @@ deployment_file="$bundle_dir/deployment.json"
 
 jq -e --arg environment "$environment" --arg vault "$vault_name" --arg subscription "$subscription_id" \
   --arg resource_group "$terraform_resource_group" --arg aks_cluster "$terraform_aks_cluster" \
-  --arg aks_resource_id "$terraform_aks_resource_id" '
+  --arg aks_resource_id "$terraform_aks_resource_id" \
+  --arg storage_account "$terraform_storage_account" \
+  --arg identity_id "$terraform_osmo_identity_id" \
+  --arg identity_principal_id "$terraform_osmo_identity_principal_id" \
+  --arg identity_client_id "$terraform_osmo_identity_client_id" \
+  --arg identity_tenant_id "$terraform_osmo_identity_tenant_id" '
   .schema_version == 1 and
   .environment == $environment and
   .key_vault_name == $vault and
@@ -98,10 +108,23 @@ jq -e --arg environment "$environment" --arg vault "$vault_name" --arg subscript
   .resource_group == $resource_group and
   .aks_cluster == $aks_cluster and
   ((.aks_resource_id | ascii_downcase) == ($aks_resource_id | ascii_downcase)) and
+  .storage_account == $storage_account and
   (.osmo_service_url | type == "string" and test("^https?://[^[:space:]]+$")) and
+  (.osmo_workflow_data_uri | type == "string" and
+    test("^azure://" + $storage_account + "/[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?/workflows/data$")) and
+  (.osmo_workload_identity | type == "object" and
+    .id == $identity_id and .principal_id == $identity_principal_id and
+    .client_id == $identity_client_id and .tenant_id == $identity_tenant_id) and
   (.artifacts | type == "object") and
   ((.artifacts | keys) - ["osmo_platforms", "osmo_images", "azureml_instance_types"] | length == 0)
 ' "$deployment_file" >/dev/null || fatal "deployment.json does not match Terraform and the selected Azure environment"
+
+live_osmo_identity=$(az identity show --ids "$terraform_osmo_identity_id" --output json)
+jq -e --arg id "$terraform_osmo_identity_id" --arg principal_id "$terraform_osmo_identity_principal_id" \
+  --arg client_id "$terraform_osmo_identity_client_id" --arg tenant_id "$terraform_osmo_identity_tenant_id" '
+  ((.id // "") | ascii_downcase) == ($id | ascii_downcase) and
+  .principalId == $principal_id and .clientId == $client_id and .tenantId == $tenant_id
+' <<< "$live_osmo_identity" >/dev/null || fatal "Live OSMO workload identity does not match Terraform"
 
 live_aks_resource_id=$(az aks show --resource-group "$terraform_resource_group" \
   --name "$terraform_aks_cluster" --query id -o tsv)
@@ -199,5 +222,7 @@ done
 section "Deployment Summary"
 print_kv "Environment" "$environment"
 print_kv "Key Vault" "$vault_name"
+print_kv "Workflow Data URI" "$(jq -r '.osmo_workflow_data_uri' "$deployment_file")"
+print_kv "OSMO Identity Client ID" "$(jq -r '.osmo_workload_identity.client_id' "$deployment_file")"
 print_kv "Artifacts" "${#upload_entries[@]}"
 info "Environment bundle upload complete"

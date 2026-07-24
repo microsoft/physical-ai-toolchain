@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import statistics
 import time
 from dataclasses import dataclass
@@ -36,6 +37,13 @@ _OBSERVATION_KEYS = {"fixture", "source"}
 _POLICY_KEYS = {"image", "kind"}
 _EXECUTION_KEYS = {"max_steps", "mode", "period_ms"}
 _SAFETY_KEYS = {"allow_command_transport", "allow_motion", "require_negative_command_probe"}
+_CREDENTIAL_PATTERN = re.compile(
+    r"BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY"
+    r"|bearer\s+[A-Za-z0-9._~-]+"
+    r"|[?&](?:sig|se|sp|sv)=[^\s&]+"
+    r"|[\"']?(?:password|token|api[-_]?key)[\"']?\s*[:=]\s*[\"']?[A-Za-z0-9._~+/%=-]{8,}",
+    re.IGNORECASE,
+)
 
 
 class NoCommandTransportError(RuntimeError):
@@ -169,6 +177,22 @@ def _write_jsonl(path: Path, values: list[dict[str, Any]]) -> None:
             stream.write(json.dumps(value, sort_keys=True) + "\n")
 
 
+def _validate_output_artifacts(output_dir: Path) -> None:
+    manifest_path = output_dir / "manifest.json"
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+    if _CREDENTIAL_PATTERN.search(manifest_text):
+        raise ValueError("credential-shaped content in manifest.json")
+    manifest = json.loads(manifest_text)
+    for entry in manifest["files"]:
+        artifact_path = output_dir / entry["path"]
+        if not artifact_path.is_file() or artifact_path.is_symlink():
+            raise ValueError(f"output artifact is not a regular file: {artifact_path.name}")
+        if artifact_path.stat().st_size != entry["bytes"] or _sha256(artifact_path) != entry["sha256"]:
+            raise ValueError(f"output artifact does not match its manifest entry: {artifact_path.name}")
+        if _CREDENTIAL_PATTERN.search(artifact_path.read_text(encoding="utf-8")):
+            raise ValueError(f"credential-shaped content in {artifact_path.name}")
+
+
 def run(config_path: Path, output_dir: Path) -> dict[str, Any]:
     """Run the deterministic evaluation and return its summary."""
     config = _load_config(config_path)
@@ -282,6 +306,7 @@ def run(config_path: Path, output_dir: Path) -> dict[str, Any]:
         if path.is_file() and path.name != "manifest.json":
             manifest.append({"path": path.name, "bytes": path.stat().st_size, "sha256": _sha256(path)})
     _write_json(output_dir / "manifest.json", {"schema_version": 1, "files": manifest})
+    _validate_output_artifacts(output_dir)
     return result
 
 

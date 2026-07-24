@@ -16,7 +16,7 @@ Produce a validated non-secret environment bundle or a host-bound HiL handoff wh
 1. Resolve the environment, desired-state sources, available read-only tools, and requested bundle consumers.
 2. Verify target identities and generate only the required allowlisted artifacts under the gitignored environment directory.
 3. Validate hashes, immutable references, file safety, and the absence of credentials before use.
-4. Preview the selected deployment or, for HiL, publish the exact host-bound catalog and hand off to the local consumer.
+4. Preview the selected deployment or, for HiL, publish the exact host-bound catalog to Key Vault and hand off to the local consumer.
 
 ## Inputs
 
@@ -24,7 +24,7 @@ Produce a validated non-secret environment bundle or a host-bound HiL handoff wh
 - Existing isolated Kubernetes context when live cluster verification is available
 - Optional isolated authenticated OSMO profile for read-only service verification
 - Requested deployment consumers and explicit version overrides
-- For HiL publication, the host identity, existing backend and pool, approved service URL, protected registry configuration, transfer choice, and optional public VPN inputs
+- For HiL publication, the host identity, existing backend and pool, approved service URL, protected registry configuration, Key Vault name, and optional public VPN inputs
 
 ## Safety Boundaries
 
@@ -103,6 +103,7 @@ Read these values when present:
 | `container_registry` | ACR name and login server                       |
 | `storage_account`    | Storage account name                            |
 | `azureml_workspace`  | Azure ML workspace name                         |
+| `osmo_workload_identity` | OSMO workload identity ID and Entra metadata |
 
 Fail when the resource group, Key Vault, or requested AKS/ACR values are missing. Do not infer names from naming conventions when Terraform exposes them.
 
@@ -116,6 +117,7 @@ Use read-only Azure CLI calls:
 4. Read AKS with `az aks show` and compare its normalized resource ID with Terraform.
 5. Read ACR with `az acr show` and compare its name and login server with Terraform.
 6. Read Key Vault metadata with `az keyvault show`; do not enumerate or read unrelated secret values.
+7. Read `osmo_workload_identity` with `az identity show --ids`, and confirm its ID, client ID, and tenant ID match Terraform.
 
 Stop on any identity or resource mismatch. Do not switch subscriptions silently.
 
@@ -235,6 +237,13 @@ Write `deployment.json` last. Use relative artifact filenames and SHA-256 digest
   "osmo_service_url": "<private-osmo-url>",
   "osmo_chart_version": "<chart-version-or-empty>",
   "osmo_image_version": "<image-version-or-empty>",
+  "osmo_workflow_data_uri": "azure://<storage-account>/<container>/workflows/data",
+  "osmo_workload_identity": {
+    "id": "<user-assigned-managed-identity-resource-id>",
+    "principal_id": "<managed-identity-principal-id>",
+    "client_id": "<managed-identity-client-id>",
+    "tenant_id": "<managed-identity-tenant-id>"
+  },
   "artifacts": {
     "osmo_platforms": {"file": "osmo-platforms.yaml", "sha256": "<digest>"},
     "osmo_images": {"file": "osmo-images.json", "sha256": "<digest>"},
@@ -250,7 +259,7 @@ Write `deployment.json` last. Use relative artifact filenames and SHA-256 digest
 }
 ```
 
-Omit optional artifact entries when their files do not exist. Set unavailable verification tools to `false`; do not claim checks that did not run.
+Set `osmo_workflow_data_uri` from the configured OSMO `workflow_data.credential.endpoint`, not a naming convention. It must match `azure://<account>/<container>/workflows/data`. Omit optional artifact entries when their files do not exist. Set unavailable verification tools to `false`; do not claim checks that did not run.
 
 ### 10. Validate
 
@@ -258,6 +267,7 @@ Before using or uploading the bundle:
 
 - Confirm every artifact is a regular non-symlink file.
 - Confirm `deployment.json` matches the active subscription, Terraform resource group, Key Vault, and AKS resource ID.
+- Confirm `osmo_workflow_data_uri` is the configured Azure workflow-data endpoint and `osmo_workload_identity` matches Terraform and Azure identity metadata.
 - Confirm artifact paths are relative filenames without `..`.
 - Recalculate and compare every artifact SHA-256.
 - Validate `osmo-images.json` against `verify_acr_image_manifest` when ACR is used.
@@ -319,11 +329,13 @@ Complete this journey when an existing OSMO backend and pool are ready: the envi
 
 The environment owner runs `infrastructure/setup/04-prepare-osmo-hil-node.sh` after verifying the existing OSMO backend and pool. Supply the generated bundle, approved service URL, existing backend and pool, protected OSMO profile, pull-only registry configuration, and token expiry. The script publishes the generic bundle and the exact host-bound catalog separately, writing the catalog last.
 
-Key Vault is the default transport. Before publication, the environment owner manually creates the exact secret resources and grants the Ubuntu identity data-plane access to each named inbound secret only. Use `Key Vault Secrets User` for inbound secrets and `Key Vault Secrets Officer` only for the host-specific CSR secret. Verify that the Ubuntu identity has no direct or inherited vault-wide data-plane role.
+Key Vault is the only scripted protected-artifact transfer. Before publication, the environment owner manually creates the exact secret resources and grants the Ubuntu identity data-plane access to each named inbound secret only. Use `Key Vault Secrets User` for inbound secrets and `Key Vault Secrets Officer` only for the host-specific CSR secret. Verify that the Ubuntu identity has no direct or inherited vault-wide data-plane role.
 
 Key Vault networking and RBAC are manual environment-owner actions. The publisher does not assign roles, modify Key Vault networking, or make a private vault reachable. Complete any bounded network-access window and restore private-only access before the consumer continues.
 
-SCP is a deliberate transport choice made before host preparation, not a Key Vault fallback. When SCP is selected, the environment owner passes `--output-dir` to `04-prepare-osmo-hil-node.sh`. The resulting protected directory contains the same exact catalog, artifact names, versions, and digests that Key Vault consumers retrieve.
+The publisher reuses the exact catalog-pinned OSMO token and token-metadata secret versions when they are valid and unexpired. `--renew-token` forces a new issuance. An absent catalog or valid expired token metadata issues a new token. Stop on a malformed or inaccessible catalog, or a token-metadata binding or digest mismatch. The publisher does not delete token versions.
+
+Manual SCP is outside this repository HiL flow. An operator may use it only as an out-of-band procedure that does not invoke repository HiL publisher, VPN, or consumer scripts and does not use retired transfer arguments.
 
 ### Connect the Ubuntu Consumer
 
@@ -338,7 +350,7 @@ data-pipeline/setup/hil/02-connect-osmo-backend.sh \
   --vault-name <vault>
 ```
 
-For the preselected SCP opt-out, use the same consumer with `--transport scp --scp-source-dir <protected-artifact-directory>`. A Key Vault access, network, target, or integrity failure stops the run. It never selects SCP automatically.
+The consumer retrieves the catalog and declared artifacts from Key Vault. It validates catalog structure, artifact digests, token metadata, token digest, backend binding, and expiry before any Kubernetes mutation. A Key Vault access, network, target, catalog, or integrity failure stops the run.
 
 The consumer validates the exact catalog-bound inputs and changes only the owned local K3s target. It does not administer Azure resources, AKS, Key Vault networking or RBAC, or remote OSMO desired state. Do not use `download-environment-bundle.sh` or `connect-environment.sh` as the Ubuntu HiL path.
 
@@ -347,7 +359,7 @@ The consumer validates the exact catalog-bound inputs and changes only the owned
 - Generated bundle files contain only the approved non-secret fields and remain under the gitignored environment directory.
 - Every available read-only target check passes or is recorded as unavailable without a false verification claim.
 - Deployment consumers receive explicit validated artifact paths instead of copied tracked values.
-- A HiL publication uses the exact host-bound catalog, publishes it last, and keeps Key Vault and SCP on the same consumer boundary.
+- A HiL publication uses Key Vault, preserves exact catalog-pinned artifact versions, and publishes the catalog last.
 - No discovery action mutates Azure, Kubernetes, OSMO, Key Vault, or a client profile.
 
 ## Stop Rules
@@ -355,8 +367,8 @@ The consumer validates the exact catalog-bound inputs and changes only the owned
 - Stop when Terraform, Azure, AKS, ACR, Key Vault, or OSMO identity does not match the selected environment.
 - Stop when a generated artifact contains a credential, private key, kubeconfig, profile, absolute home path, or unverified mutable reference.
 - Stop before deployment, publication, role assignment, network change, or credential issuance unless the caller requested that separate action and its owner prerequisites are satisfied.
-- Stop a Key Vault path on access, network, target, or integrity failure. Do not change transport automatically.
+- Stop the Key Vault path on access, network, target, catalog, token, or integrity failure.
 
 ## Handoff
 
-Return the generated bundle path, validation results, unavailable checks, and the exact next preview command. For HiL preparation, identify the trusted publisher command, the selected transfer, the local consumer command, and any environment-owner RBAC or network checkpoint that remains.
+Return the generated bundle path, validation results, unavailable checks, and the exact next preview command. For HiL preparation, identify the trusted Key Vault publisher command, the local consumer command, and any environment-owner RBAC or network checkpoint that remains.

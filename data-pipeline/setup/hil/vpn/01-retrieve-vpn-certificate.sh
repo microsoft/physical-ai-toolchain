@@ -27,8 +27,6 @@ OPTIONS:
     --tenant-id ID              Expected Microsoft Entra tenant (required)
     --subscription ID           Expected Azure subscription (required)
     --vault-name NAME           Expected Key Vault (required)
-    --transport TRANSPORT       keyvault|scp (default: keyvault)
-    --scp-source-dir DIR        Protected response directory for SCP transport
     --request-dir DIR           Protected local private-key and CSR directory
     --response-dir DIR          Protected local public-response directory
     --azure-config-dir DIR      Isolated Azure CLI state directory
@@ -40,14 +38,11 @@ EXAMPLES:
 EOF
 }
 
-# Initialize the target identity, transfer method, and local request/response directories.
 environment=""
 host_name=""
 tenant_id=""
 subscription_id=""
 vault_name=""
-transport="keyvault"
-scp_source_dir=""
 request_dir=""
 response_dir=""
 azure_config_dir=""
@@ -62,8 +57,6 @@ while [[ $# -gt 0 ]]; do
     --tenant-id)         tenant_id="$2"; shift 2 ;;
     --subscription)      subscription_id="$2"; shift 2 ;;
     --vault-name)        vault_name="$2"; shift 2 ;;
-    --transport)         transport="$2"; shift 2 ;;
-    --scp-source-dir)    scp_source_dir="$2"; shift 2 ;;
     --request-dir)       request_dir="$2"; shift 2 ;;
     --response-dir)      response_dir="$2"; shift 2 ;;
     --azure-config-dir)  azure_config_dir="$2"; shift 2 ;;
@@ -78,8 +71,6 @@ hil_require_name "Host name" "$host_name"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
 [[ -n "$subscription_id" ]] || fatal "--subscription is required"
 [[ -n "$vault_name" ]] || fatal "--vault-name is required"
-[[ "$transport" == "keyvault" || "$transport" == "scp" ]] || fatal "--transport must be keyvault or scp"
-[[ "$transport" != "scp" || -n "$scp_source_dir" ]] || fatal "--scp-source-dir is required for SCP transport"
 
 request_dir="${request_dir:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/vpn/${environment}-${host_name}/request}"
 response_dir="${response_dir:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/vpn/${environment}-${host_name}/returned}"
@@ -93,7 +84,6 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Environment" "$environment"
   print_kv "Host" "$host_name"
   print_kv "Key Vault" "$vault_name"
-  print_kv "Transfer" "$transport"
   print_kv "Request Directory" "$request_dir"
   print_kv "Response Directory" "$response_dir"
   print_kv "VPN Mutation" "none"
@@ -102,16 +92,11 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-# Check the commands used by the retrieval path.
-require_tools jq
-[[ "$transport" != "keyvault" ]] || require_tools az
-if [[ "$transport" == "keyvault" ]]; then
-  hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
-fi
+require_tools az jq
+hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
 
-# Retrieve the signed response for this environment and host.
-hil_fetch_artifacts "$transport" "$catalog_secret" "$environment" "$host_name" \
-  "$tenant_id" "$subscription_id" "$vault_name" "$response_dir" "$scp_source_dir" vpn_response
+hil_fetch_artifacts "$catalog_secret" "$environment" "$host_name" \
+  "$tenant_id" "$subscription_id" "$vault_name" "$response_dir" vpn_response
 catalog="$response_dir/catalog.json"
 response_name=$(jq -r '.artifacts.vpn_response.file // empty' "$catalog")
 response_file="$response_dir/$response_name"

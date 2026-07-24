@@ -29,8 +29,6 @@ OPTIONS:
     --tenant-id ID              Expected Microsoft Entra tenant (required)
     --subscription ID           Expected Azure subscription (required)
     --vault-name NAME           Expected Key Vault (required)
-    --transport TRANSPORT       keyvault|scp (default: keyvault)
-    --scp-source-dir DIR        Protected public-input directory for SCP transport
     --input-dir DIR             Protected local public-input directory
     --request-dir DIR           Protected local private-key and CSR directory
     --azure-config-dir DIR      Isolated Azure CLI state directory
@@ -42,14 +40,11 @@ EXAMPLES:
 EOF
 }
 
-# Initialize the target identity, transfer method, and protected local directories.
 environment=""
 host_name=""
 tenant_id=""
 subscription_id=""
 vault_name=""
-transport="keyvault"
-scp_source_dir=""
 input_dir=""
 request_dir=""
 azure_config_dir=""
@@ -64,8 +59,6 @@ while [[ $# -gt 0 ]]; do
     --tenant-id)         tenant_id="$2"; shift 2 ;;
     --subscription)      subscription_id="$2"; shift 2 ;;
     --vault-name)        vault_name="$2"; shift 2 ;;
-    --transport)         transport="$2"; shift 2 ;;
-    --scp-source-dir)    scp_source_dir="$2"; shift 2 ;;
     --input-dir)         input_dir="$2"; shift 2 ;;
     --request-dir)       request_dir="$2"; shift 2 ;;
     --azure-config-dir)  azure_config_dir="$2"; shift 2 ;;
@@ -80,8 +73,6 @@ hil_require_name "Host name" "$host_name"
 [[ -n "$tenant_id" ]] || fatal "--tenant-id is required"
 [[ -n "$subscription_id" ]] || fatal "--subscription is required"
 [[ -n "$vault_name" ]] || fatal "--vault-name is required"
-[[ "$transport" == "keyvault" || "$transport" == "scp" ]] || fatal "--transport must be keyvault or scp"
-[[ "$transport" != "scp" || -n "$scp_source_dir" ]] || fatal "--scp-source-dir is required for SCP transport"
 
 input_dir="${input_dir:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/vpn/${environment}-${host_name}/public}"
 request_dir="${request_dir:-${XDG_DATA_HOME:-$HOME/.local/share}/physical-ai-toolchain/hil/vpn/${environment}-${host_name}/request}"
@@ -98,37 +89,25 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Tenant" "$tenant_id"
   print_kv "Subscription" "$subscription_id"
   print_kv "Key Vault" "$vault_name"
-  print_kv "Transfer" "$transport"
   print_kv "Catalog" "$catalog_secret"
   print_kv "Public Inputs" "$input_dir"
   print_kv "Private Key and CSR" "$request_dir"
-  print_kv "CSR Destination" "$([[ $transport == keyvault ]] && echo "$csr_secret" || echo 'manual SCP handoff')"
+  print_kv "CSR Destination" "$csr_secret"
   print_kv "Private Key Transfer" "never"
   print_kv "Next" "close and verify the public window; the CA owner signs the CSR"
   exit 0
 fi
 
-# Check the commands used by the request path.
-require_tools jq openssl
-[[ "$transport" != "keyvault" ]] || require_tools az
-if [[ "$transport" == "keyvault" ]]; then
-  hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
-fi
+require_tools az jq openssl
+hil_login_azure "$tenant_id" "$subscription_id" "$azure_config_dir"
 
-# Retrieve the public VPN inputs for this environment and host.
-hil_fetch_artifacts "$transport" "$catalog_secret" "$environment" "$host_name" \
-  "$tenant_id" "$subscription_id" "$vault_name" "$input_dir" "$scp_source_dir" \
+hil_fetch_artifacts "$catalog_secret" "$environment" "$host_name" \
+  "$tenant_id" "$subscription_id" "$vault_name" "$input_dir" \
   vpn_config vpn_server_root vpn_client_root
 catalog="$input_dir/catalog.json"
-# Resolve safe catalog filenames so external metadata cannot select arbitrary local paths.
-artifact_path() {
-  local key="${1:?artifact key required}" file
-  file=$(jq -r --arg key "$key" '.artifacts[$key].file // empty' "$catalog")
-  printf '%s/%s\n' "$input_dir" "$file"
-}
-vpn_config=$(artifact_path vpn_config)
-vpn_server_root=$(artifact_path vpn_server_root)
-vpn_client_root=$(artifact_path vpn_client_root)
+vpn_config=$(hil_require_local_artifact "$catalog" vpn_config "$environment" "$host_name" "$input_dir")
+vpn_server_root=$(hil_require_local_artifact "$catalog" vpn_server_root "$environment" "$host_name" "$input_dir")
+vpn_client_root=$(hil_require_local_artifact "$catalog" vpn_client_root "$environment" "$host_name" "$input_dir")
 
 gateway=$(jq -r '.gateway' "$vpn_config")
 
@@ -161,18 +140,23 @@ jq -n --arg environment "$environment" --arg host "$host_name" --arg gateway "$g
 chmod 0600 "$request_tmp"
 mv "$request_tmp" "$request_file"
 
-# Publish only the signed-request payload through the selected handoff; the private key never leaves the host.
-if [[ "$transport" == "keyvault" ]]; then
-  current_request=$(az keyvault secret show --subscription "$subscription_id" --vault-name "$vault_name" \
-    --name "$csr_secret" --query value -o tsv 2>/dev/null || true)
-  if [[ "$current_request" != "$(<"$request_file")" ]]; then
-    az keyvault secret set --subscription "$subscription_id" --vault-name "$vault_name" \
-      --name "$csr_secret" --file "$request_file" --encoding utf-8 --content-type application/json \
-      --only-show-errors --output none
-  fi
+secret_error=$(mktemp "$request_dir/.key-vault-error.XXXXXX")
+trap 'rm -f "$secret_error"' EXIT
+if current_request=$(az keyvault secret show --subscription "$subscription_id" --vault-name "$vault_name" \
+  --name "$csr_secret" --query value -o tsv --only-show-errors 2>"$secret_error"); then
+  :
+elif hil_key_vault_secret_not_found "$secret_error"; then
+  current_request=""
 else
-  install -m 0600 "$request_file" "$scp_source_dir/vpn-request.json"
+  fatal "Unable to read the existing VPN CSR from Key Vault"
 fi
+if [[ "$current_request" != "$(<"$request_file")" ]]; then
+  az keyvault secret set --subscription "$subscription_id" --vault-name "$vault_name" \
+    --name "$csr_secret" --file "$request_file" --encoding utf-8 --content-type application/json \
+    --only-show-errors --output none
+fi
+rm -f "$secret_error"
+trap - EXIT
 
 # Report the CSR handoff and the checkpoint required before the CA response is retrieved.
 section "Deployment Summary"
@@ -180,7 +164,7 @@ print_kv "Milestone" "reachable: VPN request"
 print_kv "Environment" "$environment"
 print_kv "Host" "$host_name"
 print_kv "CSR" "$csr_file"
-print_kv "CSR Handoff" "$([[ $transport == keyvault ]] && echo "$csr_secret" || echo "$scp_source_dir/vpn-request.json")"
+print_kv "CSR Handoff" "$csr_secret"
 print_kv "Private Key" "remains only at $private_key"
 print_kv "Required Checkpoint" "disable and verify Key Vault public access before continuing"
 print_kv "Next" "The CA owner signs the CSR and publishes only the public response"

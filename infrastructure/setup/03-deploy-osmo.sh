@@ -308,7 +308,7 @@ section "Configure Internal LoadBalancer"
 info "Applying internal LoadBalancer ingress service..."
 if [[ -z "$private_service_ip" ]]; then
     private_service_ip=$(kubectl get svc azureml-ingress-nginx-internal-lb -n azureml \
-        -o jsonpath='{.spec.loadBalancerIP}' 2>/dev/null || true)
+    -o jsonpath='{.metadata.annotations.service\.beta\.kubernetes\.io/azure-load-balancer-ipv4}' 2>/dev/null || true)
 fi
 [[ -n "$private_service_ip" ]] || fatal "A stable private service IP is required; pass --private-service-ip"
 is_rfc1918_ipv4 "$private_service_ip" || fatal "Private service IP must be an RFC1918 IPv4 address"
