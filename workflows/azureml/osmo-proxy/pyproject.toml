@@ -22,4 +22,7 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 # force the patched release.
 override-dependencies = [
     "cryptography==48.0.1",
+    # Pin gitpython >= 3.1.53 (GHSA-3rp5-jjmw-4wv2, GHSA-fjr4-x663-mwxc,
+    # GHSA-6p8h-3wgx-97gf, GHSA-r9mr-m37c-5fr3): all four CVEs patched in 3.1.53.
+    "gitpython>=3.1.53",
 ]
