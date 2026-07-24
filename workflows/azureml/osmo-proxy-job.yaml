@@ -11,7 +11,7 @@
 #   - OSMO deployed on the same cluster (infrastructure/setup/03-deploy-osmo.sh)
 #   - WORKFLOW_YAML path must be relative to the repo root (code upload)
 #
-# Submit via: training/utils/submit-osmo-proxy-job.sh
+# Submit via: workflows/azureml/submit-osmo-proxy-job.sh
 # Or directly:
 #   az ml job create --file workflows/azureml/osmo-proxy-job.yaml \
 #     --workspace-name <ws> --resource-group <rg> \
@@ -37,8 +37,9 @@ resources:
   shm_size: 512m
 
 command: >-
-  pip install --quiet requests>=2.31 pyyaml>=6.0 mlflow>=2.10 azureml-mlflow>=1.0
-  azure-ai-ml>=1.13 azure-identity>=1.15 &&
+  pip install --quiet uv &&
+  uv --directory workflows/azureml/osmo-proxy export --frozen --no-hashes --no-emit-project |
+  uv pip install --no-deps --quiet -r /dev/stdin &&
   python workflows/azureml/osmo-proxy/osmo_proxy.py --workflow-yaml ${WORKFLOW_YAML}
 
 environment_variables:

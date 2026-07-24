@@ -37,12 +37,14 @@ Environment variables:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import logging
 import os
 import sys
 import time
-from datetime import UTC
+import xml.etree.ElementTree as ET
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
@@ -337,8 +339,6 @@ def _list_blobs(
     Handles Azure Blob REST API pagination automatically.
     Returns relative blob names (full path within container).
     """
-    import xml.etree.ElementTree as ET
-
     try:
         token = _get_msi_token("https://storage.azure.com/", client_id)
     except Exception as exc:
@@ -449,7 +449,6 @@ def _extract_tier2_metrics(
 
     Returns a dict of {metric_name: float}.
     """
-    import fnmatch
 
     def _parse_azure_url(url: str) -> tuple[str | None, str | None, str]:
         rest = url[len("azure://") :]
@@ -621,10 +620,16 @@ def _log_to_mlflow(
                 sorted(all_tasks[0].keys()),
             )
 
+        def _parse_ts(s: str) -> datetime:
+            """Parse an ISO 8601 timestamp string, with or without timezone info."""
+            s = str(s).replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(s)
+            except ValueError:
+                return datetime.strptime(str(s).rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=UTC)
+
         def _task_duration_s(task: dict[str, Any]) -> float | None:
             """Return task elapsed seconds or None if timing data unavailable."""
-            from datetime import datetime
-
             if task.get("duration") is not None:
                 return float(task["duration"])
             for start_key, end_key in (
@@ -637,14 +642,6 @@ def _log_to_mlflow(
                 end_raw = task.get(end_key)
                 if start_raw and end_raw:
                     try:
-
-                        def _parse_ts(s: str) -> datetime:
-                            s = str(s).replace("Z", "+00:00")
-                            try:
-                                return datetime.fromisoformat(s)
-                            except ValueError:
-                                return datetime.strptime(str(s).rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=UTC)
-
                         delta = _parse_ts(str(end_raw)) - _parse_ts(str(start_raw))
                         return max(0.0, delta.total_seconds())
                     except Exception:

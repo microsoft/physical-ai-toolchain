@@ -2,7 +2,7 @@
 title: Conversion Pipeline Module
 description: The conversion pipeline reuses the platform-owned ADLS Gen2 data-lake account (stdl...) for raw -> converted storage. This module owns only the Event Grid system topic + subscription that route BlobCreated events to the conversion subscriber, an in-account dead-letter container, and the Fabric capacity + workspace.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-05-11
+ms.date: 2026-07-24
 ms.topic: reference
 ---
 

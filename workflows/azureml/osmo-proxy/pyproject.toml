@@ -3,9 +3,9 @@ name = "osmo-proxy"
 version = "0.1.0"
 description = "AML→OSMO proxy runtime dependencies"
 requires-python = "==3.12.*"
-# Versions are pinned exactly; the conda overlay in osmo-proxy-job.yaml mirrors
-# these top-level constraints. Regenerate after any change:
-#   cd training/utils/osmo-proxy && uv lock
+# Versions are pinned exactly; the AML job installs from the lock via
+# `uv export --frozen --no-hashes --no-emit-project | uv pip install --no-deps`.
+# Regenerate after any change: cd workflows/azureml/osmo-proxy && uv lock
 dependencies = [
     "requests>=2.31",
     "pyyaml>=6.0",

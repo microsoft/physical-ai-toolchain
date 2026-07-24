@@ -303,6 +303,8 @@ if [[ "$skip_attach" == "false" ]]; then
     if [[ "$local_accounts_disabled" == "true" ]]; then
       info "Temporarily enabling local accounts for compute attachment..."
       az aks update -g "$rg" -n "$cluster" --enable-local-accounts -o none
+      # Safety net: re-disable on any exit (including errexit failures).
+      trap 'az aks update -g "$rg" -n "$cluster" --disable-local-accounts -o none 2>/dev/null || true; trap - EXIT' EXIT
     fi
 
     info "Attaching AKS cluster as compute target..."
@@ -313,6 +315,7 @@ if [[ "$skip_attach" == "false" ]]; then
     if [[ "$local_accounts_disabled" == "true" ]]; then
       info "Re-disabling local accounts..."
       az aks update -g "$rg" -n "$cluster" --disable-local-accounts -o none
+      trap - EXIT  # normal path handled re-disable; clear safety trap
     fi
   fi
 fi

@@ -39,6 +39,7 @@ type InfraOutputs struct {
 	PostgreSQL                 any            `output:"postgresql"`
 	Redis                      any            `output:"redis"`
 	OsmoWorkloadIdentity       map[string]any `output:"osmo_workload_identity"`
+	OsmoAdminPassword          any            `output:"osmo_admin_password"`
 }
 
 // RequiredOutputKeys returns every `output` tag defined on InfraOutputs. Used
