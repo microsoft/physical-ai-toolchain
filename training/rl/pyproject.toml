@@ -11,7 +11,7 @@ dependencies = [
     "numpy==1.26.4",
     "azure-core==1.41.0",
     "azure-identity==1.25.3",
-    "azure-ai-ml==1.34.0",
+    "azure-ai-ml==1.34.1",
     "azureml-mlflow==1.62.0.post5",
     "azure-storage-blob==12.30.0",
     "mlflow-skinny==3.14.0",
@@ -26,7 +26,7 @@ dependencies = [
     "pyperclip==1.11.0",
     "cryptography==48.0.1",
     "pyjwt==2.13.0",
-    "rsl-rl-lib==5.4.1",
+    "rsl-rl-lib==5.4.2",
     "skrl==2.1.0",
     "tensordict==0.13.0",
     # marshmallow held at 3.x because azure-ai-ml==1.33.0 imports symbols that
