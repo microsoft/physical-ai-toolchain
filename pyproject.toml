@@ -17,7 +17,7 @@ dev = [
     "hypothesis==6.156.6",
     "numpy==2.5.1",
     "ruff==0.15.21",
-    "pyarrow==24.0.0",
+    "pyarrow==25.0.0",
     "imageio==2.37.3",
     "imageio-ffmpeg==0.6.0",
     "pytest==9.1.1",
