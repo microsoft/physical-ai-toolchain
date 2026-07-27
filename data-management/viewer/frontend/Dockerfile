@@ -23,7 +23,7 @@ ENV VITE_AZURE_TENANT_ID=${VITE_AZURE_TENANT_ID}
 RUN npm run build
 
 # ─── Serve stage ─────────────────────────────────────────────────────────────
-FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:592b23aa79a6e6c08ba4b20f1fff700e1328895705966722608e115d62e52d39 AS serve
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:18d67281256ded39ff65e010ae4f831be18f19356f83c60bc546492c7eb6dd23 AS serve
 
 USER root
 
