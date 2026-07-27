@@ -14,7 +14,7 @@ dependencies = [
     "scipy==1.18.0",
     "scikit-learn==1.9.0",
     "pandas==3.0.3",
-    "pyarrow==24.0.0",
+    "pyarrow==25.0.0",
     "Pillow==12.2.0",
     "opencv-python-headless==5.0.0.93",
 ]
