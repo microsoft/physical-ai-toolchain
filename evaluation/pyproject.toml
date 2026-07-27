@@ -8,7 +8,7 @@ dependencies = [
     "azure-core==1.41.0",
     "azure-storage-blob==12.30.0",
     "azure-identity==1.25.3",
-    "azure-ai-ml==1.34.0",
+    "azure-ai-ml==1.34.1",
     "marshmallow==3.26.2",
     "mlflow==3.14.0",
     "packaging==25.0",
@@ -21,7 +21,7 @@ dependencies = [
     "toml==0.10.2",
     "gymnasium==1.3.0",
     "torch==2.10.0",
-    "transformers==5.13.1",
+    "transformers==5.14.1",
     "tensordict==0.13.0",
     # lerobot 0.6.0 ships a minimal facade: the base install no longer bundles
     # dataset dependencies. The SIL evaluation reads LeRobot dataset videos/parquet
@@ -45,8 +45,8 @@ dev = [
     "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
-    "hypothesis==6.156.6",
-    "matplotlib==3.11.0",
+    "hypothesis==6.157.0",
+    "matplotlib==3.11.1",
     "numpy==2.2.6",
     "torch==2.10.0",
 ]
