@@ -28,7 +28,7 @@ wheels = [
 
 [[package]]
 name = "azure-ai-ml"
-version = "1.34.0"
+version = "1.34.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-core", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -48,9 +48,9 @@ dependencies = [
     { name = "tqdm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "typing-extensions", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ae/a4/2ab8bb2ccbe159f40d33354aed5be5335bbcf5664b9bf433e807d656a8ac/azure_ai_ml-1.34.0.tar.gz", hash = "sha256:7b11e66a494d328022847e9b9367db34a744ffba23a2198c7b587028b296572c", size = 8595855, upload-time = "2026-06-10T23:47:53.995Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/09/d656f53ae688081cbe1ea96e27adfba6ebb2c77aac80298334b52bc77e4a/azure_ai_ml-1.34.1.tar.gz", hash = "sha256:c09938aa07094b393ff7775fa2c81c446f6d77639c8136195233446e1a5ea9c9", size = 8637852, upload-time = "2026-07-14T20:46:54.852Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/8c/a0d1fe6a8b4b2316d4478ccc11bb9a14bfc0ce4dd482e672414106818e02/azure_ai_ml-1.34.0-py3-none-any.whl", hash = "sha256:bcefb2e4a9e9dd88da0f88cb4f24c1d1f829e49a21cb90413f803b3787a0f4b9", size = 11395761, upload-time = "2026-06-10T23:47:57.865Z" },
+    { url = "https://files.pythonhosted.org/packages/67/67/70668ff5433080a260bdf29f1de69129150289a68eac987162a687013abc/azure_ai_ml-1.34.1-py3-none-any.whl", hash = "sha256:f1bfb239314f73e2426be247fc16d1a9a687d24d3443139432cb17efe9506978", size = 11396696, upload-time = "2026-07-14T20:46:58.171Z" },
 ]
 
 [[package]]
@@ -326,7 +326,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "azure-ai-ml", specifier = "==1.34.0" },
+    { name = "azure-ai-ml", specifier = "==1.34.1" },
     { name = "azure-identity", specifier = "==1.25.3" },
 ]
 
