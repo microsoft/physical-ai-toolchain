@@ -509,7 +509,7 @@ jobs:
           terraform_version: 1.9.8
           terraform_wrapper: false
       - name: Set up TFLint
-        uses: terraform-linters/setup-tflint@b480b8fcdaa6f2c577f8e4fa799e89e756bb7c93 # b480b8fcdaa6f2c577f8e4fa799e89e756bb7c93
+        uses: terraform-linters/setup-tflint@b480b8fcdaa6f2c577f8e4fa799e89e756bb7c93 # v6.2.2
         with:
           tflint_version: latest
       - id: resolve-pr
