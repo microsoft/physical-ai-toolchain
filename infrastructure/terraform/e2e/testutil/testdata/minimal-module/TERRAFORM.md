@@ -2,7 +2,7 @@
 title: Terraform IaC
 description: Auto-generated Terraform reference documentation
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-24
+ms.date: 2026-08-03
 ms.topic: reference
 ---
 

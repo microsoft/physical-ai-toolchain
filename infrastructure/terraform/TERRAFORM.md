@@ -2,7 +2,7 @@
 title: Robotics Blueprint
 description: Deploys robotics infrastructure with NVIDIA GPU support, KAI Scheduler, and optional Azure Machine Learning integration.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-24
+ms.date: 2026-08-03
 ms.topic: reference
 ---
 
@@ -16,23 +16,23 @@ Architecture:
 
 ## Requirements
 
-| Name      | Version         |
-|-----------|-----------------|
-| terraform | >= 1.9.8, < 2.0 |
-| azapi     | >= 2.3.0        |
-| azuread   | >= 3.0.2        |
-| azurerm   | >= 4.51.0       |
-| fabric    | >= 1.3.0        |
-| msgraph   | >= 0.2.0        |
-| tls       | >= 4.0.6        |
+| Name      | Version            |
+|-----------|--------------------|
+| terraform | >= 1.9.8, < 2.0    |
+| azapi     | >= 2.3.0           |
+| azuread   | >= 3.0.2           |
+| azurerm   | >= 4.51.0, < 5.0.0 |
+| fabric    | >= 1.3.0           |
+| msgraph   | >= 0.2.0           |
+| tls       | >= 4.0.6           |
 
 ## Providers
 
-| Name      | Version   |
-|-----------|-----------|
-| azurerm   | >= 4.51.0 |
-| msgraph   | >= 0.2.0  |
-| terraform | n/a       |
+| Name      | Version            |
+|-----------|--------------------|
+| azurerm   | >= 4.51.0, < 5.0.0 |
+| msgraph   | >= 0.2.0           |
+| terraform | n/a                |
 
 ## Resources
 

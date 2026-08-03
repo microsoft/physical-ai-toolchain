@@ -2,7 +2,7 @@
 title: Azure Automation Module
 description: Creates an Azure Automation Account with a scheduled PowerShell runbook for automated startup of AKS clusters and PostgreSQL servers.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-24
+ms.date: 2026-08-03
 ms.topic: reference
 ---
 
@@ -12,16 +12,16 @@ for automated startup of AKS clusters and PostgreSQL servers.
 
 ## Requirements
 
-| Name      | Version         |
-|-----------|-----------------|
-| terraform | >= 1.9.8, < 2.0 |
-| azurerm   | >= 4.51.0       |
+| Name      | Version            |
+|-----------|--------------------|
+| terraform | >= 1.9.8, < 2.0    |
+| azurerm   | >= 4.51.0, < 5.0.0 |
 
 ## Providers
 
-| Name    | Version   |
-|---------|-----------|
-| azurerm | >= 4.51.0 |
+| Name    | Version            |
+|---------|--------------------|
+| azurerm | >= 4.51.0, < 5.0.0 |
 
 ## Resources
 
