@@ -150,7 +150,7 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     expect(panelText.indexOf('Language Instructions')).toBeLessThan(panelText.indexOf('VLM Judge'))
   })
 
-  it('constrains the compact trajectory playback media frame so it does not dominate the viewer', () => {
+  it('expands trajectory playback media to use the available panel width by default', () => {
     render(<AnnotationWorkspace />)
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: /trajectory viewer/i }), {
@@ -158,9 +158,9 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
       ctrlKey: false,
     })
 
-    expect(screen.getByTestId('trajectory-compact-media-frame').className).toContain(
-      'max-w-[40rem]',
-    )
+    expect(screen.getByTestId('trajectory-playback-card')).not.toHaveClass('max-w-[44rem]')
+    expect(screen.getByTestId('trajectory-compact-media-frame')).toHaveClass('max-h-[34rem]')
+    expect(screen.getByRole('button', { name: 'Compact media' })).toBeVisible()
   })
 
   it('groups the trajectory playback and subtask list into their own scrollable panel', () => {

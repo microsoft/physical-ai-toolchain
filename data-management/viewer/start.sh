@@ -76,6 +76,7 @@ EOF
 }
 
 cleanup() {
+    local exit_code="${1:-0}"
     log_info "Shutting down services..."
 
     if [[ -n "${BACKEND_PID}" ]] && kill -0 "${BACKEND_PID}" 2>/dev/null; then
@@ -91,10 +92,10 @@ cleanup() {
     fi
 
     log_success "All services stopped"
-    exit 0
+    exit "${exit_code}"
 }
 
-trap cleanup SIGINT SIGTERM
+trap 'cleanup 0' SIGINT SIGTERM
 
 check_prerequisites() {
     local missing=()
@@ -193,7 +194,7 @@ start_backend() {
         cd "${BACKEND_DIR}"
         # shellcheck source=/dev/null
         source .venv/bin/activate
-        uvicorn src.api.main:app --reload --port "${BACKEND_PORT}" 2>&1
+        exec uvicorn src.api.main:app --reload --port "${BACKEND_PORT}" 2>&1
     ) &
     BACKEND_PID=$!
 
@@ -211,7 +212,7 @@ start_frontend() {
 
     (
         cd "${FRONTEND_DIR}"
-        npm run dev -- --port "${FRONTEND_PORT}" 2>&1
+        exec npm run dev -- --port "${FRONTEND_PORT}" 2>&1
     ) &
     FRONTEND_PID=$!
 
@@ -297,8 +298,7 @@ main() {
             wait -n "${BACKEND_PID}" "${FRONTEND_PID}" 2>/dev/null || true
             cleanup
         else
-            cleanup
-            exit 1
+            cleanup 1
         fi
     fi
 }

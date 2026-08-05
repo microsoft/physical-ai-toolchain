@@ -15,9 +15,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CORS = (
-    "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://localhost:5177"
-)
+_DEFAULT_CORS = "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://localhost:5177"
 
 
 @dataclass(frozen=True)
@@ -84,6 +82,31 @@ class AppConfig:
     vlm_judge_cache_dir: str | None = None
     """Directory for the SHA256-keyed result cache; None disables disk cache."""
 
+    operator_adapter_mode: str = "disabled"
+    """Operator implementation: 'disabled', 'simulated', or 'lerobot'."""
+
+    operator_command_timeout_s: float = 5.0
+    """Maximum wait for worker startup, command acknowledgement, or cleanup."""
+
+    operator_host_lease_path: str | None = None
+    """Required cooperative host lease path for LeRobot mode."""
+
+    operator_worker_executable: str | None = None
+    """Absolute protocol v2 worker executable path for LeRobot mode."""
+
+    operator_policy_python: str | None = None
+    """Python executable containing the trained GR00T runtime."""
+
+    operator_policy_checkpoint: str | None = None
+    """Server-selected GR00T checkpoint directory."""
+
+    operator_policy_cuda_visible_devices: str | None = None
+    """Optional CUDA device selector passed only to policy inference."""
+
+    operator_startup_timeout_s: float = 30.0
+    operator_stop_timeout_s: float = 5.0
+    operator_recovery_timeout_s: float = 10.0
+
 
 def load_config(env_path: Path | None = None) -> AppConfig:
     """
@@ -105,7 +128,9 @@ def load_config(env_path: Path | None = None) -> AppConfig:
 
     azure_account_name = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME") or None
     azure_dataset_container = os.environ.get("AZURE_STORAGE_DATASET_CONTAINER") or None
-    azure_annotation_container = os.environ.get("AZURE_STORAGE_ANNOTATION_CONTAINER") or None
+    azure_annotation_container = (
+        os.environ.get("AZURE_STORAGE_ANNOTATION_CONTAINER") or None
+    )
     azure_sas_token = os.environ.get("AZURE_STORAGE_SAS_TOKEN") or None
 
     backend_host = os.environ.get("BACKEND_HOST", "127.0.0.1")
@@ -119,13 +144,70 @@ def load_config(env_path: Path | None = None) -> AppConfig:
 
     vlm_judge_enabled = os.environ.get("VLM_JUDGE_ENABLED", "false").lower() == "true"
     vlm_judge_backend = os.environ.get("VLM_JUDGE_BACKEND", "echo").lower()
-    vlm_judge_model_id = os.environ.get("VLM_JUDGE_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct")
+    vlm_judge_model_id = os.environ.get(
+        "VLM_JUDGE_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct"
+    )
     vlm_judge_model_revision = os.environ.get("VLM_JUDGE_MODEL_REVISION") or None
     vlm_judge_base_url = os.environ.get("VLM_JUDGE_BASE_URL") or None
     vlm_judge_api_key = os.environ.get("VLM_JUDGE_API_KEY") or None
     vlm_judge_n_frames = int(os.environ.get("VLM_JUDGE_N_FRAMES", "12"))
     vlm_judge_process_method = os.environ.get("VLM_JUDGE_PROCESS_METHOD", "gvl").lower()
     vlm_judge_cache_dir = os.environ.get("VLM_JUDGE_CACHE_DIR") or None
+
+    operator_adapter_mode = os.environ.get("OPERATOR_ADAPTER_MODE", "disabled").lower()
+    allowed_operator_modes = {"disabled", "simulated", "lerobot"}
+    if operator_adapter_mode not in allowed_operator_modes:
+        allowed = ", ".join(sorted(allowed_operator_modes))
+        raise ValueError(f"OPERATOR_ADAPTER_MODE must be one of: {allowed}")
+    operator_command_timeout_s = float(
+        os.environ.get("OPERATOR_COMMAND_TIMEOUT_S", "5")
+    )
+    operator_host_lease_path = os.environ.get("OPERATOR_HOST_LEASE_PATH") or None
+    operator_worker_executable = os.environ.get("OPERATOR_WORKER_EXECUTABLE") or None
+    operator_policy_python = os.environ.get("OPERATOR_POLICY_PYTHON") or None
+    operator_policy_checkpoint = os.environ.get("OPERATOR_POLICY_CHECKPOINT") or None
+    operator_policy_cuda_visible_devices = (
+        os.environ.get("OPERATOR_POLICY_CUDA_VISIBLE_DEVICES") or None
+    )
+    operator_startup_timeout_s = float(
+        os.environ.get("OPERATOR_STARTUP_TIMEOUT_S", "30")
+    )
+    operator_stop_timeout_s = float(os.environ.get("OPERATOR_STOP_TIMEOUT_S", "5"))
+    operator_recovery_timeout_s = float(
+        os.environ.get("OPERATOR_RECOVERY_TIMEOUT_S", "10")
+    )
+    if (
+        min(
+            operator_startup_timeout_s,
+            operator_stop_timeout_s,
+            operator_recovery_timeout_s,
+        )
+        <= 0
+    ):
+        raise ValueError("Operator timeouts must be greater than zero")
+    if operator_command_timeout_s <= 0:
+        raise ValueError("OPERATOR_COMMAND_TIMEOUT_S must be greater than zero")
+    if storage_backend == "azure" and operator_adapter_mode != "disabled":
+        raise ValueError("Operator mode requires local storage")
+    if (
+        operator_adapter_mode != "disabled"
+        and int(os.environ.get("WEB_CONCURRENCY", "1")) != 1
+    ):
+        raise ValueError("Operator mode requires exactly one backend worker")
+    if operator_adapter_mode == "lerobot":
+        if not operator_host_lease_path:
+            raise ValueError("OPERATOR_HOST_LEASE_PATH is required for LeRobot mode")
+        if os.environ.get("DATAVIEWER_AUTH_DISABLED", "false").lower() == "true":
+            allowed = (
+                os.environ.get(
+                    "OPERATOR_ALLOW_UNAUTHENTICATED_LOOPBACK", "false"
+                ).lower()
+                == "true"
+            )
+            if not allowed or backend_host not in {"127.0.0.1", "::1", "localhost"}:
+                raise ValueError(
+                    "Unauthenticated LeRobot mode requires explicit loopback-only authorization"
+                )
 
     return AppConfig(
         storage_backend=storage_backend,
@@ -148,6 +230,16 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         vlm_judge_n_frames=vlm_judge_n_frames,
         vlm_judge_process_method=vlm_judge_process_method,
         vlm_judge_cache_dir=vlm_judge_cache_dir,
+        operator_adapter_mode=operator_adapter_mode,
+        operator_command_timeout_s=operator_command_timeout_s,
+        operator_host_lease_path=operator_host_lease_path,
+        operator_worker_executable=operator_worker_executable,
+        operator_policy_python=operator_policy_python,
+        operator_policy_checkpoint=operator_policy_checkpoint,
+        operator_policy_cuda_visible_devices=operator_policy_cuda_visible_devices,
+        operator_startup_timeout_s=operator_startup_timeout_s,
+        operator_stop_timeout_s=operator_stop_timeout_s,
+        operator_recovery_timeout_s=operator_recovery_timeout_s,
     )
 
 
@@ -172,8 +264,12 @@ def create_annotation_storage(config: AppConfig):
 
     if config.storage_backend == "azure":
         if not config.azure_account_name:
-            raise ValueError("AZURE_STORAGE_ACCOUNT_NAME is required when STORAGE_BACKEND=azure")
-        annotation_container = config.azure_annotation_container or config.azure_dataset_container
+            raise ValueError(
+                "AZURE_STORAGE_ACCOUNT_NAME is required when STORAGE_BACKEND=azure"
+            )
+        annotation_container = (
+            config.azure_annotation_container or config.azure_dataset_container
+        )
         if not annotation_container:
             raise ValueError(
                 "AZURE_STORAGE_ANNOTATION_CONTAINER or AZURE_STORAGE_DATASET_CONTAINER is required "
@@ -234,7 +330,9 @@ def create_blob_dataset_provider(config: AppConfig):
             sas_token=config.azure_sas_token,
         )
     except ImportError:
-        logger.warning("BlobDatasetProvider unavailable: install azure-storage-blob and azure-identity")
+        logger.warning(
+            "BlobDatasetProvider unavailable: install azure-storage-blob and azure-identity"
+        )
         return None
 
 

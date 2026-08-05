@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { combineCssFilters } from '@/lib/css-filters'
+import { useViewerSettingsStore } from '@/stores/viewer-settings-store'
 import type { DatasetInfo, EpisodeData } from '@/types'
 import type { ColorAdjustment, FrameInsertion, ImageTransform } from '@/types/episode-edit'
 
@@ -56,28 +57,17 @@ export function useAnnotationWorkspaceMediaSources({
     return Object.keys(currentEpisode?.videoUrls ?? {})
   }, [currentEpisode?.cameras, currentEpisode?.videoUrls])
 
-  // User-selected camera override; null means "follow the default (cameras[0])".
-  // Tracking the override (rather than the resolved camera) keeps the resolved
-  // cameraName synchronous on first render, avoiding a transient null that would
-  // briefly produce an empty videoSrc and disrupt autoplay sequencing.
-  const [cameraOverride, setCameraOverride] = useState<string | null>(null)
+  const cameraOverrides = useViewerSettingsStore((state) => state.selectedCameras)
+  const setCameraOverrides = useViewerSettingsStore((state) => state.setSelectedCameras)
+
+  const cameraNames = useMemo(() => {
+    const selected = cameraOverrides.filter((camera) => cameras.includes(camera))
+    return selected.length > 0 ? selected : cameras.slice(0, 1)
+  }, [cameraOverrides, cameras])
 
   const cameraName = useMemo(() => {
-    if (cameras.length === 0) {
-      return null
-    }
-    if (cameraOverride && cameras.includes(cameraOverride)) {
-      return cameraOverride
-    }
-    return cameras[0]
-  }, [cameras, cameraOverride])
-
-  // Drop a stale override when the camera list no longer contains it.
-  useEffect(() => {
-    if (cameraOverride && !cameras.includes(cameraOverride)) {
-      setCameraOverride(null)
-    }
-  }, [cameras, cameraOverride])
+    return cameraNames[0] ?? null
+  }, [cameraNames])
 
   const videoUrls = useMemo(() => currentEpisode?.videoUrls ?? {}, [currentEpisode?.videoUrls])
   const videoWindow = useMemo<[number, number] | null>(() => {
@@ -218,13 +208,16 @@ export function useAnnotationWorkspaceMediaSources({
     canvasRef,
     cameras,
     cameraName,
-    setCameraName: setCameraOverride,
+    cameraNames,
+    setCameraName: (camera: string) => setCameraOverrides([camera]),
+    setCameraNames: setCameraOverrides,
     displayFilter,
     frameImageUrl,
     interpolatedImageUrl,
     isInsertedFrame,
     videoSrc,
     videoUrls,
+    videoWindows: currentEpisode?.videoTimeWindows ?? {},
     videoWindow,
   }
 }

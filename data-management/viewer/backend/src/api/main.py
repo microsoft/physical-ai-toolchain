@@ -18,7 +18,17 @@ from .auth import require_auth
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token
 from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
-from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
+from .routers import (
+    analysis,
+    annotations,
+    datasets,
+    detection,
+    export,
+    joint_config,
+    labels,
+    operator,
+    vlm_judge,
+)
 from .routes import ai_analysis
 
 # Configure logging to show INFO level
@@ -29,7 +39,9 @@ logging.basicConfig(
 
 # Suppress verbose Azure SDK HTTP request logging
 logging.getLogger("azure").setLevel(logging.WARNING)
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
+    logging.WARNING
+)
 
 # Load .env before any config or service singletons are initialized so that
 # all env vars are available to get_app_config() on first access.
@@ -47,16 +59,69 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Clean up blob sync temp directories on shutdown."""
-    yield
-    from .services.dataset_service import get_dataset_service
+    """Own operator and dataset service cleanup for the application process."""
+    from .operator.host_lease import OperatorHostLease
+    from .operator.preflight import OperatorPreflightRunner
+    from .operator.profiles import load_operator_profile
+    from .services.operator_preflight_service import OperatorPreflightService
+    from .services.operator_service import OperatorService
 
+    preflight_service = None
+    if _config.operator_adapter_mode != "disabled":
+        profile_path = Path(__file__).parent / "operator/profile_data/so101.toml"
+        profile = load_operator_profile(profile_path, environ=os.environ)
+        preflight_service = OperatorPreflightService(
+            profiles={profile.name: profile},
+            runner=OperatorPreflightRunner(
+                data_root=Path(_config.data_path),
+                policy_python=(
+                    Path(_config.operator_policy_python)
+                    if _config.operator_policy_python
+                    else None
+                ),
+                policy_checkpoint=(
+                    Path(_config.operator_policy_checkpoint)
+                    if _config.operator_policy_checkpoint
+                    else None
+                ),
+            ),
+        )
+    host_lease = None
+    if _config.operator_adapter_mode == "lerobot":
+        host_lease = OperatorHostLease(Path(_config.operator_host_lease_path or ""))
+        host_lease.acquire()
+    operator_service = OperatorService(
+        adapter_mode=_config.operator_adapter_mode,
+        command_timeout_s=_config.operator_command_timeout_s,
+        preflight_service=preflight_service,
+        worker_executable=_config.operator_worker_executable,
+        host_lease_fd=host_lease.fd if host_lease is not None else None,
+        startup_timeout_s=_config.operator_startup_timeout_s,
+        stop_timeout_s=_config.operator_stop_timeout_s,
+        recovery_timeout_s=_config.operator_recovery_timeout_s,
+        data_root=Path(_config.data_path),
+        policy_python=_config.operator_policy_python,
+        policy_checkpoint=_config.operator_policy_checkpoint,
+        policy_cuda_visible_devices=_config.operator_policy_cuda_visible_devices,
+    )
+    _app.state.operator_service = operator_service
+    if preflight_service is not None:
+        _app.state.operator_preflight_service = preflight_service
+    _app.state.operator_host_lease = host_lease
     try:
-        service = get_dataset_service()
-        service.cleanup_temp_dirs()
-        logger.info("Cleaned up blob sync temp directories")
-    except Exception:
-        pass  # Best-effort cleanup; failure here must not block shutdown
+        yield
+    finally:
+        await operator_service.shutdown()
+        if host_lease is not None:
+            host_lease.release()
+        from .services.dataset_service import get_dataset_service
+
+        try:
+            service = get_dataset_service()
+            service.cleanup_temp_dirs()
+            logger.info("Cleaned up blob sync temp directories")
+        except Exception:
+            pass  # Best-effort cleanup; failure here must not block shutdown
 
 
 app = FastAPI(
@@ -98,9 +163,14 @@ async def unhandled_exception_handler(request, exc: Exception) -> JSONResponse:
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request, exc: RequestValidationError) -> JSONResponse:
+async def validation_exception_handler(
+    request, exc: RequestValidationError
+) -> JSONResponse:
     """Return validation errors without internal paths."""
-    errors = [{"loc": error.get("loc"), "msg": error.get("msg"), "type": error.get("type")} for error in exc.errors()]
+    errors = [
+        {"loc": error.get("loc"), "msg": error.get("msg"), "type": error.get("type")}
+        for error in exc.errors()
+    ]
     return JSONResponse(status_code=422, content={"detail": errors})
 
 
@@ -109,27 +179,64 @@ async def validation_exception_handler(request, exc: RequestValidationError) -> 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     ContentSizeLimitMiddleware,
-    max_content_length=int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024))),
+    max_content_length=int(
+        os.environ.get("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024))
+    ),
 )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_config.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-API-Key", "X-Request-ID"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-CSRF-Token",
+        "X-API-Key",
+        "X-Request-ID",
+    ],
 )
 
 # All /api/* routes require authentication (health and csrf-token are on app directly)
 api_auth = [Depends(require_auth)]
-app.include_router(export.router, prefix="/api/datasets", tags=["export"], dependencies=api_auth)
-app.include_router(detection.router, prefix="/api/datasets", tags=["detection"], dependencies=api_auth)
-app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"], dependencies=api_auth)
-app.include_router(annotations.router, prefix="/api", tags=["annotations"], dependencies=api_auth)
-app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"], dependencies=api_auth)
-app.include_router(ai_analysis.router, prefix="/api", tags=["ai"], dependencies=api_auth)
-app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], dependencies=api_auth)
-app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"], dependencies=api_auth)
-app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
+app.include_router(
+    export.router, prefix="/api/datasets", tags=["export"], dependencies=api_auth
+)
+app.include_router(
+    detection.router, prefix="/api/datasets", tags=["detection"], dependencies=api_auth
+)
+app.include_router(
+    datasets.router, prefix="/api/datasets", tags=["datasets"], dependencies=api_auth
+)
+app.include_router(
+    annotations.router, prefix="/api", tags=["annotations"], dependencies=api_auth
+)
+app.include_router(
+    analysis.router, prefix="/api/analysis", tags=["analysis"], dependencies=api_auth
+)
+app.include_router(
+    ai_analysis.router, prefix="/api", tags=["ai"], dependencies=api_auth
+)
+app.include_router(
+    labels.router, prefix="/api/datasets", tags=["labels"], dependencies=api_auth
+)
+app.include_router(
+    joint_config.router,
+    prefix="/api/datasets",
+    tags=["joint-config"],
+    dependencies=api_auth,
+)
+app.include_router(
+    joint_config.defaults_router,
+    prefix="/api",
+    tags=["joint-config"],
+    dependencies=api_auth,
+)
+app.include_router(
+    operator.router,
+    prefix="/api/operator",
+    tags=["operator"],
+)
 if _config.vlm_judge_enabled:
     app.include_router(
         vlm_judge.router,
@@ -151,11 +258,15 @@ async def health_check():
         # In Azure mode the local base_path is irrelevant; treat the blob
         # provider's presence as the storage health signal.
         if _config.storage_backend == "azure":
-            checks["storage"] = "healthy" if service._blob_provider is not None else "unhealthy"
+            checks["storage"] = (
+                "healthy" if service._blob_provider is not None else "unhealthy"
+            )
         elif hasattr(service, "base_path"):
             from pathlib import Path as _Path
 
-            checks["storage"] = "healthy" if _Path(service.base_path).exists() else "unhealthy"
+            checks["storage"] = (
+                "healthy" if _Path(service.base_path).exists() else "unhealthy"
+            )
         else:
             checks["storage"] = "healthy"
     except Exception:
@@ -163,7 +274,9 @@ async def health_check():
 
     overall = "healthy" if all(v == "healthy" for v in checks.values()) else "degraded"
     status_code = 200 if overall == "healthy" else 503
-    return JSONResponse(content={"status": overall, "checks": checks}, status_code=status_code)
+    return JSONResponse(
+        content={"status": overall, "checks": checks}, status_code=status_code
+    )
 
 
 @app.get("/api/csrf-token", tags=["auth"])

@@ -19,6 +19,7 @@ const hoisted = vi.hoisted(() => {
     availableLabels: ['SUCCESS', 'FAILURE', 'PARTIAL'],
     labelsLoaded: true,
     episodeIndex: 0,
+    annotationDirty: false,
     hasEdits: false,
     isPlaying: false,
     autoPlay: false,
@@ -72,6 +73,7 @@ const hoisted = vi.hoisted(() => {
     initializeEdit: vi.fn(),
     resetEdits: vi.fn(),
     saveEpisodeDraft: vi.fn(),
+    saveCurrentAnnotation: vi.fn(),
     setCurrentFrame: vi.fn(),
     togglePlayback: vi.fn(),
     setPlaybackSpeed: vi.fn(),
@@ -91,6 +93,7 @@ export const testState = hoisted.state
 export const mockInitializeEdit = hoisted.initializeEdit
 export const mockResetEdits = hoisted.resetEdits
 export const mockSaveEpisodeDraft = hoisted.saveEpisodeDraft
+export const mockSaveCurrentAnnotation = hoisted.saveCurrentAnnotation
 export const mockSetCurrentFrame = hoisted.setCurrentFrame
 export const mockTogglePlayback = hoisted.togglePlayback
 export const mockSetPlaybackSpeed = hoisted.setPlaybackSpeed
@@ -281,6 +284,13 @@ vi.mock('@/hooks/use-labels', () => ({
   }),
 }))
 
+vi.mock('@/hooks/use-annotations', () => ({
+  useSaveCurrentAnnotation: () => ({
+    save: hoisted.saveCurrentAnnotation,
+    isPending: false,
+  }),
+}))
+
 vi.mock('@/hooks/use-datasets', () => ({
   useCacheStats: () => ({ data: undefined }),
 }))
@@ -311,7 +321,7 @@ vi.mock('@/stores', () => ({
   useDatasetStore: (selector: (state: unknown) => unknown) =>
     selector({ currentDataset: { id: 'dataset-1', fps: 30 } }),
   useAnnotationStore: (selector: (state: unknown) => unknown) =>
-    selector({ currentAnnotation: null }),
+    selector({ currentAnnotation: null, isDirty: hoisted.state.annotationDirty }),
   useEditDirtyState: () => ({ isDirty: hoisted.state.hasEdits, resetEdits: hoisted.resetEdits }),
   useFrameInsertionState: () => ({
     insertedFrames: new Map<number, { interpolationFactor?: number }>(),
@@ -381,6 +391,7 @@ export function setupAnnotationWorkspaceTestCase() {
   testState.availableLabels = ['SUCCESS', 'FAILURE', 'PARTIAL']
   testState.labelsLoaded = true
   testState.episodeIndex = 0
+  testState.annotationDirty = false
   testState.hasEdits = false
   testState.isPlaying = false
   testState.autoPlay = false
@@ -407,6 +418,10 @@ export function setupAnnotationWorkspaceTestCase() {
     testState.hasEdits = false
   })
   mockResetEdits.mockReset()
+  mockSaveCurrentAnnotation.mockReset()
+  mockSaveCurrentAnnotation.mockImplementation(async () => {
+    testState.annotationDirty = false
+  })
   mockDiagnosticsState.enabled = false
   mockDiagnosticsState.channels = []
   mockDiagnosticsState.events = []
