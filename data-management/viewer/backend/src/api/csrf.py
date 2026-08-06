@@ -10,8 +10,6 @@ Uses the *double-submit cookie* pattern:
 4. The server compares the header value to the cookie value; mismatches
    result in ``HTTP 403``.
 
-Set ``DATAVIEWER_AUTH_DISABLED=true`` to bypass CSRF validation in local
-development (mirrors the auth bypass flag).
 """
 
 import logging
@@ -43,9 +41,6 @@ async def require_csrf_token(request: Request) -> None:
     Raises ``HTTP 403`` when the ``X-CSRF-Token`` header is absent or does not
     match the ``csrf_token`` cookie.
     """
-    if os.environ.get("DATAVIEWER_AUTH_DISABLED", "false").lower() == "true":
-        return
-
     if request.method not in _MUTATION_METHODS:
         return
 
