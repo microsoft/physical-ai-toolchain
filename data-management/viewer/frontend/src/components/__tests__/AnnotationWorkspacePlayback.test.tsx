@@ -30,6 +30,22 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     expect(screen.getByTestId('trajectory-graph-panel')).toBeInTheDocument()
   })
 
+  it('exposes an Episode Analyzer tab that surfaces motion analysis and the VLM judge', () => {
+    render(<AnnotationWorkspace />)
+
+    expect(screen.getByRole('tab', { name: /episode analyzer/i })).toBeInTheDocument()
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /episode analyzer/i }), {
+      button: 0,
+      ctrlKey: false,
+    })
+
+    expect(screen.getByTestId('analyzer-layout-grid')).toBeInTheDocument()
+    expect(screen.getByText('Motion Metrics')).toBeInTheDocument()
+    expect(screen.getByText('VLM Judge')).toBeInTheDocument()
+    expect(screen.getByText('Episode Labels')).toBeInTheDocument()
+  })
+
   it('shows subtask controls in the default trajectory viewer', () => {
     render(<AnnotationWorkspace />)
 

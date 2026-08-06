@@ -8,9 +8,19 @@ import { useLabelStore } from '@/stores/label-store'
 const mockToggle = vi.fn()
 const mockAddLabelOption = vi.fn()
 const mockRemoveLabelOption = vi.fn()
+const mockImportAnalysisLabels = vi.fn()
 let mockCurrentLabels = ['SUCCESS']
 
 vi.mock('@/hooks/use-labels', () => ({
+  IMPORTABLE_ANALYSIS_FIELDS: [
+    'object',
+    'pick_from',
+    'grasp_success',
+    'place_success',
+    'motion_score',
+    'motion_flags',
+    'source',
+  ],
   useCurrentEpisodeLabels: () => ({
     currentLabels: mockCurrentLabels,
     toggle: mockToggle,
@@ -23,6 +33,10 @@ vi.mock('@/hooks/use-labels', () => ({
     mutateAsync: mockRemoveLabelOption,
     isPending: false,
   }),
+  useImportAnalysisLabels: () => ({
+    mutateAsync: mockImportAnalysisLabels,
+    isPending: false,
+  }),
 }))
 
 describe('LabelPanel', () => {
@@ -30,9 +44,14 @@ describe('LabelPanel', () => {
     mockToggle.mockReset()
     mockAddLabelOption.mockReset()
     mockRemoveLabelOption.mockReset()
+    mockImportAnalysisLabels.mockReset()
     mockToggle.mockResolvedValue(undefined)
     mockAddLabelOption.mockResolvedValue(undefined)
     mockRemoveLabelOption.mockResolvedValue(undefined)
+    mockImportAnalysisLabels.mockResolvedValue({
+      labels_added: [],
+      episodes_updated: 0,
+    })
     mockCurrentLabels = ['SUCCESS']
     useLabelStore.getState().reset()
     useLabelStore.getState().setAvailableLabels(['SUCCESS', 'FAILURE', 'REVIEW'])

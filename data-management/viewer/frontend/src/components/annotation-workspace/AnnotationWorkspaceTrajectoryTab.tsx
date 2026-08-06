@@ -6,11 +6,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { TabsContent } from '@/components/ui/tabs'
 
+import { CollapsibleSection } from './CollapsibleSection'
+
 interface AnnotationWorkspaceTrajectoryTabProps {
   playbackCard: ReactNode
   subtaskListCard: ReactNode
   labelPanel: ReactNode
   judgePanel: ReactNode
+  analysisCard: ReactNode
   languageInstructionPanel: ReactNode
   objectDetectionPanel: ReactNode
   editToolsPanel: ReactNode
@@ -31,6 +34,7 @@ export function AnnotationWorkspaceTrajectoryTab({
   subtaskListCard,
   labelPanel,
   judgePanel,
+  analysisCard,
   languageInstructionPanel,
   objectDetectionPanel,
   editToolsPanel,
@@ -102,11 +106,22 @@ export function AnnotationWorkspaceTrajectoryTab({
         >
           <CardContent className="h-full overflow-y-auto p-4">
             <div className="space-y-6">
-              {labelPanel}
-              <div className="border-t pt-6">{languageInstructionPanel}</div>
-              <div className="border-t pt-6">{judgePanel}</div>
-              <div className="border-t pt-6">{objectDetectionPanel}</div>
-              <div className="border-t pt-6">{editToolsPanel}</div>
+              <CollapsibleSection title="Episode Labels">{labelPanel}</CollapsibleSection>
+              <CollapsibleSection title="Episode Analysis" className="border-t pt-6">
+                {analysisCard}
+              </CollapsibleSection>
+              <CollapsibleSection title="Language Instructions" className="border-t pt-6">
+                {languageInstructionPanel}
+              </CollapsibleSection>
+              <CollapsibleSection title="VLM Judge" className="border-t pt-6">
+                {judgePanel}
+              </CollapsibleSection>
+              <CollapsibleSection title="Object Detection" className="border-t pt-6">
+                {objectDetectionPanel}
+              </CollapsibleSection>
+              <CollapsibleSection title="Edit Tools" className="border-t pt-6">
+                {editToolsPanel}
+              </CollapsibleSection>
             </div>
           </CardContent>
         </Card>

@@ -6,16 +6,23 @@ import { handleResponse, mutationHeaders } from '@/lib/api-client'
 
 const API_BASE = '/api'
 
+/** Smoothness normalization mode for normalized_smoothness. */
+export type SmoothnessMode = 'log-scaled' | 'radian-based'
+
 /** Trajectory data for analysis */
 export interface TrajectoryData {
   positions: number[][]
   timestamps: number[]
   gripper_states?: number[]
+  /** Normalization for normalized_smoothness; defaults to 'log-scaled' on the backend. */
+  smoothness_mode?: SmoothnessMode
 }
 
 /** Trajectory metrics response */
 export interface TrajectoryMetrics {
   smoothness: number
+  /** Rescaled smoothness (0-1) that discriminates across degree-scale episodes. */
+  normalized_smoothness: number
   efficiency: number
   jitter: number
   hesitation_count: number
