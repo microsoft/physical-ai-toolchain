@@ -2,7 +2,7 @@
 title: Changelog
 description: Automatically generated changelog tracking all notable changes to the Azure NVIDIA Robotics Reference Architecture using semantic versioning
 author: Edge AI Team
-ms.date: 2026-06-12
+ms.date: 2026-08-06
 ms.topic: reference
 ---
 
