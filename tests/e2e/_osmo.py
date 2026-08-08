@@ -210,7 +210,33 @@ def _fetch_osmo_workflow_payload(workflow: OSMOWorkflow, repo_root: Path) -> dic
     return payload
 
 
+def _task_statuses(payload: Mapping[str, Any]) -> list[str]:
+    statuses: list[str] = []
+    groups = payload.get("groups")
+    if not isinstance(groups, list):
+        return statuses
+    for group in groups:
+        if not isinstance(group, Mapping):
+            continue
+        tasks = group.get("tasks")
+        if not isinstance(tasks, list):
+            continue
+        for task in tasks:
+            if isinstance(task, Mapping):
+                status = task.get("status")
+                if isinstance(status, str) and status.strip():
+                    statuses.append(status.strip())
+    return statuses
+
+
 def _osmo_status(payload: Mapping[str, Any]) -> str:
+    # OSMO rolls up a task's node-disruption status (e.g. FAILED_BACKEND_ERROR) into a
+    # generic top-level "FAILED" workflow status, which would otherwise mask the more
+    # specific, restart-eligible status from the disruption-recovery logic above.
+    for task_status in _task_statuses(payload):
+        if task_status.upper() in OSMO_NODE_DISRUPTION_STATES:
+            return task_status
+
     status = _find_first_string(payload, ("status", "state", "phase"))
     return status or "UNKNOWN"
 

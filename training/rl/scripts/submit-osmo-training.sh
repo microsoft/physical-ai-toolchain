@@ -161,6 +161,10 @@ require_tools osmo zip
 [[ -d "$REPO_ROOT/training/rl" ]] || fatal "Directory training/rl not found"
 [[ -z "$storage_account" ]] && fatal "Azure storage account required for code upload (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
 
+entry_script="$SCRIPT_DIR/osmo-train-entry.sh"
+[[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
+entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
+
 checkpoint_mode="$(normalize_checkpoint_mode "$checkpoint_mode")"
 
 if [[ "$skip_register" == "false" && -z "$register_checkpoint" ]]; then
@@ -212,6 +216,7 @@ submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
   "code_url=$code_url"
+  "entry_script_b64=$entry_script_b64"
   "task=$task"
   "num_envs=$num_envs"
   "payload_root=$payload_root"

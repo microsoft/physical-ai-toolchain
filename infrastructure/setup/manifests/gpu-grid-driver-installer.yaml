@@ -14,7 +14,13 @@
 # After the GRID driver is installed, the GPU Operator's toolkit, device-plugin,
 # and validator components detect the pre-installed driver and proceed normally.
 #
-# Usage: kubectl apply -f gpu-grid-driver-installer.yaml
+# Usage:
+#   infrastructure/setup/01-deploy-robotics-charts.sh
+#   kubectl create configmap gpu-grid-driver-installer-scripts -n gpu-operator \
+#     --from-file=bootstrap-grid-driver-installer.sh=infrastructure/setup/scripts/gpu-grid-driver-installer/bootstrap-grid-driver-installer.sh \
+#     --from-file=install-grid-driver.sh=infrastructure/setup/scripts/gpu-grid-driver-installer/install-grid-driver.sh \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f gpu-grid-driver-installer.yaml
 # Monitor: kubectl logs -n gpu-operator -l app.kubernetes.io/name=gpu-grid-driver-installer -c installer
 #
 # Reference:
@@ -55,95 +61,20 @@ spec:
           securityContext:
             privileged: true
           volumeMounts:
+            - name: installer-scripts
+              mountPath: /scripts
+              readOnly: true
             - name: host-root
               mountPath: /host
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              set -euo pipefail
-              cat > /host/tmp/install-grid-driver.sh << 'SCRIPT'
-              #!/bin/bash
-              set -euo pipefail
-              DRIVER_URL="https://download.microsoft.com/download/85beffdc-8361-4df4-a823-dcb1b230a7aa/NVIDIA-Linux-x86_64-580.105.08-grid-azure.run"
-              DRIVER_FILE="/tmp/NVIDIA-Linux-x86_64-580.105.08-grid-azure.run"
-
-              echo "=== Microsoft GRID Driver Installer for Azure RTX PRO 6000 ==="
-              echo "Kernel: $(uname -r)"
-
-              if nvidia-smi 2>/dev/null; then
-                echo "NVIDIA GRID driver already functional"
-                nvidia-smi
-                mkdir -p /run/nvidia/validations
-                touch /run/nvidia/validations/.driver-ctr-ready
-                # Expose host root at /run/nvidia/driver/ so the GPU Operator's
-                # driver-validation init container finds binaries and libraries
-                # at the same paths used by a containerized driver install.
-                if ! mountpoint -q /run/nvidia/driver 2>/dev/null; then
-                  mount --bind / /run/nvidia/driver
-                fi
-                exit 0
-              fi
-
-              echo "Removing existing NVIDIA kernel modules..."
-              rmmod nvidia_uvm 2>/dev/null || true
-              rmmod nvidia_modeset 2>/dev/null || true
-              rmmod nvidia_drm 2>/dev/null || true
-              rmmod nvidia_peermem 2>/dev/null || true
-              rmmod nvidia 2>/dev/null || true
-
-              echo "Installing build dependencies..."
-              apt-get update -qq
-              DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-                linux-headers-$(uname -r) build-essential wget 2>&1 | tail -5
-
-              echo "Downloading Microsoft GRID driver..."
-              wget -q -O "$DRIVER_FILE" "$DRIVER_URL"
-              chmod +x "$DRIVER_FILE"
-
-              echo "Installing GRID driver (compiling kernel modules)..."
-              sh "$DRIVER_FILE" --silent --no-drm 2>&1 || {
-                echo "Retrying with open kernel modules..."
-                sh "$DRIVER_FILE" -M open --silent --no-drm 2>&1
-              }
-
-              echo "Loading NVIDIA kernel modules..."
-              modprobe nvidia
-              modprobe nvidia-uvm || true
-              modprobe nvidia-modeset || true
-
-              nvidia-persistenced --persistence-mode || true
-
-              echo "=== Verification ==="
-              nvidia-smi
-
-              # Create the GPU Operator driver validation file.
-              # Other GPU Operator pods (toolkit, device-plugin, GFD, DCGM exporter,
-              # validator) have a driver-validation init container that polls for this
-              # file via a hostPath volume at /run/nvidia/validations/. Normally the
-              # GPU Operator's own driver DaemonSet creates it, but that pod is skipped
-              # on nodes labeled nvidia.com/gpu.deploy.driver=false.
-              echo "Creating GPU Operator driver validation marker..."
-              mkdir -p /run/nvidia/validations
-              touch /run/nvidia/validations/.driver-ctr-ready
-
-              # Expose host root at /run/nvidia/driver/ so the GPU Operator's
-              # driver-validation init container finds binaries and libraries
-              # at the same paths used by a containerized driver install.
-              if ! mountpoint -q /run/nvidia/driver 2>/dev/null; then
-                mount --bind / /run/nvidia/driver
-              fi
-
-              echo "=== GRID driver installation complete ==="
-              SCRIPT
-
-              chmod +x /host/tmp/install-grid-driver.sh
-              echo "Running GRID driver installer on host via nsenter..."
-              nsenter --target 1 --mount --uts --ipc --net --pid -- \
-                /bin/bash /tmp/install-grid-driver.sh
+          command: ["/bin/bash", "/scripts/bootstrap-grid-driver-installer.sh"]
       containers:
         - name: sleep
           image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
       volumes:
+        - name: installer-scripts
+          configMap:
+            name: gpu-grid-driver-installer-scripts
+            defaultMode: 0555
         - name: host-root
           hostPath:
             path: /

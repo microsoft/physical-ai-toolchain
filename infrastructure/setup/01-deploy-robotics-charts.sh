@@ -11,6 +11,7 @@ source "$SCRIPT_DIR/defaults.conf"
 
 VALUES_DIR="$SCRIPT_DIR/values"
 MANIFESTS_DIR="$SCRIPT_DIR/manifests"
+SETUP_SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 
 show_help() {
   cat << EOF
@@ -143,10 +144,21 @@ if [[ "$skip_gpu" == "false" ]]; then
   # These nodes have nvidia.com/gpu.deploy.driver=false and need the GRID driver
   # instead of the datacenter driver managed by the GPU Operator.
   grid_manifest="$MANIFESTS_DIR/gpu-grid-driver-installer.yaml"
+  grid_scripts_dir="$SETUP_SCRIPTS_DIR/gpu-grid-driver-installer"
+  grid_bootstrap_script="$grid_scripts_dir/bootstrap-grid-driver-installer.sh"
+  grid_install_script="$grid_scripts_dir/install-grid-driver.sh"
   if [[ -f "$grid_manifest" ]]; then
     rtx_nodes=$(kubectl get nodes -l nvidia.com/gpu.deploy.driver=false -o name 2>/dev/null || true)
     if [[ -n "$rtx_nodes" ]]; then
       info "vGPU nodes detected (nvidia.com/gpu.deploy.driver=false) — applying GRID driver DaemonSet..."
+      [[ -f "$grid_bootstrap_script" ]] || fatal "GRID driver bootstrap script not found: $grid_bootstrap_script"
+      [[ -f "$grid_install_script" ]] || fatal "GRID driver install script not found: $grid_install_script"
+      kubectl create configmap gpu-grid-driver-installer-scripts \
+        -n "$NS_GPU_OPERATOR" \
+        --from-file=bootstrap-grid-driver-installer.sh="$grid_bootstrap_script" \
+        --from-file=install-grid-driver.sh="$grid_install_script" \
+        --dry-run=client -o yaml \
+        | kubectl apply -f -
       kubectl apply -f "$grid_manifest"
       info "GRID driver DaemonSet applied. Monitor with: kubectl logs -n gpu-operator -l app.kubernetes.io/name=gpu-grid-driver-installer -c installer"
     fi

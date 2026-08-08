@@ -247,10 +247,17 @@ fi
 payload_root="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
 [[ -z "$code_storage_account" ]] && fatal "Azure storage account required for code upload (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
 
+# Base64-encode the OSMO entry script (a lintable repo file) so the workflow
+# YAML stays script-free; OSMO writes it as a *.b64 file the task bootstrap
+# decodes. The evaluation Python modules travel inside the code archive below.
+entry_script="$SCRIPT_DIR/osmo-lerobot-eval-entry.sh"
+[[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
+entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
+
 info "Packaging and uploading LeRobot runtime payload..."
 code_url=$(stage_and_upload_code "$REPO_ROOT" \
   "azure://${code_storage_account}/${osmo_container}/osmo-code" \
-  training/il evaluation/sil) \
+  training/il evaluation/sil evaluation/metrics workflows/azureml) \
   || fatal "Failed to stage and upload runtime payload"
 info "Runtime payload uploaded: $code_url"
 
@@ -262,6 +269,7 @@ submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
   "code_url=$code_url"
+  "entry_script_b64=$entry_script_b64"
   "payload_root=$payload_root"
   "policy_repo_id=$policy_repo_id"
   "policy_type=$policy_type"
