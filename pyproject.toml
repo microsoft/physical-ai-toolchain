@@ -14,9 +14,9 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.161.6",
-    "numpy==2.5.1",
-    "ruff==0.16.0",
+    "hypothesis==6.165.2",
+    "numpy==2.5.2",
+    "ruff==0.16.2",
     "pyarrow==25.0.0",
     "imageio==2.37.4",
     "imageio-ffmpeg==0.6.0",
@@ -26,7 +26,7 @@ dev = [
     "pydantic==2.13.4",
     "ipykernel==7.3.0",
     "ipywidgets==8.1.8",
-    "tqdm==4.69.1",
+    "tqdm==4.70.0",
     "matplotlib==3.11.1",
     "torch==2.13.0",
     "azureml-mlflow==1.62.0.post5",
