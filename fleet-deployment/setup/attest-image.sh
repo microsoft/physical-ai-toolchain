@@ -15,9 +15,9 @@ show_help() {
   cat << EOF
 Usage: $(basename "$0") --image <digest-ref> [OPTIONS]
 
-Attach SBOM and OpenVEX attestations to a previously built image. Does NOT
-rebuild, re-push, or re-sign. Safe to re-run; each invocation publishes a new
-attestation as an OCI referrer of the supplied digest.
+Attach an SBOM and, when configured, an OpenVEX document to a previously built
+image. Does NOT rebuild, re-push, or re-sign. Safe to re-run; each invocation
+publishes a new attestation as an OCI referrer of the supplied digest.
 
 OPTIONS:
     -h, --help                Show this help
@@ -27,8 +27,8 @@ OPTIONS:
                               or 'sigstore')
     --acr-name NAME           ACR name for 'az acr login' (default: parsed from
                               the image ref)
-    --vex-file PATH           OpenVEX statement (sigstore only; default:
-                              ${DEFAULT_VEX_FILE:-unset})
+    --vex-file PATH           OpenVEX document (sigstore only; default:
+                              ${DEFAULT_VEX_FILE:-<unset>})
     --sbom-file PATH          Reuse an existing SPDX-JSON SBOM instead of
                               generating one via syft
     --skip-sbom               Skip SBOM attestation
@@ -126,6 +126,11 @@ print_kv "Skip VEX"   "$skip_vex"
 if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
+if [[ "$skip_vex" == "true" && -z "$vex_path" ]]; then
+  warn "No VEX document configured; skipping OpenVEX attestation"
+elif [[ "$skip_vex" != "true" && ! -f "$vex_path" ]]; then
+  fatal "VEX file not found: $vex_path"
+fi
 
 # Tool requirements depend on mode and skip flags.
 case "$mode" in
@@ -161,12 +166,8 @@ case "$mode" in
       cosign attest --yes --predicate "$sbom_file" --type spdxjson "$image"
     fi
     if [[ "$skip_vex" != "true" ]]; then
-      if [[ -f "$vex_path" ]]; then
-        section "Attest OpenVEX (cosign, openvex)"
-        cosign attest --yes --predicate "$vex_path" --type openvex "$image"
-      else
-        warn "VEX file not present at '$vex_path' — skipping OpenVEX attestation."
-      fi
+      section "Attest OpenVEX (cosign, openvex)"
+      cosign attest --yes --predicate "$vex_path" --type openvex "$image"
     fi
     ;;
 

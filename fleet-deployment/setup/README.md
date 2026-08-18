@@ -26,7 +26,7 @@ that blocks large baked-in models does not apply.
 | File                              | Purpose                                                                                  |
 |-----------------------------------|------------------------------------------------------------------------------------------|
 | `build-aml-model-image.sh`        | Download AML model, `docker buildx build --push`, sign image, self-verify                |
-| `attest-image.sh`                 | Attach SBOM + OpenVEX attestations to an already-built image                             |
+| `attest-image.sh`                 | Attach an SBOM and an optional OpenVEX attestation to an already-built image              |
 | `Dockerfile.inference`            | `scratch` carrier: `COPY model/` only — no runtime, mounted via OCI image volume         |
 | `defaults.conf`                   | Centralized defaults consumed by both scripts                                            |
 | `tests/test-model-image-pod.yaml` | Smoke-test pod that mounts a built model image via OCI image volume and lists `/policy/` |
@@ -41,7 +41,7 @@ fleet-deployment/setup/build-aml-model-image.sh \
 # Build prints the digest-pinned reference, e.g.
 #   Image (digest): acrfleetprod001.azurecr.io/lerobot-act-pickplace@sha256:abc...
 
-# 2. Attach SBOM + OpenVEX attestations
+# 2. Attach an SBOM; add --vex-file when an OpenVEX document exists
 fleet-deployment/setup/attest-image.sh \
   --image acrfleetprod001.azurecr.io/lerobot-act-pickplace@sha256:abc...
 ```
@@ -92,8 +92,8 @@ when assigning one of these statuses:
 |-----------------------|----------------------------------------------------------------------------------------------------------------|
 | `under_investigation` | Product-specific reachability or the possibility of exploitation is not established. Retain this safe default. |
 | `not_affected`        | Product-specific analysis proves exploitation is impossible. Add `justification` and `status_notes`.           |
-| `affected`            | Product-specific analysis confirms vulnerability. Add an `action_statement`.                                   |
-| `fixed`               | The exact product digest contains the verified remediation.                                                    |
+| `affected`            | Product-specific analysis confirms vulnerability. Add an `action_statement` and `status_notes`.                |
+| `fixed`               | The exact product digest contains the verified remediation. Add `status_notes`.                                |
 
 Generate or refresh the VEX whenever:
 
@@ -142,7 +142,7 @@ for on-node inference), bump the base intentionally:
 | `--acr-name`/`--acr-tenant`/`--acr-subscription` | Required in cross-tenant or no-Terraform mode          |
 | `INFERENCE_BASE_IMAGE=…` env var                 | One-off base override without editing `defaults.conf`  |
 | `--skip-sbom` / `--skip-vex`                     | Selective attestation refresh                          |
-| `--vex-file ../../security/vex/<document>.openvex.json` | Attach an explicit OpenVEX document             |
+| `--vex-file PATH`                               | Attach an explicit OpenVEX document                    |
 
 Per-value resolution order: **Terraform output → CLI flag → `DEFAULT_*` env var
 → `defaults.conf` literal → fatal**.
@@ -176,7 +176,7 @@ sudo k3s kubectl get --raw /metrics | grep kubernetes_feature_enabled | grep Ima
 | `Subscription '…' (tenant …) not in az session for …`   | Missing `az login --tenant <id>` for that tenant                                            |
 | `--akv-key-id (or DEFAULT_AKV_KEY_URI) is required …`   | `notation` mode without an AKV key URI                                                      |
 | `Unexpected digest shape from az acr repository show`   | ACR returned no manifest — usually a transient ACR Tasks failure                            |
-| `VEX file not present at '…' — skipping OpenVEX`        | An explicit `--vex-file` or `DEFAULT_VEX_FILE` path is incorrect                            |
+| `VEX file not found: …`                                | An explicit `--vex-file` or `DEFAULT_VEX_FILE` path is incorrect                            |
 | `verify-image.sh not present (PR #592 not merged yet)`  | Expected until [PR #592](https://github.com/microsoft/physical-ai-toolchain/pull/592) lands |
 | Sigstore signing locally rejected by Kyverno on cluster | Signed with developer Entra identity; production builds must run in CI                      |
 
@@ -217,6 +217,6 @@ current model image.
 
 ## 📚 Related
 
-- [`scripts/security/generate-vex.sh`](../../scripts/security/generate-vex.sh) — scan + VEX stub generator
+- [`scripts/security/generate-vex.sh`](../../scripts/security/generate-vex.sh) — scan + OpenVEX merge generator
 - [VEX standards](../../.github/instructions/vex-standards.instructions.md) — authoring and mutation contract
 - [`fleet-deployment/specifications/fleet-deployment.specification.md`](../specifications/fleet-deployment.specification.md) — end-to-end pipeline contract

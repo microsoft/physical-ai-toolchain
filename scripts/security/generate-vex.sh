@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# cspell:ignore urandom
 # Resolve an OCI image digest, scan with Trivy and Grype, and merge findings into
 # an OpenVEX document without discarding existing product-specific analysis.
 set -o errexit -o nounset -o pipefail
@@ -12,13 +13,13 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # 'scratch' (no packages, no scannable surface) so this script does not apply
 # to it by default. Pass --image explicitly when scanning a runnable variant.
 DEFAULT_IMAGE="mcr.microsoft.com/azureml/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0"
-DEFAULT_PRODUCT="minimal-py312-inference"
 DEFAULT_REPO_URL="mcr.microsoft.com/azureml"
 DEFAULT_AUTHOR="Physical AI Toolchain Security Team"
 DEFAULT_ID_BASE="https://github.com/microsoft/physical-ai-toolchain/security/vex"
 DEFAULT_SEVERITY="HIGH,CRITICAL"
 DEFAULT_OUTPUT="$REPO_ROOT/security/vex/inference-base.openvex.json"
 DEFAULT_SCAN_DIR="$REPO_ROOT/.scan"
+MAX_VERSION=9007199254740990
 
 show_help() {
   cat << EOF
@@ -35,9 +36,9 @@ OPTIONS:
     -i, --image REF          Image reference to resolve and scan
                              (default: $DEFAULT_IMAGE)
     -p, --product NAME       OCI product name in the OpenVEX product purl
-                             (default: $DEFAULT_PRODUCT)
+                             (default: derived from --image)
     -r, --repo-url URL       repository_url qualifier for the product purl
-                             (default: $DEFAULT_REPO_URL)
+                             (default: derived from --image)
     -s, --severity LIST      Comma-separated severities to include
                              (default: $DEFAULT_SEVERITY; use ALL for everything)
     -o, --output PATH        Output OpenVEX JSON path
@@ -57,16 +58,17 @@ EOF
 }
 
 image="$DEFAULT_IMAGE"
-product="$DEFAULT_PRODUCT"
-repo_url="$DEFAULT_REPO_URL"
+product=""
+repo_url=""
 severity="$DEFAULT_SEVERITY"
 output="$DEFAULT_OUTPUT"
 scan_dir="$DEFAULT_SCAN_DIR"
-author="$DEFAULT_AUTHOR"
+author=""
 id_base="$DEFAULT_ID_BASE"
 skip_scan=false
 config_preview=false
 output_tmp=""
+scan_work_dir=""
 lock_dir=""
 lock_acquired=false
 
@@ -77,8 +79,15 @@ cleanup() {
   if [[ "$lock_acquired" == "true" && -n "$lock_dir" && -d "$lock_dir" ]]; then
     rmdir "$lock_dir" 2>/dev/null || true
   fi
+  if [[ -n "$scan_work_dir" && -d "$scan_work_dir" ]]; then
+    rm -f "$scan_work_dir/trivy.json" "$scan_work_dir/grype.json" \
+      "$scan_work_dir/cves.txt" "$scan_work_dir/cves.txt.tmp"
+    rmdir "$scan_work_dir" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -117,9 +126,18 @@ section "Resolve image digest"
 digest=$(resolve_digest "$image") || fatal "Failed to resolve digest for $image"
 [[ "$digest" == sha256:* ]] || fatal "Unexpected digest format: $digest"
 image_ref="${image%@*}"
+# Strip a tag only from the last path segment so registry ports survive.
 image_last_segment="${image_ref##*/}"
 if [[ "$image_last_segment" == *:* ]]; then
   image_ref="${image_ref%:*}"
+fi
+product="${product:-${image_ref##*/}}"
+if [[ -z "$repo_url" ]]; then
+  if [[ "$image_ref" == */* ]]; then
+    repo_url="${image_ref%/*}"
+  else
+    repo_url="$DEFAULT_REPO_URL"
+  fi
 fi
 image_ref="${image_ref}@${digest}"
 purl="pkg:oci/${product}@${digest}?repository_url=${repo_url}"
@@ -136,20 +154,31 @@ if [[ "$config_preview" == "true" ]]; then
 fi
 
 mkdir -p "$scan_dir" "$(dirname "$output")"
+lock_dir="${output}.lock"
+if ! mkdir "$lock_dir" 2>/dev/null; then
+  if [[ -d "$lock_dir" ]]; then
+    fatal "Another VEX generation is already writing $output; remove $lock_dir if the prior run was interrupted"
+  fi
+  fatal "Failed to create VEX generation lock: $lock_dir"
+fi
+lock_acquired=true
 
 #------------------------------------------------------------------------------
 # Run scanners
 #------------------------------------------------------------------------------
 section "Run scanners"
 
-trivy_json="$scan_dir/trivy.json"
-grype_json="$scan_dir/grype.json"
-
 if [[ "$skip_scan" == "true" ]]; then
+  trivy_json="$scan_dir/trivy.json"
+  grype_json="$scan_dir/grype.json"
   [[ -s "$trivy_json" ]] || fatal "--skip-scan set but $trivy_json missing/empty"
   [[ -s "$grype_json" ]] || fatal "--skip-scan set but $grype_json missing/empty"
   info "Reusing existing scanner output"
 else
+  scan_work_dir=$(mktemp -d "$scan_dir/run.XXXXXX") ||
+    fatal "Failed to create scanner workspace in $scan_dir"
+  trivy_json="$scan_work_dir/trivy.json"
+  grype_json="$scan_work_dir/grype.json"
   trivy_args=(image --format json --output "$trivy_json")
   if [[ "$severity" != "ALL" ]]; then
     trivy_args+=(--severity "$severity")
@@ -160,6 +189,8 @@ else
 
   info "grype $image_ref -o json > $grype_json"
   grype "$image_ref" -o json > "$grype_json"
+  cp "$trivy_json" "$scan_dir/trivy.json"
+  cp "$grype_json" "$scan_dir/grype.json"
 fi
 
 #------------------------------------------------------------------------------
@@ -167,7 +198,11 @@ fi
 #------------------------------------------------------------------------------
 section "Aggregate findings"
 
-cve_list="$scan_dir/cves.txt"
+if [[ -n "$scan_work_dir" ]]; then
+  cve_list="$scan_work_dir/cves.txt"
+else
+  cve_list="$scan_dir/cves.txt"
+fi
 
 # Build severity allow-list as a JSON array (empty array == accept all).
 if [[ "$severity" == "ALL" ]]; then
@@ -184,7 +219,7 @@ jq -r --argjson sev "$sev_json" '
 ' "$trivy_json" > "$cve_list.tmp"
 
 jq -r --argjson sev "$sev_json" '
-  .matches[]
+  .matches[]?
   | (.vulnerability.severity | ascii_upcase) as $s
   | select(($sev | length) == 0 or ($sev | index($s)))
   | .vulnerability.id
@@ -192,6 +227,9 @@ jq -r --argjson sev "$sev_json" '
 
 sort -u "$cve_list.tmp" > "$cve_list"
 rm -f "$cve_list.tmp"
+if [[ -n "$scan_work_dir" ]]; then
+  cp "$cve_list" "$scan_dir/cves.txt"
+fi
 cve_count=$(wc -l < "$cve_list" | tr -d ' ')
 print_kv "Unique CVEs" "$cve_count"
 
@@ -200,15 +238,8 @@ print_kv "Unique CVEs" "$cve_count"
 #------------------------------------------------------------------------------
 section "Merge OpenVEX document"
 
-output_dir="$(dirname "$output")"
-mkdir -p "$output_dir"
-lock_dir="${output}.lock"
-mkdir "$lock_dir" 2>/dev/null ||
-  fatal "Another VEX generation is already writing $output"
-lock_acquired=true
-
-if [[ -f "$output" ]]; then
-  previous_document=$(jq -ce '
+validate_vex_document() {
+  jq -ce --argjson max_version "$MAX_VERSION" '
     def non_empty_string:
       type == "string" and length > 0;
     def allowed_status:
@@ -225,11 +256,20 @@ if [[ -f "$output" ]]; then
     def digest_purl:
       type == "string"
       and test("^pkg:oci/.+@sha256:[0-9a-f]{64}\\?.*repository_url=[^&]+");
+    def duplicate_pairs:
+      [
+        .statements[]? as $statement
+        | $statement.products[]?
+        | [$statement.vulnerability.name, .["@id"]]
+      ]
+      | group_by(.)
+      | map(select(length > 1) | .[0]);
 
     if (.version | type) != "number"
       or .version < 1
+      or .version > $max_version
       or .version != (.version | floor)
-    then error("version must be a positive integer")
+    then error("version must be an incrementable positive integer")
     elif (.timestamp | non_empty_string | not)
     then error("timestamp must be a non-empty string")
     elif ((.statements // []) | type) != "array"
@@ -266,42 +306,41 @@ if [[ -f "$output" ]]; then
       and (.status_notes | non_empty_string | not)
     )
     then error("fixed statements require status_notes")
+    elif (duplicate_pairs | length) > 0
+    then error("duplicate vulnerability/product pairs: \(duplicate_pairs)")
     else .
     end
-  ' "$output") ||
+  ' "$1"
+}
+
+if [[ -f "$output" ]]; then
+  previous_document=$(validate_vex_document "$output") ||
     fatal "Existing OpenVEX document is invalid: $output"
 
-  duplicate_pairs=$(jq -c '
-    [
-      .statements[]? as $statement
-      | ($statement.vulnerability.name // $statement.vulnerability["@id"]) as $vulnerability
-      | $statement.products[]?
-      | [$vulnerability, .["@id"]]
-    ]
-    | group_by(.)
-    | map(select(length > 1) | .[0])
-  ' <<< "$previous_document")
-  [[ "$duplicate_pairs" == "[]" ]] ||
-    fatal "Existing OpenVEX document has duplicate vulnerability/product pairs: $duplicate_pairs"
-
-  prev_version=$(jq -r '.version' <<< "$previous_document")
+  prev_version=$(jq -r '.version | floor' <<< "$previous_document")
   prev_timestamp=$(jq -r '.timestamp' <<< "$previous_document")
+  existing_author=$(jq -r '.author // empty' <<< "$previous_document")
   existing_statements=$(jq -c --arg timestamp "$prev_timestamp" '
     [
       .statements[]?
-      | if has("timestamp") then . else . + {timestamp: $timestamp} end
+      | if (.timestamp | type == "string" and length > 0)
+        then .
+        else . + {timestamp: $timestamp}
+        end
     ]
   ' <<< "$previous_document")
 else
   previous_document='{}'
   prev_version=0
+  existing_author=""
   existing_statements='[]'
 fi
 
-next_version=$((10#$prev_version + 1))
+effective_author="${author:-${existing_author:-$DEFAULT_AUTHOR}}"
+next_version=$((prev_version + 1))
 timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 date_slug="${timestamp%%T*}"
-revision_nonce=$(printf '%05d%05d' "$RANDOM" "$RANDOM")
+revision_nonce=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
 vex_id="${id_base}/${product}/${date_slug}-v${next_version}-${revision_nonce}"
 
 # New statements remain under_investigation until evidence supports another
@@ -313,7 +352,7 @@ output_tmp=$(mktemp "${output}.tmp.XXXXXX") ||
 
 jq -n \
   --arg id "$vex_id" \
-  --arg author "$author" \
+  --arg author "$effective_author" \
   --arg ts "$timestamp" \
   --argjson version "$next_version" \
   --arg purl "$purl" \
@@ -339,7 +378,7 @@ jq -n \
   | ([
       $existing[]
       | select(any(.products[]?; .["@id"] == $purl))
-      | (.vulnerability.name // .vulnerability["@id"])
+      | .vulnerability.name
     ]) as $seen
   | ($previous + {
       "@context": "https://openvex.dev/ns/v0.2.0",
@@ -367,22 +406,23 @@ jq -n \
     else .
     end' > "$output_tmp"
 
-final_statement_count=$(jq -er '.statements | length' "$output_tmp") ||
+validate_vex_document "$output_tmp" >/dev/null ||
   fatal "Generated OpenVEX document is invalid"
-existing_statement_count=$(jq -nr --argjson existing "$existing_statements" '$existing | length')
+final_statement_count=$(jq -er '.statements | length' "$output_tmp")
+existing_statement_count=$(jq -r 'length' <<< "$existing_statements")
 new_statement_count=$((final_statement_count - existing_statement_count))
 mv "$output_tmp" "$output"
 output_tmp=""
 
 #------------------------------------------------------------------------------
-# Summary
+# Deployment Summary
 #------------------------------------------------------------------------------
 section "Deployment Summary"
 print_kv "Image"         "$image_ref"
 print_kv "OpenVEX file"  "$output"
-print_kv "Scanned CVEs"  "$cve_count"
-print_kv "New statements" "$new_statement_count"
-print_kv "Statements"    "$final_statement_count"
+print_kv "CVEs scanned" "$cve_count"
+print_kv "Statements added" "$new_statement_count"
+print_kv "Statements total" "$final_statement_count"
 print_kv "Version"       "$next_version"
 info "Triage each statement using product-specific evidence before attaching with cosign."
 info "Retain under_investigation when the evidence does not support another status."

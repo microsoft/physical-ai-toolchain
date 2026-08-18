@@ -44,18 +44,25 @@ printf '%s\n' 'sha256:$script:Digest'
     }
 
     function Invoke-Generator {
-        param([Parameter(Mandatory)][hashtable]$Workspace)
+        param(
+            [Parameter(Mandatory)][hashtable]$Workspace,
+            [string]$Image = 'registry.example.com/test-product:1',
+            [switch]$DeriveIdentity
+        )
 
         $previousPath = $env:PATH
         try {
             $env:PATH = "$($Workspace.Bin):$previousPath"
-            $output = & bash $script:Generator `
-                --image registry.example.com/test-product:1 `
-                --product test-product `
-                --repo-url registry.example.com `
-                --scan-dir $Workspace.Scan `
-                --output $Workspace.Output `
-                --skip-scan 2>&1
+            $arguments = @(
+                '--image', $Image,
+                '--scan-dir', $Workspace.Scan,
+                '--output', $Workspace.Output,
+                '--skip-scan'
+            )
+            if (-not $DeriveIdentity) {
+                $arguments += @('--product', 'test-product', '--repo-url', 'registry.example.com')
+            }
+            $output = & bash $script:Generator @arguments 2>&1
             $script:GeneratorExit = $LASTEXITCODE
             $script:GeneratorOutput = $output -join "`n"
         }
@@ -105,7 +112,7 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         $script:GeneratorExit | Should -Be 0
         $document = Get-Content $script:Workspace.Output -Raw | ConvertFrom-Json
         $document.version | Should -Be 2
-        $document.'@id' | Should -Match '/2026-\d{2}-\d{2}-v2-\d{10}$'
+        $document.'@id' | Should -Match '/2026-\d{2}-\d{2}-v2-[0-9a-f]{32}$'
         $document.last_updated | Should -Be $document.timestamp
         $document.statements.Count | Should -Be 3
 
@@ -120,7 +127,7 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
 
         $newFinding = $document.statements | Where-Object { $_.vulnerability.name -eq 'CVE-2026-0002' }
         $newFinding.status | Should -Be 'under_investigation'
-        $script:GeneratorOutput | Should -Match 'Statements:\s+3'
+        $script:GeneratorOutput | Should -Match 'Statements total:\s+3'
     }
 
     It 'rejects an untrusted existing version without evaluating it or changing the document' {
@@ -141,6 +148,28 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
         Test-Path $marker | Should -BeFalse
+    }
+
+    It 'normalizes an integer-valued JSON version before incrementing it' {
+        $existing = '{"timestamp":"2026-01-01T00:00:00Z","version":1.0,"statements":[]}'
+        Set-Content -Path $script:Workspace.Output -Value $existing -Encoding utf8 -NoNewline
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Be 0
+        (Get-Content $script:Workspace.Output -Raw | ConvertFrom-Json).version | Should -Be 2
+    }
+
+    It 'rejects a version that cannot be incremented safely' {
+        $existing = '{"timestamp":"2026-01-01T00:00:00Z","version":9223372036854775807,"statements":[]}'
+        Set-Content -Path $script:Workspace.Output -Value $existing -Encoding utf8 -NoNewline
+        $before = Get-Content $script:Workspace.Output -Raw
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
+        Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
     }
 
     It 'rejects duplicate vulnerability and product pairs without changing the document' {
@@ -190,8 +219,69 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
     }
 
+    It 'rejects not_affected without an allowed justification and status notes' {
+        @{
+            timestamp = '2026-01-01T00:00:00Z'
+            version = 1
+            statements = @(
+                @{
+                    vulnerability = @{ name = 'CVE-2026-0001' }
+                    products = @(@{ '@id' = $script:Purl })
+                    status = 'not_affected'
+                    justification = 'not_reachable'
+                    status_notes = ''
+                }
+            )
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
+    }
+
+    It 'rejects affected without an action statement' {
+        @{
+            timestamp = '2026-01-01T00:00:00Z'
+            version = 1
+            statements = @(
+                @{
+                    vulnerability = @{ name = 'CVE-2026-0001' }
+                    products = @(@{ '@id' = $script:Purl })
+                    status = 'affected'
+                    status_notes = 'The vulnerable path is reachable.'
+                }
+            )
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
+    }
+
+    It 'rejects a product that is not identified by a digest-pinned OCI purl' {
+        @{
+            timestamp = '2026-01-01T00:00:00Z'
+            version = 1
+            statements = @(
+                @{
+                    vulnerability = @{ name = 'CVE-2026-0001' }
+                    products = @(@{ '@id' = 'pkg:oci/test-product:latest?repository_url=registry.example.com' })
+                    status = 'under_investigation'
+                }
+            )
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
+    }
+
     It 'increments the version and issues a distinct revision ID on repeated runs' {
         Invoke-Generator -Workspace $script:Workspace
+        $script:GeneratorExit | Should -Be 0
         $first = Get-Content $script:Workspace.Output -Raw | ConvertFrom-Json
 
         Invoke-Generator -Workspace $script:Workspace
@@ -201,6 +291,20 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         $second.version | Should -Be ($first.version + 1)
         $second.'@id' | Should -Not -Be $first.'@id'
         $second.statements.Count | Should -Be 2
+        Test-Path "$($script:Workspace.Output).lock" | Should -BeFalse
+    }
+
+    It 'derives product identity without dropping a registry port' {
+        Invoke-Generator `
+            -Workspace $script:Workspace `
+            -Image 'registry.example.com:5000/nested/test-product:1' `
+            -DeriveIdentity
+
+        $script:GeneratorExit | Should -Be 0
+        $document = Get-Content $script:Workspace.Output -Raw | ConvertFrom-Json
+        $document.'_source'.image_ref | Should -Be "registry.example.com:5000/nested/test-product@sha256:$script:Digest"
+        $document.statements[0].products[0].'@id' |
+            Should -Be "pkg:oci/test-product@sha256:${script:Digest}?repository_url=registry.example.com:5000/nested"
     }
 
     It 'refuses a concurrent writer lock without changing the document' {
@@ -242,6 +346,11 @@ Describe 'committed OpenVEX documents' -Tag 'Unit' {
         )
         $documents = Get-ChildItem (Join-Path $PSScriptRoot '../../../security/vex') -Filter '*.openvex.json'
         $ids = @()
+
+        if ($documents.Count -eq 0) {
+            Set-ItResult -Skipped -Because 'No committed OpenVEX documents exist'
+            return
+        }
 
         foreach ($file in $documents) {
             $document = Get-Content $file.FullName -Raw | ConvertFrom-Json
