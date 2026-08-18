@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Resolve an OCI image digest, scan with Trivy and Grype, and emit a stub
-# OpenVEX document with one `under_investigation` statement per discovered CVE.
-# Operators retain `under_investigation` until product-specific evidence supports
-# changing the status before publishing.
+# Resolve an OCI image digest, scan with Trivy and Grype, and merge findings into
+# an OpenVEX document without discarding existing product-specific analysis.
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +25,10 @@ show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Scan an OCI image and emit a stub OpenVEX document for triage.
+Scan an OCI image and merge findings into an OpenVEX document.
+
+Existing statements and metadata are preserved. Newly discovered CVEs are added
+as under_investigation for the resolved digest.
 
 OPTIONS:
     -h, --help               Show this help message
@@ -65,6 +66,18 @@ author="$DEFAULT_AUTHOR"
 id_base="$DEFAULT_ID_BASE"
 skip_scan=false
 config_preview=false
+output_tmp=""
+lock_dir=""
+
+cleanup() {
+  if [[ -n "$output_tmp" && -f "$output_tmp" ]]; then
+    rm -f "$output_tmp"
+  fi
+  if [[ -n "$lock_dir" && -d "$lock_dir" ]]; then
+    rmdir "$lock_dir" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -103,18 +116,12 @@ section "Resolve image digest"
 digest=$(resolve_digest "$image") || fatal "Failed to resolve digest for $image"
 [[ "$digest" == sha256:* ]] || fatal "Unexpected digest format: $digest"
 image_ref="${image%@*}"
-image_ref="${image_ref%:*}@${digest}"
-purl="pkg:oci/${product}@${digest}?repository_url=${repo_url}"
-timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-date_slug="$(date -u +%Y-%m-%d)"
-
-if [[ -f "$output" ]]; then
-  prev_version=$(jq -r '.version // 0' "$output" 2>/dev/null || echo 0)
-else
-  prev_version=0
+image_last_segment="${image_ref##*/}"
+if [[ "$image_last_segment" == *:* ]]; then
+  image_ref="${image_ref%:*}"
 fi
-next_version=$((prev_version + 1))
-vex_id="${id_base}/${product}/${date_slug}-v${next_version}"
+image_ref="${image_ref}@${digest}"
+purl="pkg:oci/${product}@${digest}?repository_url=${repo_url}"
 
 print_kv "Image"     "$image"
 print_kv "Digest"    "$digest"
@@ -188,40 +195,72 @@ cve_count=$(wc -l < "$cve_list" | tr -d ' ')
 print_kv "Unique CVEs" "$cve_count"
 
 #------------------------------------------------------------------------------
-# Emit stub OpenVEX document
+# Merge OpenVEX document
 #------------------------------------------------------------------------------
-section "Write OpenVEX stub"
+section "Merge OpenVEX document"
+
+output_dir="$(dirname "$output")"
+mkdir -p "$output_dir"
+lock_dir="${output}.lock"
+mkdir "$lock_dir" 2>/dev/null ||
+  fatal "Another VEX generation is already writing $output"
 
 if [[ -f "$output" ]]; then
-  prev_timestamp=$(jq -er '.timestamp' "$output") ||
-    fatal "Existing OpenVEX document has no timestamp: $output"
-  duplicate_count=$(jq --arg purl "$purl" '
+  previous_document=$(jq -ce '
+    if (.version | type) != "number"
+      or .version < 0
+      or .version != (.version | floor)
+    then error("version must be a non-negative integer")
+    elif (.timestamp | type) != "string" or .timestamp == ""
+    then error("timestamp must be a non-empty string")
+    elif ((.statements // []) | type) != "array"
+    then error("statements must be an array")
+    elif any(.statements[]?; (.vulnerability.name // .vulnerability["@id"]) == null)
+    then error("every statement must identify its vulnerability")
+    else .
+    end
+  ' "$output") ||
+    fatal "Existing OpenVEX document is invalid: $output"
+
+  duplicate_pairs=$(jq -c '
     [
-      .statements[]?
-      | select(any(.products[]?; .["@id"] == $purl))
-      | .vulnerability.name
+      .statements[]? as $statement
+      | ($statement.vulnerability.name // $statement.vulnerability["@id"]) as $vulnerability
+      | $statement.products[]?
+      | [$vulnerability, .["@id"]]
     ]
     | group_by(.)
-    | map(select(length > 1))
-    | length
-  ' "$output")
-  [[ "$duplicate_count" -eq 0 ]] ||
-    fatal "Existing OpenVEX document has duplicate vulnerability/product statements: $output"
-  existing_statements=$(jq -c --arg purl "$purl" --arg timestamp "$prev_timestamp" '
+    | map(select(length > 1) | .[0])
+  ' <<< "$previous_document")
+  [[ "$duplicate_pairs" == "[]" ]] ||
+    fatal "Existing OpenVEX document has duplicate vulnerability/product pairs: $duplicate_pairs"
+
+  prev_version=$(jq -r '.version' <<< "$previous_document")
+  prev_timestamp=$(jq -r '.timestamp' <<< "$previous_document")
+  existing_statements=$(jq -c --arg timestamp "$prev_timestamp" '
     [
       .statements[]?
-      | select(any(.products[]?; .["@id"] == $purl))
       | if has("timestamp") then . else . + {timestamp: $timestamp} end
     ]
-  ' "$output")
+  ' <<< "$previous_document")
 else
+  previous_document='{}'
+  prev_version=0
   existing_statements='[]'
 fi
 
+next_version=$((10#$prev_version + 1))
+timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+date_slug="${timestamp%%T*}"
+revision_nonce=$(printf '%05d%05d' "$RANDOM" "$RANDOM")
+vex_id="${id_base}/${product}/${date_slug}-v${next_version}-${revision_nonce}"
+
 # New statements remain under_investigation until evidence supports another
-# status. Existing statements for the exact product digest retain their status.
+# status. Existing statements retain their status and effective timestamp.
 script_rel="scripts/security/$(basename "$0")"
 generator="$script_rel --image $image_ref --severity $severity"
+output_tmp=$(mktemp "${output}.tmp.XXXXXX") ||
+  fatal "Failed to create temporary output beside $output"
 
 jq -n \
   --arg id "$vex_id" \
@@ -235,6 +274,7 @@ jq -n \
   --arg product "$product" \
   --arg severity "$severity" \
   --arg generator "$generator" \
+  --argjson previous "$previous_document" \
   --argjson existing "$existing_statements" \
   --rawfile cves "$cve_list" \
   '(
@@ -247,7 +287,12 @@ jq -n \
         status: "under_investigation"
       })
   ) as $generated
-  | {
+  | ([
+      $existing[]
+      | select(any(.products[]?; .["@id"] == $purl))
+      | (.vulnerability.name // .vulnerability["@id"])
+    ]) as $seen
+  | ($previous + {
       "@context": "https://openvex.dev/ns/v0.2.0",
       "@id": $id,
       "author": $author,
@@ -262,21 +307,33 @@ jq -n \
         "generator": $generator
       },
       "statements": (
-        $existing + [
-          $generated[] as $candidate
-          | select(any($existing[]; .vulnerability.name == $candidate.vulnerability.name) | not)
-          | $candidate
-        ]
+        $existing + (
+          $generated
+          | map(select(.vulnerability.name as $name | $seen | index($name) | not))
+        )
       )
-    }' > "$output"
+    })
+  | if ($previous | has("last_updated"))
+    then . + {"last_updated": $ts}
+    else .
+    end' > "$output_tmp"
+
+final_statement_count=$(jq -er '.statements | length' "$output_tmp") ||
+  fatal "Generated OpenVEX document is invalid"
+existing_statement_count=$(jq -nr --argjson existing "$existing_statements" '$existing | length')
+new_statement_count=$((final_statement_count - existing_statement_count))
+mv "$output_tmp" "$output"
+output_tmp=""
 
 #------------------------------------------------------------------------------
 # Summary
 #------------------------------------------------------------------------------
-section "Summary"
-print_kv "Image"        "$image_ref"
-print_kv "OpenVEX file" "$output"
-print_kv "Statements"   "$cve_count"
-print_kv "Version"      "$next_version"
+section "Deployment Summary"
+print_kv "Image"         "$image_ref"
+print_kv "OpenVEX file"  "$output"
+print_kv "Scanned CVEs"  "$cve_count"
+print_kv "New statements" "$new_statement_count"
+print_kv "Statements"    "$final_statement_count"
+print_kv "Version"       "$next_version"
 info "Triage each statement using product-specific evidence before attaching with cosign."
 info "Retain under_investigation when the evidence does not support another status."

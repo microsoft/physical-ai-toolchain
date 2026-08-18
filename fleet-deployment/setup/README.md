@@ -83,15 +83,16 @@ unsigned images.
 ## 📄 OpenVEX Workflow
 
 [`security/vex/inference-base.openvex.json`](../../security/vex/inference-base.openvex.json)
-is the committed VEX document for the pinned base image. Every CVE statement
-must carry one of:
+is the committed VEX document for the pinned base image. Follow the governing
+[VEX standards](../../.github/instructions/vex-standards.instructions.md) when
+assigning one of these statuses:
 
-| `status`              | When to use                                                                                 |
-|-----------------------|---------------------------------------------------------------------------------------------|
-| `not_affected`        | CVE present in a package we ship, but our usage path is not reachable. Add `justification`. |
-| `affected`            | Exploitable. Add `action_statement` (e.g. "upgrade to 2.4").                                |
-| `fixed`               | Patched in this digest.                                                                     |
-| `under_investigation` | Triage pending. **Not accepted by strict Kyverno policies.**                                |
+| `status`              | When to use                                                                                                    |
+|-----------------------|----------------------------------------------------------------------------------------------------------------|
+| `under_investigation` | Product-specific reachability or the possibility of exploitation is not established. Retain this safe default. |
+| `not_affected`        | Product-specific analysis proves exploitation is impossible. Add `justification` and `status_notes`.           |
+| `affected`            | Product-specific analysis confirms vulnerability. Add an `action_statement`.                                   |
+| `fixed`               | The exact product digest contains the verified remediation.                                                    |
 
 Refresh the VEX whenever:
 
@@ -100,10 +101,10 @@ Refresh the VEX whenever:
 2. Scanner feeds report new CVEs against the existing digest.
 
 ```bash
-# Regenerate stub from latest Trivy + Grype findings (writes .scan/* locally)
+# Merge latest Trivy + Grype findings into the VEX document (writes .scan/* locally)
 scripts/security/generate-vex.sh
 
-# Edit security/vex/inference-base.openvex.json: triage each statement.
+# Record product-specific evidence; retain under_investigation otherwise.
 
 # Re-attest against existing images that should pick up the new dispositions
 fleet-deployment/setup/attest-image.sh --image <digest-ref> --skip-sbom
@@ -124,7 +125,7 @@ for on-node inference), bump the base intentionally:
 1. Pick the new base digest (e.g. `crane digest mcr.microsoft.com/azureml/minimal-py312-inference:1.x`).
 2. Update `DEFAULT_INFERENCE_BASE_IMAGE` in `defaults.conf`.
 3. Run `scripts/security/generate-vex.sh --image <new-digest>`.
-4. Triage `security/vex/inference-base.openvex.json`.
+4. Record product-specific evidence in `security/vex/inference-base.openvex.json`; retain `under_investigation` when evidence does not support another status.
 5. Commit all three changes together.
 
 ## 🔧 Common Overrides
