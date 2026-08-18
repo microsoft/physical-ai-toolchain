@@ -1,11 +1,11 @@
 ---
 description: OpenVEX authoring standards for base-image vulnerability triage
-applyTo: "security/vex/**"
+applyTo: "security/vex/**,scripts/security/generate-vex.sh"
 ---
 
 # VEX Standards
 
-Follow these rules when authoring or reviewing OpenVEX documents under `security/vex/`. These documents control whether vulnerability findings are suppressed, retained, or marked as remediated.
+Follow these rules when authoring or reviewing OpenVEX documents under `security/vex/` or changing their generator. These documents control whether container base-image vulnerability findings are suppressed, retained, or marked as remediated. Dependency suppressions remain governed by `osv-scanner.toml`.
 
 This guidance is adapted from the [hve-core VEX standards](https://github.com/microsoft/hve-core/blob/e6f414dabf65d67d59763ce776fa2212bd70b028/.github/instructions/security/vex-standards.instructions.md).
 
@@ -44,7 +44,7 @@ Choose the narrowest justification supported by evidence. Document the product-s
 
 Identify the exact scanned artifact in every statement. Use a digest-pinned OCI package URL when the artifact has a registry digest. Do not apply analysis from one image tag, version, architecture, or digest to another without verifying that the relevant component and execution path are identical.
 
-Keep one statement per vulnerability and product status. Update an existing statement rather than adding a contradictory statement for the same vulnerability and product in the same document.
+Keep one statement per vulnerability and product pair. Update that statement when its status changes rather than adding a contradictory statement.
 
 ## Document Mutation Contract
 
@@ -54,5 +54,7 @@ For every change to document content, including any statement:
 - Set `timestamp` to the current UTC issuance time and update `last_updated` when present.
 - Replace `@id` with a unique IRI for the new revision. Include the version or another collision-resistant revision value; a date alone is insufficient when multiple revisions can be issued in one day.
 - Preserve the original effective timestamp of every unchanged statement. Before changing the document timestamp, add an explicit statement `timestamp` where an unchanged statement previously inherited the old document timestamp.
+
+`scripts/security/generate-vex.sh` preserves existing statements for the exact digest-pinned product, adds their inherited timestamps explicitly, and appends newly scanned vulnerabilities as `under_investigation`. Do not replace that merge behavior with a wholesale rewrite. Findings absent from a later scan remain until product-specific analysis establishes their status.
 
 Reject a change when `version`, `timestamp`, or `@id` is stale, when an unchanged statement loses its original effective timestamp, or when a status lacks the required analysis.

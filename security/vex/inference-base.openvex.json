@@ -1,9 +1,9 @@
 {
   "@context": "https://openvex.dev/ns/v0.2.0",
-  "@id": "https://github.com/microsoft/physical-ai-toolchain/security/vex/inference-base/2026-05-29",
+  "@id": "https://github.com/microsoft/physical-ai-toolchain/security/vex/inference-base/2026-08-18-v2",
   "author": "Physical AI Toolchain Security Team",
-  "timestamp": "2026-05-29T00:00:00Z",
-  "version": 1,
+  "timestamp": "2026-08-18T15:57:59Z",
+  "version": 2,
   "_source": {
     "base_image": "scratch",
     "digest": null,

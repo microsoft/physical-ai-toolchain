@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Resolve an OCI image digest, scan with Trivy and Grype, and emit a stub
 # OpenVEX document with one `under_investigation` statement per discovered CVE.
-# Operators triage each statement and replace its status with not_affected /
-# affected / fixed before publishing.
+# Operators retain `under_investigation` until product-specific evidence supports
+# changing the status before publishing.
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -107,7 +107,14 @@ image_ref="${image_ref%:*}@${digest}"
 purl="pkg:oci/${product}@${digest}?repository_url=${repo_url}"
 timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 date_slug="$(date -u +%Y-%m-%d)"
-vex_id="${id_base}/${product}/${date_slug}"
+
+if [[ -f "$output" ]]; then
+  prev_version=$(jq -r '.version // 0' "$output" 2>/dev/null || echo 0)
+else
+  prev_version=0
+fi
+next_version=$((prev_version + 1))
+vex_id="${id_base}/${product}/${date_slug}-v${next_version}"
 
 print_kv "Image"     "$image"
 print_kv "Digest"    "$digest"
@@ -186,15 +193,33 @@ print_kv "Unique CVEs" "$cve_count"
 section "Write OpenVEX stub"
 
 if [[ -f "$output" ]]; then
-  prev_version=$(jq -r '.version // 0' "$output" 2>/dev/null || echo 0)
+  prev_timestamp=$(jq -er '.timestamp' "$output") ||
+    fatal "Existing OpenVEX document has no timestamp: $output"
+  duplicate_count=$(jq --arg purl "$purl" '
+    [
+      .statements[]?
+      | select(any(.products[]?; .["@id"] == $purl))
+      | .vulnerability.name
+    ]
+    | group_by(.)
+    | map(select(length > 1))
+    | length
+  ' "$output")
+  [[ "$duplicate_count" -eq 0 ]] ||
+    fatal "Existing OpenVEX document has duplicate vulnerability/product statements: $output"
+  existing_statements=$(jq -c --arg purl "$purl" --arg timestamp "$prev_timestamp" '
+    [
+      .statements[]?
+      | select(any(.products[]?; .["@id"] == $purl))
+      | if has("timestamp") then . else . + {timestamp: $timestamp} end
+    ]
+  ' "$output")
 else
-  prev_version=0
+  existing_statements='[]'
 fi
-next_version=$((prev_version + 1))
 
-# All statements emitted as under_investigation; operators must triage each
-# CVE and replace status (and add justification/action_statement) before
-# publishing. See https://openvex.dev/ns/v0.2.0 for the schema.
+# New statements remain under_investigation until evidence supports another
+# status. Existing statements for the exact product digest retain their status.
 script_rel="scripts/security/$(basename "$0")"
 generator="$script_rel --image $image_ref --severity $severity"
 
@@ -210,32 +235,40 @@ jq -n \
   --arg product "$product" \
   --arg severity "$severity" \
   --arg generator "$generator" \
+  --argjson existing "$existing_statements" \
   --rawfile cves "$cve_list" \
-  '{
-    "@context": "https://openvex.dev/ns/v0.2.0",
-    "@id": $id,
-    "author": $author,
-    "timestamp": $ts,
-    "version": $version,
-    "_source": {
-      "image": $image,
-      "image_ref": $image_ref,
-      "digest": $digest,
-      "product": $product,
-      "severity_filter": $severity,
-      "generator": $generator
-    },
-    "statements": (
-      $cves
-      | split("\n")
-      | map(select(length > 0))
-      | map({
-          vulnerability: { name: . },
-          products: [ { "@id": $purl } ],
-          status: "under_investigation"
-        })
-    )
-  }' > "$output"
+  '(
+    $cves
+    | split("\n")
+    | map(select(length > 0))
+    | map({
+        vulnerability: { name: . },
+        products: [ { "@id": $purl } ],
+        status: "under_investigation"
+      })
+  ) as $generated
+  | {
+      "@context": "https://openvex.dev/ns/v0.2.0",
+      "@id": $id,
+      "author": $author,
+      "timestamp": $ts,
+      "version": $version,
+      "_source": {
+        "image": $image,
+        "image_ref": $image_ref,
+        "digest": $digest,
+        "product": $product,
+        "severity_filter": $severity,
+        "generator": $generator
+      },
+      "statements": (
+        $existing + [
+          $generated[] as $candidate
+          | select(any($existing[]; .vulnerability.name == $candidate.vulnerability.name) | not)
+          | $candidate
+        ]
+      )
+    }' > "$output"
 
 #------------------------------------------------------------------------------
 # Summary
@@ -245,5 +278,5 @@ print_kv "Image"        "$image_ref"
 print_kv "OpenVEX file" "$output"
 print_kv "Statements"   "$cve_count"
 print_kv "Version"      "$next_version"
-info "Triage each statement: set status to not_affected / affected / fixed and"
-info "add justification or action_statement before attaching with cosign."
+info "Triage each statement using product-specific evidence before attaching with cosign."
+info "Retain under_investigation when the evidence does not support another status."
