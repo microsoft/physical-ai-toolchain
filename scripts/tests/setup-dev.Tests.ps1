@@ -12,7 +12,7 @@ BeforeAll {
         [ref]$tokens,
         [ref]$errors
     )
-    $functionNames = @('Write-Warn', 'Get-UvTarget', 'Install-Uv')
+    $functionNames = @('Write-Warn', 'Get-UvTarget', 'Expand-UvArchive', 'Install-Uv')
     $functions = $ast.FindAll({
             param($node)
             $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -74,5 +74,83 @@ Describe 'setup-dev uv installation' -Tag 'Unit' {
                 -BinDir $binDir
         } | Should -Throw '*expected expected, got bad*'
         Test-Path $binDir | Should -BeFalse
+    }
+
+    It 'installs both uv binaries from the pinned <Target> archive' -TestCases @(
+        @{
+            Target = 'x86_64-unknown-linux-gnu'
+            Extension = 'tar.gz'
+            UvExecutable = 'uv'
+            UvxExecutable = 'uvx'
+        }
+        @{
+            Target = 'x86_64-pc-windows-msvc'
+            Extension = 'zip'
+            UvExecutable = 'uv.exe'
+            UvxExecutable = 'uvx.exe'
+        }
+    ) {
+        param($Target, $Extension, $UvExecutable, $UvxExecutable)
+
+        Mock Invoke-WebRequest {
+            param($Uri, $OutFile, $UseBasicParsing)
+            $null = $Uri
+            $null = $UseBasicParsing
+            Set-Content $OutFile 'archive'
+        }
+        Mock Get-FileHash { @{ Hash = 'ABC123' } }
+        Mock Expand-UvArchive {
+            param($Archive, $DestinationPath, $Target)
+            $null = $Archive
+            $null = $Target
+            $extractDir = Join-Path $DestinationPath 'extracted'
+            New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+            Set-Content (Join-Path $extractDir $UvExecutable) 'uv'
+            Set-Content (Join-Path $extractDir $UvxExecutable) 'uvx'
+            return $extractDir
+        }
+        $binDir = Join-Path $TestDrive "bin-$($Target -replace '[^a-z0-9]', '-')"
+        $originalPath = $env:PATH
+        $expectedUrl = "https://github.com/astral-sh/uv/releases/download/1.0.0/uv-$Target.$Extension"
+
+        try {
+            Install-Uv -Version '1.0.0' -Digests @{ $Target = 'abc123' } -Target $Target -BinDir $binDir
+
+            Test-Path (Join-Path $binDir $UvExecutable) | Should -BeTrue
+            Test-Path (Join-Path $binDir $UvxExecutable) | Should -BeTrue
+            $env:PATH.StartsWith("$binDir$([System.IO.Path]::PathSeparator)") | Should -BeTrue
+            Should -Invoke Invoke-WebRequest -Times 1 -ParameterFilter {
+                $Uri -eq $expectedUrl
+            }
+        }
+        finally {
+            $env:PATH = $originalPath
+        }
+    }
+
+    It 'keeps the shell and PowerShell Linux uv pins consistent' {
+        $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '../..')
+        $powerShellContent = Get-Content (Join-Path $repoRoot 'setup-dev.ps1') -Raw
+        $shellContent = Get-Content (Join-Path $repoRoot 'setup-dev.sh') -Raw
+
+        $powerShellVersionMatch = [regex]::Match($powerShellContent, "\`$UvVersion = '([^']+)'")
+        $shellVersionMatch = [regex]::Match($shellContent, 'UV_VERSION="([^"]+)"')
+        $powerShellVersionMatch.Success | Should -BeTrue
+        $shellVersionMatch.Success | Should -BeTrue
+        $powerShellVersion = $powerShellVersionMatch.Groups[1].Value
+        $shellVersion = $shellVersionMatch.Groups[1].Value
+        $powerShellVersion | Should -Be $shellVersion
+
+        foreach ($target in @('x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu')) {
+            $powerShellDigestMatch = [regex]::Match($powerShellContent, "'$target'\s*=\s*'([^']+)'")
+            $architecture = if ($target.StartsWith('x86_64')) { 'x86_64' } else { 'aarch64' }
+            $shellDigestMatch = [regex]::Match(
+                $shellContent,
+                "(?m)^\s*$architecture\).*UV_SHA256=`"([^`"]+)`""
+            )
+            $powerShellDigestMatch.Success | Should -BeTrue
+            $shellDigestMatch.Success | Should -BeTrue
+            $powerShellDigestMatch.Groups[1].Value | Should -Be $shellDigestMatch.Groups[1].Value
+        }
     }
 }

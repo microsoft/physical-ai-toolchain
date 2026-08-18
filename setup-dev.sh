@@ -58,9 +58,17 @@ verify_sha256() {
 
 section "UV Package Manager Setup"
 
-if ! command -v uv &>/dev/null; then
+UV_VERSION="0.12.5"
+installed_uv_version=""
+if command -v uv &>/dev/null; then
+  installed_uv_version=$(uv --version | awk '{print $2}')
+fi
+
+if [[ "${installed_uv_version}" != "${UV_VERSION}" ]]; then
+  if [[ -n "${installed_uv_version}" ]]; then
+    warn "Replacing uv ${installed_uv_version} with pinned version ${UV_VERSION}"
+  fi
   info "Installing uv package manager..."
-  UV_VERSION="0.12.5"
   UV_ARCH=$(uname -m)
   case "${UV_ARCH}" in
     x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2" ;;

@@ -72,7 +72,7 @@ function Assert-Tools {
 function Get-UvTarget {
     param(
         [string]$Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture,
-        [string]$OperatingSystem = $(if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } elseif ($IsLinux) { 'linux' })
+        [string]$OperatingSystem = $(if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } elseif ($IsLinux) { 'linux' } else { 'unknown' })
     )
 
     $arch = switch ($Architecture) {
@@ -87,6 +87,25 @@ function Get-UvTarget {
         default { throw "Unsupported operating system for uv: $OperatingSystem" }
     }
     return "$arch-$platform"
+}
+
+function Expand-UvArchive {
+    param(
+        [Parameter(Mandatory)][string]$Archive,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [Parameter(Mandatory)][string]$Target
+    )
+
+    if ($Target.EndsWith('-pc-windows-msvc')) {
+        Expand-Archive -Path $Archive -DestinationPath $DestinationPath -Force
+        return $DestinationPath
+    }
+
+    tar -xzf $Archive -C $DestinationPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to extract uv archive for $Target"
+    }
+    return (Join-Path $DestinationPath "uv-$Target")
 }
 
 function Install-Uv {
@@ -110,36 +129,32 @@ function Install-Uv {
         New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
         Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
         $actualHash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-        $expectedHash = $Digests[$Target]
+        $expectedHash = ([string]$Digests[$Target]).ToLowerInvariant()
         if ($actualHash -ne $expectedHash) {
             throw "uv archive checksum mismatch for ${Target}: expected $expectedHash, got $actualHash"
-        }
-
-        if ($isWindowsTarget) {
-            Expand-Archive -Path $archive -DestinationPath $tempDir -Force
-        }
-        else {
-            tar -xzf $archive -C $tempDir
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to extract uv archive for $Target"
-            }
         }
 
         New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
         $uvExecutable = if ($isWindowsTarget) { 'uv.exe' } else { 'uv' }
         $uvxExecutable = if ($isWindowsTarget) { 'uvx.exe' } else { 'uvx' }
-        $extractedDir = if ($isWindowsTarget) { $tempDir } else { Join-Path $tempDir "uv-$Target" }
-        Move-Item (Join-Path $extractedDir $uvExecutable) (Join-Path $BinDir $uvExecutable) -Force
-        Move-Item (Join-Path $extractedDir $uvxExecutable) (Join-Path $BinDir $uvxExecutable) -Force
+        $extractedDir = Expand-UvArchive -Archive $archive -DestinationPath $tempDir -Target $Target
+        $uvSource = Join-Path $extractedDir $uvExecutable
+        $uvxSource = Join-Path $extractedDir $uvxExecutable
+        if (-not (Test-Path $uvSource) -or -not (Test-Path $uvxSource)) {
+            throw "uv archive for $Target does not contain both uv and uvx"
+        }
+        Move-Item $uvSource (Join-Path $BinDir $uvExecutable) -Force
+        Move-Item $uvxSource (Join-Path $BinDir $uvxExecutable) -Force
         $env:PATH = "$BinDir$([System.IO.Path]::PathSeparator)$env:PATH"
 
-        if ($isWindowsTarget) {
+        if ($isWindowsTarget -and $IsWindows) {
             $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-            $userPathEntries = @($userPath -split [System.IO.Path]::PathSeparator)
+            $userPathEntries = @($userPath -split [System.IO.Path]::PathSeparator | Where-Object { $_ })
             if ($BinDir -notin $userPathEntries) {
+                $updatedUserPath = @($userPathEntries + $BinDir) -join [System.IO.Path]::PathSeparator
                 [Environment]::SetEnvironmentVariable(
                     'Path',
-                    "$BinDir$([System.IO.Path]::PathSeparator)$userPath",
+                    $updatedUserPath,
                     'User'
                 )
             }
@@ -224,17 +239,22 @@ Write-Info 'All required tools found'
 Write-Section 'UV Package Manager Setup'
 
 $UvVersion = '0.12.5'
+$UvDigests = @{
+    'aarch64-apple-darwin'       = '5bb0e5fe008a773c3dbcb97ff79cd89e1241464fe9d2f986d52ad8f1b037bd62'
+    'aarch64-pc-windows-msvc'    = '724279317fee6e5fa8ad1908e4eba2bbe764ef1ece5b3f4597927b62b1fe562a'
+    'aarch64-unknown-linux-gnu'  = '9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31'
+    'x86_64-apple-darwin'        = 'b3b2137477cf96c9686ebfb71524614cec780c673fd73e59bce099aef02e70e8'
+    'x86_64-pc-windows-msvc'     = '4c4d49d8738847d9b71ba319e49a5688c93eac0fe6204b1df24e98528dddf39a'
+    'x86_64-unknown-linux-gnu'   = '68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2'
+}
 
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Info "Installing uv package manager v$UvVersion..."
-    $UvDigests = @{
-        'aarch64-apple-darwin'       = '5bb0e5fe008a773c3dbcb97ff79cd89e1241464fe9d2f986d52ad8f1b037bd62'
-        'aarch64-pc-windows-msvc'    = '724279317fee6e5fa8ad1908e4eba2bbe764ef1ece5b3f4597927b62b1fe562a'
-        'aarch64-unknown-linux-gnu'  = '9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31'
-        'x86_64-apple-darwin'        = 'b3b2137477cf96c9686ebfb71524614cec780c673fd73e59bce099aef02e70e8'
-        'x86_64-pc-windows-msvc'     = '4c4d49d8738847d9b71ba319e49a5688c93eac0fe6204b1df24e98528dddf39a'
-        'x86_64-unknown-linux-gnu'   = '68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2'
+$installedUv = Get-Command uv -ErrorAction SilentlyContinue
+$installedUvVersion = if ($installedUv) { ((uv --version) -split '\s+')[1] } else { $null }
+if (-not $installedUv -or $installedUvVersion -ne $UvVersion) {
+    if ($installedUv) {
+        Write-Warn "Replacing uv $installedUvVersion with pinned version $UvVersion"
     }
+    Write-Info "Installing uv package manager v$UvVersion..."
     Install-Uv -Version $UvVersion -Digests $UvDigests
 }
 

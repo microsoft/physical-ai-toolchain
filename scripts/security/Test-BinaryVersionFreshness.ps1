@@ -3,6 +3,16 @@
 
 #Requires -Version 7.0
 
+<#
+.SYNOPSIS
+    Compares exact binary version pins against upstream releases.
+
+.DESCRIPTION
+    Reads exact installation pins from repository files, detects inconsistent copies,
+    and writes JSON and GitHub Actions outputs for check-binary-freshness.yml.
+    Test-BinaryFreshness.ps1 separately validates checksums and Helm chart versions.
+#>
+
 [CmdletBinding()]
 param(
     [string]$RepositoryRoot = (Split-Path $PSScriptRoot -Parent | Split-Path -Parent),
@@ -10,7 +20,7 @@ param(
     [string]$GitHubOutputPath = $env:GITHUB_OUTPUT
 )
 
-function Get-BinaryVersionSource {
+function Get-BinaryVersionToolDefinitions {
     [CmdletBinding()]
     param()
 
@@ -28,6 +38,20 @@ function Get-BinaryVersionSource {
             )
         }
         @{
+            Name = 'osv-scanner'
+            Repo = 'google/osv-scanner'
+            Sources = @(
+                @{ File = 'setup-dev.sh'; Pattern = 'OSV_SCANNER_VERSION="([^"]+)"' }
+                @{ File = 'setup-dev.ps1'; Pattern = '\$OsvScannerVersion = ''([^'']+)''' }
+                @{
+                    File = '.github/workflows/copilot-setup-steps.yml'
+                    Pattern = 'OSV_SCANNER_VERSION:\s*([0-9][^\s]+)'
+                }
+                @{ File = 'docs/contributing/prerequisites.md'; Pattern = '\| OSV-Scanner\s+\|\s+([0-9][^\s|]+)' }
+                @{ File = 'CONTRIBUTING.md'; Pattern = 'OSV-Scanner v([0-9][^\s]+)' }
+            )
+        }
+        @{
             Name = 'terraform-docs'
             Repo = 'terraform-docs/terraform-docs'
             Sources = @(
@@ -36,10 +60,12 @@ function Get-BinaryVersionSource {
                 @{ File = '.github/workflows/go-tests.yml'; Pattern = '\$version = ''v?([^'']+)''' }
                 @{
                     File = '.github/workflows/terraform-docs-check.yml'
+                    # Workflow input default under terraform-docs-version.
                     Pattern = '(?ms)^\s*terraform-docs-version:\s*.*?^\s*default:\s*''v?([0-9][^'']+)'''
                 }
                 @{
                     File = 'docs/contributing/infrastructure-style.md'
+                    # Linked terraform-docs release version in the style guide.
                     Pattern = 'terraform-docs\]\([^)]+\) v([0-9][^\s.]*\.[0-9][^\s.]*\.[0-9][^\s.]*)'
                 }
                 @{ File = 'docs/contributing/prerequisites.md'; Pattern = '\| terraform-docs\s+\|\s+([0-9][^\s|]+)' }
@@ -51,8 +77,6 @@ function Get-BinaryVersionSource {
             Sources = @(
                 @{ File = '.devcontainer/devcontainer.json'; Pattern = 'TFLINT_VERSION=v?([0-9][^\s&"]+)' }
                 @{ File = '.github/workflows/terraform-lint.yml'; Pattern = 'tflint_version: v?([0-9][^\s]+)' }
-                @{ File = '.tflint.hcl'; Pattern = 'required_version = ">= ([0-9][^"]+)"' }
-                @{ File = 'docs/contributing/prerequisites.md'; Pattern = '\| TFLint\s+\|\s+([0-9][^\s|]+)' }
             )
         }
         @{
@@ -75,6 +99,32 @@ function Get-BinaryVersionSource {
                 @{ File = 'scripts/linting/Invoke-GoLint.ps1'; Pattern = '\$lintInstallVersion = ''([^'']+)''' }
             )
         }
+        @{
+            Name = 'gitleaks'
+            Repo = 'gitleaks/gitleaks'
+            Sources = @(
+                @{ File = 'scripts/security/tool-checksums.json'; JsonTool = 'gitleaks' }
+                @{ File = '.github/workflows/gitleaks-scan.yml'; Pattern = 'GITLEAKS_VERSION="([^"]+)"' }
+            )
+        }
+        @{
+            Name = 'oras'
+            Repo = 'oras-project/oras'
+            Sources = @(
+                @{ File = 'scripts/security/tool-checksums.json'; JsonTool = 'oras' }
+                @{ File = 'training/vla/scripts/groot/osmo-train-entry.sh'; Pattern = 'ORAS_VERSION="([^"]+)"' }
+            )
+        }
+        @{
+            Name = 'gh-aw'
+            Repo = 'github/gh-aw'
+            Sources = @(
+                @{
+                    File = '.github/workflows/copilot-setup-steps.yml'
+                    Pattern = 'gh extension install github/gh-aw --pin v?([0-9][^\s]+)'
+                }
+            )
+        }
     )
 }
 
@@ -82,13 +132,13 @@ function Get-PinnedBinaryVersion {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
-        [Parameter(Mandatory)][hashtable]$Tool,
+        [Parameter(Mandatory)][string]$ToolName,
         [Parameter(Mandatory)][hashtable]$Source
     )
 
     $path = Join-Path $RepositoryRoot $Source.File
     if (-not (Test-Path $path)) {
-        throw "File not found for $($Tool.Name): $($Source.File)"
+        throw "File not found for ${ToolName}: $($Source.File)"
     }
 
     $content = Get-Content $path -Raw
@@ -96,13 +146,13 @@ function Get-PinnedBinaryVersion {
         $manifest = $content | ConvertFrom-Json
         $entry = @($manifest.tools).Where({ $_.name -eq $Source.JsonTool }, 'First')
         if (-not $entry -or -not $entry.version) {
-            throw "Could not extract version for $($Tool.Name) from $($Source.File)"
+            throw "Could not extract version for $ToolName from $($Source.File)"
         }
         return [string]$entry.version
     }
 
     if ($content -notmatch $Source.Pattern) {
-        throw "Could not extract version for $($Tool.Name) from $($Source.File)"
+        throw "Could not extract version for $ToolName from $($Source.File)"
     }
     return $Matches[1]
 }
@@ -111,10 +161,14 @@ function Invoke-BinaryVersionFreshnessCheck {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
-        [hashtable[]]$Tools = (Get-BinaryVersionSource),
+        [hashtable[]]$Tools = (Get-BinaryVersionToolDefinitions),
         [scriptblock]$LatestReleaseResolver = {
             param([string]$Repository)
-            gh api "repos/$Repository/releases/latest" --jq '.tag_name' 2>$null
+            $response = gh api "repos/$Repository/releases/latest" --jq '.tag_name' 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                throw "GitHub release lookup failed for ${Repository}: $response"
+            }
+            return $response
         }
     )
 
@@ -123,12 +177,15 @@ function Invoke-BinaryVersionFreshnessCheck {
             throw "No version sources configured for $($tool.Name)"
         }
 
-        $pinnedVersions = foreach ($source in $tool.Sources) {
+        $pinnedVersions = @(foreach ($source in $tool.Sources) {
             @{
                 File = $source.File
-                Version = Get-PinnedBinaryVersion -RepositoryRoot $RepositoryRoot -Tool $tool -Source $source
+                Version = Get-PinnedBinaryVersion `
+                    -RepositoryRoot $RepositoryRoot `
+                    -ToolName $tool.Name `
+                    -Source $source
             }
-        }
+        })
 
         $pinnedVersion = $pinnedVersions[0].Version
         $inconsistent = @($pinnedVersions | Where-Object { $_.Version -ne $pinnedVersion }).Count -gt 0
@@ -137,14 +194,15 @@ function Invoke-BinaryVersionFreshnessCheck {
             throw "Could not fetch latest release for $($tool.Repo) - freshness check cannot produce reliable results"
         }
 
-        $latestVersion = ([string]$latestTag).Trim().TrimStart('v')
+        $latestTag = ([string]$latestTag).Trim()
+        $latestVersion = $latestTag.TrimStart('v')
         $isStale = $pinnedVersion -ne $latestVersion
         [ordered]@{
             Name = $tool.Name
             Repo = $tool.Repo
             PinnedVersion = $pinnedVersion
             LatestVersion = $latestVersion
-            LatestTag = ([string]$latestTag).Trim()
+            LatestTag = $latestTag
             IsStale = $isStale
             Inconsistent = $inconsistent
             RequiresAttention = $isStale -or $inconsistent

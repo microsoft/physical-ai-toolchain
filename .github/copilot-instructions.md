@@ -35,21 +35,21 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 
 ## Repository Structure
 
-| Directory | Purpose |
-| --- | --- |
-| `infrastructure/terraform/prerequisites/` | Azure subscription setup, provider registration |
-| `infrastructure/terraform/` | Terraform infrastructure (AKS, networking, storage, identity) |
-| `infrastructure/terraform/vpn/` | Point-to-site VPN for private cluster access |
-| `infrastructure/setup/` | Post-deploy shell scripts (Helm charts, AzureML, OSMO) |
-| `training/rl/` | RL training package (SKRL, RSL-RL, Isaac Lab) |
-| `training/il/` | IL training package (LeRobot ACT/Diffusion) |
-| `evaluation/sil/` | Software-in-the-loop evaluation scripts and workflows |
-| `data-management/viewer/` | Dataset analysis tool (FastAPI backend + React frontend) |
-| `data-pipeline/capture/` | Recording configuration and data capture |
-| `scripts/` | CI/CD scripts, shared libraries, linting, security, and Pester tests |
-| `scripts/lib/` | Cross-domain shared shell and PowerShell libraries |
-| `external/IsaacLab/` | NVIDIA Isaac Lab (cloned for IntelliSense only, not built locally) |
-| `docs/contributing/` | Architecture, roadmap, style guides, contribution workflow |
+| Directory                                 | Purpose                                                              |
+|-------------------------------------------|----------------------------------------------------------------------|
+| `infrastructure/terraform/prerequisites/` | Azure subscription setup, provider registration                      |
+| `infrastructure/terraform/`               | Terraform infrastructure (AKS, networking, storage, identity)        |
+| `infrastructure/terraform/vpn/`           | Point-to-site VPN for private cluster access                         |
+| `infrastructure/setup/`                   | Post-deploy shell scripts (Helm charts, AzureML, OSMO)               |
+| `training/rl/`                            | RL training package (SKRL, RSL-RL, Isaac Lab)                        |
+| `training/il/`                            | IL training package (LeRobot ACT/Diffusion)                          |
+| `evaluation/sil/`                         | Software-in-the-loop evaluation scripts and workflows                |
+| `data-management/viewer/`                 | Dataset analysis tool (FastAPI backend + React frontend)             |
+| `data-pipeline/capture/`                  | Recording configuration and data capture                             |
+| `scripts/`                                | CI/CD scripts, shared libraries, linting, security, and Pester tests |
+| `scripts/lib/`                            | Cross-domain shared shell and PowerShell libraries                   |
+| `external/IsaacLab/`                      | NVIDIA Isaac Lab (cloned for IntelliSense only, not built locally)   |
+| `docs/contributing/`                      | Architecture, roadmap, style guides, contribution workflow           |
 
 * Do not modify files in `external/`
 * Version: managed by release-please across `pyproject.toml` and `package.json`
@@ -97,16 +97,16 @@ Detailed template and structure in `.github/instructions/shell-scripts.instructi
 
 ### Library Functions (`scripts/lib/common.sh`)
 
-| Function | Purpose |
-| --- | --- |
-| `info`, `warn`, `error`, `fatal` | Colored logging (fatal exits) |
-| `section "Title"` | Print section header |
-| `print_kv "Key" "$val"` | Print key-value pair |
-| `require_tools tool1 tool2` | Validate CLI tools exist |
-| `tf_get "$json" "path" "default"` | Extract optional Terraform output |
+| Function                           | Purpose                           |
+|------------------------------------|-----------------------------------|
+| `info`, `warn`, `error`, `fatal`   | Colored logging (fatal exits)     |
+| `section "Title"`                  | Print section header              |
+| `print_kv "Key" "$val"`            | Print key-value pair              |
+| `require_tools tool1 tool2`        | Validate CLI tools exist          |
+| `tf_get "$json" "path" "default"`  | Extract optional Terraform output |
 | `tf_require "$json" "path" "desc"` | Extract required Terraform output |
-| `connect_aks "$rg" "$cluster"` | Get AKS credentials |
-| `ensure_namespace "$ns"` | Create namespace idempotently |
+| `connect_aks "$rg" "$cluster"`     | Get AKS credentials               |
+| `ensure_namespace "$ns"`           | Create namespace idempotently     |
 
 ## Python Conventions
 
@@ -148,14 +148,14 @@ stdlib → third-party → first-party (blank-line separated). `collections.abc`
 
 ### Naming
 
-| Pattern | Convention | Examples |
-| --- | --- | --- |
-| Classes | PascalCase | `AzureMLContext`, `StorageError` |
-| Enums | PascalCase StrEnum | `TaskCompletenessRating(StrEnum)` |
-| Public functions | snake_case | `load_metadata()`, `prepare_for_shutdown()` |
-| Private functions | _snake_case | `_parse_mlflow_log_interval()` |
-| Module constants (private) | _UPPER_SNAKE | `_LOGGER`, `_DEFAULT_MLFLOW_INTERVAL` |
-| Module constants (public) | UPPER_SNAKE | `NUM_JOINTS`, `CONTROL_HZ` |
+| Pattern                    | Convention         | Examples                                    |
+|----------------------------|--------------------|---------------------------------------------|
+| Classes                    | PascalCase         | `AzureMLContext`, `StorageError`            |
+| Enums                      | PascalCase StrEnum | `TaskCompletenessRating(StrEnum)`           |
+| Public functions           | snake_case         | `load_metadata()`, `prepare_for_shutdown()` |
+| Private functions          | _snake_case        | `_parse_mlflow_log_interval()`              |
+| Module constants (private) | _UPPER_SNAKE       | `_LOGGER`, `_DEFAULT_MLFLOW_INTERVAL`       |
+| Module constants (public)  | UPPER_SNAKE        | `NUM_JOINTS`, `CONTROL_HZ`                  |
 
 ### Type Annotations
 
@@ -175,10 +175,10 @@ Literal["local", "azure"]
 
 ### Logging
 
-| Domain | Variable | Logger Name |
-| --- | --- | --- |
-| Training/RL/Eval | `_LOGGER` | Custom domain (`"isaaclab.skrl"`) |
-| Backend/Dataviewer | `logger` | `__name__` |
+| Domain             | Variable  | Logger Name                       |
+|--------------------|-----------|-----------------------------------|
+| Training/RL/Eval   | `_LOGGER` | Custom domain (`"isaaclab.skrl"`) |
+| Backend/Dataviewer | `logger`  | `__name__`                        |
 
 Always %-style formatting: `_LOGGER.warning("Invalid %s, using default (%d)", arg, default)`. Never f-strings in log calls.
 
@@ -214,14 +214,14 @@ Detailed rules in `.github/instructions/dataviewer.instructions.md`.
 
 ### File Naming
 
-| Category | Convention | Examples |
-| --- | --- | --- |
-| Components | PascalCase `.tsx` | `TrajectoryPlot.tsx`, `CameraSelector.tsx` |
-| Stores | kebab-case `.ts` | `annotation-store.ts`, `edit-store.ts` |
-| Hooks | kebab-case `.ts` | `use-datasets.ts`, `use-annotations.ts` |
-| Types | kebab-case `.ts` | `annotations.ts`, `api.ts` |
-| UI primitives | kebab-case `.tsx` | `button.tsx`, `dialog.tsx` |
-| Barrels | `index.ts` | Every feature folder |
+| Category      | Convention        | Examples                                   |
+|---------------|-------------------|--------------------------------------------|
+| Components    | PascalCase `.tsx` | `TrajectoryPlot.tsx`, `CameraSelector.tsx` |
+| Stores        | kebab-case `.ts`  | `annotation-store.ts`, `edit-store.ts`     |
+| Hooks         | kebab-case `.ts`  | `use-datasets.ts`, `use-annotations.ts`    |
+| Types         | kebab-case `.ts`  | `annotations.ts`, `api.ts`                 |
+| UI primitives | kebab-case `.tsx` | `button.tsx`, `dialog.tsx`                 |
+| Barrels       | `index.ts`        | Every feature folder                       |
 
 ### Component Patterns
 
@@ -296,12 +296,12 @@ Tests always test behaviors. Mocks reserved for external dependencies (Azure SDK
 
 Detailed rules in `.github/instructions/docs-style-and-conventions.instructions.md`.
 
-| Term | Use | Avoid |
-| --- | --- | --- |
-| Deploy | Provision infrastructure or install components | |
-| Setup | Post-deploy configuration | |
-| Cleanup | Remove components, keep infrastructure | |
-| Destroy | Delete Azure infrastructure | Teardown |
+| Term    | Use                                            | Avoid    |
+|---------|------------------------------------------------|----------|
+| Deploy  | Provision infrastructure or install components |          |
+| Setup   | Post-deploy configuration                      |          |
+| Cleanup | Remove components, keep infrastructure         |          |
+| Destroy | Delete Azure infrastructure                    | Teardown |
 
 * Voice: direct, technical, imperative. No hedging, no conversational filler.
 * H2 in README.md files: prefix with emoji (`## 📋 Prerequisites`, `## 🚀 Quick Start`)
@@ -327,9 +327,12 @@ Treat `.github/workflows/copilot-setup-steps.yml` and `.devcontainer/devcontaine
 * Test runners (Pester, pytest, vitest) MUST stay aligned for the same reason.
 * Azure-deployment tools (`az`, `kubectl`, `helm`, OSMO, NGC) live in the devcontainer only.
 * Lint-only tools may live in either or both depending on whether the agent invokes the linter.
-* Register every binary version pin in `scripts/security/Test-BinaryVersionFreshness.ps1` so the weekly workflow detects stale and inconsistent copies.
 
-The weekly `copilot-setup-steps.yml`, binary freshness workflow, and binary integrity workflow surface upstream drift across these surfaces.
+### Binary Version Pinning
+
+Register every exact binary installation pin in `scripts/security/Test-BinaryVersionFreshness.ps1` so `.github/workflows/check-binary-freshness.yml` detects stale and inconsistent copies. Compatibility floors such as Terraform `required_version` constraints and documentation minimums are excluded. Docker image digests remain owned by Dependabot.
+
+`Test-BinaryVersionFreshness.ps1` detects version drift. `Test-BinaryFreshness.ps1`, invoked by `.github/workflows/check-binary-integrity.yml`, validates binary checksums and Helm chart versions.
 
 ### Cloud-Agent RPI Wrapper
 
@@ -353,12 +356,12 @@ Full specification in `.github/instructions/commit-message.instructions.md`.
 
 Four ordered deployment steps:
 
-| Step | Directory | Description |
-| --- | --- | --- |
-| 1 | `infrastructure/terraform/prerequisites/` | Azure subscription init, provider registration |
-| 2 | `infrastructure/terraform/` | Terraform infrastructure (AKS, networking, storage, identity) |
-| 3 | `infrastructure/terraform/vpn/` | Point-to-site VPN (required for private clusters before any kubectl) |
-| 4 | `infrastructure/setup/` | Helm charts, AzureML extension, OSMO control plane and backend |
+| Step | Directory                                 | Description                                                          |
+|------|-------------------------------------------|----------------------------------------------------------------------|
+| 1    | `infrastructure/terraform/prerequisites/` | Azure subscription init, provider registration                       |
+| 2    | `infrastructure/terraform/`               | Terraform infrastructure (AKS, networking, storage, identity)        |
+| 3    | `infrastructure/terraform/vpn/`           | Point-to-site VPN (required for private clusters before any kubectl) |
+| 4    | `infrastructure/setup/`                   | Helm charts, AzureML extension, OSMO control plane and backend       |
 
 * Default is private AKS — VPN step (3) is REQUIRED before any kubectl or Helm commands unless `should_enable_public_access = true`
 * Three network modes: Full Private (default), Hybrid, Full Public
@@ -423,9 +426,9 @@ Training runs in NVIDIA Isaac Lab containers on GPU nodes via AzureML or OSMO.
 
 ## GPU Configuration
 
-| GPU | Driver Source | MIG Strategy | Special Requirements |
-| --- | --- | --- | --- |
-| H100 | GPU Operator datacenter driver | Disabled | Standard |
+| GPU          | Driver Source                                      | MIG Strategy                      | Special Requirements                            |
+|--------------|----------------------------------------------------|-----------------------------------|-------------------------------------------------|
+| H100         | GPU Operator datacenter driver                     | Disabled                          | Standard                                        |
 | RTX PRO 6000 | Microsoft GRID DaemonSet (`580.105.08-grid-azure`) | `mig.strategy: single` (REQUIRED) | `nvidia.com/gpu.deploy.driver=false` node label |
 
 * MIG strategy `single` is required for RTX PRO 6000: Azure vGPU host enables MIG, and `strategy: none` causes `CUDA_ERROR_NO_DEVICE` because `NVIDIA_VISIBLE_DEVICES` receives bare GPU UUIDs instead of MIG device UUIDs
@@ -438,23 +441,23 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 ### Quick Reference
 
-| File Type | Validation Commands |
-| --- | --- |
-| `*.md` | `npm run lint:md`, `npm run spell-check`, `npm run format:tables` |
-| `*.tf`, `*.tfvars` | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan`, `npm run test:go` (output contract) |
-| `*.tftest.hcl` | `npm run test:tf`, `cd infrastructure/terraform/modules/<name> && terraform test` or `cd infrastructure/terraform && terraform test` |
-| `*.go` | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`), `./infrastructure/terraform/e2e/run-contract-tests.sh` (Terraform output contract, requires `terraform-docs`) |
-| `*.sh` | `shellcheck <file>` |
-| `*.ps1` | `npm run lint:ps` |
-| `*.yml` (GitHub Actions) | `npm run lint:yaml` |
-| `data-management/viewer/frontend/**` | `cd data-management/viewer/frontend && npm run validate` (type-check + lint + test) |
-| `data-management/viewer/backend/**` | `cd data-management/viewer/backend && pytest` and `ruff check src/` |
-| `training/**/*.py` | `cd training && ruff check . && pytest` |
-| `evaluation/**/*.py` | `cd evaluation && ruff check . && pytest` |
-| `*.py`, workflow YAML with HF downloads | `npm run lint:hfpins` (HuggingFace revision-pin guard) |
-| `data-pipeline/**/*.py` | `cd data-pipeline && ruff check .` |
-| `uv.lock`, `pyproject.toml` | `uv lock` (regenerate the lock), `npm run lint:uvlock` (verify lock/manifest consistency) |
-| Any file | `npm run spell-check` |
+| File Type                               | Validation Commands                                                                                                                                                             |
+|-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `*.md`                                  | `npm run lint:md`, `npm run spell-check`, `npm run format:tables`                                                                                                               |
+| `*.tf`, `*.tfvars`                      | `npm run lint:tf`, `npm run lint:tf:validate`, `terraform plan`, `npm run test:go` (output contract)                                                                            |
+| `*.tftest.hcl`                          | `npm run test:tf`, `cd infrastructure/terraform/modules/<name> && terraform test` or `cd infrastructure/terraform && terraform test`                                            |
+| `*.go`                                  | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`), `./infrastructure/terraform/e2e/run-contract-tests.sh` (Terraform output contract, requires `terraform-docs`) |
+| `*.sh`                                  | `shellcheck <file>`                                                                                                                                                             |
+| `*.ps1`                                 | `npm run lint:ps`                                                                                                                                                               |
+| `*.yml` (GitHub Actions)                | `npm run lint:yaml`                                                                                                                                                             |
+| `data-management/viewer/frontend/**`    | `cd data-management/viewer/frontend && npm run validate` (type-check + lint + test)                                                                                             |
+| `data-management/viewer/backend/**`     | `cd data-management/viewer/backend && pytest` and `ruff check src/`                                                                                                             |
+| `training/**/*.py`                      | `cd training && ruff check . && pytest`                                                                                                                                         |
+| `evaluation/**/*.py`                    | `cd evaluation && ruff check . && pytest`                                                                                                                                       |
+| `*.py`, workflow YAML with HF downloads | `npm run lint:hfpins` (HuggingFace revision-pin guard)                                                                                                                          |
+| `data-pipeline/**/*.py`                 | `cd data-pipeline && ruff check .`                                                                                                                                              |
+| `uv.lock`, `pyproject.toml`             | `uv lock` (regenerate the lock), `npm run lint:uvlock` (verify lock/manifest consistency)                                                                                       |
+| Any file                                | `npm run spell-check`                                                                                                                                                           |
 
 ### Linting
 
@@ -496,18 +499,18 @@ Terraform validation is per-directory — each deployment directory has its own 
 
 ## Contributing References
 
-| Document | Content |
-| --- | --- |
-| `docs/contributing/architecture.md` | Current and future architecture (hub-spoke, multi-node, 8 lifecycle domains) |
-| `docs/contributing/ROADMAP.md` | Migration phases from monolithic to multi-node (Q2-Q3 2026) |
-| `docs/contributing/infrastructure-style.md` | Terraform naming, modules, commenting (NOTE: boolean prefix guidance is outdated; use `should_` per this file) |
-| `docs/contributing/contribution-workflow.md` | Branch naming, PR process, review checklist |
-| `docs/contributing/prerequisites.md` | Required tools and versions |
-| `docs/contributing/deployment-validation.md` | Post-deployment verification steps |
-| `docs/contributing/cost-considerations.md` | Azure resource cost guidance |
-| `docs/contributing/security-review.md` | Security review checklist |
-| `docs/gpu-configuration.md` | Detailed GPU driver and operator configuration |
-| `docs/mlflow-integration.md` | MLflow tracking and experiment management |
-| `.github/instructions/dataviewer.instructions.md` | Frontend coding patterns, component design, testing philosophy |
-| `.github/instructions/shell-scripts.instructions.md` | Shell script template, section order, library function reference |
-| `.github/instructions/commit-message.instructions.md` | Conventional commit format, types, scopes, footer requirements |
+| Document                                              | Content                                                                                                        |
+|-------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| `docs/contributing/architecture.md`                   | Current and future architecture (hub-spoke, multi-node, 8 lifecycle domains)                                   |
+| `docs/contributing/ROADMAP.md`                        | Migration phases from monolithic to multi-node (Q2-Q3 2026)                                                    |
+| `docs/contributing/infrastructure-style.md`           | Terraform naming, modules, commenting (NOTE: boolean prefix guidance is outdated; use `should_` per this file) |
+| `docs/contributing/contribution-workflow.md`          | Branch naming, PR process, review checklist                                                                    |
+| `docs/contributing/prerequisites.md`                  | Required tools and versions                                                                                    |
+| `docs/contributing/deployment-validation.md`          | Post-deployment verification steps                                                                             |
+| `docs/contributing/cost-considerations.md`            | Azure resource cost guidance                                                                                   |
+| `docs/contributing/security-review.md`                | Security review checklist                                                                                      |
+| `docs/gpu-configuration.md`                           | Detailed GPU driver and operator configuration                                                                 |
+| `docs/mlflow-integration.md`                          | MLflow tracking and experiment management                                                                      |
+| `.github/instructions/dataviewer.instructions.md`     | Frontend coding patterns, component design, testing philosophy                                                 |
+| `.github/instructions/shell-scripts.instructions.md`  | Shell script template, section order, library function reference                                               |
+| `.github/instructions/commit-message.instructions.md` | Conventional commit format, types, scopes, footer requirements                                                 |
