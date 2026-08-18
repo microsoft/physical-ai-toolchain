@@ -95,6 +95,7 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
                     vulnerability = @{ name = 'CVE-2025-9999' }
                     products = @(@{ '@id' = $otherPurl })
                     status = 'fixed'
+                    status_notes = 'The prior digest contains the verified remediation.'
                 }
             )
         } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
@@ -165,6 +166,30 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
     }
 
+    It 'rejects a terminal status without product-specific evidence' {
+        @{
+            '@context' = 'https://openvex.dev/ns/v0.2.0'
+            '@id' = 'https://example.test/vex/v1'
+            author = 'Test'
+            timestamp = '2026-01-01T00:00:00Z'
+            version = 1
+            statements = @(
+                @{
+                    vulnerability = @{ name = 'CVE-2026-0001' }
+                    products = @(@{ '@id' = $script:Purl })
+                    status = 'fixed'
+                }
+            )
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
+        $before = Get-Content $script:Workspace.Output -Raw
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
+        Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
+    }
+
     It 'increments the version and issues a distinct revision ID on repeated runs' {
         Invoke-Generator -Workspace $script:Workspace
         $first = Get-Content $script:Workspace.Output -Raw | ConvertFrom-Json
@@ -188,6 +213,7 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         $script:GeneratorExit | Should -Not -Be 0
         $script:GeneratorOutput | Should -Match 'already writing'
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
+        Test-Path "$($script:Workspace.Output).lock" | Should -BeTrue
     }
 
     It 'leaves the existing document intact when the atomic replacement fails' {
@@ -227,12 +253,17 @@ Describe 'committed OpenVEX documents' -Tag 'Unit' {
 
             foreach ($statement in $document.statements) {
                 $statement.status | Should -BeIn $allowedStatuses
+                foreach ($product in $statement.products) {
+                    $product.'@id' | Should -Match '^pkg:oci/.+@sha256:[0-9a-f]{64}\?.*repository_url=[^&]+'
+                }
                 if ($statement.status -eq 'not_affected') {
                     $statement.justification | Should -BeIn $allowedJustifications
-                    $statement.status_notes | Should -Not -BeNullOrEmpty
                 }
                 if ($statement.status -eq 'affected') {
                     $statement.action_statement | Should -Not -BeNullOrEmpty
+                }
+                if ($statement.status -ne 'under_investigation') {
+                    $statement.status_notes | Should -Not -BeNullOrEmpty
                 }
             }
         }

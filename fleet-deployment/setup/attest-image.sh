@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Attach SBOM and OpenVEX attestations to an already-built, signed image in ACR.
+# Attach SBOM and an optional OpenVEX attestation to an already-built, signed image in ACR.
 # Decoupled from build-aml-model-image.sh so security/compliance can refresh
 # VEX dispositions without rebuilding.
 set -o errexit -o nounset
@@ -27,8 +27,8 @@ OPTIONS:
                               or 'sigstore')
     --acr-name NAME           ACR name for 'az acr login' (default: parsed from
                               the image ref)
-    --vex-file PATH           OpenVEX statement (sigstore only)
-                              (default: $DEFAULT_VEX_FILE)
+    --vex-file PATH           OpenVEX statement (sigstore only; default:
+                              ${DEFAULT_VEX_FILE:-unset})
     --sbom-file PATH          Reuse an existing SPDX-JSON SBOM instead of
                               generating one via syft
     --skip-sbom               Skip SBOM attestation
@@ -45,14 +45,17 @@ NOTES:
     is supplied or parseable from the image ref.
 
 EXAMPLES:
-    # Attach the committed VEX to a previously built image
-    $(basename "$0") --image acrfleetprod001.azurecr.io/act-pickplace@sha256:abc...
+    # Attach an explicit VEX document to a previously built image
+    $(basename "$0") --image acrfleetprod001.azurecr.io/act-pickplace@sha256:abc... \
+      --vex-file ../../security/vex/inference-base.openvex.json
 
     # Refresh just the VEX (skip SBOM regeneration)
-    $(basename "$0") --image <ref> --skip-sbom
+    $(basename "$0") --image <ref> --skip-sbom \
+      --vex-file ../../security/vex/inference-base.openvex.json
 
     # Reuse an existing SBOM and attach the VEX
-    $(basename "$0") --image <ref> --sbom-file ./sbom.spdx.json
+    $(basename "$0") --image <ref> --sbom-file ./sbom.spdx.json \
+      --vex-file ../../security/vex/inference-base.openvex.json
 
     # Notation mode (SBOM only; VEX skipped)
     $(basename "$0") --image <ref> --mode notation
@@ -106,6 +109,9 @@ fi
 vex_path="${vex_file:-${DEFAULT_VEX_FILE:-}}"
 if [[ -n "$vex_path" && "$vex_path" != /* ]]; then
   vex_path="$(realpath -m "$SCRIPT_DIR/$vex_path")"
+fi
+if [[ -z "$vex_path" ]]; then
+  skip_vex=true
 fi
 
 section "Configuration"

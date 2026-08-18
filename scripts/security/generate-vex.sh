@@ -10,8 +10,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 
 # Default image is a runnable AML base. The fleet inference image now uses
 # 'scratch' (no packages, no scannable surface) so this script does not apply
-# to it by default — see security/vex/inference-base.openvex.json. Pass --image
-# explicitly when scanning a runnable variant.
+# to it by default. Pass --image explicitly when scanning a runnable variant.
 DEFAULT_IMAGE="mcr.microsoft.com/azureml/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0"
 DEFAULT_PRODUCT="minimal-py312-inference"
 DEFAULT_REPO_URL="mcr.microsoft.com/azureml"
@@ -27,8 +26,9 @@ Usage: $(basename "$0") [OPTIONS]
 
 Scan an OCI image and merge findings into an OpenVEX document.
 
-Existing statements and metadata are preserved. Newly discovered CVEs are added
-as under_investigation for the resolved digest.
+Existing statements and unrelated metadata are preserved. Revision metadata and
+scan provenance are updated, and newly discovered CVEs are added as
+under_investigation for the resolved digest.
 
 OPTIONS:
     -h, --help               Show this help message
@@ -68,12 +68,13 @@ skip_scan=false
 config_preview=false
 output_tmp=""
 lock_dir=""
+lock_acquired=false
 
 cleanup() {
   if [[ -n "$output_tmp" && -f "$output_tmp" ]]; then
     rm -f "$output_tmp"
   fi
-  if [[ -n "$lock_dir" && -d "$lock_dir" ]]; then
+  if [[ "$lock_acquired" == "true" && -n "$lock_dir" && -d "$lock_dir" ]]; then
     rmdir "$lock_dir" 2>/dev/null || true
   fi
 }
@@ -204,19 +205,67 @@ mkdir -p "$output_dir"
 lock_dir="${output}.lock"
 mkdir "$lock_dir" 2>/dev/null ||
   fatal "Another VEX generation is already writing $output"
+lock_acquired=true
 
 if [[ -f "$output" ]]; then
   previous_document=$(jq -ce '
+    def non_empty_string:
+      type == "string" and length > 0;
+    def allowed_status:
+      . == "under_investigation"
+      or . == "not_affected"
+      or . == "affected"
+      or . == "fixed";
+    def allowed_justification:
+      . == "component_not_present"
+      or . == "vulnerable_code_not_present"
+      or . == "vulnerable_code_not_in_execute_path"
+      or . == "vulnerable_code_cannot_be_controlled_by_adversary"
+      or . == "inline_mitigations_already_exist";
+    def digest_purl:
+      type == "string"
+      and test("^pkg:oci/.+@sha256:[0-9a-f]{64}\\?.*repository_url=[^&]+");
+
     if (.version | type) != "number"
-      or .version < 0
+      or .version < 1
       or .version != (.version | floor)
-    then error("version must be a non-negative integer")
-    elif (.timestamp | type) != "string" or .timestamp == ""
+    then error("version must be a positive integer")
+    elif (.timestamp | non_empty_string | not)
     then error("timestamp must be a non-empty string")
     elif ((.statements // []) | type) != "array"
     then error("statements must be an array")
-    elif any(.statements[]?; (.vulnerability.name // .vulnerability["@id"]) == null)
-    then error("every statement must identify its vulnerability")
+    elif any(.statements[]?; (.vulnerability.name | non_empty_string | not))
+    then error("every statement must identify its vulnerability by name")
+    elif any(.statements[]?; (.products | type) != "array" or (.products | length) == 0)
+    then error("every statement must identify at least one product")
+    elif any(.statements[]?.products[]?; (.["@id"] | digest_purl | not))
+    then error("every product must use a digest-pinned OCI package URL")
+    elif any(.statements[]?; (.status | allowed_status | not))
+    then error("every statement must use an allowed status")
+    elif any(
+      .statements[]?;
+      .status == "not_affected"
+      and (
+        (.justification | allowed_justification | not)
+        or (.status_notes | non_empty_string | not)
+      )
+    )
+    then error("not_affected statements require an allowed justification and status_notes")
+    elif any(
+      .statements[]?;
+      .status == "affected"
+      and (
+        (.action_statement | non_empty_string | not)
+        or (.status_notes | non_empty_string | not)
+      )
+    )
+    then error("affected statements require action_statement and status_notes")
+    elif any(
+      .statements[]?;
+      .status == "fixed"
+      and (.status_notes | non_empty_string | not)
+    )
+    then error("fixed statements require status_notes")
     else .
     end
   ' "$output") ||
