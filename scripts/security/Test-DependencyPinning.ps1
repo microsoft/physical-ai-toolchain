@@ -955,19 +955,48 @@ function Get-DockerImageViolations {
         $exempt = $hasIgnore -or $prevWasIgnoreComment
         $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
 
-        if ($line -match '^\s*environment:\s*(azureml:[^:\s]+:latest)\s*(?:#.*)?$') {
-            if ($exempt) { continue }
-            $v = [DependencyViolation]::new()
-            $v.File = $relativePath
-            $v.Line = $i + 1
-            $v.Type = $type
-            $v.Name = $Matches[1]
-            $v.Version = 'latest'
-            $v.Severity = 'warning'
-            $v.Description = 'Mutable AzureML environment version (:latest)'
-            $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
-            $violations += $v
-            continue
+        if ($line -match '^\s*(?:-\s*)?environment:\s*(.+?)\s*$') {
+            $environmentRef = ($Matches[1] -replace '\s+#.*$', '').Trim().Trim('"', "'").Trim()
+            if ($environmentRef -match '^azureml:') {
+                if ($exempt) { continue }
+
+                $name = $environmentRef
+                $version = '(none)'
+                $hasExplicitVersion = $false
+
+                if ($environmentRef -match '^azureml:(?<Name>[^:@\s]+):(?<Version>[^:@\s]+)$') {
+                    $name = "azureml:$($Matches['Name'])"
+                    $version = $Matches['Version']
+                    $hasExplicitVersion = $true
+                }
+                elseif ($environmentRef -match '^azureml:.*/environments/(?<Name>[^/]+)/versions/(?<Version>[^/\s]+)$') {
+                    $name = $environmentRef -replace '/versions/[^/]+$', ''
+                    $version = $Matches['Version']
+                    $hasExplicitVersion = $true
+                }
+                elseif ($environmentRef -match '^azureml:(?<Name>[^:@\s]+)@(?<Version>[^:@\s]+)$') {
+                    $name = "azureml:$($Matches['Name'])"
+                    $version = $Matches['Version']
+                }
+                elseif ($environmentRef -match '^azureml:.*/environments/(?<Name>[^/]+)/labels/(?<Version>[^/\s]+)$') {
+                    $name = $environmentRef -replace '/labels/[^/]+$', ''
+                    $version = $Matches['Version']
+                }
+
+                if ($hasExplicitVersion -and $version -ne 'latest') { continue }
+
+                $v = [DependencyViolation]::new()
+                $v.File = $relativePath
+                $v.Line = $i + 1
+                $v.Type = $type
+                $v.Name = $name
+                $v.Version = $version
+                $v.Severity = 'warning'
+                $v.Description = 'Mutable or unversioned AzureML environment reference'
+                $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
+                $violations += $v
+                continue
+            }
         }
 
         # Match an image-bearing field (optionally a YAML list item), capturing key and value.

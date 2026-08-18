@@ -29,7 +29,8 @@ identity:
 # Runtime values below are overridden by submit-azureml-training.sh.
 # This file serves as a structural template for the job definition.
 code: .
-# Direct submission requires this environment version to be registered by the submit script.
+# Direct submission requires this environment version to be registered first.
+# The submit script registers the asset and verifies its image.
 # scripts/update-image-digests.sh keeps it aligned with DEFAULT_ISAAC_LAB_IMAGE.
 environment: azureml:isaaclab-training-env:2.3.2-sha256-388dbc806f48359a964cb9f807feb226da95d0a107f470fdcad9780ea10fe6f2
 compute: azureml:cpu-cluster

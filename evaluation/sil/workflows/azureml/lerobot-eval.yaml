@@ -28,7 +28,8 @@ identity:
 # Code root is the repository root so the entrypoint and helper scripts resolve
 # consistently when the template is submitted directly or via the wrapper script.
 code: ../../../..
-# Direct submission requires this environment version to be registered by the submit script.
+# Direct submission requires this environment version to be registered first.
+# The submit script registers the asset and verifies its image.
 # scripts/update-image-digests.sh keeps it aligned with DEFAULT_LEROBOT_EVAL_IMAGE.
 environment: azureml:lerobot-inference-env:2.4.1-cuda12.4-cudnn9-runtime-sha256-0a3b9fedefe1f61ac4d5a9de9015c0863db27ca0fde2d4e37e6268147980b726
 compute: azureml:cpu-inference

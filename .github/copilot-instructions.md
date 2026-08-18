@@ -397,6 +397,7 @@ AzureML runs on Arc-connected AKS clusters via the AzureML Kubernetes extension.
 * Job YAML schema: `$schema: .../commandJob.schema.json`
   * No empty strings in YAML values — use sentinel values (`auto`, `none`, `placeholder`)
   * Submit with runtime overrides: `az ml job create --file <yaml> --set "display_name=..." --set "environment_variables.KEY=value"`
+  * Pin `environment:` assets to explicit versions derived from checked-in image tag and digest defaults; synchronize them with `scripts/update-image-digests.sh`
 * Code snapshot: each domain's workflow directory uploaded to AzureML via `code: .` relative path
 * Identity chain: Terraform-created managed identity → federated credentials → K8s service accounts (`azureml:default`, `azureml:training`)
 * Model validation mode: `mode: download` (NOT `ro_mount`) — workaround for workload identity auth failures in `data-capability` sidecar

@@ -661,12 +661,17 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
             $script:DockerResult = @(Get-DockerImageViolations -FileInfo @{ Path = $testFile; Type = 'docker'; RelativePath = 'docker-image-unpinned-workflow.yaml' })
         }
 
-        It 'Flags every tag-only OCI image' {
-            $script:DockerResult.Count | Should -Be 3
+        It 'Flags every unpinned image and mutable environment reference' {
+            $script:DockerResult.Count | Should -Be 4
         }
 
-        It 'Flags the expected image repositories' {
-            ($script:DockerResult.Name | Sort-Object) | Should -Be @('nvcr.io/nvidia/isaac-lab', 'python', 'pytorch/pytorch')
+        It 'Flags the expected repositories and environment assets' {
+            ($script:DockerResult.Name | Sort-Object) | Should -Be @(
+                'azureml:isaaclab-training-env',
+                'nvcr.io/nvidia/isaac-lab',
+                'python',
+                'pytorch/pytorch'
+            )
         }
 
         It 'Records the tag as the unpinned version' {
@@ -718,11 +723,49 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
             Set-Content -Path $tmp -Value $content
             $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'env.yaml' })
             $result.Count | Should -Be 1
-            $result[0].Description | Should -Be 'Mutable AzureML environment version (:latest)'
+            $result[0].Name | Should -Be 'azureml:lerobot-training-env'
+            $result[0].Version | Should -Be 'latest'
+            $result[0].Severity | Should -Be 'warning'
+            $result[0].Line | Should -Be 1
+            $result[0].Description | Should -Be 'Mutable or unversioned AzureML environment reference'
+        }
+
+        It 'Flags quoted, label-based, list-item, URI-label, and unversioned AzureML references' {
+            $content = @'
+environment: "azureml:quoted-env:latest"
+environment: 'azureml:single-quoted-env:latest'
+- environment: azureml:list-env:latest
+environment: azureml:label-env@production
+environment: azureml://registries/example/environments/uri-env/labels/production
+environment: azureml:unversioned-env
+'@
+            $tmp = Join-Path $TestDrive 'mutable-env-forms.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'mutable-env-forms.yaml' })
+
+            $result.Count | Should -Be 6
+            $result.Name | Should -Contain 'azureml:quoted-env'
+            $result.Name | Should -Contain 'azureml:single-quoted-env'
+            $result.Name | Should -Contain 'azureml:list-env'
+            $result.Name | Should -Contain 'azureml:label-env'
+            $result.Name | Should -Contain 'azureml://registries/example/environments/uri-env'
+            $result.Name | Should -Contain 'azureml:unversioned-env'
+        }
+
+        It 'Honors comments and pinning-ignore for AzureML environment references' {
+            $content = "environment: azureml:commented-env:latest  # note`n" +
+                "environment: azureml:ignored-env:latest  # pinning-ignore"
+            $tmp = Join-Path $TestDrive 'commented-env.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'commented-env.yaml' })
+
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'azureml:commented-env'
         }
 
         It 'Accepts explicitly versioned AzureML environment assets' {
-            $content = '  environment: azureml:lerobot-training-env:2.4.1-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            $content = "  environment: azureml:lerobot-training-env:2.4.1-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`n" +
+                '  environment: azureml://registries/example/environments/lerobot-training-env/versions/42'
             $tmp = Join-Path $TestDrive 'env.yaml'
             Set-Content -Path $tmp -Value $content
             $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'env.yaml' })
