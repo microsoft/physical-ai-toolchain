@@ -4,9 +4,10 @@
 # and the shared submission defaults in scripts/lib/common.sh.
 #
 # References are discovered automatically: every "<image>:<tag>@sha256:<digest>" is
-# re-resolved to its current registry digest and rewritten in place. Dockerfiles,
-# compose files, and .github/ are skipped because those digests are owned by
-# Dependabot and the gh-aw workflow compiler respectively.
+# re-resolved to its current registry digest and rewritten in place. AzureML
+# environment versions derived from shared image defaults are synchronized in the
+# same run. Dockerfiles, compose files, and .github/ are skipped because those
+# digests are owned by Dependabot and the gh-aw workflow compiler respectively.
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,8 +22,8 @@ Usage: $(basename "$0") [OPTIONS]
 Discover every "<image>:<tag>@sha256:<digest>" reference in the repository, resolve
 each tag to its current registry digest, and rewrite the pins in place. Dockerfiles,
 compose files, and .github/ are skipped (Dependabot and the gh-aw compiler own those).
-AzureML environment references (azureml:<name>:latest) are not digest pins and are
-left untouched.
+AzureML environment versions derived from checked-in Isaac Lab and LeRobot image
+defaults are updated with the resolved tag and digest.
 
 OPTIONS:
     -h, --help               Show this help message
@@ -59,6 +60,12 @@ exclude_paths=(
   ':(exclude,glob)**/*compose*.y*ml'
   ':(exclude,glob)**/tests/Fixtures/**'
   ':(exclude,glob)**/*.Tests.ps1'
+)
+azureml_pin_specs=(
+  'DEFAULT_ISAAC_LAB_IMAGE|isaaclab-training-env|training/rl/workflows/azureml/train.yaml'
+  'DEFAULT_ISAAC_LAB_IMAGE|isaaclab-training-env|evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml'
+  'DEFAULT_LEROBOT_TRAIN_IMAGE|lerobot-training-env|training/il/workflows/azureml/lerobot-train.yaml'
+  'DEFAULT_LEROBOT_EVAL_IMAGE|lerobot-inference-env|evaluation/sil/workflows/azureml/lerobot-eval.yaml'
 )
 
 cd "$REPO_ROOT"
@@ -109,6 +116,15 @@ resolve_digest() {
     | tr -d '\r' | grep -i '^docker-content-digest:' | head -n 1 | awk '{ print $2 }' || true
 }
 
+read_checked_in_image_default() {
+  local variable="$1" line prefix image
+  line=$(grep -E "^${variable}=" "$REPO_ROOT/scripts/lib/common.sh")
+  prefix="${variable}=\"\${${variable}:-"
+  [[ "$line" == "$prefix"*'}"' ]] || fatal "Could not parse checked-in default for $variable"
+  image="${line#"$prefix"}"
+  printf '%s\n' "${image%??}"
+}
+
 #------------------------------------------------------------------------------
 # Discover
 #------------------------------------------------------------------------------
@@ -117,10 +133,12 @@ section "Discovering Digest Pins"
 refs=$(git grep -hoE "$digest_ref_re" -- "${exclude_paths[@]}" 2>/dev/null \
   | sed -E 's/@sha256:[0-9a-f]{64}//' | sort -u || true)
 files=$(git grep -lE "$digest_ref_re" -- "${exclude_paths[@]}" 2>/dev/null || true)
+azureml_files=$(printf '%s\n' "${azureml_pin_specs[@]}" | cut -d'|' -f3 | sort -u)
+all_files=$(printf '%s\n%s\n' "$files" "$azureml_files" | grep -v '^$' | sort -u)
 [[ -n "$refs" ]] || fatal "No digest-pinned image references found under $REPO_ROOT"
 
 ref_count=$(printf '%s\n' "$refs" | grep -c .)
-file_count=$(printf '%s\n' "$files" | grep -c .)
+file_count=$(printf '%s\n' "$all_files" | grep -c .)
 print_kv "Images Discovered" "$ref_count"
 print_kv "Files Discovered"  "$file_count"
 
@@ -128,7 +146,7 @@ if [[ "$config_preview" == "true" ]]; then
   section "Discovered Images"
   while IFS= read -r ref; do print_kv "Image" "$ref"; done <<< "$refs"
   section "Discovered Files"
-  while IFS= read -r file; do print_kv "File" "$file"; done <<< "$files"
+  while IFS= read -r file; do print_kv "File" "$file"; done <<< "$all_files"
   exit 0
 fi
 
@@ -179,6 +197,31 @@ while IFS= read -r file; do
     info "Updated $file"
   fi
 done <<< "$files"
+
+# Synchronize AzureML environment versions with the newly resolved image digests.
+while IFS='|' read -r variable environment_name file; do
+  image=$(read_checked_in_image_default "$variable")
+  ref="${image%@*}"
+  digest=$(awk -v ref="$ref" '$1 == ref { print $2; exit }' "$digest_map")
+  [[ "$digest" == sha256:* ]] || fatal "No resolved digest found for $variable ($ref)"
+  version=$(derive_azureml_environment_version_from_image "${ref}@${digest}")
+  replacement="environment: azureml:${environment_name}:${version}"
+  grep -qE "^environment: azureml:${environment_name}:[A-Za-z0-9._-]+$" "$file" \
+    || fatal "Could not find AzureML environment pin in $file"
+  sed -E "s#^environment: azureml:${environment_name}:[A-Za-z0-9._-]+\$#${replacement}#" "$file" > "$tmp"
+
+  if cmp -s "$file" "$tmp"; then
+    continue
+  fi
+  updated=$((updated + 1))
+  if [[ "$dry_run" == "true" ]]; then
+    info "[dry-run] Would update $file"
+    diff -u "$file" "$tmp" || true
+  else
+    cp "$tmp" "$file"
+    info "Updated $file"
+  fi
+done < <(printf '%s\n' "${azureml_pin_specs[@]}")
 
 #------------------------------------------------------------------------------
 # Summary

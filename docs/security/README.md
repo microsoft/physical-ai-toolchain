@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-01
+ms.date: 2026-08-18
 ms.topic: overview
 keywords:
   - security
@@ -54,9 +54,9 @@ Automated security and freshness checks that run on GitHub Actions schedules and
 | [`scripts/security/Test-DependencyPinning.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-DependencyPinning.ps1) | `dependency-pinning-scan.yml`      | Validate that GitHub Actions, package manifests, inline pip/uv installs, and workflow container images (`@sha256` digests) pin exact versions (Dockerfile base images: OpenSSF Scorecard) |
 | [`scripts/security/Test-SHAStaleness.ps1`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/security/Test-SHAStaleness.ps1)           | `sha-staleness-check.yml`          | Detect SHA pins that have drifted behind upstream release tags                                                                                                                            |
 | [`scripts/update-chart-hashes.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-chart-hashes.sh)                           | Run manually after chart bumps     | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf`                                                                                             |
-| [`scripts/update-image-digests.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-image-digests.sh)                         | Run manually after image tag bumps | Re-resolve and refresh `@sha256` container image digest pins (auto-discovered; Dockerfiles, compose, and `.github/` excluded)                                                             |
+| [`scripts/update-image-digests.sh`](https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-image-digests.sh)                         | Run manually after image tag bumps | Re-resolve and refresh `@sha256` container image digest pins and derived AzureML environment versions (Dockerfiles, compose, and `.github/` excluded)                                     |
 
-Script parameters vary by check: `Test-BinaryFreshness.ps1` uses `-SarifFile` and `-ConfigPreview`, `Test-DependencyPinning.ps1` uses `-Format sarif -OutputPath <path>`, and `Test-SHAStaleness.ps1` uses `-OutputFormat` and `-OutputPath`. Run `scripts/update-chart-hashes.sh` locally whenever a pinned Helm chart version is updated so `defaults.conf` stays in sync. Likewise, run `scripts/update-image-digests.sh` after bumping a container image tag so the `@sha256` digest pins stay in sync.
+`Test-BinaryFreshness.ps1` uses `-SarifFile` and `-ConfigPreview`, `Test-DependencyPinning.ps1` uses `-Format sarif -OutputPath <path>`, and `Test-SHAStaleness.ps1` uses `-OutputFormat` and `-OutputPath`. Run `scripts/update-chart-hashes.sh` after changing a Helm chart version. Run `scripts/update-image-digests.sh` after changing a container image tag; it synchronizes OCI digest pins and derived AzureML environment versions.
 
 `Test-DependencyPinning.ps1 -Apply` rewrites tag-pinned GitHub Actions references with their resolved commit SHAs in place; run it manually to remediate pinning findings.
 

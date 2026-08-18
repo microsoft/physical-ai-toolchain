@@ -921,8 +921,9 @@ function Get-DockerImageViolations {
         digest. A value under 'init:'/'client:' is treated as an image only when it carries a
         registry/namespace path, so plain configuration scalars are left untouched.
         Submission-time templated ('{{ ... }}') and shell-variable ('$VAR' / '${VAR}')
-        references are injected at submit time and skipped, as are AzureML asset references
-        ('azureml:<name>:<version>'), which are versioned assets rather than OCI images.
+        references are injected at submit time and skipped. AzureML asset references
+        ('azureml:<name>:<version>') are versioned assets rather than OCI images, but a
+        mutable ':latest' environment version is rejected.
         Dockerfile 'FROM' pinning is out of scope (covered by OpenSSF Scorecard). An
         intentional non-pin opts out with a '# pinning-ignore' comment on the image line or a
         dedicated comment line directly above it.
@@ -953,6 +954,21 @@ function Get-DockerImageViolations {
         $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
         $exempt = $hasIgnore -or $prevWasIgnoreComment
         $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
+
+        if ($line -match '^\s*environment:\s*(azureml:[^:\s]+:latest)\s*(?:#.*)?$') {
+            if ($exempt) { continue }
+            $v = [DependencyViolation]::new()
+            $v.File = $relativePath
+            $v.Line = $i + 1
+            $v.Type = $type
+            $v.Name = $Matches[1]
+            $v.Version = 'latest'
+            $v.Severity = 'warning'
+            $v.Description = 'Mutable AzureML environment version (:latest)'
+            $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
+            $violations += $v
+            continue
+        }
 
         # Match an image-bearing field (optionally a YAML list item), capturing key and value.
         # 'image:' is the canonical field; Helm values also express OCI references under

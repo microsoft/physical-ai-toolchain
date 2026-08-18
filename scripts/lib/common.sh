@@ -19,12 +19,9 @@ unset _common_sh_dir _env_local
 # pulls; the tag is retained for readability. Refresh digests with
 # scripts/update-image-digests.sh.
 #
-# derive_azureml_environment_version_from_image() below derives each image's AzureML
-# environment version. That derived version is duplicated as the direct-submit
-# fallback pin in training/il/workflows/azureml/lerobot-train.yaml,
-# training/rl/workflows/azureml/train.yaml, evaluation/sil/workflows/azureml/lerobot-eval.yaml,
-# and evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml. update-image-digests.sh does
-# not rewrite those fallback pins; update them by hand whenever an image below changes.
+# derive_azureml_environment_version_from_image() below derives AzureML environment
+# versions from the checked-in Isaac Lab and LeRobot defaults. update-image-digests.sh
+# keeps the direct-submit workflow pins synchronized with those defaults.
 DEFAULT_ISAAC_LAB_IMAGE="${DEFAULT_ISAAC_LAB_IMAGE:-nvcr.io/nvidia/isaac-lab:2.3.2@sha256:388dbc806f48359a964cb9f807feb226da95d0a107f470fdcad9780ea10fe6f2}"
 DEFAULT_LEROBOT_TRAIN_IMAGE="${DEFAULT_LEROBOT_TRAIN_IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be}"
 DEFAULT_LEROBOT_EVAL_IMAGE="${DEFAULT_LEROBOT_EVAL_IMAGE:-pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime@sha256:0a3b9fedefe1f61ac4d5a9de9015c0863db27ca0fde2d4e37e6268147980b726}"

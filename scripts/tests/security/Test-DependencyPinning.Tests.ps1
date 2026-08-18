@@ -712,8 +712,17 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
             $result | Should -BeNullOrEmpty
         }
 
-        It 'Does not inspect environment: fields (AzureML :latest is left untouched)' {
+        It 'Flags mutable AzureML environment versions' {
             $content = '  environment: azureml:lerobot-training-env:latest'
+            $tmp = Join-Path $TestDrive 'env.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'env.yaml' })
+            $result.Count | Should -Be 1
+            $result[0].Description | Should -Be 'Mutable AzureML environment version (:latest)'
+        }
+
+        It 'Accepts explicitly versioned AzureML environment assets' {
+            $content = '  environment: azureml:lerobot-training-env:2.4.1-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
             $tmp = Join-Path $TestDrive 'env.yaml'
             Set-Content -Path $tmp -Value $content
             $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'env.yaml' })
