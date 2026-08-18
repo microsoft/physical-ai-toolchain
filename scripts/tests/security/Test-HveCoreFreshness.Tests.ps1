@@ -66,6 +66,32 @@ Describe 'Select-LatestRelease' -Tag 'Unit' {
     }
 }
 
+Describe 'Get-HveCoreFileSource' -Tag 'Unit' {
+    It 'Extracts the source path and normalizes the commit SHA' {
+        $path = Join-Path $TestDrive 'derived.ps1'
+        @'
+Adapted from microsoft/hve-core scripts/security/Test-DangerousWorkflow.ps1
+as of commit ABCDEF1234567890ABCDEF1234567890ABCDEF12.
+'@ | Set-Content -Path $path -Encoding utf8
+
+        $source = Get-HveCoreFileSource -Path $path
+
+        $source.Path | Should -Be 'scripts/security/Test-DangerousWorkflow.ps1'
+        $source.Sha | Should -Be 'abcdef1234567890abcdef1234567890abcdef12'
+    }
+
+    It 'Throws when the source header is missing' {
+        $path = Join-Path $TestDrive 'missing-header.ps1'
+        '# no provenance header' | Set-Content -Path $path -Encoding utf8
+
+        { Get-HveCoreFileSource -Path $path } | Should -Throw '*Could not extract*'
+    }
+
+    It 'Throws when the file does not exist' {
+        { Get-HveCoreFileSource -Path (Join-Path $TestDrive 'missing.ps1') } | Should -Throw '*not found locally*'
+    }
+}
+
 Describe 'Get-DriftState' -Tag 'Unit' {
     It 'Returns current when pinned and latest upstream SHAs match' {
         Get-DriftState -PinnedUpstreamSha 'abc123' -LatestUpstreamSha 'abc123' | Should -Be 'current'
@@ -124,6 +150,9 @@ Describe 'Get-HveCoreFileDrift' -Tag 'Unit' {
         $r.Drift | Should -BeTrue
         $r.PinnedUpstreamSha | Should -Be 'aaaaaaa'
         $r.LatestUpstreamSha | Should -Be 'bbbbbbb'
+        $r.PinnedRef | Should -Be 'PIN'
+        $r.LatestRef | Should -Be 'LATEST'
+        $r.ComparisonUrl | Should -Be 'https://github.com/o/r/compare/PIN...LATEST'
     }
 
     It 'Reports current when the upstream blob is unchanged' {
@@ -139,6 +168,96 @@ Describe 'Get-HveCoreFileDrift' -Tag 'Unit' {
             else { $global:LASTEXITCODE = 0; 'aaaaaaa' }
         }
         (Get-HveCoreFileDrift -Repo 'o/r' -Path 'p' -PinnedRef 'PIN' -LatestRef 'LATEST').State | Should -Be 'missing-upstream'
+    }
+
+    It 'Throws when the file is absent at the baseline ref' {
+        Mock gh {
+            if ("$args" -match 'ref=PIN') { $global:LASTEXITCODE = 1; 'gh: Not Found (HTTP 404)' }
+            else { $global:LASTEXITCODE = 0; 'bbbbbbb' }
+        }
+
+        { Get-HveCoreFileDrift -Repo 'o/r' -Path 'p' -PinnedRef 'PIN' -LatestRef 'LATEST' } |
+            Should -Throw '*Baseline file not found upstream*'
+    }
+}
+
+Describe 'Assert-HveCoreCommitOnMain' -Tag 'Unit' {
+    It 'Accepts a commit whose merge base with main is itself' {
+        Mock gh { $global:LASTEXITCODE = 0; 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
+
+        {
+            Assert-HveCoreCommitOnMain -Repo 'o/r' `
+                -CommitSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' `
+                -MainSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        } | Should -Not -Throw
+    }
+
+    It 'Throws when the recorded commit is not an ancestor of main' {
+        Mock gh { $global:LASTEXITCODE = 0; 'cccccccccccccccccccccccccccccccccccccccc' }
+
+        {
+            Assert-HveCoreCommitOnMain -Repo 'o/r' `
+                -CommitSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' `
+                -MainSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        } | Should -Throw '*not an ancestor*'
+    }
+}
+
+Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
+    It 'Uses the source-header SHA and resolved main SHA' {
+        $path = 'scripts/security/Test-DangerousWorkflow.ps1'
+        $sourceSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        $mainSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        $file = [pscustomobject]@{ Path = $path; Baseline = 'source-header' }
+        Mock Get-HveCoreFileSource { [pscustomobject]@{ Path = $path; Sha = $sourceSha } }
+        Mock Assert-HveCoreCommitOnMain {}
+        Mock Get-HveCoreFileDrift { [pscustomobject]@{ State = 'current'; Drift = $false } }
+
+        $null = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha $mainSha
+
+        Should -Invoke Assert-HveCoreCommitOnMain -Times 1 -ParameterFilter {
+            $CommitSha -eq $sourceSha -and $MainSha -eq $mainSha
+        }
+        Should -Invoke Get-HveCoreFileDrift -Times 1 -ParameterFilter {
+            $Path -eq $path -and $PinnedRef -eq $sourceSha -and $LatestRef -eq $mainSha
+        }
+    }
+
+    It 'Uses the release pin and latest release tag' {
+        $path = 'scripts/security/Modules/SecurityHelpers.psm1'
+        $file = [pscustomobject]@{ Path = $path; Baseline = 'release' }
+        Mock Get-HveCoreFileDrift { [pscustomobject]@{ State = 'current'; Drift = $false } }
+
+        $null = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
+
+        Should -Invoke Get-HveCoreFileDrift -Times 1 -ParameterFilter {
+            $Path -eq $path -and $PinnedRef -eq 'pin' -and $LatestRef -eq 'tag'
+        }
+    }
+
+    It 'Throws when the recorded upstream path differs from the local path' {
+        $file = [pscustomobject]@{
+            Path = 'scripts/security/Test-DangerousWorkflow.ps1'
+            Baseline = 'source-header'
+        }
+        Mock Get-HveCoreFileSource {
+            [pscustomobject]@{
+                Path = 'scripts/security/Other.ps1'
+                Sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            }
+        }
+
+        {
+            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
+        } | Should -Throw '*must match its recorded*'
+    }
+
+    It 'Throws on an unsupported baseline' {
+        $file = [pscustomobject]@{ Path = 'scripts/security/Test-DangerousWorkflow.ps1'; Baseline = 'bogus' }
+
+        {
+            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
+        } | Should -Throw '*Unsupported hve-core baseline*'
     }
 }
 
@@ -156,6 +275,9 @@ Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
                     Path = 'scripts/x.psm1'
                     PinnedUpstreamSha = '1111111'
                     LatestUpstreamSha = '2222222'
+                    PinnedRef = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                    LatestRef = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+                    ComparisonUrl = 'https://github.com/microsoft/hve-core/compare/a...b'
                     Drift = $true
                     State = 'drift'
                 }
@@ -167,6 +289,7 @@ Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
         $body | Should -Match 'hve-core-v9'
         $body | Should -Match 'scripts/x\.psm1'
         $body | Should -Match 'compare/hve-core-v1\.\.\.hve-core-v9'
+        $body | Should -Match '\[aaaaaaa → bbbbbbb\]\(https://github\.com/microsoft/hve-core/compare/a\.\.\.b\)'
         $body | Should -Not -Match '[Pp]ersona'
     }
 
@@ -184,6 +307,9 @@ Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
                     Path = 'scripts/x.psm1'
                     PinnedUpstreamSha = '1111111'
                     LatestUpstreamSha = '2222222'
+                    PinnedRef = 'hve-core-v1'
+                    LatestRef = 'main'
+                    ComparisonUrl = 'https://github.com/microsoft/hve-core/compare/hve-core-v1...main'
                     Drift = $true
                     State = 'drift'
                 }
@@ -201,6 +327,7 @@ Describe 'Format-HveCoreJobSummary' -Tag 'Unit' {
         $r = [pscustomobject]@{
             LatestTag = 'hve-core-v9'
             LatestUrl = 'http://u'
+            LatestMainSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
             Pin = [pscustomobject]@{
                 PinnedTag = 'hve-core-v1'
                 File = '.github/workflows/copilot-setup-steps.yml'
@@ -210,6 +337,9 @@ Describe 'Format-HveCoreJobSummary' -Tag 'Unit' {
                     Path = 'scripts/x.psm1'
                     PinnedUpstreamSha = '1111111'
                     LatestUpstreamSha = '2222222'
+                    PinnedRef = 'hve-core-v1'
+                    LatestRef = 'main'
+                    ComparisonUrl = 'https://github.com/microsoft/hve-core/compare/hve-core-v1...main'
                     Drift = $true
                     State = 'drift'
                 }
@@ -220,7 +350,9 @@ Describe 'Format-HveCoreJobSummary' -Tag 'Unit' {
         $summary | Should -Match 'hve-core-v9'
         $summary | Should -Match 'scripts/x\.psm1'
         $summary | Should -Match '⚠️ Upstream advanced'
-        $summary | Should -Match '\| Pinned blob \| Latest blob \|'
+        $summary | Should -Match '\| Derived File \| Upstream comparison \| Pinned blob \| Latest blob \| Status \|'
         $summary | Should -Match '\| 1111111 \| 2222222 \|'
+        $summary | Should -Match '\[hve-core-v1 → main\]\(https://github\.com/microsoft/hve-core/compare/hve-core-v1\.\.\.main\)'
+        $summary | Should -Match 'Source-header target: b{40}'
     }
 }
