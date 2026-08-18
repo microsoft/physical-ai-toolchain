@@ -33,6 +33,26 @@ BeforeDiscovery {
 
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+    $updateScript = Get-Content (Join-Path $script:RepoRoot 'scripts/update-image-digests.sh')
+    $inPinSpecs = $false
+    $script:PinCases = @(
+        foreach ($line in $updateScript) {
+            if ($line.Trim() -eq 'azureml_pin_specs=(') {
+                $inPinSpecs = $true
+                continue
+            }
+            if ($inPinSpecs -and $line.Trim() -eq ')') {
+                break
+            }
+            if ($inPinSpecs -and $line -match "^\s*'(?<Variable>[^|]+)\|(?<Environment>[^|]+)\|(?<Path>[^']+)'\s*$") {
+                @{
+                    Variable    = $Matches['Variable']
+                    Environment = $Matches['Environment']
+                    Path        = $Matches['Path']
+                }
+            }
+        }
+    )
 
     function Get-CheckedInImageDefault {
         param([string]$Variable)
@@ -55,9 +75,66 @@ BeforeAll {
         $LASTEXITCODE | Should -Be 0
         return $version
     }
+
+    function New-UpdateScriptSandbox {
+        $sandbox = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        & git clone --quiet --shared $script:RepoRoot $sandbox
+        $LASTEXITCODE | Should -Be 0
+        Copy-Item (Join-Path $script:RepoRoot 'scripts/update-image-digests.sh') `
+            (Join-Path $sandbox 'scripts/update-image-digests.sh') -Force
+        return $sandbox
+    }
+
+    function New-FakeCurl {
+        $fakeBin = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $fakeBin | Out-Null
+        $fakeCurl = Join-Path $fakeBin 'curl'
+        @'
+#!/usr/bin/env bash
+if [[ "$*" == *"auth.docker.io"* || "$*" == *"proxy_auth"* ]]; then
+  printf '{"token":"test"}\n'
+else
+  printf 'Docker-Content-Digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n'
+fi
+'@ | Set-Content -Path $fakeCurl
+        & chmod +x $fakeCurl
+        return $fakeBin
+    }
+
+    function Invoke-UpdateScript {
+        param(
+            [string]$Sandbox,
+            [string]$FakeBin,
+            [string[]]$Arguments
+        )
+
+        $originalPath = $env:PATH
+        try {
+            $env:PATH = "$FakeBin$([IO.Path]::PathSeparator)$originalPath"
+            Push-Location $Sandbox
+            $output = & bash 'scripts/update-image-digests.sh' @Arguments 2>&1
+            return @{
+                ExitCode = $LASTEXITCODE
+                Output   = $output -join "`n"
+            }
+        }
+        finally {
+            Pop-Location
+            $env:PATH = $originalPath
+        }
+    }
 }
 
 Describe 'AzureML environment pins' -Tag 'Unit' {
+    It 'discovers every AzureML workflow pin' {
+        $workflowPaths = @(
+            & git -C $script:RepoRoot grep -l '^environment: azureml:' -- ':(glob)**/workflows/azureml/*.yaml'
+        )
+        $LASTEXITCODE | Should -Be 0
+
+        @($script:PinCases.Path | Sort-Object) | Should -Be @($workflowPaths | Sort-Object)
+    }
+
     It 'matches <Variable> in <Path>' -ForEach $pinCases {
         $image = Get-CheckedInImageDefault -Variable $Variable
         $expected = "environment: azureml:${Environment}:$(Get-DerivedEnvironmentVersion -Image $image)"
@@ -75,40 +152,79 @@ Describe 'AzureML environment pins' -Tag 'Unit' {
         Get-DerivedEnvironmentVersion -Image $image | Should -Be "1.2.3-sha256-$($digest.ToLowerInvariant())"
     }
 
-    It 'dry-runs synchronized environment updates without modifying workflow files' {
-        $fakeBin = Join-Path $TestDrive 'bin'
-        New-Item -ItemType Directory -Path $fakeBin | Out-Null
-        $fakeCurl = Join-Path $fakeBin 'curl'
-        @'
-#!/usr/bin/env bash
-if [[ "$*" == *"auth.docker.io"* || "$*" == *"proxy_auth"* ]]; then
-  printf '{"token":"test"}\n'
-else
-  printf 'Docker-Content-Digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n'
-fi
-'@ | Set-Content -Path $fakeCurl
-        & chmod +x $fakeCurl
+    It 'uses the image tag when no digest is present' {
+        Get-DerivedEnvironmentVersion -Image 'example.com/repo:1.2.3' | Should -Be '1.2.3'
+    }
 
-        $originals = @{}
-        foreach ($case in $pinCases) {
-            $path = Join-Path $script:RepoRoot $case.Path
-            $originals[$path] = Get-Content -Raw $path
+    It 'rejects images without a tag and malformed digests' -ForEach @(
+        @{ Image = 'example.com/repo' }
+        @{ Image = 'localhost:5000/repo' }
+        @{ Image = 'example.com/repo:1.0@sha256:zzzz' }
+    ) {
+        $commonPath = Join-Path $script:RepoRoot 'scripts/lib/common.sh'
+
+        $output = & bash -c 'source "$1"; derive_azureml_environment_version_from_image "$2"' _ $commonPath $Image 2>&1
+
+        $LASTEXITCODE | Should -Not -Be 0
+        $output | Should -Not -BeNullOrEmpty
+    }
+
+    It 'dry-runs synchronized environment updates without modifying its sandbox' {
+        $sandbox = New-UpdateScriptSandbox
+        $fakeBin = New-FakeCurl
+        $before = & git -C $sandbox status --porcelain
+
+        $result = Invoke-UpdateScript -Sandbox $sandbox -FakeBin $fakeBin -Arguments @('--dry-run')
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Environment References Changed:\s+4'
+        (& git -C $sandbox status --porcelain) | Should -BeExactly $before
+    }
+
+    It 'writes the derived environment version into each workflow and is idempotent' {
+        $sandbox = New-UpdateScriptSandbox
+        $fakeBin = New-FakeCurl
+        $digest = 'a' * 64
+        $expectedFiles = @{}
+
+        foreach ($case in $script:PinCases) {
+            $path = Join-Path $sandbox $case.Path
+            $stale = (Get-Content -Raw $path) -replace '(?m)^environment: azureml:[^\r\n]+$', "environment: azureml:$($case.Environment):stale"
+            Set-Content -Path $path -Value $stale -NoNewline
+
+            $image = Get-CheckedInImageDefault -Variable $case.Variable
+            $ref = $image -replace '@sha256:[0-9a-fA-F]{64}$', ''
+            $expectedVersion = Get-DerivedEnvironmentVersion -Image "${ref}@sha256:${digest}"
+            $expectedFiles[$path] = $stale -replace '(?m)^environment: azureml:[^\r\n]+$',
+                "environment: azureml:$($case.Environment):$expectedVersion"
         }
 
-        $originalPath = $env:PATH
-        try {
-            $env:PATH = "$fakeBin$([IO.Path]::PathSeparator)$originalPath"
-            $output = & bash (Join-Path $script:RepoRoot 'scripts/update-image-digests.sh') --dry-run 2>&1
-            $LASTEXITCODE | Should -Be 0
-        }
-        finally {
-            $env:PATH = $originalPath
+        $result = Invoke-UpdateScript -Sandbox $sandbox -FakeBin $fakeBin -Arguments @()
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Environment References Changed:\s+4'
+        foreach ($path in $expectedFiles.Keys) {
+            Get-Content -Raw $path | Should -BeExactly $expectedFiles[$path]
         }
 
-        $output -join "`n" | Should -Match 'Environment Versions Changed:\s+4'
-        foreach ($case in $pinCases) {
-            $path = Join-Path $script:RepoRoot $case.Path
-            Get-Content -Raw $path | Should -BeExactly $originals[$path]
-        }
+        $secondResult = Invoke-UpdateScript -Sandbox $sandbox -FakeBin $fakeBin -Arguments @()
+        $secondResult.ExitCode | Should -Be 0
+        $secondResult.Output | Should -Match 'Environment References Changed:\s+0'
+        $secondResult.Output | Should -Match 'Files Updated:\s+0'
+    }
+
+    It 'validates every environment target before writing any file' {
+        $sandbox = New-UpdateScriptSandbox
+        $fakeBin = New-FakeCurl
+        $invalidPath = Join-Path $sandbox $script:PinCases[0].Path
+        $invalid = (Get-Content -Raw $invalidPath) -replace '(?m)^environment:', '  environment:'
+        Set-Content -Path $invalidPath -Value $invalid -NoNewline
+        $before = & git -C $sandbox diff --no-ext-diff
+
+        $result = Invoke-UpdateScript -Sandbox $sandbox -FakeBin $fakeBin -Arguments @()
+
+        $result.ExitCode | Should -Not -Be 0
+        $result.Output | Should -Match 'Could not find unindented AzureML environment pin'
+        (& git -C $sandbox diff --no-ext-diff) | Should -BeExactly $before
     }
 }

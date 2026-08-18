@@ -661,13 +661,12 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
             $script:DockerResult = @(Get-DockerImageViolations -FileInfo @{ Path = $testFile; Type = 'docker'; RelativePath = 'docker-image-unpinned-workflow.yaml' })
         }
 
-        It 'Flags every unpinned image and disallowed environment reference' {
-            $script:DockerResult.Count | Should -Be 4
+        It 'Flags every unpinned image reference' {
+            $script:DockerResult.Count | Should -Be 3
         }
 
-        It 'Flags the expected repositories and environment assets' {
+        It 'Flags the expected repositories' {
             ($script:DockerResult.Name | Sort-Object) | Should -Be @(
-                'azureml:isaaclab-training-env',
                 'nvcr.io/nvidia/isaac-lab',
                 'python',
                 'pytorch/pytorch'
@@ -717,17 +716,39 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
             $result | Should -BeNullOrEmpty
         }
 
-        It 'Flags the ambiguous explicit AzureML environment version latest' {
+        It 'Leaves AzureML environment references to their dedicated validator' {
             $content = '  environment: azureml:lerobot-training-env:latest'
             $tmp = Join-Path $TestDrive 'env.yaml'
             Set-Content -Path $tmp -Value $content
             $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'env.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Ignores a YAML comment that mentions image:' {
+            $content = '  # image: example.com/repo:tag is just prose'
+            $tmp = Join-Path $TestDrive 'comment.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'comment.yaml' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Describe 'Get-AzureMLEnvironmentViolations' -Tag 'Unit' {
+        It 'Flags the ambiguous explicit AzureML environment version latest' {
+            $content = '  environment: azureml:lerobot-training-env:latest'
+            $tmp = Join-Path $TestDrive 'env.yaml'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'env.yaml'
+                })
+
             $result.Count | Should -Be 1
             $result[0].Name | Should -Be 'azureml:lerobot-training-env'
             $result[0].Version | Should -Be 'latest'
             $result[0].Severity | Should -Be 'warning'
+            $result[0].Type | Should -Be 'azureml-environments'
             $result[0].Line | Should -Be 1
-            $result[0].Description | Should -Be 'Disallowed AzureML environment reference'
+            $result[0].Description | Should -Be 'Unpinned AzureML environment (use an explicit version, not a label or :latest)'
         }
 
         It 'Flags quoted, label-based, list-item, URI-label, and unversioned AzureML references' {
@@ -741,7 +762,9 @@ environment: azureml:unversioned-env
 '@
             $tmp = Join-Path $TestDrive 'mutable-env-forms.yaml'
             Set-Content -Path $tmp -Value $content
-            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'mutable-env-forms.yaml' })
+            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'mutable-env-forms.yaml'
+                })
 
             $result.Count | Should -Be 6
             $result.Name | Should -Contain 'azureml:quoted-env'
@@ -757,7 +780,9 @@ environment: azureml:unversioned-env
                 "environment: azureml:ignored-env:latest  # pinning-ignore"
             $tmp = Join-Path $TestDrive 'commented-env.yaml'
             Set-Content -Path $tmp -Value $content
-            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'commented-env.yaml' })
+            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'commented-env.yaml'
+                })
 
             $result.Count | Should -Be 1
             $result[0].Name | Should -Be 'azureml:commented-env'
@@ -766,17 +791,21 @@ environment: azureml:unversioned-env
         It 'Accepts explicitly versioned AzureML environment assets' {
             $content = "  environment: azureml:lerobot-training-env:2.4.1-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`n" +
                 '  environment: azureml://registries/example/environments/lerobot-training-env/versions/42'
-            $tmp = Join-Path $TestDrive 'env.yaml'
+            $tmp = Join-Path $TestDrive 'versioned-env.yaml'
             Set-Content -Path $tmp -Value $content
-            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'env.yaml' })
+            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'versioned-env.yaml'
+                })
             $result | Should -BeNullOrEmpty
         }
 
-        It 'Ignores a YAML comment that mentions image:' {
-            $content = '  # image: example.com/repo:tag is just prose'
-            $tmp = Join-Path $TestDrive 'comment.yaml'
+        It 'Ignores non-AzureML environment values' {
+            $content = "environment: production`n- environment: staging`nenvironment: `${{ inputs.env }}"
+            $tmp = Join-Path $TestDrive 'non-azureml-env.yaml'
             Set-Content -Path $tmp -Value $content
-            $result = @(Get-DockerImageViolations -FileInfo @{ Path = $tmp; Type = 'docker'; RelativePath = 'comment.yaml' })
+            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'non-azureml-env.yaml'
+                })
             $result | Should -BeNullOrEmpty
         }
     }

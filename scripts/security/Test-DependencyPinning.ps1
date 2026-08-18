@@ -203,6 +203,12 @@ $DependencyPatterns = @{
         Description    = 'Container image references in workflow YAML, Kubernetes manifests, and Helm values must be digest-pinned (@sha256)'
     }
 
+    'azureml-environments' = @{
+        FilePatterns   = @('**/workflows/**/*.yaml', '**/workflows/**/*.yml')
+        ValidationFunc = 'Get-AzureMLEnvironmentViolations'
+        Description    = 'AzureML environment asset references in workflow YAML must use explicit immutable versions'
+    }
+
     'workflow-npm-commands' = @{
         FilePatterns   = @('**/.github/workflows/*.yml', '**/.github/workflows/*.yaml',
             '**/.github/actions/**/*.yml', '**/.github/actions/**/*.yaml')
@@ -907,6 +913,85 @@ function Get-PowerShellModuleViolations {
     return $violations
 }
 
+function Get-AzureMLEnvironmentViolations {
+    <#
+    .SYNOPSIS
+        Detects mutable AzureML environment asset references in workflow YAML.
+    .DESCRIPTION
+        AzureML environment labels and unversioned references are mutable. Explicit versions
+        are immutable, except that repository policy rejects the ambiguous version name
+        'latest'. An intentional mutable reference opts out with a '# pinning-ignore' comment
+        on the environment line or a dedicated comment line directly above it.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    $lines = @(Get-Content -Path $filePath)
+    $prevWasIgnoreComment = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
+        $exempt = $hasIgnore -or $prevWasIgnoreComment
+        $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
+
+        if ($line -notmatch '^\s*(?:-\s*)?environment:\s*(.+?)\s*$') { continue }
+        $environmentRef = ($Matches[1] -replace '\s+#.*$', '').Trim().Trim('"', "'").Trim()
+        if ($environmentRef -notmatch '^azureml:' -or $exempt) { continue }
+
+        $name = $environmentRef
+        $version = '(none)'
+        $hasExplicitVersion = $false
+
+        if ($environmentRef -match '^azureml:(?<Name>[^:@\s]+):(?<Version>[^:@\s]+)$') {
+            $name = "azureml:$($Matches['Name'])"
+            $version = $Matches['Version']
+            $hasExplicitVersion = $true
+        }
+        elseif ($environmentRef -match '^azureml:.*/environments/[^/]+/versions/(?<Version>[^/\s]+)$') {
+            $name = $environmentRef -replace '/versions/[^/]+$', ''
+            $version = $Matches['Version']
+            $hasExplicitVersion = $true
+        }
+        elseif ($environmentRef -match '^azureml:(?<Name>[^:@\s]+)@(?<Version>[^:@\s]+)$') {
+            $name = "azureml:$($Matches['Name'])"
+            $version = $Matches['Version']
+        }
+        elseif ($environmentRef -match '^azureml:.*/environments/[^/]+/labels/(?<Version>[^/\s]+)$') {
+            $name = $environmentRef -replace '/labels/[^/]+$', ''
+            $version = $Matches['Version']
+        }
+
+        if ($hasExplicitVersion -and $version -ne 'latest') { continue }
+
+        $v = [DependencyViolation]::new()
+        $v.File = $relativePath
+        $v.Line = $i + 1
+        $v.Type = $type
+        $v.Name = $name
+        $v.Version = $version
+        $v.Severity = 'warning'
+        $v.Description = 'Unpinned AzureML environment (use an explicit version, not a label or :latest)'
+        $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
+        $violations += $v
+    }
+
+    return $violations
+}
+
 function Get-DockerImageViolations {
     <#
     .SYNOPSIS
@@ -921,10 +1006,8 @@ function Get-DockerImageViolations {
         digest. A value under 'init:'/'client:' is treated as an image only when it carries a
         registry/namespace path, so plain configuration scalars are left untouched.
         Submission-time templated ('{{ ... }}') and shell-variable ('$VAR' / '${VAR}')
-        references are injected at submit time and skipped. AzureML asset references
-        ('azureml:<name>:<version>') are versioned assets rather than OCI images. Labels
-        and unversioned references are mutable; the ambiguous explicit version ':latest'
-        is also rejected by repository policy.
+        references are injected at submit time and skipped. AzureML asset references are
+        versioned assets rather than OCI images and are validated separately.
         Dockerfile 'FROM' pinning is out of scope (covered by OpenSSF Scorecard). An
         intentional non-pin opts out with a '# pinning-ignore' comment on the image line or a
         dedicated comment line directly above it.
@@ -955,50 +1038,6 @@ function Get-DockerImageViolations {
         $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
         $exempt = $hasIgnore -or $prevWasIgnoreComment
         $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
-
-        if ($line -match '^\s*(?:-\s*)?environment:\s*(.+?)\s*$') {
-            $environmentRef = ($Matches[1] -replace '\s+#.*$', '').Trim().Trim('"', "'").Trim()
-            if ($environmentRef -match '^azureml:') {
-                if ($exempt) { continue }
-
-                $name = $environmentRef
-                $version = '(none)'
-                $hasExplicitVersion = $false
-
-                if ($environmentRef -match '^azureml:(?<Name>[^:@\s]+):(?<Version>[^:@\s]+)$') {
-                    $name = "azureml:$($Matches['Name'])"
-                    $version = $Matches['Version']
-                    $hasExplicitVersion = $true
-                }
-                elseif ($environmentRef -match '^azureml:.*/environments/(?<Name>[^/]+)/versions/(?<Version>[^/\s]+)$') {
-                    $name = $environmentRef -replace '/versions/[^/]+$', ''
-                    $version = $Matches['Version']
-                    $hasExplicitVersion = $true
-                }
-                elseif ($environmentRef -match '^azureml:(?<Name>[^:@\s]+)@(?<Version>[^:@\s]+)$') {
-                    $name = "azureml:$($Matches['Name'])"
-                    $version = $Matches['Version']
-                }
-                elseif ($environmentRef -match '^azureml:.*/environments/(?<Name>[^/]+)/labels/(?<Version>[^/\s]+)$') {
-                    $name = $environmentRef -replace '/labels/[^/]+$', ''
-                    $version = $Matches['Version']
-                }
-
-                if ($hasExplicitVersion -and $version -ne 'latest') { continue }
-
-                $v = [DependencyViolation]::new()
-                $v.File = $relativePath
-                $v.Line = $i + 1
-                $v.Type = $type
-                $v.Name = $name
-                $v.Version = $version
-                $v.Severity = 'warning'
-                $v.Description = 'Disallowed AzureML environment reference'
-                $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
-                $violations += $v
-                continue
-            }
-        }
 
         # Match an image-bearing field (optionally a YAML list item), capturing key and value.
         # 'image:' is the canonical field; Helm values also express OCI references under

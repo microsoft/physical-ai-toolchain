@@ -131,13 +131,12 @@ read_checked_in_image_default() {
 }
 
 apply_file_update() {
-  local file="$1" candidate="$2" update_type="${3:-digest}"
+  local file="$1" candidate="$2"
   if cmp -s "$file" "$candidate"; then
     return
   fi
 
   updated=$((updated + 1))
-  [[ "$update_type" == "azureml" ]] && azureml_updated=$((azureml_updated + 1))
   if [[ "$dry_run" == "true" ]]; then
     info "[dry-run] Would update $file"
     diff -u "$file" "$candidate" || true
@@ -199,7 +198,7 @@ while IFS='|' read -r variable environment_name file; do
   version=$(derive_azureml_environment_version_from_image "${ref}@${digest}")
   replacement="environment: azureml:${environment_name}:${version}"
   grep -qE "^environment: azureml:${environment_name}:[A-Za-z0-9._-]+$" "$file" \
-    || fatal "Could not find AzureML environment pin in $file"
+    || fatal "Could not find unindented AzureML environment pin in $file"
   printf '%s\t%s\t%s\n' "$environment_name" "$file" "$replacement" >> "$azureml_update_map"
 done < <(printf '%s\n' "${azureml_pin_specs[@]}")
 
@@ -222,27 +221,26 @@ while IFS= read -r file; do
     mv "$tmp_new" "$tmp"
   done < "$digest_map"
 
-  apply_file_update "$file" "$tmp"
-done <<< "$files"
+  while IFS=$'\t' read -r environment_name environment_file replacement; do
+    [[ "$environment_file" == "$file" ]] || continue
+    sed -E "s#^environment: azureml:${environment_name}:[A-Za-z0-9._-]+\$#${replacement}#" "$tmp" > "$tmp_new"
+    if ! cmp -s "$tmp" "$tmp_new"; then
+      azureml_updated=$((azureml_updated + 1))
+    fi
+    mv "$tmp_new" "$tmp"
+  done < "$azureml_update_map"
 
-# Synchronize AzureML environment versions with the newly resolved image digests.
-while IFS=$'\t' read -r environment_name file replacement; do
-  sed -E "s#^environment: azureml:${environment_name}:[A-Za-z0-9._-]+\$#${replacement}#" "$file" > "$tmp"
-  apply_file_update "$file" "$tmp" azureml
-done < "$azureml_update_map"
+  apply_file_update "$file" "$tmp"
+done <<< "$files_in_scope"
 
 #------------------------------------------------------------------------------
 # Summary
 #------------------------------------------------------------------------------
 section "Summary"
 print_kv "Images Checked" "$ref_count"
-if [[ "$dry_run" == "true" ]]; then
-  print_kv "Files That Would Update" "$updated"
-else
-  print_kv "Files Updated" "$updated"
-fi
-print_kv "Environment Versions Changed" "$azureml_updated"
-print_kv "Dry Run"        "$dry_run"
+print_kv "Files Updated" "$updated"
+print_kv "Environment References Changed" "$azureml_updated"
+print_kv "Dry Run" "$dry_run"
 if [[ "$azureml_updated" -gt 0 ]]; then
   warn "Register changed AzureML environment versions before direct template submission"
 fi
