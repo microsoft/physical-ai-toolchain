@@ -71,7 +71,7 @@ Security scanning and dependency management scripts.
 | `security/Test-DependencyPinning.ps1` | Validate dependency pinning compliance                                                        |
 | `security/Test-SHAStaleness.ps1`      | Check for outdated SHA pins                                                                   |
 | `security/Test-BinaryFreshness.ps1`   | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab    |
-| `security/Test-HveCoreFreshness.ps1`  | Check hve-core-derived files against their reviewed release or source-header baselines         |
+| `security/Test-HveCoreFreshness.ps1`  | Check hve-core-derived files against their reviewed release or source-header baselines        |
 | `security/zap-to-sarif.py`            | Convert ZAP results to SARIF format                                                           |
 | `update-chart-hashes.sh`              | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
 

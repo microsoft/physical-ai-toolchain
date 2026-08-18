@@ -338,6 +338,10 @@ The `Physical-AI RPI` umbrella (`.github/agents/physical-ai-rpi.agent.md`) and i
 
 See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the full umbrella/worker rationale.
 
+### hve-core Derived Files
+
+Files tracked with a source-header baseline must contain `Adapted from microsoft/hve-core <upstream-path> as of commit <40-hex SHA>`. Keep the upstream path equal to the local vendored path and update the SHA after reviewing and porting upstream changes. `scripts/security/Test-HveCoreFreshness.ps1` compares these entries with a resolved upstream `main` commit; release-baseline modules use the RPI `UPSTREAM_REF` and latest non-draft release.
+
 ## Git Workflow
 
 Full specification in `.github/instructions/commit-message.instructions.md`.

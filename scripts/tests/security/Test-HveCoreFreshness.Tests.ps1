@@ -6,6 +6,7 @@
 BeforeAll {
     . $PSScriptRoot/../../security/Test-HveCoreFreshness.ps1
 
+    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:SetupPath = Join-Path $TestDrive 'copilot-setup-steps.yml'
     @'
       - name: Bootstrap hve-core RPI persona
@@ -14,6 +15,26 @@ BeforeAll {
           UPSTREAM_REF: e69486a5f809ede45c63c0a31358c12912bd5168
         run: echo bootstrap
 '@ | Set-Content -Path $script:SetupPath -Encoding utf8
+}
+
+Describe 'DerivedFiles configuration' -Tag 'Unit' {
+    It 'Tracks both security linters with source-header baselines' {
+        $sourceFiles = @($script:DerivedFiles | Where-Object { $_.Baseline -eq 'source-header' })
+
+        $sourceFiles.Count | Should -Be 2
+        $sourceFiles.Path | Should -Contain 'scripts/security/Test-WorkflowPermissions.ps1'
+        $sourceFiles.Path | Should -Contain 'scripts/security/Test-DangerousWorkflow.ps1'
+    }
+
+    It 'Parses the provenance header of every source-header entry' {
+        $sourceFiles = @($script:DerivedFiles | Where-Object { $_.Baseline -eq 'source-header' })
+
+        foreach ($file in $sourceFiles) {
+            $source = Get-HveCoreFileSource -Path (Join-Path $script:RepoRoot $file.Path)
+            $source.Path | Should -Be $file.Path
+            $source.Sha | Should -Match '^[0-9a-f]{40}$'
+        }
+    }
 }
 
 Describe 'Get-PinnedHveCoreRef' -Tag 'Unit' {
@@ -80,6 +101,26 @@ as of commit ABCDEF1234567890ABCDEF1234567890ABCDEF12.
         $source.Sha | Should -Be 'abcdef1234567890abcdef1234567890abcdef12'
     }
 
+    It 'Accepts a source path outside scripts/security' {
+        $path = Join-Path $TestDrive 'derived.psm1'
+        @'
+Adapted from microsoft/hve-core scripts/linting/Modules/Example.psm1
+as of commit ABCDEF1234567890ABCDEF1234567890ABCDEF12.
+'@ | Set-Content -Path $path -Encoding utf8
+
+        (Get-HveCoreFileSource -Path $path).Path | Should -Be 'scripts/linting/Modules/Example.psm1'
+    }
+
+    It 'Throws when multiple source headers are present' {
+        $path = Join-Path $TestDrive 'duplicate-header.ps1'
+        @'
+Adapted from microsoft/hve-core scripts/security/First.ps1 as of commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.
+Adapted from microsoft/hve-core scripts/security/Second.ps1 as of commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.
+'@ | Set-Content -Path $path -Encoding utf8
+
+        { Get-HveCoreFileSource -Path $path } | Should -Throw '*multiple*'
+    }
+
     It 'Throws when the source header is missing' {
         $path = Join-Path $TestDrive 'missing-header.ps1'
         '# no provenance header' | Set-Content -Path $path -Encoding utf8
@@ -107,6 +148,10 @@ Describe 'Get-DriftState' -Tag 'Unit' {
 
     It 'Returns missing-upstream when the latest upstream SHA is empty' {
         Get-DriftState -PinnedUpstreamSha 'abc123' -LatestUpstreamSha '' | Should -Be 'missing-upstream'
+    }
+
+    It 'Returns missing-baseline when the pinned upstream SHA is empty' {
+        Get-DriftState -PinnedUpstreamSha '' -LatestUpstreamSha 'abc123' | Should -Be 'missing-baseline'
     }
 }
 
@@ -170,14 +215,24 @@ Describe 'Get-HveCoreFileDrift' -Tag 'Unit' {
         (Get-HveCoreFileDrift -Repo 'o/r' -Path 'p' -PinnedRef 'PIN' -LatestRef 'LATEST').State | Should -Be 'missing-upstream'
     }
 
-    It 'Throws when the file is absent at the baseline ref' {
+    It 'Reports missing-baseline when the file is absent at the baseline ref' {
         Mock gh {
             if ("$args" -match 'ref=PIN') { $global:LASTEXITCODE = 1; 'gh: Not Found (HTTP 404)' }
             else { $global:LASTEXITCODE = 0; 'bbbbbbb' }
         }
 
-        { Get-HveCoreFileDrift -Repo 'o/r' -Path 'p' -PinnedRef 'PIN' -LatestRef 'LATEST' } |
-            Should -Throw '*Baseline file not found upstream*'
+        $r = Get-HveCoreFileDrift -Repo 'o/r' -Path 'p' -PinnedRef 'PIN' -LatestRef 'LATEST'
+        $r.State | Should -Be 'missing-baseline'
+        $r.Drift | Should -BeTrue
+    }
+
+    It 'URL-encodes refs in comparison links' {
+        Mock gh { $global:LASTEXITCODE = 0; 'samesha' }
+
+        $r = Get-HveCoreFileDrift -Repo 'o/r' -Path 'p' -PinnedRef 'v1](https://evil.example)' -LatestRef 'main'
+
+        $r.ComparisonUrl | Should -Not -Match '\]\('
+        $r.ComparisonUrl | Should -Match 'v1%5D%28https%3A%2F%2Fevil\.example%29'
     }
 }
 
@@ -201,9 +256,33 @@ Describe 'Assert-HveCoreCommitOnMain' -Tag 'Unit' {
                 -MainSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
         } | Should -Throw '*not an ancestor*'
     }
+
+    It 'Throws when the compare API fails' {
+        Mock gh { $global:LASTEXITCODE = 1; 'gh: Not Found (HTTP 404)' }
+
+        {
+            Assert-HveCoreCommitOnMain -Repo 'o/r' `
+                -CommitSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' `
+                -MainSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        } | Should -Throw '*Could not verify source commit*'
+    }
+
+    It 'Throws when the compare API returns no merge base' {
+        Mock gh { $global:LASTEXITCODE = 0; '' }
+
+        {
+            Assert-HveCoreCommitOnMain -Repo 'o/r' `
+                -CommitSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' `
+                -MainSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        } | Should -Throw '*Could not verify source commit*'
+    }
 }
 
 Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
+    BeforeEach {
+        Mock Test-Path { $true }
+    }
+
     It 'Uses the source-header SHA and resolved main SHA' {
         $path = 'scripts/security/Test-DangerousWorkflow.ps1'
         $sourceSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -215,10 +294,10 @@ Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
 
         $null = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha $mainSha
 
-        Should -Invoke Assert-HveCoreCommitOnMain -Times 1 -ParameterFilter {
+        Should -Invoke Assert-HveCoreCommitOnMain -Times 1 -Exactly -ParameterFilter {
             $CommitSha -eq $sourceSha -and $MainSha -eq $mainSha
         }
-        Should -Invoke Get-HveCoreFileDrift -Times 1 -ParameterFilter {
+        Should -Invoke Get-HveCoreFileDrift -Times 1 -Exactly -ParameterFilter {
             $Path -eq $path -and $PinnedRef -eq $sourceSha -and $LatestRef -eq $mainSha
         }
     }
@@ -226,13 +305,17 @@ Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
     It 'Uses the release pin and latest release tag' {
         $path = 'scripts/security/Modules/SecurityHelpers.psm1'
         $file = [pscustomobject]@{ Path = $path; Baseline = 'release' }
+        Mock Get-HveCoreFileSource { throw 'source parser must not run' }
+        Mock Assert-HveCoreCommitOnMain { throw 'ancestry check must not run' }
         Mock Get-HveCoreFileDrift { [pscustomobject]@{ State = 'current'; Drift = $false } }
 
         $null = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
 
-        Should -Invoke Get-HveCoreFileDrift -Times 1 -ParameterFilter {
+        Should -Invoke Get-HveCoreFileDrift -Times 1 -Exactly -ParameterFilter {
             $Path -eq $path -and $PinnedRef -eq 'pin' -and $LatestRef -eq 'tag'
         }
+        Should -Invoke Get-HveCoreFileSource -Times 0 -Exactly
+        Should -Invoke Assert-HveCoreCommitOnMain -Times 0 -Exactly
     }
 
     It 'Throws when the recorded upstream path differs from the local path' {
@@ -259,6 +342,69 @@ Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
             Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
         } | Should -Throw '*Unsupported hve-core baseline*'
     }
+
+    It 'Throws when the derived file is missing locally' {
+        Mock Test-Path { $false }
+        $file = [pscustomobject]@{ Path = 'scripts/security/Missing.ps1'; Baseline = 'release' }
+
+        {
+            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
+        } | Should -Throw '*not found locally*'
+    }
+}
+
+Describe 'Format-HveCoreDriftCells' -Tag 'Unit' {
+    It 'Renders missing-upstream records with short and empty SHAs' {
+        $file = [pscustomobject]@{
+            Baseline = 'source-header'
+            PinnedUpstreamSha = 'abc'
+            LatestUpstreamSha = ''
+            PinnedRef = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+            LatestRef = 'main'
+            State = 'missing-upstream'
+            ComparisonUrl = ''
+        }
+
+        $cells = Format-HveCoreDriftCells -File $file
+
+        $cells.Baseline | Should -Be 'Source header'
+        $cells.PinnedSha | Should -Be 'abc'
+        $cells.LatestSha | Should -BeExactly ''
+        $cells.Comparison | Should -BeExactly ''
+        $cells.Status | Should -Match 'Not found at target ref'
+    }
+
+    It 'Escapes error details for markdown output' {
+        $file = [pscustomobject]@{
+            Baseline = 'release'
+            PinnedUpstreamSha = ''
+            LatestUpstreamSha = ''
+            PinnedRef = ''
+            LatestRef = ''
+            State = 'error'
+            Error = "bad | value`nnext"
+            ComparisonUrl = ''
+        }
+
+        (Format-HveCoreDriftCells -File $file).Status | Should -Be '❌ Check failed — <code>bad &#124; value next</code>'
+    }
+
+    It 'Escapes ref text in comparison links' {
+        $file = [pscustomobject]@{
+            Baseline = 'release'
+            PinnedUpstreamSha = 'abc123'
+            LatestUpstreamSha = 'def456'
+            PinnedRef = 'v1](https://evil.example)'
+            LatestRef = 'main'
+            State = 'drift'
+            ComparisonUrl = 'https://github.com/o/r/compare/v1%5D%28https%3A%2F%2Fevil.example%29...main'
+        }
+
+        $comparison = (Format-HveCoreDriftCells -File $file).Comparison
+
+        $comparison | Should -Not -Match '\]\(https://evil'
+        $comparison | Should -Match 'v1&#93;&#40;https://evil\.example&#41;'
+    }
 }
 
 Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
@@ -273,6 +419,7 @@ Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
             Files = @(
                 [pscustomobject]@{
                     Path = 'scripts/x.psm1'
+                    Baseline = 'release'
                     PinnedUpstreamSha = '1111111'
                     LatestUpstreamSha = '2222222'
                     PinnedRef = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -305,6 +452,7 @@ Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
             Files = @(
                 [pscustomobject]@{
                     Path = 'scripts/x.psm1'
+                    Baseline = 'source-header'
                     PinnedUpstreamSha = '1111111'
                     LatestUpstreamSha = '2222222'
                     PinnedRef = 'hve-core-v1'
@@ -335,6 +483,7 @@ Describe 'Format-HveCoreJobSummary' -Tag 'Unit' {
             Files = @(
                 [pscustomobject]@{
                     Path = 'scripts/x.psm1'
+                    Baseline = 'source-header'
                     PinnedUpstreamSha = '1111111'
                     LatestUpstreamSha = '2222222'
                     PinnedRef = 'hve-core-v1'
@@ -350,9 +499,86 @@ Describe 'Format-HveCoreJobSummary' -Tag 'Unit' {
         $summary | Should -Match 'hve-core-v9'
         $summary | Should -Match 'scripts/x\.psm1'
         $summary | Should -Match '⚠️ Upstream advanced'
-        $summary | Should -Match '\| Derived File \| Upstream comparison \| Pinned blob \| Latest blob \| Status \|'
+        $summary | Should -Match '\| Derived File \| Baseline \| Upstream comparison \| Baseline blob \| Target blob \| Status \|'
+        $summary | Should -Match '\| Source header \|'
         $summary | Should -Match '\| 1111111 \| 2222222 \|'
         $summary | Should -Match '\[hve-core-v1 → main\]\(https://github\.com/microsoft/hve-core/compare/hve-core-v1\.\.\.main\)'
         $summary | Should -Match 'Source-header target: b{40}'
+    }
+}
+
+Describe 'Invoke-HveCoreFreshnessCheck' -Tag 'Unit' {
+    BeforeEach {
+        Mock Get-HveCoreReleases {
+            @([pscustomobject]@{
+                    tag_name = 'hve-core-v9'
+                    draft = $false
+                    created_at = '2026-08-01T00:00:00Z'
+                    html_url = 'https://example.test/release'
+                })
+        }
+        Mock Resolve-HveCoreCommitSha {
+            if ($Ref -eq 'main') { 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }
+            else { 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
+        }
+        Mock Get-PinnedHveCoreRef {
+            [ordered]@{
+                Tag = 'hve-core-v1'
+                Sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            }
+        }
+        Mock Get-HveCoreFileDriftForBaseline {
+            [ordered]@{
+                Path = $File.Path
+                PinnedUpstreamSha = '1111111'
+                LatestUpstreamSha = '1111111'
+                PinnedRef = 'pin'
+                LatestRef = 'target'
+                ComparisonUrl = 'https://example.test/compare'
+                Drift = $false
+                State = 'current'
+            }
+        }
+    }
+
+    It 'Writes the resolved main SHA and all configured files to results JSON' {
+        $resultsFile = Join-Path $TestDrive 'results.json'
+
+        $outcome = Invoke-HveCoreFreshnessCheck -RepoRoot $script:RepoRoot -ResultsFile $resultsFile
+        $result = Get-Content -Path $resultsFile -Raw | ConvertFrom-Json
+
+        $outcome.StaleCount | Should -Be 0
+        $result.LatestMainSha | Should -Be 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        @($result.Files).Count | Should -Be $script:DerivedFiles.Count
+        @($result.Files | Where-Object { $_.Baseline -eq 'source-header' }).Count | Should -Be 2
+    }
+
+    It 'Records a file-level error and continues checking remaining files' {
+        $resultsFile = Join-Path $TestDrive 'results-with-error.json'
+        Mock Get-HveCoreFileDriftForBaseline {
+            if ($File.Path -eq 'scripts/security/Test-DangerousWorkflow.ps1') {
+                throw 'invalid provenance header'
+            }
+            [ordered]@{
+                Path = $File.Path
+                PinnedUpstreamSha = '1111111'
+                LatestUpstreamSha = '1111111'
+                PinnedRef = 'pin'
+                LatestRef = 'target'
+                ComparisonUrl = 'https://example.test/compare'
+                Drift = $false
+                State = 'current'
+            }
+        }
+
+        $outcome = Invoke-HveCoreFreshnessCheck -RepoRoot $script:RepoRoot -ResultsFile $resultsFile
+        $result = Get-Content -Path $resultsFile -Raw | ConvertFrom-Json
+        $failed = $result.Files | Where-Object { $_.Path -eq 'scripts/security/Test-DangerousWorkflow.ps1' }
+
+        $outcome.StaleCount | Should -Be 1
+        @($result.Files).Count | Should -Be $script:DerivedFiles.Count
+        $failed.State | Should -Be 'error'
+        $failed.Error | Should -Be 'invalid provenance header'
+        $failed.Drift | Should -BeTrue
     }
 }
