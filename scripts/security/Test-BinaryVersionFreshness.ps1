@@ -1,0 +1,197 @@
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: MIT
+
+#Requires -Version 7.0
+
+[CmdletBinding()]
+param(
+    [string]$RepositoryRoot = (Split-Path $PSScriptRoot -Parent | Split-Path -Parent),
+    [string]$ResultsPath = 'freshness-results.json',
+    [string]$GitHubOutputPath = $env:GITHUB_OUTPUT
+)
+
+function Get-BinaryVersionSource {
+    [CmdletBinding()]
+    param()
+
+    return @(
+        @{
+            Name = 'uv'
+            Repo = 'astral-sh/uv'
+            Sources = @(
+                @{ File = 'setup-dev.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
+                @{ File = 'setup-dev.ps1'; Pattern = '\$UvVersion = ''([^'']+)''' }
+                @{ File = 'training/rl/scripts/setup_isaac_runtime.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
+                @{ File = 'infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
+                @{ File = 'shared/ci/smoke-import.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
+                @{ File = 'docs/contributing/prerequisites.md'; Pattern = '\| uv\s+\|\s+([0-9][^\s|]+)' }
+            )
+        }
+        @{
+            Name = 'terraform-docs'
+            Repo = 'terraform-docs/terraform-docs'
+            Sources = @(
+                @{ File = 'setup-dev.sh'; Pattern = 'TERRAFORM_DOCS_VERSION="([^"]+)"' }
+                @{ File = 'setup-dev.ps1'; Pattern = '\$TerraformDocsVersion = ''([^'']+)''' }
+                @{ File = '.github/workflows/go-tests.yml'; Pattern = '\$version = ''v?([^'']+)''' }
+                @{
+                    File = '.github/workflows/terraform-docs-check.yml'
+                    Pattern = '(?ms)^\s*terraform-docs-version:\s*.*?^\s*default:\s*''v?([0-9][^'']+)'''
+                }
+                @{
+                    File = 'docs/contributing/infrastructure-style.md'
+                    Pattern = 'terraform-docs\]\([^)]+\) v([0-9][^\s.]*\.[0-9][^\s.]*\.[0-9][^\s.]*)'
+                }
+                @{ File = 'docs/contributing/prerequisites.md'; Pattern = '\| terraform-docs\s+\|\s+([0-9][^\s|]+)' }
+            )
+        }
+        @{
+            Name = 'tflint'
+            Repo = 'terraform-linters/tflint'
+            Sources = @(
+                @{ File = '.devcontainer/devcontainer.json'; Pattern = 'TFLINT_VERSION=v?([0-9][^\s&"]+)' }
+                @{ File = '.github/workflows/terraform-lint.yml'; Pattern = 'tflint_version: v?([0-9][^\s]+)' }
+                @{ File = '.tflint.hcl'; Pattern = 'required_version = ">= ([0-9][^"]+)"' }
+                @{ File = 'docs/contributing/prerequisites.md'; Pattern = '\| TFLint\s+\|\s+([0-9][^\s|]+)' }
+            )
+        }
+        @{
+            Name = 'actionlint'
+            Repo = 'rhysd/actionlint'
+            Sources = @(
+                @{
+                    File = 'scripts/setup/install-actionlint.sh'
+                    Pattern = 'ACTIONLINT_VERSION="\$\{ACTIONLINT_VERSION:-([0-9][^}]+)\}"'
+                }
+                @{ File = '.github/workflows/yaml-lint.yml'; Pattern = '\$version = ''([0-9][^'']+)''' }
+                @{ File = 'scripts/security/tool-checksums.json'; JsonTool = 'actionlint' }
+            )
+        }
+        @{
+            Name = 'golangci-lint'
+            Repo = 'golangci/golangci-lint'
+            Sources = @(
+                @{ File = '.devcontainer/devcontainer.json'; Pattern = 'GOLANGCI_LINT_VERSION=([0-9][^\s&"]+)' }
+                @{ File = 'scripts/linting/Invoke-GoLint.ps1'; Pattern = '\$lintInstallVersion = ''([^'']+)''' }
+            )
+        }
+    )
+}
+
+function Get-PinnedBinaryVersion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][hashtable]$Tool,
+        [Parameter(Mandatory)][hashtable]$Source
+    )
+
+    $path = Join-Path $RepositoryRoot $Source.File
+    if (-not (Test-Path $path)) {
+        throw "File not found for $($Tool.Name): $($Source.File)"
+    }
+
+    $content = Get-Content $path -Raw
+    if ($Source.JsonTool) {
+        $manifest = $content | ConvertFrom-Json
+        $entry = @($manifest.tools).Where({ $_.name -eq $Source.JsonTool }, 'First')
+        if (-not $entry -or -not $entry.version) {
+            throw "Could not extract version for $($Tool.Name) from $($Source.File)"
+        }
+        return [string]$entry.version
+    }
+
+    if ($content -notmatch $Source.Pattern) {
+        throw "Could not extract version for $($Tool.Name) from $($Source.File)"
+    }
+    return $Matches[1]
+}
+
+function Invoke-BinaryVersionFreshnessCheck {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [hashtable[]]$Tools = (Get-BinaryVersionSource),
+        [scriptblock]$LatestReleaseResolver = {
+            param([string]$Repository)
+            gh api "repos/$Repository/releases/latest" --jq '.tag_name' 2>$null
+        }
+    )
+
+    $results = foreach ($tool in $Tools) {
+        if (-not $tool.Sources -or $tool.Sources.Count -eq 0) {
+            throw "No version sources configured for $($tool.Name)"
+        }
+
+        $pinnedVersions = foreach ($source in $tool.Sources) {
+            @{
+                File = $source.File
+                Version = Get-PinnedBinaryVersion -RepositoryRoot $RepositoryRoot -Tool $tool -Source $source
+            }
+        }
+
+        $pinnedVersion = $pinnedVersions[0].Version
+        $inconsistent = @($pinnedVersions | Where-Object { $_.Version -ne $pinnedVersion }).Count -gt 0
+        $latestTag = & $LatestReleaseResolver $tool.Repo
+        if (-not $latestTag) {
+            throw "Could not fetch latest release for $($tool.Repo) - freshness check cannot produce reliable results"
+        }
+
+        $latestVersion = ([string]$latestTag).Trim().TrimStart('v')
+        $isStale = $pinnedVersion -ne $latestVersion
+        [ordered]@{
+            Name = $tool.Name
+            Repo = $tool.Repo
+            PinnedVersion = $pinnedVersion
+            LatestVersion = $latestVersion
+            LatestTag = ([string]$latestTag).Trim()
+            IsStale = $isStale
+            Inconsistent = $inconsistent
+            RequiresAttention = $isStale -or $inconsistent
+            SourceFiles = @($tool.Sources.File)
+        }
+    }
+
+    return @($results)
+}
+
+function Write-BinaryVersionFreshnessResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object[]]$Results,
+        [Parameter(Mandatory)][string]$ResultsPath,
+        [string]$GitHubOutputPath
+    )
+
+    $staleCount = @($Results | Where-Object { $_.IsStale }).Count
+    $attentionCount = @($Results | Where-Object { $_.RequiresAttention }).Count
+    $Results | ConvertTo-Json -Depth 5 | Set-Content $ResultsPath
+
+    if ($GitHubOutputPath) {
+        "stale-count=$staleCount" | Add-Content $GitHubOutputPath
+        "attention-count=$attentionCount" | Add-Content $GitHubOutputPath
+        "total-count=$($Results.Count)" | Add-Content $GitHubOutputPath
+    }
+
+    return @{
+        StaleCount = $staleCount
+        AttentionCount = $attentionCount
+        TotalCount = $Results.Count
+    }
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    $results = Invoke-BinaryVersionFreshnessCheck -RepositoryRoot $RepositoryRoot
+    foreach ($result in $results) {
+        $status = if ($result.RequiresAttention) { 'WARNING' } else { 'CURRENT' }
+        $extra = if ($result.Inconsistent) { ' [INCONSISTENT]' } else { '' }
+        Write-Output "$status $($result.Name): pinned=$($result.PinnedVersion) latest=$($result.LatestVersion)$extra"
+    }
+
+    $summary = Write-BinaryVersionFreshnessResult `
+        -Results $results `
+        -ResultsPath $ResultsPath `
+        -GitHubOutputPath $GitHubOutputPath
+    Write-Output "`nStale: $($summary.StaleCount) / $($summary.TotalCount)"
+    Write-Output "Attention required: $($summary.AttentionCount) / $($summary.TotalCount)"
+}

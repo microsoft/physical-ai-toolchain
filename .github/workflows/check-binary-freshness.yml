@@ -38,136 +38,38 @@ jobs:
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          # Docker base image digest freshness is monitored by Dependabot (docker ecosystem).
-          # See .github/dependabot.yml for Docker monitoring config.
-          $tools = @(
-              @{
-                  Name    = 'uv'
-                  Repo    = 'astral-sh/uv'
-                  Sources = @(
-                      @{ File = 'setup-dev.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
-                      @{ File = 'setup-dev.ps1'; Pattern = '\$UvVersion = ''([^'']+)''' }
-                      @{ File = 'training/rl/scripts/setup_isaac_runtime.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
-                      @{ File = 'infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
-                      @{ File = 'shared/ci/smoke-import.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
-                  )
-              }
-              @{
-                  Name    = 'terraform-docs'
-                  Repo    = 'terraform-docs/terraform-docs'
-                  Sources = @(
-                      @{ File = 'setup-dev.sh'; Pattern = 'TERRAFORM_DOCS_VERSION="([^"]+)"' }
-                      @{ File = 'setup-dev.ps1'; Pattern = '\$TerraformDocsVersion = ''([^'']+)''' }
-                      @{ File = '.github/workflows/go-tests.yml'; Pattern = '\$version = ''v?([^'']+)''' }
-                      @{ File = '.github/workflows/terraform-docs-check.yml'; Pattern = 'default: ''v?([0-9][^'']+)''' }
-                  )
-              }
-              @{
-                  Name    = 'tflint'
-                  Repo    = 'terraform-linters/tflint'
-                  Sources = @(
-                      @{ File = '.devcontainer/devcontainer.json'; Pattern = 'TFLINT_VERSION=v?([0-9][^\s&"]+)' }
-                      @{ File = '.github/workflows/terraform-lint.yml'; Pattern = 'tflint_version: v?([0-9][^\s]+)' }
-                  )
-              }
-              @{
-                  Name    = 'actionlint'
-                  Repo    = 'rhysd/actionlint'
-                  Sources = @(
-                      @{ File = 'scripts/setup/install-actionlint.sh'; Pattern = 'ACTIONLINT_VERSION="\$\{ACTIONLINT_VERSION:-([0-9][^}]+)\}"' }
-                      @{ File = '.github/workflows/yaml-lint.yml'; Pattern = '\$version = ''([0-9][^'']+)''' }
-                  )
-              }
-              @{
-                  Name    = 'golangci-lint'
-                  Repo    = 'golangci/golangci-lint'
-                  Sources = @(
-                      @{ File = '.devcontainer/devcontainer.json'; Pattern = 'GOLANGCI_LINT_VERSION=([0-9][^\s&"]+)' }
-                      @{ File = 'scripts/linting/Invoke-GoLint.ps1'; Pattern = '\$lintInstallVersion = ''([^'']+)''' }
-                  )
-              }
-          )
-
-          $results = @()
-
-          foreach ($tool in $tools) {
-              $pinnedVersions = @()
-
-              foreach ($source in $tool.Sources) {
-                  if (-not (Test-Path $source.File)) {
-                      throw "File not found for $($tool.Name): $($source.File)"
-                  }
-
-                  $content = Get-Content $source.File -Raw
-                  if ($content -match $source.Pattern) {
-                      $pinnedVersions += @{ File = $source.File; Version = $Matches[1] }
-                  } else {
-                      throw "Could not extract version for $($tool.Name) from $($source.File)"
-                  }
-              }
-
-              if ($pinnedVersions.Count -eq 0) {
-                  throw "No pinned versions found for $($tool.Name)"
-              }
-
-              $pinnedVersion = $pinnedVersions[0].Version
-              $inconsistent = @($pinnedVersions | Where-Object { $_.Version -ne $pinnedVersion }).Count -gt 0
-
-              $latestTag = gh api "repos/$($tool.Repo)/releases/latest" --jq '.tag_name' 2>$null
-              if (-not $latestTag) {
-                  throw "Could not fetch latest release for $($tool.Repo) — freshness check cannot produce reliable results"
-              }
-
-              $latestVersion = $latestTag.TrimStart('v')
-              $isStale = $pinnedVersion -ne $latestVersion
-
-              $results += [ordered]@{
-                  Name          = $tool.Name
-                  Repo          = $tool.Repo
-                  PinnedVersion = $pinnedVersion
-                  LatestVersion = $latestVersion
-                  LatestTag     = $latestTag
-                  IsStale       = $isStale
-                  Inconsistent  = $inconsistent
-                  Files         = @($tool.Sources.File)
-              }
-
-              $status = if ($isStale) { '⚠️' } else { '✅' }
-              $extra = if ($inconsistent) { ' [INCONSISTENT]' } else { '' }
-              Write-Host "$status $($tool.Name): pinned=$pinnedVersion latest=$latestVersion$extra"
-          }
-
-          $staleCount = @($results | Where-Object { $_.IsStale }).Count
-          Write-Host "`nStale: $staleCount / $($results.Count)"
-
-          "stale-count=$staleCount" >> $env:GITHUB_OUTPUT
-          "total-count=$($results.Count)" >> $env:GITHUB_OUTPUT
-          $results | ConvertTo-Json -Depth 5 | Set-Content 'freshness-results.json'
+        run: ./scripts/security/Test-BinaryVersionFreshness.ps1
 
       - name: Create or update tracking issue
-        if: steps.check.outputs.stale-count != '0'
+        if: steps.check.outputs.attention-count != '0'
         env:
           GH_TOKEN: ${{ github.token }}
+          ATTENTION_COUNT: ${{ steps.check.outputs.attention-count }}
           STALE_COUNT: ${{ steps.check.outputs.stale-count }}
         run: |
           $results = @(Get-Content 'freshness-results.json' | ConvertFrom-Json)
 
           $tableRows = foreach ($r in $results) {
-              $status = if ($r.IsStale) { '⚠️ Update available' } else { '✅ Current' }
+              $status = if ($r.IsStale) {
+                  '⚠️ Update available'
+              } elseif ($r.Inconsistent) {
+                  '⚠️ Inconsistent pins'
+              } else {
+                  '✅ Current'
+              }
               $latest = "[$($r.LatestVersion)](https://github.com/$($r.Repo)/releases/tag/$($r.LatestTag))"
               "| $($r.Name) | $($r.PinnedVersion) | $latest | $status |"
           }
 
           $staleTools = @($results | Where-Object { $_.IsStale })
           $fileLines = foreach ($r in $staleTools) {
-              foreach ($f in $r.Files) {
+              foreach ($f in $r.SourceFiles) {
                   "- ``$f`` — $($r.Name) $($r.PinnedVersion) → $($r.LatestVersion)"
               }
           }
 
           $warnings = @($results | Where-Object { $_.Inconsistent }) | ForEach-Object {
-              "- **$($_.Name)**: version mismatch across files ($($_.Files -join ', '))"
+              "- **$($_.Name)**: version mismatch across files ($($_.SourceFiles -join ', '))"
           }
           $warningSection = if ($warnings) {
               "`n### ⚠️ Version Inconsistencies`n`n$($warnings -join "`n")"
@@ -211,13 +113,13 @@ jobs:
               --jq '.[0].number // empty'
           $existing = if ($existing) { $existing.Trim() } else { $null }
 
-          $title = "security: binary dependency updates available ($env:STALE_COUNT stale)"
+          $title = "security: binary dependencies require attention ($env:ATTENTION_COUNT)"
 
           if ($existing) {
               Write-Host "Updating existing issue #$existing"
               gh issue edit $existing --title $title --body $body
               gh issue comment $existing `
-                  --body "🔄 Weekly scan: $env:STALE_COUNT tool(s) stale as of $checkDate. [Workflow run]($runUrl)."
+                  --body "🔄 Weekly scan: $env:ATTENTION_COUNT tool(s) require attention, including $env:STALE_COUNT stale, as of $checkDate. [Workflow run]($runUrl)."
           } else {
               Write-Host "Creating new tracking issue"
               gh issue create `
@@ -227,7 +129,7 @@ jobs:
           }
 
       - name: Close resolved tracking issue
-        if: steps.check.outputs.stale-count == '0'
+        if: steps.check.outputs.attention-count == '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -258,11 +160,18 @@ jobs:
           $results = @(Get-Content 'freshness-results.json' | ConvertFrom-Json)
 
           $rows = foreach ($r in $results) {
-              $status = if ($r.IsStale) { '⚠️ Stale' } else { '✅ Current' }
+              $status = if ($r.IsStale) {
+                  '⚠️ Stale'
+              } elseif ($r.Inconsistent) {
+                  '⚠️ Inconsistent'
+              } else {
+                  '✅ Current'
+              }
               "| $($r.Name) | $($r.PinnedVersion) | $($r.LatestVersion) | $status |"
           }
 
           $staleCount = @($results | Where-Object { $_.IsStale }).Count
+          $attentionCount = @($results | Where-Object { $_.RequiresAttention }).Count
 
           $summary = @"
           ## Binary Dependency Freshness
@@ -272,6 +181,7 @@ jobs:
           $($rows -join "`n")
 
           **Stale:** $staleCount / $($results.Count)
+          **Requires attention:** $attentionCount / $($results.Count)
           "@
 
           $summary >> $env:GITHUB_STEP_SUMMARY

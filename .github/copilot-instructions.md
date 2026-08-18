@@ -327,8 +327,9 @@ Treat `.github/workflows/copilot-setup-steps.yml` and `.devcontainer/devcontaine
 * Test runners (Pester, pytest, vitest) MUST stay aligned for the same reason.
 * Azure-deployment tools (`az`, `kubectl`, `helm`, OSMO, NGC) live in the devcontainer only.
 * Lint-only tools may live in either or both depending on whether the agent invokes the linter.
+* Register every binary version pin in `scripts/security/Test-BinaryVersionFreshness.ps1` so the weekly workflow detects stale and inconsistent copies.
 
-The weekly `copilot-setup-steps.yml` cron and `Test-BinaryFreshness.ps1` weekly run together surface upstream drift across both surfaces.
+The weekly `copilot-setup-steps.yml`, binary freshness workflow, and binary integrity workflow surface upstream drift across these surfaces.
 
 ### Cloud-Agent RPI Wrapper
 

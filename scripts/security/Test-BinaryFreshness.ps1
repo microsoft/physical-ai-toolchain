@@ -339,9 +339,9 @@ function Get-BinaryCheckDefinitions {
             File     = $DevDeps
         }
         @{
-            Name     = "uv Installer (v$(Get-ShellVariable -Path $DevDeps -Name 'UV_VERSION'))"
-            Url      = "https://astral.sh/uv/$(Get-ShellVariable -Path $DevDeps -Name 'UV_VERSION')/install.sh"
-            Expected = (Get-ShellVariable -Path $DevDeps -Name 'UV_INSTALLER_SHA256')
+            Name     = "uv Archive (v$(Get-ShellVariable -Path $DevDeps -Name 'UV_VERSION'))"
+            Url      = "https://github.com/astral-sh/uv/releases/download/$(Get-ShellVariable -Path $DevDeps -Name 'UV_VERSION')/uv-x86_64-unknown-linux-gnu.tar.gz"
+            Expected = (Get-ShellVariable -Path $DevDeps -Name 'UV_SHA256')
             File     = $DevDeps
         }
         @{

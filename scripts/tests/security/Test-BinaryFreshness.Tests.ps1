@@ -14,7 +14,7 @@ BeforeAll {
 #!/usr/bin/env bash
 NODESOURCE_GPG_SHA256="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 UV_VERSION="0.4.18"
-UV_INSTALLER_SHA256="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+UV_SHA256="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 MICROSOFT_GPG_SHA256="${MICROSOFT_GPG_OVERRIDE:-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}"
 NVIDIA_CTK_GPG_SHA256="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 '@ | Set-Content -Path $script:DevDepsPath -Encoding utf8
@@ -301,6 +301,13 @@ Describe 'Get-BinaryCheckDefinitions' -Tag 'Unit' {
         $defs[4].Name | Should -BeLike 'ThinLinc Server*'
         $defs[4].Expected | Should -Be 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
         $defs[4].File | Should -Be $script:ThinlincPath
+    }
+
+    It 'Resolves the verified uv release archive' {
+        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath
+        $defs[1].Name | Should -Be 'uv Archive (v0.4.18)'
+        $defs[1].Url | Should -Be 'https://github.com/astral-sh/uv/releases/download/0.4.18/uv-x86_64-unknown-linux-gnu.tar.gz'
+        $defs[1].Expected | Should -Be 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
     }
 
     It 'Resolves devcontainer entries with correct file reference' {

@@ -33,7 +33,7 @@ Describe 'Invoke-GoLintCore' -Tag 'Unit' {
 
         Mock golangci-lint {
             $global:LASTEXITCODE = 0
-            return 'golangci-lint has version v2.11.4'
+            return 'golangci-lint has version v2.12.2'
         } -ParameterFilter { $args[0] -eq 'version' }
 
         Mock golangci-lint {

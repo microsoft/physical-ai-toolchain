@@ -32,7 +32,7 @@ Install these tools before contributing:
 | Node.js/npm    | 20+ LTS         | <https://nodejs.org/>                                                                                                     |
 | Python         | 3.12+           | <https://www.python.org/downloads/>                                                                                       |
 | shellcheck     | 0.10+           | <https://www.shellcheck.net/>                                                                                             |
-| uv             | latest          | <https://docs.astral.sh/uv/>                                                                                              |
+| uv             | 0.12.5 (pinned) | <https://docs.astral.sh/uv/>                                                                                              |
 | Go             | 1.24+           | <https://go.dev/dl/>                                                                                                      |
 | golangci-lint  | 2.12+           | <https://golangci-lint.run/welcome/install/>                                                                              |
 | Docker         | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit)                                                     |
@@ -135,7 +135,7 @@ python --version  # >= 3.12
 shellcheck --version  # >= 0.10
 
 # uv (Python package manager)
-uv --version
+uv --version  # == 0.12.5 (pinned by setup-dev scripts)
 
 # Go
 go version  # >= 1.24

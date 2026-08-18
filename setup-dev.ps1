@@ -69,6 +69,90 @@ function Assert-Tools {
     }
 }
 
+function Get-UvTarget {
+    param(
+        [string]$Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture,
+        [string]$OperatingSystem = $(if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } elseif ($IsLinux) { 'linux' })
+    )
+
+    $arch = switch ($Architecture) {
+        'X64' { 'x86_64' }
+        'Arm64' { 'aarch64' }
+        default { throw "Unsupported architecture for uv: $Architecture" }
+    }
+    $platform = switch ($OperatingSystem) {
+        'windows' { 'pc-windows-msvc' }
+        'macos' { 'apple-darwin' }
+        'linux' { 'unknown-linux-gnu' }
+        default { throw "Unsupported operating system for uv: $OperatingSystem" }
+    }
+    return "$arch-$platform"
+}
+
+function Install-Uv {
+    param(
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][hashtable]$Digests,
+        [string]$Target = (Get-UvTarget),
+        [string]$BinDir = (Join-Path $HOME '.local/bin')
+    )
+
+    if (-not $Digests.ContainsKey($Target)) {
+        throw "No pinned uv digest for $Target"
+    }
+
+    $isWindowsTarget = $Target.EndsWith('-pc-windows-msvc')
+    $extension = if ($isWindowsTarget) { 'zip' } else { 'tar.gz' }
+    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "uv-$([guid]::NewGuid())"
+    $archive = Join-Path $tempDir "uv.$extension"
+    $url = "https://github.com/astral-sh/uv/releases/download/$Version/uv-$Target.$extension"
+    try {
+        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+        Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+        $actualHash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+        $expectedHash = $Digests[$Target]
+        if ($actualHash -ne $expectedHash) {
+            throw "uv archive checksum mismatch for ${Target}: expected $expectedHash, got $actualHash"
+        }
+
+        if ($isWindowsTarget) {
+            Expand-Archive -Path $archive -DestinationPath $tempDir -Force
+        }
+        else {
+            tar -xzf $archive -C $tempDir
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to extract uv archive for $Target"
+            }
+        }
+
+        New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+        $uvExecutable = if ($isWindowsTarget) { 'uv.exe' } else { 'uv' }
+        $uvxExecutable = if ($isWindowsTarget) { 'uvx.exe' } else { 'uvx' }
+        $extractedDir = if ($isWindowsTarget) { $tempDir } else { Join-Path $tempDir "uv-$Target" }
+        Move-Item (Join-Path $extractedDir $uvExecutable) (Join-Path $BinDir $uvExecutable) -Force
+        Move-Item (Join-Path $extractedDir $uvxExecutable) (Join-Path $BinDir $uvxExecutable) -Force
+        $env:PATH = "$BinDir$([System.IO.Path]::PathSeparator)$env:PATH"
+
+        if ($isWindowsTarget) {
+            $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+            $userPathEntries = @($userPath -split [System.IO.Path]::PathSeparator)
+            if ($BinDir -notin $userPathEntries) {
+                [Environment]::SetEnvironmentVariable(
+                    'Path',
+                    "$BinDir$([System.IO.Path]::PathSeparator)$userPath",
+                    'User'
+                )
+            }
+        }
+        else {
+            Write-Warn "uv was installed to $BinDir. Add this directory to your shell PATH for future terminals."
+        }
+    }
+    finally {
+        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 #endregion
 
 $ScriptDir = $PSScriptRoot
@@ -143,22 +227,7 @@ $UvVersion = '0.12.5'
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Info "Installing uv package manager v$UvVersion..."
-    $uvArch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
-        'X64' { 'x86_64' }
-        'Arm64' { 'aarch64' }
-        default { throw "Unsupported architecture for uv: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" }
-    }
-    $uvPlatform = if ($IsWindows) {
-        'pc-windows-msvc'
-    } elseif ($IsMacOS) {
-        'apple-darwin'
-    } elseif ($IsLinux) {
-        'unknown-linux-gnu'
-    } else {
-        throw 'Unsupported operating system for uv'
-    }
-    $uvTarget = "$uvArch-$uvPlatform"
-    $uvHashes = @{
+    $UvDigests = @{
         'aarch64-apple-darwin'       = '5bb0e5fe008a773c3dbcb97ff79cd89e1241464fe9d2f986d52ad8f1b037bd62'
         'aarch64-pc-windows-msvc'    = '724279317fee6e5fa8ad1908e4eba2bbe764ef1ece5b3f4597927b62b1fe562a'
         'aarch64-unknown-linux-gnu'  = '9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31'
@@ -166,39 +235,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         'x86_64-pc-windows-msvc'     = '4c4d49d8738847d9b71ba319e49a5688c93eac0fe6204b1df24e98528dddf39a'
         'x86_64-unknown-linux-gnu'   = '68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2'
     }
-    $uvExtension = if ($IsWindows) { 'zip' } else { 'tar.gz' }
-    $uvTempDir = Join-Path ([System.IO.Path]::GetTempPath()) "uv-$([guid]::NewGuid())"
-    $uvArchive = Join-Path $uvTempDir "uv.$uvExtension"
-    $uvUrl = "https://github.com/astral-sh/uv/releases/download/$UvVersion/uv-$uvTarget.$uvExtension"
-    try {
-        New-Item -ItemType Directory -Path $uvTempDir -Force | Out-Null
-        Invoke-WebRequest -Uri $uvUrl -OutFile $uvArchive -UseBasicParsing
-        $actualHash = (Get-FileHash -Path $uvArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actualHash -ne $uvHashes[$uvTarget]) {
-            throw "uv archive checksum mismatch for $uvTarget"
-        }
-
-        if ($IsWindows) {
-            Expand-Archive -Path $uvArchive -DestinationPath $uvTempDir -Force
-        } else {
-            tar -xzf $uvArchive -C $uvTempDir
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to extract uv archive for $uvTarget"
-            }
-        }
-
-        $uvBinDir = Join-Path $HOME '.local/bin'
-        New-Item -ItemType Directory -Path $uvBinDir -Force | Out-Null
-        $uvExecutable = if ($IsWindows) { 'uv.exe' } else { 'uv' }
-        $uvxExecutable = if ($IsWindows) { 'uvx.exe' } else { 'uvx' }
-        $uvExtractedDir = if ($IsWindows) { $uvTempDir } else { Join-Path $uvTempDir "uv-$uvTarget" }
-        Move-Item (Join-Path $uvExtractedDir $uvExecutable) (Join-Path $uvBinDir $uvExecutable) -Force
-        Move-Item (Join-Path $uvExtractedDir $uvxExecutable) (Join-Path $uvBinDir $uvxExecutable) -Force
-        $env:PATH = "$uvBinDir$([System.IO.Path]::PathSeparator)$env:PATH"
-    }
-    finally {
-        Remove-Item $uvTempDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    Install-Uv -Version $UvVersion -Digests $UvDigests
 }
 
 Write-Info "Using uv: $(uv --version)"
