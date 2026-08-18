@@ -34,6 +34,10 @@ printf '%s\n' 'sha256:$script:Digest'
         Set-Content -Path (Join-Path $scan 'grype.json') -Encoding utf8 -Value @'
 {"matches":[{"vulnerability":{"id":"CVE-2026-0002","severity":"Critical"}}]}
 '@
+        @{
+            digest = "sha256:$script:Digest"
+            severity_filter = 'HIGH,CRITICAL'
+        } | ConvertTo-Json | Set-Content -Path (Join-Path $scan 'metadata.json') -Encoding utf8
 
         @{
             Root = $root
@@ -170,6 +174,41 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         $script:GeneratorExit | Should -Not -Be 0
         $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
+    }
+
+    It 'rejects malformed document and statement timestamps' {
+        @{
+            timestamp = 'not-a-timestamp'
+            version = 1
+            statements = @(
+                @{
+                    vulnerability = @{ name = 'CVE-2026-0001' }
+                    products = @(@{ '@id' = $script:Purl })
+                    status = 'under_investigation'
+                    timestamp = 'also-not-a-timestamp'
+                }
+            )
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
+        $before = Get-Content $script:Workspace.Output -Raw
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
+        Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
+    }
+
+    It 'rejects scanner output cached for another digest' {
+        @{
+            digest = 'sha256:' + ('a' * 64)
+            severity_filter = 'HIGH,CRITICAL'
+        } | ConvertTo-Json | Set-Content -Path (Join-Path $script:Workspace.Scan 'metadata.json') -Encoding utf8
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Cached scanner output does not match digest'
+        Test-Path $script:Workspace.Output | Should -BeFalse
     }
 
     It 'rejects duplicate vulnerability and product pairs without changing the document' {
@@ -373,6 +412,9 @@ Describe 'committed OpenVEX documents' -Tag 'Unit' {
                 }
                 if ($statement.status -ne 'under_investigation') {
                     $statement.status_notes | Should -Not -BeNullOrEmpty
+                }
+                if ($null -ne $statement.timestamp) {
+                    $statement.timestamp.ToUniversalTime().ToString('o') | Should -Match 'Z$'
                 }
             }
         }

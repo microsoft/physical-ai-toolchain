@@ -47,7 +47,8 @@ OPTIONS:
                              (default: $DEFAULT_SCAN_DIR)
         --author NAME        OpenVEX author string (default: $DEFAULT_AUTHOR)
         --id-base URL        Base URL for the OpenVEX @id (default: $DEFAULT_ID_BASE)
-        --skip-scan          Reuse existing trivy.json/grype.json in --scan-dir
+        --skip-scan          Reuse scanner output in --scan-dir only when its
+                             metadata matches the resolved digest and severity
         --config-preview     Print configuration and exit
 
 EXAMPLES:
@@ -68,16 +69,25 @@ id_base="$DEFAULT_ID_BASE"
 skip_scan=false
 config_preview=false
 output_tmp=""
+scan_metadata_tmp=""
 scan_work_dir=""
 lock_dir=""
 lock_acquired=false
+scan_lock_dir=""
+scan_lock_acquired=false
 
 cleanup() {
   if [[ -n "$output_tmp" && -f "$output_tmp" ]]; then
     rm -f "$output_tmp"
   fi
+  if [[ -n "$scan_metadata_tmp" && -f "$scan_metadata_tmp" ]]; then
+    rm -f "$scan_metadata_tmp"
+  fi
   if [[ "$lock_acquired" == "true" && -n "$lock_dir" && -d "$lock_dir" ]]; then
     rmdir "$lock_dir" 2>/dev/null || true
+  fi
+  if [[ "$scan_lock_acquired" == "true" && -n "$scan_lock_dir" && -d "$scan_lock_dir" ]]; then
+    rmdir "$scan_lock_dir" 2>/dev/null || true
   fi
   if [[ -n "$scan_work_dir" && -d "$scan_work_dir" ]]; then
     rm -f "$scan_work_dir/trivy.json" "$scan_work_dir/grype.json" \
@@ -162,17 +172,33 @@ if ! mkdir "$lock_dir" 2>/dev/null; then
   fatal "Failed to create VEX generation lock: $lock_dir"
 fi
 lock_acquired=true
+scan_lock_dir="$scan_dir/.generate-vex.lock"
+if ! mkdir "$scan_lock_dir" 2>/dev/null; then
+  if [[ -d "$scan_lock_dir" ]]; then
+    fatal "Another VEX generation is using $scan_dir; remove $scan_lock_dir if the prior run was interrupted"
+  fi
+  fatal "Failed to create scanner output lock: $scan_lock_dir"
+fi
+scan_lock_acquired=true
 
 #------------------------------------------------------------------------------
 # Run scanners
 #------------------------------------------------------------------------------
 section "Run scanners"
 
+scan_metadata="$scan_dir/metadata.json"
 if [[ "$skip_scan" == "true" ]]; then
   trivy_json="$scan_dir/trivy.json"
   grype_json="$scan_dir/grype.json"
   [[ -s "$trivy_json" ]] || fatal "--skip-scan set but $trivy_json missing/empty"
   [[ -s "$grype_json" ]] || fatal "--skip-scan set but $grype_json missing/empty"
+  [[ -s "$scan_metadata" ]] || fatal "--skip-scan set but $scan_metadata missing/empty"
+  jq -e \
+    --arg digest "$digest" \
+    --arg severity "$severity" \
+    '.digest == $digest and .severity_filter == $severity' \
+    "$scan_metadata" >/dev/null ||
+    fatal "Cached scanner output does not match digest $digest and severity $severity"
   info "Reusing existing scanner output"
 else
   scan_work_dir=$(mktemp -d "$scan_dir/run.XXXXXX") ||
@@ -191,6 +217,14 @@ else
   grype "$image_ref" -o json > "$grype_json"
   cp "$trivy_json" "$scan_dir/trivy.json"
   cp "$grype_json" "$scan_dir/grype.json"
+  scan_metadata_tmp=$(mktemp "$scan_dir/metadata.json.tmp.XXXXXX") ||
+    fatal "Failed to create scanner metadata in $scan_dir"
+  jq -n \
+    --arg digest "$digest" \
+    --arg severity "$severity" \
+    '{digest: $digest, severity_filter: $severity}' > "$scan_metadata_tmp"
+  mv "$scan_metadata_tmp" "$scan_metadata"
+  scan_metadata_tmp=""
 fi
 
 #------------------------------------------------------------------------------
@@ -242,6 +276,12 @@ validate_vex_document() {
   jq -ce --argjson max_version "$MAX_VERSION" '
     def non_empty_string:
       type == "string" and length > 0;
+    def valid_timestamp:
+      type == "string"
+      and test(
+        "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])"
+        + "T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?Z$"
+      );
     def allowed_status:
       . == "under_investigation"
       or . == "not_affected"
@@ -270,8 +310,10 @@ validate_vex_document() {
       or .version > $max_version
       or .version != (.version | floor)
     then error("version must be an incrementable positive integer")
-    elif (.timestamp | non_empty_string | not)
-    then error("timestamp must be a non-empty string")
+    elif (.timestamp | valid_timestamp | not)
+    then error("timestamp must be a UTC RFC 3339 timestamp")
+    elif has("last_updated") and (.last_updated | valid_timestamp | not)
+    then error("last_updated must be a UTC RFC 3339 timestamp")
     elif ((.statements // []) | type) != "array"
     then error("statements must be an array")
     elif any(.statements[]?; (.vulnerability.name | non_empty_string | not))
@@ -280,6 +322,8 @@ validate_vex_document() {
     then error("every statement must identify at least one product")
     elif any(.statements[]?.products[]?; (.["@id"] | digest_purl | not))
     then error("every product must use a digest-pinned OCI package URL")
+    elif any(.statements[]?; has("timestamp") and (.timestamp | valid_timestamp | not))
+    then error("statement timestamps must be UTC RFC 3339 timestamps")
     elif any(.statements[]?; (.status | allowed_status | not))
     then error("every statement must use an allowed status")
     elif any(
