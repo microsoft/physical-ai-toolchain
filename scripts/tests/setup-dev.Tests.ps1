@@ -128,29 +128,56 @@ Describe 'setup-dev uv installation' -Tag 'Unit' {
         }
     }
 
-    It 'keeps the shell and PowerShell Linux uv pins consistent' {
+    It 'keeps uv versions and Linux digests consistent across consumers' {
         $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '../..')
         $powerShellContent = Get-Content (Join-Path $repoRoot 'setup-dev.ps1') -Raw
         $shellContent = Get-Content (Join-Path $repoRoot 'setup-dev.sh') -Raw
 
         $powerShellVersionMatch = [regex]::Match($powerShellContent, "\`$UvVersion = '([^']+)'")
-        $shellVersionMatch = [regex]::Match($shellContent, 'UV_VERSION="([^"]+)"')
         $powerShellVersionMatch.Success | Should -BeTrue
-        $shellVersionMatch.Success | Should -BeTrue
         $powerShellVersion = $powerShellVersionMatch.Groups[1].Value
-        $shellVersion = $shellVersionMatch.Groups[1].Value
-        $powerShellVersion | Should -Be $shellVersion
+        $powerShellLinuxDigest = [regex]::Match(
+            $powerShellContent,
+            "'x86_64-unknown-linux-gnu'\s*=\s*'([^']+)'"
+        )
+        $powerShellLinuxDigest.Success | Should -BeTrue
 
-        foreach ($target in @('x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu')) {
-            $powerShellDigestMatch = [regex]::Match($powerShellContent, "'$target'\s*=\s*'([^']+)'")
-            $architecture = if ($target.StartsWith('x86_64')) { 'x86_64' } else { 'aarch64' }
-            $shellDigestMatch = [regex]::Match(
-                $shellContent,
-                "(?m)^\s*$architecture\).*UV_SHA256=`"([^`"]+)`""
-            )
-            $powerShellDigestMatch.Success | Should -BeTrue
-            $shellDigestMatch.Success | Should -BeTrue
-            $powerShellDigestMatch.Groups[1].Value | Should -Be $shellDigestMatch.Groups[1].Value
+        $linuxConsumers = @(
+            @{
+                File = 'setup-dev.sh'
+                DigestPattern = '(?m)^\s*x86_64\).*UV_SHA256="([^"]+)"'
+            }
+            @{
+                File = 'training/rl/scripts/setup_isaac_runtime.sh'
+                DigestPattern = 'UV_SHA256="([^"]+)"'
+            }
+            @{
+                File = 'infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh'
+                DigestPattern = 'UV_SHA256="([^"]+)"'
+            }
+            @{
+                File = 'shared/ci/smoke-import.sh'
+                DigestPattern = 'UV_SHA256="([^"]+)"'
+            }
+        )
+        foreach ($consumer in $linuxConsumers) {
+            $content = Get-Content (Join-Path $repoRoot $consumer.File) -Raw
+            $versionMatch = [regex]::Match($content, 'UV_VERSION="([^"]+)"')
+            $digestMatch = [regex]::Match($content, $consumer.DigestPattern)
+            $versionMatch.Success | Should -BeTrue -Because "$($consumer.File) must declare the uv version"
+            $digestMatch.Success | Should -BeTrue -Because "$($consumer.File) must declare the uv digest"
+            $versionMatch.Groups[1].Value | Should -Be $powerShellVersion
+            $digestMatch.Groups[1].Value | Should -Be $powerShellLinuxDigest.Groups[1].Value
         }
+
+        $powerShellArmDigest = [regex]::Match(
+            $powerShellContent,
+            "'aarch64-unknown-linux-gnu'\s*=\s*'([^']+)'"
+        )
+        $shellArmDigest = [regex]::Match($shellContent, '(?m)^\s*aarch64\).*UV_SHA256="([^"]+)"')
+        $powerShellArmDigest.Success | Should -BeTrue
+        $shellArmDigest.Success | Should -BeTrue
+        $shellArmDigest.Groups[1].Value | Should -Be $powerShellArmDigest.Groups[1].Value
+        $shellContent | Should -Match 'export PATH="/usr/local/bin:\$\{PATH\}"'
     }
 }

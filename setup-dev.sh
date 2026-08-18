@@ -81,6 +81,14 @@ if [[ "${installed_uv_version}" != "${UV_VERSION}" ]]; then
   sudo install -m 0755 "/tmp/uv-${UV_TRIPLE}/uv" /usr/local/bin/uv
   sudo install -m 0755 "/tmp/uv-${UV_TRIPLE}/uvx" /usr/local/bin/uvx
   rm -rf /tmp/uv.tar.gz "/tmp/uv-${UV_TRIPLE}"
+  export PATH="/usr/local/bin:${PATH}"
+  hash -r
+fi
+
+installed_uv_version=$(uv --version | awk '{print $2}')
+if [[ "${installed_uv_version}" != "${UV_VERSION}" ]]; then
+  error "Failed to activate pinned uv ${UV_VERSION}; found ${installed_uv_version}"
+  exit 1
 fi
 
 info "Using uv: $(uv --version)"
