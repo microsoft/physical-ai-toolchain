@@ -35,8 +35,8 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 | Prompt      | `/start-dataviewer`        | Launch Dataset Analysis Tool                        | `.github/prompts/start-dataviewer.prompt.md`                      |
 | Prompt      | `/submit-lerobot-training` | Submit LeRobot training job to OSMO                 | `.github/prompts/submit-lerobot-training.prompt.md`               |
 | Skill       | dataviewer                 | Dataset browsing, annotation, and export            | `.github/skills/dataviewer/SKILL.md`                              |
-| Skill suite | RPI                        | Cloud-agent research, plan, implement, review       | `.github/skills/rpi/` (runtime-generated, gitignored)             |
 | Skill       | osmo-lerobot-training      | Training submission, monitoring, and analysis       | `.github/skills/osmo-lerobot-training/SKILL.md`                   |
+| Skill       | rpi-*                      | Cloud-agent research, plan, implement, review       | `.github/skills/rpi/` (runtime-provisioned, gitignored)           |
 
 ## 🔗 Quick Reference
 
@@ -132,7 +132,7 @@ discovery (frontmatter only) → instructions (SKILL.md body) → resources
 | Resources | `references/DEFAULTS.md` (env, datasets, GPU profiles), `references/REFERENCE.md` (CLI, inference, AzureML navigation) |
 | Used by   | OSMO Training Manager agent                                                                                            |
 
-### hve-core RPI
+### rpi
 
 The cloud-agent setup workflow downloads the complete RPI skill suite from
 a pinned `microsoft/hve-core` commit into the gitignored
@@ -141,16 +141,16 @@ unless the setup workflow has provisioned them. Each skill retains its
 upstream references and templates, and `_audit.json` records the resolved
 commit and installed file inventory.
 
-| Skill               | Purpose                                             |
-|---------------------|-----------------------------------------------------|
-| `rpi-quick`         | Coordinate the complete RPI lifecycle               |
-| `rpi-research`      | Gather evidence and produce planning-ready findings |
-| `rpi-plan`          | Build and critique an implementation plan           |
-| `rpi-implement`     | Execute approved plan phases and validate changes   |
-| `rpi-review`        | Review implementation evidence and route follow-ups |
-| `rpi-challenger`    | Challenge scope and assumptions                     |
-| `rpi-plan-critique` | Assess plans independently                          |
-| `rpi-walkthrough`   | Walk through RPI artifacts and decisions            |
+| Skill               | Purpose                                             | Bootstrap requirement |
+|---------------------|-----------------------------------------------------|-----------------------|
+| `rpi-quick`         | Coordinate the complete RPI lifecycle               | Required              |
+| `rpi-research`      | Gather evidence and produce planning-ready findings | Required              |
+| `rpi-plan`          | Build and critique an implementation plan           | Required              |
+| `rpi-implement`     | Execute approved plan phases and validate changes   | Required              |
+| `rpi-review`        | Review implementation evidence and route follow-ups | Required              |
+| `rpi-challenger`    | Challenge scope and assumptions                     | Required              |
+| `rpi-plan-critique` | Assess plans independently                          | Required              |
+| `rpi-walkthrough`   | Walk through RPI artifacts and decisions            | Required              |
 
 ## 🔄 Workflow Chains
 

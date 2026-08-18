@@ -75,10 +75,9 @@ $script:DerivedFiles = @(
 function Get-PinnedHveCoreRef {
     <#
     .SYNOPSIS
-        Extract the pinned hve-core UPSTREAM_REF SHA and release tag from the RPI
-        bootstrap workflow file - the last reviewed upstream ref used as the drift
-        baseline. Returns null when the file is absent; members are null when the
-        corresponding key is not present.
+        Extract the pinned hve-core UPSTREAM_REF SHA and optional release tag from
+        the RPI bootstrap workflow file. Returns null when the file is absent;
+        members are null when the corresponding key is not present.
     #>
     [CmdletBinding()]
     param(
@@ -235,12 +234,13 @@ function Format-HveCoreIssueBody {
     $fileRows = ($files | ForEach-Object { Format-HveCoreDriftRow -File $_ }) -join "`n"
 
     $compareBase = if ($pin.PinnedTag -ne 'unknown') { $pin.PinnedTag } else { $pin.PinnedSha }
+    $baselineLabel = $compareBase
 
     return @"
 ## hve-core Upstream Freshness Report
 
 Latest reviewed hve-core release: $latestLink
-Drift baseline: ``$($pin.PinnedTag)`` (``UPSTREAM_REF`` in ``$($pin.File)``)
+Drift baseline: ``$baselineLabel`` (``UPSTREAM_REF`` in ``$($pin.File)``)
 
 ### Derived Files
 
