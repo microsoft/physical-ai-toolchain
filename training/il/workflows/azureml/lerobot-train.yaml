@@ -26,8 +26,10 @@ identity:
   type: managed_identity
 
 # All values below are placeholders and will be overridden by submit-azureml-lerobot-training.sh
+# The environment version below is a direct-submit fallback; it must match the
+# version derived from DEFAULT_LEROBOT_TRAIN_IMAGE in scripts/lib/common.sh.
 code: .
-environment: azureml:lerobot-training-env:latest
+environment: azureml:lerobot-training-env:2.11.0-cuda12.8-cudnn9-runtime-sha256-eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be
 compute: azureml:cpu-cluster
 
 inputs:
