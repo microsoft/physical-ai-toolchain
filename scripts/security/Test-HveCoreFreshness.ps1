@@ -8,12 +8,12 @@
     Checks hve-core-derived files against the latest upstream release.
 
 .DESCRIPTION
-    Resolves the newest non-draft microsoft/hve-core release and compares each
-    hve-core-derived file's upstream blob SHA at the pinned UPSTREAM_REF (the last
-    reviewed upstream ref, read from the RPI bootstrap workflow) against the same
-    upstream path at the latest release. Writes a JSON results file consumed by the
-    tracking-issue steps and, when running under GitHub Actions, emits the stale item
-    count to GITHUB_OUTPUT.
+    Compares each hve-core-derived file's upstream blob SHA at its reviewed source
+    revision against its current upstream target. Modules use the RPI bootstrap's
+    pinned UPSTREAM_REF and the latest release. Security linters use the source
+    revision recorded in their headers and upstream main, which also covers files
+    not present in a release. Writes a JSON results file consumed by the tracking-
+    issue steps and, under GitHub Actions, emits the stale item count to GITHUB_OUTPUT.
 
 .PARAMETER ResultsFile
     Output JSON results path. Default: hve-core-freshness-results.json.
@@ -55,17 +55,16 @@ $script:SetupWorkflow = '.github/workflows/copilot-setup-steps.yml'
 $script:IssueMarker = 'automation:hve-core-freshness'
 $script:IssueSearch = "in:body $script:IssueMarker is:open"
 
-# These are hve-core-derived modules; the check compares each file's UPSTREAM blob SHA
-# at the pinned ref vs the latest release, so local adaptations never cause false drift.
-# "drift" means upstream changed the file since the pinned ref and the change should
-# be reviewed and ported.
+# Blob-to-blob comparisons avoid false drift from intentional local adaptations.
 $script:DerivedFiles = @(
-    'scripts/security/Modules/SecurityHelpers.psm1'
-    'scripts/security/Modules/SecurityClasses.psm1'
-    'scripts/linting/Modules/LintingHelpers.psm1'
-    'scripts/tests/Mocks/GitMocks.psm1'
-    'scripts/lib/Modules/CIHelpers.psm1'
-    'scripts/linting/Modules/FrontmatterValidation.psm1'
+    [ordered]@{ Path = 'scripts/security/Modules/SecurityHelpers.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/security/Modules/SecurityClasses.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/linting/Modules/LintingHelpers.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/tests/Mocks/GitMocks.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/lib/Modules/CIHelpers.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/linting/Modules/FrontmatterValidation.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/security/Test-WorkflowPermissions.ps1'; Baseline = 'source-header' }
+    [ordered]@{ Path = 'scripts/security/Test-DangerousWorkflow.ps1'; Baseline = 'source-header' }
 )
 
 # ============================================================
@@ -94,6 +93,32 @@ function Get-PinnedHveCoreRef {
     $tag = if ($content -match 'hve-core release:\s*(\S+)') { $Matches[1] } else { 'unknown' }
 
     return [ordered]@{ Tag = $tag; Sha = $sha }
+}
+
+function Get-HveCoreFileSource {
+    <#
+    .SYNOPSIS
+        Reads an hve-core source path and commit from a vendored file's header.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    if (-not (Test-Path $Path)) {
+        throw "Derived file not found locally: $Path"
+    }
+
+    $content = Get-Content -Path $Path -Raw
+    $pattern = 'Adapted from\s+microsoft/hve-core\s+(scripts/security/\S+\.ps1)\s+as of commit\s+([0-9a-fA-F]{40})'
+    if ($content -notmatch $pattern) {
+        throw "Could not extract hve-core source revision from $Path"
+    }
+
+    return [ordered]@{
+        Path = $Matches[1]
+        Sha  = $Matches[2].ToLowerInvariant()
+    }
 }
 
 function Select-LatestRelease {
@@ -177,6 +202,9 @@ function Get-HveCoreFileDrift {
         Path              = $Path
         PinnedUpstreamSha = if ($pinnedUp) { $pinnedUp } else { '' }
         LatestUpstreamSha = if ($latestUp) { $latestUp } else { '' }
+        PinnedRef         = $PinnedRef
+        LatestRef         = $LatestRef
+        ComparisonUrl     = "https://github.com/$Repo/compare/$PinnedRef...$LatestRef"
         Drift             = ($state -ne 'current')
         State             = $state
     }
@@ -213,7 +241,10 @@ function Format-HveCoreDriftRow {
     $status = Get-HveCoreStateLabel -State $File.State
     $pSha = if ($File.PinnedUpstreamSha) { $File.PinnedUpstreamSha.Substring(0, [Math]::Min(7, $File.PinnedUpstreamSha.Length)) } else { '' }
     $lSha = if ($File.LatestUpstreamSha) { $File.LatestUpstreamSha.Substring(0, [Math]::Min(7, $File.LatestUpstreamSha.Length)) } else { '' }
-    return "| ``$($File.Path)`` | $pSha | $lSha | $status |"
+    $pRef = if ($File.PinnedRef -match '^[0-9a-fA-F]{40}$') { $File.PinnedRef.Substring(0, 7) } else { $File.PinnedRef }
+    $lRef = if ($File.LatestRef -match '^[0-9a-fA-F]{40}$') { $File.LatestRef.Substring(0, 7) } else { $File.LatestRef }
+    $comparison = if ($File.ComparisonUrl) { "[$pRef → $lRef]($($File.ComparisonUrl))" } else { '' }
+    return "| ``$($File.Path)`` | $comparison | $pSha | $lSha | $status |"
 }
 
 function Format-HveCoreIssueBody {
@@ -244,13 +275,13 @@ Drift baseline: ``$($pin.PinnedTag)`` (``UPSTREAM_REF`` in ``$($pin.File)``)
 
 ### Derived Files
 
-| File | Pinned Upstream blob | Latest Upstream blob | Status |
-|------|----------------------|----------------------|--------|
+| File | Upstream comparison | Pinned Upstream blob | Latest Upstream blob | Status |
+|------|---------------------|----------------------|----------------------|--------|
 $fileRows
 
 ### How to Refresh
 
-Review the upstream changes and port any relevant ones into the locally-adapted copy; do not blindly overwrite (these files carry intentional local adaptations). Compare link: https://github.com/microsoft/hve-core/compare/$compareBase...$($Result.LatestTag)
+Review the upstream changes and port any relevant ones into the locally-adapted copy; do not blindly overwrite (these files carry intentional local adaptations). Each row links to its exact baseline comparison. Release baseline: https://github.com/microsoft/hve-core/compare/$compareBase...$($Result.LatestTag)
 
 Run ``npm run lint:ps`` and ``npm run test:ps`` after changes.
 
@@ -279,17 +310,23 @@ function Format-HveCoreJobSummary {
         $fStatus = Get-HveCoreStateLabel -State $f.State
         $pSha = if ($f.PinnedUpstreamSha) { $f.PinnedUpstreamSha.Substring(0, [Math]::Min(7, $f.PinnedUpstreamSha.Length)) } else { '' }
         $lSha = if ($f.LatestUpstreamSha) { $f.LatestUpstreamSha.Substring(0, [Math]::Min(7, $f.LatestUpstreamSha.Length)) } else { '' }
-        "| $($f.Path) | $pSha | $lSha | $fStatus |"
+        $pRef = if ($f.PinnedRef -match '^[0-9a-fA-F]{40}$') { $f.PinnedRef.Substring(0, 7) } else { $f.PinnedRef }
+        $lRef = if ($f.LatestRef -match '^[0-9a-fA-F]{40}$') { $f.LatestRef.Substring(0, 7) } else { $f.LatestRef }
+        $comparison = if ($f.ComparisonUrl) { "[$pRef → $lRef]($($f.ComparisonUrl))" } else { '' }
+        "| $($f.Path) | $comparison | $pSha | $lSha | $fStatus |"
     }
+
+    $mainSummary = if ($Result.LatestMainSha) { "`nUpstream main: $($Result.LatestMainSha)" } else { '' }
 
     return @"
 ## hve-core Upstream Freshness
 
 Latest release: $($Result.LatestTag)
 Drift baseline: $($pin.PinnedTag)
+$mainSummary
 
-| Derived File | Pinned blob | Latest blob | Status |
-|--------------|-------------|-------------|--------|
+| Derived File | Upstream comparison | Pinned blob | Latest blob | Status |
+|--------------|---------------------|-------------|-------------|--------|
 $($fileRows -join "`n")
 "@
 }
@@ -364,6 +401,8 @@ function Invoke-HveCoreFreshnessCheck {
 
         $latestSha = Resolve-HveCoreCommitSha -Repo $script:UpstreamRepo -Ref $latestTag
         Write-Host "Latest hve-core release: $latestTag ($latestSha)"
+        $latestMainSha = Resolve-HveCoreCommitSha -Repo $script:UpstreamRepo -Ref 'main'
+        Write-Host "Latest hve-core main: $latestMainSha"
 
         $pinRef = Get-PinnedHveCoreRef -Path $script:SetupWorkflow
         if (-not $pinRef -or -not $pinRef.Sha) {
@@ -380,13 +419,29 @@ function Invoke-HveCoreFreshnessCheck {
             File      = $script:SetupWorkflow
         }
 
-        # --- Derived file drift ---
-        $fileResults = foreach ($path in $script:DerivedFiles) {
+        $fileResults = foreach ($file in $script:DerivedFiles) {
+            $path = $file.Path
             if (-not (Test-Path $path)) {
                 throw "Derived file not found locally: $path"
             }
 
-            $r = Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $path -PinnedRef $pinRef.Sha -LatestRef $latestTag
+            switch ($file.Baseline) {
+                'source-header' {
+                    $source = Get-HveCoreFileSource -Path $path
+                    if ($source.Path -ne $path) {
+                        throw "Recorded hve-core source path for $path is $($source.Path)"
+                    }
+                    $null = Resolve-HveCoreCommitSha -Repo $script:UpstreamRepo -Ref $source.Sha
+                    $r = Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $source.Path -PinnedRef $source.Sha -LatestRef 'main'
+                }
+                'release' {
+                    $r = Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $path -PinnedRef $pinRef.Sha -LatestRef $latestTag
+                }
+                default {
+                    throw "Unsupported hve-core baseline '$($file.Baseline)' for $path"
+                }
+            }
+
             $icon = if ($r.Drift) { 'DRIFT' } else { 'OK' }
             Write-Host "$icon $path : $($r.State)"
             $r
@@ -400,6 +455,7 @@ function Invoke-HveCoreFreshnessCheck {
         [ordered]@{
             LatestTag = $latestTag
             LatestUrl = $latestUrl
+            LatestMainSha = $latestMainSha
             Pin       = $pin
             Files     = $fileResults
         } | ConvertTo-Json -Depth 5 | Set-Content $ResultsFile
@@ -440,7 +496,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         Write-Host "Results File   : $ResultsFile"
         Write-Host "Repo Root      : $resolvedRoot"
         Write-Host 'Derived Files :'
-        $script:DerivedFiles | ForEach-Object { Write-Host "  - $_" }
+        $script:DerivedFiles | ForEach-Object { Write-Host "  - $($_.Path) [$($_.Baseline)]" }
         exit 0
     }
 
