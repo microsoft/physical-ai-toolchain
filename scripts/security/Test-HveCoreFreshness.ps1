@@ -282,11 +282,13 @@ function Format-HveCoreJobSummary {
         "| $($f.Path) | $pSha | $lSha | $fStatus |"
     }
 
+    $compareBase = if ($pin.PinnedTag -ne 'unknown') { $pin.PinnedTag } else { $pin.PinnedSha }
+
     return @"
 ## hve-core Upstream Freshness
 
 Latest release: $($Result.LatestTag)
-Drift baseline: $($pin.PinnedTag)
+Drift baseline: $compareBase
 
 | Derived File | Pinned blob | Latest blob | Status |
 |--------------|-------------|-------------|--------|

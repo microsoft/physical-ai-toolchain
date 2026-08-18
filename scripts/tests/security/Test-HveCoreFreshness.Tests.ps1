@@ -419,4 +419,17 @@ Describe 'Format-HveCoreJobSummary' -Tag 'Unit' {
         $summary | Should -Match '\| Pinned blob \| Latest blob \|'
         $summary | Should -Match '\| 1111111 \| 2222222 \|'
     }
+
+    It 'Uses the pinned SHA when the bootstrap ref has no release tag' {
+        $r = [pscustomobject]@{
+            LatestTag = 'hve-core-v9'
+            Pin = [pscustomobject]@{
+                PinnedTag = 'unknown'
+                PinnedSha = 'abcdef1234567890'
+            }
+            Files = @()
+        }
+
+        (Format-HveCoreJobSummary -Result $r) | Should -Match 'Drift baseline: abcdef1234567890'
+    }
 }
