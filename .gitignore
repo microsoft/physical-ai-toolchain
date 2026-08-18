@@ -57,6 +57,7 @@ Generated\ Files/
 # NUnit
 *.VisualState.xml
 TestResult.xml
+[Tt]est[Rr]esults.xml
 nunit-*.xml
 
 # Approval Tests result files

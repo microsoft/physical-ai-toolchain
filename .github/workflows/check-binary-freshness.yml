@@ -45,37 +45,47 @@ jobs:
               @{
                   Name    = 'uv'
                   Repo    = 'astral-sh/uv'
-                  Pattern = 'UV_VERSION="([^"]+)"'
-                  Files   = @(
-                      'setup-dev.sh'
-                      'training/rl/scripts/setup_isaac_runtime.sh'
-                      'infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh'
-                      'shared/ci/smoke-import.sh'
+                  Sources = @(
+                      @{ File = 'setup-dev.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
+                      @{ File = 'setup-dev.ps1'; Pattern = '\$UvVersion = ''([^'']+)''' }
+                      @{ File = 'training/rl/scripts/setup_isaac_runtime.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
+                      @{ File = 'infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
+                      @{ File = 'shared/ci/smoke-import.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
                   )
               }
               @{
                   Name    = 'terraform-docs'
                   Repo    = 'terraform-docs/terraform-docs'
-                  Pattern = 'TERRAFORM_DOCS_VERSION="([^"]+)"'
-                  Files   = @('setup-dev.sh')
+                  Sources = @(
+                      @{ File = 'setup-dev.sh'; Pattern = 'TERRAFORM_DOCS_VERSION="([^"]+)"' }
+                      @{ File = 'setup-dev.ps1'; Pattern = '\$TerraformDocsVersion = ''([^'']+)''' }
+                      @{ File = '.github/workflows/go-tests.yml'; Pattern = '\$version = ''v?([^'']+)''' }
+                      @{ File = '.github/workflows/terraform-docs-check.yml'; Pattern = 'default: ''v?([0-9][^'']+)''' }
+                  )
               }
               @{
                   Name    = 'tflint'
                   Repo    = 'terraform-linters/tflint'
-                  Pattern = 'TFLINT_VERSION=v?([0-9][^\s&"]+)'
-                  Files   = @('.devcontainer/devcontainer.json')
+                  Sources = @(
+                      @{ File = '.devcontainer/devcontainer.json'; Pattern = 'TFLINT_VERSION=v?([0-9][^\s&"]+)' }
+                      @{ File = '.github/workflows/terraform-lint.yml'; Pattern = 'tflint_version: v?([0-9][^\s]+)' }
+                  )
               }
               @{
                   Name    = 'actionlint'
                   Repo    = 'rhysd/actionlint'
-                  Pattern = 'ACTIONLINT_VERSION="\$\{ACTIONLINT_VERSION:-([0-9][^}]+)\}"'
-                  Files   = @('scripts/setup/install-actionlint.sh')
+                  Sources = @(
+                      @{ File = 'scripts/setup/install-actionlint.sh'; Pattern = 'ACTIONLINT_VERSION="\$\{ACTIONLINT_VERSION:-([0-9][^}]+)\}"' }
+                      @{ File = '.github/workflows/yaml-lint.yml'; Pattern = '\$version = ''([0-9][^'']+)''' }
+                  )
               }
               @{
                   Name    = 'golangci-lint'
                   Repo    = 'golangci/golangci-lint'
-                  Pattern = 'GOLANGCI_LINT_VERSION=([0-9][^\s&"]+)'
-                  Files   = @('.devcontainer/devcontainer.json')
+                  Sources = @(
+                      @{ File = '.devcontainer/devcontainer.json'; Pattern = 'GOLANGCI_LINT_VERSION=([0-9][^\s&"]+)' }
+                      @{ File = 'scripts/linting/Invoke-GoLint.ps1'; Pattern = '\$lintInstallVersion = ''([^'']+)''' }
+                  )
               }
           )
 
@@ -84,23 +94,21 @@ jobs:
           foreach ($tool in $tools) {
               $pinnedVersions = @()
 
-              foreach ($file in $tool.Files) {
-                  if (-not (Test-Path $file)) {
-                      Write-Warning "File not found: $file"
-                      continue
+              foreach ($source in $tool.Sources) {
+                  if (-not (Test-Path $source.File)) {
+                      throw "File not found for $($tool.Name): $($source.File)"
                   }
 
-                  $content = Get-Content $file -Raw
-                  if ($content -match $tool.Pattern) {
-                      $pinnedVersions += @{ File = $file; Version = $Matches[1] }
+                  $content = Get-Content $source.File -Raw
+                  if ($content -match $source.Pattern) {
+                      $pinnedVersions += @{ File = $source.File; Version = $Matches[1] }
                   } else {
-                      Write-Warning "Could not extract version for $($tool.Name) from $file"
+                      throw "Could not extract version for $($tool.Name) from $($source.File)"
                   }
               }
 
               if ($pinnedVersions.Count -eq 0) {
-                  Write-Warning "No versions found for $($tool.Name), skipping"
-                  continue
+                  throw "No pinned versions found for $($tool.Name)"
               }
 
               $pinnedVersion = $pinnedVersions[0].Version
@@ -122,7 +130,7 @@ jobs:
                   LatestTag     = $latestTag
                   IsStale       = $isStale
                   Inconsistent  = $inconsistent
-                  Files         = $tool.Files
+                  Files         = @($tool.Sources.File)
               }
 
               $status = if ($isStale) { '⚠️' } else { '✅' }

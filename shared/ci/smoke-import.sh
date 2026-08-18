@@ -16,7 +16,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 # shellcheck source=../../scripts/lib/common.sh
 source "$REPO_ROOT/scripts/lib/common.sh"
 
-# Pinned uv for in-container bootstrap, mirroring training/rl/scripts/train.sh.
+# Pinned uv for in-container bootstrap, mirroring training/rl/scripts/setup_isaac_runtime.sh.
 UV_VERSION="0.12.5"
 UV_SHA256="68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2"
 

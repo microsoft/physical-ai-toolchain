@@ -5,10 +5,10 @@
     {
       "name": "actionlint",
       "repo": "rhysd/actionlint",
-      "version": "1.7.11",
-      "sha256": "900919a84f2229bac68ca9cd4103ea297abc35e9689ebb842c6e34a3d1b01b0a",
+      "version": "1.7.12",
+      "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
       "downloadUrlTemplate": "https://github.com/rhysd/actionlint/releases/download/v{version}/actionlint_{version}_linux_amd64.tar.gz",
-      "notes": "Used in devcontainer for GitHub Actions workflow linting"
+      "notes": "Installed by scripts/setup/install-actionlint.sh for GitHub Actions workflow linting"
     },
     {
       "name": "gitleaks",

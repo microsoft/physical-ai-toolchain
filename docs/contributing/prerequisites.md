@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Prerequisites and Build Validation
 description: Required tools, Azure access, NGC credentials, and build validation commands for contributing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-25
+ms.date: 2026-08-18
 ms.topic: how-to
 keywords:
   - prerequisites
@@ -25,7 +25,7 @@ Install these tools before contributing:
 | Tool           | Minimum Version | Installation                                                                                                              |
 |----------------|-----------------|---------------------------------------------------------------------------------------------------------------------------|
 | Terraform      | 1.9.8           | <https://developer.hashicorp.com/terraform/install>                                                                       |
-| TFLint         | 0.61.0          | <https://github.com/terraform-linters/tflint>                                                                             |
+| TFLint         | 0.64.0          | <https://github.com/terraform-linters/tflint>                                                                             |
 | Azure CLI      | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>                                                                 |
 | kubectl        | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                                                                                 |
 | Helm           | 4.0             | <https://helm.sh/docs/intro/install/>                                                                                     |
@@ -34,7 +34,7 @@ Install these tools before contributing:
 | shellcheck     | 0.10+           | <https://www.shellcheck.net/>                                                                                             |
 | uv             | latest          | <https://docs.astral.sh/uv/>                                                                                              |
 | Go             | 1.24+           | <https://go.dev/dl/>                                                                                                      |
-| golangci-lint  | 2.11+           | <https://golangci-lint.run/welcome/install/>                                                                              |
+| golangci-lint  | 2.12+           | <https://golangci-lint.run/welcome/install/>                                                                              |
 | Docker         | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit)                                                     |
 | OSMO CLI       | latest          | <https://developer.nvidia.com/osmo>                                                                                       |
 | terraform-docs | 0.24.0          | <https://github.com/terraform-docs/terraform-docs/releases>                                                               |
@@ -114,7 +114,7 @@ Verify tool versions before validating:
 terraform version  # >= 1.9.8
 
 # TFLint (Terraform linter)
-tflint --version  # >= 0.61.0
+tflint --version  # >= 0.64.0
 
 # Azure CLI
 az version  # >= 2.65.0
@@ -141,7 +141,7 @@ uv --version
 go version  # >= 1.24
 
 # golangci-lint
-golangci-lint version  # >= 2.11
+golangci-lint version  # >= 2.12
 
 # Docker with NVIDIA Container Toolkit
 docker --version
@@ -162,7 +162,7 @@ code --list-extensions | grep -i hve-core
 
 ### TFLint Local Setup
 
-Install TFLint v0.61.0 or newer before changing Terraform modules:
+Install TFLint v0.64.0 or newer before changing Terraform modules:
 
 ```bash
 # macOS

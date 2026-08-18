@@ -1,7 +1,7 @@
 /** TFLint configuration for infrastructure/terraform and child modules */
 
 tflint {
-  required_version = ">= 0.61.0"
+  required_version = ">= 0.64.0"
 }
 
 config {

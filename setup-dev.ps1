@@ -1,6 +1,7 @@
 ﻿#!/usr/bin/env pwsh
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
+# cspell:ignore msvc
 
 #Requires -Version 7.0
 
@@ -138,23 +139,65 @@ Write-Info 'All required tools found'
 
 Write-Section 'UV Package Manager Setup'
 
-$UvVersion = '0.11.21'
+$UvVersion = '0.12.5'
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Info "Installing uv package manager v$UvVersion..."
-    $uvInstaller = Join-Path ([System.IO.Path]::GetTempPath()) 'uv-install.ps1'
+    $uvArch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
+        'X64' { 'x86_64' }
+        'Arm64' { 'aarch64' }
+        default { throw "Unsupported architecture for uv: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" }
+    }
+    $uvPlatform = if ($IsWindows) {
+        'pc-windows-msvc'
+    } elseif ($IsMacOS) {
+        'apple-darwin'
+    } elseif ($IsLinux) {
+        'unknown-linux-gnu'
+    } else {
+        throw 'Unsupported operating system for uv'
+    }
+    $uvTarget = "$uvArch-$uvPlatform"
+    $uvHashes = @{
+        'aarch64-apple-darwin'       = '5bb0e5fe008a773c3dbcb97ff79cd89e1241464fe9d2f986d52ad8f1b037bd62'
+        'aarch64-pc-windows-msvc'    = '724279317fee6e5fa8ad1908e4eba2bbe764ef1ece5b3f4597927b62b1fe562a'
+        'aarch64-unknown-linux-gnu'  = '9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31'
+        'x86_64-apple-darwin'        = 'b3b2137477cf96c9686ebfb71524614cec780c673fd73e59bce099aef02e70e8'
+        'x86_64-pc-windows-msvc'     = '4c4d49d8738847d9b71ba319e49a5688c93eac0fe6204b1df24e98528dddf39a'
+        'x86_64-unknown-linux-gnu'   = '68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2'
+    }
+    $uvExtension = if ($IsWindows) { 'zip' } else { 'tar.gz' }
+    $uvTempDir = Join-Path ([System.IO.Path]::GetTempPath()) "uv-$([guid]::NewGuid())"
+    $uvArchive = Join-Path $uvTempDir "uv.$uvExtension"
+    $uvUrl = "https://github.com/astral-sh/uv/releases/download/$UvVersion/uv-$uvTarget.$uvExtension"
     try {
-        Invoke-WebRequest -Uri "https://astral.sh/uv/$UvVersion/install.ps1" -OutFile $uvInstaller -UseBasicParsing
-        & $uvInstaller
+        New-Item -ItemType Directory -Path $uvTempDir -Force | Out-Null
+        Invoke-WebRequest -Uri $uvUrl -OutFile $uvArchive -UseBasicParsing
+        $actualHash = (Get-FileHash -Path $uvArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -ne $uvHashes[$uvTarget]) {
+            throw "uv archive checksum mismatch for $uvTarget"
+        }
+
+        if ($IsWindows) {
+            Expand-Archive -Path $uvArchive -DestinationPath $uvTempDir -Force
+        } else {
+            tar -xzf $uvArchive -C $uvTempDir
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to extract uv archive for $uvTarget"
+            }
+        }
+
+        $uvBinDir = Join-Path $HOME '.local/bin'
+        New-Item -ItemType Directory -Path $uvBinDir -Force | Out-Null
+        $uvExecutable = if ($IsWindows) { 'uv.exe' } else { 'uv' }
+        $uvxExecutable = if ($IsWindows) { 'uvx.exe' } else { 'uvx' }
+        $uvExtractedDir = if ($IsWindows) { $uvTempDir } else { Join-Path $uvTempDir "uv-$uvTarget" }
+        Move-Item (Join-Path $uvExtractedDir $uvExecutable) (Join-Path $uvBinDir $uvExecutable) -Force
+        Move-Item (Join-Path $uvExtractedDir $uvxExecutable) (Join-Path $uvBinDir $uvxExecutable) -Force
+        $env:PATH = "$uvBinDir$([System.IO.Path]::PathSeparator)$env:PATH"
     }
     finally {
-        Remove-Item $uvInstaller -Force -ErrorAction SilentlyContinue
-    }
-    if (-not $IsWindows) {
-        $env:PATH = "$HOME/.local/bin:$HOME/.cargo/bin:$env:PATH"
-    }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to install uv v$UvVersion"
+        Remove-Item $uvTempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
