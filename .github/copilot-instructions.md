@@ -334,7 +334,18 @@ The weekly `copilot-setup-steps.yml` cron and `Test-BinaryFreshness.ps1` weekly 
 
 The `Bootstrap hve-core RPI skills` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the complete RPI skill suite from a pinned `microsoft/hve-core` commit into `.github/skills/rpi/`.
 
-The cloud agent discovers the `rpi-quick`, `rpi-research`, `rpi-plan`, `rpi-implement`, and `rpi-review` workflows directly from their `SKILL.md` files. The bootstrap preserves each skill's bundled references and templates.
+The generated `.github/skills/rpi/` directory is gitignored. The bootstrap clears it before installation, rejects incomplete upstream trees, requires the five lifecycle entry points, and records the resolved commit and file inventory in `_audit.json`. Bootstrap failure is fatal because no local fallback provides these workflows.
+
+The cloud agent discovers the `rpi-quick`, `rpi-research`, `rpi-plan`, `rpi-implement`, and `rpi-review` workflows directly from their `SKILL.md` files. The bootstrap also preserves `rpi-challenger`, `rpi-plan-critique`, `rpi-walkthrough`, and every bundled reference and template.
+
+The current immutable commit predates a published hve-core release containing the skill-forward layout. Prefer a released commit on upgrades; when none exists, review the complete upstream commit and tree before changing `UPSTREAM_REF`.
+
+When RPI work touches repository-specific surfaces, preserve these safeguards:
+
+* `training/rl/**` and `training/rl/scripts/train.sh`: verify Isaac Sim ABI compatibility for numpy, torch, tensordict, ONNX Runtime GPU, SciPy, scikit-learn, PyArrow, OpenCV, and pynvml changes.
+* `evaluation/**/Dockerfile*` and `Dockerfile.lerobot-eval`: cross-check CUDA and cuDNN base-image changes against torch and ONNX Runtime GPU.
+* `infrastructure/terraform/**`: call out AzureRM provider major-version changes explicitly.
+* `data-management/viewer/**`: apply the FastAPI and React rules in `.github/instructions/dataviewer.instructions.md`.
 
 See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the RPI skill inventory.
 

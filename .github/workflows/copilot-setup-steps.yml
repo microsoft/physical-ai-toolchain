@@ -98,32 +98,61 @@ jobs:
       # customize-the-agent-firewall docs) so it can fetch content that the
       # agent itself cannot reach.
       #
-      # UPSTREAM_REF is pinned to the reviewed skill-consolidation commit to
-      # defend against malicious or breaking changes landing on `main`.
+      # UPSTREAM_REF is pinned to the reviewed skill-consolidation commit because
+      # no published hve-core release contains this skill layout. Prefer a release
+      # SHA on future upgrades; otherwise review the commit and complete tree.
       - name: Bootstrap hve-core RPI skills
         env:
           GH_TOKEN: ${{ github.token }}
           UPSTREAM_REPO: microsoft/hve-core
-          # microsoft/hve-core RPI skill consolidation (2026-07-27)
           UPSTREAM_REF: 130ab64338bb77e912e603693672c31f14bc60c6
           UPSTREAM_SKILLS_PATH: .github/skills/rpi
           DEST_DIR: .github/skills/rpi
         run: |
           set -euo pipefail
 
+          if [ -d "${DEST_DIR}" ]; then
+            find "${DEST_DIR}" -depth -mindepth 1 -delete
+          fi
           mkdir -p "${DEST_DIR}"
 
-          sha="$(gh api "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_REF}" --jq .sha)"
-          if [ -z "${sha}" ]; then
+          if ! sha="$(gh api "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_REF}" --jq .sha)" || [ -z "${sha}" ]; then
             echo "Failed to resolve ${UPSTREAM_REPO}@${UPSTREAM_REF} SHA" >&2
             exit 1
           fi
 
           echo "Resolved ${UPSTREAM_REPO}@${UPSTREAM_REF} -> ${sha}"
 
+          if ! tree_json="$(gh api "repos/${UPSTREAM_REPO}/git/trees/${sha}?recursive=1")"; then
+            echo "Failed to read ${UPSTREAM_REPO}@${sha} tree" >&2
+            exit 1
+          fi
+
+          if jq -e '.truncated == true' <<<"${tree_json}" >/dev/null; then
+            echo "Git tree response was truncated for ${UPSTREAM_REPO}@${sha}" >&2
+            exit 1
+          fi
+
+          mapfile -t unsupported_files < <(
+            jq -r --arg prefix "${UPSTREAM_SKILLS_PATH}/" \
+              '.tree[]
+              | select(.type == "blob")
+              | select(.path | startswith($prefix))
+              | select(.mode != "100644" and .mode != "100755")
+              | .path' <<<"${tree_json}"
+          )
+          if [ "${#unsupported_files[@]}" -gt 0 ]; then
+            printf 'Unsupported RPI skill file mode: %s\n' "${unsupported_files[@]}" >&2
+            exit 1
+          fi
+
           mapfile -t skill_files < <(
-            gh api "repos/${UPSTREAM_REPO}/git/trees/${sha}?recursive=1" \
-              --jq ".tree[] | select(.type == \"blob\") | select(.path | startswith(\"${UPSTREAM_SKILLS_PATH}/\")) | .path"
+            jq -r --arg prefix "${UPSTREAM_SKILLS_PATH}/" \
+              '.tree[]
+              | select(.type == "blob")
+              | select(.mode == "100644" or .mode == "100755")
+              | select(.path | startswith($prefix))
+              | .path' <<<"${tree_json}"
           )
 
           if [ "${#skill_files[@]}" -eq 0 ]; then
@@ -131,23 +160,56 @@ jobs:
             exit 1
           fi
 
-          skill_count=0
+          declare -A discovered_files=()
           for path in "${skill_files[@]}"; do
-            relative_path="${path#"${UPSTREAM_SKILLS_PATH}/"}"
-            destination="${DEST_DIR}/${relative_path}"
-            mkdir -p "$(dirname "${destination}")"
-            curl -fsSL "https://raw.githubusercontent.com/${UPSTREAM_REPO}/${sha}/${path}" -o "${destination}"
-            if [[ "${path}" == */SKILL.md ]]; then
-              skill_count=$((skill_count + 1))
-            fi
+            discovered_files["${path}"]=1
           done
 
-          if [ "${skill_count}" -eq 0 ]; then
-            echo "No SKILL.md files discovered under ${UPSTREAM_REPO}@${sha}:${UPSTREAM_SKILLS_PATH}" >&2
+          required_skills=(rpi-quick rpi-research rpi-plan rpi-implement rpi-review)
+          missing_skills=()
+          for skill in "${required_skills[@]}"; do
+            required_path="${UPSTREAM_SKILLS_PATH}/${skill}/SKILL.md"
+            if [ -z "${discovered_files[${required_path}]:-}" ]; then
+              missing_skills+=("${skill}")
+            fi
+          done
+          if [ "${#missing_skills[@]}" -gt 0 ]; then
+            printf 'Missing required RPI skill: %s\n' "${missing_skills[@]}" >&2
             exit 1
           fi
 
-          echo "Installed ${skill_count} RPI skills from ${UPSTREAM_REPO}@${sha}"
+          for path in "${skill_files[@]}"; do
+            relative_path="${path#"${UPSTREAM_SKILLS_PATH}/"}"
+            case "${relative_path}" in
+              '' | /* | ../* | */../* | */..)
+                echo "Unsafe RPI skill path: ${path}" >&2
+                exit 1
+                ;;
+            esac
+            destination="${DEST_DIR}/${relative_path}"
+            mkdir -p "$(dirname "${destination}")"
+            curl --fail --silent --show-error --location \
+              --retry 3 --retry-delay 2 --retry-all-errors \
+              "https://raw.githubusercontent.com/${UPSTREAM_REPO}/${sha}/${path}" \
+              --output "${destination}"
+          done
+
+          files_json="$(printf '%s\n' "${skill_files[@]}" | jq -R . | jq -s .)"
+          jq -n \
+            --arg upstream_repo "${UPSTREAM_REPO}" \
+            --arg requested_ref "${UPSTREAM_REF}" \
+            --arg resolved_sha "${sha}" \
+            --arg resolved_at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --argjson files "${files_json}" \
+            '{
+              upstream_repo: $upstream_repo,
+              requested_ref: $requested_ref,
+              resolved_sha: $resolved_sha,
+              resolved_at: $resolved_at,
+              files: $files
+            }' > "${DEST_DIR}/_audit.json"
+
+          echo "Installed ${#required_skills[@]} required RPI skills and ${#skill_files[@]} files from ${UPSTREAM_REPO}@${sha}"
 
       - name: Install PowerShell modules (Pester 5.7.1, powershell-yaml 0.4.12)
         shell: pwsh

@@ -6,6 +6,7 @@
 BeforeAll {
     . $PSScriptRoot/../../security/Test-HveCoreFreshness.ps1
 
+    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:SetupPath = Join-Path $TestDrive 'copilot-setup-steps.yml'
     @'
       - name: Bootstrap hve-core RPI persona
@@ -33,6 +34,34 @@ Describe 'Get-PinnedHveCoreRef' -Tag 'Unit' {
         $ref = Get-PinnedHveCoreRef -Path $p
         $ref.Sha | Should -BeNullOrEmpty
         $ref.Tag | Should -Be 'unknown'
+    }
+}
+
+Describe 'RPI bootstrap workflow contract' -Tag 'Unit' {
+    BeforeAll {
+        $script:CheckedInSetupPath = Join-Path $script:RepoRoot '.github/workflows/copilot-setup-steps.yml'
+        $script:CheckedInSetup = Get-Content -Path $script:CheckedInSetupPath -Raw
+    }
+
+    It 'Pins the checked-in bootstrap to an immutable commit' {
+        $ref = Get-PinnedHveCoreRef -Path $script:CheckedInSetupPath
+
+        $ref.Sha | Should -Match '^[0-9a-f]{40}$'
+    }
+
+    It 'Rejects truncated trees and requires every lifecycle skill' {
+        $script:CheckedInSetup | Should -Match '\.truncated == true'
+        foreach ($skill in @('rpi-quick', 'rpi-research', 'rpi-plan', 'rpi-implement', 'rpi-review')) {
+            $script:CheckedInSetup | Should -Match ([regex]::Escape($skill))
+        }
+    }
+
+    It 'Cleans and audits the gitignored runtime destination' {
+        $gitignore = Get-Content -Path (Join-Path $script:RepoRoot '.gitignore') -Raw
+
+        $gitignore | Should -Match '(?m)^\.github/skills/rpi/$'
+        $script:CheckedInSetup | Should -Match 'find "\$\{DEST_DIR\}" -depth -mindepth 1 -delete'
+        $script:CheckedInSetup | Should -Match '"\$\{DEST_DIR\}/_audit\.json"'
     }
 }
 

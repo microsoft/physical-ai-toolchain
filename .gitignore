@@ -463,6 +463,7 @@ venv/
 .hypothesis/
 **/out/*
 .copilot-tracking/
+.github/skills/rpi/
 
 # Environment-specific deployment artifacts
 infrastructure/setup/generated/

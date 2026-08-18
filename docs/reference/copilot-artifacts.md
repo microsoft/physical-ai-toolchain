@@ -17,8 +17,8 @@ keywords:
 
 GitHub Copilot extensibility artifacts provide AI-assisted workflows
 for dataset analysis, training job management, and coding standards
-enforcement. These artifacts are configured in `.github/` and activate
-automatically in VS Code.
+enforcement. Committed artifacts activate automatically in VS Code.
+The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 
 ## 📋 Artifact Inventory
 
@@ -35,7 +35,7 @@ automatically in VS Code.
 | Prompt      | `/start-dataviewer`        | Launch Dataset Analysis Tool                        | `.github/prompts/start-dataviewer.prompt.md`                      |
 | Prompt      | `/submit-lerobot-training` | Submit LeRobot training job to OSMO                 | `.github/prompts/submit-lerobot-training.prompt.md`               |
 | Skill       | dataviewer                 | Dataset browsing, annotation, and export            | `.github/skills/dataviewer/SKILL.md`                              |
-| Skill       | hve-core RPI               | Research, plan, implement, review lifecycle         | `.github/skills/rpi/`                                             |
+| Skill suite | RPI                        | Cloud-agent research, plan, implement, review       | `.github/skills/rpi/` (runtime-generated, gitignored)             |
 | Skill       | osmo-lerobot-training      | Training submission, monitoring, and analysis       | `.github/skills/osmo-lerobot-training/SKILL.md`                   |
 
 ## 🔗 Quick Reference
@@ -135,17 +135,22 @@ discovery (frontmatter only) → instructions (SKILL.md body) → resources
 ### hve-core RPI
 
 The cloud-agent setup workflow downloads the complete RPI skill suite from
-a pinned `microsoft/hve-core` commit into `.github/skills/rpi/`. Each skill
-retains its upstream references and templates.
+a pinned `microsoft/hve-core` commit into the gitignored
+`.github/skills/rpi/` directory. Local clones do not contain these skills
+unless the setup workflow has provisioned them. Each skill retains its
+upstream references and templates, and `_audit.json` records the resolved
+commit and installed file inventory.
 
-| Skill             | Purpose                                             |
-|-------------------|-----------------------------------------------------|
-| `rpi-quick`       | Coordinate the complete RPI lifecycle               |
-| `rpi-research`    | Gather evidence and produce planning-ready findings |
-| `rpi-plan`        | Build and critique an implementation plan           |
-| `rpi-implement`   | Execute approved plan phases and validate changes   |
-| `rpi-review`      | Review implementation evidence and route follow-ups |
-| Supporting skills | Challenge, critique, and walkthrough RPI artifacts  |
+| Skill               | Purpose                                             |
+|---------------------|-----------------------------------------------------|
+| `rpi-quick`         | Coordinate the complete RPI lifecycle               |
+| `rpi-research`      | Gather evidence and produce planning-ready findings |
+| `rpi-plan`          | Build and critique an implementation plan           |
+| `rpi-implement`     | Execute approved plan phases and validate changes   |
+| `rpi-review`        | Review implementation evidence and route follow-ups |
+| `rpi-challenger`    | Challenge scope and assumptions                     |
+| `rpi-plan-critique` | Assess plans independently                          |
+| `rpi-walkthrough`   | Walk through RPI artifacts and decisions            |
 
 ## 🔄 Workflow Chains
 
