@@ -36,7 +36,7 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 | Prompt      | `/submit-lerobot-training` | Submit LeRobot training job to OSMO                 | `.github/prompts/submit-lerobot-training.prompt.md`               |
 | Skill       | dataviewer                 | Dataset browsing, annotation, and export            | `.github/skills/dataviewer/SKILL.md`                              |
 | Skill       | osmo-lerobot-training      | Training submission, monitoring, and analysis       | `.github/skills/osmo-lerobot-training/SKILL.md`                   |
-| Skill       | rpi-*                      | Cloud-agent research, plan, implement, review       | `.github/skills/rpi/` (runtime-provisioned, gitignored)           |
+| Skill       | rpi-*                      | Cloud-agent research, plan, implement, review       | `.github/skills/rpi-*/` (runtime-provisioned, gitignored)         |
 
 ## 🔗 Quick Reference
 
@@ -135,11 +135,12 @@ discovery (frontmatter only) → instructions (SKILL.md body) → resources
 ### rpi skill suite
 
 The cloud-agent setup workflow downloads the complete RPI skill suite from
-a pinned `microsoft/hve-core` commit into the gitignored
-`.github/skills/rpi/` directory. Local clones do not contain these skills
-unless the setup workflow has provisioned them. Each skill retains its
-upstream references and templates, and `_audit.json` records the resolved
-commit and installed file inventory. All eight skill entry points are required.
+a pinned `microsoft/hve-core` commit into gitignored `.github/skills/rpi-*/`
+directories. Each skill is an immediate child of `.github/skills/`, as required
+for discovery. Local clones do not contain these skills unless the setup
+workflow has provisioned them. Each skill retains its upstream references and
+templates, and `.github/skills/.rpi-audit.json` records the resolved commit and
+installed file inventory. All eight skill entry points are required.
 
 | Skill               | Purpose                                             |
 |---------------------|-----------------------------------------------------|

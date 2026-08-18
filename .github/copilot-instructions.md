@@ -332,15 +332,15 @@ The weekly `copilot-setup-steps.yml` cron and `Test-BinaryFreshness.ps1` weekly 
 
 ### Cloud-Agent RPI Skills
 
-The `Bootstrap hve-core RPI skills` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the complete RPI skill suite from a pinned `microsoft/hve-core` commit into `.github/skills/rpi/`.
+The `Bootstrap hve-core RPI skills` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the complete RPI skill suite from a pinned `microsoft/hve-core` commit into immediate subdirectories of `.github/skills/`.
 
-The generated `.github/skills/rpi/` directory is gitignored and excluded from repository Markdown linting. The standalone bootstrap script stages downloads before installation, accepts Markdown blobs only, verifies each pinned Git blob SHA, requires all eight skill entry points, and records the resolved commit and file inventory in `_audit.json`. Bootstrap failure is fatal because no local fallback provides these workflows.
+The generated `.github/skills/rpi-*/` directories are gitignored and excluded from repository Markdown linting. The standalone bootstrap script stages downloads before installation, accepts Markdown blobs only, verifies each pinned Git blob SHA, requires all eight skill entry points, and records the resolved commit and file inventory in `.github/skills/.rpi-audit.json`. Bootstrap failure is fatal because no local fallback provides these workflows.
 
 The cloud agent discovers the `rpi-quick`, `rpi-research`, `rpi-plan`, `rpi-implement`, and `rpi-review` workflows directly from their `SKILL.md` files. The bootstrap also preserves `rpi-challenger`, `rpi-plan-critique`, `rpi-walkthrough`, and every bundled reference and template.
 
 The current immutable commit predates a published hve-core release containing the skill-forward layout. Prefer a released commit on upgrades; when none exists, review the complete upstream commit and tree before changing `UPSTREAM_REF`.
 
-Before starting RPI work, verify `.github/skills/rpi/_audit.json` exists and contains the expected pinned `resolved_sha`; otherwise stop with a bootstrap failure. Treat `.copilot-tracking/` files as session scratch because the directory is gitignored.
+Before starting RPI work, verify `.github/skills/.rpi-audit.json` exists and contains the expected pinned `resolved_sha`; otherwise stop with a bootstrap failure. Treat `.copilot-tracking/` files as session scratch because the directory is gitignored.
 
 In cloud-agent PR work, persist each completed RPI phase as a PR comment and maintain an `RPI Artifact Index` in the PR description with the phase comment links and resolved upstream SHA. If PR write tools are unavailable, include the complete phase artifacts in the final response rather than claiming durable persistence.
 

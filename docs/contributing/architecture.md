@@ -392,7 +392,7 @@ This repository defines project-specific artifacts in `.github/` that extend HVE
 | Agents        | 2     | OSMO training manager, dataviewer developer                                      |
 | Instructions  | 4     | Copilot instructions, dataviewer conventions, documentation style, shell scripts |
 | Prompts       | 4     | OSMO training submission, LeRobot pipeline, dataviewer workflows                 |
-| Skills        | 2 + 8 | Two committed domain skills and eight runtime-provisioned RPI skills             |
+| Skills        | 7 + 8 | Seven committed domain skills and eight runtime-provisioned RPI skills           |
 
 Project artifacts are auto-discovered by VS Code from the `.github/` directory without explicit registration.
 

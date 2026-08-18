@@ -7,8 +7,7 @@ set -o errexit -o nounset -o pipefail
 UPSTREAM_REPO="${UPSTREAM_REPO:-microsoft/hve-core}"
 UPSTREAM_REF="${UPSTREAM_REF:-}"
 UPSTREAM_SKILLS_PATH="${UPSTREAM_SKILLS_PATH:-.github/skills/rpi}"
-# DEST_DIR may relocate the workspace root, but the discovery leaf must remain .github/skills/rpi.
-DEST_DIR="${DEST_DIR:-.github/skills/rpi}"
+SKILLS_ROOT="${SKILLS_ROOT:-.github/skills}"
 
 required_skills=(
     rpi-quick
@@ -64,14 +63,15 @@ require_tools curl gh git jq mktemp
 UPSTREAM_SKILLS_PATH="${UPSTREAM_SKILLS_PATH%/}"
 [ -n "$UPSTREAM_SKILLS_PATH" ] || fail "UPSTREAM_SKILLS_PATH is required"
 
-dest_parent="$(dirname "$DEST_DIR")"
-mkdir -p "$dest_parent"
-dest_parent="$(cd "$dest_parent" && pwd)"
-dest_abs="${dest_parent}/$(basename "$DEST_DIR")"
-case "$dest_abs" in
-*/.github/skills/rpi) ;;
-*) fail "Refusing nonstandard RPI destination: ${dest_abs}" ;;
+skills_parent="$(dirname "$SKILLS_ROOT")"
+mkdir -p "$skills_parent"
+skills_parent="$(cd "$skills_parent" && pwd)"
+skills_root_abs="${skills_parent}/$(basename "$SKILLS_ROOT")"
+case "$skills_root_abs" in
+*/.github/skills) ;;
+*) fail "Refusing nonstandard skills root: ${skills_root_abs}" ;;
 esac
+mkdir -p "$skills_root_abs"
 
 commit_json="$(gh_api_with_retry "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_REF}")" ||
     fail "Failed to resolve ${UPSTREAM_REPO}@${UPSTREAM_REF}"
@@ -101,16 +101,33 @@ entries_file="$(mktemp)"
 paths_file="$(mktemp)"
 staging_dir=""
 backup_dir=""
+installed_skills=()
+audit_installed=false
+install_started=false
 install_complete=false
 cleanup() {
     rm -f "$entries_file" "$paths_file"
     if [ -n "$staging_dir" ] && [ -d "$staging_dir" ]; then
         rm -rf "$staging_dir"
     fi
-    if [ "$install_complete" != true ] && [ -n "$backup_dir" ] && [ -e "$backup_dir" ]; then
-        if [ ! -e "$dest_abs" ]; then
-            mv "$backup_dir" "$dest_abs"
+    if [ "$install_started" = true ] && [ "$install_complete" != true ]; then
+        for skill in "${installed_skills[@]}"; do
+            rm -rf "${skills_root_abs:?}/${skill}"
+        done
+        if [ "$audit_installed" = true ]; then
+            rm -f "${skills_root_abs}/.rpi-audit.json"
         fi
+        for skill in "${required_skills[@]}"; do
+            if [ -e "${backup_dir}/${skill}" ]; then
+                mv "${backup_dir}/${skill}" "${skills_root_abs}/${skill}"
+            fi
+        done
+        if [ -e "${backup_dir}/.rpi-audit.json" ]; then
+            mv "${backup_dir}/.rpi-audit.json" "${skills_root_abs}/.rpi-audit.json"
+        fi
+    fi
+    if [ -n "$backup_dir" ] && [ -d "$backup_dir" ]; then
+        rm -rf "$backup_dir"
     fi
 }
 trap cleanup EXIT
@@ -132,9 +149,7 @@ for skill in "${required_skills[@]}"; do
         fail "Missing required RPI skill: ${skill}"
 done
 
-staging_dir="$(mktemp -d "${dest_abs}.staging.XXXXXX")"
-install_root="${staging_dir}/rpi"
-mkdir -p "$install_root"
+staging_dir="$(mktemp -d "${skills_root_abs}/.rpi-staging.XXXXXX")"
 
 while IFS=$'\t' read -r path blob_sha; do
     relative_path="${path#"${UPSTREAM_SKILLS_PATH}/"}"
@@ -146,7 +161,7 @@ while IFS=$'\t' read -r path blob_sha; do
     [[ "$relative_path" =~ ^[A-Za-z0-9._/-]+$ ]] ||
         fail "Unsafe characters in RPI skill path: ${path}"
 
-    destination="${install_root}/${relative_path}"
+    destination="${staging_dir}/${relative_path}"
     mkdir -p "$(dirname "$destination")"
     # pinning-ignore: content is verified against the pinned Git blob SHA immediately below.
     curl --fail --silent --show-error --location \
@@ -160,7 +175,7 @@ while IFS=$'\t' read -r path blob_sha; do
 done <"$entries_file"
 
 for skill in "${required_skills[@]}"; do
-    [ -s "${install_root}/${skill}/SKILL.md" ] ||
+    [ -s "${staging_dir}/${skill}/SKILL.md" ] ||
         fail "Installed RPI skill is missing or empty: ${skill}"
 done
 
@@ -177,18 +192,29 @@ jq -n \
       resolved_sha: $resolved_sha,
       resolved_at: $resolved_at,
       files: $files
-    }' >"${install_root}/_audit.json"
+    }' >"${staging_dir}/.rpi-audit.json"
 
-backup_dir="${dest_abs}.backup.$$"
-if [ -e "$dest_abs" ]; then
-    mv "$dest_abs" "$backup_dir"
-fi
-if ! mv "$install_root" "$dest_abs"; then
-    if [ -e "$backup_dir" ]; then
-        mv "$backup_dir" "$dest_abs"
+backup_dir="$(mktemp -d "${skills_root_abs}/.rpi-backup.XXXXXX")"
+install_started=true
+for skill in "${required_skills[@]}"; do
+    if [ -e "${skills_root_abs}/${skill}" ]; then
+        mv "${skills_root_abs}/${skill}" "${backup_dir}/${skill}"
     fi
-    fail "Failed to install RPI skills into ${dest_abs}"
+done
+if [ -e "${skills_root_abs}/.rpi-audit.json" ]; then
+    mv "${skills_root_abs}/.rpi-audit.json" "${backup_dir}/.rpi-audit.json"
 fi
+
+for skill in "${required_skills[@]}"; do
+    if ! mv "${staging_dir}/${skill}" "${skills_root_abs}/${skill}"; then
+        fail "Failed to install RPI skill into ${skills_root_abs}/${skill}"
+    fi
+    installed_skills+=("$skill")
+done
+if ! mv "${staging_dir}/.rpi-audit.json" "${skills_root_abs}/.rpi-audit.json"; then
+    fail "Failed to install RPI audit manifest into ${skills_root_abs}"
+fi
+audit_installed=true
 rm -rf "$backup_dir"
 backup_dir=""
 install_complete=true

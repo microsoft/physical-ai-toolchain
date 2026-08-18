@@ -463,9 +463,17 @@ venv/
 .hypothesis/
 **/out/*
 .copilot-tracking/
-.github/skills/rpi/
-.github/skills/rpi.backup.*
-.github/skills/rpi.staging.*
+.github/skills/rpi-quick/
+.github/skills/rpi-research/
+.github/skills/rpi-plan/
+.github/skills/rpi-implement/
+.github/skills/rpi-review/
+.github/skills/rpi-challenger/
+.github/skills/rpi-plan-critique/
+.github/skills/rpi-walkthrough/
+.github/skills/.rpi-audit.json
+.github/skills/.rpi-backup.*
+.github/skills/.rpi-staging.*
 
 # Environment-specific deployment artifacts
 infrastructure/setup/generated/
