@@ -76,6 +76,15 @@ The review body prepends a `⚠️ Maintainer review recommended` banner when an
 
 Maintainers remain the source of truth — the reviewer is advisory context, not automated policy.
 
+### Patch Auto-merge
+
+[.github/workflows/dependabot-auto-merge.yml](pathname://../../.github/workflows/dependabot-auto-merge.yml) enables auto-merge for patch-only, non-security bumps in github-actions, terraform, npm, and docker. Major and minor bumps, uv (GPU/ABI risk), and any security update always stay in manual review. Merge is never forced — auto-merge waits for the required `pr-validation-summary` check, then merges by squash.
+
+Auto-merge requires the repo's **Allow auto-merge** setting (Settings → General → Pull Requests); until it is on the workflow is a green no-op. Each dependabot patch PR still needs its one approval and green checks before it merges — auto-merge only drops the final click.
+
+> [!WARNING]
+> Revert playbook: if an auto-merged patch breaks `main`, `gh pr revert <num>` (or `git revert <sha>`) and merge the revert. Then add an `ignore` pin in `.github/dependabot.yml` for the bad version.
+
 ### Python Lockfiles
 
 Every Python subproject carries a committed `uv.lock` beside its `pyproject.toml`. The lock is the single resolution source of truth — runtime-flat `requirements.txt` files are not committed.
