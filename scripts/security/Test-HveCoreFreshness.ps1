@@ -57,6 +57,10 @@ $script:IssueSearch = "in:body $script:IssueMarker is:open"
 $script:FullShaPattern = '^[0-9a-fA-F]{40}$'
 $script:ShortShaLength = 7
 
+class HveCoreFileValidationException : System.Exception {
+    HveCoreFileValidationException([string]$message) : base($message) {}
+}
+
 # Release entries use the RPI pin; source-header entries require the exact header
 # "Adapted from microsoft/hve-core <path> as of commit <40-hex SHA>" and track main.
 # Blob-to-blob comparisons avoid false drift from intentional local adaptations.
@@ -110,17 +114,17 @@ function Get-HveCoreFileSource {
     )
 
     if (-not (Test-Path $Path)) {
-        throw "Derived file not found locally: $Path"
+        throw [HveCoreFileValidationException]::new("Derived file not found locally: $Path")
     }
 
     $content = Get-Content -Path $Path -Raw
     $pattern = 'Adapted from\s+microsoft/hve-core\s+(\S+)\s+as of commit\s+([0-9a-fA-F]{40})(?:\.|\s|$)'
     $sourceMatches = [regex]::Matches($content, $pattern)
     if ($sourceMatches.Count -eq 0) {
-        throw "Could not extract hve-core source revision from $Path"
+        throw [HveCoreFileValidationException]::new("Could not extract hve-core source revision from $Path")
     }
     if ($sourceMatches.Count -gt 1) {
-        throw "Found multiple hve-core source revisions in $Path"
+        throw [HveCoreFileValidationException]::new("Found multiple hve-core source revisions in $Path")
     }
     $match = $sourceMatches[0]
 
@@ -460,7 +464,9 @@ function Assert-HveCoreCommitOnMain {
         throw "Could not verify source commit '$CommitSha' against upstream main in ${Repo}: $mergeBase"
     }
     if (("$mergeBase").Trim() -ne $CommitSha) {
-        throw "Recorded source commit '$CommitSha' is not an ancestor of upstream main '$MainSha'"
+        throw [HveCoreFileValidationException]::new(
+            "Recorded source commit '$CommitSha' is not an ancestor of upstream main '$MainSha'"
+        )
     }
 }
 
@@ -479,14 +485,16 @@ function Get-HveCoreFileDriftForBaseline {
 
     $path = $File.Path
     if (-not (Test-Path $path)) {
-        throw "Derived file not found locally: $path"
+        throw [HveCoreFileValidationException]::new("Derived file not found locally: $path")
     }
 
     switch ($File.Baseline) {
         'source-header' {
             $source = Get-HveCoreFileSource -Path $path
             if ($source.Path -ne $path) {
-                throw "Vendored path '$path' must match its recorded hve-core source path, but the header records '$($source.Path)'"
+                throw [HveCoreFileValidationException]::new(
+                    "Vendored path '$path' must match its recorded hve-core source path, but the header records '$($source.Path)'"
+                )
             }
             Assert-HveCoreCommitOnMain -Repo $script:UpstreamRepo -CommitSha $source.Sha -MainSha $LatestMainSha
             return Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $source.Path -PinnedRef $source.Sha -LatestRef $LatestMainSha
@@ -495,7 +503,7 @@ function Get-HveCoreFileDriftForBaseline {
             return Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $path -PinnedRef $PinnedReleaseSha -LatestRef $LatestReleaseTag
         }
         default {
-            throw "Unsupported hve-core baseline '$($File.Baseline)' for $path"
+            throw [HveCoreFileValidationException]::new("Unsupported hve-core baseline '$($File.Baseline)' for $path")
         }
     }
 }
@@ -546,7 +554,7 @@ function Invoke-HveCoreFreshnessCheck {
                 $r = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha $pinRef.Sha -LatestReleaseTag $latestTag -LatestMainSha $latestMainSha
                 $r['Baseline'] = $file.Baseline
             }
-            catch {
+            catch [HveCoreFileValidationException] {
                 $r = [ordered]@{
                     Path              = $path
                     Baseline          = $file.Baseline

@@ -557,7 +557,7 @@ Describe 'Invoke-HveCoreFreshnessCheck' -Tag 'Unit' {
         $resultsFile = Join-Path $TestDrive 'results-with-error.json'
         Mock Get-HveCoreFileDriftForBaseline {
             if ($File.Path -eq 'scripts/security/Test-DangerousWorkflow.ps1') {
-                throw 'invalid provenance header'
+                throw [HveCoreFileValidationException]::new('invalid provenance header')
             }
             [ordered]@{
                 Path = $File.Path
@@ -580,5 +580,17 @@ Describe 'Invoke-HveCoreFreshnessCheck' -Tag 'Unit' {
         $failed.State | Should -Be 'error'
         $failed.Error | Should -Be 'invalid provenance header'
         $failed.Drift | Should -BeTrue
+    }
+
+    It 'Propagates upstream failures instead of reporting false drift' {
+        $resultsFile = Join-Path $TestDrive 'results-with-api-error.json'
+        Mock Get-HveCoreFileDriftForBaseline {
+            throw 'gh api failed for scripts/security/Test-DangerousWorkflow.ps1@main'
+        }
+
+        {
+            Invoke-HveCoreFreshnessCheck -RepoRoot $script:RepoRoot -ResultsFile $resultsFile
+        } | Should -Throw '*gh api failed*'
+        Test-Path $resultsFile | Should -BeFalse
     }
 }
