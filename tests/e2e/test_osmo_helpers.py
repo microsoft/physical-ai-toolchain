@@ -18,6 +18,8 @@ from tests.e2e._common import delete_blob_prefix
 from tests.e2e._osmo import (
     _OSMO_MAX_NODE_DISRUPTION_RESTARTS,
     OSMOWorkflow,
+    _osmo_status,
+    _task_statuses,
     cancel_osmo_workflow,
     wait_until_osmo_completed,
     wait_until_osmo_started,
@@ -164,3 +166,45 @@ def test_restart_settle_tolerates_stale_disruption_status(monkeypatch: pytest.Mo
     _osmo._wait_until_osmo_restarted(workflow, Path("."), poll_interval_seconds=0)
 
     assert workflow.is_terminal is False
+
+
+def test_task_statuses_collects_across_groups_and_tasks() -> None:
+    payload = {
+        "groups": [
+            {"tasks": [{"status": "SUCCEEDED"}, {"status": " FAILED_EVICTED "}]},
+            {"tasks": [{"status": "RUNNING"}]},
+        ]
+    }
+
+    assert _task_statuses(payload) == ["SUCCEEDED", "FAILED_EVICTED", "RUNNING"]
+
+
+def test_task_statuses_ignores_malformed_shapes() -> None:
+    # Defends against payloads where "groups"/"tasks" aren't lists, tasks aren't mappings, or a
+    # status is missing/blank/non-string — any of which would otherwise raise instead of degrading
+    # to "no task-level signal", falling back to the top-level status.
+    assert _task_statuses({}) == []
+    assert _task_statuses({"groups": "not-a-list"}) == []
+    assert _task_statuses({"groups": [{"tasks": "not-a-list"}]}) == []
+    assert _task_statuses({"groups": [{"tasks": ["not-a-mapping"]}]}) == []
+    assert _task_statuses({"groups": [{"tasks": [{"status": ""}, {"status": None}, {}]}]}) == []
+
+
+def test_osmo_status_prefers_task_level_disruption_over_top_level_failed() -> None:
+    # OSMO rolls up a node-disruption task status into a generic top-level "FAILED"; the
+    # task-level status must win so the restart-on-disruption logic can engage.
+    payload = {"status": "FAILED", "groups": [{"tasks": [{"status": "FAILED_BACKEND_ERROR"}]}]}
+
+    assert _osmo_status(payload) == "FAILED_BACKEND_ERROR"
+
+
+def test_osmo_status_falls_back_to_top_level_for_non_disruption_failure() -> None:
+    # A genuine application failure has no matching task-level disruption status, so the
+    # top-level field is used as-is rather than being masked or misreported.
+    payload = {"status": "FAILED", "groups": [{"tasks": [{"status": "FAILED_EXEC_TIMEOUT"}]}]}
+
+    assert _osmo_status(payload) == "FAILED"
+
+
+def test_osmo_status_defaults_to_unknown_when_no_status_found() -> None:
+    assert _osmo_status({}) == "UNKNOWN"

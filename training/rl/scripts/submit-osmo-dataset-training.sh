@@ -182,6 +182,10 @@ require_tools osmo rsync
 [[ -d "$training_path" ]] || fatal "Training directory not found: $training_path"
 [[ -f "$training_path/scripts/train.sh" ]] || fatal "Training path must contain scripts/train.sh: $training_path"
 
+entry_script="$SCRIPT_DIR/osmo-train-dataset-entry.sh"
+[[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
+entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
+
 checkpoint_mode="$(normalize_checkpoint_mode "$checkpoint_mode")"
 
 if [[ "$skip_register" == "false" && -z "$register_checkpoint" ]]; then
@@ -255,6 +259,7 @@ rel_training_path="$(python3 -c "import os.path; print(os.path.relpath('$STAGING
 submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
+  "entry_script_b64=$entry_script_b64"
   "task=$task"
   "num_envs=$num_envs"
   "run_azure_smoke_test=$run_smoke"

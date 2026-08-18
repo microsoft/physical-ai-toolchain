@@ -237,6 +237,9 @@ done
 require_tools osmo zip python3
 
 [[ -d "$REPO_ROOT/training/il" ]] || fatal "Directory training/il not found"
+entry_script="$SCRIPT_DIR/lerobot-train-osmo-entry.sh"
+[[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
+entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
 
 if [[ ${#blob_urls[@]} -gt 0 && -n "$dataset_repo_id" ]]; then
   fatal "--dataset-repo-id and --blob-url are mutually exclusive."
@@ -323,6 +326,7 @@ info "Training payload uploaded: $code_url"
 submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
+  --set-string "entry_script_b64=$entry_script_b64"
   "code_url=$code_url"
   "payload_root=$payload_root"
   "dataset_repo_id=$dataset_repo_id"
