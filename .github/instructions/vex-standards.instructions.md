@@ -1,0 +1,58 @@
+---
+description: OpenVEX authoring standards for base-image vulnerability triage
+applyTo: "security/vex/**"
+---
+
+# VEX Standards
+
+Follow these rules when authoring or reviewing OpenVEX documents under `security/vex/`. These documents control whether vulnerability findings are suppressed, retained, or marked as remediated.
+
+This guidance is adapted from the [hve-core VEX standards](https://github.com/microsoft/hve-core/blob/e6f414dabf65d67d59763ce776fa2212bd70b028/.github/instructions/security/vex-standards.instructions.md).
+
+## Status Determination
+
+Use only the four OpenVEX statuses:
+
+| Status | Use |
+| --- | --- |
+| `under_investigation` | Reachability or the ability to exploit the vulnerability is not yet known. This is the safe default for generated findings that have not been reviewed. |
+| `not_affected` | Analysis demonstrates that the vulnerability cannot affect the identified product. |
+| `affected` | Analysis demonstrates that the identified product is vulnerable. Include an `action_statement` describing remediation or mitigation. |
+| `fixed` | The identified product version or digest contains the verified remediation. |
+
+Never infer a terminal status from a scanner result alone. A scanner finding establishes that investigation is required; an absent finding does not establish `not_affected` or `fixed`.
+
+Do not change `under_investigation` to another status without product-specific analysis. Record the evidence and reasoning in `status_notes`. Vendor disputes, severity reassessments, and unavailable exploit reports do not establish that exploitation is impossible; retain `under_investigation` until the required evidence exists.
+
+Do not mark a product `fixed` because an upstream fix exists. Verify that the exact product version or digest named by the statement contains the fix.
+
+## Not-Affected Justifications
+
+Every `not_affected` statement must include exactly one of these machine-readable `justification` values:
+
+| Justification | Required finding |
+| --- | --- |
+| `component_not_present` | The vulnerable component is absent from the identified product. |
+| `vulnerable_code_not_present` | The component is present, but the vulnerable code is excluded or patched out. |
+| `vulnerable_code_not_in_execute_path` | The vulnerable code is present but cannot execute in the product. |
+| `vulnerable_code_cannot_be_controlled_by_adversary` | The vulnerable code executes, but an adversary cannot control the inputs or state required for exploitation. |
+| `inline_mitigations_already_exist` | Built-in controls that cannot be bypassed prevent all known exploit paths. |
+
+Choose the narrowest justification supported by evidence. Document the product-specific evidence in `status_notes`; do not repeat advisory prose or use a generic claim such as "not reachable."
+
+## Product Identity
+
+Identify the exact scanned artifact in every statement. Use a digest-pinned OCI package URL when the artifact has a registry digest. Do not apply analysis from one image tag, version, architecture, or digest to another without verifying that the relevant component and execution path are identical.
+
+Keep one statement per vulnerability and product status. Update an existing statement rather than adding a contradictory statement for the same vulnerability and product in the same document.
+
+## Document Mutation Contract
+
+For every change to document content, including any statement:
+
+- Increment the integer `version` by one.
+- Set `timestamp` to the current UTC issuance time and update `last_updated` when present.
+- Replace `@id` with a unique IRI for the new revision. Include the version or another collision-resistant revision value; a date alone is insufficient when multiple revisions can be issued in one day.
+- Preserve the original effective timestamp of every unchanged statement. Before changing the document timestamp, add an explicit statement `timestamp` where an unchanged statement previously inherited the old document timestamp.
+
+Reject a change when `version`, `timestamp`, or `@id` is stale, when an unchanged statement loses its original effective timestamp, or when a status lacks the required analysis.
