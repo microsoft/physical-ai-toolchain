@@ -21,6 +21,7 @@ CI/CD automation scripts for linting, validation, security scanning, and shared 
 
 ```text
 scripts/
+├── ci/                       CI bootstrap and release automation
 ├── lib/                      Shared utility modules
 ├── linting/                  PowerShell linting and validation scripts
 ├── security/                 Security scanning and dependency pinning scripts

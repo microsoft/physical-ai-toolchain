@@ -4,6 +4,8 @@
     ".agent/reviews/**",
     ".copilot-tracking/**",
     ".github/skills/rpi/**",
+    ".github/skills/rpi.backup.*/**",
+    ".github/skills/rpi.staging.*/**",
     "venv/**",
     ".venv/**",
     "**/.venv/**",

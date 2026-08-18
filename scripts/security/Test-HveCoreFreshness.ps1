@@ -75,9 +75,9 @@ $script:DerivedFiles = @(
 function Get-PinnedHveCoreRef {
     <#
     .SYNOPSIS
-        Extract the pinned hve-core UPSTREAM_REF SHA and optional release tag from
-        the RPI bootstrap workflow file. Returns null when the file is absent;
-        members are null when the corresponding key is not present.
+        Extract the pinned hve-core derived-files baseline SHA and optional release
+        tag from the cloud-agent setup workflow. Returns null when the file is absent;
+        Sha is null when the key is absent and Tag is 'unknown' without a release marker.
     #>
     [CmdletBinding()]
     param(
@@ -89,8 +89,8 @@ function Get-PinnedHveCoreRef {
     }
 
     $content = Get-Content -Path $Path -Raw
-    $sha = if ($content -match 'UPSTREAM_REF:\s*([0-9a-fA-F]{7,40})') { $Matches[1] } else { $null }
-    $tag = if ($content -match 'hve-core release:\s*(\S+)') { $Matches[1] } else { 'unknown' }
+    $sha = if ($content -match 'HVE_CORE_DERIVED_FILES_REF:\s*([0-9a-fA-F]{7,40})') { $Matches[1] } else { $null }
+    $tag = if ($content -match 'hve-core derived-files release:\s*(\S+)') { $Matches[1] } else { 'unknown' }
 
     return [ordered]@{ Tag = $tag; Sha = $sha }
 }
@@ -234,13 +234,11 @@ function Format-HveCoreIssueBody {
     $fileRows = ($files | ForEach-Object { Format-HveCoreDriftRow -File $_ }) -join "`n"
 
     $compareBase = if ($pin.PinnedTag -ne 'unknown') { $pin.PinnedTag } else { $pin.PinnedSha }
-    $baselineLabel = $compareBase
-
     return @"
 ## hve-core Upstream Freshness Report
 
 Latest reviewed hve-core release: $latestLink
-Drift baseline: ``$baselineLabel`` (``UPSTREAM_REF`` in ``$($pin.File)``)
+Drift baseline: ``$compareBase`` (``HVE_CORE_DERIVED_FILES_REF`` in ``$($pin.File)``)
 
 ### Derived Files
 
@@ -369,7 +367,7 @@ function Invoke-HveCoreFreshnessCheck {
 
         $pinRef = Get-PinnedHveCoreRef -Path $script:SetupWorkflow
         if (-not $pinRef -or -not $pinRef.Sha) {
-            throw "Could not extract UPSTREAM_REF from $script:SetupWorkflow"
+            throw "Could not extract HVE_CORE_DERIVED_FILES_REF from $script:SetupWorkflow"
         }
 
         # Fail loudly if the pinned ref itself does not resolve upstream; otherwise every

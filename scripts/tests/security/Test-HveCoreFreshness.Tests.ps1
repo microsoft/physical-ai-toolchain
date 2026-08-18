@@ -6,6 +6,7 @@
 BeforeAll {
     . $PSScriptRoot/../../security/Test-HveCoreFreshness.ps1
     Import-Module (Resolve-Path (Join-Path $PSScriptRoot '../Mocks/BashScriptHarness.psm1')) -Force
+    Import-Module powershell-yaml -Force
 
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:BootstrapScriptPath = Join-Path $script:RepoRoot 'scripts/ci/bootstrap-hve-core-rpi-skills.sh'
@@ -13,11 +14,12 @@ BeforeAll {
     @'
       - name: Bootstrap hve-core RPI skills
         env:
-          # microsoft/hve-core release: hve-core-v3.2.2 (2026-03-23)
-          UPSTREAM_REF: e69486a5f809ede45c63c0a31358c12912bd5168
+          # microsoft/hve-core derived-files release: hve-core-v3.2.2 (2026-03-23)
+          HVE_CORE_DERIVED_FILES_REF: e69486a5f809ede45c63c0a31358c12912bd5168
         run: echo bootstrap
 '@ | Set-Content -Path $script:SetupPath -Encoding utf8
 
+    $script:ResolvedRpiSha = '130ab64338bb77e912e603693672c31f14bc60c6'
     $script:RequiredRpiSkills = @(
         'rpi-quick'
         'rpi-research'
@@ -68,24 +70,37 @@ BeforeAll {
     function Invoke-RpiBootstrap {
         param(
             [Parameter(Mandatory)][string]$TreeJson,
-            [string]$Workspace = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
+            [string]$Workspace = (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))),
+            [string]$CommitSha = $script:ResolvedRpiSha,
+            [string]$UpstreamRef = $script:ResolvedRpiSha,
+            [string]$UpstreamSkillsPath = '.github/skills/rpi',
+            [string]$Destination,
+            [string]$GhStub,
+            [string]$CurlStub,
+            [hashtable]$AdditionalEnv = @{},
+            [hashtable]$AdditionalStubs = @{}
         )
 
         $commitJsonPath = Join-Path $Workspace 'commit.json'
         $treeJsonPath = Join-Path $Workspace 'tree.json'
-        $destination = Join-Path $Workspace '.github/skills/rpi'
-        New-Item -ItemType Directory -Path $destination -Force | Out-Null
-        '{"sha":"130ab64338bb77e912e603693672c31f14bc60c6"}' | Set-Content -Path $commitJsonPath -NoNewline
+        if (-not $Destination) {
+            $Destination = Join-Path $Workspace '.github/skills/rpi'
+        }
+        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+        @{ sha = $CommitSha } | ConvertTo-Json -Compress | Set-Content -Path $commitJsonPath -NoNewline
         $TreeJson | Set-Content -Path $treeJsonPath -NoNewline
 
-        $ghStub = @'
+        if (-not $GhStub) {
+            $GhStub = @'
 case "$*" in
     *commits/*) cat "$COMMIT_JSON_PATH" ;;
     *git/trees/*) cat "$TREE_JSON_PATH" ;;
     *) exit 1 ;;
 esac
 '@
-        $curlStub = @'
+        }
+        if (-not $CurlStub) {
+            $CurlStub = @'
 output=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -96,22 +111,32 @@ done
 mkdir -p "$(dirname "$output")"
 printf '# skill\n' > "$output"
 '@
+        }
+        $stubs = @{
+            gh   = $GhStub
+            curl = $CurlStub
+        }
+        foreach ($name in $AdditionalStubs.Keys) {
+            $stubs[$name] = $AdditionalStubs[$name]
+        }
 
-        $result = Invoke-BashEntryScript -ScriptPath $script:BootstrapScriptPath -WorkDir $Workspace -EnvVars @{
+        $envVars = @{
             COMMIT_JSON_PATH    = $commitJsonPath
             TREE_JSON_PATH      = $treeJsonPath
             UPSTREAM_REPO       = 'microsoft/hve-core'
-            UPSTREAM_REF        = '130ab64338bb77e912e603693672c31f14bc60c6'
-            UPSTREAM_SKILLS_PATH = '.github/skills/rpi'
-            DEST_DIR            = $destination
-        } -Stubs @{
-            gh   = $ghStub
-            curl = $curlStub
+            UPSTREAM_REF        = $UpstreamRef
+            UPSTREAM_SKILLS_PATH = $UpstreamSkillsPath
+            DEST_DIR            = $Destination
         }
+        foreach ($name in $AdditionalEnv.Keys) {
+            $envVars[$name] = $AdditionalEnv[$name]
+        }
+
+        $result = Invoke-BashEntryScript -ScriptPath $script:BootstrapScriptPath -WorkDir $Workspace -EnvVars $envVars -Stubs $stubs
 
         return [pscustomobject]@{
             Result      = $result
-            Destination = $destination
+            Destination = $Destination
             Workspace   = $Workspace
         }
     }
@@ -128,7 +153,7 @@ Describe 'Get-PinnedHveCoreRef' -Tag 'Unit' {
         Get-PinnedHveCoreRef -Path (Join-Path $TestDrive 'missing.yml') | Should -BeNullOrEmpty
     }
 
-    It 'Returns a null Sha when UPSTREAM_REF is absent' {
+    It 'Returns a null Sha when HVE_CORE_DERIVED_FILES_REF is absent' {
         $p = Join-Path $TestDrive 'no-ref.yml'
         "env:`n  FOO: bar" | Set-Content -Path $p -Encoding utf8
         $ref = Get-PinnedHveCoreRef -Path $p
@@ -147,12 +172,25 @@ Describe 'RPI bootstrap workflow contract' -Tag 'Contract' {
         $ref = Get-PinnedHveCoreRef -Path $script:CheckedInSetupPath
 
         $ref.Sha | Should -Match '^[0-9a-f]{40}$'
-        $ref.Tag | Should -Be 'unknown'
+        $ref.Sha | Should -Be 'e69486a5f809ede45c63c0a31358c12912bd5168'
+        $ref.Tag | Should -Be 'hve-core-v3.2.2'
     }
 
     It 'Invokes the standalone bootstrap as a fatal step' {
-        $script:CheckedInSetup | Should -Match 'run: bash scripts/ci/bootstrap-hve-core-rpi-skills\.sh'
-        $script:CheckedInSetup | Should -Not -Match '(?s)Bootstrap hve-core RPI skills.{0,500}continue-on-error'
+        $workflow = ConvertFrom-Yaml $script:CheckedInSetup
+        $step = @($workflow.jobs.'copilot-setup-steps'.steps) |
+            Where-Object { $_.name -eq 'Bootstrap hve-core RPI skills' }
+
+        $step | Should -HaveCount 1
+        $step.run | Should -Be 'bash scripts/ci/bootstrap-hve-core-rpi-skills.sh'
+        $step.PSObject.Properties.Name | Should -Not -Contain 'continue-on-error'
+    }
+
+    It 'Runs when the standalone bootstrap changes' {
+        $workflow = ConvertFrom-Yaml $script:CheckedInSetup
+
+        @($workflow.on.push.paths) | Should -Contain 'scripts/ci/bootstrap-hve-core-rpi-skills.sh'
+        @($workflow.on.pull_request.paths) | Should -Contain 'scripts/ci/bootstrap-hve-core-rpi-skills.sh'
     }
 
     It 'Keeps the runtime destination gitignored and untracked' {
@@ -160,6 +198,8 @@ Describe 'RPI bootstrap workflow contract' -Tag 'Contract' {
         $trackedFiles = @(git -C $script:RepoRoot ls-files -- '.github/skills/rpi')
 
         $gitignore | Should -Match '(?m)^\.github/skills/rpi/$'
+        $gitignore | Should -Match '(?m)^\.github/skills/rpi\.backup\.\*$'
+        $gitignore | Should -Match '(?m)^\.github/skills/rpi\.staging\.\*$'
         $trackedFiles | Should -BeNullOrEmpty
     }
 }
@@ -171,16 +211,35 @@ Describe 'bootstrap-hve-core-rpi-skills.sh' -Tag 'Unit' {
         New-Item -ItemType Directory -Path $destination -Force | Out-Null
         'stale' | Set-Content -Path (Join-Path $destination 'stale.md')
 
-        $run = Invoke-RpiBootstrap -TreeJson (New-RpiTreeJson) -Workspace $workspace
+        $nestedPath = '.github/skills/rpi/rpi-plan/references/checklist.md'
+        $run = Invoke-RpiBootstrap -TreeJson (
+            New-RpiTreeJson -ExtraPath $nestedPath
+        ) -Workspace $workspace
 
         $run.Result.ExitCode | Should -Be 0
         Test-Path (Join-Path $destination 'stale.md') | Should -BeFalse
         foreach ($skill in $script:RequiredRpiSkills) {
             Test-Path (Join-Path $destination "$skill/SKILL.md") | Should -BeTrue
         }
+        Test-Path (Join-Path $destination 'rpi-plan/references/checklist.md') | Should -BeTrue
         $audit = Get-Content -Path (Join-Path $destination '_audit.json') -Raw | ConvertFrom-Json
-        $audit.resolved_sha | Should -Be '130ab64338bb77e912e603693672c31f14bc60c6'
-        @($audit.files).Count | Should -Be $script:RequiredRpiSkills.Count
+        $audit.upstream_repo | Should -Be 'microsoft/hve-core'
+        $audit.requested_ref | Should -Be $script:ResolvedRpiSha
+        $audit.resolved_sha | Should -Be $script:ResolvedRpiSha
+        @($audit.files) | Should -Contain $nestedPath
+        @($audit.files).Count | Should -Be ($script:RequiredRpiSkills.Count + 1)
+        $run.Result.StdOut | Should -Match 'Installed 8 RPI skills and 9 verified files'
+    }
+
+    It 'Downloads every file from the resolved commit SHA' {
+        $run = Invoke-RpiBootstrap -TreeJson (New-RpiTreeJson)
+        $curlCalls = @($run.Result.Calls | Where-Object { $_ -like 'curl *' })
+
+        $run.Result.ExitCode | Should -Be 0
+        $curlCalls | Should -HaveCount $script:RequiredRpiSkills.Count
+        foreach ($call in $curlCalls) {
+            $call | Should -Match "https://raw\.githubusercontent\.com/microsoft/hve-core/$($script:ResolvedRpiSha)/\.github/skills/rpi/"
+        }
     }
 
     It 'Rejects a truncated tree before downloading files' {
@@ -196,6 +255,63 @@ Describe 'bootstrap-hve-core-rpi-skills.sh' -Tag 'Unit' {
 
         $run.Result.ExitCode | Should -Not -Be 0
         $run.Result.StdErr | Should -Match 'Unsupported RPI skill file mode or type'
+    }
+
+    It 'Rejects non-Markdown upstream files' {
+        $run = Invoke-RpiBootstrap -TreeJson (
+            New-RpiTreeJson -ExtraPath '.github/skills/rpi/rpi-quick/run.sh'
+        )
+
+        $run.Result.ExitCode | Should -Not -Be 0
+        $run.Result.StdErr | Should -Match 'Unsupported RPI skill file type'
+    }
+
+    It 'Rejects unsafe characters in upstream paths' {
+        $run = Invoke-RpiBootstrap -TreeJson (
+            New-RpiTreeJson -ExtraPath '.github/skills/rpi/bad$name.md'
+        )
+
+        $run.Result.ExitCode | Should -Not -Be 0
+        $run.Result.StdErr | Should -Match 'Unsafe characters in RPI skill path'
+    }
+
+    It 'Rejects a non-immutable resolved SHA' {
+        $run = Invoke-RpiBootstrap -TreeJson (New-RpiTreeJson) -CommitSha 'abc'
+
+        $run.Result.ExitCode | Should -Not -Be 0
+        $run.Result.StdErr | Should -Match 'Invalid resolved SHA'
+        @($run.Result.Calls | Where-Object { $_ -like 'curl *' }) | Should -BeNullOrEmpty
+    }
+
+    It 'Requires an upstream ref before calling GitHub' {
+        $run = Invoke-RpiBootstrap -TreeJson (New-RpiTreeJson) -UpstreamRef ''
+
+        $run.Result.ExitCode | Should -Not -Be 0
+        $run.Result.StdErr | Should -Match 'UPSTREAM_REF is required'
+        @($run.Result.Calls | Where-Object { $_ -like 'gh *' }) | Should -BeNullOrEmpty
+    }
+
+    It 'Refuses a destination outside the runtime discovery leaf' {
+        $workspace = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $destination = Join-Path $workspace '.github/skills/other'
+        $run = Invoke-RpiBootstrap -TreeJson (New-RpiTreeJson) -Workspace $workspace -Destination $destination
+
+        $run.Result.ExitCode | Should -Not -Be 0
+        $run.Result.StdErr | Should -Match 'Refusing nonstandard RPI destination'
+        @($run.Result.Calls | Where-Object { $_ -like 'gh *' }) | Should -BeNullOrEmpty
+    }
+
+    It 'Rejects an empty upstream tree' {
+        $run = Invoke-RpiBootstrap -TreeJson '{"truncated":false,"tree":[]}'
+
+        $run.Result.ExitCode | Should -Not -Be 0
+        $run.Result.StdErr | Should -Match 'No RPI skill files discovered'
+    }
+
+    It 'Normalizes a trailing slash in the upstream skills path' {
+        $run = Invoke-RpiBootstrap -TreeJson (New-RpiTreeJson) -UpstreamSkillsPath '.github/skills/rpi/'
+
+        $run.Result.ExitCode | Should -Be 0
     }
 
     It 'Rejects a missing required skill' {
@@ -228,6 +344,72 @@ Describe 'bootstrap-hve-core-rpi-skills.sh' -Tag 'Unit' {
         $run.Result.ExitCode | Should -Not -Be 0
         $run.Result.StdErr | Should -Match 'integrity check failed'
         Test-Path (Join-Path $destination 'prior.md') | Should -BeTrue
+    }
+
+    It 'Retries transient GitHub API failures' {
+        $workspace = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $counterPath = Join-Path $workspace 'gh-counter'
+        $ghStub = @'
+count=0
+[ ! -f "$GH_COUNTER_PATH" ] || count="$(cat "$GH_COUNTER_PATH")"
+count=$((count + 1))
+printf '%s' "$count" > "$GH_COUNTER_PATH"
+case "$*" in
+    *commits/*)
+        [ "$count" -ge 3 ] || { echo transient >&2; exit 1; }
+        cat "$COMMIT_JSON_PATH"
+        ;;
+    *git/trees/*) cat "$TREE_JSON_PATH" ;;
+    *) exit 1 ;;
+esac
+'@
+        $run = Invoke-RpiBootstrap -TreeJson (New-RpiTreeJson) -Workspace $workspace -GhStub $ghStub -AdditionalEnv @{
+            GH_COUNTER_PATH = $counterPath
+        } -AdditionalStubs @{
+            sleep = 'exit 0'
+        }
+
+        $run.Result.ExitCode | Should -Be 0
+        @($run.Result.Calls | Where-Object { $_ -like 'gh api repos/*commits/*' }) | Should -HaveCount 3
+        $run.Result.StdErr | Should -Match 'attempt 1/3 failed'
+    }
+
+    It 'Fails after exhausting GitHub API retries' {
+        $ghStub = 'echo unavailable >&2; exit 1'
+        $run = Invoke-RpiBootstrap -TreeJson (New-RpiTreeJson) -GhStub $ghStub -AdditionalStubs @{
+            sleep = 'exit 0'
+        }
+
+        $run.Result.ExitCode | Should -Not -Be 0
+        @($run.Result.Calls | Where-Object { $_ -like 'gh api repos/*commits/*' }) | Should -HaveCount 3
+        $run.Result.StdErr | Should -Match 'attempt 3/3 failed'
+        $run.Result.StdErr | Should -Match 'Failed to resolve'
+    }
+
+    It 'Restores the prior install when the final move fails' {
+        $workspace = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $destination = Join-Path $workspace '.github/skills/rpi'
+        $counterPath = Join-Path $workspace 'mv-counter'
+        New-Item -ItemType Directory -Path $destination -Force | Out-Null
+        'prior' | Set-Content -Path (Join-Path $destination 'prior.md')
+        $mvStub = @'
+count=0
+[ ! -f "$MV_COUNTER_PATH" ] || count="$(cat "$MV_COUNTER_PATH")"
+count=$((count + 1))
+printf '%s' "$count" > "$MV_COUNTER_PATH"
+[ "$count" -ne 2 ] || exit 1
+/bin/mv "$@"
+'@
+        $run = Invoke-RpiBootstrap -TreeJson (New-RpiTreeJson) -Workspace $workspace -AdditionalEnv @{
+            MV_COUNTER_PATH = $counterPath
+        } -AdditionalStubs @{
+            mv = $mvStub
+        }
+
+        $run.Result.ExitCode | Should -Not -Be 0
+        $run.Result.StdErr | Should -Match 'Failed to install RPI skills'
+        Test-Path (Join-Path $destination 'prior.md') | Should -BeTrue
+        @(Get-ChildItem (Split-Path $destination) -Filter 'rpi.backup.*') | Should -BeNullOrEmpty
     }
 }
 

@@ -14,9 +14,11 @@ on:
   push:
     paths:
       - .github/workflows/copilot-setup-steps.yml
+      - scripts/ci/bootstrap-hve-core-rpi-skills.sh
   pull_request:
     paths:
       - .github/workflows/copilot-setup-steps.yml
+      - scripts/ci/bootstrap-hve-core-rpi-skills.sh
   # Weekly drift check: surfaces broken action SHAs, yanked packages, or
   # registry outages on a Monday morning instead of mid-Copilot-session.
   schedule:
@@ -104,10 +106,10 @@ jobs:
       - name: Bootstrap hve-core RPI skills
         env:
           GH_TOKEN: ${{ github.token }}
+          # microsoft/hve-core derived-files release: hve-core-v3.2.2 (2026-03-23)
+          HVE_CORE_DERIVED_FILES_REF: e69486a5f809ede45c63c0a31358c12912bd5168
           UPSTREAM_REPO: microsoft/hve-core
           UPSTREAM_REF: 130ab64338bb77e912e603693672c31f14bc60c6
-          UPSTREAM_SKILLS_PATH: .github/skills/rpi
-          DEST_DIR: .github/skills/rpi
         run: bash scripts/ci/bootstrap-hve-core-rpi-skills.sh
 
       - name: Install PowerShell modules (Pester 5.7.1, powershell-yaml 0.4.12)

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Provision the pinned hve-core RPI skill suite for cloud-agent sessions.
+# This bootstrap remains standalone because it establishes the agent's trusted
+# instruction set before repository helpers are loaded.
 set -o errexit -o nounset -o pipefail
 
 UPSTREAM_REPO="${UPSTREAM_REPO:-microsoft/hve-core}"
 UPSTREAM_REF="${UPSTREAM_REF:-}"
 UPSTREAM_SKILLS_PATH="${UPSTREAM_SKILLS_PATH:-.github/skills/rpi}"
+# DEST_DIR may relocate the workspace root, but the discovery leaf must remain .github/skills/rpi.
 DEST_DIR="${DEST_DIR:-.github/skills/rpi}"
 
 required_skills=(
@@ -33,29 +36,33 @@ require_tools() {
 gh_api_with_retry() {
     local endpoint="$1"
     local attempt
+    local max_attempts=3
     local output_file
     local error_file
 
     output_file="$(mktemp)"
     error_file="$(mktemp)"
-    for attempt in 1 2 3; do
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
         if gh api "$endpoint" >"$output_file" 2>"$error_file"; then
             cat "$output_file"
             rm -f "$output_file" "$error_file"
             return 0
         fi
-        if [ "$attempt" -lt 3 ]; then
+        printf 'gh api attempt %d/%d failed for %s: ' "$attempt" "$max_attempts" "$endpoint" >&2
+        cat "$error_file" >&2
+        if [ "$attempt" -lt "$max_attempts" ]; then
             sleep "$attempt"
         fi
     done
 
-    cat "$error_file" >&2
     rm -f "$output_file" "$error_file"
     return 1
 }
 
 require_tools curl gh git jq mktemp
 [ -n "$UPSTREAM_REF" ] || fail "UPSTREAM_REF is required"
+UPSTREAM_SKILLS_PATH="${UPSTREAM_SKILLS_PATH%/}"
+[ -n "$UPSTREAM_SKILLS_PATH" ] || fail "UPSTREAM_SKILLS_PATH is required"
 
 dest_parent="$(dirname "$DEST_DIR")"
 mkdir -p "$dest_parent"
@@ -93,10 +100,17 @@ unsupported_files="$(
 entries_file="$(mktemp)"
 paths_file="$(mktemp)"
 staging_dir=""
+backup_dir=""
+install_complete=false
 cleanup() {
     rm -f "$entries_file" "$paths_file"
     if [ -n "$staging_dir" ] && [ -d "$staging_dir" ]; then
         rm -rf "$staging_dir"
+    fi
+    if [ "$install_complete" != true ] && [ -n "$backup_dir" ] && [ -e "$backup_dir" ]; then
+        if [ ! -e "$dest_abs" ]; then
+            mv "$backup_dir" "$dest_abs"
+        fi
     fi
 }
 trap cleanup EXIT
@@ -140,7 +154,6 @@ while IFS=$'\t' read -r path blob_sha; do
         "https://raw.githubusercontent.com/${UPSTREAM_REPO}/${sha}/${path}" \
         --output "$destination"
 
-    [ -s "$destination" ] || fail "Downloaded empty RPI skill file: ${path}"
     actual_blob_sha="$(git hash-object "$destination")"
     [ "$actual_blob_sha" = "$blob_sha" ] ||
         fail "RPI skill integrity check failed for ${path}: expected ${blob_sha}, got ${actual_blob_sha}"
@@ -167,7 +180,6 @@ jq -n \
     }' >"${install_root}/_audit.json"
 
 backup_dir="${dest_abs}.backup.$$"
-rm -rf "$backup_dir"
 if [ -e "$dest_abs" ]; then
     mv "$dest_abs" "$backup_dir"
 fi
@@ -178,7 +190,9 @@ if ! mv "$install_root" "$dest_abs"; then
     fail "Failed to install RPI skills into ${dest_abs}"
 fi
 rm -rf "$backup_dir"
+backup_dir=""
+install_complete=true
 
-installed_count="$(find "$dest_abs" -name SKILL.md -type f | wc -l | tr -d ' ')"
+installed_count="${#required_skills[@]}"
 file_count="$(wc -l <"$paths_file" | tr -d ' ')"
 echo "Installed ${installed_count} RPI skills and ${file_count} verified files from ${UPSTREAM_REPO}@${sha}"
