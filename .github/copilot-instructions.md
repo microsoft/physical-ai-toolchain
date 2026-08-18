@@ -330,13 +330,13 @@ Treat `.github/workflows/copilot-setup-steps.yml` and `.devcontainer/devcontaine
 
 The weekly `copilot-setup-steps.yml` cron and `Test-BinaryFreshness.ps1` weekly run together surface upstream drift across both surfaces.
 
-### Cloud-Agent RPI Wrapper
+### Cloud-Agent RPI Skills
 
-The `Bootstrap hve-core RPI persona` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the latest `microsoft/hve-core@main` `rpi-agent.agent.md` plus every `subagents/*.agent.md` into `.copilot-tracking/upstream/hve-core-rpi/`.
+The `Bootstrap hve-core RPI skills` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the complete RPI skill suite from a pinned `microsoft/hve-core` commit into `.github/skills/rpi/`.
 
-The `Physical-AI RPI` umbrella (`.github/agents/physical-ai-rpi.agent.md`) and its hidden generic worker (`.github/agents/physical-ai-rpi-worker.agent.md`) read those files at session start. The worker resolves a `persona: <stem>` dispatch parameter to a workspace path under `.copilot-tracking/upstream/hve-core-rpi/subagents/`, so new upstream personas auto-onboard via the next bootstrap with no change in this repo.
+The cloud agent discovers the `rpi-quick`, `rpi-research`, `rpi-plan`, `rpi-implement`, and `rpi-review` workflows directly from their `SKILL.md` files. The bootstrap preserves each skill's bundled references and templates.
 
-See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the full umbrella/worker rationale.
+See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the RPI skill inventory.
 
 ## Git Workflow
 
