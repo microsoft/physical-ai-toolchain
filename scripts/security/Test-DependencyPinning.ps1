@@ -922,8 +922,9 @@ function Get-DockerImageViolations {
         registry/namespace path, so plain configuration scalars are left untouched.
         Submission-time templated ('{{ ... }}') and shell-variable ('$VAR' / '${VAR}')
         references are injected at submit time and skipped. AzureML asset references
-        ('azureml:<name>:<version>') are versioned assets rather than OCI images, but a
-        mutable ':latest' environment version is rejected.
+        ('azureml:<name>:<version>') are versioned assets rather than OCI images. Labels
+        and unversioned references are mutable; the ambiguous explicit version ':latest'
+        is also rejected by repository policy.
         Dockerfile 'FROM' pinning is out of scope (covered by OpenSSF Scorecard). An
         intentional non-pin opts out with a '# pinning-ignore' comment on the image line or a
         dedicated comment line directly above it.
@@ -992,7 +993,7 @@ function Get-DockerImageViolations {
                 $v.Name = $name
                 $v.Version = $version
                 $v.Severity = 'warning'
-                $v.Description = 'Mutable or unversioned AzureML environment reference'
+                $v.Description = 'Disallowed AzureML environment reference'
                 $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
                 $violations += $v
                 continue

@@ -661,7 +661,7 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
             $script:DockerResult = @(Get-DockerImageViolations -FileInfo @{ Path = $testFile; Type = 'docker'; RelativePath = 'docker-image-unpinned-workflow.yaml' })
         }
 
-        It 'Flags every unpinned image and mutable environment reference' {
+        It 'Flags every unpinned image and disallowed environment reference' {
             $script:DockerResult.Count | Should -Be 4
         }
 
@@ -717,7 +717,7 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
             $result | Should -BeNullOrEmpty
         }
 
-        It 'Flags mutable AzureML environment versions' {
+        It 'Flags the ambiguous explicit AzureML environment version latest' {
             $content = '  environment: azureml:lerobot-training-env:latest'
             $tmp = Join-Path $TestDrive 'env.yaml'
             Set-Content -Path $tmp -Value $content
@@ -727,7 +727,7 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
             $result[0].Version | Should -Be 'latest'
             $result[0].Severity | Should -Be 'warning'
             $result[0].Line | Should -Be 1
-            $result[0].Description | Should -Be 'Mutable or unversioned AzureML environment reference'
+            $result[0].Description | Should -Be 'Disallowed AzureML environment reference'
         }
 
         It 'Flags quoted, label-based, list-item, URI-label, and unversioned AzureML references' {
