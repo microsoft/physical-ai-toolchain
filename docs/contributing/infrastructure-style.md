@@ -345,7 +345,7 @@ kind: ConfigMap
 
 ## Documentation Generation
 
-Terraform module documentation generates from source using [terraform-docs](https://terraform-docs.io/) v0.21.0. Each module and deployment directory contains a `TERRAFORM.md` file that terraform-docs produces automatically.
+Terraform module documentation generates from source using [terraform-docs](https://terraform-docs.io/) v0.24.0. Each module and deployment directory contains a `TERRAFORM.md` file that terraform-docs produces automatically.
 
 ### Configuration
 

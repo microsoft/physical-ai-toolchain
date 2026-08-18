@@ -152,8 +152,8 @@ EOF
 apt_get update
 apt_get install -y --no-install-recommends nodejs
 
-UV_VERSION="0.11.21"
-UV_SHA256="8c88519b0ef0af9801fcdee419bbb12116bd9e6b18e162ae093c932d8b264050"
+UV_VERSION="0.12.5"
+UV_SHA256="68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2"
 curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/uv.tar.gz
 echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
 tar -xzf /tmp/uv.tar.gz -C /tmp

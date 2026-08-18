@@ -48,8 +48,9 @@ jobs:
                   Pattern = 'UV_VERSION="([^"]+)"'
                   Files   = @(
                       'setup-dev.sh'
-                      'training/rl/scripts/train.sh'
+                      'training/rl/scripts/setup_isaac_runtime.sh'
                       'infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh'
+                      'shared/ci/smoke-import.sh'
                   )
               }
               @{
@@ -67,8 +68,8 @@ jobs:
               @{
                   Name    = 'actionlint'
                   Repo    = 'rhysd/actionlint'
-                  Pattern = 'ACTIONLINT_VERSION=([0-9][^\s&"]+)'
-                  Files   = @('.devcontainer/devcontainer.json')
+                  Pattern = 'ACTIONLINT_VERSION="\$\{ACTIONLINT_VERSION:-([0-9][^}]+)\}"'
+                  Files   = @('scripts/setup/install-actionlint.sh')
               }
               @{
                   Name    = 'golangci-lint'

@@ -51,8 +51,8 @@ jobs:
 
       - name: Install terraform-docs
         run: |
-          $version = 'v0.21.0'
-          $expectedSha = '2fdd81b8d21ff1498cd559af0dcc5d155835f84600db06d3923e217124fc735a'
+          $version = 'v0.24.0'
+          $expectedSha = '9005daf969de0b50134493a2c00078b49f5f5b39d021cda7c89bf4d4f3d776d3'
           $tarball = 'terraform-docs.tar.gz'
           $url = "https://github.com/terraform-docs/terraform-docs/releases/download/${version}/terraform-docs-${version}-linux-amd64.tar.gz"
 

@@ -40,8 +40,8 @@ jobs:
 
       - name: Install actionlint
         run: |
-          $version = '1.7.10'
-          $expectedHash = 'f4c76b71db5755a713e6055cbb0857ed07e103e028bda117817660ebadb4386f'
+          $version = '1.7.12'
+          $expectedHash = '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
           $url = "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz"
           $tmpFile = '/tmp/actionlint.tar.gz'
           Invoke-WebRequest -Uri $url -OutFile $tmpFile

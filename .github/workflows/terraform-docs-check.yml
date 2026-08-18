@@ -17,12 +17,12 @@ on:
         description: 'terraform-docs version to install'
         required: false
         type: string
-        default: 'v0.21.0'
+        default: 'v0.24.0'
       terraform-docs-sha256:
         description: 'SHA256 checksum of terraform-docs linux-amd64 tarball'
         required: false
         type: string
-        default: '2fdd81b8d21ff1498cd559af0dcc5d155835f84600db06d3923e217124fc735a'
+        default: '9005daf969de0b50134493a2c00078b49f5f5b39d021cda7c89bf4d4f3d776d3'
 
 permissions:
   contents: read

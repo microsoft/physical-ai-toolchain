@@ -103,8 +103,8 @@ function Invoke-GoLintCore {
     # Check golangci-lint on PATH; install if missing via SHA256-verified binary download
     if (-not (Get-Command golangci-lint -ErrorAction SilentlyContinue)) {
         Write-Host 'golangci-lint not found — installing via SHA256-verified binary...'
-        $lintInstallVersion = '2.11.4'
-        $lintExpectedSHA256 = '200c5b7503f67b59a6743ccf32133026c174e272b930ee79aa2aa6f37aca7ef1'
+        $lintInstallVersion = '2.12.2'
+        $lintExpectedSHA256 = '8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553'
         $lintUrl = "https://github.com/golangci/golangci-lint/releases/download/v${lintInstallVersion}/golangci-lint-${lintInstallVersion}-linux-amd64.tar.gz"
         $lintTarball = '/tmp/golangci-lint.tar.gz'
         $goPathBin = (& go env GOPATH) + '/bin'
