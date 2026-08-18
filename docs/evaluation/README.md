@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Evaluation Guide
 description: Evaluate trained robotics policies in simulation and on physical hardware using Azure ML and NVIDIA OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-07-13
 ms.topic: overview
 keywords:
   - evaluation
@@ -22,6 +22,7 @@ Evaluate trained robotics policies using local environments, Azure ML compute, o
 |--------------------------------------------------------|----------------------------------------------------------|
 | [LeRobot ACT Policy Evaluation](lerobot-evaluation.md) | Run LeRobot ACT policies locally with ROS2 deployment    |
 | [OSMO Evaluation Workflows](osmo-evaluation.md)        | Execute Isaac Lab and LeRobot evaluation via NVIDIA OSMO |
+| [HiL Evaluation](hil-evaluation.md)                    | Run CPU and independently no-command HiL gates           |
 
 ## ⚖️ Evaluation Comparison
 

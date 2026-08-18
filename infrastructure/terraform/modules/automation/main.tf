@@ -77,6 +77,10 @@ resource "azurerm_automation_runbook" "start_resources" {
   content = file(var.runbook_script_path)
 
   tags = var.tags
+
+  lifecycle {
+    ignore_changes = [job_schedule, runbook_type]
+  }
 }
 
 // ============================================================

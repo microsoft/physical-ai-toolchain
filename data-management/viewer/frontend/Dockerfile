@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ─── Build stage ─────────────────────────────────────────────────────────────
-FROM node:26.4.0-slim@sha256:a1d9d671994fc2d26e297ac56b4b1522a8bc7fa71c43b14cd1b1fe6c5116f7dc AS build
+FROM node:26.5.1-slim@sha256:deae974a69e140f44f434ab29cb519fb5f8fe250fd364b8ca446bd0761acdc6a AS build
 
 WORKDIR /app
 

@@ -1,0 +1,43 @@
+# Tier 2 Spec-Driven Blob Metrics -- Schema Reference
+#
+# Set OSMO_METRICS_SPEC to the path of a spec file (or inline YAML) at proxy
+# job submission time to enable Tier 2 metric extraction from workflow outputs.
+#
+# The proxy reads declared output URLs from the OSMO workflow YAML, lists blobs
+# matching each rule's source pattern, fetches matched JSON files using MSI auth,
+# applies transforms, and logs results as osmo.workflow.<name> MLflow metrics.
+#
+# No changes to the OSMO workflow YAML are required.
+#
+# Usage:
+#   az ml job create --file workflows/azureml/osmo-proxy-job.yaml \
+#     --set environment_variables.OSMO_METRICS_SPEC=path/to/my-metrics-spec.yaml
+#
+# Schema reference:
+metrics:
+  - name: string           # MLflow key: osmo.workflow.<name>
+    source: string         # Glob pattern relative to the declared output URL.
+                           # Examples: "*/sidecars/status.json" or "results/**/*.png"
+    extract: string        # (optional) JSON object key to read from matched files.
+                           # Omit for blob-count aggregates (aggregate: count).
+    transform: string      # (optional) Value transform applied per matched file:
+                           #   eq:<value>   -- 1.0 if field == value, else 0.0
+                           #   ne:<value>   -- 1.0 if field != value, else 0.0
+                           #   bool         -- 1.0 if truthy, else 0.0
+                           #   not_bool     -- 0.0 if truthy, else 1.0
+                           #   len          -- float(len(field)) for strings / lists
+                           #   (none)       -- float(field) directly
+    aggregate: string      # Aggregation over all matched files:
+                           #   sum | mean | count | max | min
+
+# Example: count completed videos and total generated images.
+# metrics:
+#   - name: videos_completed
+#     source: "*/sidecars/pipeline_status.json"
+#     extract: status
+#     transform: "eq:completed"
+#     aggregate: sum
+#
+#   - name: images_generated
+#     source: "results/**/*.png"
+#     aggregate: count

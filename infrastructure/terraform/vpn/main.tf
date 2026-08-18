@@ -51,6 +51,7 @@ module "vpn" {
   // P2S Certificate configuration
   root_certificate_name        = var.root_certificate_name
   root_certificate_public_data = var.root_certificate_public_data
+  revoked_client_certificates  = var.revoked_client_certificates
 
   // P2S Azure AD configuration
   aad_auth_config = var.aad_auth_config

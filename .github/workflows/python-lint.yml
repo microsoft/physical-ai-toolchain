@@ -24,18 +24,20 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
 
+      # Ruff version is pinned to match the `ruff` dev-dependency pin in the root
+      # pyproject.toml. Keep these in sync; bump both together (via Dependabot).
       - name: Ruff lint check
         id: ruff-check
         continue-on-error: true
         run: |
-          uvx ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
+          uvx --with ruff==0.15.21 ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_CHECK_FAILED=true' >> $env:GITHUB_ENV
@@ -46,7 +48,7 @@ jobs:
         id: ruff-format
         continue-on-error: true
         run: |
-          uvx ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
+          uvx --with ruff==0.15.21 ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_FORMAT_FAILED=true' >> $env:GITHUB_ENV
@@ -77,5 +79,5 @@ jobs:
       - name: Fail job if errors found
         if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true' || env.HF_PINS_FAILED == 'true') && !inputs.soft-fail
         run: |
-          Write-Output "::error::Python lint violations detected. Run 'uvx ruff check --fix .', 'uvx ruff format .', and 'npm run lint:hfpins' locally."
+          Write-Output "::error::Python lint violations detected. Run 'uvx --with ruff==0.15.21 ruff check --fix .', 'uvx --with ruff==0.15.21 ruff format .', and 'npm run lint:hfpins' locally."
           exit 1

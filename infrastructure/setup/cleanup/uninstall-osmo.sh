@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Uninstall OSMO control plane and backend operator, clean up resources
+# cspell:ignore REDISCLI
 #
 # Prerequisites:
 #   - AKS cluster accessible (kubectl configured)
@@ -29,6 +30,10 @@ Uninstall OSMO control plane and backend operator, clean up resources.
 OPTIONS:
     -h, --help              Show this help message
     -t, --tf-dir DIR        Terraform directory (default: $DEFAULT_TF_DIR)
+    --kubeconfig PATH       Isolated AKS kubeconfig output
+    --context NAME          Explicit AKS context (default: cluster name)
+    --expected-aks-resource-id ID
+                            Required AKS resource ID safety boundary
     --skip-backend          Skip backend operator removal
     --skip-k8s-cleanup      Skip cleaning up K8s resources
     --backend-name NAME     Backend identifier (default: default)
@@ -50,6 +55,10 @@ EOF
 }
 
 tf_dir="$SCRIPT_DIR/../$DEFAULT_TF_DIR"
+kubeconfig=""
+kubeconfig_set=false
+context=""
+expected_aks_resource_id=""
 skip_backend=false
 skip_k8s_cleanup=false
 backend_name="default"
@@ -60,11 +69,16 @@ purge_redis=false
 db_name="osmo"
 use_local_osmo=false
 config_preview=false
+postgres_image="postgres:16@sha256:eb4759788a2182f08257135e61a34f2cfc3c2914079f3465d64ee62350f4d081"
+redis_image="redis:7@sha256:a8f08480e1f88f2647fed492d1178c06abb0d0c1fbf02c682a61e2f483fb3954"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)            show_help; exit 0 ;;
         -t|--tf-dir)          tf_dir="$2"; shift 2 ;;
+        --kubeconfig)         kubeconfig="$2"; kubeconfig_set=true; shift 2 ;;
+        --context)            context="$2"; shift 2 ;;
+        --expected-aks-resource-id) expected_aks_resource_id="$2"; shift 2 ;;
         --skip-backend)       skip_backend=true; shift ;;
         --skip-k8s-cleanup)   skip_k8s_cleanup=true; shift ;;
         --backend-name)       backend_name="$2"; shift 2 ;;
@@ -90,9 +104,17 @@ require_tools az terraform kubectl helm jq
 
 info "Reading terraform outputs from $tf_dir..."
 tf_output=$(read_terraform_outputs "$tf_dir")
+if [[ "$kubeconfig_set" == "true" && -z "$expected_aks_resource_id" ]]; then
+    fatal "--expected-aks-resource-id is required with --kubeconfig"
+fi
+expected_aks_resource_id="${expected_aks_resource_id:-$(tf_require "$tf_output" "aks_cluster.value.id" "AKS cluster resource ID")}"
+verify_aks_resource_id "$tf_output" "$expected_aks_resource_id"
 
 cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster name")
 rg=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
+kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${cluster}.yaml}"
+context="${context:-$cluster}"
+verify_existing_aks_kubeconfig "$kubeconfig" "$context" "$expected_aks_resource_id"
 keyvault=$(tf_get "$tf_output" "key_vault_name.value")
 pg_fqdn=$(tf_get "$tf_output" "postgresql_connection_info.value.fqdn")
 pg_user=$(tf_get "$tf_output" "postgresql_connection_info.value.admin_username")
@@ -103,7 +125,10 @@ storage_name=$(tf_get "$tf_output" "storage_account.value.name")
 if [[ "$config_preview" == "true" ]]; then
     section "Configuration Preview"
     print_kv "Cluster" "$cluster"
+    print_kv "Kubeconfig" "$kubeconfig"
+    print_kv "Context" "$context"
     print_kv "Resource Group" "$rg"
+    print_kv "AKS Resource ID" "$expected_aks_resource_id"
     print_kv "Control Plane NS" "$NS_OSMO_CONTROL_PLANE"
     print_kv "Backend" "$([[ $skip_backend == true ]] && echo 'skipped' || echo "$backend_name")"
     print_kv "PostgreSQL" "${pg_fqdn:-<not configured>}"
@@ -121,7 +146,99 @@ fi
 #------------------------------------------------------------------------------
 section "Connect to Cluster"
 
-connect_aks "$rg" "$cluster"
+connect_aks "$rg" "$cluster" "$kubeconfig" "$context"
+
+cleanup_purge_resources() {
+    kubectl delete pod osmo-purge-db osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1 || true
+    kubectl delete secret osmo-purge-db osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1 || true
+}
+trap cleanup_purge_resources EXIT
+
+#------------------------------------------------------------------------------
+# Destructive Preflight
+#------------------------------------------------------------------------------
+
+pg_password=""
+redis_key=""
+
+if [[ "$purge_postgres" == "true" ]]; then
+    section "Preflight PostgreSQL Purge"
+    [[ -n "$pg_fqdn" && -n "$pg_user" && -n "$keyvault" ]] || \
+        fatal "PostgreSQL or Key Vault is not configured; refusing incomplete purge"
+    pg_password=$(az keyvault secret show --vault-name "$keyvault" --name "psql-admin-password" --query value -o tsv)
+    [[ -n "$pg_password" ]] || fatal "Could not retrieve PostgreSQL password; refusing incomplete purge"
+    kubectl create secret generic osmo-purge-db -n default \
+        --from-file=password=<(printf '%s' "$pg_password") \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        kubectl delete pod osmo-purge-db -n default --ignore-not-found >/dev/null 2>&1
+        jq -n --arg image "$postgres_image" \
+                --arg connection "host=$pg_fqdn port=5432 dbname=$db_name user=$pg_user sslmode=require" '
+                {
+                    apiVersion: "v1",
+                    kind: "Pod",
+                    metadata: {name: "osmo-purge-db", namespace: "default"},
+                    spec: {
+                        restartPolicy: "Never",
+                        containers: [{
+                            name: "psql",
+                            image: $image,
+                            env: [{
+                                name: "PGPASSWORD",
+                                valueFrom: {secretKeyRef: {name: "osmo-purge-db", key: "password"}}
+                            }],
+                            command: ["psql"],
+                            args: [$connection, "-c", "SELECT 1"]
+                        }]
+                    }
+                }
+        ' | kubectl apply -f - >/dev/null
+    if ! kubectl wait pod/osmo-purge-db -n default \
+        --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s >/dev/null 2>&1; then
+        kubectl logs pod/osmo-purge-db -n default >&2 || true
+        fatal "PostgreSQL purge preflight failed"
+    fi
+    kubectl delete pod osmo-purge-db -n default --ignore-not-found >/dev/null
+    kubectl delete secret osmo-purge-db -n default --ignore-not-found >/dev/null
+fi
+
+if [[ "$purge_redis" == "true" ]]; then
+    section "Preflight Redis Purge"
+    [[ -n "$redis_hostname" && -n "$keyvault" ]] || \
+        fatal "Redis or Key Vault is not configured; refusing incomplete purge"
+    redis_key=$(az keyvault secret show --vault-name "$keyvault" --name "redis-primary-key" --query value -o tsv)
+    [[ -n "$redis_key" ]] || fatal "Could not retrieve Redis access key; refusing incomplete purge"
+    kubectl create secret generic osmo-purge-redis -n default \
+        --from-file=password=<(printf '%s' "$redis_key") \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        kubectl delete pod osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1
+        jq -n --arg image "$redis_image" --arg host "$redis_hostname" --arg port "$redis_port" '
+                {
+                    apiVersion: "v1",
+                    kind: "Pod",
+                    metadata: {name: "osmo-purge-redis", namespace: "default"},
+                    spec: {
+                        restartPolicy: "Never",
+                        containers: [{
+                            name: "redis-cli",
+                            image: $image,
+                            env: [{
+                                name: "REDISCLI_AUTH",
+                                valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
+                            }],
+                            command: ["redis-cli"],
+                            args: ["-h", $host, "-p", $port, "--tls", "--insecure", "--no-auth-warning", "PING"]
+                        }]
+                    }
+                }
+        ' | kubectl apply -f - >/dev/null
+    if ! kubectl wait pod/osmo-purge-redis -n default \
+        --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s >/dev/null 2>&1; then
+        kubectl logs pod/osmo-purge-redis -n default >&2 || true
+        fatal "Redis purge preflight failed"
+    fi
+    kubectl delete pod osmo-purge-redis -n default --ignore-not-found >/dev/null
+    kubectl delete secret osmo-purge-redis -n default --ignore-not-found >/dev/null
+fi
 
 #------------------------------------------------------------------------------
 # Uninstall Backend Operator
@@ -231,30 +348,45 @@ fi
 if [[ "$purge_postgres" == "true" ]]; then
     section "Purge PostgreSQL Data"
 
-    if [[ -z "$pg_fqdn" || -z "$keyvault" ]]; then
-        warn "PostgreSQL or Key Vault not configured, skipping..."
+        warn "Dropping all tables from database '$db_name' (public schema)..."
+
+        drop_sql="SET client_min_messages TO WARNING; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO PUBLIC;"
+
+        kubectl delete pod osmo-purge-db -n default --ignore-not-found >/dev/null 2>&1
+        kubectl create secret generic osmo-purge-db -n default \
+                --from-file=password=<(printf '%s' "$pg_password") \
+                --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        jq -n --arg image "$postgres_image" \
+                --arg connection "host=$pg_fqdn port=5432 dbname=$db_name user=$pg_user sslmode=require" \
+                --arg sql "$drop_sql" '
+                {
+                    apiVersion: "v1",
+                    kind: "Pod",
+                    metadata: {name: "osmo-purge-db", namespace: "default"},
+                    spec: {
+                        restartPolicy: "Never",
+                        containers: [{
+                            name: "psql",
+                            image: $image,
+                            env: [{
+                                name: "PGPASSWORD",
+                                valueFrom: {secretKeyRef: {name: "osmo-purge-db", key: "password"}}
+                            }],
+                            command: ["psql"],
+                            args: [$connection, "-c", $sql]
+                        }]
+                    }
+                }
+        ' | kubectl apply -f - >/dev/null
+    if kubectl wait pod/osmo-purge-db -n default \
+        --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s >/dev/null 2>&1; then
+        info "PostgreSQL public schema dropped and recreated"
     else
-        pg_password=$(az keyvault secret show --vault-name "$keyvault" --name "psql-admin-password" --query value -o tsv 2>/dev/null) || true
-
-        if [[ -z "$pg_password" ]]; then
-            warn "Could not retrieve PostgreSQL password, skipping..."
-        else
-            warn "Dropping all tables from database '$db_name' (public schema)..."
-
-            drop_sql="SET client_min_messages TO WARNING; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO PUBLIC;"
-
-            kubectl delete pod osmo-purge-db -n default --ignore-not-found >/dev/null 2>&1
-
-            if kubectl run osmo-purge-db --rm -i --restart=Never -n default \
-                    --image=postgres:16 \
-                    -- psql "host=$pg_fqdn port=5432 dbname=$db_name user=$pg_user password=$pg_password sslmode=require" \
-                    -c "$drop_sql" 2>/dev/null; then
-                info "PostgreSQL public schema dropped and recreated"
-            else
-                warn "Failed to drop PostgreSQL schema"
-            fi
-        fi
+        kubectl logs pod/osmo-purge-db -n default >&2 || true
+        fatal "Failed to drop PostgreSQL schema"
     fi
+    kubectl delete pod osmo-purge-db -n default --ignore-not-found >/dev/null 2>&1
+    kubectl delete secret osmo-purge-db -n default --ignore-not-found >/dev/null 2>&1
 else
     info "Skipping PostgreSQL purge (use --purge-postgres to remove data)"
 fi
@@ -266,30 +398,44 @@ fi
 if [[ "$purge_redis" == "true" ]]; then
     section "Purge Redis Data"
 
-    if [[ -z "$redis_hostname" || -z "$keyvault" ]]; then
-        warn "Redis or Key Vault not configured, skipping..."
+    warn "Flushing OSMO keys from Redis..."
+
+    flush_script='local keys = redis.call("KEYS", "{osmo}:*"); for i=1,#keys do redis.call("DEL", keys[i]) end; return #keys'
+
+    kubectl delete pod osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1
+    kubectl create secret generic osmo-purge-redis -n default \
+        --from-file=password=<(printf '%s' "$redis_key") \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        jq -n --arg image "$redis_image" --arg host "$redis_hostname" --arg port "$redis_port" \
+                --arg script "$flush_script" '
+                {
+                    apiVersion: "v1",
+                    kind: "Pod",
+                    metadata: {name: "osmo-purge-redis", namespace: "default"},
+                    spec: {
+                        restartPolicy: "Never",
+                        containers: [{
+                            name: "redis-cli",
+                            image: $image,
+                            env: [{
+                                name: "REDISCLI_AUTH",
+                                valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
+                            }],
+                            command: ["redis-cli"],
+                            args: ["-h", $host, "-p", $port, "--tls", "--insecure", "--no-auth-warning", "EVAL", $script, "0"]
+                        }]
+                    }
+                }
+        ' | kubectl apply -f - >/dev/null
+    if kubectl wait pod/osmo-purge-redis -n default \
+        --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s >/dev/null 2>&1; then
+        info "Redis keys flushed"
     else
-        redis_key=$(az keyvault secret show --vault-name "$keyvault" --name "redis-primary-key" --query value -o tsv 2>/dev/null) || true
-
-        if [[ -z "$redis_key" ]]; then
-            warn "Could not retrieve Redis access key, skipping..."
-        else
-            warn "Flushing OSMO keys from Redis..."
-
-            flush_script='local keys = redis.call("KEYS", "{osmo}:*"); for i=1,#keys do redis.call("DEL", keys[i]) end; return #keys'
-
-            kubectl delete pod osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1
-
-            if kubectl run osmo-purge-redis --rm -i --restart=Never -n default \
-                    --image=redis:7 \
-                    -- redis-cli -h "$redis_hostname" -p "$redis_port" -a "$redis_key" --tls --insecure --no-auth-warning \
-                    EVAL "$flush_script" 0 2>/dev/null; then
-                info "Redis keys flushed"
-            else
-                warn "Failed to flush Redis keys"
-            fi
-        fi
+        kubectl logs pod/osmo-purge-redis -n default >&2 || true
+        fatal "Failed to flush Redis keys"
     fi
+    kubectl delete pod osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1
+    kubectl delete secret osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1
 else
     info "Skipping Redis purge (use --purge-redis to remove data)"
 fi
@@ -298,23 +444,27 @@ fi
 # Verification
 #------------------------------------------------------------------------------
 section "Verification"
+verification_failed=false
 
 if helm status osmo -n "$NS_OSMO_CONTROL_PLANE" &>/dev/null; then
-    warn "Helm release 'osmo' still exists"
+    error "Helm release 'osmo' still exists"
+    verification_failed=true
 else
     info "Helm release 'osmo' removed"
 fi
 
 if [[ "$skip_backend" == "false" ]]; then
     if helm status osmo-operator -n "$NS_OSMO_OPERATOR" &>/dev/null; then
-        warn "Helm release 'osmo-operator' still exists"
+        error "Helm release 'osmo-operator' still exists"
+        verification_failed=true
     else
         info "Helm release 'osmo-operator' removed"
     fi
 fi
 
 if kubectl get namespace "$NS_OSMO_CONTROL_PLANE" &>/dev/null; then
-    warn "$NS_OSMO_CONTROL_PLANE namespace still exists (may be terminating)"
+    error "$NS_OSMO_CONTROL_PLANE namespace still exists"
+    verification_failed=true
 else
     info "$NS_OSMO_CONTROL_PLANE namespace removed"
 fi
@@ -322,12 +472,15 @@ fi
 if [[ "$skip_backend" == "false" ]]; then
     for ns in "$NS_OSMO_OPERATOR" "$NS_OSMO_WORKFLOWS"; do
         if kubectl get namespace "$ns" &>/dev/null; then
-            warn "$ns namespace still exists (may be terminating)"
+            error "$ns namespace still exists"
+            verification_failed=true
         else
             info "$ns namespace removed"
         fi
     done
 fi
+
+[[ "$verification_failed" == "false" ]] || fatal "OSMO cleanup verification failed"
 
 #------------------------------------------------------------------------------
 # Summary

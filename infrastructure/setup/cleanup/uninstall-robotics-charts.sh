@@ -20,6 +20,8 @@ Uninstall NVIDIA GPU Operator and KAI Scheduler from an AKS cluster.
 OPTIONS:
     -h, --help               Show this help message
     -t, --tf-dir DIR         Terraform directory (default: $DEFAULT_TF_DIR)
+    --kubeconfig PATH        Isolated AKS kubeconfig output
+    --context NAME           Explicit AKS context (default: cluster name)
     --skip-gpu-operator      Skip GPU Operator uninstallation
     --skip-kai-scheduler     Skip KAI Scheduler uninstallation
     --delete-namespaces      Also delete the gpu-operator and kai-scheduler namespaces
@@ -35,6 +37,8 @@ EOF
 
 # Defaults
 tf_dir="$SCRIPT_DIR/../$DEFAULT_TF_DIR"
+kubeconfig=""
+context=""
 skip_gpu=false
 skip_kai=false
 delete_namespaces=false
@@ -45,6 +49,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)            show_help; exit 0 ;;
     -t|--tf-dir)          tf_dir="$2"; shift 2 ;;
+    --kubeconfig)         kubeconfig="$2"; shift 2 ;;
+    --context)            context="$2"; shift 2 ;;
     --skip-gpu-operator)  skip_gpu=true; shift ;;
     --skip-kai-scheduler) skip_kai=true; shift ;;
     --delete-namespaces)  delete_namespaces=true; shift ;;
@@ -65,10 +71,14 @@ tf_output=$(read_terraform_outputs "$tf_dir")
 
 cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster name")
 rg=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
+kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${cluster}.yaml}"
+context="${context:-$cluster}"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Cluster" "$cluster"
+  print_kv "Kubeconfig" "$kubeconfig"
+  print_kv "Context" "$context"
   print_kv "Resource Group" "$rg"
   print_kv "GPU Operator" "$([[ $skip_gpu == true ]] && echo 'Skip' || echo 'Uninstall')"
   print_kv "KAI Scheduler" "$([[ $skip_kai == true ]] && echo 'Skip' || echo 'Uninstall')"
@@ -82,7 +92,7 @@ fi
 #------------------------------------------------------------------------------
 section "Connect to Cluster"
 
-connect_aks "$rg" "$cluster"
+connect_aks "$rg" "$cluster" "$kubeconfig" "$context"
 
 #------------------------------------------------------------------------------
 # Uninstall KAI Scheduler

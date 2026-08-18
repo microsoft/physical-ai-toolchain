@@ -127,6 +127,11 @@ run "both_auth_types" {
     condition     = length(azurerm_virtual_network_gateway.main.vpn_client_configuration[0].root_certificate) == 1
     error_message = "Root certificate should be present when both auth types are enabled"
   }
+
+  assert {
+    condition     = tolist(azurerm_virtual_network_gateway.main.vpn_client_configuration[0].vpn_client_protocols) == tolist(["OpenVPN"])
+    error_message = "OpenVPN should be the only protocol when both authentication types are enabled"
+  }
 }
 
 // ============================================================
