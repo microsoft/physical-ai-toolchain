@@ -36,6 +36,7 @@ import numpy as np
 import torch
 
 from training.rl.simulation_shutdown import prepare_for_shutdown
+from training.utils.integrity import safe_load_checkpoint, safe_load_framework_checkpoint
 
 _LOGGER = logging.getLogger("isaaclab.eval")
 
@@ -110,18 +111,20 @@ def load_agent(
         framework: Framework type (skrl, rsl_rl)
         task_id: Isaac Lab task identifier
         env: Wrapped environment instance (needed for SKRL Runner)
-        device: Torch device string
+        device: Torch device string used to reconstruct RSL-RL policies. SKRL
+            derives its device from the runner configuration.
 
     Returns:
         Loaded agent instance
 
     Raises:
-        ValueError: If framework is not supported
+        ValueError: If the framework is unsupported, the checkpoint is malformed,
+            or the safe unpickler rejects it.
     """
     _LOGGER.info("Loading %s agent from %s", framework, checkpoint_path)
 
     if framework == "skrl":
-        return _load_skrl(checkpoint_path, task_id, env, device)
+        return _load_skrl(checkpoint_path, task_id, env)
     elif framework == "rsl_rl":
         return _load_rsl_rl(checkpoint_path, device)
     else:
@@ -132,7 +135,6 @@ def _load_skrl(
     checkpoint_path: str,
     task_id: str,
     env: Any,
-    device: str,
 ) -> Any:
     """Load SKRL agent using SKRL Runner for proper model instantiation.
 
@@ -141,6 +143,9 @@ def _load_skrl(
 
     Note: The hydra_task_config decorator parses sys.argv, so we must
     temporarily clear it to avoid conflicts with our CLI arguments.
+
+    Raises:
+        ValueError: If the safe unpickler rejects the checkpoint.
     """
     from isaaclab_tasks.utils.hydra import hydra_task_config
     from skrl.utils.runner.torch import Runner
@@ -176,12 +181,7 @@ def _load_skrl(
     # Create Runner which instantiates models based on config
     runner = Runner(env, agent_dict)
 
-    from training.utils.integrity import safe_load_checkpoint
-
-    safe_load_checkpoint(checkpoint_path, map_location=device)
-
-    # Load checkpoint into the runner's agent
-    runner.agent.load(checkpoint_path)
+    safe_load_framework_checkpoint(checkpoint_path, loader=runner.agent.load)
     runner.agent.enable_training_mode(enabled=False, apply_to_models=True)
 
     _LOGGER.info("SKRL agent loaded and set to eval mode")
@@ -199,12 +199,17 @@ def _load_rsl_rl(checkpoint_path: str, device: str) -> Any:
     Raises:
         ValueError: If the safe unpickler rejects the checkpoint.
     """
-    from training.utils.integrity import safe_load_checkpoint
-
     checkpoint = safe_load_checkpoint(checkpoint_path, map_location=device)
+    required_keys = ("model_cfg", "model_state_dict")
+    missing_keys = [key for key in required_keys if key not in checkpoint]
+    if missing_keys:
+        raise ValueError(f"Checkpoint {checkpoint_path} is missing required keys: {', '.join(missing_keys)}")
+    model_cfg = checkpoint["model_cfg"]
+    if not isinstance(model_cfg, dict):
+        raise ValueError(f"Checkpoint {checkpoint_path} model_cfg must be a dictionary")
     from rsl_rl.modules import ActorCritic
 
-    policy = ActorCritic(**checkpoint.get("model_cfg", {}))
+    policy = ActorCritic(**model_cfg)
     policy.load_state_dict(checkpoint["model_state_dict"])
     policy.eval()
     return policy.to(device)
