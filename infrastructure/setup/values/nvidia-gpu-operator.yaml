@@ -37,6 +37,8 @@ driver:
 # Container toolkit
 toolkit:
   enabled: true
+  # v1.19.1 writes a containerd v4 drop-in, which prevents startup with AKS's v2 root configuration.
+  # Before changing, deploy on AKS and verify `containerd config dump`, node readiness, and allocatable nvidia.com/gpu.
   version: v1.17.8-ubuntu20.04
   tolerations:
     - key: nvidia.com/gpu
