@@ -502,7 +502,7 @@ info "  Policy Type: $policy_type"
 info "  Job Name: $job_name"
 [[ "$with_register" == "true" ]] && info "  Register Model: $register_model_name"
 
-# shellcheck disable=SC2329  # invoked indirectly via `trap`
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via `trap`
 _interrupt_message() {
   error "Interrupted while waiting for az ml job create. The pipeline may have been submitted."
   error "Check: https://ml.azure.com/runs?wsid=/subscriptions/${subscription_id}/resourceGroups/${resource_group}/providers/Microsoft.MachineLearningServices/workspaces/${workspace_name}"
