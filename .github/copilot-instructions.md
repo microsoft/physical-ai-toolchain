@@ -338,6 +338,10 @@ The `Physical-AI RPI` umbrella (`.github/agents/physical-ai-rpi.agent.md`) and i
 
 See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the full umbrella/worker rationale.
 
+## hve-core Derived Files
+
+Follow the baseline conventions in [`scripts/README.md`](../scripts/README.md). `scripts/security/Test-HveCoreFreshness.ps1` compares source-header entries with a resolved upstream `main` commit and release entries with the RPI `UPSTREAM_REF` and a resolved latest non-draft release commit.
+
 ## Git Workflow
 
 Full specification in `.github/instructions/commit-message.instructions.md`.

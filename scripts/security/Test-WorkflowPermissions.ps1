@@ -20,7 +20,7 @@
     and zero false positives.
 
     Adapted from microsoft/hve-core scripts/security/Test-WorkflowPermissions.ps1
-    as of commit 5d663940a203c97d91f30508d41500629d4081cf (2026-06-30). See
+    as of commit 5d663940a203c97d91f30508d41500629d4081cf. See
     docs/security/workflow-permissions.md for the enumerated job-scoped write
     permissions this invariant protects.
 
