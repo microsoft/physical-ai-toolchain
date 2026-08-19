@@ -60,6 +60,8 @@ Script parameters vary by check: `Test-BinaryFreshness.ps1` uses `-SarifFile` an
 
 `update-image-digests.sh --check` exits 0 when pins are current, 2 when drift findings are written, and 1 for resolution or report-generation failures. The scheduled workflow keeps drift non-gating while propagating failures.
 
+The script resolves anonymous OCI registries, including hosts with ports. It acquires anonymous pull tokens only for Docker Hub and NGC; registries that require other authentication flows are not supported.
+
 Run `scripts/update-chart-hashes.sh` locally whenever a pinned Helm chart version is updated so `defaults.conf` stays in sync. Likewise, run `scripts/update-image-digests.sh` after bumping a container image tag so the `@sha256` digest pins stay in sync.
 
 `Test-DependencyPinning.ps1 -Apply` rewrites tag-pinned GitHub Actions references with their resolved commit SHAs in place; run it manually to remediate pinning findings.

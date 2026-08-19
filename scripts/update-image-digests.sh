@@ -25,6 +25,8 @@ files, gh-aw compiled workflows, test fixtures, and Pester test files are skippe
 AzureML environment references (azureml:<name>:latest) are not digest pins and are
 left untouched. Check mode is a CI signal that supports SARIF and exits 2 on drift.
 Dry-run mode is a local preview of the changes that write mode would apply.
+Anonymous OCI registries are supported. Anonymous pull tokens are acquired only for
+Docker Hub and NGC; other registries that require authentication are not supported.
 
 OPTIONS:
     -h, --help               Show this help message
@@ -83,11 +85,13 @@ fi
 
 require_tools git curl jq
 
-# Reference shape: registry/repo:tag@sha256:<64 hex>. Pathspecs exclude the files
-# whose digests are maintained by other tooling (Dependabot, gh-aw).
+# Reference shape: [registry[:port]/]repo[:path]:tag@sha256:<64 hex>. Pathspecs
+# exclude files whose digests are maintained by other tooling (Dependabot, gh-aw).
 digest_value_re='sha256:[0-9a-f]{64}'
-ref_left_boundary_re='(^|[^A-Za-z0-9._/-])'
-digest_ref_re="[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+@${digest_value_re}"
+ref_left_boundary_re='(^|[^A-Za-z0-9._/:-])'
+registry_prefix_re='([A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?/)'
+repository_re='[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*'
+digest_ref_re="(${registry_prefix_re})?${repository_re}:[A-Za-z0-9._-]+@${digest_value_re}"
 exclude_paths=(
   ':(exclude,glob).github/workflows/*.lock.yml'
   ':(exclude,glob)**/Dockerfile*'
@@ -136,10 +140,10 @@ resolve_digest() {
     host="registry.k8s.io"
     repo="${ref#registry.k8s.io/}"
     ;;
-  *.*/*)
+  *.*/* | *:*/* | localhost/*)
     host="${ref%%/*}"
     repo="${ref#*/}"
-    ;; # any dotted-host registry (ghcr.io, quay.io, *.azurecr.io, ...)
+    ;;
   *)
     host="registry-1.docker.io"
     repo="$ref"
