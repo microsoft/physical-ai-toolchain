@@ -49,9 +49,13 @@ jobs:
           $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           $checkDate = Get-Date -Format 'yyyy-MM-dd' -AsUTC
           $body = Format-HveCoreIssueBody -Result $data -RunUrl $runUrl -CheckDate $checkDate
-          $title = "security: hve-core freshness needs attention ($env:DRIFT_COUNT drift, $env:ERROR_COUNT errors)"
+          $title = "security: hve-core freshness needs attention ($env:DRIFT_COUNT drifted, $env:ERROR_COUNT check errors)"
           $existing = Get-HveCoreTrackingIssue
-          if ($existing) { gh issue edit $existing --title $title --body $body; gh issue comment $existing --body "🔄 Weekly scan: $env:DRIFT_COUNT drifted, $env:ERROR_COUNT check errors as of $checkDate. [Workflow run]($runUrl)." }
+          if ($existing) {
+            gh issue edit $existing --title $title --body $body
+            if ($LASTEXITCODE -ne 0) { throw "Could not update hve-core freshness issue #$existing" }
+            gh issue comment $existing --body "🔄 Weekly scan: $env:DRIFT_COUNT drifted, $env:ERROR_COUNT check errors as of $checkDate. [Workflow run]($runUrl)."
+          }
           else { gh issue create --title $title --body $body --label "dependencies,automated,needs-triage" }
 
       - name: Close resolved tracking issue

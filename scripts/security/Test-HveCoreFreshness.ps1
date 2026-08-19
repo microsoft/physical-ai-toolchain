@@ -104,7 +104,7 @@ function Get-PinnedHveCoreRef {
     else {
         $null
     }
-    $tag = if ($content -match 'hve-core release:\s*(\S+)') { $Matches[1] } else { 'unknown' }
+    $tag = if ($content -match 'hve-core release:\s*([A-Za-z0-9._/+.-]{1,128})(?:\s|$)') { $Matches[1] } else { 'unknown' }
 
     return [ordered]@{ Tag = $tag; Sha = $sha }
 }
@@ -124,6 +124,9 @@ function Get-HveCoreFileSource {
     }
 
     $content = Get-Content -Path $Path -Raw
+    if ([string]::IsNullOrWhiteSpace($content)) {
+        throw [HveCoreFileValidationException]::new("Derived file is empty: $Path")
+    }
     $headerEnd = $content.IndexOf('#>')
     if ($headerEnd -lt 0) {
         throw [HveCoreFileValidationException]::new("Could not find a comment-based help header in $Path")
@@ -239,8 +242,8 @@ function Get-HveCoreFileDrift {
 
     return [ordered]@{
         Path                = $Path
-        BaselineUpstreamSha = if ($baselineUpstreamSha) { $baselineUpstreamSha } else { '' }
-        TargetUpstreamSha   = if ($targetUpstreamSha) { $targetUpstreamSha } else { '' }
+        BaselineUpstreamSha = $baselineUpstreamSha
+        TargetUpstreamSha   = $targetUpstreamSha
         BaselineRef         = $BaselineRef
         TargetRef           = $TargetRef
         ComparisonUrl       = "https://github.com/$Repo/compare/$baselineRefUrl...$targetRefUrl"
@@ -261,11 +264,14 @@ function Get-HveCoreStateLabel {
 
     switch ($State) {
         'drift'            { return '⚠️ Upstream advanced' }
-        'missing-both'     { return '❓ Not found at either ref' }
         'missing-baseline' { return '❓ Not found at baseline ref' }
         'missing-target'   { return '❓ Not found at target ref' }
         'error'            { return '❌ Check failed' }
-        default            { return '✅ Current' }
+        'current'          { return '✅ Current' }
+        default {
+            $stateText = ConvertTo-HveCoreMarkdownText -Value $State
+            return "❓ Unknown state: $stateText"
+        }
     }
 }
 
@@ -375,7 +381,7 @@ function Get-HveCoreTrustedReleaseUrl {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$Value
+        [Parameter(Mandatory)][AllowNull()][AllowEmptyString()][string]$Value
     )
 
     $uri = $null
@@ -416,7 +422,7 @@ function Format-HveCoreIssueBody {
     return @"
 ## hve-core Upstream Freshness Report
 
-Latest reviewed hve-core release: $latestLink
+Latest hve-core release: $latestLink
 Release-file baseline: ``$pinnedTagText`` (``UPSTREAM_REF`` in ``$($pin.File)``)
 Source-header target: ``$latestMainShaText``
 Action required: $($Result.DriftCount) drifted, $($Result.ErrorCount) check errors
@@ -454,14 +460,17 @@ function Format-HveCoreJobSummary {
     $pin = $Result.Pin
     $files = @($Result.Files)
 
+    $latestTagText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestTag
+    $pinnedTagText = ConvertTo-HveCoreMarkdownText -Value $pin.PinnedTag
+    $latestMainShaText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestMainSha
     $fileRows = $files | ForEach-Object { Format-HveCoreDriftRow -File $_ }
 
     return @"
 ## hve-core Upstream Freshness
 
-Latest release: $($Result.LatestTag)
-Release-file baseline: $($pin.PinnedTag)
-Source-header target: $($Result.LatestMainSha)
+Latest release: $latestTagText
+Release-file baseline: $pinnedTagText
+Source-header target: $latestMainShaText
 Action required: $($Result.DriftCount) drifted, $($Result.ErrorCount) check errors
 
 | File | Baseline | Upstream comparison | Baseline upstream blob | Target upstream blob | Status |
@@ -553,7 +562,7 @@ function Assert-HveCoreCommitOnMain {
     if ($mergeBase -notmatch $script:FullShaPattern) {
         throw "Could not verify source commit '$CommitSha' against upstream main in ${Repo}: invalid merge-base SHA '$mergeBase'"
     }
-    if ($mergeBase -cne $CommitSha) {
+    if ($mergeBase -ne $CommitSha) {
         throw [HveCoreFileValidationException]::new(
             "Recorded source commit '$CommitSha' is not an ancestor of upstream main '$MainSha'"
         )
@@ -569,7 +578,7 @@ function Get-HveCoreFileDriftForBaseline {
     param(
         [Parameter(Mandatory)][object]$File,
         [Parameter(Mandatory)][string]$PinnedReleaseSha,
-        [Parameter(Mandatory)][string]$LatestReleaseTag,
+        [Parameter(Mandatory)][string]$LatestReleaseSha,
         [Parameter(Mandatory)][string]$LatestMainSha
     )
 
@@ -587,10 +596,16 @@ function Get-HveCoreFileDriftForBaseline {
                 )
             }
             Assert-HveCoreCommitOnMain -Repo $script:UpstreamRepo -CommitSha $source.Sha -MainSha $LatestMainSha
-            return Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $source.Path -BaselineRef $source.Sha -TargetRef $LatestMainSha
+            $result = Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $source.Path -BaselineRef $source.Sha -TargetRef $LatestMainSha
+            if ($result.State -eq 'missing-baseline') {
+                throw [HveCoreFileValidationException]::new(
+                    "Recorded source path '$($source.Path)' is absent at its recorded commit '$($source.Sha)'"
+                )
+            }
+            return $result
         }
         'release' {
-            return Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $path -BaselineRef $PinnedReleaseSha -TargetRef $LatestReleaseTag
+            return Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $path -BaselineRef $PinnedReleaseSha -TargetRef $LatestReleaseSha
         }
         default {
             throw [HveCoreFileValidationException]::new("Unsupported hve-core baseline '$($File.Baseline)' for $path")
@@ -641,7 +656,7 @@ function Invoke-HveCoreFreshnessCheck {
         $fileResults = foreach ($file in $script:DerivedFiles) {
             $path = $file.Path
             try {
-                $r = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha $pinRef.Sha -LatestReleaseTag $latestTag -LatestMainSha $latestMainSha
+                $r = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha $pinRef.Sha -LatestReleaseSha $latestSha -LatestMainSha $latestMainSha
                 $r['Baseline'] = $file.Baseline
             }
             catch [HveCoreFileValidationException] {
@@ -672,6 +687,7 @@ function Invoke-HveCoreFreshnessCheck {
 
         [ordered]@{
             LatestTag     = $latestTag
+            LatestReleaseSha = $latestSha
             LatestUrl     = $latestUrl
             LatestMainSha = $latestMainSha
             DriftCount    = $driftCount

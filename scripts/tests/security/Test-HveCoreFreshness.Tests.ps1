@@ -78,6 +78,14 @@ Describe 'Get-PinnedHveCoreRef' -Tag 'Unit' {
 
         (Get-PinnedHveCoreRef -Path $p).Sha | Should -BeNullOrEmpty
     }
+
+    It 'Returns unknown for an invalid release tag' {
+        $p = Join-Path $TestDrive 'invalid-tag.yml'
+        "env:`n  # microsoft/hve-core release: bad](tag`n  UPSTREAM_REF: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" |
+            Set-Content -Path $p -Encoding utf8
+
+        (Get-PinnedHveCoreRef -Path $p).Tag | Should -Be 'unknown'
+    }
 }
 
 Describe 'Select-LatestRelease' -Tag 'Unit' {
@@ -188,6 +196,13 @@ Write-Host 'Adapted from microsoft/hve-core scripts/security/Fake.ps1 as of comm
 
     It 'Throws when the file does not exist' {
         { Get-HveCoreFileSource -Path (Join-Path $TestDrive 'missing.ps1') } | Should -Throw '*not found locally*'
+    }
+
+    It 'Classifies an empty file as a validation failure' {
+        $path = Join-Path $TestDrive 'empty.ps1'
+        '' | Set-Content -Path $path -NoNewline
+
+        { Get-HveCoreFileSource -Path $path } | Should -Throw -ExceptionType ([HveCoreFileValidationException])
     }
 }
 
@@ -329,6 +344,20 @@ Describe 'Assert-HveCoreCommitOnMain' -Tag 'Unit' {
                 -CommitSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' `
                 -MainSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
         } | Should -Not -Throw
+        Should -Invoke gh -Times 1 -Exactly -ParameterFilter {
+            "$args" -match 'repos/o/r/compare/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\.\.\.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' -and
+            "$args" -match '\.merge_base_commit\.sha'
+        }
+    }
+
+    It 'Accepts a merge base whose SHA differs only by case' {
+        Mock gh { $global:LASTEXITCODE = 0; 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' }
+
+        {
+            Assert-HveCoreCommitOnMain -Repo 'o/r' `
+                -CommitSha 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' `
+                -MainSha 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        } | Should -Not -Throw
     }
 
     It 'Throws when the recorded commit is not an ancestor of main' {
@@ -396,7 +425,7 @@ Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
         Mock Assert-HveCoreCommitOnMain {}
         Mock Get-HveCoreFileDrift { [pscustomobject]@{ State = 'current'; Drift = $false } }
 
-        $null = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha $mainSha
+        $null = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseSha 'release-sha' -LatestMainSha $mainSha
 
         Should -Invoke Assert-HveCoreCommitOnMain -Times 1 -Exactly -ParameterFilter {
             $CommitSha -eq $sourceSha -and $MainSha -eq $mainSha
@@ -406,17 +435,17 @@ Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
         }
     }
 
-    It 'Uses the release pin and latest release tag' {
+    It 'Uses the release pin and resolved latest release SHA' {
         $path = 'scripts/security/Modules/SecurityHelpers.psm1'
         $file = [pscustomobject]@{ Path = $path; Baseline = 'release' }
         Mock Get-HveCoreFileSource { throw 'source parser must not run' }
         Mock Assert-HveCoreCommitOnMain { throw 'ancestry check must not run' }
         Mock Get-HveCoreFileDrift { [pscustomobject]@{ State = 'current'; Drift = $false } }
 
-        $null = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
+        $null = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseSha 'release-sha' -LatestMainSha 'main'
 
         Should -Invoke Get-HveCoreFileDrift -Times 1 -Exactly -ParameterFilter {
-            $Path -eq $path -and $BaselineRef -eq 'pin' -and $TargetRef -eq 'tag'
+            $Path -eq $path -and $BaselineRef -eq 'pin' -and $TargetRef -eq 'release-sha'
         }
         Should -Invoke Get-HveCoreFileSource -Times 0 -Exactly
         Should -Invoke Assert-HveCoreCommitOnMain -Times 0 -Exactly
@@ -435,7 +464,7 @@ Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
         }
 
         {
-            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
+            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseSha 'release-sha' -LatestMainSha 'main'
         } | Should -Throw '*must match its recorded*'
     }
 
@@ -452,7 +481,7 @@ Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
         }
 
         {
-            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
+            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseSha 'release-sha' -LatestMainSha 'main'
         } | Should -Throw '*must match its recorded*'
     }
 
@@ -460,7 +489,7 @@ Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
         $file = [pscustomobject]@{ Path = 'scripts/security/Test-DangerousWorkflow.ps1'; Baseline = 'bogus' }
 
         {
-            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
+            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseSha 'release-sha' -LatestMainSha 'main'
         } | Should -Throw '*Unsupported hve-core baseline*'
     }
 
@@ -469,8 +498,24 @@ Describe 'Get-HveCoreFileDriftForBaseline' -Tag 'Unit' {
         $file = [pscustomobject]@{ Path = 'scripts/security/Missing.ps1'; Baseline = 'release' }
 
         {
-            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseTag 'tag' -LatestMainSha 'main'
+            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseSha 'release-sha' -LatestMainSha 'main'
         } | Should -Throw '*not found locally*'
+    }
+
+    It 'Rejects a source header whose recorded path is absent at its recorded commit' {
+        $path = 'scripts/security/Test-DangerousWorkflow.ps1'
+        $file = [pscustomobject]@{ Path = $path; Baseline = 'source-header' }
+        Mock Get-HveCoreFileSource {
+            [pscustomobject]@{ Path = $path; Sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }
+        }
+        Mock Assert-HveCoreCommitOnMain {}
+        Mock Get-HveCoreFileDrift {
+            [pscustomobject]@{ State = 'missing-baseline'; Drift = $true }
+        }
+
+        {
+            Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha 'pin' -LatestReleaseSha 'release-sha' -LatestMainSha 'main'
+        } | Should -Throw '*absent at its recorded commit*'
     }
 }
 
@@ -703,6 +748,52 @@ Describe 'Format-HveCoreJobSummary' -Tag 'Unit' {
         $summary | Should -Match 'Source-header target: b{40}'
         $summary | Should -Match 'Action required: 1 drifted, 0 check errors'
     }
+
+    It 'Escapes untrusted refs in the job summary' {
+        $r = [pscustomobject]@{
+            LatestTag = 'v1|spoof'
+            LatestMainSha = 'main](https://evil.example)'
+            DriftCount = 0
+            ErrorCount = 0
+            Pin = [pscustomobject]@{ PinnedTag = 'pin`value' }
+            Files = @()
+        }
+
+        $summary = Format-HveCoreJobSummary -Result $r
+
+        $summary | Should -Match 'v1&#124;spoof'
+        $summary | Should -Match 'main&#93;&#40;https://evil\.example&#41;'
+        $summary | Should -Match 'pin&#96;value'
+    }
+}
+
+Describe 'Get-HveCoreReleases' -Tag 'Unit' {
+    It 'Parses release objects from the GitHub API' {
+        Mock gh {
+            $global:LASTEXITCODE = 0
+            '[{"tag_name":"v1","draft":false},{"tag_name":"v2","draft":true}]'
+        }
+
+        $releases = @(Get-HveCoreReleases -Repo 'o/r')
+
+        $releases.Count | Should -Be 2
+        $releases[0].tag_name | Should -Be 'v1'
+        Should -Invoke gh -Times 1 -Exactly -ParameterFilter {
+            "$args" -match 'repos/o/r/releases\?per_page=30'
+        }
+    }
+
+    It 'Throws when the GitHub API fails' {
+        Mock gh { $global:LASTEXITCODE = 1; 'HTTP 403 rate limit' }
+
+        { Get-HveCoreReleases -Repo 'o/r' } | Should -Throw '*cannot produce reliable results*'
+    }
+
+    It 'Throws when the GitHub API returns no payload' {
+        Mock gh { $global:LASTEXITCODE = 0; '' }
+
+        { Get-HveCoreReleases -Repo 'o/r' } | Should -Throw '*cannot produce reliable results*'
+    }
 }
 
 Describe 'Invoke-HveCoreFreshnessCheck' -Tag 'Unit' {
@@ -750,6 +841,7 @@ Describe 'Invoke-HveCoreFreshnessCheck' -Tag 'Unit' {
         $outcome.DriftCount | Should -Be 0
         $outcome.ErrorCount | Should -Be 0
         $result.LatestMainSha | Should -Be 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        $result.LatestReleaseSha | Should -Be 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
         $result.DriftCount | Should -Be 0
         $result.ErrorCount | Should -Be 0
         @($result.Files).Count | Should -Be $script:DerivedFiles.Count
@@ -896,6 +988,27 @@ Describe 'Write-HveCoreGitHubOutputs' -Tag 'Unit' {
             'drift-count=1'
             'error-count=1'
         )
+    }
+
+    It 'Matches every workflow output consumer' {
+        $outputPath = Join-Path $TestDrive 'github-output-contract.txt'
+        $outcome = [pscustomobject]@{
+            AttentionCount = 0
+            DriftCount = 0
+            ErrorCount = 0
+        }
+        Write-HveCoreGitHubOutputs -Outcome $outcome -Path $outputPath
+        $emitted = @(Get-Content -Path $outputPath | ForEach-Object { ($_ -split '=', 2)[0] })
+        $workflowPath = Join-Path $script:RepoRoot '.github/workflows/check-hve-core-freshness.yml'
+        $workflow = Get-Content -Path $workflowPath -Raw
+        $referenced = @([regex]::Matches($workflow, 'steps\.check\.outputs\.([a-z-]+)') |
+                ForEach-Object { $_.Groups[1].Value } |
+                Select-Object -Unique)
+
+        $referenced | Should -Be @('attention-count', 'drift-count', 'error-count')
+        foreach ($name in $referenced) {
+            $emitted | Should -Contain $name
+        }
     }
 }
 

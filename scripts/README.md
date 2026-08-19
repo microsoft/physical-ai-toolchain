@@ -77,7 +77,7 @@ Security scanning and dependency management scripts.
 
 The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the values pinned in `.devcontainer/install-dev-deps.sh` and `.devcontainer/devcontainer.json`, and queries upstream Helm repositories for chart version drift. Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script.
 
-The `Test-HveCoreFreshness.ps1` script is invoked by the `check-hve-core-freshness.yml` workflow on a weekly schedule. Modules compare the **upstream** blob SHA at the pinned `UPSTREAM_REF` against the newest non-draft `microsoft/hve-core` release. Security linters absent from releases compare the source revision recorded in their header against one resolved, immutable upstream `main` revision. This intentionally reports relevant upstream changes before they appear in a release.
+The `Test-HveCoreFreshness.ps1` script is invoked by the `check-hve-core-freshness.yml` workflow on a weekly schedule. Each derived file declares a baseline. `release` files compare the **upstream** blob SHA at the pinned `UPSTREAM_REF` against one resolved, immutable newest non-draft release revision. `source-header` files compare the revision recorded in their header against one resolved, immutable upstream `main` revision. This reports relevant upstream changes before they appear in a release.
 
 Source-header files must include `Adapted from microsoft/hve-core <upstream-path> as of commit <40-hex SHA>`. Comparing upstream blobs avoids false drift from intentional local adaptations.
 
