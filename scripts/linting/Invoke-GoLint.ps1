@@ -61,6 +61,38 @@ function Write-EmptyLintResults {
     Write-Host $summaryContent
 }
 
+function Get-GoLintReleaseAsset {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Version,
+        [string]$OperatingSystem = $(if ($IsMacOS) { 'darwin' } elseif ($IsLinux) { 'linux' } else { 'unsupported' }),
+        [string]$Architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    )
+
+    $arch = switch ($Architecture) {
+        'X64' { 'amd64' }
+        'Arm64' { 'arm64' }
+        default { throw "Unsupported architecture for golangci-lint: $Architecture" }
+    }
+    if ($OperatingSystem -notin @('darwin', 'linux')) {
+        throw "Unsupported operating system for golangci-lint installation: $OperatingSystem"
+    }
+
+    $checksums = @{
+        'darwin-amd64' = 'f6f06d94b6241521c53d15450c5209b028270bf966f842afb11c030c79f5bc16'
+        'darwin-arm64' = 'a9c54498731b3128f79e090be6110f3e5fffccc617b08142ed244d4126c73f29'
+        'linux-amd64' = '8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553'
+        'linux-arm64' = '44cd40a8c76c86755375adfeea52cfd3533cb43d7bd647771e0ae065e166df3a'
+    }
+    $platform = "$OperatingSystem-$arch"
+    $archiveName = "golangci-lint-${Version}-${platform}.tar.gz"
+    return @{
+        ArchiveName = $archiveName
+        Checksum = $checksums[$platform]
+        DirectoryName = "golangci-lint-${Version}-${platform}"
+    }
+}
+
 function Invoke-GoLintCore {
     [CmdletBinding()]
     param(
@@ -104,12 +136,13 @@ function Invoke-GoLintCore {
     if (-not (Get-Command golangci-lint -ErrorAction SilentlyContinue)) {
         Write-Host 'golangci-lint not found — installing via SHA256-verified binary...'
         $lintInstallVersion = '2.12.2'
-        $lintExpectedSHA256 = '8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553'
-        $lintUrl = "https://github.com/golangci/golangci-lint/releases/download/v${lintInstallVersion}/golangci-lint-${lintInstallVersion}-linux-amd64.tar.gz"
+        $lintAsset = Get-GoLintReleaseAsset -Version $lintInstallVersion
+        $lintExpectedSHA256 = $lintAsset.Checksum
+        $lintUrl = "https://github.com/golangci/golangci-lint/releases/download/v${lintInstallVersion}/$($lintAsset.ArchiveName)"
         $lintTarball = '/tmp/golangci-lint.tar.gz'
         $goPathBin = (& go env GOPATH) + '/bin'
 
-        & bash -c "set -euo pipefail && curl -fsSL -o '${lintTarball}' '${lintUrl}' && echo '${lintExpectedSHA256}  ${lintTarball}' | sha256sum -c --quiet - && mkdir -p '${goPathBin}' && tar -xzf '${lintTarball}' -C '${goPathBin}' --strip-components=1 'golangci-lint-${lintInstallVersion}-linux-amd64/golangci-lint' && rm -f '${lintTarball}'"
+        & bash -c "set -euo pipefail && curl -fsSL -o '${lintTarball}' '${lintUrl}' && echo '${lintExpectedSHA256}  ${lintTarball}' | sha256sum -c --quiet - && mkdir -p '${goPathBin}' && tar -xzf '${lintTarball}' -C '${goPathBin}' --strip-components=1 '$($lintAsset.DirectoryName)/golangci-lint' && rm -f '${lintTarball}'"
         if ($LASTEXITCODE -ne 0) {
             Write-CIAnnotation -Level Error -Message 'Failed to install golangci-lint'
             return 1

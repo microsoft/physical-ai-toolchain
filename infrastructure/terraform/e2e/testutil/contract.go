@@ -80,10 +80,7 @@ func ValidateTerraformContract(t *testing.T, terraformDir string, required []str
 // GetOutputKeysFromStruct extracts all `output:"..."` struct tag values using
 // reflection. Accepts either a struct value or a pointer to a struct.
 func GetOutputKeysFromStruct(v any) []string {
-	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr {
-		rv = rv.Elem()
-	}
+	rv := reflect.Indirect(reflect.ValueOf(v))
 	typ := rv.Type()
 
 	keys := make([]string, 0, typ.NumField())

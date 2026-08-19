@@ -64,6 +64,8 @@ jobs:
 
       - name: Setup uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          version: '0.12.5'
 
       - name: Setup Node.js (frontend pin)
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0

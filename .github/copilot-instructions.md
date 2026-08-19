@@ -330,7 +330,7 @@ Treat `.github/workflows/copilot-setup-steps.yml` and `.devcontainer/devcontaine
 
 ### Binary Version Pinning
 
-Register every exact binary installation pin in `scripts/security/Test-BinaryVersionFreshness.ps1` so `.github/workflows/check-binary-freshness.yml` detects stale and inconsistent copies. Compatibility floors such as Terraform `required_version` constraints and documentation minimums are excluded. Docker image digests remain owned by Dependabot.
+Register every exact binary installation pin backed by a GitHub release in `scripts/security/Test-BinaryVersionFreshness.ps1` so `.github/workflows/check-binary-freshness.yml` detects stale and inconsistent copies. Compatibility floors such as Terraform `required_version` constraints and documentation minimums are excluded. Vendor-hosted binaries without a compatible latest-release API remain checksum-tracked by `Test-BinaryFreshness.ps1`. Docker image digests remain owned by Dependabot.
 
 `Test-BinaryVersionFreshness.ps1` detects version drift. `Test-BinaryFreshness.ps1`, invoked by `.github/workflows/check-binary-integrity.yml`, validates binary checksums and Helm chart versions.
 

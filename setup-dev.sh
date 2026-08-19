@@ -69,22 +69,32 @@ if [[ "${installed_uv_version}" != "${UV_VERSION}" ]]; then
     warn "Replacing uv ${installed_uv_version} with pinned version ${UV_VERSION}"
   fi
   info "Installing uv package manager..."
+  UV_OS=$(uname -s)
   UV_ARCH=$(uname -m)
-  case "${UV_ARCH}" in
-    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2" ;;
-    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31" ;;
-    *) error "Unsupported architecture for uv: ${UV_ARCH}"; exit 1 ;;
+  case "${UV_OS}-${UV_ARCH}" in
+    Darwin-arm64)  UV_TRIPLE="aarch64-apple-darwin"; UV_SHA256="5bb0e5fe008a773c3dbcb97ff79cd89e1241464fe9d2f986d52ad8f1b037bd62" ;;
+    Darwin-x86_64) UV_TRIPLE="x86_64-apple-darwin"; UV_SHA256="b3b2137477cf96c9686ebfb71524614cec780c673fd73e59bce099aef02e70e8" ;;
+    Linux-aarch64|Linux-arm64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31" ;;
+    Linux-x86_64) UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2" ;;
+    *) error "Unsupported platform for uv: ${UV_OS}-${UV_ARCH}"; exit 1 ;;
   esac
-  curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TRIPLE}.tar.gz" -o /tmp/uv.tar.gz
-  verify_sha256 "${UV_SHA256}" /tmp/uv.tar.gz
-  tar -xzf /tmp/uv.tar.gz -C /tmp
-  sudo install -m 0755 "/tmp/uv-${UV_TRIPLE}/uv" /usr/local/bin/uv
-  sudo install -m 0755 "/tmp/uv-${UV_TRIPLE}/uvx" /usr/local/bin/uvx
-  rm -rf /tmp/uv.tar.gz "/tmp/uv-${UV_TRIPLE}"
-  export PATH="/usr/local/bin:${PATH}"
+  UV_TEMP_DIR=$(mktemp -d)
+  UV_BIN_DIR="${HOME}/.local/bin"
+  curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TRIPLE}.tar.gz" -o "${UV_TEMP_DIR}/uv.tar.gz"
+  verify_sha256 "${UV_SHA256}" "${UV_TEMP_DIR}/uv.tar.gz"
+  tar -xzf "${UV_TEMP_DIR}/uv.tar.gz" -C "${UV_TEMP_DIR}"
+  mkdir -p "${UV_BIN_DIR}"
+  install -m 0755 "${UV_TEMP_DIR}/uv-${UV_TRIPLE}/uv" "${UV_BIN_DIR}/uv"
+  install -m 0755 "${UV_TEMP_DIR}/uv-${UV_TRIPLE}/uvx" "${UV_BIN_DIR}/uvx"
+  rm -rf "${UV_TEMP_DIR}"
+  export PATH="${UV_BIN_DIR}:${PATH}"
   hash -r
 fi
 
+if ! command -v uv &>/dev/null; then
+  error "uv not found on PATH after installing pinned version ${UV_VERSION}"
+  exit 1
+fi
 installed_uv_version=$(uv --version | awk '{print $2}')
 if [[ "${installed_uv_version}" != "${UV_VERSION}" ]]; then
   error "Failed to activate pinned uv ${UV_VERSION}; found ${installed_uv_version}"

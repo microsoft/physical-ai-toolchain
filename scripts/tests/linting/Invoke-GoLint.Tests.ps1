@@ -53,6 +53,29 @@ Describe 'Invoke-GoLintCore' -Tag 'Unit' {
     }
 
     Context 'tool availability' {
+        It 'maps supported release assets and checksums' -TestCases @(
+            @{
+                OperatingSystem = 'darwin'
+                Architecture = 'Arm64'
+                ArchiveName = 'golangci-lint-2.12.2-darwin-arm64.tar.gz'
+                Checksum = 'a9c54498731b3128f79e090be6110f3e5fffccc617b08142ed244d4126c73f29'
+            }
+            @{
+                OperatingSystem = 'linux'
+                Architecture = 'X64'
+                ArchiveName = 'golangci-lint-2.12.2-linux-amd64.tar.gz'
+                Checksum = '8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553'
+            }
+        ) {
+            param($OperatingSystem, $Architecture, $ArchiveName, $Checksum)
+
+            $asset = Get-GoLintReleaseAsset -Version '2.12.2' `
+                -OperatingSystem $OperatingSystem -Architecture $Architecture
+
+            $asset.ArchiveName | Should -Be $ArchiveName
+            $asset.Checksum | Should -Be $Checksum
+        }
+
         It 'Installs golangci-lint when not in PATH' {
             $script:getLintCallCount = 0
             Mock Get-Command {

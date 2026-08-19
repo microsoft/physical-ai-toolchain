@@ -50,26 +50,37 @@ jobs:
           $results = @(Get-Content 'freshness-results.json' | ConvertFrom-Json)
 
           $tableRows = foreach ($r in $results) {
-              $status = if ($r.IsStale) {
+              $status = if ($r.Error) {
+                  '❌ Check failed'
+              } elseif ($r.IsStale) {
                   '⚠️ Update available'
               } elseif ($r.Inconsistent) {
                   '⚠️ Inconsistent pins'
               } else {
                   '✅ Current'
               }
-              $latest = "[$($r.LatestVersion)](https://github.com/$($r.Repo)/releases/tag/$($r.LatestTag))"
+              $latest = if ($r.LatestTag) {
+                  "[$($r.LatestVersion)](https://github.com/$($r.Repo)/releases/tag/$($r.LatestTag))"
+              } else {
+                  'Unavailable'
+              }
               "| $($r.Name) | $($r.PinnedVersion) | $latest | $status |"
           }
 
-          $staleTools = @($results | Where-Object { $_.IsStale })
-          $fileLines = foreach ($r in $staleTools) {
+          $attentionTools = @($results | Where-Object { $_.RequiresAttention })
+          $fileLines = foreach ($r in $attentionTools) {
               foreach ($f in $r.SourceFiles) {
-                  "- ``$f`` — $($r.Name) $($r.PinnedVersion) → $($r.LatestVersion)"
+                  if ($r.Error) {
+                      "- ``$f`` — $($r.Name): $($r.Error)"
+                  } elseif ($r.IsStale) {
+                      "- ``$f`` — $($r.Name) $($r.PinnedVersion) → $($r.LatestVersion)"
+                  }
               }
           }
 
           $warnings = @($results | Where-Object { $_.Inconsistent }) | ForEach-Object {
-              "- **$($_.Name)**: version mismatch across files ($($_.SourceFiles -join ', '))"
+              $versions = $_.PinnedVersions | ForEach-Object { "``$($_.File)``=$($_.Version)" }
+              "- **$($_.Name)**: version mismatch across files ($($versions -join ', '))"
           }
           $warningSection = if ($warnings) {
               "`n### ⚠️ Version Inconsistencies`n`n$($warnings -join "`n")"
@@ -160,7 +171,9 @@ jobs:
           $results = @(Get-Content 'freshness-results.json' | ConvertFrom-Json)
 
           $rows = foreach ($r in $results) {
-              $status = if ($r.IsStale) {
+              $status = if ($r.Error) {
+                  "❌ $($r.Error)"
+              } elseif ($r.IsStale) {
                   '⚠️ Stale'
               } elseif ($r.Inconsistent) {
                   '⚠️ Inconsistent'

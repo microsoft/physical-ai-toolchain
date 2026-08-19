@@ -11,6 +11,14 @@
     Reads exact installation pins from repository files, detects inconsistent copies,
     and writes JSON and GitHub Actions outputs for check-binary-freshness.yml.
     Test-BinaryFreshness.ps1 separately validates checksums and Helm chart versions.
+.PARAMETER RepositoryRoot
+    Repository root containing the registered pin sources.
+.PARAMETER ResultsPath
+    JSON output path for freshness results.
+.PARAMETER GitHubOutputPath
+    Optional GitHub Actions output file.
+.EXAMPLE
+    ./scripts/security/Test-BinaryVersionFreshness.ps1
 #>
 
 [CmdletBinding()]
@@ -35,6 +43,10 @@ function Get-BinaryVersionToolDefinitions {
                 @{ File = 'infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
                 @{ File = 'shared/ci/smoke-import.sh'; Pattern = 'UV_VERSION="([^"]+)"' }
                 @{ File = 'docs/contributing/prerequisites.md'; Pattern = '\| uv\s+\|\s+([0-9][^\s|]+)' }
+                @{
+                    File = '.github/workflows/copilot-setup-steps.yml'
+                    Pattern = '(?ms)^\s*- name: Setup uv\s+.*?^\s+version:\s*''([0-9][^'']+)'''
+                }
             )
         }
         @{
@@ -57,7 +69,10 @@ function Get-BinaryVersionToolDefinitions {
             Sources = @(
                 @{ File = 'setup-dev.sh'; Pattern = 'TERRAFORM_DOCS_VERSION="([^"]+)"' }
                 @{ File = 'setup-dev.ps1'; Pattern = '\$TerraformDocsVersion = ''([^'']+)''' }
-                @{ File = '.github/workflows/go-tests.yml'; Pattern = '\$version = ''v?([^'']+)''' }
+                @{
+                    File = '.github/workflows/go-tests.yml'
+                    Pattern = '(?ms)^\s*- name: Install terraform-docs\s+.*?^\s*\$version = ''v?([^'']+)'''
+                }
                 @{
                     File = '.github/workflows/terraform-docs-check.yml'
                     # Workflow input default under terraform-docs-version.
@@ -68,7 +83,6 @@ function Get-BinaryVersionToolDefinitions {
                     # Linked terraform-docs release version in the style guide.
                     Pattern = 'terraform-docs\]\([^)]+\) v([0-9][^\s.]*\.[0-9][^\s.]*\.[0-9][^\s.]*)'
                 }
-                @{ File = 'docs/contributing/prerequisites.md'; Pattern = '\| terraform-docs\s+\|\s+([0-9][^\s|]+)' }
             )
         }
         @{
@@ -87,7 +101,10 @@ function Get-BinaryVersionToolDefinitions {
                     File = 'scripts/setup/install-actionlint.sh'
                     Pattern = 'ACTIONLINT_VERSION="\$\{ACTIONLINT_VERSION:-([0-9][^}]+)\}"'
                 }
-                @{ File = '.github/workflows/yaml-lint.yml'; Pattern = '\$version = ''([0-9][^'']+)''' }
+                @{
+                    File = '.github/workflows/yaml-lint.yml'
+                    Pattern = '(?ms)^\s*- name: Install actionlint\s+.*?^\s*\$version = ''([0-9][^'']+)'''
+                }
                 @{ File = 'scripts/security/tool-checksums.json'; JsonTool = 'actionlint' }
             )
         }
@@ -125,6 +142,13 @@ function Get-BinaryVersionToolDefinitions {
                 }
             )
         }
+        @{
+            Name = 'osmo'
+            Repo = 'NVIDIA/OSMO'
+            Sources = @(
+                @{ File = '.devcontainer/devcontainer.json'; Pattern = 'OSMO_VERSION=([0-9][^\s&"]+)' }
+            )
+        }
     )
 }
 
@@ -151,10 +175,14 @@ function Get-PinnedBinaryVersion {
         return [string]$entry.version
     }
 
-    if ($content -notmatch $Source.Pattern) {
+    $regexMatches = [regex]::Matches($content, $Source.Pattern)
+    if ($regexMatches.Count -eq 0) {
         throw "Could not extract version for $ToolName from $($Source.File)"
     }
-    return $Matches[1]
+    if ($regexMatches.Count -gt 1) {
+        throw "Version pattern for $ToolName matched multiple values in $($Source.File)"
+    }
+    return $regexMatches[0].Groups[1].Value
 }
 
 function Invoke-BinaryVersionFreshnessCheck {
@@ -164,7 +192,7 @@ function Invoke-BinaryVersionFreshnessCheck {
         [hashtable[]]$Tools = (Get-BinaryVersionToolDefinitions),
         [scriptblock]$LatestReleaseResolver = {
             param([string]$Repository)
-            $response = gh api "repos/$Repository/releases/latest" --jq '.tag_name' 2>&1
+            $response = gh api "repos/$Repository/releases/latest" --jq '.tag_name' 2>$null
             if ($LASTEXITCODE -ne 0) {
                 throw "GitHub release lookup failed for ${Repository}: $response"
             }
@@ -173,40 +201,67 @@ function Invoke-BinaryVersionFreshnessCheck {
     )
 
     $results = foreach ($tool in $Tools) {
-        if (-not $tool.Sources -or $tool.Sources.Count -eq 0) {
-            throw "No version sources configured for $($tool.Name)"
-        }
-
-        $pinnedVersions = @(foreach ($source in $tool.Sources) {
-            @{
-                File = $source.File
-                Version = Get-PinnedBinaryVersion `
-                    -RepositoryRoot $RepositoryRoot `
-                    -ToolName $tool.Name `
-                    -Source $source
+        $pinnedVersions = @()
+        $pinnedVersion = $null
+        $latestVersion = $null
+        $latestTag = $null
+        $inconsistent = $false
+        try {
+            if (-not $tool.Sources -or $tool.Sources.Count -eq 0) {
+                throw "No version sources configured for $($tool.Name)"
             }
-        })
 
-        $pinnedVersion = $pinnedVersions[0].Version
-        $inconsistent = @($pinnedVersions | Where-Object { $_.Version -ne $pinnedVersion }).Count -gt 0
-        $latestTag = & $LatestReleaseResolver $tool.Repo
-        if (-not $latestTag) {
-            throw "Could not fetch latest release for $($tool.Repo) - freshness check cannot produce reliable results"
+            $pinnedVersions = @(foreach ($source in $tool.Sources) {
+                [ordered]@{
+                    File = $source.File
+                    Version = Get-PinnedBinaryVersion `
+                        -RepositoryRoot $RepositoryRoot `
+                        -ToolName $tool.Name `
+                        -Source $source
+                }
+            })
+
+            $pinnedVersion = $pinnedVersions[0].Version
+            $inconsistent = @($pinnedVersions | Where-Object { $_.Version -ne $pinnedVersion }).Count -gt 0
+            $latestTag = & $LatestReleaseResolver $tool.Repo
+            if (-not $latestTag) {
+                throw "Could not fetch latest release for $($tool.Repo) - freshness check cannot produce reliable results"
+            }
+
+            $latestTag = ([string]$latestTag).Trim()
+            if ($latestTag -notmatch '^v?([0-9]+(?:\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?)$') {
+                throw "Invalid latest release tag for $($tool.Repo): $latestTag"
+            }
+            $latestVersion = $Matches[1]
+            $isStale = $pinnedVersion -ne $latestVersion
+            [ordered]@{
+                Name = $tool.Name
+                Repo = $tool.Repo
+                PinnedVersion = $pinnedVersion
+                PinnedVersions = $pinnedVersions
+                LatestVersion = $latestVersion
+                LatestTag = $latestTag
+                IsStale = $isStale
+                Inconsistent = $inconsistent
+                Error = $null
+                RequiresAttention = $isStale -or $inconsistent
+                SourceFiles = @($tool.Sources.File)
+            }
         }
-
-        $latestTag = ([string]$latestTag).Trim()
-        $latestVersion = $latestTag.TrimStart('v')
-        $isStale = $pinnedVersion -ne $latestVersion
-        [ordered]@{
-            Name = $tool.Name
-            Repo = $tool.Repo
-            PinnedVersion = $pinnedVersion
-            LatestVersion = $latestVersion
-            LatestTag = $latestTag
-            IsStale = $isStale
-            Inconsistent = $inconsistent
-            RequiresAttention = $isStale -or $inconsistent
-            SourceFiles = @($tool.Sources.File)
+        catch {
+            [ordered]@{
+                Name = $tool.Name
+                Repo = $tool.Repo
+                PinnedVersion = $pinnedVersion
+                PinnedVersions = $pinnedVersions
+                LatestVersion = $latestVersion
+                LatestTag = $latestTag
+                IsStale = $false
+                Inconsistent = $inconsistent
+                Error = $_.Exception.Message
+                RequiresAttention = $true
+                SourceFiles = @($tool.Sources.File)
+            }
         }
     }
 
@@ -241,9 +296,10 @@ function Write-BinaryVersionFreshnessResult {
 if ($MyInvocation.InvocationName -ne '.') {
     $results = Invoke-BinaryVersionFreshnessCheck -RepositoryRoot $RepositoryRoot
     foreach ($result in $results) {
-        $status = if ($result.RequiresAttention) { 'WARNING' } else { 'CURRENT' }
+        $status = if ($result.Error) { 'ERROR' } elseif ($result.RequiresAttention) { 'WARNING' } else { 'CURRENT' }
         $extra = if ($result.Inconsistent) { ' [INCONSISTENT]' } else { '' }
-        Write-Output "$status $($result.Name): pinned=$($result.PinnedVersion) latest=$($result.LatestVersion)$extra"
+        $detail = if ($result.Error) { $result.Error } else { "pinned=$($result.PinnedVersion) latest=$($result.LatestVersion)$extra" }
+        Write-Output "$status $($result.Name): $detail"
     }
 
     $summary = Write-BinaryVersionFreshnessResult `

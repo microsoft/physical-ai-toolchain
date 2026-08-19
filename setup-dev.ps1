@@ -145,27 +145,58 @@ function Install-Uv {
         }
         Move-Item $uvSource (Join-Path $BinDir $uvExecutable) -Force
         Move-Item $uvxSource (Join-Path $BinDir $uvxExecutable) -Force
+        $pathEntries = @($env:PATH -split [System.IO.Path]::PathSeparator | Where-Object { $_ })
         $env:PATH = "$BinDir$([System.IO.Path]::PathSeparator)$env:PATH"
-
-        if ($isWindowsTarget -and $IsWindows) {
-            $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-            $userPathEntries = @($userPath -split [System.IO.Path]::PathSeparator | Where-Object { $_ })
-            if ($BinDir -notin $userPathEntries) {
-                $updatedUserPath = @($userPathEntries + $BinDir) -join [System.IO.Path]::PathSeparator
-                [Environment]::SetEnvironmentVariable(
-                    'Path',
-                    $updatedUserPath,
-                    'User'
-                )
-            }
-        }
-        else {
+        if ($BinDir -notin $pathEntries) {
             Write-Warn "uv was installed to $BinDir. Add this directory to your shell PATH for future terminals."
         }
     }
     finally {
         Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Get-UvInstallation {
+    [CmdletBinding()]
+    param()
+
+    $command = Get-Command uv -ErrorAction SilentlyContinue
+    if (-not $command) {
+        return $null
+    }
+
+    $version = ((& $command.Source --version) -split '\s+')[1]
+    return [pscustomobject]@{
+        Path = $command.Source
+        Version = $version
+    }
+}
+
+function Initialize-Uv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][hashtable]$Digests
+    )
+
+    $installed = Get-UvInstallation
+    if (-not $installed -or $installed.Version -ne $Version) {
+        if ($installed) {
+            Write-Warn "Installing pinned uv $Version ahead of uv $($installed.Version) at $($installed.Path)"
+        }
+        Write-Info "Installing uv package manager v$Version..."
+        Install-Uv -Version $Version -Digests $Digests
+    }
+
+    $active = Get-UvInstallation
+    if (-not $active) {
+        throw "uv not found on PATH after installing pinned version $Version"
+    }
+    if ($active.Version -ne $Version) {
+        throw "Failed to activate pinned uv $Version; found $($active.Version) at $($active.Path)"
+    }
+
+    Write-Info "Using uv: uv $($active.Version)"
 }
 
 #endregion
@@ -248,17 +279,7 @@ $UvDigests = @{
     'x86_64-unknown-linux-gnu'   = '68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2'
 }
 
-$installedUv = Get-Command uv -ErrorAction SilentlyContinue
-$installedUvVersion = if ($installedUv) { ((uv --version) -split '\s+')[1] } else { $null }
-if (-not $installedUv -or $installedUvVersion -ne $UvVersion) {
-    if ($installedUv) {
-        Write-Warn "Replacing uv $installedUvVersion with pinned version $UvVersion"
-    }
-    Write-Info "Installing uv package manager v$UvVersion..."
-    Install-Uv -Version $UvVersion -Digests $UvDigests
-}
-
-Write-Info "Using uv: $(uv --version)"
+Initialize-Uv -Version $UvVersion -Digests $UvDigests
 
 # ===================================================================
 # Terraform-Docs
