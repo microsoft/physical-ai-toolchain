@@ -2,6 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0' }
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
+# cspell:ignore CRITICL
 
 BeforeDiscovery {
     $script:ToolsPresent = [bool](Get-Command bash -ErrorAction SilentlyContinue) -and
@@ -23,9 +24,26 @@ BeforeAll {
 #!/usr/bin/env bash
 printf '%s\n' 'sha256:$script:Digest'
 "@
-        foreach ($tool in @('trivy', 'grype')) {
-            Set-Content -Path (Join-Path $bin $tool) -Encoding utf8 -Value "#!/usr/bin/env bash`nexit 0`n"
-        }
+        Set-Content -Path (Join-Path $bin 'trivy') -Encoding utf8 -Value @'
+#!/usr/bin/env bash
+set -o errexit -o nounset
+output=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --output) output="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+cat > "$output" <<'JSON'
+{"Results":[{"Vulnerabilities":[{"VulnerabilityID":"CVE-2026-0001","Severity":"HIGH"},{"VulnerabilityID":"CVE-2026-0002","Severity":"CRITICAL"}]}]}
+JSON
+'@
+        Set-Content -Path (Join-Path $bin 'grype') -Encoding utf8 -Value @'
+#!/usr/bin/env bash
+cat <<'JSON'
+{"matches":[{"vulnerability":{"id":"CVE-2026-0002","severity":"Critical"}}]}
+JSON
+'@
         & chmod +x (Join-Path $bin 'crane') (Join-Path $bin 'trivy') (Join-Path $bin 'grype')
 
         Set-Content -Path (Join-Path $scan 'trivy.json') -Encoding utf8 -Value @'
@@ -51,7 +69,10 @@ printf '%s\n' 'sha256:$script:Digest'
         param(
             [Parameter(Mandatory)][hashtable]$Workspace,
             [string]$Image = 'registry.example.com/test-product:1',
-            [switch]$DeriveIdentity
+            [switch]$DeriveIdentity,
+            [switch]$LiveScan,
+            [string]$Severity,
+            [string[]]$AdditionalArguments = @()
         )
 
         $previousPath = $env:PATH
@@ -60,12 +81,18 @@ printf '%s\n' 'sha256:$script:Digest'
             $arguments = @(
                 '--image', $Image,
                 '--scan-dir', $Workspace.Scan,
-                '--output', $Workspace.Output,
-                '--skip-scan'
+                '--output', $Workspace.Output
             )
+            if (-not $LiveScan) {
+                $arguments += '--skip-scan'
+            }
             if (-not $DeriveIdentity) {
                 $arguments += @('--product', 'test-product', '--repo-url', 'registry.example.com')
             }
+            if ($Severity) {
+                $arguments += @('--severity', $Severity)
+            }
+            $arguments += $AdditionalArguments
             $output = & bash $script:Generator @arguments 2>&1
             $script:GeneratorExit = $LASTEXITCODE
             $script:GeneratorOutput = $output -join "`n"
@@ -131,7 +158,7 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
 
         $newFinding = $document.statements | Where-Object { $_.vulnerability.name -eq 'CVE-2026-0002' }
         $newFinding.status | Should -Be 'under_investigation'
-        $script:GeneratorOutput | Should -Match 'Statements total:\s+3'
+        $script:GeneratorOutput | Should -Match 'Statements:\s+3'
     }
 
     It 'rejects an untrusted existing version without evaluating it or changing the document' {
@@ -176,9 +203,24 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
     }
 
-    It 'rejects malformed document and statement timestamps' {
+    It 'rejects an invalid document timestamp' {
         @{
             timestamp = 'not-a-timestamp'
+            version = 1
+            statements = @()
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
+        $before = Get-Content $script:Workspace.Output -Raw
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
+        Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
+    }
+
+    It 'rejects an invalid statement timestamp' {
+        @{
+            timestamp = '2026-01-01T00:00:00Z'
             version = 1
             statements = @(
                 @{
@@ -208,6 +250,65 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
 
         $script:GeneratorExit | Should -Not -Be 0
         $script:GeneratorOutput | Should -Match 'Cached scanner output does not match digest'
+        Test-Path $script:Workspace.Output | Should -BeFalse
+    }
+
+    It 'rejects scanner output cached for another severity filter' {
+        @{
+            digest = "sha256:$script:Digest"
+            severity_filter = 'ALL'
+        } | ConvertTo-Json | Set-Content -Path (Join-Path $script:Workspace.Scan 'metadata.json') -Encoding utf8
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Cached scanner output does not match digest'
+        Test-Path $script:Workspace.Output | Should -BeFalse
+    }
+
+    It 'publishes matching scanner output and metadata after a live scan' {
+        Invoke-Generator -Workspace $script:Workspace -LiveScan
+
+        $script:GeneratorExit | Should -Be 0
+        $metadata = Get-Content (Join-Path $script:Workspace.Scan 'metadata.json') -Raw | ConvertFrom-Json
+        $metadata.digest | Should -Be "sha256:$script:Digest"
+        $metadata.severity_filter | Should -Be 'HIGH,CRITICAL'
+        Get-Content (Join-Path $script:Workspace.Scan 'trivy.json') -Raw | Should -Match 'CVE-2026-0001'
+        Get-Content (Join-Path $script:Workspace.Scan 'grype.json') -Raw | Should -Match 'CVE-2026-0002'
+        Get-Content (Join-Path $script:Workspace.Scan 'cves.txt') -Raw | Should -Match 'CVE-2026-0001'
+        Get-ChildItem $script:Workspace.Scan -Directory -Filter 'run.*' | Should -BeNullOrEmpty
+
+        Invoke-Generator -Workspace $script:Workspace
+        $script:GeneratorExit | Should -Be 0
+    }
+
+    It 'invalidates scanner metadata before publishing replacement cache files' {
+        $oldMetadata = Get-Content (Join-Path $script:Workspace.Scan 'metadata.json') -Raw
+        Set-Content -Path (Join-Path $script:Workspace.Bin 'mv') -Encoding utf8 -Value @'
+#!/usr/bin/env bash
+if [[ "$2" == */grype.json ]]; then
+    exit 1
+fi
+exec /bin/mv "$@"
+'@
+        & chmod +x (Join-Path $script:Workspace.Bin 'mv')
+
+        Invoke-Generator -Workspace $script:Workspace -LiveScan
+
+        $script:GeneratorExit | Should -Not -Be 0
+        Test-Path (Join-Path $script:Workspace.Scan 'metadata.json') | Should -BeFalse
+        $oldMetadata | Should -Not -BeNullOrEmpty
+    }
+
+    It 'rejects malformed scanner vulnerability identifiers' {
+        Set-Content -Path (Join-Path $script:Workspace.Scan 'trivy.json') -Encoding utf8 -Value @'
+{"Results":[{"Vulnerabilities":[{"VulnerabilityID":null,"Severity":"HIGH"}]}]}
+'@
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Trivy output contains an invalid vulnerability entry'
         Test-Path $script:Workspace.Output | Should -BeFalse
     }
 
@@ -258,7 +359,7 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
     }
 
-    It 'rejects not_affected without an allowed justification and status notes' {
+    It 'rejects not_affected with an unsupported justification' {
         @{
             timestamp = '2026-01-01T00:00:00Z'
             version = 1
@@ -268,6 +369,27 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
                     products = @(@{ '@id' = $script:Purl })
                     status = 'not_affected'
                     justification = 'not_reachable'
+                    status_notes = 'The vulnerable path is not reachable.'
+                }
+            )
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
+    }
+
+    It 'rejects not_affected without status notes' {
+        @{
+            timestamp = '2026-01-01T00:00:00Z'
+            version = 1
+            statements = @(
+                @{
+                    vulnerability = @{ name = 'CVE-2026-0001' }
+                    products = @(@{ '@id' = $script:Purl })
+                    status = 'not_affected'
+                    justification = 'component_not_present'
                     status_notes = ''
                 }
             )
@@ -318,6 +440,61 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
     }
 
+    It 'rejects null statements instead of treating them as an empty array' {
+        Set-Content `
+            -Path $script:Workspace.Output `
+            -Value '{"timestamp":"2026-01-01T00:00:00Z","version":1,"statements":null}' `
+            -Encoding utf8
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Existing OpenVEX document is invalid'
+    }
+
+    It 'preserves unrelated metadata, absent last_updated, and explicit statement timestamps' {
+        @{
+            '@context' = 'https://openvex.dev/ns/v0.2.0'
+            '@id' = 'https://example.test/vex/v1'
+            author = 'Original Author'
+            timestamp = '2026-01-01T00:00:00Z'
+            version = 1
+            '_note' = 'keep me'
+            statements = @(
+                @{
+                    vulnerability = @{ name = 'CVE-2026-0001' }
+                    products = @(@{ '@id' = $script:Purl })
+                    status = 'under_investigation'
+                    timestamp = '2025-06-01T12:00:00Z'
+                }
+            )
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Be 0
+        $document = Get-Content $script:Workspace.Output -Raw | ConvertFrom-Json
+        $document.'_note' | Should -Be 'keep me'
+        $document.PSObject.Properties.Name | Should -Not -Contain 'last_updated'
+        $document.author | Should -Be 'Original Author'
+        $statement = $document.statements | Where-Object { $_.vulnerability.name -eq 'CVE-2026-0001' }
+        $statement.timestamp.ToUniversalTime().ToString('o') | Should -Be '2025-06-01T12:00:00.0000000Z'
+    }
+
+    It 'uses an explicit author instead of the existing document author' {
+        Set-Content `
+            -Path $script:Workspace.Output `
+            -Value '{"author":"Original","timestamp":"2026-01-01T00:00:00Z","version":1,"statements":[]}' `
+            -Encoding utf8
+
+        Invoke-Generator `
+            -Workspace $script:Workspace `
+            -AdditionalArguments @('--author', 'Replacement')
+
+        $script:GeneratorExit | Should -Be 0
+        (Get-Content $script:Workspace.Output -Raw | ConvertFrom-Json).author | Should -Be 'Replacement'
+    }
+
     It 'increments the version and issues a distinct revision ID on repeated runs' {
         Invoke-Generator -Workspace $script:Workspace
         $script:GeneratorExit | Should -Be 0
@@ -346,6 +523,37 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
             Should -Be "pkg:oci/test-product@sha256:${script:Digest}?repository_url=registry.example.com:5000/nested"
     }
 
+    It 'requires a repository URL for an unqualified image' {
+        Invoke-Generator -Workspace $script:Workspace -Image 'ubuntu:latest' -DeriveIdentity
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Cannot derive repository URL from unqualified image'
+        Test-Path $script:Workspace.Output | Should -BeFalse
+    }
+
+    It 'rejects invalid severity values before scanning' {
+        Invoke-Generator -Workspace $script:Workspace -Severity 'HIGH,CRITICL'
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'Invalid severity: CRITICL'
+        Test-Path $script:Workspace.Output | Should -BeFalse
+    }
+
+    It 'reports a missing option value' {
+        $previousPath = $env:PATH
+        try {
+            $env:PATH = "$($script:Workspace.Bin):$previousPath"
+            $output = & bash $script:Generator --image 2>&1
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $env:PATH = $previousPath
+        }
+
+        $exitCode | Should -Not -Be 0
+        $output -join "`n" | Should -Match 'Option --image requires a value'
+    }
+
     It 'refuses a concurrent writer lock without changing the document' {
         Set-Content -Path $script:Workspace.Output -Value '{"timestamp":"2026-01-01T00:00:00Z","version":1,"statements":[]}' -Encoding utf8
         New-Item -ItemType Directory -Path "$($script:Workspace.Output).lock" | Out-Null
@@ -357,6 +565,16 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
         $script:GeneratorOutput | Should -Match 'already writing'
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
         Test-Path "$($script:Workspace.Output).lock" | Should -BeTrue
+    }
+
+    It 'refuses a concurrent scanner cache lock' {
+        New-Item -ItemType Directory -Path (Join-Path $script:Workspace.Scan '.generate-vex.lock') | Out-Null
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'is using'
+        Test-Path $script:Workspace.Output | Should -BeFalse
     }
 
     It 'leaves the existing document intact when the atomic replacement fails' {

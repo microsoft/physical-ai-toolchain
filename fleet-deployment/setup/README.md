@@ -26,7 +26,7 @@ that blocks large baked-in models does not apply.
 | File                              | Purpose                                                                                  |
 |-----------------------------------|------------------------------------------------------------------------------------------|
 | `build-aml-model-image.sh`        | Download AML model, `docker buildx build --push`, sign image, self-verify                |
-| `attest-image.sh`                 | Attach an SBOM and an optional OpenVEX attestation to an already-built image              |
+| `attest-image.sh`                 | Attach an SBOM and an optional OpenVEX attestation to an already-built image             |
 | `Dockerfile.inference`            | `scratch` carrier: `COPY model/` only — no runtime, mounted via OCI image volume         |
 | `defaults.conf`                   | Centralized defaults consumed by both scripts                                            |
 | `tests/test-model-image-pod.yaml` | Smoke-test pod that mounts a built model image via OCI image volume and lists `/policy/` |
@@ -111,7 +111,7 @@ scripts/security/generate-vex.sh
 fleet-deployment/setup/attest-image.sh \
   --image <digest-ref> \
   --skip-sbom \
-  --vex-file ../../security/vex/inference-base.openvex.json
+  --vex-file <path/to/document.openvex.json>
 ```
 
 ## 🏗️ Base Image Pinning
@@ -142,10 +142,13 @@ for on-node inference), bump the base intentionally:
 | `--acr-name`/`--acr-tenant`/`--acr-subscription` | Required in cross-tenant or no-Terraform mode          |
 | `INFERENCE_BASE_IMAGE=…` env var                 | One-off base override without editing `defaults.conf`  |
 | `--skip-sbom` / `--skip-vex`                     | Selective attestation refresh                          |
-| `--vex-file PATH`                               | Attach an explicit OpenVEX document                    |
+| `--vex-file PATH`                                | Attach an explicit OpenVEX document                    |
 
-Per-value resolution order: **Terraform output → CLI flag → `DEFAULT_*` env var
-→ `defaults.conf` literal → fatal**.
+Build scripts resolve values in this order: **Terraform output → CLI flag →
+`DEFAULT_*` env var → `defaults.conf` literal → fatal**.
+
+`attest-image.sh` does not read Terraform outputs. It resolves values from CLI
+flags, `DEFAULT_*` values, and `defaults.conf`.
 
 ## 🧩 Enabling OCI Image Volumes on k3s
 
@@ -176,7 +179,7 @@ sudo k3s kubectl get --raw /metrics | grep kubernetes_feature_enabled | grep Ima
 | `Subscription '…' (tenant …) not in az session for …`   | Missing `az login --tenant <id>` for that tenant                                            |
 | `--akv-key-id (or DEFAULT_AKV_KEY_URI) is required …`   | `notation` mode without an AKV key URI                                                      |
 | `Unexpected digest shape from az acr repository show`   | ACR returned no manifest — usually a transient ACR Tasks failure                            |
-| `VEX file not found: …`                                | An explicit `--vex-file` or `DEFAULT_VEX_FILE` path is incorrect                            |
+| `VEX file not found: …`                                 | An explicit `--vex-file` or `DEFAULT_VEX_FILE` path is incorrect                            |
 | `verify-image.sh not present (PR #592 not merged yet)`  | Expected until [PR #592](https://github.com/microsoft/physical-ai-toolchain/pull/592) lands |
 | Sigstore signing locally rejected by Kyverno on cluster | Signed with developer Entra identity; production builds must run in CI                      |
 

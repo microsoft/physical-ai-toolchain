@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# cspell:ignore urandom
 # Resolve an OCI image digest, scan with Trivy and Grype, and merge findings into
 # an OpenVEX document without discarding existing product-specific analysis.
+# cspell:ignore urandom
 set -o errexit -o nounset -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,12 +13,12 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # 'scratch' (no packages, no scannable surface) so this script does not apply
 # to it by default. Pass --image explicitly when scanning a runnable variant.
 DEFAULT_IMAGE="mcr.microsoft.com/azureml/minimal-py312-inference@sha256:cfb7101d17e0d397f9369639b9873282c9ea386c709c434bb0100745f647c6c0"
-DEFAULT_REPO_URL="mcr.microsoft.com/azureml"
 DEFAULT_AUTHOR="Physical AI Toolchain Security Team"
 DEFAULT_ID_BASE="https://github.com/microsoft/physical-ai-toolchain/security/vex"
 DEFAULT_SEVERITY="HIGH,CRITICAL"
 DEFAULT_OUTPUT="$REPO_ROOT/security/vex/inference-base.openvex.json"
 DEFAULT_SCAN_DIR="$REPO_ROOT/.scan"
+# jq stores numbers as IEEE-754 doubles; leave one exact integer for version + 1.
 MAX_VERSION=9007199254740990
 
 show_help() {
@@ -45,7 +45,8 @@ OPTIONS:
                              (default: $DEFAULT_OUTPUT)
     -d, --scan-dir DIR       Directory for raw scanner output
                              (default: $DEFAULT_SCAN_DIR)
-        --author NAME        OpenVEX author string (default: $DEFAULT_AUTHOR)
+        --author NAME        OpenVEX author string (default: existing document
+                             author when merging; otherwise $DEFAULT_AUTHOR)
         --id-base URL        Base URL for the OpenVEX @id (default: $DEFAULT_ID_BASE)
         --skip-scan          Reuse scanner output in --scan-dir only when its
                              metadata matches the resolved digest and severity
@@ -71,6 +72,10 @@ config_preview=false
 output_tmp=""
 scan_metadata_tmp=""
 scan_work_dir=""
+trivy_cache_tmp=""
+grype_cache_tmp=""
+cve_list_tmp=""
+cve_sorted_tmp=""
 lock_dir=""
 lock_acquired=false
 scan_lock_dir=""
@@ -82,6 +87,18 @@ cleanup() {
   fi
   if [[ -n "$scan_metadata_tmp" && -f "$scan_metadata_tmp" ]]; then
     rm -f "$scan_metadata_tmp"
+  fi
+  if [[ -n "$trivy_cache_tmp" && -f "$trivy_cache_tmp" ]]; then
+    rm -f "$trivy_cache_tmp"
+  fi
+  if [[ -n "$grype_cache_tmp" && -f "$grype_cache_tmp" ]]; then
+    rm -f "$grype_cache_tmp"
+  fi
+  if [[ -n "$cve_list_tmp" && -f "$cve_list_tmp" ]]; then
+    rm -f "$cve_list_tmp"
+  fi
+  if [[ -n "$cve_sorted_tmp" && -f "$cve_sorted_tmp" ]]; then
+    rm -f "$cve_sorted_tmp"
   fi
   if [[ "$lock_acquired" == "true" && -n "$lock_dir" && -d "$lock_dir" ]]; then
     rmdir "$lock_dir" 2>/dev/null || true
@@ -99,22 +116,43 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+require_option_value() {
+  [[ $# -ge 2 ]] || fatal "Option $1 requires a value"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)         show_help; exit 0 ;;
-    -i|--image)        image="$2"; shift 2 ;;
-    -p|--product)      product="$2"; shift 2 ;;
-    -r|--repo-url)     repo_url="$2"; shift 2 ;;
-    -s|--severity)     severity="$2"; shift 2 ;;
-    -o|--output)       output="$2"; shift 2 ;;
-    -d|--scan-dir)     scan_dir="$2"; shift 2 ;;
-    --author)          author="$2"; shift 2 ;;
-    --id-base)         id_base="$2"; shift 2 ;;
+    -i|--image)        require_option_value "$@"; image="$2"; shift 2 ;;
+    -p|--product)      require_option_value "$@"; product="$2"; shift 2 ;;
+    -r|--repo-url)     require_option_value "$@"; repo_url="$2"; shift 2 ;;
+    -s|--severity)     require_option_value "$@"; severity="$2"; shift 2 ;;
+    -o|--output)       require_option_value "$@"; output="$2"; shift 2 ;;
+    -d|--scan-dir)     require_option_value "$@"; scan_dir="$2"; shift 2 ;;
+    --author)          require_option_value "$@"; author="$2"; shift 2 ;;
+    --id-base)         require_option_value "$@"; id_base="$2"; shift 2 ;;
     --skip-scan)       skip_scan=true; shift ;;
     --config-preview)  config_preview=true; shift ;;
     *)                 fatal "Unknown option: $1" ;;
   esac
 done
+
+IFS=',' read -r -a severity_tokens <<< "$severity"
+canonical_severities=()
+for token in "${severity_tokens[@]}"; do
+  token="${token//[[:space:]]/}"
+  token=$(printf '%s' "$token" | tr '[:lower:]' '[:upper:]')
+  case "$token" in
+    UNKNOWN|LOW|MEDIUM|HIGH|CRITICAL) canonical_severities+=("$token") ;;
+    ALL)
+      [[ ${#severity_tokens[@]} -eq 1 ]] ||
+        fatal "--severity ALL cannot be combined with other values"
+      canonical_severities=("ALL")
+      ;;
+    *) fatal "Invalid severity: ${token:-<empty>}" ;;
+  esac
+done
+severity=$(IFS=,; printf '%s' "${canonical_severities[*]}")
 
 require_tools jq trivy grype
 # digest resolution: prefer crane, fall back to docker buildx
@@ -134,7 +172,7 @@ fi
 section "Resolve image digest"
 
 digest=$(resolve_digest "$image") || fatal "Failed to resolve digest for $image"
-[[ "$digest" == sha256:* ]] || fatal "Unexpected digest format: $digest"
+[[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fatal "Unexpected digest format: $digest"
 image_ref="${image%@*}"
 # Strip a tag only from the last path segment so registry ports survive.
 image_last_segment="${image_ref##*/}"
@@ -143,12 +181,14 @@ if [[ "$image_last_segment" == *:* ]]; then
 fi
 product="${product:-${image_ref##*/}}"
 if [[ -z "$repo_url" ]]; then
-  if [[ "$image_ref" == */* ]]; then
-    repo_url="${image_ref%/*}"
-  else
-    repo_url="$DEFAULT_REPO_URL"
-  fi
+  [[ "$image_ref" == */* ]] ||
+    fatal "Cannot derive repository URL from unqualified image '$image'; pass --repo-url"
+  repo_url="${image_ref%/*}"
 fi
+[[ "$product" =~ ^[A-Za-z0-9._~-]+$ ]] ||
+  fatal "Invalid OCI product name: $product"
+[[ "$repo_url" != *[\?\&\#[:space:]]* ]] ||
+  fatal "Invalid repository URL qualifier: $repo_url"
 image_ref="${image_ref}@${digest}"
 purl="pkg:oci/${product}@${digest}?repository_url=${repo_url}"
 
@@ -215,8 +255,18 @@ else
 
   info "grype $image_ref -o json > $grype_json"
   grype "$image_ref" -o json > "$grype_json"
-  cp "$trivy_json" "$scan_dir/trivy.json"
-  cp "$grype_json" "$scan_dir/grype.json"
+
+  rm -f "$scan_metadata"
+  trivy_cache_tmp=$(mktemp "$scan_dir/trivy.json.tmp.XXXXXX") ||
+    fatal "Failed to create Trivy cache file in $scan_dir"
+  grype_cache_tmp=$(mktemp "$scan_dir/grype.json.tmp.XXXXXX") ||
+    fatal "Failed to create Grype cache file in $scan_dir"
+  cp "$trivy_json" "$trivy_cache_tmp"
+  cp "$grype_json" "$grype_cache_tmp"
+  mv "$trivy_cache_tmp" "$scan_dir/trivy.json"
+  trivy_cache_tmp=""
+  mv "$grype_cache_tmp" "$scan_dir/grype.json"
+  grype_cache_tmp=""
   scan_metadata_tmp=$(mktemp "$scan_dir/metadata.json.tmp.XXXXXX") ||
     fatal "Failed to create scanner metadata in $scan_dir"
   jq -n \
@@ -238,6 +288,21 @@ else
   cve_list="$scan_dir/cves.txt"
 fi
 
+jq -e '
+  all(
+    .Results[]?.Vulnerabilities[]?;
+    (.VulnerabilityID | type == "string" and length > 0)
+    and (.Severity | type == "string" and length > 0)
+  )
+' "$trivy_json" >/dev/null || fatal "Trivy output contains an invalid vulnerability entry"
+jq -e '
+  all(
+    .matches[]?;
+    (.vulnerability.id | type == "string" and length > 0)
+    and (.vulnerability.severity | type == "string" and length > 0)
+  )
+' "$grype_json" >/dev/null || fatal "Grype output contains an invalid vulnerability entry"
+
 # Build severity allow-list as a JSON array (empty array == accept all).
 if [[ "$severity" == "ALL" ]]; then
   sev_json='[]'
@@ -245,22 +310,30 @@ else
   sev_json=$(jq -nc --arg s "$severity" '$s | ascii_upcase | split(",") | map(gsub("^\\s+|\\s+$";""))')
 fi
 
+cve_list_tmp=$(mktemp "${cve_list}.tmp.XXXXXX") ||
+  fatal "Failed to create temporary CVE list beside $cve_list"
+cve_sorted_tmp=$(mktemp "${cve_list}.sorted.XXXXXX") ||
+  fatal "Failed to create sorted CVE list beside $cve_list"
+
 jq -r --argjson sev "$sev_json" '
   .Results[]?.Vulnerabilities[]?
   | .Severity as $s
   | select(($sev | length) == 0 or ($sev | index($s)))
   | .VulnerabilityID
-' "$trivy_json" > "$cve_list.tmp"
+' "$trivy_json" > "$cve_list_tmp"
 
 jq -r --argjson sev "$sev_json" '
   .matches[]?
   | (.vulnerability.severity | ascii_upcase) as $s
   | select(($sev | length) == 0 or ($sev | index($s)))
   | .vulnerability.id
-' "$grype_json" >> "$cve_list.tmp"
+' "$grype_json" >> "$cve_list_tmp"
 
-sort -u "$cve_list.tmp" > "$cve_list"
-rm -f "$cve_list.tmp"
+sort -u "$cve_list_tmp" > "$cve_sorted_tmp"
+mv "$cve_sorted_tmp" "$cve_list"
+cve_sorted_tmp=""
+rm -f "$cve_list_tmp"
+cve_list_tmp=""
 if [[ -n "$scan_work_dir" ]]; then
   cp "$cve_list" "$scan_dir/cves.txt"
 fi
@@ -314,7 +387,7 @@ validate_vex_document() {
     then error("timestamp must be a UTC RFC 3339 timestamp")
     elif has("last_updated") and (.last_updated | valid_timestamp | not)
     then error("last_updated must be a UTC RFC 3339 timestamp")
-    elif ((.statements // []) | type) != "array"
+    elif has("statements") and (.statements | type) != "array"
     then error("statements must be an array")
     elif any(.statements[]?; (.vulnerability.name | non_empty_string | not))
     then error("every statement must identify its vulnerability by name")
@@ -464,9 +537,9 @@ output_tmp=""
 section "Deployment Summary"
 print_kv "Image"         "$image_ref"
 print_kv "OpenVEX file"  "$output"
-print_kv "CVEs scanned" "$cve_count"
-print_kv "Statements added" "$new_statement_count"
-print_kv "Statements total" "$final_statement_count"
+print_kv "Unique CVEs"   "$cve_count"
+print_kv "Statements new" "$new_statement_count"
+print_kv "Statements"    "$final_statement_count"
 print_kv "Version"       "$next_version"
 info "Triage each statement using product-specific evidence before attaching with cosign."
 info "Retain under_investigation when the evidence does not support another status."

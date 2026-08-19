@@ -1,6 +1,6 @@
 ---
 description: 'OpenVEX authoring standards for base-image vulnerability triage'
-applyTo: 'security/vex/**,scripts/security/generate-vex.sh,fleet-deployment/setup/attest-image.sh,fleet-deployment/setup/defaults.conf'
+applyTo: 'security/vex/**,scripts/security/generate-vex.sh,fleet-deployment/setup/attest-image.sh,fleet-deployment/setup/defaults.conf,fleet-deployment/setup/README.md'
 ---
 
 # VEX Standards
