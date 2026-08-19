@@ -387,10 +387,8 @@ def validate_synthetic_dataset(root: Path) -> None:
 
 
 # --- Blob staging -----------------------------------------------------------
-# The OSMO data container ("osmo") always exists and the OSMO workflow identity
-# holds account-scoped Storage Blob Data Contributor, so a training/eval pod can
-# read a dataset staged here via its workload identity (no SAS needed). Mirrors
-# the VLA dataset staging in tests/e2e/_osmo.py.
+# OSMO callers default to the OSMO data container. Other backends supply their
+# own provisioned container explicitly.
 
 _IL_DATASET_CONTAINER_ENV = "E2E_IL_DATASET_CONTAINER"
 _DEFAULT_IL_DATASET_CONTAINER = "osmo"
@@ -419,14 +417,22 @@ def _materialize_synthetic_dataset(request: pytest.FixtureRequest, *, prefix: st
 
 
 def stage_synthetic_lerobot_dataset(
-    request: pytest.FixtureRequest, repo_root: Path, storage_account: str
+    request: pytest.FixtureRequest,
+    repo_root: Path,
+    storage_account: str,
+    *,
+    container: str | None = None,
 ) -> StagedDataset:
     """Generate the synthetic dataset, upload it to blob, and register teardown cleanup.
 
-    Returns the staged location so a test can drive the OSMO training (``--blob-url``)
-    or eval (``--from-blob-dataset``) submission without a HuggingFace token.
+    Returns the staged location so a test can drive training or evaluation from
+    Azure Blob Storage without a HuggingFace token.
     """
-    container = env_value(_IL_DATASET_CONTAINER_ENV, _DEFAULT_IL_DATASET_CONTAINER) or _DEFAULT_IL_DATASET_CONTAINER
+    container = (
+        container
+        or env_value(_IL_DATASET_CONTAINER_ENV, _DEFAULT_IL_DATASET_CONTAINER)
+        or _DEFAULT_IL_DATASET_CONTAINER
+    )
 
     dataset_dir = _materialize_synthetic_dataset(
         request, prefix="il-e2e-dataset-", log_message="Generating synthetic LeRobot v3.0 dataset"

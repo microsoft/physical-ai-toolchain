@@ -153,6 +153,7 @@ dataset_root="${DATASET_ROOT:-/workspace/data}"
 blob_urls=()
 blob_urls_json="[]"
 blob_source_count=0
+use_huggingface_credential="true"
 
 training_steps="${TRAINING_STEPS:-100000}"
 batch_size="${BATCH_SIZE:-32}"
@@ -254,6 +255,7 @@ if [[ ${#blob_urls[@]} -gt 0 ]]; then
   validate_blob_urls "${blob_urls[@]}"
   blob_urls_json=$(json_array "${blob_urls[@]}")
   blob_source_count="${#blob_urls[@]}"
+  use_huggingface_credential="false"
 elif [[ -z "$dataset_repo_id" ]]; then
   fatal "No dataset source specified. Use --dataset-repo-id for HuggingFace Hub, or provide one or more --blob-url sources."
 fi
@@ -332,6 +334,7 @@ submit_args=(
   "dataset_repo_id=$dataset_repo_id"
   "dataset_root=$dataset_root"
   "blob_urls=$blob_urls_json"
+  "use_huggingface_credential=$use_huggingface_credential"
   "policy_type=$policy_type"
   "job_name=$job_name"
   "output_dir=$output_dir"
