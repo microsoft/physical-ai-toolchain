@@ -601,9 +601,15 @@ Describe 'committed OpenVEX documents' -Tag 'Unit' {
             'vulnerable_code_cannot_be_controlled_by_adversary',
             'inline_mitigations_already_exist'
         )
-        $documents = Get-ChildItem (Join-Path $PSScriptRoot '../../../security/vex') -Filter '*.openvex.json'
+        $vexDirectory = Join-Path $PSScriptRoot '../../../security/vex'
         $ids = @()
 
+        if (-not (Test-Path $vexDirectory)) {
+            Set-ItResult -Skipped -Because 'No committed OpenVEX document directory exists'
+            return
+        }
+
+        $documents = Get-ChildItem $vexDirectory -Filter '*.openvex.json'
         if ($documents.Count -eq 0) {
             Set-ItResult -Skipped -Because 'No committed OpenVEX documents exist'
             return
