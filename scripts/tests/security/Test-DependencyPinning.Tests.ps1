@@ -733,83 +733,6 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
         }
     }
 
-    Describe 'Get-AzureMLEnvironmentViolations' -Tag 'Unit' {
-        It 'Flags the ambiguous explicit AzureML environment version latest' {
-            $content = '  environment: azureml:lerobot-training-env:latest'
-            $tmp = Join-Path $TestDrive 'env.yaml'
-            Set-Content -Path $tmp -Value $content
-            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
-                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'env.yaml'
-                })
-
-            $result.Count | Should -Be 1
-            $result[0].Name | Should -Be 'azureml:lerobot-training-env'
-            $result[0].Version | Should -Be 'latest'
-            $result[0].Severity | Should -Be 'warning'
-            $result[0].Type | Should -Be 'azureml-environments'
-            $result[0].Line | Should -Be 1
-            $result[0].Description | Should -Be 'Unpinned AzureML environment (use an explicit version, not a label or :latest)'
-        }
-
-        It 'Flags quoted, label-based, list-item, URI-label, and unversioned AzureML references' {
-            $content = @'
-environment: "azureml:quoted-env:latest"
-environment: 'azureml:single-quoted-env:latest'
-- environment: azureml:list-env:latest
-environment: azureml:label-env@production
-environment: azureml://registries/example/environments/uri-env/labels/production
-environment: azureml:unversioned-env
-'@
-            $tmp = Join-Path $TestDrive 'mutable-env-forms.yaml'
-            Set-Content -Path $tmp -Value $content
-            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
-                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'mutable-env-forms.yaml'
-                })
-
-            $result.Count | Should -Be 6
-            $result.Name | Should -Contain 'azureml:quoted-env'
-            $result.Name | Should -Contain 'azureml:single-quoted-env'
-            $result.Name | Should -Contain 'azureml:list-env'
-            $result.Name | Should -Contain 'azureml:label-env'
-            $result.Name | Should -Contain 'azureml://registries/example/environments/uri-env'
-            $result.Name | Should -Contain 'azureml:unversioned-env'
-        }
-
-        It 'Honors comments and pinning-ignore for AzureML environment references' {
-            $content = "environment: azureml:commented-env:latest  # note`n" +
-                "environment: azureml:ignored-env:latest  # pinning-ignore"
-            $tmp = Join-Path $TestDrive 'commented-env.yaml'
-            Set-Content -Path $tmp -Value $content
-            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
-                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'commented-env.yaml'
-                })
-
-            $result.Count | Should -Be 1
-            $result[0].Name | Should -Be 'azureml:commented-env'
-        }
-
-        It 'Accepts explicitly versioned AzureML environment assets' {
-            $content = "  environment: azureml:lerobot-training-env:2.4.1-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`n" +
-                '  environment: azureml://registries/example/environments/lerobot-training-env/versions/42'
-            $tmp = Join-Path $TestDrive 'versioned-env.yaml'
-            Set-Content -Path $tmp -Value $content
-            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
-                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'versioned-env.yaml'
-                })
-            $result | Should -BeNullOrEmpty
-        }
-
-        It 'Ignores non-AzureML environment values' {
-            $content = "environment: production`n- environment: staging`nenvironment: `${{ inputs.env }}"
-            $tmp = Join-Path $TestDrive 'non-azureml-env.yaml'
-            Set-Content -Path $tmp -Value $content
-            $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
-                    Path = $tmp; Type = 'azureml-environments'; RelativePath = 'non-azureml-env.yaml'
-                })
-            $result | Should -BeNullOrEmpty
-        }
-    }
-
     Context 'Single-line files' {
         It 'Flags an unpinned image in a single-line file' {
             $content = '  image: python:3.11-slim'
@@ -881,6 +804,101 @@ environment: azureml:unversioned-env
     }
 }
 
+Describe 'Get-AzureMLEnvironmentViolations' -Tag 'Unit' {
+    It 'Flags the ambiguous explicit AzureML environment version latest' {
+        $content = '  environment: azureml:lerobot-training-env:latest'
+        $tmp = Join-Path $TestDrive 'env.yaml'
+        Set-Content -Path $tmp -Value $content
+        $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                Path = $tmp; Type = 'azureml-environments'; RelativePath = 'env.yaml'
+            })
+
+        $result.Count | Should -Be 1
+        $result[0].Name | Should -Be 'azureml:lerobot-training-env'
+        $result[0].Version | Should -Be 'latest'
+        $result[0].Severity | Should -Be 'warning'
+        $result[0].Type | Should -Be 'azureml-environments'
+        $result[0].Line | Should -Be 1
+        $result[0].Description | Should -Be 'Unpinned AzureML environment (use an explicit version, not a label or :latest)'
+    }
+
+    It 'Flags quoted keys, whitespace, labels, list items, URI labels, and unversioned references' {
+        $content = @'
+"environment": azureml:quoted-key-env@production
+environment : "azureml:quoted-env:latest"
+environment: 'azureml:single-quoted-env:latest'
+- environment: azureml:list-env:latest
+environment: azureml:label-env@production
+environment: azureml://registries/example/environments/uri-env/labels/production
+environment: azureml:unversioned-env
+'@
+        $tmp = Join-Path $TestDrive 'mutable-env-forms.yaml'
+        Set-Content -Path $tmp -Value $content
+        $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                Path = $tmp; Type = 'azureml-environments'; RelativePath = 'mutable-env-forms.yaml'
+            })
+
+        $result.Count | Should -Be 7
+        $result.Name | Should -Contain 'azureml:quoted-key-env'
+        $result.Name | Should -Contain 'azureml:quoted-env'
+        $result.Name | Should -Contain 'azureml:single-quoted-env'
+        $result.Name | Should -Contain 'azureml:list-env'
+        $result.Name | Should -Contain 'azureml:label-env'
+        $result.Name | Should -Contain 'azureml://registries/example/environments/uri-env'
+        $result.Name | Should -Contain 'azureml:unversioned-env'
+    }
+
+    It 'Flags the AzureML environment in the shared unpinned workflow fixture' {
+        $testFile = Join-Path $script:FixturesPath 'docker-image-unpinned-workflow.yaml'
+        $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                Path = $testFile; Type = 'azureml-environments'; RelativePath = 'docker-image-unpinned-workflow.yaml'
+            })
+
+        $result.Count | Should -Be 1
+        $result[0].Name | Should -Be 'azureml:isaaclab-training-env'
+        $result[0].Version | Should -Be 'latest'
+    }
+
+    It 'Honors same-line and directly preceding pinning-ignore comments only' {
+        $content = "# pinning-ignore: intentional label`n" +
+            "environment: azureml:preceded-env@production`n" +
+            "environment: azureml:reported-env@production`n" +
+            "# pinning-ignore`n`n" +
+            "environment: azureml:blank-separated-env@production`n" +
+            "environment: azureml:same-line-env@production  # pinning-ignore"
+        $tmp = Join-Path $TestDrive 'commented-env.yaml'
+        Set-Content -Path $tmp -Value $content
+        $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                Path = $tmp; Type = 'azureml-environments'; RelativePath = 'commented-env.yaml'
+            })
+
+        $result.Count | Should -Be 2
+        $result.Name | Should -Contain 'azureml:reported-env'
+        $result.Name | Should -Contain 'azureml:blank-separated-env'
+    }
+
+    It 'Accepts explicitly versioned AzureML environment assets' {
+        $content = "  environment: azureml:lerobot-training-env:2.4.1-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`n" +
+            '  environment: azureml://registries/example/environments/lerobot-training-env/versions/42'
+        $tmp = Join-Path $TestDrive 'versioned-env.yaml'
+        Set-Content -Path $tmp -Value $content
+        $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                Path = $tmp; Type = 'azureml-environments'; RelativePath = 'versioned-env.yaml'
+            })
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Ignores non-AzureML environment values' {
+        $content = "environment: production`n- environment: staging`nenvironment: `${{ inputs.env }}"
+        $tmp = Join-Path $TestDrive 'non-azureml-env.yaml'
+        Set-Content -Path $tmp -Value $content
+        $result = @(Get-AzureMLEnvironmentViolations -FileInfo @{
+                Path = $tmp; Type = 'azureml-environments'; RelativePath = 'non-azureml-env.yaml'
+            })
+        $result | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Get-FilesToScan docker discovery' -Tag 'Unit' {
     BeforeAll {
         $script:DockerScanRoot = Join-Path $TestDrive 'docker-scan-root'
@@ -891,6 +909,30 @@ Describe 'Get-FilesToScan docker discovery' -Tag 'Unit' {
         New-Item -ItemType Directory -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/values') -Force | Out-Null
         Set-Content -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/manifests/m.yaml') -Value 'image: foo:bar'
         Set-Content -Path (Join-Path $script:DockerScanRoot 'infrastructure/setup/values/v.yaml') -Value 'init: reg.io/x:1'
+    }
+
+    Describe 'Get-FilesToScan azureml-environments discovery' -Tag 'Unit' {
+        BeforeAll {
+            $script:AzureMLScanRoot = Join-Path $TestDrive 'azureml-scan-root'
+            New-Item -ItemType Directory -Path (Join-Path $script:AzureMLScanRoot 'training/workflows/azureml/nested') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $script:AzureMLScanRoot 'training/other') -Force | Out-Null
+            Set-Content -Path (Join-Path $script:AzureMLScanRoot 'training/workflows/azureml/job.yaml') -Value 'environment: azureml:x:latest'
+            Set-Content -Path (Join-Path $script:AzureMLScanRoot 'training/workflows/azureml/nested/job.yml') -Value 'environment: azureml:y:latest'
+            Set-Content -Path (Join-Path $script:AzureMLScanRoot 'training/other/job.yaml') -Value 'environment: azureml:z:latest'
+        }
+
+        It 'Discovers YAML under workflow directories and resolves its validator' {
+            $rels = @(Get-FilesToScan -ScanPath $script:AzureMLScanRoot -Types @('azureml-environments') -Recursive).RelativePath -replace '\\', '/'
+
+            $rels | Should -Contain 'training/workflows/azureml/job.yaml'
+            $rels | Should -Contain 'training/workflows/azureml/nested/job.yml'
+            $rels | Should -Not -Contain 'training/other/job.yaml'
+            Get-Command $DependencyPatterns['azureml-environments'].ValidationFunc | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Includes the AzureML validator in the default scan types' {
+            $IncludeTypes.Split(',') | Should -Contain 'azureml-environments'
+        }
     }
 
     It 'Discovers workflow YAML but not .sh under the docker type' {

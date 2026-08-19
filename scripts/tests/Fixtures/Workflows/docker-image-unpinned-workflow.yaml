@@ -1,6 +1,6 @@
 # Fixture: non-compliant container image references (tag-only, no @sha256 digest).
 # Used by Test-DependencyPinning.Tests.ps1 for the docker ecosystem.
-# Expected violations (4): one AzureML environment and three OCI images.
+# Expected violations: three under docker and one under azureml-environments.
 name: unpinned-docker
 workflow:
   image: nvcr.io/nvidia/isaac-lab:2.3.2

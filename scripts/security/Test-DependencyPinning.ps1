@@ -121,7 +121,7 @@ param(
     [string]$ExcludePaths = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,workflow-npm-commands",
+    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,azureml-environments,workflow-npm-commands",
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 100)]
@@ -206,7 +206,7 @@ $DependencyPatterns = @{
     'azureml-environments' = @{
         FilePatterns   = @('**/workflows/**/*.yaml', '**/workflows/**/*.yml')
         ValidationFunc = 'Get-AzureMLEnvironmentViolations'
-        Description    = 'AzureML environment asset references in workflow YAML must use explicit immutable versions'
+        Description    = 'AzureML environment asset references in domain workflow YAML must use explicit immutable versions'
     }
 
     'workflow-npm-commands' = @{
@@ -948,8 +948,12 @@ function Get-AzureMLEnvironmentViolations {
         $exempt = $hasIgnore -or $prevWasIgnoreComment
         $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
 
-        if ($line -notmatch '^\s*(?:-\s*)?environment:\s*(.+?)\s*$') { continue }
-        $environmentRef = ($Matches[1] -replace '\s+#.*$', '').Trim().Trim('"', "'").Trim()
+        if ($line -notmatch '^\s*(?:-\s*)?["'']?environment["'']?\s*:\s*(.+?)\s*$') { continue }
+        $environmentRef = ($Matches[1] -replace '\s+#.*$', '').Trim()
+        if (($environmentRef.StartsWith('"') -and $environmentRef.EndsWith('"')) -or
+            ($environmentRef.StartsWith("'") -and $environmentRef.EndsWith("'"))) {
+            $environmentRef = $environmentRef.Substring(1, $environmentRef.Length - 2).Trim()
+        }
         if ($environmentRef -notmatch '^azureml:' -or $exempt) { continue }
 
         $name = $environmentRef

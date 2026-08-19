@@ -94,7 +94,13 @@ BeforeAll {
 if [[ "$*" == *"auth.docker.io"* || "$*" == *"proxy_auth"* ]]; then
   printf '{"token":"test"}\n'
 else
-  printf 'Docker-Content-Digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n'
+  case "$*" in
+    *2.3.2*)  digest="$(printf 'a%.0s' {1..64})" ;;
+    *2.11.0*) digest="$(printf 'b%.0s' {1..64})" ;;
+    *2.4.1*)  digest="$(printf 'c%.0s' {1..64})" ;;
+    *)        digest="$(printf 'd%.0s' {1..64})" ;;
+  esac
+  printf 'Docker-Content-Digest: sha256:%s\r\n' "$digest"
 fi
 '@ | Set-Content -Path $fakeCurl
         & chmod +x $fakeCurl
@@ -177,14 +183,14 @@ Describe 'AzureML environment pins' -Tag 'Unit' {
         $result = Invoke-UpdateScript -Sandbox $sandbox -FakeBin $fakeBin -Arguments @('--dry-run')
 
         $result.ExitCode | Should -Be 0
-        $result.Output | Should -Match 'Environment References Changed:\s+4'
+        $result.Output | Should -Match "Environment References Changed:\s+$($script:PinCases.Count)"
+        $result.Output | Should -Match '\[dry-run\] Changed AzureML environment versions would require registration'
         (& git -C $sandbox status --porcelain) | Should -BeExactly $before
     }
 
     It 'writes the derived environment version into each workflow and is idempotent' {
         $sandbox = New-UpdateScriptSandbox
         $fakeBin = New-FakeCurl
-        $digest = 'a' * 64
         $expectedFiles = @{}
 
         foreach ($case in $script:PinCases) {
@@ -194,6 +200,12 @@ Describe 'AzureML environment pins' -Tag 'Unit' {
 
             $image = Get-CheckedInImageDefault -Variable $case.Variable
             $ref = $image -replace '@sha256:[0-9a-fA-F]{64}$', ''
+            $digest = switch -Wildcard ($ref) {
+                '*:2.3.2' { 'a' * 64 }
+                '*:2.11.0-*' { 'b' * 64 }
+                '*:2.4.1-*' { 'c' * 64 }
+                default { 'd' * 64 }
+            }
             $expectedVersion = Get-DerivedEnvironmentVersion -Image "${ref}@sha256:${digest}"
             $expectedFiles[$path] = $stale -replace '(?m)^environment: azureml:[^\r\n]+$',
                 "environment: azureml:$($case.Environment):$expectedVersion"
@@ -202,7 +214,7 @@ Describe 'AzureML environment pins' -Tag 'Unit' {
         $result = Invoke-UpdateScript -Sandbox $sandbox -FakeBin $fakeBin -Arguments @()
 
         $result.ExitCode | Should -Be 0
-        $result.Output | Should -Match 'Environment References Changed:\s+4'
+        $result.Output | Should -Match "Environment References Changed:\s+$($script:PinCases.Count)"
         foreach ($path in $expectedFiles.Keys) {
             Get-Content -Raw $path | Should -BeExactly $expectedFiles[$path]
         }
@@ -213,18 +225,29 @@ Describe 'AzureML environment pins' -Tag 'Unit' {
         $secondResult.Output | Should -Match 'Files Updated:\s+0'
     }
 
-    It 'validates every environment target before writing any file' {
+    It 'updates an indented environment target' {
         $sandbox = New-UpdateScriptSandbox
         $fakeBin = New-FakeCurl
-        $invalidPath = Join-Path $sandbox $script:PinCases[0].Path
-        $invalid = (Get-Content -Raw $invalidPath) -replace '(?m)^environment:', '  environment:'
-        Set-Content -Path $invalidPath -Value $invalid -NoNewline
-        $before = & git -C $sandbox diff --no-ext-diff
+        $targetPath = Join-Path $sandbox $script:PinCases[0].Path
+        $indented = (Get-Content -Raw $targetPath) -replace '(?m)^environment:', '  environment:'
+        Set-Content -Path $targetPath -Value $indented -NoNewline
+
+        $result = Invoke-UpdateScript -Sandbox $sandbox -FakeBin $fakeBin -Arguments @()
+
+        $result.ExitCode | Should -Be 0
+        (Get-Content $targetPath | Where-Object { $_ -match 'environment:' }) | Should -Match '^  environment: azureml:'
+    }
+
+    It 'rejects discovered AzureML workflow pins missing from the synchronization map' {
+        $sandbox = New-UpdateScriptSandbox
+        $fakeBin = New-FakeCurl
+        $extraPath = Join-Path $sandbox 'training/rl/workflows/azureml/nested/extra.yaml'
+        New-Item -ItemType Directory -Path (Split-Path $extraPath) -Force | Out-Null
+        Set-Content -Path $extraPath -Value '  environment: azureml:extra-env:stale'
 
         $result = Invoke-UpdateScript -Sandbox $sandbox -FakeBin $fakeBin -Arguments @()
 
         $result.ExitCode | Should -Not -Be 0
-        $result.Output | Should -Match 'Could not find unindented AzureML environment pin'
-        (& git -C $sandbox diff --no-ext-diff) | Should -BeExactly $before
+        $result.Output | Should -Match 'AzureML environment pin targets missing from azureml_pin_specs'
     }
 }

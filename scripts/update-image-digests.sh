@@ -67,6 +67,7 @@ azureml_pin_specs=(
   'DEFAULT_LEROBOT_TRAIN_IMAGE|lerobot-training-env|training/il/workflows/azureml/lerobot-train.yaml'
   'DEFAULT_LEROBOT_EVAL_IMAGE|lerobot-inference-env|evaluation/sil/workflows/azureml/lerobot-eval.yaml'
 )
+azureml_environment_line_re="^[[:space:]]*(-[[:space:]]*)?[\"']?environment[\"']?[[:space:]]*:[[:space:]]*[\"']?azureml:"
 
 cd "$REPO_ROOT"
 
@@ -117,7 +118,7 @@ resolve_digest() {
 }
 
 read_checked_in_image_default() {
-  local variable="$1" lines line_count prefix suffix image
+  local variable="$1" lines line_count line prefix suffix image
   lines=$(grep -E "^${variable}=" "$REPO_ROOT/scripts/lib/common.sh" || true)
   [[ -n "$lines" ]] || fatal "No checked-in default for $variable in scripts/lib/common.sh"
   line_count=$(printf '%s\n' "$lines" | grep -c .)
@@ -133,10 +134,9 @@ read_checked_in_image_default() {
 apply_file_update() {
   local file="$1" candidate="$2"
   if cmp -s "$file" "$candidate"; then
-    return
+    return 1
   fi
 
-  updated=$((updated + 1))
   if [[ "$dry_run" == "true" ]]; then
     info "[dry-run] Would update $file"
     diff -u "$file" "$candidate" || true
@@ -145,6 +145,7 @@ apply_file_update() {
     cp "$candidate" "$file"
     info "Updated $file"
   fi
+  return 0
 }
 
 #------------------------------------------------------------------------------
@@ -156,6 +157,13 @@ refs=$(git grep -hoE "$digest_ref_re" -- "${exclude_paths[@]}" 2>/dev/null \
   | sed -E 's/@sha256:[0-9a-f]{64}//' | sort -u || true)
 files=$(git grep -lE "$digest_ref_re" -- "${exclude_paths[@]}" 2>/dev/null || true)
 azureml_files=$(printf '%s\n' "${azureml_pin_specs[@]}" | cut -d'|' -f3 | sort -u)
+discovered_azureml_files=$(git grep --untracked -lE "$azureml_environment_line_re" -- \
+  ':(glob)**/workflows/**/*.yaml' ':(glob)**/workflows/**/*.yml' "${exclude_paths[@]}" 2>/dev/null || true)
+missing_azureml_files=$(comm -23 \
+  <(printf '%s\n' "$discovered_azureml_files" | grep -v '^$' | sort -u) \
+  <(printf '%s\n' "$azureml_files" | grep -v '^$' | sort -u))
+[[ -z "$missing_azureml_files" ]] \
+  || fatal "AzureML environment pin targets missing from azureml_pin_specs: $(printf '%s' "$missing_azureml_files" | tr '\n' ' ')"
 files_in_scope=$(printf '%s\n%s\n' "$files" "$azureml_files" | grep -v '^$' | sort -u)
 [[ -n "$refs" ]] || fatal "No digest-pinned image references found under $REPO_ROOT"
 
@@ -191,14 +199,15 @@ done <<< "$refs"
 
 # Validate every AzureML synchronization target before writing any file.
 while IFS='|' read -r variable environment_name file; do
+  [[ -f "$file" ]] || fatal "AzureML pin target not found: $file"
   image=$(read_checked_in_image_default "$variable")
   ref="${image%@*}"
   digest=$(awk -v ref="$ref" '$1 == ref { print $2; exit }' "$digest_map")
   [[ "$digest" == sha256:* ]] || fatal "No resolved digest found for $variable ($ref)"
   version=$(derive_azureml_environment_version_from_image "${ref}@${digest}")
   replacement="environment: azureml:${environment_name}:${version}"
-  grep -qE "^environment: azureml:${environment_name}:[A-Za-z0-9._-]+$" "$file" \
-    || fatal "Could not find unindented AzureML environment pin in $file"
+  grep -qE "^[[:space:]]*(-[[:space:]]*)?[\"']?environment[\"']?[[:space:]]*:[[:space:]]*[\"']?azureml:${environment_name}:[A-Za-z0-9._-]+[\"']?[[:space:]]*$" "$file" \
+    || fatal "Could not find AzureML environment pin in $file"
   printf '%s\t%s\t%s\n' "$environment_name" "$file" "$replacement" >> "$azureml_update_map"
 done < <(printf '%s\n' "${azureml_pin_specs[@]}")
 
@@ -223,14 +232,17 @@ while IFS= read -r file; do
 
   while IFS=$'\t' read -r environment_name environment_file replacement; do
     [[ "$environment_file" == "$file" ]] || continue
-    sed -E "s#^environment: azureml:${environment_name}:[A-Za-z0-9._-]+\$#${replacement}#" "$tmp" > "$tmp_new"
+    environment_ref="${replacement#environment: }"
+    sed -E "s#^([[:space:]]*(-[[:space:]]*)?[\"']?environment[\"']?[[:space:]]*:[[:space:]]*)[\"']?azureml:${environment_name}:[A-Za-z0-9._-]+[\"']?[[:space:]]*\$#\1${environment_ref}#" "$tmp" > "$tmp_new"
     if ! cmp -s "$tmp" "$tmp_new"; then
       azureml_updated=$((azureml_updated + 1))
     fi
     mv "$tmp_new" "$tmp"
   done < "$azureml_update_map"
 
-  apply_file_update "$file" "$tmp"
+  if apply_file_update "$file" "$tmp"; then
+    updated=$((updated + 1))
+  fi
 done <<< "$files_in_scope"
 
 #------------------------------------------------------------------------------
@@ -242,5 +254,9 @@ print_kv "Files Updated" "$updated"
 print_kv "Environment References Changed" "$azureml_updated"
 print_kv "Dry Run" "$dry_run"
 if [[ "$azureml_updated" -gt 0 ]]; then
-  warn "Register changed AzureML environment versions before direct template submission"
+  if [[ "$dry_run" == "true" ]]; then
+    warn "[dry-run] Changed AzureML environment versions would require registration before direct template submission"
+  else
+    warn "Register changed AzureML environment versions before direct template submission"
+  fi
 fi
