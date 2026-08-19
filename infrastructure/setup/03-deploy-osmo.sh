@@ -454,35 +454,35 @@ if [[ "$skip_mek" == "false" ]]; then
         # Clear service_auth from DB — it was encrypted with the old MEK and is now
         # undecryptable. The service regenerates a fresh keypair on next start.
         info "Clearing stale service_auth from database..."
-                kubectl delete pod osmo-clear-auth -n "$NS_OSMO_CONTROL_PLANE" --ignore-not-found >/dev/null
-                cat <<EOF | kubectl apply -f - >/dev/null
+        kubectl delete pod osmo-clear-auth -n "$NS_OSMO_CONTROL_PLANE" --ignore-not-found >/dev/null
+        cat <<EOF | kubectl apply -f - >/dev/null
 apiVersion: v1
 kind: Pod
 metadata:
-    name: osmo-clear-auth
-    namespace: $NS_OSMO_CONTROL_PLANE
+  name: osmo-clear-auth
+  namespace: $NS_OSMO_CONTROL_PLANE
 spec:
-    restartPolicy: Never
-    containers:
-        - name: psql
-            image: postgres:16@sha256:eb4759788a2182f08257135e61a34f2cfc3c2914079f3465d64ee62350f4d081
-            env:
-                - name: PGPASSWORD
-                    valueFrom:
-                        secretKeyRef:
-                            name: db-secret
-                            key: db-password
-            command: [psql]
-            args:
-                - "host=$pg_fqdn port=5432 dbname=osmo user=$pg_user sslmode=require"
-                - -c
-                - "DELETE FROM configs WHERE key='service_auth' AND type='SERVICE'"
+  restartPolicy: Never
+  containers:
+    - name: psql
+      image: postgres:16@sha256:eb4759788a2182f08257135e61a34f2cfc3c2914079f3465d64ee62350f4d081
+      env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: db-password
+      command: [psql]
+      args:
+        - "host=$pg_fqdn port=5432 dbname=osmo user=$pg_user sslmode=require"
+        - -c
+        - "DELETE FROM configs WHERE key='service_auth' AND type='SERVICE'"
 EOF
-                if ! kubectl wait pod/osmo-clear-auth -n "$NS_OSMO_CONTROL_PLANE" \
-                        --for=jsonpath='{.status.phase}'=Succeeded --timeout=60s >/dev/null 2>&1; then
-                        warn "Could not clear service_auth (DB may not be initialized yet — safe on first deploy)"
-                fi
-                kubectl delete pod osmo-clear-auth -n "$NS_OSMO_CONTROL_PLANE" --ignore-not-found >/dev/null
+        if ! kubectl wait pod/osmo-clear-auth -n "$NS_OSMO_CONTROL_PLANE" \
+            --for=jsonpath='{.status.phase}'=Succeeded --timeout=60s >/dev/null 2>&1; then
+            warn "Could not clear service_auth (DB may not be initialized yet — safe on first deploy)"
+        fi
+        kubectl delete pod osmo-clear-auth -n "$NS_OSMO_CONTROL_PLANE" --ignore-not-found >/dev/null
 
         # Ensure the service pod restarts to pick up the new MEK and regenerate service_auth.
         # Helm upgrade may not trigger a rollout if values are unchanged.
