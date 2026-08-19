@@ -476,6 +476,17 @@ if [[ "$assets_only" == "true" ]]; then
   exit 0
 fi
 
+managed_identity_client_id="${AZURE_CLIENT_ID:-}"
+if [[ -z "$managed_identity_client_id" ]]; then
+  managed_identity_client_id=$(az ml compute show \
+    --name "${compute#azureml:}" \
+    --resource-group "$resource_group" \
+    --workspace-name "$workspace_name" \
+    --query "identity.user_assigned_identities[0].client_id" \
+    --output tsv)
+  [[ "$managed_identity_client_id" == "None" ]] && managed_identity_client_id=""
+fi
+
 #------------------------------------------------------------------------------
 # Pre-submission Checks
 #------------------------------------------------------------------------------
@@ -523,6 +534,7 @@ az_args=(
 [[ -n "$instance_type" ]] && az_args+=(--set "resources.instance_type=$instance_type")
 [[ -n "$experiment_name" ]] && az_args+=(--set "experiment_name=$experiment_name")
 [[ -n "$display_name" ]] && az_args+=(--set "display_name=$display_name")
+[[ -n "$managed_identity_client_id" ]] && az_args+=(--set "environment_variables.AZURE_CLIENT_ID=$managed_identity_client_id")
 
 az_args+=(--set "command=$train_cmd")
 

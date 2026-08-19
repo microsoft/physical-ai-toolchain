@@ -293,6 +293,16 @@ if [[ "$assets_only" == "true" ]]; then
   exit 0
 fi
 
+managed_identity_client_id="${AZURE_CLIENT_ID:-}"
+if [[ -z "$managed_identity_client_id" && -n "$compute" ]]; then
+  managed_identity_client_id=$(az ml compute show \
+    --name "${compute#azureml:}" \
+    --resource-group "$resource_group" \
+    --workspace-name "$workspace_name" \
+    --query "identity.user_assigned_identities[0].client_id" \
+    --output tsv)
+  [[ "$managed_identity_client_id" == "None" ]] && managed_identity_client_id=""
+fi
 
 #------------------------------------------------------------------------------
 # Build Submission Command
@@ -371,6 +381,7 @@ az_args+=(
 [[ -n "$lerobot_version" ]] && az_args+=(--set "environment_variables.LEROBOT_VERSION=$lerobot_version")
 [[ -n "$experiment_name" ]] && az_args+=(--set "environment_variables.EXPERIMENT_NAME=$experiment_name")
 [[ -n "$register_model" ]] && az_args+=(--set "environment_variables.REGISTER_MODEL=$register_model")
+[[ -n "$managed_identity_client_id" ]] && az_args+=(--set "environment_variables.AZURE_CLIENT_ID=$managed_identity_client_id")
 
 [[ ${#forward_args[@]} -gt 0 ]] && az_args+=("${forward_args[@]}")
 az_args+=(--query "name" -o "tsv")

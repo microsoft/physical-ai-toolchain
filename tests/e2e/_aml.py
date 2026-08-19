@@ -106,6 +106,8 @@ def _list_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model
         cwd=repo_root,
     )
     if result.returncode != 0:
+        if "ModelNotFound" in result.stderr:
+            return []
         raise AssertionError(
             f"Failed to list AzureML model versions for {model_name!r}\n\n{format_command_failure(result)}"
         )
