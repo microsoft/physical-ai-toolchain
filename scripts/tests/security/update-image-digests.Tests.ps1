@@ -388,6 +388,27 @@ esac
         $manifestCalls[0] | Should -Match ([regex]::Escape('Authorization: Bearer ngc-token'))
     }
 
+    It 'routes references with registry ports to the complete host' {
+        $reference = "registry.example.com:5000/team/robot:1.0@$($script:OldDigest)"
+        $workspace = New-DigestTestRepository -Name 'registry-port' -Content "image: $reference`n"
+        $curlBody = @"
+case "`$*" in
+  *"registry.example.com:5000/v2/team/robot/manifests/1.0"*) printf 'HTTP/1.1 200 OK\nDocker-Content-Digest: $($script:NewDigest)\n\n' ;;
+  *) exit 1 ;;
+esac
+"@
+
+        $result = Invoke-DigestScript -Workspace $workspace -Arguments @('--check') -CurlBody $curlBody
+        $manifestCalls = @($result.Calls | Where-Object {
+            $_ -match 'registry\.example\.com:5000/v2/team/robot/manifests/1\.0'
+        })
+
+        $result.ExitCode | Should -Be 2
+        $manifestCalls | Should -HaveCount 1
+        ($result.Calls -join "`n") | Should -Not -Match 'registry-1\.docker\.io'
+        ($result.Calls -join "`n") | Should -Not -Match 'auth\.docker\.io'
+    }
+
     It 'treats dots in image references as literal characters' {
         $currentReference = "example.com/robot:1.0@$($script:NewDigest)"
         $lookalikeReference = "exampleXcom/robot:1.0@$($script:OldDigest)"
