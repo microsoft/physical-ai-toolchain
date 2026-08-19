@@ -9,11 +9,10 @@
 
 .DESCRIPTION
     Resolves the newest non-draft microsoft/hve-core release and compares each
-    hve-core-derived file's upstream blob SHA at the pinned UPSTREAM_REF (the last
-    reviewed upstream ref, read from the RPI bootstrap workflow) against the same
-    upstream path at the latest release. Writes a JSON results file consumed by the
-    tracking-issue steps and, when running under GitHub Actions, emits the stale item
-    count to GITHUB_OUTPUT.
+    hve-core-derived file's upstream blob SHA at the pinned
+    HVE_CORE_DERIVED_FILES_REF against the same upstream path at the latest release.
+    Writes a JSON results file consumed by the tracking-issue steps and, when running
+    under GitHub Actions, emits the stale item count to GITHUB_OUTPUT.
 
 .PARAMETER ResultsFile
     Output JSON results path. Default: hve-core-freshness-results.json.
@@ -233,7 +232,7 @@ function Format-HveCoreIssueBody {
 
     $fileRows = ($files | ForEach-Object { Format-HveCoreDriftRow -File $_ }) -join "`n"
 
-    $compareBase = if ($pin.PinnedTag -ne 'unknown') { $pin.PinnedTag } else { $pin.PinnedSha }
+    $compareBase = Get-HveCoreCompareBase -Pin $pin
     return @"
 ## hve-core Upstream Freshness Report
 
@@ -280,7 +279,7 @@ function Format-HveCoreJobSummary {
         "| $($f.Path) | $pSha | $lSha | $fStatus |"
     }
 
-    $compareBase = if ($pin.PinnedTag -ne 'unknown') { $pin.PinnedTag } else { $pin.PinnedSha }
+    $compareBase = Get-HveCoreCompareBase -Pin $pin
 
     return @"
 ## hve-core Upstream Freshness
@@ -292,6 +291,19 @@ Drift baseline: $compareBase
 |--------------|-------------|-------------|--------|
 $($fileRows -join "`n")
 "@
+}
+
+function Get-HveCoreCompareBase {
+    <#
+    .SYNOPSIS
+        Selects the release tag or SHA used as the freshness comparison baseline.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Pin
+    )
+
+    return $(if ($Pin.PinnedTag -ne 'unknown') { $Pin.PinnedTag } else { $Pin.PinnedSha })
 }
 
 function Get-HveCoreTrackingIssue {

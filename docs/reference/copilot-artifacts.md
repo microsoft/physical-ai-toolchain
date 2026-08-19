@@ -35,7 +35,12 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 | Prompt      | `/start-dataviewer`        | Launch Dataset Analysis Tool                        | `.github/prompts/start-dataviewer.prompt.md`                      |
 | Prompt      | `/submit-lerobot-training` | Submit LeRobot training job to OSMO                 | `.github/prompts/submit-lerobot-training.prompt.md`               |
 | Skill       | dataviewer                 | Dataset browsing, annotation, and export            | `.github/skills/dataviewer/SKILL.md`                              |
+| Skill       | environment-deployment     | Generate and consume environment deployment bundles | `.github/skills/environment-deployment/SKILL.md`                  |
+| Skill       | fleet-deployment           | Deploy trained policies through fleet GitOps        | `.github/skills/fleet-deployment/SKILL.md`                        |
+| Skill       | fleet-intelligence         | Monitor fleet telemetry and drift                   | `.github/skills/fleet-intelligence/SKILL.md`                      |
+| Skill       | infrastructure             | Deploy and manage Azure infrastructure              | `.github/skills/infrastructure/SKILL.md`                          |
 | Skill       | osmo-lerobot-training      | Training submission, monitoring, and analysis       | `.github/skills/osmo-lerobot-training/SKILL.md`                   |
+| Skill       | synthetic-data             | Generate synthetic robotics training data           | `.github/skills/synthetic-data/SKILL.md`                          |
 | Skill       | rpi-*                      | Cloud-agent research, plan, implement, review       | `.github/skills/rpi-*/` (runtime-provisioned, gitignored)         |
 
 ## 🔗 Quick Reference
@@ -132,15 +137,17 @@ discovery (frontmatter only) → instructions (SKILL.md body) → resources
 | Resources | `references/DEFAULTS.md` (env, datasets, GPU profiles), `references/REFERENCE.md` (CLI, inference, AzureML navigation) |
 | Used by   | OSMO Training Manager agent                                                                                            |
 
-### rpi skill suite
+### rpi-* skill suite
 
 The cloud-agent setup workflow downloads the complete RPI skill suite from
 a pinned `microsoft/hve-core` commit into gitignored `.github/skills/rpi-*/`
 directories. Each skill is an immediate child of `.github/skills/`, as required
 for discovery. Local clones do not contain these skills unless the setup
 workflow has provisioned them. Each skill retains its upstream references and
-templates, and `.github/skills/.rpi-audit.json` records the resolved commit and
-installed file inventory. All eight skill entry points are required.
+templates, and `.github/skills/.rpi-audit.json` records the resolved commit,
+installed file paths, and verified Git blob SHAs. All eight skill entry points
+are required. Unexpected top-level content fails bootstrap rather than changing
+the installed skill surface implicitly.
 
 | Skill               | Purpose                                             |
 |---------------------|-----------------------------------------------------|

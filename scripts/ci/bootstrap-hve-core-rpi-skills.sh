@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Provision the pinned hve-core RPI skill suite for cloud-agent sessions.
-# This bootstrap remains standalone because it establishes the agent's trusted
-# instruction set before repository helpers are loaded.
+# cspell:ignore unmatch
 set -o errexit -o nounset -o pipefail
 
 UPSTREAM_REPO="${UPSTREAM_REPO:-microsoft/hve-core}"
 UPSTREAM_REF="${UPSTREAM_REF:-}"
 UPSTREAM_SKILLS_PATH="${UPSTREAM_SKILLS_PATH:-.github/skills/rpi}"
 SKILLS_ROOT="${SKILLS_ROOT:-.github/skills}"
+AUDIT_FILE=".rpi-audit.json"
 
 required_skills=(
     rpi-quick
@@ -19,6 +19,7 @@ required_skills=(
     rpi-plan-critique
     rpi-walkthrough
 )
+artifacts=("${required_skills[@]}" "$AUDIT_FILE")
 
 fail() {
     echo "$*" >&2
@@ -60,6 +61,7 @@ gh_api_with_retry() {
 
 require_tools curl gh git jq mktemp
 [ -n "$UPSTREAM_REF" ] || fail "UPSTREAM_REF is required"
+[[ "$UPSTREAM_REF" =~ ^[0-9a-f]{40}$ ]] || fail "UPSTREAM_REF must be a 40-character lowercase commit SHA"
 UPSTREAM_SKILLS_PATH="${UPSTREAM_SKILLS_PATH%/}"
 [ -n "$UPSTREAM_SKILLS_PATH" ] || fail "UPSTREAM_SKILLS_PATH is required"
 
@@ -73,10 +75,20 @@ case "$skills_root_abs" in
 esac
 mkdir -p "$skills_root_abs"
 
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$repo_root" ]; then
+    for skill in "${required_skills[@]}"; do
+        if git -C "$repo_root" ls-files --error-unmatch ".github/skills/${skill}" >/dev/null 2>&1; then
+            fail "Refusing to replace tracked RPI skill: .github/skills/${skill}"
+        fi
+    done
+fi
+
 commit_json="$(gh_api_with_retry "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_REF}")" ||
     fail "Failed to resolve ${UPSTREAM_REPO}@${UPSTREAM_REF}"
 sha="$(jq -r '.sha // empty' <<<"$commit_json")"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || fail "Invalid resolved SHA for ${UPSTREAM_REPO}@${UPSTREAM_REF}: ${sha}"
+[ "$sha" = "$UPSTREAM_REF" ] || fail "Resolved SHA does not match immutable UPSTREAM_REF: ${sha}"
 
 echo "Resolved ${UPSTREAM_REPO}@${UPSTREAM_REF} -> ${sha}"
 
@@ -101,32 +113,33 @@ entries_file="$(mktemp)"
 paths_file="$(mktemp)"
 staging_dir=""
 backup_dir=""
-installed_skills=()
-audit_installed=false
+installed_artifacts=()
 install_started=false
 install_complete=false
 cleanup() {
+    local artifact
+    local restore_failed=false
+
     rm -f "$entries_file" "$paths_file"
     if [ -n "$staging_dir" ] && [ -d "$staging_dir" ]; then
         rm -rf "$staging_dir"
     fi
     if [ "$install_started" = true ] && [ "$install_complete" != true ]; then
-        for skill in "${installed_skills[@]}"; do
-            rm -rf "${skills_root_abs:?}/${skill}"
-        done
-        if [ "$audit_installed" = true ]; then
-            rm -f "${skills_root_abs}/.rpi-audit.json"
+        if [ "${#installed_artifacts[@]}" -gt 0 ]; then
+            for artifact in "${installed_artifacts[@]}"; do
+                rm -rf "${skills_root_abs:?}/${artifact}"
+            done
         fi
-        for skill in "${required_skills[@]}"; do
-            if [ -e "${backup_dir}/${skill}" ]; then
-                mv "${backup_dir}/${skill}" "${skills_root_abs}/${skill}"
+        for artifact in "${artifacts[@]}"; do
+            if [ -e "${backup_dir}/${artifact}" ]; then
+                if ! mv "${backup_dir}/${artifact}" "${skills_root_abs}/${artifact}"; then
+                    echo "Failed to restore ${artifact}; backup preserved at ${backup_dir}" >&2
+                    restore_failed=true
+                fi
             fi
         done
-        if [ -e "${backup_dir}/.rpi-audit.json" ]; then
-            mv "${backup_dir}/.rpi-audit.json" "${skills_root_abs}/.rpi-audit.json"
-        fi
     fi
-    if [ -n "$backup_dir" ] && [ -d "$backup_dir" ]; then
+    if [ -n "$backup_dir" ] && [ -d "$backup_dir" ] && [ "$restore_failed" = false ]; then
         rm -rf "$backup_dir"
     fi
 }
@@ -143,6 +156,28 @@ jq -r --arg prefix "${UPSTREAM_SKILLS_PATH}/" '
     fail "No RPI skill files discovered under ${UPSTREAM_REPO}@${sha}:${UPSTREAM_SKILLS_PATH}"
 cut -f1 "$entries_file" >"$paths_file"
 
+while IFS=$'\t' read -r path _; do
+    relative_path="${path#"${UPSTREAM_SKILLS_PATH}/"}"
+    case "$relative_path" in
+    '' | /* | .. | ../* | */../* | */..) fail "Unsafe RPI skill path: ${path}" ;;
+    *.md) ;;
+    *) fail "Unsupported RPI skill file type: ${path}" ;;
+    esac
+    [[ "$relative_path" =~ ^[A-Za-z0-9._/-]+$ ]] ||
+        fail "Unsupported characters in RPI skill path: ${path}"
+
+    top_level="${relative_path%%/*}"
+    is_required=false
+    for skill in "${required_skills[@]}"; do
+        if [ "$top_level" = "$skill" ]; then
+            is_required=true
+            break
+        fi
+    done
+    [ "$is_required" = true ] ||
+        fail "Unexpected top-level RPI skill path: ${path}"
+done <"$entries_file"
+
 for skill in "${required_skills[@]}"; do
     required_path="${UPSTREAM_SKILLS_PATH}/${skill}/SKILL.md"
     grep -Fxq "$required_path" "$paths_file" ||
@@ -153,14 +188,6 @@ staging_dir="$(mktemp -d "${skills_root_abs}/.rpi-staging.XXXXXX")"
 
 while IFS=$'\t' read -r path blob_sha; do
     relative_path="${path#"${UPSTREAM_SKILLS_PATH}/"}"
-    case "$relative_path" in
-    '' | /* | .. | ../* | */../* | */..) fail "Unsafe RPI skill path: ${path}" ;;
-    *.md) ;;
-    *) fail "Unsupported RPI skill file type: ${path}" ;;
-    esac
-    [[ "$relative_path" =~ ^[A-Za-z0-9._/-]+$ ]] ||
-        fail "Unsafe characters in RPI skill path: ${path}"
-
     destination="${staging_dir}/${relative_path}"
     mkdir -p "$(dirname "$destination")"
     # pinning-ignore: content is verified against the pinned Git blob SHA immediately below.
@@ -179,7 +206,7 @@ for skill in "${required_skills[@]}"; do
         fail "Installed RPI skill is missing or empty: ${skill}"
 done
 
-files_json="$(jq -R -s 'split("\n") | map(select(length > 0))' <"$paths_file")"
+files_json="$(jq -Rn '[inputs | split("\t") | {path: .[0], blob_sha: .[1]}]' <"$entries_file")"
 jq -n \
     --arg upstream_repo "$UPSTREAM_REPO" \
     --arg requested_ref "$UPSTREAM_REF" \
@@ -192,32 +219,25 @@ jq -n \
       resolved_sha: $resolved_sha,
       resolved_at: $resolved_at,
       files: $files
-    }' >"${staging_dir}/.rpi-audit.json"
+    }' >"${staging_dir}/${AUDIT_FILE}"
 
 backup_dir="$(mktemp -d "${skills_root_abs}/.rpi-backup.XXXXXX")"
 install_started=true
-for skill in "${required_skills[@]}"; do
-    if [ -e "${skills_root_abs}/${skill}" ]; then
-        mv "${skills_root_abs}/${skill}" "${backup_dir}/${skill}"
+for artifact in "${artifacts[@]}"; do
+    if [ -e "${skills_root_abs}/${artifact}" ]; then
+        mv "${skills_root_abs}/${artifact}" "${backup_dir}/${artifact}"
     fi
 done
-if [ -e "${skills_root_abs}/.rpi-audit.json" ]; then
-    mv "${skills_root_abs}/.rpi-audit.json" "${backup_dir}/.rpi-audit.json"
-fi
 
-for skill in "${required_skills[@]}"; do
-    if ! mv "${staging_dir}/${skill}" "${skills_root_abs}/${skill}"; then
-        fail "Failed to install RPI skill into ${skills_root_abs}/${skill}"
+for artifact in "${artifacts[@]}"; do
+    if ! mv "${staging_dir}/${artifact}" "${skills_root_abs}/${artifact}"; then
+        fail "Failed to install RPI artifact into ${skills_root_abs}/${artifact}"
     fi
-    installed_skills+=("$skill")
+    installed_artifacts+=("$artifact")
 done
-if ! mv "${staging_dir}/.rpi-audit.json" "${skills_root_abs}/.rpi-audit.json"; then
-    fail "Failed to install RPI audit manifest into ${skills_root_abs}"
-fi
-audit_installed=true
+install_complete=true
 rm -rf "$backup_dir"
 backup_dir=""
-install_complete=true
 
 installed_count="${#required_skills[@]}"
 file_count="$(wc -l <"$paths_file" | tr -d ' ')"

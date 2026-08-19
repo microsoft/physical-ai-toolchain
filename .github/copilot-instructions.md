@@ -334,7 +334,7 @@ The weekly `copilot-setup-steps.yml` cron and `Test-BinaryFreshness.ps1` weekly 
 
 The `Bootstrap hve-core RPI skills` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the complete RPI skill suite from a pinned `microsoft/hve-core` commit into immediate subdirectories of `.github/skills/`.
 
-The generated `.github/skills/rpi-*/` directories are gitignored and excluded from repository Markdown linting. The standalone bootstrap script stages downloads before installation, accepts Markdown blobs only, verifies each pinned Git blob SHA, requires all eight skill entry points, and records the resolved commit and file inventory in `.github/skills/.rpi-audit.json`. Bootstrap failure is fatal because no local fallback provides these workflows.
+The generated `.github/skills/rpi-*/` directories are gitignored and excluded from repository Markdown linting. The standalone bootstrap script stages downloads before installation, accepts Markdown blobs only, verifies each pinned Git blob SHA, requires all eight skill entry points, rejects unexpected top-level content, and records the resolved commit, file paths, and blob SHAs in `.github/skills/.rpi-audit.json`. Bootstrap failure is fatal because no local fallback provides these workflows.
 
 The cloud agent discovers the `rpi-quick`, `rpi-research`, `rpi-plan`, `rpi-implement`, and `rpi-review` workflows directly from their `SKILL.md` files. The bootstrap also preserves `rpi-challenger`, `rpi-plan-critique`, `rpi-walkthrough`, and every bundled reference and template.
 

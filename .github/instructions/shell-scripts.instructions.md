@@ -100,6 +100,10 @@ info "Operation complete"
 
 <!-- <important-conventions> -->
 
+Standalone trust-bootstrap scripts under `scripts/ci/` may omit `common.sh`,
+argument parsing, `--config-preview`, and deployment summaries when sourcing
+repository helpers would widen the bootstrap trust boundary.
+
 **Arguments:**
 
 - Short: `-h`, `-t` | Long: `--help`, `--tf-dir`

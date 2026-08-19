@@ -43,6 +43,20 @@ Shared utility modules used across scripts and workflows.
 | `lib/Get-VerifiedDownload.ps1` | Download files with SHA verification                   |
 | `lib/Modules/CIHelpers.psm1`   | CI output formatting, annotations, step summaries      |
 
+## 🚀 CI Scripts
+
+CI bootstrap and release automation.
+
+| Script                                | Purpose                                                 |
+|---------------------------------------|---------------------------------------------------------|
+| `ci/bootstrap-hve-core-rpi-skills.sh` | Provision the verified RPI skill suite for cloud agents |
+| `ci/Add-ReleaseVerificationNotes.ps1` | Add release verification notes                          |
+| `ci/Close-ReleaseMilestone.ps1`       | Close the milestone associated with a completed release |
+| `ci/Install-Gitsign.ps1`              | Install the pinned gitsign release                      |
+| `ci/New-SignedReleaseTag.ps1`         | Create a signed release tag                             |
+| `ci/New-SigningArtifacts.ps1`         | Generate release signing artifacts                      |
+| `ci/Update-ChangelogMsDate.ps1`       | Refresh changelog metadata dates                        |
+
 ## 🔍 Linting Scripts
 
 PowerShell scripts for validating code quality and documentation.
@@ -78,7 +92,7 @@ Security scanning and dependency management scripts.
 
 The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the values pinned in `.devcontainer/install-dev-deps.sh` and `.devcontainer/devcontainer.json`, and queries upstream Helm repositories for chart version drift. Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script.
 
-The `Test-HveCoreFreshness.ps1` script is invoked by the `check-hve-core-freshness.yml` workflow on a weekly schedule. For every hve-core-derived module, it compares the **upstream** blob SHA at the pinned `UPSTREAM_REF` (the last reviewed upstream ref) against the newest non-draft `microsoft/hve-core` release. Comparing blobs, not release tags, means a stale signal is a real upstream change rather than an unrelated prerelease.
+The `Test-HveCoreFreshness.ps1` script is invoked by the `check-hve-core-freshness.yml` workflow on a weekly schedule. For every hve-core-derived module, it compares the **upstream** blob SHA at the pinned `HVE_CORE_DERIVED_FILES_REF` against the newest non-draft `microsoft/hve-core` release. Comparing blobs, not release tags, means a stale signal is a real upstream change rather than an unrelated prerelease.
 
 ### 🔗 Where Pins Live
 

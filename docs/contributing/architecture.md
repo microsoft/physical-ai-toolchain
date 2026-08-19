@@ -392,7 +392,7 @@ This repository defines project-specific artifacts in `.github/` that extend HVE
 | Agents        | 2     | OSMO training manager, dataviewer developer                                      |
 | Instructions  | 4     | Copilot instructions, dataviewer conventions, documentation style, shell scripts |
 | Prompts       | 4     | OSMO training submission, LeRobot pipeline, dataviewer workflows                 |
-| Skills        | 7 + 8 | Seven committed domain skills and eight runtime-provisioned RPI skills           |
+| Skills        | 15    | Seven committed domain skills and eight runtime-provisioned RPI skills           |
 
 Project artifacts are auto-discovered by VS Code from the `.github/` directory without explicit registration.
 
@@ -400,7 +400,7 @@ Three workflow chains compose these artifacts:
 
 - **OSMO Training Manager**: `osmo-training-manager` agent → `osmo-lerobot-training` skill → training submission prompts
 - **Dataviewer Developer**: `dataviewer-developer` agent → `dataviewer` skill → dataviewer instruction conventions
-- **RPI**: `rpi-quick` → research → plan and critique → implementation → review
+- **RPI**: `rpi-quick` → `rpi-research` → `rpi-plan` / `rpi-plan-critique` → `rpi-implement` → `rpi-review`
 
 ### Artifact Types and Loading
 
