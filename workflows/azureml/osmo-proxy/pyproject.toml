@@ -9,7 +9,7 @@ requires-python = "==3.12.*"
 dependencies = [
     "requests>=2.31",
     "pyyaml>=6.0",
-    "mlflow>=2.10",
+    "mlflow>=3.15.0",
     "azureml-mlflow>=1.0",
     "azure-ai-ml>=1.13",
     "azure-identity>=1.15",
