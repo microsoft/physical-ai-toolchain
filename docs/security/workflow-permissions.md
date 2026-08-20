@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Workflow Permissions
 description: GitHub Actions permission scopes and OSSF Scorecard Token-Permissions exception rationale
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-06
+ms.date: 2026-08-18
 ms.topic: reference
 keywords:
   - security
@@ -28,31 +28,32 @@ This document enumerates every job-scoped `security-events`, `contents`, and `at
 
 ## 🔒 Job-Scoped Write Permissions
 
-The 21 write permissions below are required by the action or CLI invoked in the corresponding job. Each grant is the minimum scope needed.
+The 22 write permissions below are required by the action or CLI invoked in the corresponding job. Each grant is the minimum scope needed.
 
-| Workflow                      | Job                         | Permission               | Rationale                                                                                                                    |
-|-------------------------------|-----------------------------|--------------------------|------------------------------------------------------------------------------------------------------------------------------|
-| `check-binary-integrity.yml`  | `check-hashes`              | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish binary integrity findings to the Security tab.                    |
-| `codeql-analysis.yml`         | `analyze`                   | `security-events: write` | Required by `github/codeql-action/analyze` to upload CodeQL SARIF results to the Security tab.                               |
-| `container-scan.yml`          | `scan`                      | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish Trivy base-image CVE findings to the Security tab.                |
-| `dast-zap-scan.yml`           | `scan`                      | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish ZAP DAST findings to the Security tab.                            |
-| `dependency-pinning-scan.yml` | `scan`                      | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish SHA-pinning findings to the Security tab.                         |
-| `gitleaks-scan.yml`           | `scan`                      | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish secret-scanning findings to the Security tab.                     |
-| `main.yml`                    | `dependency-pinning`        | `security-events: write` | Inherited by reusable `dependency-pinning-scan.yml`; required for SARIF upload.                                              |
-| `main.yml`                    | `codeql-analysis`           | `security-events: write` | Inherited by reusable `codeql-analysis.yml`; required for SARIF upload.                                                      |
-| `main.yml`                    | `generate-dependency-sbom`  | `contents: write`        | Required by `gh release upload "${TAG}" dependencies.spdx.json --clobber` to attach the dependency SBOM to the release.      |
-| `main.yml`                    | `attest-release`            | `attestations: write`    | Required by `actions/attest-build-provenance` and `actions/attest` to create Sigstore provenance attestations.               |
-| `main.yml`                    | `attest-release`            | `contents: write`        | Required by `gh release upload` to attach `*.sigstore.json` and `*.intoto.jsonl` attestation artifacts to the release.       |
-| `main.yml`                    | `sbom-diff`                 | `contents: write`        | Required by `gh release upload "${TAG}" dependency-diff.md --clobber` to attach the dependency-change report to the release. |
-| `main.yml`                    | `append-verification-notes` | `contents: write`        | Required by `gh release edit` to append artifact-verification instructions to the release body.                              |
-| `pr-validation.yml`           | `dependency-pinning`        | `security-events: write` | Inherited by reusable `dependency-pinning-scan.yml`; required for SARIF upload.                                              |
-| `pr-validation.yml`           | `codeql-analysis`           | `security-events: write` | Inherited by reusable `codeql-analysis.yml`; required for SARIF upload.                                                      |
-| `pr-validation.yml`           | `container-scan`            | `security-events: write` | Inherited by reusable `container-scan.yml`; required for SARIF upload.                                                       |
-| `pr-validation.yml`           | `osv-scanner`               | `security-events: write` | Required by `google/osv-scanner-action` to publish OSV dependency findings to the Security tab.                              |
-| `pr-validation.yml`           | `terraform-security`        | `security-events: write` | Inherited by reusable `terraform-security.yml`; required for SARIF upload.                                                   |
-| `scorecard.yml`               | `scorecard`                 | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish OpenSSF Scorecard findings to the Security tab.                   |
-| `terraform-security.yml`      | `checkov`                   | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish Checkov findings to the Security tab.                             |
-| `weekly-validation.yml`       | `container-rescan`          | `security-events: write` | Inherited by reusable `container-scan.yml`; required for SARIF upload of the soft-fail base-image rescan.                    |
+| Workflow                           | Job                         | Permission               | Rationale                                                                                                                    |
+|------------------------------------|-----------------------------|--------------------------|------------------------------------------------------------------------------------------------------------------------------|
+| `check-binary-integrity.yml`       | `check-hashes`              | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish binary integrity findings to the Security tab.                    |
+| `check-image-digest-freshness.yml` | `check-freshness`           | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish container image digest drift findings to the Security tab.        |
+| `codeql-analysis.yml`              | `analyze`                   | `security-events: write` | Required by `github/codeql-action/analyze` to upload CodeQL SARIF results to the Security tab.                               |
+| `container-scan.yml`               | `scan`                      | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish Trivy base-image CVE findings to the Security tab.                |
+| `dast-zap-scan.yml`                | `scan`                      | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish ZAP DAST findings to the Security tab.                            |
+| `dependency-pinning-scan.yml`      | `scan`                      | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish SHA-pinning findings to the Security tab.                         |
+| `gitleaks-scan.yml`                | `scan`                      | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish secret-scanning findings to the Security tab.                     |
+| `main.yml`                         | `dependency-pinning`        | `security-events: write` | Inherited by reusable `dependency-pinning-scan.yml`; required for SARIF upload.                                              |
+| `main.yml`                         | `codeql-analysis`           | `security-events: write` | Inherited by reusable `codeql-analysis.yml`; required for SARIF upload.                                                      |
+| `main.yml`                         | `generate-dependency-sbom`  | `contents: write`        | Required by `gh release upload "${TAG}" dependencies.spdx.json --clobber` to attach the dependency SBOM to the release.      |
+| `main.yml`                         | `attest-release`            | `attestations: write`    | Required by `actions/attest-build-provenance` and `actions/attest` to create Sigstore provenance attestations.               |
+| `main.yml`                         | `attest-release`            | `contents: write`        | Required by `gh release upload` to attach `*.sigstore.json` and `*.intoto.jsonl` attestation artifacts to the release.       |
+| `main.yml`                         | `sbom-diff`                 | `contents: write`        | Required by `gh release upload "${TAG}" dependency-diff.md --clobber` to attach the dependency-change report to the release. |
+| `main.yml`                         | `append-verification-notes` | `contents: write`        | Required by `gh release edit` to append artifact-verification instructions to the release body.                              |
+| `pr-validation.yml`                | `dependency-pinning`        | `security-events: write` | Inherited by reusable `dependency-pinning-scan.yml`; required for SARIF upload.                                              |
+| `pr-validation.yml`                | `codeql-analysis`           | `security-events: write` | Inherited by reusable `codeql-analysis.yml`; required for SARIF upload.                                                      |
+| `pr-validation.yml`                | `container-scan`            | `security-events: write` | Inherited by reusable `container-scan.yml`; required for SARIF upload.                                                       |
+| `pr-validation.yml`                | `osv-scanner`               | `security-events: write` | Required by `google/osv-scanner-action` to publish OSV dependency findings to the Security tab.                              |
+| `pr-validation.yml`                | `terraform-security`        | `security-events: write` | Inherited by reusable `terraform-security.yml`; required for SARIF upload.                                                   |
+| `scorecard.yml`                    | `scorecard`                 | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish OpenSSF Scorecard findings to the Security tab.                   |
+| `terraform-security.yml`           | `checkov`                   | `security-events: write` | Required by `github/codeql-action/upload-sarif` to publish Checkov findings to the Security tab.                             |
+| `weekly-validation.yml`            | `container-rescan`          | `security-events: write` | Inherited by reusable `container-scan.yml`; required for SARIF upload of the soft-fail base-image rescan.                    |
 
 ## 🛡️ Defense in Depth
 
