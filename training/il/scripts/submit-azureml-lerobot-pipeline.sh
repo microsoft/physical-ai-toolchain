@@ -153,23 +153,6 @@ ensure_ml_extension() {
     fatal "Azure ML CLI extension not installed. Run: az extension add --name ml"
 }
 
-resolve_managed_identity_client_id() {
-  local compute_target="$1"
-  local client_id="${AZURE_CLIENT_ID:-}"
-
-  if [[ -z "$client_id" ]]; then
-    client_id=$(az ml compute show \
-      --name "${compute_target#azureml:}" \
-      --resource-group "$resource_group" \
-      --workspace-name "$workspace_name" \
-      --query "identity.user_assigned_identities[0].client_id" \
-      --output tsv)
-    [[ "$client_id" == "None" ]] && client_id=""
-  fi
-
-  printf '%s' "$client_id"
-}
-
 #------------------------------------------------------------------------------
 # Defaults
 #------------------------------------------------------------------------------
@@ -369,11 +352,14 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
-train_managed_identity_client_id=$(resolve_managed_identity_client_id "$compute_train")
-evaluate_managed_identity_client_id=$(resolve_managed_identity_client_id "$compute_evaluate")
+train_managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
+  "$compute_train" "$resource_group" "$workspace_name")
+evaluate_managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
+  "$compute_evaluate" "$resource_group" "$workspace_name")
 register_managed_identity_client_id=""
 if [[ "$with_register" == "true" ]]; then
-  register_managed_identity_client_id=$(resolve_managed_identity_client_id "$compute_register")
+  register_managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
+    "$compute_register" "$resource_group" "$workspace_name")
 fi
 
 #------------------------------------------------------------------------------

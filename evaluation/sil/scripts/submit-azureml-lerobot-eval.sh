@@ -293,16 +293,8 @@ if [[ "$assets_only" == "true" ]]; then
   exit 0
 fi
 
-managed_identity_client_id="${AZURE_CLIENT_ID:-}"
-if [[ -z "$managed_identity_client_id" && -n "$compute" ]]; then
-  managed_identity_client_id=$(az ml compute show \
-    --name "${compute#azureml:}" \
-    --resource-group "$resource_group" \
-    --workspace-name "$workspace_name" \
-    --query "identity.user_assigned_identities[0].client_id" \
-    --output tsv)
-  [[ "$managed_identity_client_id" == "None" ]] && managed_identity_client_id=""
-fi
+managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
+  "$compute" "$resource_group" "$workspace_name")
 
 #------------------------------------------------------------------------------
 # Build Submission Command
