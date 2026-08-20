@@ -493,7 +493,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 * Two orchestrators: `main.yml` (push to main), `pr-validation.yml` (PRs) using reusable `workflow_call` workflows
 * PR validation sequence: spell check → markdown lint → table format → frontmatter → PSScriptAnalyzer → YAML lint → link check → Python lint → Python tests → uv lock consistency → frontend tests → Pester → dependency review → dependency pinning → CodeQL
 * Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
-* Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main)
+* Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main), container image digest freshness (weekly)
 * Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)
 * Codecov: 12+ flags including `pytest-*`, `vitest`/`vitest-*`, `pester`, `go`, `terraform`; 80-100% range; carryforward enabled; OIDC tokenless upload via `codecov/codecov-action@v6`
 
