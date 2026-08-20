@@ -8,6 +8,7 @@ import { useCallback, useEffect } from 'react'
 import { mutationFetch, setEpisodeLabels } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
 import { useLabelStore } from '@/stores/label-store'
+import type { EpisodeAnalysisRecord } from '@/types/api'
 
 const API_BASE = '/api'
 
@@ -15,6 +16,7 @@ interface DatasetLabelsResponse {
   dataset_id: string
   available_labels: string[]
   episodes: Record<string, string[]>
+  analysis?: Record<string, EpisodeAnalysisRecord>
 }
 
 export const labelKeys = {
@@ -52,6 +54,47 @@ async function removeLabelOption(datasetId: string, label: string): Promise<stri
   return res.json()
 }
 
+/** Analysis fields that can be promoted into filterable episode labels. */
+export const IMPORTABLE_ANALYSIS_FIELDS = [
+  'object',
+  'pick_from',
+  'grasp_success',
+  'place_success',
+  'motion_score',
+  'motion_flags',
+  'source',
+] as const
+
+export type ImportableAnalysisField = (typeof IMPORTABLE_ANALYSIS_FIELDS)[number]
+
+interface ImportAnalysisResult {
+  dataset_id: string
+  available_labels: string[]
+  episodes: Record<string, string[]>
+  field: string
+  prefix: string
+  labels_added: string[]
+  episodes_updated: number
+}
+
+async function importAnalysisLabels(
+  datasetId: string,
+  field: ImportableAnalysisField,
+  options?: { prefix?: string; overwrite?: boolean },
+): Promise<ImportAnalysisResult> {
+  const res = await mutationFetch(`${API_BASE}/datasets/${datasetId}/labels/import-from-analysis`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      field,
+      prefix: options?.prefix,
+      overwrite: options?.overwrite ?? false,
+    }),
+  })
+  if (!res.ok) throw new Error('Failed to import analysis labels')
+  return res.json()
+}
+
 /**
  * Hook to load and sync dataset labels with the label store.
  */
@@ -59,6 +102,7 @@ export function useDatasetLabels() {
   const currentDataset = useDatasetStore((state) => state.currentDataset)
   const setAvailableLabels = useLabelStore((state) => state.setAvailableLabels)
   const setAllEpisodeLabels = useLabelStore((state) => state.setAllEpisodeLabels)
+  const setAllEpisodeAnalysis = useLabelStore((state) => state.setAllEpisodeAnalysis)
   const setLoaded = useLabelStore((state) => state.setLoaded)
 
   const query = useQuery({
@@ -72,9 +116,10 @@ export function useDatasetLabels() {
     if (query.data) {
       setAvailableLabels(query.data.available_labels)
       setAllEpisodeLabels(query.data.episodes)
+      setAllEpisodeAnalysis(query.data.analysis ?? {})
       setLoaded(true)
     }
-  }, [query.data, setAvailableLabels, setAllEpisodeLabels, setLoaded])
+  }, [query.data, setAvailableLabels, setAllEpisodeLabels, setAllEpisodeAnalysis, setLoaded])
 
   return query
 }
@@ -144,6 +189,32 @@ export function useRemoveLabelOption() {
     onSuccess: (data, label) => {
       removeLabelOptionInStore(label)
       setAvailableLabels(data)
+      if (currentDataset) {
+        queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) })
+      }
+    },
+  })
+
+  return mutation
+}
+
+/**
+ * Hook to import an analysis field into episode labels.
+ */
+export function useImportAnalysisLabels() {
+  const currentDataset = useDatasetStore((state) => state.currentDataset)
+  const setAvailableLabels = useLabelStore((state) => state.setAvailableLabels)
+  const setAllEpisodeLabels = useLabelStore((state) => state.setAllEpisodeLabels)
+  const queryClient = useQueryClient()
+
+  const mutation = useMutation({
+    mutationFn: ({ field, overwrite }: { field: ImportableAnalysisField; overwrite?: boolean }) => {
+      if (!currentDataset) throw new Error('No dataset selected')
+      return importAnalysisLabels(currentDataset.id, field, { overwrite })
+    },
+    onSuccess: (data) => {
+      setAvailableLabels(data.available_labels)
+      setAllEpisodeLabels(data.episodes)
       if (currentDataset) {
         queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) })
       }
