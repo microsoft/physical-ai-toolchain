@@ -75,6 +75,8 @@ function Invoke-BashEntryScript {
     through to any same-named binary already on PATH (or fail with "command not found").
     .PARAMETER WorkDir
     Directory the script is run from (its $PWD). A fresh temp directory is used if omitted.
+    .PARAMETER ScriptArgs
+    Arguments passed to the bash script.
     .OUTPUTS
     PSCustomObject with ExitCode (int), StdOut (string), StdErr (string), Calls (string[],
     one call-log line per stubbed-command invocation, in invocation order), and WorkDir.
@@ -85,7 +87,8 @@ function Invoke-BashEntryScript {
         [Parameter(Mandatory)][string]$ScriptPath,
         [hashtable]$EnvVars = @{},
         [hashtable]$Stubs = @{},
-        [string]$WorkDir
+        [string]$WorkDir,
+        [string[]]$ScriptArgs = @()
     )
 
     if (-not $WorkDir) {
@@ -112,7 +115,11 @@ function Invoke-BashEntryScript {
     }
     $wrapperLines.Add("export PATH=$(ConvertTo-BashSingleQuoted $stubDir):`$PATH")
     $wrapperLines.Add("cd $(ConvertTo-BashSingleQuoted $WorkDir) || exit 1")
-    $wrapperLines.Add("bash $(ConvertTo-BashSingleQuoted $ScriptPath)")
+    $command = "bash $(ConvertTo-BashSingleQuoted $ScriptPath)"
+    foreach ($argument in $ScriptArgs) {
+        $command += " $(ConvertTo-BashSingleQuoted $argument)"
+    }
+    $wrapperLines.Add($command)
     Set-Content -Path $wrapperPath -Value ($wrapperLines -join "`n") -NoNewline
     if (Get-Command chmod -ErrorAction SilentlyContinue) {
         & chmod +x $wrapperPath
