@@ -234,10 +234,11 @@ class TestLoadAgent:
 
     def test_dispatches_to_skrl_loader(self) -> None:
         sentinel = object()
+        env = MagicMock()
         with patch("sil.policy_evaluation._load_skrl", return_value=sentinel) as mock:
-            result = load_agent("/tmp/ckpt.pt", "skrl", "Reach-v0", MagicMock(), "cuda")
+            result = load_agent("/tmp/ckpt.pt", "skrl", "Reach-v0", env, "cuda")
         assert result is sentinel
-        mock.assert_called_once()
+        mock.assert_called_once_with("/tmp/ckpt.pt", "Reach-v0", env)
 
     def test_dispatches_to_rsl_rl_loader(self) -> None:
         sentinel = object()
@@ -257,9 +258,7 @@ class TestLoadRslRl:
 
         with (
             patch.dict(sys.modules, {"rsl_rl": MagicMock(), "rsl_rl.modules": rsl_rl_modules}),
-            patch.object(
-                sys.modules["training.utils.integrity"], "safe_load_checkpoint", return_value=checkpoint
-            ) as mock_load,
+            patch.object(policy_evaluation, "safe_load_checkpoint", return_value=checkpoint) as mock_load,
         ):
             result = _load_rsl_rl("/tmp/ckpt.pt", "cpu")
 
@@ -286,20 +285,32 @@ class TestLoadRslRl:
             "iter": 100,
             "infos": None,
         }
+        torch.save(checkpoint, checkpoint_path)
 
-        with (
-            patch.dict(sys.modules, {"rsl_rl": MagicMock(), "rsl_rl.modules": rsl_rl_modules}),
-            patch.object(
-                sys.modules["training.utils.integrity"],
-                "safe_load_checkpoint",
-                return_value=checkpoint,
-            ),
-        ):
+        with patch.dict(sys.modules, {"rsl_rl": MagicMock(), "rsl_rl.modules": rsl_rl_modules}):
             result = _load_rsl_rl(str(checkpoint_path), "cpu")
 
         rsl_rl_modules.ActorCritic.assert_called_once_with(a=1)
         policy.load_state_dict.assert_called_once()
+        loaded_state_dict = policy.load_state_dict.call_args.args[0]
+        assert loaded_state_dict.keys() == checkpoint["model_state_dict"].keys()
+        assert torch.equal(loaded_state_dict["w"], checkpoint["model_state_dict"]["w"])
         assert result is policy
+
+    @pytest.mark.parametrize(
+        ("checkpoint", "message"),
+        [
+            ({"model_state_dict": {}}, "model_cfg"),
+            ({"model_cfg": {}}, "model_state_dict"),
+            ({"model_cfg": [], "model_state_dict": {}}, "model_cfg must be a dictionary"),
+        ],
+    )
+    def test_rejects_malformed_checkpoint(self, checkpoint: dict, message: str) -> None:
+        with (
+            patch.object(policy_evaluation, "safe_load_checkpoint", return_value=checkpoint),
+            pytest.raises(ValueError, match=message),
+        ):
+            _load_rsl_rl("/tmp/ckpt.pt", "cpu")
 
 
 class _StubEnv:
@@ -433,29 +444,26 @@ def _skrl_module_stubs(decorator_calls_inner: bool = True, cfg: object | None = 
 
 class TestLoadSkrl:
     @pytest.fixture(autouse=True)
-    def mock_safe_load_checkpoint(self):
-        """Patch ``safe_load_checkpoint`` at its source module for every load test.
+    def mock_safe_load_framework_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        mock = MagicMock()
+        monkeypatch.setattr(policy_evaluation, "safe_load_framework_checkpoint", mock)
+        return mock
 
-        ``_load_skrl`` imports it locally from ``training.utils.integrity``; a combined
-        test run exposes the real loader, which rejects a dummy checkpoint path. Patching
-        the source attribute keeps these tests independent of collection order and of the
-        conftest module stub.
-        """
-        with patch("training.utils.integrity.safe_load_checkpoint") as mock:
-            yield mock
-
-    def test_to_dict_cfg_creates_runner_and_loads_checkpoint(self) -> None:
+    def test_to_dict_cfg_creates_runner_and_loads_checkpoint(
+        self, mock_safe_load_framework_checkpoint: MagicMock
+    ) -> None:
         cfg = MagicMock()
         cfg.to_dict.return_value = {"a": 1}
         stubs, runner_mod = _skrl_module_stubs(cfg=cfg)
         env = MagicMock()
 
         with patch.dict(sys.modules, stubs):
-            agent = _load_skrl("ckpt.pt", "Reach-v0", env, "cuda")
+            agent = _load_skrl("ckpt.pt", "Reach-v0", env)
 
         runner_mod.Runner.assert_called_once_with(env, {"a": 1})
         runner_instance = runner_mod.Runner.return_value
-        runner_instance.agent.load.assert_called_once_with("ckpt.pt")
+        mock_safe_load_framework_checkpoint.assert_called_once_with("ckpt.pt", loader=runner_instance.agent.load)
+        runner_instance.agent.load.assert_not_called()
         runner_instance.agent.enable_training_mode.assert_called_once_with(enabled=False, apply_to_models=True)
         assert agent is runner_instance.agent
 
@@ -464,37 +472,38 @@ class TestLoadSkrl:
         stubs, runner_mod = _skrl_module_stubs(cfg=cfg)
 
         with patch.dict(sys.modules, stubs):
-            _load_skrl("ckpt.pt", "Reach-v0", MagicMock(), "cuda")
+            _load_skrl("ckpt.pt", "Reach-v0", MagicMock())
 
         runner_mod.Runner.assert_called_once()
         assert runner_mod.Runner.call_args.args[1] == {"b": 2}
 
     def test_load_skrl_rejects_weights_only_incompatible_payload_and_skips_load(
-        self, mock_safe_load_checkpoint: MagicMock
+        self, mock_safe_load_framework_checkpoint: MagicMock
     ) -> None:
         cfg = {"b": 2}
         stubs, runner_mod = _skrl_module_stubs(cfg=cfg)
         env = MagicMock()
-        mock_safe_load_checkpoint.side_effect = ValueError("add_safe_globals")
+        mock_safe_load_framework_checkpoint.side_effect = ValueError("add_safe_globals")
 
         with patch.dict(sys.modules, stubs), pytest.raises(ValueError, match="add_safe_globals"):
-            _load_skrl("evil.pt", "Reach-v0", env, "cuda")
+            _load_skrl("evil.pt", "Reach-v0", env)
 
         runner_instance = runner_mod.Runner.return_value
         runner_instance.agent.load.assert_not_called()
+        runner_instance.agent.enable_training_mode.assert_not_called()
 
     def test_unsupported_cfg_type_raises(self) -> None:
         cfg = object()  # no to_dict, not a dict
         stubs, _ = _skrl_module_stubs(cfg=cfg)
 
         with patch.dict(sys.modules, stubs), pytest.raises(ValueError, match="Unexpected agent config type"):
-            _load_skrl("ckpt.pt", "Reach-v0", MagicMock(), "cuda")
+            _load_skrl("ckpt.pt", "Reach-v0", MagicMock())
 
     def test_missing_cfg_raises(self) -> None:
         stubs, _ = _skrl_module_stubs(decorator_calls_inner=False)
 
         with patch.dict(sys.modules, stubs), pytest.raises(ValueError, match="Could not load agent configuration"):
-            _load_skrl("ckpt.pt", "Reach-v0", MagicMock(), "cuda")
+            _load_skrl("ckpt.pt", "Reach-v0", MagicMock())
 
     def test_restores_sys_argv_after_call(self) -> None:
         cfg = {"a": 1}
@@ -502,7 +511,7 @@ class TestLoadSkrl:
         sentinel_argv = ["prog", "--keep", "me"]
 
         with patch.dict(sys.modules, stubs), patch.object(sys, "argv", sentinel_argv):
-            _load_skrl("ckpt.pt", "Reach-v0", MagicMock(), "cuda")
+            _load_skrl("ckpt.pt", "Reach-v0", MagicMock())
             assert sys.argv == sentinel_argv
 
 

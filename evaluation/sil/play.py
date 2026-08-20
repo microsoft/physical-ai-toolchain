@@ -93,6 +93,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
 from training.packaging.scripts.export_policy import write_sha256_sidecar
+from training.utils.integrity import safe_load_framework_checkpoint
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 
@@ -165,7 +166,7 @@ def main(
         runner = DistillationRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     else:
         raise ValueError(f"Unsupported runner class: {agent_cfg.class_name}")
-    runner.load(resume_path)
+    safe_load_framework_checkpoint(resume_path, loader=runner.load)
 
     # obtain the trained policy for inference
     policy = runner.get_inference_policy(device=env.unwrapped.device)

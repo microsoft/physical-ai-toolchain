@@ -615,7 +615,7 @@ info "  Image: $image"
 # Ctrl+C between az invocation and a successful return leaves the operator
 # unsure whether the job was accepted. Print a clear pointer to the portal so
 # they can resolve the ambiguity instead of blindly resubmitting.
-# shellcheck disable=SC2329  # invoked indirectly via `trap`
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via `trap`
 _interrupt_message() {
   error "Interrupted while waiting for az ml job create. The job may have been submitted."
   error "Check: https://ml.azure.com/runs?wsid=/subscriptions/${subscription_id}/resourceGroups/${resource_group}/providers/Microsoft.MachineLearningServices/workspaces/${workspace_name}"
