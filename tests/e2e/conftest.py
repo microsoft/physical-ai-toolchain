@@ -366,7 +366,7 @@ def _cluster_has_scalable_gpu_node_pool(repo_root: Path) -> bool:
 
     tf_outputs = _terraform_outputs(repo_root)
     resource_group = os.environ.get("AZURE_RESOURCE_GROUP") or tf_outputs.try_key_value("resource_group")
-    cluster_name = tf_outputs.try_key_value("aks_cluster")
+    cluster_name = os.environ.get("AKS_CLUSTER_NAME") or tf_outputs.try_key_value("aks_cluster")
     if not resource_group or not cluster_name:
         return False
 

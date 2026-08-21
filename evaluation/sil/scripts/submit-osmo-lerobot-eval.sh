@@ -106,6 +106,7 @@ model_name="${AML_MODEL_NAME:-}"
 model_version="${AML_MODEL_VERSION:-}"
 builtin_policy="${BUILTIN_POLICY:-false}"
 from_blob_dataset=false
+use_huggingface_credential="true"
 storage_account="${BLOB_STORAGE_ACCOUNT:-${AZURE_STORAGE_ACCOUNT_NAME:-}}"
 storage_container="${BLOB_STORAGE_CONTAINER:-datasets}"
 blob_prefix="${BLOB_PREFIX:-}"
@@ -202,6 +203,10 @@ else
   [[ -z "$dataset_revision" ]] && fatal "--dataset-revision is required with --dataset-repo-id"
 fi
 
+if [[ "$from_blob_dataset" == "true" && ( "$from_aml_model" == "true" || "$builtin_policy" == "true" ) ]]; then
+  use_huggingface_credential="false"
+fi
+
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
 [[ -d "$REPO_ROOT/training/il" ]] || fatal "Directory training/il not found"
 
@@ -278,6 +283,7 @@ submit_args=(
   "eval_episodes=$eval_episodes"
   "eval_batch_size=$eval_batch_size"
   "record_video=$record_video"
+  "use_huggingface_credential=$use_huggingface_credential"
 )
 
 [[ -n "$policy_revision" ]] && submit_args+=("policy_revision=$policy_revision")

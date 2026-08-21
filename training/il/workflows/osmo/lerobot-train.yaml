@@ -21,9 +21,11 @@ workflow:
       inputs:
         - url: "{{ code_url }}"
           regex: ".*"
+{% if use_huggingface_credential == "true" %}
       credentials:
         huggingface:
           HF_TOKEN: hf_token
+{% endif %}
       environment:
         GIT_PYTHON_REFRESH: "quiet"
         NVIDIA_DRIVER_CAPABILITIES: "all"
@@ -71,6 +73,7 @@ default-values:
   dataset_repo_id: ""
   dataset_root: /workspace/data
   blob_urls: "[]"
+  use_huggingface_credential: "true"
   policy_type: act
   output_dir: /workspace/outputs/train
   job_name: lerobot-training
