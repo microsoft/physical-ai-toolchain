@@ -476,6 +476,9 @@ if [[ "$assets_only" == "true" ]]; then
   exit 0
 fi
 
+managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
+  "$compute" "$resource_group" "$workspace_name")
+
 #------------------------------------------------------------------------------
 # Pre-submission Checks
 #------------------------------------------------------------------------------
@@ -523,6 +526,7 @@ az_args=(
 [[ -n "$instance_type" ]] && az_args+=(--set "resources.instance_type=$instance_type")
 [[ -n "$experiment_name" ]] && az_args+=(--set "experiment_name=$experiment_name")
 [[ -n "$display_name" ]] && az_args+=(--set "display_name=$display_name")
+[[ -n "$managed_identity_client_id" ]] && az_args+=(--set "environment_variables.AZURE_CLIENT_ID=$managed_identity_client_id")
 
 az_args+=(--set "command=$train_cmd")
 
