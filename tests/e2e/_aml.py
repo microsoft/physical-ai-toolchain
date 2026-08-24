@@ -275,7 +275,7 @@ def submit_aml_vla_pi0_training(
     register_model_name: str,
 ) -> AzureMLJob:
     experiment_name = e2e_name("vla-pi0-training-e2e-aml")
-    instance_type = os.environ.get("E2E_AML_INSTANCE_TYPE", "gpu")
+    instance_type = os.environ.get("E2E_AML_INSTANCE_TYPE", "")
     log_e2e(
         "Submitting AzureML VLA pi0 training job "
         f"for dataset={blob_url}, training_steps={training_steps}, "
@@ -794,3 +794,25 @@ def cancel_aml_job(job: AzureMLJob, repo_root: Path) -> None:
         ],
         cwd=repo_root,
     )
+
+
+def cleanup_aml_job_and_model_versions(
+    job: AzureMLJob,
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    model_name: str,
+) -> None:
+    """Cancel an AzureML job before archiving every model version it registered."""
+    cancel_aml_job(job, repo_root)
+    if not job.is_terminal:
+        terminal_status = wait_for_status(
+            lambda: _aml_status(fetch_aml_job_payload(job, repo_root)),
+            goal_description=f"AzureML job {job.name} cleanup",
+            timeout_minutes=10,
+            poll_interval_seconds=15,
+            success_statuses={"Completed", *AML_FAILURE_STATES},
+            status_log_prefix="Cleanup poll status",
+        )
+        _mark_job_terminal(job, terminal_status)
+
+    archive_all_model_versions(repo_root, aml_workspace, model_name)
