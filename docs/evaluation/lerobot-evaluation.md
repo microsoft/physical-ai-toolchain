@@ -3,7 +3,7 @@ sidebar_position: 2
 title: LeRobot ACT Policy Inference
 description: Run a trained ACT policy locally, on OSMO with MLflow plots, or on a UR10E robot via ROS2
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-01
+ms.date: 2026-07-14
 ms.topic: how-to
 keywords:
   - lerobot
@@ -59,6 +59,9 @@ hve-robo-act-train/
 ├── policy_postprocessor_step_0_unnormalizer_processor.safetensors
 └── train_config.json                                          # Training hyperparameters
 ```
+
+> [!IMPORTANT]
+> LeRobot checkpoints trained before 0.6 require migration before processor-aware inference. Do not evaluate migrated weights without loading the corresponding preprocessor and postprocessor pipelines. See [Migrate LeRobot Checkpoints](../training/lerobot-checkpoint-migration.md).
 
 ### Install Dependencies
 
@@ -225,6 +228,7 @@ ros2 run lerobot_inference act_inference_node \
 
 ## 🔗 Related Documentation
 
+- [Migrate LeRobot Checkpoints](../training/lerobot-checkpoint-migration.md) for pre-0.6 checkpoint conversion
 - [MLflow Integration](../training/mlflow-integration.md) for experiment tracking during training
 - [LeRobot Training Guide](../training/lerobot-training.md) for training workflow configuration
 - [Workflows README](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/README.md) for training workflow definitions

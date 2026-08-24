@@ -81,6 +81,58 @@ run "empty_zones_rejected" {
 }
 
 // ============================================================
+// Invalid Revoked Client Certificate Thumbprint
+// ============================================================
+
+run "invalid_revoked_client_certificate_thumbprint_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix = run.setup.resource_prefix
+    environment     = run.setup.environment
+    instance        = run.setup.instance
+    location        = run.setup.location
+    resource_group  = run.setup.resource_group
+    virtual_network = run.setup.virtual_network
+    revoked_client_certificates = [{
+      name       = "invalid-thumbprint"
+      thumbprint = "0123456789abcdef0123456789abcdef0123456g"
+    }]
+  }
+
+  expect_failures = [var.revoked_client_certificates]
+}
+
+// ============================================================
+// Duplicate Revoked Client Certificate Names
+// ============================================================
+
+run "duplicate_revoked_client_certificate_names_rejected" {
+  command = plan
+
+  variables {
+    resource_prefix = run.setup.resource_prefix
+    environment     = run.setup.environment
+    instance        = run.setup.instance
+    location        = run.setup.location
+    resource_group  = run.setup.resource_group
+    virtual_network = run.setup.virtual_network
+    revoked_client_certificates = [
+      {
+        name       = "duplicate-certificate"
+        thumbprint = "0123456789abcdef0123456789abcdef01234567"
+      },
+      {
+        name       = "duplicate-certificate"
+        thumbprint = "89abcdef0123456789abcdef0123456789abcdef"
+      },
+    ]
+  }
+
+  expect_failures = [var.revoked_client_certificates]
+}
+
+// ============================================================
 // Valid SKUs Accepted
 // ============================================================
 

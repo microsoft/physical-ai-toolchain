@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import re
-import time
-import uuid
+import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from tests.e2e._common import format_command_failure, log_e2e, parse_json_from_output, run_command, wait_for_status
+import pytest
+
+from tests.e2e._common import (
+    e2e_name,
+    env_value,
+    format_command_failure,
+    log_e2e,
+    parse_json_from_output,
+    run_command,
+    wait_for_status,
+)
 
 AML_STARTED_STATES = {"Queued", "Preparing", "Starting", "Running", "Finalizing", "Completed"}
 AML_FAILURE_STATES = {"Canceled", "Cancelled", "Failed", "NotResponding"}
@@ -22,6 +31,34 @@ class AzureMLWorkspace:
     workspace_name: str
 
 
+def archive_aml_asset(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    asset_type: str,
+    name: str,
+    version: str,
+) -> None:
+    log_e2e(f"Archiving AzureML {asset_type} {name}:{version}")
+    result = run_command(
+        [
+            "az",
+            "ml",
+            asset_type,
+            "archive",
+            "--name",
+            name,
+            "--version",
+            version,
+            *aml_workspace_args(aml_workspace),
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Failed to archive AzureML {asset_type} {name}:{version}\n\n{format_command_failure(result)}"
+        )
+
+
 @dataclass
 class AzureMLJob:
     name: str
@@ -31,13 +68,82 @@ class AzureMLJob:
     terminal_status: str | None = None
 
 
-def _e2e_name(prefix: str) -> str:
-    return f"{prefix}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+@dataclass(frozen=True)
+class AmlModelRef:
+    """A concrete registered AzureML model — never the mutable ``latest`` alias."""
+
+    name: str
+    version: str
+
+
+def _model_versions(payload: Any) -> list[int]:
+    items = payload if isinstance(payload, list) else [payload]
+    versions: list[int] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            versions.append(int(str(item.get("version"))))
+        except (TypeError, ValueError):
+            continue
+    return versions
+
+
+def _list_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model_name: str) -> list[int]:
+    """List concrete integer versions registered under an AzureML model name."""
+    result = run_command(
+        [
+            "az",
+            "ml",
+            "model",
+            "list",
+            "--name",
+            model_name,
+            *aml_workspace_args(aml_workspace),
+            "-o",
+            "json",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        if "ModelNotFound" in result.stderr:
+            return []
+        raise AssertionError(
+            f"Failed to list AzureML model versions for {model_name!r}\n\n{format_command_failure(result)}"
+        )
+    return _model_versions(parse_json_from_output(result.stdout))
+
+
+def resolve_registered_model(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    model_name: str,
+) -> AmlModelRef:
+    """Resolve the concrete latest version of a registered AzureML model.
+
+    A lifecycle test registers its checkpoint under a unique model name, so the
+    returned version is the single concrete version that run produced — this avoids
+    the mutable ``latest`` alias entirely.
+    """
+    versions = _list_model_versions(repo_root, aml_workspace, model_name)
+    if not versions:
+        raise AssertionError(f"Training run registered no versions under AzureML model {model_name!r}")
+    version = str(max(versions))
+    log_e2e(f"Resolved AzureML model {model_name} to concrete version {version}")
+    return AmlModelRef(name=model_name, version=version)
+
+
+def archive_all_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model_name: str) -> None:
+    """Archive every registered version of an AzureML model (best-effort cleanup)."""
+    for version in _list_model_versions(repo_root, aml_workspace, model_name):
+        archive_aml_asset(repo_root, aml_workspace, "model", model_name, str(version))
 
 
 def _parse_azureml_job_name(output: str) -> str | None:
     patterns = (
         r"Job submitted:\s*(?P<name>[^\s]+)",
+        r"Pipeline submitted:\s*(?P<name>[^\s]+)",
         r"Job Name:\s*(?P<name>[^\s]+)",
     )
     for pattern in patterns:
@@ -47,6 +153,28 @@ def _parse_azureml_job_name(output: str) -> str | None:
     return None
 
 
+def aml_workspace_args(aml_workspace: AzureMLWorkspace) -> list[str]:
+    return [
+        "--subscription",
+        aml_workspace.subscription_id,
+        "--resource-group",
+        aml_workspace.resource_group,
+        "--workspace-name",
+        aml_workspace.workspace_name,
+    ]
+
+
+def _submit_workspace_args(aml_workspace: AzureMLWorkspace) -> list[str]:
+    return [
+        "--subscription-id",
+        aml_workspace.subscription_id,
+        "--resource-group",
+        aml_workspace.resource_group,
+        "--workspace-name",
+        aml_workspace.workspace_name,
+    ]
+
+
 def submit_aml_training(
     repo_root: Path,
     aml_workspace: AzureMLWorkspace,
@@ -54,8 +182,9 @@ def submit_aml_training(
     task: str,
     max_iterations: int,
     num_envs: int,
+    register_model_name: str,
 ) -> AzureMLJob:
-    experiment_name = _e2e_name("rl-training-e2e-aml")
+    experiment_name = e2e_name("rl-training-e2e-aml")
     log_e2e(
         "Submitting AzureML training job "
         f"for task={task}, num_envs={num_envs}, max_iterations={max_iterations}, experiment={experiment_name}"
@@ -71,48 +200,34 @@ def submit_aml_training(
             str(num_envs),
             "--experiment-name",
             experiment_name,
-            "--subscription-id",
-            aml_workspace.subscription_id,
-            "--resource-group",
-            aml_workspace.resource_group,
-            "--workspace-name",
-            aml_workspace.workspace_name,
-            "--skip-register-checkpoint",
+            *_submit_workspace_args(aml_workspace),
+            "--register-checkpoint",
+            register_model_name,
         ],
         cwd=repo_root,
     )
     if result.returncode != 0:
         raise AssertionError(f"AzureML e2e submission failed\n\n{format_command_failure(result)}")
 
-    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
-    job_name = _parse_azureml_job_name(combined_output)
-    if job_name is None:
-        raise AssertionError(f"Unable to parse AzureML job name from submission output\n\n{combined_output.strip()}")
-
-    log_e2e(f"Submitted AzureML job name={job_name}")
-
-    return AzureMLJob(
-        name=job_name,
-        workspace=aml_workspace,
-        experiment_name=experiment_name,
-    )
+    return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML training")
 
 
 def submit_aml_lerobot_training(
     repo_root: Path,
     aml_workspace: AzureMLWorkspace,
     *,
-    dataset_repo_id: str,
+    blob_url: str,
     policy_type: str,
     training_steps: int,
     save_freq: int,
     batch_size: int,
     log_freq: int,
+    register_model_name: str,
 ) -> AzureMLJob:
-    experiment_name = _e2e_name("il-training-e2e-aml")
+    experiment_name = e2e_name("il-training-e2e-aml")
     log_e2e(
         "Submitting AzureML LeRobot training job "
-        f"for dataset={dataset_repo_id}, policy={policy_type}, training_steps={training_steps}, "
+        f"for dataset={blob_url}, policy={policy_type}, training_steps={training_steps}, "
         f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}"
     )
     # eval-freq > training-steps disables in-loop evaluation (which would need
@@ -120,8 +235,8 @@ def submit_aml_lerobot_training(
     result = run_command(
         [
             str(repo_root / "training/il/scripts/submit-azureml-lerobot-training.sh"),
-            "--dataset-repo-id",
-            dataset_repo_id,
+            "--blob-url",
+            blob_url,
             "--policy-type",
             policy_type,
             "--training-steps",
@@ -136,32 +251,228 @@ def submit_aml_lerobot_training(
             str(log_freq),
             "--experiment-name",
             experiment_name,
-            "--subscription-id",
-            aml_workspace.subscription_id,
-            "--resource-group",
-            aml_workspace.resource_group,
-            "--workspace-name",
-            aml_workspace.workspace_name,
+            *_submit_workspace_args(aml_workspace),
+            "--register-checkpoint",
+            register_model_name,
         ],
         cwd=repo_root,
     )
     if result.returncode != 0:
         raise AssertionError(f"AzureML LeRobot e2e submission failed\n\n{format_command_failure(result)}")
 
+    return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML LeRobot training")
+
+
+_AML_LEROBOT_EVAL_MODEL_ENV = "E2E_AML_LEROBOT_EVAL_MODEL"
+_AML_ISAAC_EVAL_MODEL_ENV = "E2E_AML_ISAAC_EVAL_MODEL"
+
+
+@dataclass(frozen=True)
+class AmlLeRobotEvalPolicySource:
+    """Resolved policy source for the AzureML LeRobot eval submission."""
+
+    args: tuple[str, ...]
+    description: str
+
+
+def aml_lerobot_policy_source_from_model(model: AmlModelRef) -> AmlLeRobotEvalPolicySource:
+    """Build an eval policy source from a concrete registered AzureML model."""
+    return AmlLeRobotEvalPolicySource(
+        args=("--from-aml-model", "--model-name", model.name, "--model-version", model.version),
+        description=f"AzureML model {model.name}:{model.version}",
+    )
+
+
+def _resolve_aml_model_env(env_var: str) -> AmlModelRef | None:
+    model = env_value(env_var)
+    if not model:
+        return None
+    if ":" not in model:
+        pytest.skip(f"{env_var} must use AzureML model name:version syntax")
+    model_name, model_version = (part.strip() for part in model.split(":", 1))
+    if not model_name or not model_version:
+        pytest.skip(f"{env_var} must include a non-empty AzureML model name and version")
+    return AmlModelRef(name=model_name, version=model_version)
+
+
+def resolve_aml_lerobot_eval_policy_override() -> AmlLeRobotEvalPolicySource | None:
+    """Resolve an eval policy source from the environment, or ``None`` when unset.
+
+    ``submit-azureml-lerobot-eval.sh`` has no ``--builtin-policy`` option, so a real
+    policy must be supplied. Configure:
+
+    - ``E2E_AML_LEROBOT_EVAL_MODEL`` — an AzureML model ``name:version``.
+
+    Returns ``None`` when this is unset: the lifecycle test provisions a freshly
+    trained model instead. Malformed values skip.
+    """
+    ref = _resolve_aml_model_env(_AML_LEROBOT_EVAL_MODEL_ENV)
+    return None if ref is None else aml_lerobot_policy_source_from_model(ref)
+
+
+def submit_aml_lerobot_eval(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    policy_source: AmlLeRobotEvalPolicySource,
+    policy_type: str,
+    eval_episodes: int,
+    eval_batch_size: int,
+    blob_storage_account: str,
+    blob_container: str,
+    blob_prefix: str,
+) -> AzureMLJob:
+    policy_args = list(policy_source.args)
+    policy_description = policy_source.description
+    experiment_name = e2e_name("il-eval-e2e-aml")
+    log_e2e(
+        "Submitting AzureML LeRobot eval job "
+        f"for policy={policy_description}, policy_type={policy_type}, eval_episodes={eval_episodes}, "
+        f"dataset={blob_storage_account}/{blob_container}/{blob_prefix}, experiment={experiment_name}"
+    )
+    result = run_command(
+        [
+            str(repo_root / "evaluation/sil/scripts/submit-azureml-lerobot-eval.sh"),
+            *policy_args,
+            "--policy-type",
+            policy_type,
+            "--from-blob",
+            "--storage-account",
+            blob_storage_account,
+            "--storage-container",
+            blob_container,
+            "--blob-prefix",
+            blob_prefix,
+            "--eval-episodes",
+            str(eval_episodes),
+            "--eval-batch-size",
+            str(eval_batch_size),
+            "--mlflow-enable",
+            "--experiment-name",
+            experiment_name,
+            *_submit_workspace_args(aml_workspace),
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"AzureML LeRobot eval e2e submission failed\n\n{format_command_failure(result)}")
+
+    return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML LeRobot eval")
+
+
+def resolve_aml_isaac_eval_model_override() -> AmlModelRef | None:
+    """Resolve an AzureML eval model from the environment, or ``None`` when unset."""
+    return _resolve_aml_model_env(_AML_ISAAC_EVAL_MODEL_ENV)
+
+
+def submit_aml_isaaclab_eval(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    model: AmlModelRef,
+    task: str,
+    eval_episodes: int,
+    num_envs: int,
+) -> AzureMLJob:
+    """Submit the AzureML Isaac Lab evaluation against a concrete registered model."""
+    experiment_name = e2e_name("rl-eval-e2e-aml")
+    log_e2e(
+        "Submitting AzureML Isaac Lab eval job "
+        f"for model={model.name}:{model.version}, task={task}, eval_episodes={eval_episodes}, num_envs={num_envs}, "
+        f"experiment={experiment_name}"
+    )
+    result = run_command(
+        [
+            str(repo_root / "evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh"),
+            "--model-name",
+            model.name,
+            "--model-version",
+            model.version,
+            "--task",
+            task,
+            "--eval-episodes",
+            str(eval_episodes),
+            "--num-envs",
+            str(num_envs),
+            # The e2e validates the submission + Isaac Lab eval runtime, not policy
+            # quality, so a 0.0 threshold accepts any success rate and the job
+            # completes regardless of the reference policy's score.
+            "--success-threshold",
+            "0.0",
+            "--experiment-name",
+            experiment_name,
+            *_submit_workspace_args(aml_workspace),
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"AzureML Isaac Lab eval e2e submission failed\n\n{format_command_failure(result)}")
+
+    return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML Isaac Lab eval")
+
+
+def submit_aml_lerobot_pipeline(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    dataset_asset: str,
+    dataset_repo_id: str,
+    policy_type: str,
+    training_steps: int,
+    save_freq: int,
+    batch_size: int,
+    eval_episodes: int,
+) -> AzureMLJob:
+    experiment_name = e2e_name("il-pipeline-e2e-aml")
+    log_e2e(
+        "Submitting AzureML LeRobot pipeline job "
+        f"for dataset_asset={dataset_asset}, dataset_repo_id={dataset_repo_id}, policy={policy_type}, "
+        f"training_steps={training_steps}, save_freq={save_freq}, batch_size={batch_size}, "
+        f"eval_episodes={eval_episodes}, experiment={experiment_name}"
+    )
+    result = run_command(
+        [
+            str(repo_root / "training/il/scripts/submit-azureml-lerobot-pipeline.sh"),
+            "--dataset-asset",
+            dataset_asset,
+            "--dataset-repo-id",
+            dataset_repo_id,
+            "--policy-type",
+            policy_type,
+            "--training-steps",
+            str(training_steps),
+            "--save-freq",
+            str(save_freq),
+            "--batch-size",
+            str(batch_size),
+            "--eval-episodes",
+            str(eval_episodes),
+            "--experiment-name",
+            experiment_name,
+            *_submit_workspace_args(aml_workspace),
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"AzureML LeRobot pipeline e2e submission failed\n\n{format_command_failure(result)}")
+
+    return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML LeRobot pipeline")
+
+
+def _aml_job_from_submission(
+    result: subprocess.CompletedProcess[str],
+    aml_workspace: AzureMLWorkspace,
+    experiment_name: str,
+    description: str,
+) -> AzureMLJob:
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     job_name = _parse_azureml_job_name(combined_output)
     if job_name is None:
         raise AssertionError(
-            f"Unable to parse AzureML job name from LeRobot submission output\n\n{combined_output.strip()}"
+            f"Unable to parse {description} job name from submission output\n\n{combined_output.strip()}"
         )
-
-    log_e2e(f"Submitted AzureML LeRobot job name={job_name}")
-
-    return AzureMLJob(
-        name=job_name,
-        workspace=aml_workspace,
-        experiment_name=experiment_name,
-    )
+    log_e2e(f"Submitted {description} job name={job_name}")
+    return AzureMLJob(name=job_name, workspace=aml_workspace, experiment_name=experiment_name)
 
 
 def fetch_aml_job_payload(job: AzureMLJob, repo_root: Path) -> dict[str, Any]:

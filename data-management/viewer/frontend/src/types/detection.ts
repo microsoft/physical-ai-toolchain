@@ -10,8 +10,21 @@ export interface DetectionRequest {
   frames?: number[]
   /** Minimum confidence threshold (0.0-1.0, default: 0.1) */
   confidence?: number
-  /** YOLO model variant (default: yolo11n) */
-  model?: 'yolo11n' | 'yolo11s' | 'yolo11m' | 'yolo11l' | 'yolo11x'
+  /**
+   * YOLO model variant. Closed-vocabulary defaults are `yolo11*`; open-vocabulary
+   * variants such as `yolov8s-world` are selected automatically when `labels` is set.
+   */
+  model?: string
+  /**
+   * Optional open-vocabulary class names. When provided the backend switches to a
+   * YOLO-World model and only returns boxes matching these labels.
+   */
+  labels?: string[]
+  /**
+   * Camera/stream key to source frames from (e.g. `observation.images.color`). When
+   * omitted the backend uses the episode's first available camera.
+   */
+  camera?: string
 }
 
 /**
@@ -64,14 +77,4 @@ export interface EpisodeDetectionSummary {
   detections_by_frame: DetectionResult[]
   /** Detection statistics by class name */
   class_summary: Record<string, ClassSummary>
-}
-
-/**
- * Detection filter state.
- */
-export interface DetectionFilters {
-  /** Classes to show (empty = all) */
-  classes: string[]
-  /** Minimum confidence threshold */
-  minConfidence: number
 }

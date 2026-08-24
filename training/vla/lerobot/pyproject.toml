@@ -4,12 +4,11 @@ version = "0.1.0"
 description = "LeRobot vision-language-action (pi0 / pi0_fast / pi05) workflow runtime dependencies"
 requires-python = ">=3.12"
 # Direct dependencies for the AzureML VLA pi0 training entrypoint. All versions
-# are pinned exactly because requirements.txt is installed with `uv pip install
-# --no-deps` from a compiled lockfile; pip's resolver does NOT run in the
-# container. Regenerate requirements.txt after any change here:
+# are pinned exactly because runtime consumers install with `uv pip install
+# --no-deps` from a build-time export of uv.lock; pip's resolver does NOT run in
+# the container. Regenerate the lock after any change here:
 #   cd training/vla/lerobot
-#   uv pip compile pyproject.toml -o requirements.txt --python-version 3.12 \
-#     --python-platform x86_64-manylinux_2_28
+#   uv lock
 #
 # This file is a fork of training/il/lerobot/pyproject.toml. The VLA fork
 # differs in two ways:
@@ -87,6 +86,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
+# Constrain the universal lock to the AzureML deployment target so the
+# resolution yields a deterministic export for the Linux x86_64 container.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# Required for prerelease transitives that we intentionally accept in the
+# resolved tree. Audit the full set after regenerating the lock:
+#   uv export --frozen --no-hashes --no-emit-project | grep -E '[0-9][ab][0-9]+|rc[0-9]+'
+prerelease = "allow"
 # `override-dependencies` forces uv to ignore upstream upper-bound constraints
 # during resolution. Each entry below must repeat a pinned version that also
 # appears in `dependencies` above, otherwise resolution drifts. Remove an
@@ -123,10 +129,10 @@ override-dependencies = [
 ]
 package = false
 
-[tool.uv.pip]
 # Required for prerelease transitives that we intentionally accept in the
-# resolved tree. After regenerating requirements.txt, audit the full set with:
-#   grep -E '==[0-9]+\.[0-9]+(\.[0-9]+)?(a|b|rc)[0-9]+' requirements.txt
+# resolved tree. After regenerating uv.lock, audit the exported set with:
+#   uv export --frozen --no-hashes --no-emit-project | \
+#     grep -E '==[0-9]+\.[0-9]+(\.[0-9]+)?(a|b|rc)[0-9]+'
 # Expected (and only) prerelease pins after audit:
 #   - msal==1.38.0rc1 — no stable 1.38.x has shipped yet; the 1.38 line ships
 #     the AzureCliCredential / msal-extensions cache fix our azure-identity
@@ -142,4 +148,3 @@ package = false
 # Anything else that surfaces here (wrapt rc, safetensors rc, tokenizers rc,
 # pydantic alpha, etc.) is a regression — add a direct pin to dependencies
 # above to override it.
-prerelease = "allow"

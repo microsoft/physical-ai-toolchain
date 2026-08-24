@@ -20,21 +20,17 @@ describe('useAnnotationWorkspaceShell', () => {
     expect(result.current.activeTab).toBe('trajectory')
   })
 
-  it('records workspace and detection diagnostics when switching to the detection tab', () => {
+  it('records workspace diagnostics when switching tabs', () => {
     const { result } = renderHook(() => useAnnotationWorkspaceShell({}))
 
     act(() => {
-      result.current.handleTabChange('detection')
+      result.current.handleTabChange('other')
     })
 
-    expect(result.current.activeTab).toBe('detection')
+    expect(result.current.activeTab).toBe('other')
     expect(mockRecordDiagnosticEvent).toHaveBeenCalledWith('workspace', 'tab-change', {
       previousTab: 'trajectory',
-      nextTab: 'detection',
-    })
-    expect(mockRecordDiagnosticEvent).toHaveBeenCalledWith('detection', 'tab-viewed', {
-      previousTab: 'trajectory',
-      episodeIndex: 0,
+      nextTab: 'other',
     })
   })
 

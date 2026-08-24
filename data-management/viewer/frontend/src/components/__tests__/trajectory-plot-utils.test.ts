@@ -51,6 +51,50 @@ describe('trajectory-plot-utils', () => {
     expect(chartData[0]).toMatchObject({ joint_0: 0.1, joint_1: 0.2 })
   })
 
+  it('builds normalized chart series from named trajectory variables', () => {
+    const chartData = buildTrajectoryChartData({
+      trajectoryData: [
+        {
+          frame: 0,
+          timestamp: 0,
+          jointPositions: [0],
+          jointVelocities: [0],
+          variables: {
+            'observation.state[0]': 0,
+            'action[0]': 2,
+            'observation.gripper.is_closed': 0,
+          },
+        },
+        {
+          frame: 1,
+          timestamp: 0.1,
+          jointPositions: [1],
+          jointVelocities: [0.1],
+          variables: {
+            'observation.state[0]': 1,
+            'action[0]': 4,
+            'observation.gripper.is_closed': 1,
+          },
+        },
+      ],
+      trajectoryAdjustments: new Map(),
+      trajectoryVariables: [
+        { key: 'observation.state[0]', label: 'shoulder_pan_joint', source: 'observation.state' },
+        { key: 'action[0]', label: 'target_shoulder_pan_joint', source: 'action' },
+        {
+          key: 'observation.gripper.is_closed',
+          label: 'is_closed',
+          source: 'observation.gripper.is_closed',
+        },
+      ],
+      showVelocity: false,
+      showNormalized: true,
+    })
+
+    expect(chartData[0]).toMatchObject({ series_0: 0, series_1: 0, series_2: 0 })
+    expect(chartData[1]).toMatchObject({ series_0: 1, series_1: 1, series_2: 1 })
+  })
+
   it('normalizes values and resolves drag selection ranges predictably', () => {
     expect(normalizeSeries(6, 2, 10)).toBe(0.5)
     expect(applyTrajectoryAdjustment(3, 0, { frameIndex: 0, rightArmDelta: [2, 0, 0] })).toBe(5)

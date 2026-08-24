@@ -8,9 +8,10 @@
     Verifies and reports on SHA pinning compliance for supply chain security.
 
 .DESCRIPTION
-    Cross-platform PowerShell script that analyzes GitHub Actions workflows, Docker images,
-    and other dependency declarations to verify compliance with SHA pinning security practices.
-    Identifies unpinned dependencies and provides remediation guidance.
+    Cross-platform PowerShell script that analyzes GitHub Actions workflows, package manifests,
+    workflow-YAML container image references, and other dependency declarations to verify compliance
+    with SHA pinning security practices. Identifies unpinned dependencies and provides remediation
+    guidance. Dockerfile base-image pinning is covered by OpenSSF Scorecard, not this scanner.
 
 .PARAMETER Path
     Root path to scan for dependency files. Defaults to current directory.
@@ -30,11 +31,12 @@
     Exit with error code if pinning violations are found. Default is false for reporting mode.
 
 .PARAMETER ExcludePaths
-    Comma-separated list of paths to exclude from scanning (glob patterns supported).
+    Additional comma-separated paths to exclude from scanning (glob patterns supported).
 
 .PARAMETER IncludeTypes
-    Comma-separated list of dependency types to check. Options: github-actions, npm, pip.
-    Default is all types.
+    Comma-separated list of dependency types to check. Options include: github-actions, npm,
+    pip, shell-downloads, shell-inline-pip, gh-extension, powershell-modules, docker,
+    workflow-npm-commands. Default is all types.
 
 .PARAMETER Threshold
     Minimum compliance score percentage required for passing grade (0-100).
@@ -43,6 +45,12 @@
 
 .PARAMETER Remediate
     Generate remediation suggestions with specific SHA pins for unpinned dependencies.
+
+.PARAMETER Apply
+    Rewrite GitHub Actions 'uses:' references in place, replacing tag or branch refs with
+    the resolved immutable commit SHA and a trailing '# <ref>' comment. Implies SHA
+    resolution. Only github-actions references are auto-applied; other ecosystems are
+    reported for manual pinning. Does not affect the compliance gate or exit code.
 
 .EXAMPLE
     ./Test-DependencyPinning.ps1
@@ -55,6 +63,10 @@
 .EXAMPLE
     ./Test-DependencyPinning.ps1 -IncludeTypes "github-actions,pip" -Remediate
     Check only GitHub Actions and pip dependencies with remediation suggestions.
+
+.EXAMPLE
+    ./Test-DependencyPinning.ps1 -IncludeTypes "github-actions" -Apply
+    Resolve and write immutable SHA pins for tag-pinned GitHub Actions in place.
 
 .EXAMPLE
     ./Test-DependencyPinning.ps1 -Threshold 90 -FailOnUnpinned
@@ -71,7 +83,7 @@
 .NOTES
     Requires:
     - PowerShell 7.0 or later for cross-platform compatibility
-    - Internet connectivity for SHA resolution (with -Remediate)
+    - Internet connectivity for SHA resolution (with -Remediate or -Apply)
     - GitHub API access for action SHA resolution (optional)
 
     Compatible with:
@@ -109,14 +121,17 @@ param(
     [string]$ExcludePaths = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads",
+    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,workflow-npm-commands",
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 100)]
     [int]$Threshold = 95,
 
     [Parameter(Mandatory = $false)]
-    [switch]$Remediate
+    [switch]$Remediate,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Apply
 )
 
 $ErrorActionPreference = 'Stop'
@@ -127,7 +142,8 @@ Import-Module (Join-Path $PSScriptRoot '../lib/Modules/CIHelpers.psm1') -Force
 # Define dependency patterns for different ecosystems
 $DependencyPatterns = @{
     'github-actions' = @{
-        FilePatterns    = @('**/.github/workflows/*.yml', '**/.github/workflows/*.yaml')
+        FilePatterns    = @('**/.github/workflows/*.yml', '**/.github/workflows/*.yaml',
+            '**/.github/actions/**/*.yml', '**/.github/actions/**/*.yaml')
         VersionPatterns = @(
             @{
                 Pattern     = 'uses:\s*([^@\s]+)@([^#\s]+)'
@@ -154,9 +170,44 @@ $DependencyPatterns = @{
     }
 
     'shell-downloads'  = @{
-        FilePatterns   = @('**/.devcontainer/scripts/*.sh', '**/scripts/*.sh')
+        FilePatterns   = @('**/*.sh', '**/workflows/**/*.yml', '**/workflows/**/*.yaml')
         ValidationFunc = 'Test-ShellDownloadSecurity'
-        Description    = 'Shell script downloads must include checksum verification'
+        Description    = 'Shell script and workflow run: downloads must include checksum verification'
+    }
+
+    'gh-extension'     = @{
+        FilePatterns   = @('**/.github/workflows/*.yml', '**/.github/workflows/*.yaml', '**/*.sh')
+        ValidationFunc = 'Get-GhExtensionPinViolations'
+        Description    = 'gh extension install must pin a released ref with --pin'
+    }
+
+    'powershell-modules' = @{
+        FilePatterns   = @('**/.github/workflows/*.yml', '**/.github/workflows/*.yaml', '**/*.ps1', '**/*.psm1')
+        ValidationFunc = 'Get-PowerShellModuleViolations'
+        Description    = 'Install-Module must pin an exact version with -RequiredVersion'
+    }
+
+    'shell-inline-pip' = @{
+        FilePatterns   = @('**/workflows/**/*.yaml', '**/workflows/**/*.yml', '**/*.sh')
+        ValidationFunc = 'Get-ShellInlinePipViolations'
+        PinPattern     = '^.+==.+'
+        RemediationUrl = 'https://pypi.org/pypi/{0}/{1}/json'
+        Description    = 'Inline pip/uv pip installs in workflow YAML and shell scripts must be exact-pinned (==) or lock-derived'
+    }
+
+    'docker'           = @{
+        FilePatterns   = @('**/workflows/**/*.yaml', '**/workflows/**/*.yml',
+            '**/infrastructure/setup/manifests/*.yaml', '**/infrastructure/setup/manifests/*.yml',
+            '**/infrastructure/setup/values/*.yaml', '**/infrastructure/setup/values/*.yml')
+        ValidationFunc = 'Get-DockerImageViolations'
+        Description    = 'Container image references in workflow YAML, Kubernetes manifests, and Helm values must be digest-pinned (@sha256)'
+    }
+
+    'workflow-npm-commands' = @{
+        FilePatterns   = @('**/.github/workflows/*.yml', '**/.github/workflows/*.yaml',
+            '**/.github/actions/**/*.yml', '**/.github/actions/**/*.yaml')
+        ValidationFunc = 'Get-WorkflowNpmCommandViolations'
+        Description    = 'Workflow run: steps must use npm ci for deterministic installs from the lockfile, not npm install/update'
     }
 }
 
@@ -187,38 +238,136 @@ function Test-ShellDownloadSecurity {
         return @()
     }
 
-    $lines = Get-Content $FilePath
+    $lines = @(Get-Content -Path $FilePath)
+    if ($null -eq $lines -or $lines.Count -eq 0) {
+        return @()
+    }
+    
+    # Process logical lines to handle split commands cleanly
+    $logicalLines = @(Join-LineContinuations -Lines @($lines) -ContinuationPattern '\\\s*$')
+    if ($null -eq $logicalLines) {
+        return @()
+    }
     $violations = @()
 
     # Pattern to match curl/wget download commands
     $downloadPattern = '(curl|wget)\s+.*https?://[^\s]+'
-    $checksumPattern = 'sha256sum|shasum|Get-FileHash|openssl\s+dgst\s+-sha256|sha256sum\s+-c'
+    $checksumPattern = 'sha256sum|shasum|Get-FileHash|openssl\s+dgst\s+-sha256|sha256sum\s+-c|verify_sha256'
 
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i]
-        if ($line -match $downloadPattern) {
-            # Check next 5 lines for checksum verification
-            $hasChecksum = $false
-            $searchEnd = [Math]::Min($i + 5, $lines.Count - 1)
+    $prevWasIgnoreComment = $false
+    for ($i = 0; $i -lt $logicalLines.Count; $i++) {
+        $logical = $logicalLines[$i]
+        $lineText = $logical.Text
 
-            for ($j = $i; $j -le $searchEnd; $j++) {
-                if ($lines[$j] -match $checksumPattern) {
-                    $hasChecksum = $true
-                    break
-                }
+        # Inline exemption: a `# pinning-ignore` comment trailing the download line, or a
+        # dedicated `# pinning-ignore` comment line directly above it. The `#` must start the
+        # comment (at line start or after whitespace), so the marker can't be smuggled in via a
+        # `#` inside a URL/filename on a non-comment line. Lets an intentionally unchecksummed
+        # download (e.g. a GPG-signed apt repo fetched over a dynamic, distro-dependent URL
+        # with no stable digest to verify) opt out, mirroring the shell-inline-pip exemption.
+        $hasIgnore = $lineText -match '(^|\s)#[^\n]*pinning-ignore'
+        $exempt = $hasIgnore -or $prevWasIgnoreComment
+        $prevWasIgnoreComment = $hasIgnore -and $lineText.TrimStart().StartsWith('#')
+
+        # A pure comment line is never an executed download (mirrors Get-ShellInlinePipViolations).
+        if ($lineText.TrimStart().StartsWith('#')) { continue }
+        if ($lineText -notmatch $downloadPattern) { continue }
+        if ($exempt) { continue }
+
+        # Check the download line and the next 5 lines for checksum verification
+        $hasChecksum = $false
+        $searchEnd = [Math]::Min($i + 5, $logicalLines.Count - 1)
+
+        for ($j = $i; $j -le $searchEnd; $j++) {
+            if ($logicalLines[$j].Text -match $checksumPattern) {
+                $hasChecksum = $true
+                break
             }
+        }
 
-            if (-not $hasChecksum) {
-                $violation = [DependencyViolation]::new()
-                $violation.File = $FileInfo.RelativePath
-                $violation.Line = $i + 1
-                $violation.Type = $FileInfo.Type
-                $violation.Name = $line.Trim()
-                $violation.Severity = 'warning'
-                $violation.Description = 'Download without checksum verification'
-                $violation.Metadata = @{ Pattern = $line.Trim() }
-                $violations += $violation
-            }
+        if (-not $hasChecksum) {
+            $violation = [DependencyViolation]::new()
+            $violation.File = $FileInfo.RelativePath
+            $violation.Line = $logical.Line
+            $violation.Type = $FileInfo.Type
+            $violation.Name = $lineText.Trim()
+            $violation.Severity = 'warning'
+            $violation.Description = 'Download without checksum verification'
+            $violation.Metadata = @{ Pattern = $lineText.Trim() }
+            $violations += $violation
+        }
+    }
+
+    return $violations
+}
+
+function Get-PyprojectSpecViolation {
+    <#
+    .SYNOPSIS
+        Builds pip pinning violations for every quoted specifier in a pyproject array segment.
+    .DESCRIPTION
+        Parses each double-quoted specifier found in the supplied text and returns a
+        [DependencyViolation] for any that is not exactly == pinned. Handles multiple
+        specifiers on one line (single-line arrays such as fuzz = ["atheris>=3.1.0"]),
+        bare package names, and the self-referencing project name.
+    .PARAMETER LineText
+        Array segment to scan (the remainder after [ on an opener line, or a full array line).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$LineText,
+        [Parameter(Mandatory)]
+        [int]$LineNumber,
+        [Parameter(Mandatory)]
+        [string]$SectionName,
+        [string]$ProjectName,
+        [Parameter(Mandatory)]
+        [string]$RelativePath,
+        [Parameter(Mandatory)]
+        [string]$Type
+    )
+
+    $violations = @()
+
+    foreach ($specMatch in [regex]::Matches($LineText, '"([^"]+)"')) {
+        $spec = $specMatch.Groups[1].Value.Trim()
+
+        # Extract package name and version spec
+        if ($spec -notmatch '^([a-zA-Z0-9_][\w.\-]*)(.*)$') {
+            continue
+        }
+
+        $packageName = $Matches[1]
+        $versionSpec = $Matches[2].Trim()
+
+        # Skip self-referencing extras (e.g. "mypackage[dev,test]")
+        if ($ProjectName -and $packageName -eq $ProjectName) {
+            continue
+        }
+
+        $violation = [DependencyViolation]::new()
+        $violation.File = $RelativePath
+        $violation.Line = $LineNumber
+        $violation.Type = $Type
+        $violation.Name = $packageName
+        $violation.Severity = 'warning'
+        $violation.Metadata = @{ Section = $SectionName; Format = 'pyproject.toml' }
+
+        # Entries with no version constraint (bare package names) are unpinned
+        if ([string]::IsNullOrWhiteSpace($versionSpec)) {
+            $violation.Version = '(none)'
+            $violation.Description = "Unpinned pip dependency in $SectionName (no version specified)"
+            $violations += $violation
+            continue
+        }
+
+        # Pinned means exactly ==version (may include extras like [extra])
+        if ($versionSpec -notmatch '^(\[[\w,]+\])?\s*==\s*\S+') {
+            $violation.Version = $versionSpec
+            $violation.Description = "Unpinned pip dependency in $SectionName"
+            $violations += $violation
         }
     }
 
@@ -251,7 +400,7 @@ function Get-PipDependencyViolations {
         return $violations
     }
 
-    $lines = Get-Content -Path $filePath
+    $lines = @(Get-Content -Path $filePath)
     $fileName = Split-Path $filePath -Leaf
 
     if ($fileName -match 'pyproject\.toml$') {
@@ -273,10 +422,20 @@ function Get-PipDependencyViolations {
             $line = $lines[$i]
 
             # Detect dependency array start: dependencies = [ or optional-dependencies.*= [
-            if ($line -match '^\s*(dependencies)\s*=\s*\[' -or
-                $line -match '^\s*(\w[\w-]*)\s*=\s*\[' -and $inDependencySection) {
+            if ($line -match '^\s*(dependencies)\s*=\s*\[(.*)$' -or
+                ($line -match '^\s*(\w[\w-]*)\s*=\s*\[(.*)$' -and $inDependencySection)) {
                 $inArray = $true
                 $sectionName = $Matches[1]
+                $remainder = $Matches[2]
+
+                # Parse specifiers on the opener line itself (single-line arrays)
+                $violations += Get-PyprojectSpecViolation -LineText $remainder -LineNumber ($i + 1) `
+                    -SectionName $sectionName -ProjectName $projectName -RelativePath $relativePath -Type $type
+
+                # A closing bracket on the same line terminates the array
+                if ($remainder -match '\]') {
+                    $inArray = $false
+                }
                 continue
             }
 
@@ -305,51 +464,10 @@ function Get-PipDependencyViolations {
                 continue
             }
 
-            # Inside array — parse quoted dependency specifiers
-            if ($inArray -and $line -match '"([^"]+)"') {
-                $spec = $Matches[1].Trim()
-
-                # Extract package name and check for == pin
-                if ($spec -match '^([a-zA-Z0-9_][\w.\-]*)(.*)$') {
-                    $packageName = $Matches[1]
-                    $versionSpec = $Matches[2].Trim()
-
-                    # Skip self-referencing extras (e.g. "mypackage[dev,test]")
-                    if ($projectName -and $packageName -eq $projectName) {
-                        continue
-                    }
-
-                    # Skip entries with no version constraint (bare package names)
-                    if ([string]::IsNullOrWhiteSpace($versionSpec)) {
-                        $violation = [DependencyViolation]::new()
-                        $violation.File = $relativePath
-                        $violation.Line = $i + 1
-                        $violation.Type = $type
-                        $violation.Name = $packageName
-                        $violation.Version = '(none)'
-                        $violation.Severity = 'warning'
-                        $violation.Description = "Unpinned pip dependency in $sectionName (no version specified)"
-                        $violation.Metadata = @{ Section = $sectionName; Format = 'pyproject.toml' }
-                        $violations += $violation
-                        continue
-                    }
-
-                    # Pinned means exactly ==version (may include extras like [extra])
-                    $isPinned = $versionSpec -match '^(\[[\w,]+\])?\s*==\s*\S+'
-
-                    if (-not $isPinned) {
-                        $violation = [DependencyViolation]::new()
-                        $violation.File = $relativePath
-                        $violation.Line = $i + 1
-                        $violation.Type = $type
-                        $violation.Name = $packageName
-                        $violation.Version = $versionSpec
-                        $violation.Severity = 'warning'
-                        $violation.Description = "Unpinned pip dependency in $sectionName"
-                        $violation.Metadata = @{ Section = $sectionName; Format = 'pyproject.toml' }
-                        $violations += $violation
-                    }
-                }
+            # Inside array — parse every quoted dependency specifier on the line
+            if ($inArray -and $line -match '"') {
+                $violations += Get-PyprojectSpecViolation -LineText $line -LineNumber ($i + 1) `
+                    -SectionName $sectionName -ProjectName $projectName -RelativePath $relativePath -Type $type
             }
         }
     }
@@ -405,15 +523,704 @@ function Get-PipDependencyViolations {
     return $violations
 }
 
+function Join-LineContinuations {
+    <#
+    .SYNOPSIS
+        Folds shell / PowerShell line continuations into logical lines, tracking each line's start.
+    .DESCRIPTION
+        A trailing continuation marker (bash `\`, PowerShell backtick) joins a command split across
+        physical lines into one logical line so a single-line scan sees the whole command. Each
+        result records the 1-based physical line where the logical line began, for violation
+        reporting.
+    .PARAMETER Lines
+        The physical lines of a file.
+    .PARAMETER ContinuationPattern
+        Regex matching a trailing continuation marker (e.g. '\\\s*$' for bash only, or '[\\`]\s*$'
+        for bash and PowerShell).
+    .OUTPUTS
+        Array of @{ Text = <joined logical line>; Line = <1-based start line> }.
+    #>
+    [CmdletBinding()]
+    param(
+        [string[]]$Lines = @(),
+
+        [Parameter(Mandatory)]
+        [string]$ContinuationPattern
+    )
+
+    $logicalLines = @()
+    $buffer = ''
+    $startLine = 0
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        if ($buffer -eq '') { $startLine = $i + 1 }
+        $current = $Lines[$i]
+        if ($current -match $ContinuationPattern) {
+            $buffer += ($current -replace $ContinuationPattern, ' ')
+        }
+        else {
+            $buffer += $current
+            $logicalLines += @{ Text = $buffer; Line = $startLine }
+            $buffer = ''
+        }
+    }
+    if ($buffer -ne '') { $logicalLines += @{ Text = $buffer; Line = $startLine } }
+
+    return $logicalLines
+}
+
+function Remove-ShellTrailingComment {
+    <#
+    .SYNOPSIS
+        Removes a trailing shell comment from one command segment.
+    .DESCRIPTION
+        Strips comments that begin after whitespace so scanners do not treat pinning flags
+        mentioned in comments as command arguments.
+    .PARAMETER Command
+        Command segment to normalize.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Command
+    )
+
+    return ($Command -split '\s+#', 2)[0].Trim()
+}
+
+function Get-ShellInlinePipViolations {
+    <#
+    .SYNOPSIS
+        Detects unpinned inline pip / uv pip install invocations embedded in workflow YAML and shell scripts.
+    .DESCRIPTION
+        OSMO (and similar) workflow YAML embed shell commands in task args that run
+        'pip install' / 'uv pip install'. Each installed package must be exact-pinned
+        with == (including shell-variable pins like name=="${VAR}"), installed from a
+        lock/requirement (-r FILE, -r -, --requirement, or a 'uv export | uv pip install'
+        pipe), or be an editable local project (-e .). Extra package arguments after a
+        requirement file are still checked. Bare names and range specifiers are violations.
+        Build-frontend tools (pip/setuptools/wheel) are allowlisted.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    # Build-frontend tools tolerated unpinned (idiomatic `pip install --upgrade pip ...`)
+    $allowlist = @('pip', 'setuptools', 'wheel')
+    # Flags that consume the following token as their value
+    $valueFlags = @('--index-url', '--extra-index-url', '-i', '--timeout', '--retries',
+        '-c', '--constraint', '-r', '--requirement', '--find-links', '-f', '-e',
+        '--editable', '--prefix', '--target', '--index-strategy', '--python-version',
+        '--project', '-p', '--torch-backend')
+
+    $lines = @(Get-Content -Path $filePath)
+
+    # Bash continuation only ('\'): a trailing backtick here is command substitution, not a join.
+    $logicalLines = Join-LineContinuations -Lines @($lines) -ContinuationPattern '\\\s*$'
+
+    $installRegex = '(?:uv\s+pip|pip3?|python3?\s+-m\s+pip)\s+install\b'
+    # uv run / uvx / uv tool run, anchored to command position so binary-install
+    # lines like `install /tmp/.../uvx /usr/local/bin/uvx` do not match.
+    $uvRunAnchored = '^(?:sudo\s+)?(?:uvx|uv\s+tool\s+run|uv\s+run)\b'
+
+    # Shared compliance check for a single package spec. Emits a violation object
+    # (or $null when compliant). Build-frontend tools are allowlisted; exact ==
+    # pins (including name=="${VAR}") pass; bare names and ranges fail.
+    $testSpec = {
+        param([string]$specRaw, [int]$lineNo, [string]$cmdText, [string]$source)
+
+        $spec = $specRaw.Trim('"', "'").Trim()
+        if ([string]::IsNullOrWhiteSpace($spec)) { return $null }
+        if ($spec.StartsWith('-')) { return $null }
+        if ($spec -match '^\$' -or $spec -match '^https?://' -or
+            $spec -match '^[./~]' -or $spec -match '^[<>|&]') {
+            return $null
+        }
+        if ($spec -notmatch '^([A-Za-z0-9][A-Za-z0-9._-]*)') { return $null }
+        $packageName = $Matches[1]
+        if ($allowlist -contains $packageName.ToLower()) { return $null }
+        if ($spec -match '^[A-Za-z0-9][A-Za-z0-9._-]*(\[[^\]]+\])?==') { return $null }
+
+        $versionSpec = ($spec -replace '^[A-Za-z0-9][A-Za-z0-9._-]*(\[[^\]]+\])?', '')
+        if ([string]::IsNullOrWhiteSpace($versionSpec)) { $versionSpec = '(none)' }
+
+        $v = [DependencyViolation]::new()
+        $v.File = $relativePath
+        $v.Line = $lineNo
+        $v.Type = $type
+        $v.Name = $packageName
+        $v.Version = $versionSpec
+        $v.Severity = 'warning'
+        $v.Description = "Unpinned inline pip dependency via $source (use ==, -r/--requirement lockfile, or uv export)"
+        $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $cmdText }
+        return $v
+    }
+
+    $prevWasIgnoreComment = $false
+    foreach ($logical in $logicalLines) {
+        $lineText = $logical.Text
+        # The marker must sit in a `#` comment (the `#` at line start or after whitespace), not
+        # merely appear after a `#` inside an install argument/URL.
+        $hasIgnore = $lineText -match '(^|\s)#[^\n]*pinning-ignore'
+
+        # Inline exemption: `# pinning-ignore` trailing the install (or its continued lines),
+        # or a dedicated `# pinning-ignore` comment line directly above the install. Lets an
+        # intentional non-pin opt out of this check (e.g. an Isaac-ABI numpy range).
+        $exempt = $hasIgnore -or $prevWasIgnoreComment
+        $prevWasIgnoreComment = $hasIgnore -and $lineText.TrimStart().StartsWith('#')
+
+        if ($lineText -notmatch 'install|uv\s+run|uvx|uv\s+tool\s+run') { continue }
+        if ($exempt) { continue }
+
+        # Split into shell commands on &&, ||, ; (NOT single | so 'uv export | uv pip install' stays intact)
+        $commands = $lineText -split '\s*(?:&&|\|\||;)\s*'
+
+        foreach ($command in $commands) {
+            $cmdTrim = $command.TrimStart()
+            if ($cmdTrim.StartsWith('#')) { continue }
+
+            # Strip inline comments to prevent comment words from being tokenized as packages
+            $command = $command -replace '\s+#.*$', ''
+
+            if ($command -match $installRegex) {
+                # Isolate the package arguments (everything after the install keyword)
+                $installArgs = ($command -replace '^.*?\b(?:uv\s+pip|pip3?|python3?\s+-m\s+pip)\s+install\b', '').Trim()
+                $tokens = [regex]::Matches($installArgs, '"[^"]*"|''[^'']*''|\S+') | ForEach-Object { $_.Value }
+
+                $skipNext = $false
+                foreach ($rawToken in $tokens) {
+                    if ($skipNext) { $skipNext = $false; continue }
+                    $token = $rawToken.Trim('"', "'").Trim()
+                    if ($token.StartsWith('-')) {
+                        if ($valueFlags -contains $token) { $skipNext = $true }
+                        continue
+                    }
+                    $result = & $testSpec $rawToken $logical.Line $command.Trim() 'pip install'
+                    if ($null -ne $result) { $violations += $result }
+                }
+            }
+            elseif ($cmdTrim -match $uvRunAnchored) {
+                # uv run / uvx / uv tool run with ephemeral deps: each --with SPEC must be pinned.
+                # --with-requirements FILE is lock-derived (compliant); --with-editable is a local project (compliant).
+                $tokens = [regex]::Matches($command, '"[^"]*"|''[^'']*''|\S+') | ForEach-Object { $_.Value }
+                for ($t = 0; $t -lt $tokens.Count; $t++) {
+                    $tok = $tokens[$t].Trim('"', "'")
+                    if ($tok -eq '--with' -and ($t + 1) -lt $tokens.Count) {
+                        $result = & $testSpec $tokens[$t + 1] $logical.Line $command.Trim() 'uv run --with'
+                        if ($null -ne $result) { $violations += $result }
+                    }
+                    elseif ($tok -match '^--with=(.+)$') {
+                        $result = & $testSpec $Matches[1] $logical.Line $command.Trim() 'uv run --with'
+                        if ($null -ne $result) { $violations += $result }
+                    }
+                }
+            }
+        }
+    }
+
+    return $violations
+}
+
+function Get-GhExtensionPinViolations {
+    <#
+    .SYNOPSIS
+        Detects `gh extension install` invocations that do not pin a released ref with --pin.
+    .DESCRIPTION
+        `gh extension install <owner>/<repo>` tracks the extension's default-branch HEAD. A
+        released tag or commit must be pinned with `--pin <ref>`. Comment lines and a trailing
+        `# pinning-ignore` opt out. Lives in CI/agent workflow YAML and shell setup scripts.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    $installRegex = '\bgh\s+ext(?:ension)?\s+install\b'
+    # Bash continuation only ('\'): gh runs in .sh files and default-shell run: blocks, where a
+    # trailing backtick is command substitution, not a join (mirrors Get-ShellInlinePipViolations).
+    $logicalLines = Join-LineContinuations -Lines @(Get-Content -Path $filePath) -ContinuationPattern '\\\s*$'
+
+    $prevWasIgnoreComment = $false
+    foreach ($logical in $logicalLines) {
+        $line = $logical.Text
+        
+        $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
+        $exempt = $hasIgnore -or $prevWasIgnoreComment
+        $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
+
+        if ($line -notmatch $installRegex) { continue }
+        if ($line.TrimStart().StartsWith('#')) { continue }
+        if ($exempt) { continue }
+
+        $segments = $line -split '\s*(?:;|\|\||&&)\s*'
+        foreach ($segment in $segments) {
+            $commandText = Remove-ShellTrailingComment -Command $segment
+            if ($commandText -notmatch $installRegex) { continue }
+            if ($commandText -match '(?:^|\s)--pin(?:=|\s+)\S+') { continue }
+
+            # First non-flag token after `install` is the extension reference.
+            $afterInstall = ($commandText -replace ('^.*?' + $installRegex), '').Trim()
+            $name = ($afterInstall -split '\s+' | Where-Object { $_ -and -not $_.StartsWith('-') } | Select-Object -First 1)
+            if (-not $name) { $name = 'gh-extension' }
+
+            $v = [DependencyViolation]::new()
+            $v.File = $relativePath
+            $v.Line = $logical.Line
+            $v.Type = $type
+            $v.Name = $name
+            $v.Version = '(unpinned)'
+            $v.Severity = 'warning'
+            $v.Description = 'gh extension install without --pin (tracks extension HEAD)'
+            $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $commandText }
+            $violations += $v
+        }
+    }
+
+    return $violations
+}
+
+function Get-PowerShellModuleViolations {
+    <#
+    .SYNOPSIS
+        Detects `Install-Module` invocations that do not pin an exact version with -RequiredVersion.
+    .DESCRIPTION
+        Install-Module without -RequiredVersion resolves the latest gallery version at run time.
+        Only command-position invocations are flagged: a `Mock Install-Module`, a line comment,
+        an inline string mention (e.g. a Write-Warning hint), and any mention inside a block
+        comment or a single- or double-quoted here-string are ignored. A trailing `# pinning-ignore`
+        opts out. -MinimumVersion/-MaximumVersion are ranges, not pins, so they still fail.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    # Coalesce bash (\) and PowerShell (`) continuations so a -RequiredVersion on the next line is seen.
+    $logicalLines = Join-LineContinuations -Lines @(Get-Content -Path $filePath) -ContinuationPattern '[\\`]\s*$'
+
+    $prevWasIgnoreComment = $false
+    $inBlockComment = $false
+    $hereTerminator = $null
+    foreach ($logical in $logicalLines) {
+        $line = $logical.Text
+
+        # Skip here-string bodies (@'...'@ / @"..."@): their content is string data, not a
+        # command. The closing sequence must begin the line per PowerShell parsing rules.
+        if ($null -ne $hereTerminator) {
+            if ($line.TrimStart().StartsWith($hereTerminator)) { $hereTerminator = $null }
+            continue
+        }
+        if ($line -match "@['""]\s*$") {
+            $hereTerminator = if ($line -match "@'\s*$") { "'@" } else { '"@' }
+            continue
+        }
+
+        # Skip block-comment bodies (<# ... #>) so documentation mentioning Install-Module is
+        # not treated as a live invocation.
+        if ($inBlockComment) {
+            if ($line -match '#>') { $inBlockComment = $false }
+            continue
+        }
+        if ($line -match '<#') {
+            if ($line -notmatch '<#.*#>') { $inBlockComment = $true }
+            continue
+        }
+
+        $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
+        $exempt = $hasIgnore -or $prevWasIgnoreComment
+        $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
+
+        if ($line -notmatch '\bInstall-Module\b') { continue }
+        if ($line.TrimStart().StartsWith('#')) { continue }
+        if ($exempt) { continue }
+
+        # Split into statement segments so a string mention or a `Mock Install-Module` (which
+        # does not start a segment with Install-Module) is not treated as a real invocation.
+        $segments = $line -split '\s*(?:;|\|\||\||&&)\s*'
+        foreach ($segment in $segments) {
+            # Strip a YAML list marker and/or `run:` step prefix so flow-style
+            # `- run: Install-Module ...` and `run: Install-Module ...` are recognized.
+            $seg = ($segment.TrimStart() -replace '^-\s+', '' -replace '^run:\s*', '')
+            $commandText = Remove-ShellTrailingComment -Command $seg
+            if ($commandText -notmatch '^Install-Module\b') { continue }
+            if ($commandText -match '(?:^|\s)-RequiredVersion(?::|\s+)\S+') { continue }
+
+            if ($commandText -match '-Name\s+[''"]?([A-Za-z0-9_][A-Za-z0-9_.-]*)') {
+                $name = $Matches[1]
+            }
+            elseif ($commandText -match '^Install-Module\s+[''"]?([A-Za-z0-9_][A-Za-z0-9_.-]*)') {
+                $name = $Matches[1]
+            }
+            else {
+                $name = '(module)'
+            }
+
+            $v = [DependencyViolation]::new()
+            $v.File = $relativePath
+            $v.Line = $logical.Line
+            $v.Type = $type
+            $v.Name = $name
+            $v.Version = '(unpinned)'
+            $v.Severity = 'warning'
+            $v.Description = 'Install-Module without -RequiredVersion (resolves latest at run time)'
+            $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $commandText }
+            $violations += $v
+        }
+    }
+
+    return $violations
+}
+
+function Get-DockerImageViolations {
+    <#
+    .SYNOPSIS
+        Detects unpinned OCI container image references in workflow YAML, Kubernetes
+        manifests, and Helm values.
+    .DESCRIPTION
+        OSMO and AzureML workflow YAML, Kubernetes manifests, and Helm values reference
+        runtime container images via 'image:' fields; Helm values additionally carry OCI
+        references under 'init:'/'client:' keys (the OSMO backend_images block). Each concrete
+        OCI reference must be pinned by an immutable '@sha256:<digest>' so pulls are
+        reproducible and tamper-evident; the human-readable tag may be kept alongside the
+        digest. A value under 'init:'/'client:' is treated as an image only when it carries a
+        registry/namespace path, so plain configuration scalars are left untouched.
+        Submission-time templated ('{{ ... }}') and shell-variable ('$VAR' / '${VAR}')
+        references are injected at submit time and skipped, as are AzureML asset references
+        ('azureml:<name>:<version>'), which are versioned assets rather than OCI images.
+        Dockerfile 'FROM' pinning is out of scope (covered by OpenSSF Scorecard). An
+        intentional non-pin opts out with a '# pinning-ignore' comment on the image line or a
+        dedicated comment line directly above it.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    $lines = @(Get-Content -Path $filePath)
+    $digestPattern = '@sha256:[a-fA-F0-9]{64}'
+
+    $prevWasIgnoreComment = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
+        $exempt = $hasIgnore -or $prevWasIgnoreComment
+        $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
+
+        # Match an image-bearing field (optionally a YAML list item), capturing key and value.
+        # 'image:' is the canonical field; Helm values also express OCI references under
+        # 'init:'/'client:' (the OSMO backend_images block), so those keys are inspected too.
+        if ($line -notmatch '^\s*(?:-\s*)?(image|init|client):\s*(.+?)\s*$') { continue }
+        if ($exempt) { continue }
+
+        $key = $Matches[1]
+        # Drop any trailing YAML comment, then surrounding quotes.
+        $ref = ($Matches[2] -replace '\s+#.*$', '').Trim().Trim('"', "'").Trim()
+
+        # Skip empties, submission-time templates/variables, AzureML assets, and prose.
+        if ([string]::IsNullOrWhiteSpace($ref)) { continue }
+        if ($ref -match '\{\{' -or $ref -match '^\$' -or $ref -match '\$\{') { continue }
+        if ($ref -match '^azureml:') { continue }
+        if ($ref -match '\s') { continue }
+
+        # 'init:'/'client:' are generic keys that only sometimes carry an OCI reference;
+        # require a registry/namespace path ('/') before treating the value as an image, so
+        # plain scalars (e.g. 'init: true', 'client: guest') are not misread as unpinned.
+        if ($key -ne 'image' -and $ref -notmatch '/') { continue }
+
+        # Already digest-pinned -> compliant.
+        if ($ref -match $digestPattern) { continue }
+
+        # Split the digest-free reference into repository and tag for reporting.
+        $name = $ref
+        $version = '(none)'
+        if ($ref -match '^(.*):([^:/]+)$') {
+            $name = $Matches[1]
+            $version = $Matches[2]
+        }
+
+        $v = [DependencyViolation]::new()
+        $v.File = $relativePath
+        $v.Line = $i + 1
+        $v.Type = $type
+        $v.Name = $name
+        $v.Version = $version
+        $v.Severity = 'warning'
+        $v.Description = 'Unpinned container image (missing @sha256 digest)'
+        $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
+        $violations += $v
+    }
+
+    return $violations
+}
+
+function Test-NpmCommandLine {
+    <#
+    .SYNOPSIS
+        Returns the unpinned npm command found on a line, or $null.
+    .DESCRIPTION
+        Matches npm (and the npm.cmd Windows shim) invocations that mutate the dependency
+        tree: install, i, update, and install-test. Commands that install deterministically
+        from the committed lockfile (ci) or that do not install packages (run, test, audit)
+        are not matched, nor is npx. A trailing non-word, non-hyphen boundary keeps 'i'
+        matching only the standalone alias (not 'install' or 'init') and stops 'install' and
+        'update' from matching longer hyphenated subcommands such as install-ci-test.
+    .PARAMETER Line
+        The command text to inspect.
+    .OUTPUTS
+        System.String matched command, or $null when no unpinned npm command is present.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Line
+    )
+
+    if ($Line -match '\bnpm(?:\.cmd)?\s+(?:install-test|install|update|i)(?![\w-])') {
+        return $Matches[0]
+    }
+
+    return $null
+}
+
+function Get-WorkflowNpmCommandViolations {
+    <#
+    .SYNOPSIS
+        Detects unpinned npm install/update commands in GitHub Actions workflow run: steps.
+    .DESCRIPTION
+        Scans workflow and composite-action YAML for run: steps and flags npm commands that
+        mutate the dependency tree (install, i, update, install-test). npm ci, which installs
+        deterministically from the committed lockfile, is compliant, as are non-installing
+        subcommands (run, test, audit) and npx.
+
+        Indentation-aware parsing confines detection to run: block content — both inline
+        (run: npm install) and block-scalar (run: |) forms, with or without a leading YAML
+        list-item dash — so npm references in step names, other keys, or comments are not
+        flagged. An intentional non-ci install opts out with a '# pinning-ignore' comment on
+        the command line or a dedicated comment line directly above it.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    $lines = @(Get-Content -Path $filePath)
+    $inRunBlock = $false
+    $runBlockIndent = 0
+    $prevWasIgnoreComment = $false
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $trimmed = $line.TrimStart()
+
+        # Blank lines carry no indentation and must not close an open block scalar, but
+        # they do break a preceding `# pinning-ignore`, which exempts only the line below it.
+        if ($trimmed -eq '') { $prevWasIgnoreComment = $false; continue }
+
+        # The marker must sit in a `#` comment, not merely appear after a `#` in an argument.
+        $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
+
+        # A comment line only records whether it exempts the command directly below it.
+        if ($trimmed.StartsWith('#')) {
+            $prevWasIgnoreComment = $hasIgnore
+            continue
+        }
+
+        $currentIndent = $line.Length - $trimmed.Length
+
+        # A run: block ends once indentation returns to or above the run: key.
+        if ($inRunBlock -and $currentIndent -le $runBlockIndent) {
+            $inRunBlock = $false
+            $prevWasIgnoreComment = $false
+        }
+
+        # Candidate command text: the inline run: content, or a line inside a block scalar.
+        # A run:-prefixed line inside an open block scalar is shell content, not a new YAML
+        # key, so match a new key only when not already in a block; otherwise the block would
+        # close early and hide later npm commands in the same step.
+        $candidate = $null
+        if (-not $inRunBlock -and $trimmed -match '^((?:-\s+)?)run:\s*(.*)$') {
+            $runContent = $Matches[2].Trim()
+            # Block-scalar content is indented past the run: key. A `- run:` list item places
+            # the key past the dash, so close the block on the key column (dash indent plus
+            # prefix length), not the dash column; otherwise same-step sibling keys (name:,
+            # env:, with:) would be scanned as shell content.
+            $runBlockIndent = $currentIndent + $Matches[1].Length
+
+            if ($runContent -and $runContent -notmatch '^[|>]') {
+                $candidate = $runContent
+                $inRunBlock = $false
+            }
+            else {
+                $inRunBlock = $true
+            }
+        }
+        elseif ($inRunBlock) {
+            $candidate = $trimmed
+        }
+
+        if ($candidate -and -not ($hasIgnore -or $prevWasIgnoreComment)) {
+            $npmMatch = Test-NpmCommandLine -Line $candidate
+            if ($npmMatch) {
+                $v = [DependencyViolation]::new(
+                    $relativePath,
+                    $i + 1,
+                    $type,
+                    $npmMatch,
+                    'Medium',
+                    "Unpinned npm command '$npmMatch'; use 'npm ci' for deterministic installs from the lockfile."
+                )
+                $v.ViolationType = 'Unpinned'
+                $v.CurrentRef = $candidate
+                $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $candidate }
+                $violations += $v
+            }
+        }
+
+        $prevWasIgnoreComment = $false
+    }
+
+    return $violations
+}
+
+function Get-NpmOverrideViolation {
+    <#
+    .SYNOPSIS
+        Recursively scans an npm overrides / resolutions object for unpinned specifiers.
+    .DESCRIPTION
+        overrides entries may nest: a package key can map to a child object that overrides
+        that package's own transitive dependencies, with an optional "." key pinning the
+        package itself. resolutions (Yarn) entries are flat. Every string leaf is a version
+        specifier checked for exact pinning; nested objects are walked, attributing a "."
+        entry to the enclosing package name.
+    .PARAMETER Node
+        The overrides / resolutions object (or a nested override object) to scan.
+    .PARAMETER ParentName
+        Enclosing package name, used to attribute a "." self-pin during recursion.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        $Node,
+        [Parameter(Mandatory)]
+        [string]$Section,
+        [Parameter(Mandatory)]
+        [string]$Type,
+        [Parameter(Mandatory)]
+        [string]$RelativePath,
+        [string]$ParentName = ''
+    )
+
+    $violations = @()
+
+    if ($null -eq $Node -or $null -eq $Node.PSObject) {
+        return $violations
+    }
+
+    foreach ($prop in $Node.PSObject.Properties) {
+        # A "." key pins the enclosing package itself; attribute it to the parent
+        $packageName = if ($prop.Name -eq '.') { $ParentName } else { $prop.Name }
+        $value = $prop.Value
+
+        if ($value -is [string]) {
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                continue
+            }
+
+            if (-not (Test-SHAPinning -Version $value -Type $Type)) {
+                $violation = [DependencyViolation]::new()
+                $violation.File = $RelativePath
+                $violation.Line = 0
+                $violation.Type = $Type
+                $violation.Name = $packageName
+                $violation.Version = $value
+                $violation.Severity = 'warning'
+                $violation.Description = "Unpinned npm dependency in $Section"
+                $violation.Metadata = @{ Section = $Section }
+                $violations += $violation
+            }
+        }
+        elseif ($null -ne $value -and $null -ne $value.PSObject) {
+            # Nested override object — recurse, tracking the enclosing package name
+            $violations += Get-NpmOverrideViolation -Node $value -Section $Section -Type $Type `
+                -RelativePath $RelativePath -ParentName $packageName
+        }
+    }
+
+    return $violations
+}
+
 function Get-NpmDependencyViolations {
     <#
     .SYNOPSIS
         Analyzes package.json files for unpinned npm dependencies.
     .DESCRIPTION
-        Parses package.json as JSON and checks only actual dependency sections
-        (dependencies, devDependencies, peerDependencies, optionalDependencies)
-        for exact version pinning. Rejects range operators (^, ~, >=, *, etc.).
-        Ignores metadata fields like name, version, description, scripts, etc.
+        Parses package.json as JSON and checks the dependency sections
+        (dependencies, devDependencies, peerDependencies, optionalDependencies) and
+        the override sections (overrides, resolutions) for exact version pinning.
+        Rejects range operators (^, ~, >=, *, etc.). Ignores metadata fields like
+        name, version, description, scripts, etc.
     .PARAMETER FileInfo
         Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
     .OUTPUTS
@@ -446,10 +1253,11 @@ function Get-NpmDependencyViolations {
     $dependencySections = @('dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies')
 
     foreach ($section in $dependencySections) {
-        $deps = $packageJson.$section
-        if ($null -eq $deps) {
+        $sectionProperty = $packageJson.PSObject.Properties[$section]
+        if ($null -eq $sectionProperty) {
             continue
         }
+        $deps = $sectionProperty.Value
 
         foreach ($prop in $deps.PSObject.Properties) {
             $packageName = $prop.Name
@@ -474,6 +1282,16 @@ function Get-NpmDependencyViolations {
                 $violations += $violation
             }
         }
+    }
+
+    # overrides / resolutions may nest arbitrarily; walk them recursively
+    foreach ($section in @('overrides', 'resolutions')) {
+        $node = $packageJson.$section
+        if ($null -eq $node) {
+            continue
+        }
+
+        $violations += Get-NpmOverrideViolation -Node $node -Section $section -Type $type -RelativePath $relativePath
     }
 
     return $violations
@@ -521,6 +1339,45 @@ function Get-FilesToScan {
                 $hasRecursiveGlob = $pattern.StartsWith('**/')
                 $effectivePattern = if ($hasRecursiveGlob) { $pattern.Substring(3) } else { $pattern }
 
+                # Handle an interior ** (e.g. workflows/**/*.yaml): recurse for the leaf
+                # filter, then keep files whose relative path contains the required segment.
+                # Get-ChildItem cannot resolve ** as a mid-path directory segment.
+                # -Force is required so recursion descends into the dot-prefixed .github
+                # directory, where GitHub Actions workflows live; without it -Recurse skips
+                # hidden trees and .github/workflows/* is never scanned. Vendored hidden
+                # trees (.git, .venv, …) are pruned by the relative-path filter below.
+                if ($effectivePattern -match '/\*\*/') {
+                    $segments = $effectivePattern -split '/\*\*/'
+                    $requiredSegment = $segments[0]
+                    $leafFilter = Split-Path $segments[-1] -Leaf
+                    try {
+                        $interiorFiles = Get-ChildItem -Path $ScanPath -Filter $leafFilter -Recurse -File -Force -ErrorAction SilentlyContinue |
+                            Where-Object {
+                                $rel = ([System.IO.Path]::GetRelativePath($ScanPath, $_.FullName)) -replace '\\', '/'
+                                ($rel -match "(^|/)$([regex]::Escape($requiredSegment))/") -and
+                                ($_.FullName -notmatch '[/\\](\.git|\.venv|node_modules|external|tests[/\\]Fixtures)[/\\]')
+                            }
+
+                        if ($ExcludePatterns) {
+                            foreach ($exclude in $ExcludePatterns) {
+                                $interiorFiles = $interiorFiles | Where-Object { (($_.FullName -replace '\\', '/') -notlike "*$exclude*") }
+                            }
+                        }
+
+                        $allFiles += $interiorFiles | ForEach-Object {
+                            @{
+                                Path         = $_.FullName
+                                Type         = $type
+                                RelativePath = [System.IO.Path]::GetRelativePath($ScanPath, $_.FullName)
+                            }
+                        }
+                    }
+                    catch {
+                        Write-PinningLog "Error scanning for $type files with pattern $pattern`: $($_.Exception.Message)" -Level Warning
+                    }
+                    continue
+                }
+
                 $dirPart = Split-Path $effectivePattern -Parent
                 $filePart = Split-Path $effectivePattern -Leaf
 
@@ -542,10 +1399,16 @@ function Get-FilesToScan {
 
                     $files = Get-ChildItem @gciParams
 
+                    # Always skip vendored / VCS / virtualenv trees and test-fixture data
+                    # (never lint dependencies' own files or intentionally-unpinned fixtures)
+                    $files = $files | Where-Object {
+                        $_.FullName -notmatch '[/\\](\.git|\.venv|node_modules|external|tests[/\\]Fixtures)[/\\]'
+                    }
+
                     # Apply exclusion filters
                     if ($ExcludePatterns) {
                         foreach ($exclude in $ExcludePatterns) {
-                            $files = $files | Where-Object { $_.FullName -notlike "*$exclude*" }
+                            $files = $files | Where-Object { (($_.FullName -replace '\\', '/') -notlike "*$exclude*") }
                         }
                     }
 
@@ -564,7 +1427,10 @@ function Get-FilesToScan {
         }
     }
 
-    return $allFiles | Sort-Object Path -Unique
+    # Dedup per (Path, Type): a file may legitimately be scanned by several validators
+    # (e.g. a workflow YAML checked for github-actions, gh-extension and powershell-modules).
+    # Deduping by Path alone would collapse those to one entry and run only a single validator.
+    return $allFiles | Sort-Object -Property Path, Type -Unique
 }
 
 function Test-SHAPinning {
@@ -589,12 +1455,12 @@ function Test-SHAPinning {
     $config = $DependencyPatterns[$Type]
 
     # Use SHAPattern for ecosystems that require commit SHA pinning (github-actions)
-    if ($config.SHAPattern) {
+    if ($config.ContainsKey('SHAPattern') -and $config.SHAPattern) {
         return $Version -match $config.SHAPattern
     }
 
     # Use PinPattern for ecosystems with version-based pinning (npm, pip)
-    if ($config.PinPattern) {
+    if ($config.ContainsKey('PinPattern') -and $config.PinPattern) {
         return $Version -match $config.PinPattern
     }
 
@@ -618,9 +1484,11 @@ function Get-DependencyViolation {
         return $violations
     }
 
+    $config = $DependencyPatterns[$fileType]
+
     # Check if this type uses a validation function instead of regex patterns
-    if ($null -ne $DependencyPatterns[$fileType].ValidationFunc) {
-        $funcName = $DependencyPatterns[$fileType].ValidationFunc
+    if ($config.ContainsKey('ValidationFunc') -and $null -ne $config.ValidationFunc) {
+        $funcName = $config.ValidationFunc
         $rawViolations = & $funcName -FileInfo $FileInfo
 
         if ($null -eq $rawViolations) {
@@ -655,9 +1523,9 @@ function Get-DependencyViolation {
 
     try {
         $content = Get-Content -Path $filePath -Raw
-        $lines = Get-Content -Path $filePath
+        $lines = @(Get-Content -Path $filePath)
 
-        $patterns = $DependencyPatterns[$fileType].VersionPatterns
+        $patterns = $config.VersionPatterns
 
         foreach ($patternInfo in $patterns) {
             $pattern = $patternInfo.Pattern
@@ -720,6 +1588,11 @@ function Get-RemediationSuggestion {
     $name = $Violation.Name
     $version = $Violation.Version
 
+    # npm command remediation is deterministic (no SHA to resolve), so it is flag-independent.
+    if ($type -eq 'workflow-npm-commands') {
+        return "Replace '$name' with 'npm ci' for deterministic installs from the committed lockfile."
+    }
+
     if (!$Remediate) {
         return "Enable -Remediate flag for specific SHA suggestions"
     }
@@ -727,8 +1600,11 @@ function Get-RemediationSuggestion {
     try {
         switch ($type) {
             'github-actions' {
-                # For GitHub Actions, resolve tag to commit SHA
-                $apiUrl = "https://api.github.com/repos/$name/commits/$version"
+                # Resolve the tag or branch to a commit SHA against the owner/repo slug
+                # (first two path segments) so monorepo subpath actions such as
+                # github/codeql-action/init resolve correctly.
+                $repoSlug = ($name -split '/' | Select-Object -First 2) -join '/'
+                $apiUrl = "https://api.github.com/repos/$repoSlug/commits/$version"
                 $headers = @{}
 
                 if ($env:GITHUB_TOKEN) {
@@ -738,7 +1614,10 @@ function Get-RemediationSuggestion {
                 $response = Invoke-RestMethod -Uri $apiUrl -Headers $headers -TimeoutSec 30
                 $sha = $response.sha
 
-                if ($sha) {
+                # -Apply persists $sha verbatim into workflow files, so validate it is a real
+                # 40-hex commit SHA (via the shared validator) before ever stashing/writing it.
+                if ($sha -and (Test-SHAPinning -Version $sha -Type 'github-actions')) {
+                    $Violation.Metadata['ResolvedSha'] = $sha
                     return "Pin to SHA: uses: $name@$sha # $version"
                 }
             }
@@ -753,6 +1632,83 @@ function Get-RemediationSuggestion {
     }
 
     return "Manually research and pin to immutable reference"
+}
+
+function Invoke-ActionShaPinApply {
+    <#
+    .SYNOPSIS
+    Rewrites tag-pinned GitHub Actions references in place with resolved commit SHAs.
+    .DESCRIPTION
+    For each github-actions violation carrying a resolved SHA in Metadata['ResolvedSha'],
+    replaces the 'uses: <name>@<ref>' token on the recorded line with
+    'uses: <name>@<sha> # <ref>'. Files are read and written as raw text so existing line
+    endings are preserved. Returns the number of references rewritten.
+    .PARAMETER Violations
+    Violations to apply. Only github-actions entries with a resolved SHA are acted on.
+    .PARAMETER BasePath
+    Root path the violation file paths are relative to.
+    #>
+    param(
+        [DependencyViolation[]]$Violations,
+        [string]$BasePath = '.'
+    )
+
+    $actionable = @($Violations | Where-Object {
+            $_.Type -eq 'github-actions' -and
+            $_.Metadata.ContainsKey('ResolvedSha') -and
+            $_.Metadata['ResolvedSha']
+        })
+
+    if ($actionable.Count -eq 0) {
+        return 0
+    }
+
+    $applied = 0
+
+    foreach ($fileGroup in ($actionable | Group-Object File)) {
+        $relativePath = $fileGroup.Name
+        $absolutePath = Join-Path $BasePath $relativePath
+
+        if (!(Test-Path -Path $absolutePath)) {
+            Write-Warning "Skipping apply for missing file: $relativePath"
+            continue
+        }
+
+        $content = Get-Content -Path $absolutePath -Raw
+
+        # Split on line terminators but keep them (capturing group) so each line's own
+        # ending survives verbatim on rejoin, even in a mixed CRLF/LF file. Content lines
+        # sit at even indices; captured terminators at the odd indices between them.
+        $parts = $content -split "(`r`n|`n)"
+
+        foreach ($violation in $fileGroup.Group) {
+            $partIndex = ($violation.Line - 1) * 2
+            if ($partIndex -lt 0 -or $partIndex -ge $parts.Count) {
+                Write-Warning "Skipping apply for $relativePath line $($violation.Line): out of range"
+                continue
+            }
+
+            $sha = $violation.Metadata['ResolvedSha']
+            $target = "$($violation.Name)@$($violation.Version)"
+
+            # Bound the match so a shorter action name never matches inside a longer one and
+            # a version prefix (v4) never matches a longer ref (v40).
+            $pattern = "(?<![\w./-])$([regex]::Escape($target))(?![\w./-])"
+            $replacement = "$($violation.Name)@$sha # $($violation.Version)"
+
+            # Insert via a MatchEvaluator so the ref is written verbatim: -replace treats
+            # '$' in a replacement string as a substitution token (e.g. $&, ${n}).
+            $updatedLine = [regex]::Replace($parts[$partIndex], $pattern, { $replacement })
+            if ($updatedLine -ne $parts[$partIndex]) {
+                $parts[$partIndex] = $updatedLine
+                $applied++
+            }
+        }
+
+        Set-Content -Path $absolutePath -Value ($parts -join '') -NoNewline -Encoding utf8
+    }
+
+    return $applied
 }
 
 function Get-ComplianceReportData {
@@ -1004,7 +1960,12 @@ try {
 
         # Parse include types and exclude paths
         $typesToCheck = $IncludeTypes.Split(',') | ForEach-Object { $_.Trim() }
-        $excludePatterns = if ($ExcludePaths) { $ExcludePaths.Split(',') | ForEach-Object { $_.Trim() } } else { @() }
+        $defaultExcludePatterns = @('scripts/tests/Fixtures', 'shared/ci/tests/Fixtures')
+        $userExcludePatterns = if ($ExcludePaths) { $ExcludePaths.Split(',') | ForEach-Object { $_.Trim() } } else { @() }
+        $excludePatterns = @($defaultExcludePatterns + $userExcludePatterns) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { $_ -replace '\\', '/' } |
+            Select-Object -Unique
 
         Write-PinningLog "Scanning path: $Path" -Level Info
         Write-PinningLog "Include types: $($typesToCheck -join ', ')" -Level Info
@@ -1020,15 +1981,22 @@ try {
             Write-PinningLog "Scanning: $($fileInfo.RelativePath)" -Level Info
             $violations = @(Get-DependencyViolation -FileInfo $fileInfo)
 
-            # Add remediation suggestions
+            # Resolve SHA remediations when reporting suggestions or applying pins
             foreach ($violation in $violations) {
-                $violation.Remediation = Get-RemediationSuggestion -Violation $violation -Remediate:$Remediate
+                $violation.Remediation = Get-RemediationSuggestion -Violation $violation -Remediate:($Remediate -or $Apply)
             }
 
             $allViolations += $violations
         }
 
         Write-PinningLog "Found $(@($allViolations).Count) dependency pinning violations" -Level Info
+
+        # Auto-apply resolved SHA pins to GitHub Actions references when requested.
+        # This does not alter the compliance report or the exit-code gate below.
+        if ($Apply) {
+            $appliedCount = Invoke-ActionShaPinApply -Violations $allViolations -BasePath $Path
+            Write-PinningLog "Applied $appliedCount GitHub Actions SHA pin(s); re-run without -Apply to verify compliance" -Level Info
+        }
 
         # Generate compliance report
         $report = Get-ComplianceReportData -Violations $allViolations -ScannedFiles $filesToScan -ScanPath $Path -Remediate:$Remediate

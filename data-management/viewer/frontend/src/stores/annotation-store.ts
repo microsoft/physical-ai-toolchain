@@ -11,6 +11,7 @@ import type {
   DataQualityAnnotation,
   EpisodeAnnotation,
   LanguageInstructionAnnotation,
+  ObjectDetectionAnnotation,
   TaskCompletenessAnnotation,
   TrajectoryQualityAnnotation,
 } from '@/types'
@@ -57,6 +58,12 @@ interface AnnotationActions {
   updateLanguageInstruction: (update: Partial<LanguageInstructionAnnotation>) => void
   /** Clear language instruction */
   clearLanguageInstruction: () => void
+  /** Replace the saved object detections list (one entry per reference frame) */
+  setObjectDetections: (detections: ObjectDetectionAnnotation[]) => void
+  /** Upsert a single object-detection annotation by frame index */
+  upsertObjectDetection: (detection: ObjectDetectionAnnotation) => void
+  /** Remove a saved object detection by frame index */
+  removeObjectDetection: (frameIndex: number) => void
   /** Set saving state */
   setSaving: (isSaving: boolean) => void
   /** Set error state */
@@ -368,6 +375,68 @@ export const useAnnotationStore = create<AnnotationStore>()(
           },
           false,
           'clearLanguageInstruction',
+        )
+      },
+
+      setObjectDetections: (detections) => {
+        const { currentAnnotation } = get()
+        if (!currentAnnotation) return
+
+        set(
+          {
+            currentAnnotation: {
+              ...currentAnnotation,
+              timestamp: new Date().toISOString(),
+              objectDetections: structuredClone(detections),
+            },
+            isDirty: true,
+          },
+          false,
+          'setObjectDetections',
+        )
+      },
+
+      upsertObjectDetection: (detection) => {
+        const { currentAnnotation } = get()
+        if (!currentAnnotation) return
+
+        const existing = currentAnnotation.objectDetections ?? []
+        const next = existing.filter((entry) => entry.frameIndex !== detection.frameIndex)
+        next.push(structuredClone(detection))
+        next.sort((a, b) => a.frameIndex - b.frameIndex)
+
+        set(
+          {
+            currentAnnotation: {
+              ...currentAnnotation,
+              timestamp: new Date().toISOString(),
+              objectDetections: next,
+            },
+            isDirty: true,
+          },
+          false,
+          'upsertObjectDetection',
+        )
+      },
+
+      removeObjectDetection: (frameIndex) => {
+        const { currentAnnotation } = get()
+        if (!currentAnnotation) return
+
+        const existing = currentAnnotation.objectDetections ?? []
+        const next = existing.filter((entry) => entry.frameIndex !== frameIndex)
+
+        set(
+          {
+            currentAnnotation: {
+              ...currentAnnotation,
+              timestamp: new Date().toISOString(),
+              objectDetections: next,
+            },
+            isDirty: true,
+          },
+          false,
+          'removeObjectDetection',
         )
       },
 

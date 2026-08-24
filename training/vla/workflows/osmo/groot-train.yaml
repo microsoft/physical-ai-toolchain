@@ -1,0 +1,108 @@
+# GR00T Fine-tuning Workflow for OSMO
+#
+# Downloads a LeRobot-format dataset from Azure Blob Storage and fine-tunes
+# an NVIDIA GR00T model on AKS GPU nodes. Checkpoints are written to pod
+# ephemeral storage and optionally mirrored to Azure ML.
+#
+# Usage — submit via the wrapper script, which base64-injects the entry scripts
+# (training/vla/scripts/groot/{download_blob.py,osmo-train-entry.sh};
+# AML mirror reuses training/utils/aml_mirror.py)
+# as default-values before submitting:
+#   training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh \
+#     --blob-url https://<account>.blob.core.windows.net/<container>/<path>
+workflow:
+  name: "{{workflow_name}}"
+
+  resources:
+    default:
+      cpu: 14
+      memory: 48Gi
+      storage: 200Gi
+      gpu: {{gpu}}
+      platform: "{{platform}}"
+
+  timeout:
+    exec_timeout: 2d
+    queue_timeout: 4h
+
+  tasks:
+    - name: train
+      image: "{{image}}"
+      command: ["bash", "-euc"]
+      args:
+        - |
+          base64 -d /tmp/download_blob.py.b64 > /tmp/download_blob.py
+          base64 -d /tmp/aml_mirror.py.b64 > /tmp/aml_mirror.py
+          base64 -d /tmp/train.sh.b64 > /tmp/train.sh
+          for f in /tmp/download_blob.py /tmp/aml_mirror.py /tmp/train.sh; do
+            [ -s "$f" ] || { echo "ERROR: $f is empty — submit via training/vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh" >&2; exit 1; }
+          done
+          exec bash /tmp/train.sh
+      environment:
+        BLOB_URL: "{{blob_url}}"
+        DATASET_PATH: "{{dataset_path}}"
+        OUTPUT_ROOT: "/outputs"
+        DATA_CONFIG: "{{data_config}}"
+        BASE_MODEL: "{{base_model}}"
+        BASE_MODEL_REVISION: "{{base_model_revision}}"
+        BATCH_SIZE: "{{batch_size}}"
+        MAX_STEPS: "{{max_steps}}"
+        SAVE_STEPS: "{{save_steps}}"
+        DATALOADER_WORKERS: "{{dataloader_workers}}"
+        EMBODIMENT_TAG: "{{embodiment_tag}}"
+        ISAAC_GROOT_REF: "{{isaac_groot_ref}}"
+        RUN_ID_OVERRIDE: "{{run_id_override}}"
+        RESUME: "{{resume}}"
+        AZURE_UPLOAD: "{{azure_upload}}"
+        AZURE_SUBSCRIPTION_ID: "{{azure_subscription_id}}"
+        AZUREML_RESOURCE_GROUP: "{{azureml_resource_group}}"
+        AZUREML_WORKSPACE_NAME: "{{azureml_workspace_name}}"
+        AZUREML_MODEL_NAME: "{{azureml_model_name}}"
+        DATA_CONFIG_B64: "{{data_config_b64}}"
+        MODALITY_CONFIG_B64: "{{modality_config_b64}}"
+        ACR_REGISTRY: "{{acr_registry}}"
+        ACR_MODEL_REPO: "{{acr_model_repo}}"
+        HF_TOKEN: "{{hf_token}}"
+        PYTHONUNBUFFERED: "1"
+        PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+      files:
+        - path: /tmp/download_blob.py.b64
+          contents: "{{download_blob_b64}}"
+        - path: /tmp/aml_mirror.py.b64
+          contents: "{{aml_mirror_b64}}"
+        - path: /tmp/train.sh.b64
+          contents: "{{train_script_b64}}"
+
+default-values:
+  workflow_name: groot-train
+  # Submission scripts set image from scripts/lib/common.sh via --set-string.
+  # This value is the direct-workflow fallback; keep it in sync with DEFAULT_GROOT_IMAGE.
+  image: pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel@sha256:0cf3402e946b7c384ba943ee05c90b4c5a4a05227923921f2b0918c011cfaf56
+  gpu: 1
+  platform: gpu_platform
+  blob_url: ""
+  dataset_path: "/data/dataset"
+  data_config: ""
+  data_config_b64: ""
+  modality_config_b64: ""
+  download_blob_b64: ""
+  aml_mirror_b64: ""
+  train_script_b64: ""
+  base_model: ""
+  base_model_revision: ""
+  batch_size: 4
+  max_steps: 500
+  save_steps: 100
+  dataloader_workers: 0
+  embodiment_tag: new_embodiment
+  isaac_groot_ref: 23ace64f17aa5015259b8609d371eb61a357c776
+  run_id_override: ""
+  resume: "false"
+  azure_upload: "false"
+  azure_subscription_id: ""
+  azureml_resource_group: ""
+  azureml_workspace_name: ""
+  azureml_model_name: "groot-model"
+  acr_registry: ""
+  acr_model_repo: "models/groot"
+  hf_token: ""

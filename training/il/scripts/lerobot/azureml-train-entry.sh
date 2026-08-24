@@ -5,26 +5,20 @@ set -euo pipefail
 
 echo "=== LeRobot AzureML Training ==="
 
-# wandb is a transitive dependency of lerobot==0.4.4 (hard pin in upstream
-# pyproject.toml). Setting WANDB_MODE=disabled prevents the client from
-# initializing or making network calls; logging goes to MLflow / Azure ML only.
-export WANDB_MODE=disabled
-export WANDB_DISABLED=true
-
 # Restore `training/` prefix so absolute references (training/il/...) and python -m
 # `training.il.scripts...` resolve when cwd is the contents of training/.
 if [[ ! -e training ]]; then ln -s . training; fi
 
-# Install runtime dependencies from pre-compiled requirements
+# Install runtime dependencies from the selected locked project.
 apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential >/dev/null 2>&1
 # --break-system-packages bypasses PEP 668 (externally-managed-environment)
 # enforced by Debian-packaged Python in PyTorch 2.4.1+ containers. Safe here
 # because the container is ephemeral and isolated from any host system Python.
-pip install --quiet --break-system-packages uv
+pip install --quiet --break-system-packages uv==0.7.12
 
-LEROBOT_REQUIREMENTS="${LEROBOT_REQUIREMENTS:-training/il/lerobot/requirements.txt}"
-if [[ ! -f "${LEROBOT_REQUIREMENTS}" ]]; then
-  echo "ERROR: LeRobot requirements not found at ${LEROBOT_REQUIREMENTS}" >&2
+LEROBOT_PROJECT="${LEROBOT_PROJECT:-training/il/lerobot}"
+if [[ ! -f "${LEROBOT_PROJECT}/uv.lock" ]]; then
+  echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT}/uv.lock" >&2
   exit 1
 fi
 
@@ -34,17 +28,19 @@ fi
 # subsequent `python3` and `lerobot-train` invocations resolve through the
 # venv's bin directory once it is on PATH.
 #
-# `--no-deps` is required: requirements.txt is a fully-resolved lockfile
-# emitted by `uv pip compile`, and pyproject.toml carries `override-dependencies`
-# entries (e.g., azure-storage-blob==12.29.0 above azureml-mlflow's <=12.27.1
-# cap) that are honored at compile time only. Re-resolving at install time
-# would fail with the same conflicts the overrides were added to bypass.
+# `--no-deps` is required: the flat requirement set is exported at runtime
+# from the selected project's uv.lock, and pyproject.toml carries
+# `override-dependencies` entries (e.g., azure-storage-blob==12.30.0 above
+# azureml-mlflow's cap) that are honored only during locking. Re-resolving at
+# install time would fail with the same conflicts the overrides were added to
+# bypass.
 LEROBOT_VENV="${LEROBOT_VENV:-/opt/lerobot-venv}"
 uv python install 3.12
 uv venv --python 3.12 "${LEROBOT_VENV}"
 # shellcheck disable=SC1091
 source "${LEROBOT_VENV}/bin/activate"
-uv pip install --no-cache-dir --no-deps --requirement "${LEROBOT_REQUIREMENTS}"
+uv export --frozen --no-hashes --no-emit-project --project "${LEROBOT_PROJECT}" \
+  | uv pip install --no-cache-dir --no-deps -r -
 
 # HuggingFace login: must run before any code path that pulls gated models or
 # datasets from the Hub. pi0 reaches the Hub during policy init to download the
@@ -204,7 +200,7 @@ else
   # Multiple sources — merge into a single dataset via lerobot-edit-dataset.
   echo "Merging ${total_sources} dataset sources..."
   MERGE_DEST="${DATASET_ROOT:-/workspace/data}/merged"
-  python3 -c "
+  python3 - "${MERGE_DEST}" "${all_sources[@]}" <<'EOF'
 import shlex, subprocess, shutil, sys
 from pathlib import Path
 
@@ -255,7 +251,7 @@ if missing_keys:
     print(f'Merged dataset info.json is missing required keys {missing_keys}: {info_found}', file=sys.stderr)
     sys.exit(1)
 print(f'Merged dataset at: {dest} (info: {info_found})')
-" "${MERGE_DEST}" "${all_sources[@]}"
+EOF
 
   # Same lerobot flags as the single-source path; see comment above for rationale.
   train_args+=(

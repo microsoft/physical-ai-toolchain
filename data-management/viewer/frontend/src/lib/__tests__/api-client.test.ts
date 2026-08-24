@@ -8,6 +8,7 @@ import {
 } from '@/test-utils/fetch-mocks'
 
 import {
+  _resetCsrfToken,
   ApiClientError,
   deleteAnnotations,
   fetchAnnotations,
@@ -18,8 +19,10 @@ import {
   fetchDatasets,
   fetchEpisode,
   fetchEpisodes,
+  fetchVlmJudgeStatus,
   mutationFetch,
   mutationHeaders,
+  runVlmJudge,
   saveAnnotation,
   triggerAutoAnalysis,
   warmCache,
@@ -27,9 +30,11 @@ import {
 
 beforeEach(() => {
   installFetchMock({ csrf: false })
+  _resetCsrfToken()
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 describe('ApiClientError', () => {
@@ -433,5 +438,89 @@ describe('mutationFetch', () => {
     const [, init] = mockFetch.mock.calls[1]
     const headers = (init as RequestInit).headers as Record<string, string>
     expect(headers['X-CSRF-Token']).toBe('caller-override')
+  })
+})
+
+describe('fetchVlmJudgeStatus', () => {
+  it('maps a 404 (router not mounted) to the disabled status', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ detail: 'Not Found' }, { status: 404 }))
+
+    const result = await fetchVlmJudgeStatus('ds-1', 0)
+    expect(result.enabled).toBe(false)
+    expect(result.result).toBeNull()
+    expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0/judge', { headers: {} })
+  })
+
+  it('camelCases an enabled status payload', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        enabled: true,
+        cached: false,
+        judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+        prompt_version: 'outcome-mcq-v1',
+        cache_key: null,
+        result: null,
+      }),
+    )
+
+    const result = await fetchVlmJudgeStatus('ds-1', 0)
+    expect(result.enabled).toBe(true)
+    expect(result.judgeModel).toBe('Qwen/Qwen3-VL-4B-Instruct')
+    expect(result.promptVersion).toBe('outcome-mcq-v1')
+  })
+})
+
+describe('runVlmJudge', () => {
+  it('polls the returned cache key until the job has a result', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ csrf_token: 'csrf-1' }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            enabled: true,
+            cached: false,
+            job_status: 'pending',
+            judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+            prompt_version: 'outcome-mcq-v1',
+            cache_key: 'a'.repeat(64),
+            result: null,
+          },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          enabled: true,
+          cached: true,
+          job_status: 'done',
+          judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+          prompt_version: 'outcome-mcq-v1',
+          cache_key: 'a'.repeat(64),
+          result: {
+            episode_id: 'ds-1/episode_000000',
+            instruction: 'Pick',
+            judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+            prompt_version: 'outcome-mcq-v1',
+            n_frames: 6,
+            outcome_success: true,
+            outcome_confidence: 1,
+            outcome_n_valid_votes: 3,
+            progress_per_frame: [100],
+            voc: 1,
+            milestones: [],
+            failure_mode: null,
+            cached: false,
+          },
+        }),
+      )
+
+    const pending = runVlmJudge('ds-1', 0, { processMethod: 'gvl' })
+    await expect(pending).resolves.toMatchObject({ episodeId: 'ds-1/episode_000000' })
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      '/api/datasets/ds-1/episodes/0/judge?cache_key=' + 'a'.repeat(64),
+      {
+        headers: {},
+      },
+    )
   })
 })

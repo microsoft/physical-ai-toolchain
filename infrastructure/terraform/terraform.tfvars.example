@@ -139,6 +139,7 @@ reports_archive_tier_days              = 180
 // Observability
 // All observability components deploy by default. Disable individually to reduce cost.
 // should_deploy_grafana            = true
+// grafana_major_version            = "12"
 // should_deploy_monitor_workspace  = true
 // should_deploy_ampls              = true
 // should_deploy_dce                = true

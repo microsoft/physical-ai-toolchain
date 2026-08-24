@@ -196,6 +196,51 @@ data-management/viewer/
 | `/api/datasets/{id}/episodes/{idx}/labels` | PUT | Set labels for one episode (`{"labels": ["A", "B"]}`) |
 | `/api/datasets/{id}/labels/save` | POST | Persist all labels to disk |
 
+### VLM-as-Judge Endpoints
+
+> [!NOTE]
+> Mounted only when `VLM_JUDGE_ENABLED=true` in `backend/.env`. The frontend's
+> JudgePanel auto-hides when the backend reports `enabled: false`.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/datasets/{id}/episodes/{idx}/judge` | GET  | Cache lookup: returns any persisted judgment for the episode without invoking the model |
+| `/api/datasets/{id}/episodes/{idx}/judge` | POST | Run the multi-step judge (cache-first unless `force: true`); body: `{instruction?, views?, force?}` |
+
+`POST` response (snake_case on the wire, camelCased by the frontend client) is the composite `JudgeResult`:
+
+```json
+{
+  "episode_id": "leisaac-pick-orange/episode_000007",
+  "instruction": "Grab orange and place into plate",
+  "judge_model": "Qwen/Qwen3-VL-4B-Instruct",
+  "prompt_version": "outcome-mcq-v1+gvl-process-v1+milestones-v1+failuremode-v1",
+  "n_frames": 12,
+  "outcome_success": true,
+  "outcome_confidence": 0.83,
+  "outcome_n_valid_votes": 3,
+  "progress_per_frame": [0, 14, 28, 42, 57, 71, 85, 100],
+  "voc": 0.92,
+  "milestones": [
+    {"name": "approach_object", "completed": true, "frame_range": "0-3", "evidence": "..."}
+  ],
+  "failure_mode": null,
+  "cached": false
+}
+```
+
+Key knobs (`backend/.env`):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `VLM_JUDGE_ENABLED` | `false` | Mount the router |
+| `VLM_JUDGE_BACKEND` | `echo` | `qwen3-vl` (local HF) / `openai-compat` (vLLM, NIM, AOAI) / `echo` (offline) |
+| `VLM_JUDGE_MODEL_ID` | `Qwen/Qwen3-VL-4B-Instruct` | HF id or remote model name |
+| `VLM_JUDGE_BASE_URL` | _(unset)_ | OpenAI-compatible server URL (`openai-compat` only) |
+| `VLM_JUDGE_API_KEY` | _(unset)_ | Bearer token for the remote backend |
+| `VLM_JUDGE_N_FRAMES` | `12` | Frames sampled per episode |
+| `VLM_JUDGE_CACHE_DIR` | `outputs/vlm-judge/cache` | SHA256-keyed result cache; empty disables disk cache |
+
 ### Annotation Endpoints
 
 | Endpoint | Method | Description |
@@ -411,5 +456,102 @@ The React app has these key areas for Playwright interaction:
 | Snapshot refs stale after navigation | Always take a fresh `browser_snapshot` before clicking; refs change on page updates |
 | Slider not responding to Playwright | Use `browser_evaluate` with native input value setter and dispatch `input` + `change` events |
 | Sidebar not scrolling | Scroll the `aside ul` element directly via `browser_evaluate` with `element.scrollTop = N` |
+
+## VLM-as-Judge Workflow
+
+The VLM judge scores each episode with an outcome MCQ (success/fail with N-sample self-consistency), a GVL process reward (per-frame 0-100 progress + Spearman VOC), milestone decomposition, and failure-mode attribution. Both the dataviewer UI and the CLI under `evaluation/vlm_judge/` consume the same `JudgeService`, so cache hits and prompt versions stay aligned across surfaces.
+
+### Enable the judge
+
+Edit `data-management/viewer/backend/.env` before launch:
+
+```env
+DATA_DIR=/abs/path/to/datasets
+DATAVIEWER_AUTH_DISABLED=true
+
+VLM_JUDGE_ENABLED=true
+VLM_JUDGE_BACKEND=echo                        # echo | qwen3-vl | openai-compat
+VLM_JUDGE_MODEL_ID=Qwen/Qwen3-VL-4B-Instruct
+VLM_JUDGE_N_FRAMES=12
+VLM_JUDGE_CACHE_DIR=outputs/vlm-judge/cache
+```
+
+> [!IMPORTANT]
+> Restart the backend after editing `.env`. Uvicorn `--reload` re-reads code, not env vars. The frontend auto-detects backend state via `GET /api/datasets/{id}/episodes/{idx}/judge`.
+
+### Backends at a glance
+
+| Backend | Use case | Notes |
+|---------|----------|-------|
+| `echo` | UI smoke / wiring tests | Deterministic stub, no GPU, no network |
+| `qwen3-vl` | Local HF inference | First call downloads weights; ~10 GB GPU for `Qwen3-VL-4B-Instruct` BF16 |
+| `openai-compat` | vLLM / NVIDIA NIM / Azure OpenAI | Set `VLM_JUDGE_BASE_URL` (+ `VLM_JUDGE_API_KEY` if needed); identical code path |
+
+### UI workflow (Trajectory tab)
+
+1. Open the dataviewer (`open_browser_page("http://localhost:5173")`).
+2. Pick a dataset, select an episode, switch to the **Trajectory** tab.
+3. The **VLM Judge** panel sits between **Episode Labels** and **Language Instructions**.
+4. Click **Run judge** → outcome badge, progress sparkline, VOC, optional milestones + failure mode appear. The result also lands on disk under `VLM_JUDGE_CACHE_DIR`.
+5. Re-visiting the same episode shows a `cached` badge. Click **Force fresh** to bypass the cache and re-run.
+
+### Playwright UI verification
+
+Use the same MCP tooling as the rest of the skill, but route through the new panel selectors. After a `browser_snapshot`, click using element refs from the snapshot. As a JS-fallback when the snapshot lacks button refs:
+
+```javascript
+browser_evaluate: () => {
+  const headers = Array.from(document.querySelectorAll('h3'))
+  const judge = headers.find((el) => el.textContent?.includes('VLM Judge'))
+  judge?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  const run = Array.from(judge?.parentElement?.querySelectorAll('button') ?? [])
+    .find((b) => /run judge|re-evaluate/i.test(b.textContent ?? ''))
+  run?.click()
+  return run ? 'clicked' : 'panel not visible'
+}
+```
+
+To assert the result rendered, wait for the outcome badge text:
+
+```text
+browser_wait_for(text="SUCCESS")  # or "FAILURE", "Inconclusive"
+```
+
+### Direct API calls (curl / Python)
+
+CSRF must be honored on POST. The frontend hook does this transparently; for ad-hoc shell:
+
+```bash
+CSRF=$(curl -s http://localhost:8000/api/csrf-token -c /tmp/dv-cookie | jq -r .csrf_token)
+
+# Cache lookup (no inference)
+curl -s http://localhost:8000/api/datasets/leisaac-pick-orange/episodes/0/judge | jq
+
+# Run the judge (cache-first)
+curl -s -X POST http://localhost:8000/api/datasets/leisaac-pick-orange/episodes/0/judge \
+  -H "Content-Type: application/json" -H "X-CSRF-Token: $CSRF" -b /tmp/dv-cookie \
+  -d '{"force": false}' | jq
+```
+
+### Bulk evaluation via the CLI (no dataviewer needed)
+
+```bash
+# Single dataset
+evaluation/vlm_judge/scripts/evaluate-leisaac-pick-orange.sh --limit 5
+
+# Generic
+python -m evaluation.vlm_judge.run \
+  --dataset datasets/cnc_lerobot \
+  --views observation.images.color \
+  --backend qwen3-vl \
+  --model-id Qwen/Qwen3-VL-4B-Instruct \
+  --output outputs/vlm-judge/cnc_lerobot.jsonl \
+  --limit 5
+
+# Policy-rollout MP4s (e.g. leisaac-tests/pickup-orange/)
+evaluation/vlm_judge/scripts/evaluate-policy-rollouts.sh
+```
+
+The CLI writes a JSONL with the same composite schema as the API, keyed on the same SHA256 cache, so a CLI run primes the dataviewer's cache (and vice versa).
 
 > Brought to you by physical-ai-toolchain

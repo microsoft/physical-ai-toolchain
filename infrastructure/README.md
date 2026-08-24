@@ -26,8 +26,7 @@ infrastructure/
 ├── setup/                             # Post-deploy configuration scripts
 │   ├── 01-deploy-robotics-charts.sh   # GPU Operator, KAI Scheduler
 │   ├── 02-deploy-azureml-extension.sh # AzureML K8s extension
-│   ├── 03-deploy-osmo-control-plane.sh# OSMO control plane
-│   ├── 04-deploy-osmo-backend.sh      # OSMO backend services
+│   ├── 03-deploy-osmo.sh           # OSMO service + backend operator
 │   ├── defaults.conf                  # Central version and namespace config
 │   ├── README.md                      # Setup quick start
 │   ├── lib/                           # Shared shell libraries
@@ -79,11 +78,10 @@ az aks get-credentials --resource-group <rg> --name <aks>
 cd infrastructure/setup
 ./01-deploy-robotics-charts.sh
 ./02-deploy-azureml-extension.sh
-./03-deploy-osmo-control-plane.sh
-./04-deploy-osmo-backend.sh
+./03-deploy-osmo.sh
 ```
 
-Each script supports `--config-preview` to print configuration without making changes.
+`03-deploy-osmo.sh` deploys the unified OSMO chart and backend configuration. Each script supports `--config-preview` to print configuration without making changes.
 
 ## 🌐 Network Modes
 

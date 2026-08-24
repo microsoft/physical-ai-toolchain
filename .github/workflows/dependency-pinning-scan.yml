@@ -12,7 +12,7 @@ on:
         description: 'Comma-separated list of dependency types to check'
         required: false
         type: string
-        default: 'github-actions,npm,pip,shell-downloads'
+        default: 'github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,workflow-npm-commands'
       soft-fail:
         description: 'Whether to continue on compliance violations'
         required: false
@@ -64,111 +64,23 @@ jobs:
       is-compliant: ${{ steps.pinning.outputs.is-compliant }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Run SHA Pinning Validation
         id: pinning
-        run: |
-          Write-Host "Validating dependency SHA pinning compliance..."
-
-          # Ensure logs directory exists
-          New-Item -ItemType Directory -Force -Path logs | Out-Null
-
-          # Build parameter list for JSON output (always generate)
-          $params = @{
-            Path = '.'
-            Recursive = $true
-            Format = 'json'
-            OutputPath = 'logs/dependency-pinning-results.json'
-          }
-
-          # Enable failure on threshold violations unless soft-fail is requested
-          if ('${{ inputs.soft-fail }}' -ne 'true') {
-            $params['FailOnUnpinned'] = $true
-          }
-
-          # Pass dependency types filter to script
-          if ('${{ inputs.dependency-types }}') {
-            $params['IncludeTypes'] = '${{ inputs.dependency-types }}'
-          }
-
-          # Pass compliance threshold to script (script handles enforcement)
-          if ('${{ inputs.threshold }}') {
-            $params['Threshold'] = [int]'${{ inputs.threshold }}'
-          }
-
-          # Pass exclude paths to script
-          if ('${{ inputs.exclude-paths }}') {
-            $params['ExcludePaths'] = '${{ inputs.exclude-paths }}'
-          }
-
-          # Run validation script (JSON format)
-          & scripts/security/Test-DependencyPinning.ps1 @params
-          $jsonExitCode = $LASTEXITCODE
-
-          # Generate SARIF format if requested
-          if ('${{ inputs.upload-sarif }}' -eq 'true') {
-            Write-Host "Generating SARIF format for Security tab..."
-            $params['Format'] = 'sarif'
-            $params['OutputPath'] = 'logs/dependency-pinning-results.sarif'
-
-            & scripts/security/Test-DependencyPinning.ps1 @params
-          }
-
-          # Extract metrics from JSON report
-          if (Test-Path logs/dependency-pinning-results.json) {
-            $report = Get-Content logs/dependency-pinning-results.json | ConvertFrom-Json
-            $complianceScore = $report.ComplianceScore
-            $unpinnedCount = $report.UnpinnedDependencies
-
-            # Extract threshold from report metadata (script calculated compliance)
-            $threshold = $report.Metadata.ComplianceThreshold
-            $isCompliant = $complianceScore -ge $threshold
-
-            "compliance-score=$complianceScore" >> $env:GITHUB_OUTPUT
-            "unpinned-count=$unpinnedCount" >> $env:GITHUB_OUTPUT
-            "is-compliant=$($isCompliant.ToString().ToLower())" >> $env:GITHUB_OUTPUT
-
-            Write-Host "Compliance Score: $complianceScore%"
-            Write-Host "Unpinned Dependencies: $unpinnedCount"
-            Write-Host "Is Compliant (>=$threshold%): $isCompliant"
-
-            # Fire GitHub Actions warnings for each violation
-            if ($unpinnedCount -gt 0) {
-              # Escape function to prevent workflow command injection
-              function ConvertTo-GHAEscaped($Value, [switch]$ForProperty) {
-                if ([string]::IsNullOrEmpty($Value)) { return $Value }
-                $escaped = $Value -replace '%', '%25'
-                $escaped = $escaped -replace "`r", '%0D'
-                $escaped = $escaped -replace "`n", '%0A'
-                $escaped = $escaped -replace '::', '%3A%3A'
-                if ($ForProperty) {
-                  $escaped = $escaped -replace ':', '%3A'
-                  $escaped = $escaped -replace ',', '%2C'
-                }
-                return $escaped
-              }
-
-              foreach ($violation in $report.Violations) {
-                $escapedFile = ConvertTo-GHAEscaped $violation.File -ForProperty
-                $escapedName = ConvertTo-GHAEscaped $violation.Name
-                $escapedVersion = ConvertTo-GHAEscaped $violation.Version
-                $escapedType = ConvertTo-GHAEscaped $violation.Type
-                $escapedSeverity = ConvertTo-GHAEscaped $violation.Severity
-                Write-Output "::warning file=$escapedFile,line=$($violation.Line)::Unpinned $escapedType dependency: $escapedName@$escapedVersion (Severity: $escapedSeverity)"
-              }
-            }
-          }
-          else {
-            Write-Error "Failed to generate dependency pinning report"
-            exit 1
-          }
+        env:
+          PINNING_THRESHOLD: ${{ inputs.threshold }}
+          PINNING_DEPENDENCY_TYPES: ${{ inputs.dependency-types }}
+          PINNING_SOFT_FAIL: ${{ inputs.soft-fail }}
+          PINNING_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
+          PINNING_EXCLUDE_PATHS: ${{ inputs.exclude-paths }}
+        run: ./scripts/security/Invoke-DependencyPinningWorkflow.ps1
 
       - name: Upload SARIF to Security tab
         if: inputs.upload-sarif && always()
-        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           sarif_file: logs/dependency-pinning-results.sarif
           category: dependency-pinning
@@ -181,40 +93,3 @@ jobs:
           name: dependency-pinning-results
           path: logs/dependency-pinning-results.json
           retention-days: 90
-
-      - name: Add job summary
-        if: always()
-        run: |
-          $complianceScore = '${{ steps.pinning.outputs.compliance-score }}'
-          $unpinnedCount = '${{ steps.pinning.outputs.unpinned-count }}'
-          $isCompliant = '${{ steps.pinning.outputs.is-compliant }}'
-
-          @"
-          ## Dependency Pinning Scan Results
-
-          | Metric | Value |
-          |--------|-------|
-          | Compliance Score | $complianceScore% |
-          | Unpinned Dependencies | $unpinnedCount |
-          | Status | $(if ($isCompliant -eq 'true') { '✅ Compliant' } else { '⚠️ Non-Compliant' }) |
-
-          $(if ($unpinnedCount -ne '0') {
-            @"
-
-          ### ⚠️ Action Required
-
-          **$unpinnedCount dependencies are not SHA-pinned.**
-
-          Review the warnings in the workflow log and pin dependencies to specific SHA commits.
-
-          "@
-          } else {
-            @"
-
-          ### ✅ All Dependencies Pinned
-
-          All dependencies are properly SHA-pinned.
-
-          "@
-          })
-          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding UTF8

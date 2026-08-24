@@ -1,5 +1,7 @@
 """LeRobot replay-based inference evaluation."""
 
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -9,7 +11,86 @@ from pathlib import Path
 import numpy as np
 import torch
 
+_EVALUATION_ROOT = Path(__file__).resolve().parents[2]
+if str(_EVALUATION_ROOT) not in sys.path:
+    sys.path.insert(0, str(_EVALUATION_ROOT))
+
+from sil.hf_revision import resolve_hf_revision  # noqa: E402
+
 JOINT_NAMES: list[str] = []
+
+
+_EVALUATION_SCHEMA_VERSION = 1
+_VERDICT_PASS = "pass"
+_VERDICT_SKIPPED = "skipped"
+_BASELINE_NONE = "none"
+
+_TOOLCHAIN_TO_VLA_METRIC = {
+    "mse": "action_accuracy_l2",
+    "mae": "action_accuracy_l1",
+    "avg_inference_ms": "inference_latency_mean_ms",
+    "throughput_hz": "throughput_hz",
+}
+
+
+def _write_vla_schema_v1(
+    output_dir: Path,
+    aggregate: dict[str, float],
+    per_episode: list[dict],
+    dataset_repo_id: str,
+    policy_repo_id: str,
+) -> None:
+    """Emit evaluation_schema_version=1 artifacts alongside eval_results.json.
+
+    The toolchain has no gate / threshold / baseline system (governance was
+    explicitly removed during the upstream port), so every metric is emitted
+    with absolute_threshold=inf, absolute_verdict=pass, baseline_value=null,
+    regression_verdict=skipped. metrics.json carries the aggregate verdict;
+    failure_cases.jsonl is empty unless an episode raised a rollout_error
+    during the inference loop.
+    """
+    metrics_payload = {
+        "evaluation_schema_version": _EVALUATION_SCHEMA_VERSION,
+        "aggregate_verdict": _VERDICT_PASS,
+        "baseline_model_version": _BASELINE_NONE,
+        "metrics": [
+            {
+                "name": _TOOLCHAIN_TO_VLA_METRIC.get(toolchain_name, toolchain_name),
+                "value": float(value),
+                "absolute_threshold": float("inf"),
+                "absolute_verdict": _VERDICT_PASS,
+                "baseline_value": None,
+                "regression_pct": 0.0,
+                "regression_verdict": _VERDICT_SKIPPED,
+            }
+            for toolchain_name, value in aggregate.items()
+        ],
+    }
+
+    metrics_path = output_dir / "metrics.json"
+    with open(metrics_path, "w") as f:
+        json.dump(metrics_payload, f, indent=2)
+    print(f"[INFO] VLA schema v1 metrics: {metrics_path}")
+
+    failure_cases_path = output_dir / "failure_cases.jsonl"
+    with open(failure_cases_path, "w") as f:
+        for episode in per_episode:
+            if not episode.get("rollout_error"):
+                continue
+            record = {
+                "evaluation_schema_version": _EVALUATION_SCHEMA_VERSION,
+                "episode_id": str(episode.get("episode", "unknown")),
+                "dataset_id": dataset_repo_id,
+                "dataset_version": "unknown",
+                "domain_category": None,
+                "model_version": policy_repo_id,
+                "artifact_refs": [],
+                "failure_mode": "rollout_error",
+                "metric_values": {k: v for k, v in episode.items() if isinstance(v, (int, float))},
+                "metric_thresholds_violated": [],
+            }
+            f.write(json.dumps(record) + "\n")
+    print(f"[INFO] VLA schema v1 failure cases: {failure_cases_path}")
 
 
 def _setup_matplotlib():
@@ -222,17 +303,25 @@ def _find_video_file(ds_dir: str, vk: str, ep_idx: int) -> str | None:
 
 
 def main() -> int:
+    global JOINT_NAMES
+
     import av
     import pyarrow.parquet as pq
     from lerobot.policies.act.modeling_act import ACTPolicy
 
-    policy_repo_id = os.environ["POLICY_REPO_ID"]
+    policy_repo_id = os.environ.get("POLICY_REPO_ID", "").strip()
     policy_type = os.environ.get("POLICY_TYPE", "act")
     dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")
+    policy_revision = os.environ.get("POLICY_REVISION", "").strip() or None
+    dataset_revision = os.environ.get("DATASET_REVISION") or None
     eval_episodes = int(os.environ.get("EVAL_EPISODES", "10"))
     output_dir = Path(os.environ.get("OUTPUT_DIR", "/workspace/outputs/eval"))
     job_name = os.environ.get("JOB_NAME", "lerobot-eval")
     mlflow_enable = os.environ.get("MLFLOW_ENABLE", "false") == "true"
+
+    if not policy_repo_id:
+        print("[ERROR] POLICY_REPO_ID is required")
+        return 1
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -245,9 +334,14 @@ def main() -> int:
         dataset_dir = dataset_dir_env
         print(f"[INFO] Using blob-downloaded dataset: {dataset_dir}")
     elif dataset_repo_id and dataset_repo_id != "none":
+        try:
+            dataset_revision = resolve_hf_revision(dataset_repo_id, dataset_revision, revision_name="DATASET_REVISION")
+        except ValueError as exc:
+            print(f"[ERROR] {exc}")
+            return 1
         from huggingface_hub import snapshot_download
 
-        dataset_dir = snapshot_download(repo_id=dataset_repo_id, repo_type="dataset")
+        dataset_dir = snapshot_download(repo_id=dataset_repo_id, repo_type="dataset", revision=dataset_revision)
         print(f"[INFO] Dataset downloaded from HuggingFace: {dataset_dir}")
     else:
         print("[ERROR] Dataset source required: set DATASET_REPO_ID or blob storage params")
@@ -258,14 +352,29 @@ def main() -> int:
         info = json.load(f)
     fps = info["fps"]
 
+    # Resolve dimension labels from the dataset's action feature names so plots
+    # carry real joint names; fall back to generic dim_N labels otherwise.
+    action_names = info.get("features", {}).get("action", {}).get("names")
+    JOINT_NAMES = list(action_names) if isinstance(action_names, list) else []
+
     # Identify video key from features
     features = info.get("features", {})
     video_keys = [k for k, v in features.items() if v.get("dtype") in ("video", "image")]
-    image_key = video_keys[0] if video_keys else "observation.images.color"
+    # Prefer an observation.images.* key for a deterministic choice on
+    # multi-camera datasets; fall back to the first video/image feature.
+    image_key = next(
+        (k for k in video_keys if k.startswith("observation.images.")),
+        video_keys[0] if video_keys else "observation.images.color",
+    )
 
     # Load policy (normalization is handled internally by select_action)
     print(f"[INFO] Loading policy from: {policy_repo_id}")
-    policy = ACTPolicy.from_pretrained(policy_repo_id)
+    try:
+        policy_revision = resolve_hf_revision(policy_repo_id, policy_revision, revision_name="POLICY_REVISION")
+    except ValueError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
+    policy = ACTPolicy.from_pretrained(policy_repo_id, revision=policy_revision)
     policy.to(device)
 
     # Determine episode range
@@ -431,6 +540,19 @@ def main() -> int:
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\n[INFO] Results saved to: {results_path}")
+
+    _write_vla_schema_v1(
+        output_dir=output_dir,
+        aggregate={
+            "mse": agg_mse,
+            "mae": agg_mae,
+            "avg_inference_ms": agg_inf_ms,
+            "throughput_hz": agg_throughput,
+        },
+        per_episode=all_episode_metrics,
+        dataset_repo_id=dataset_repo_id,
+        policy_repo_id=policy_repo_id,
+    )
 
     if mlflow_enable:
         import mlflow

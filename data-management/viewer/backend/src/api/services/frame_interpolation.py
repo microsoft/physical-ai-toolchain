@@ -52,6 +52,8 @@ def interpolate_trajectory(
             e1 + t * (e2 - e1) for e1, e2 in zip(point1.end_effector_pose, point2.end_effector_pose, strict=True)
         ],
         gripper_state=point1.gripper_state if t < 0.5 else point2.gripper_state,
+        action=[a1 + t * (a2 - a1) for a1, a2 in zip(point1.action, point2.action, strict=True)],
+        signals=point1.signals if t < 0.5 else point2.signals,
     )
 
 

@@ -10,7 +10,9 @@ interface AnnotationWorkspaceTrajectoryTabProps {
   playbackCard: ReactNode
   subtaskListCard: ReactNode
   labelPanel: ReactNode
+  judgePanel: ReactNode
   languageInstructionPanel: ReactNode
+  objectDetectionPanel: ReactNode
   editToolsPanel: ReactNode
   selectedRange: [number, number] | null
   selectedSubtaskId: string | null
@@ -28,7 +30,9 @@ export function AnnotationWorkspaceTrajectoryTab({
   playbackCard,
   subtaskListCard,
   labelPanel,
+  judgePanel,
   languageInstructionPanel,
+  objectDetectionPanel,
   editToolsPanel,
   selectedRange,
   selectedSubtaskId,
@@ -63,7 +67,7 @@ export function AnnotationWorkspaceTrajectoryTab({
                   </div>
                 )}
                 <TrajectoryPlot
-                  className="h-[180px]"
+                  className="h-[320px]"
                   selectedRange={selectedRange}
                   onSelectedRangeChange={onDraftRangeChange}
                   onCreateSubtaskFromRange={onCreateSubtaskFromRange}
@@ -100,6 +104,8 @@ export function AnnotationWorkspaceTrajectoryTab({
             <div className="space-y-6">
               {labelPanel}
               <div className="border-t pt-6">{languageInstructionPanel}</div>
+              <div className="border-t pt-6">{judgePanel}</div>
+              <div className="border-t pt-6">{objectDetectionPanel}</div>
               <div className="border-t pt-6">{editToolsPanel}</div>
             </div>
           </CardContent>

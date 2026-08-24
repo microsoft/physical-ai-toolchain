@@ -21,17 +21,21 @@ jobs:
       contents: read
     outputs:
       training: ${{ steps.filter.outputs.training }}
+      rl: ${{ steps.filter.outputs.rl }}
+      il: ${{ steps.filter.outputs.il }}
       dm_tools: ${{ steps.filter.outputs.dm_tools }}
       data_pipeline: ${{ steps.filter.outputs.data_pipeline }}
       inference: ${{ steps.filter.outputs.inference }}
+      shared_ci: ${{ steps.filter.outputs.shared_ci }}
       dv_backend: ${{ steps.filter.outputs.dv_backend }}
       dv_frontend: ${{ steps.filter.outputs.dv_frontend }}
       fuzz: ${{ steps.filter.outputs.fuzz }}
       docusaurus: ${{ steps.filter.outputs.docusaurus }}
       pester: ${{ steps.filter.outputs.pester }}
+      containers: ${{ steps.filter.outputs.containers }}
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -45,20 +49,42 @@ jobs:
           FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
           echo "Changed files:"
           echo "$FILES"
+          # match() returns false (not an error) on an empty/non-matching diff.
+          # That is safe: the unconditional CPU import baseline in smoke-cpu.yml
+          # runs regardless of these outputs, so a false here can only narrow the
+          # path-gated runtime-image depth, never silently skip the gate.
           match() { echo "$FILES" | grep -qE "$1" && echo true || echo false; }
           pester_match=$(match '\.(ps1|psm1|psd1)$')
           echo "Computed pester=$pester_match"
           {
             echo "training=$(match '^training/')"
+            echo "rl=$(match '^(training/rl/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
+            echo "il=$(match '^(training/il/|shared/ci/|\.github/workflows/smoke-cpu\.yml)')"
             echo "dm_tools=$(match '^data-management/tools/')"
             echo "data_pipeline=$(match '^data-pipeline/capture/')"
             echo "inference=$(match '^fleet-deployment/inference/')"
-            echo "dv_backend=$(match '^data-management/viewer/backend/')"
+            echo "shared_ci=$(match '^shared/ci/')"
+            echo "dv_backend=$(match '^(data-management/viewer/backend/|data-management/viewer/docker-compose\.yml|shared/ci/smoke-docker\.sh|\.github/workflows/smoke-cpu\.yml)')"
             echo "dv_frontend=$(match '^data-management/viewer/frontend/')"
             echo "fuzz=$(match '^(tests/fuzz|tests/fuzz_harness\.py|tests/generate_fuzz_corpus\.py|data-management/viewer/backend/src/|training/)')"
             echo "docusaurus=$(match '^docs/docusaurus/')"
             echo "pester=$pester_match"
+            echo "containers=$(match '(Dockerfile|^\.github/workflows/container-scan\.yml$|^scripts/security/(discover-base-images|image-slug)\.sh$)')"
           } >> "$GITHUB_OUTPUT"
+
+  # GPU-free import smoke gate. CPU import smoke runs for every domain on every
+  # PR (unconditional baseline); the runtime-image smoke is path-gated to the
+  # changed training domain.
+  smoke:
+    name: Smoke
+    needs: changes
+    uses: ./.github/workflows/smoke-cpu.yml
+    with:
+      rl: ${{ needs.changes.outputs.rl == 'true' }}
+      il: ${{ needs.changes.outputs.il == 'true' }}
+      dataviewer: ${{ needs.changes.outputs.dv_backend == 'true' || needs.changes.outputs.dv_frontend == 'true' }}
+    permissions:
+      contents: read
 
   # Validate that all `uses: ./.github/workflows/*.yml` references resolve
   workflow-refs-check:
@@ -172,11 +198,11 @@ jobs:
       security-events: write  # Required for SARIF upload to Security tab
     steps:
       - name: Checkout repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Run OSV-Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2  # v2.3.8
+        uses: google/osv-scanner-action/osv-scanner-action@8deb546fdb875b9996d27d4950be7312dac076a1  # v2.5.0
         continue-on-error: true
         with:
           # --no-resolve disables transitive resolution; pinned requirements files
@@ -187,6 +213,23 @@ jobs:
             --no-resolve
             --recursive
             ./
+
+  # Container base-image CVE scan (Trivy). Discovers every digest-pinned base
+  # image across the repo's Dockerfiles and reports fixable CRITICAL/HIGH
+  # vulnerabilities to the Security tab. Runs soft-fail while the shipped base
+  # images still carry fixable CVEs (see #1085). Path-gated to Dockerfile, scan
+  # workflow, or discovery/slug helper changes; a weekly Container Rescan
+  # re-evaluates already-merged base images.
+  container-scan:
+    name: Container Scan
+    needs: changes
+    if: needs.changes.outputs.containers == 'true'
+    uses: ./.github/workflows/container-scan.yml
+    with:
+      soft-fail: true
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
 
   # PowerShell Pester test execution
   pester-tests:
@@ -273,6 +316,18 @@ jobs:
       contents: read
       id-token: write
 
+  # Pytest: shared CI scripts component
+  pytest-shared-ci:
+    name: Pytest Shared CI
+    needs: changes
+    if: needs.changes.outputs.shared_ci == 'true'
+    uses: ./.github/workflows/pytest-shared-ci.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Dataviewer backend pytest execution
   dataviewer-backend-pytests:
     name: Dataviewer Backend Pytest
@@ -311,6 +366,16 @@ jobs:
   python-lint:
     name: Python Lint
     uses: ./.github/workflows/python-lint.yml
+    permissions:
+      contents: read
+
+  # uv lock/manifest consistency gate across all Python subprojects
+  uv-lock-consistency:
+    name: uv Lock Consistency
+    uses: ./.github/workflows/uv-lock-consistency.yml
+    with:
+      changed-files-only: true
+      soft-fail: false
     permissions:
       contents: read
 
@@ -381,8 +446,7 @@ jobs:
     name: Go Tests
     uses: ./.github/workflows/go-tests.yml
     with:
-      soft-fail: true
-      changed-files-only: true
+      soft-fail: false
       code-coverage: true
     permissions:
       contents: read
@@ -434,10 +498,12 @@ jobs:
       - pytest-dm-tools
       - pytest-data-pipeline
       - pytest-inference
+      - pytest-shared-ci
       - dataviewer-backend-pytests
       - evaluation-pytests
       - fuzz-regression-tests
       - python-lint
+      - uv-lock-consistency
       - terraform-lint
       - terraform-validation
       - terraform-tests
@@ -446,6 +512,8 @@ jobs:
       - go-tests
       - shellcheck
       - codeql-analysis
+      - smoke
+      - container-scan
     permissions:
       contents: read
     steps:

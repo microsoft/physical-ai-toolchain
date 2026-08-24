@@ -32,13 +32,14 @@ type InfraOutputs struct {
 	ContainerRegistry          map[string]any `output:"container_registry"`
 	StorageAccount             map[string]any `output:"storage_account"`
 	DataLakeStorageAccount     any            `output:"data_lake_storage_account"`
-	AmlComputeCluster          any            `output:"aml_compute_cluster"`
+	AmlComputeClusters         map[string]any `output:"aml_compute_clusters"`
 	LogAnalyticsWorkspace      map[string]any `output:"log_analytics_workspace"`
 	ApplicationInsights        map[string]any `output:"application_insights"`
 	Grafana                    map[string]any `output:"grafana"`
 	PostgreSQL                 any            `output:"postgresql"`
 	Redis                      any            `output:"redis"`
 	OsmoWorkloadIdentity       map[string]any `output:"osmo_workload_identity"`
+	OsmoAdminPassword          any            `output:"osmo_admin_password"`
 }
 
 // RequiredOutputKeys returns every `output` tag defined on InfraOutputs. Used

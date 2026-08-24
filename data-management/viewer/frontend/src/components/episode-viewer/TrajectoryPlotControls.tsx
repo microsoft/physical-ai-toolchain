@@ -19,6 +19,7 @@ interface TrajectoryPlotControlsProps {
     toPosition: number,
   ) => void
   onOpenDefaults: () => void
+  editable: boolean
   showVelocity: boolean
   onSetShowVelocity: (value: boolean) => void
   showNormalized: boolean
@@ -38,6 +39,7 @@ export function TrajectoryPlotControls({
   onDeleteGroup,
   onMoveJoint,
   onOpenDefaults,
+  editable,
   showVelocity,
   onSetShowVelocity,
   showNormalized,
@@ -57,13 +59,13 @@ export function TrajectoryPlotControls({
           colors={JOINT_COLORS}
           groups={groups}
           labels={labels}
-          editable
+          editable={editable}
           onEditJointLabel={onEditJointLabel}
           onEditGroupLabel={onEditGroupLabel}
           onCreateGroup={onCreateGroup}
           onDeleteGroup={onDeleteGroup}
           onMoveJoint={onMoveJoint}
-          onOpenDefaults={onOpenDefaults}
+          onOpenDefaults={editable ? onOpenDefaults : undefined}
         />
       </div>
       <div className="flex w-full shrink-0 flex-wrap items-center gap-2 lg:w-auto lg:justify-end lg:self-start">

@@ -24,18 +24,20 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
 
+      # Ruff version is pinned to match the `ruff` dev-dependency pin in the root
+      # pyproject.toml. Keep these in sync; bump both together (via Dependabot).
       - name: Ruff lint check
         id: ruff-check
         continue-on-error: true
         run: |
-          uvx ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
+          uvx --with ruff==0.15.21 ruff check . --output-format github 2>&1 | Tee-Object -FilePath ruff-check-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_CHECK_FAILED=true' >> $env:GITHUB_ENV
@@ -46,10 +48,21 @@ jobs:
         id: ruff-format
         continue-on-error: true
         run: |
-          uvx ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
+          uvx --with ruff==0.15.21 ruff format --check --diff . 2>&1 | Tee-Object -FilePath ruff-format-results.txt
           $exitCode = $LASTEXITCODE
           if ($exitCode -ne 0) {
             'RUFF_FORMAT_FAILED=true' >> $env:GITHUB_ENV
+          }
+          exit $exitCode
+
+      - name: HuggingFace revision-pin guard
+        id: hf-pins
+        continue-on-error: true
+        run: |
+          python3 scripts/security/check_hf_pins.py
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            'HF_PINS_FAILED=true' >> $env:GITHUB_ENV
           }
           exit $exitCode
 
@@ -64,7 +77,7 @@ jobs:
           retention-days: 30
 
       - name: Fail job if errors found
-        if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true') && !inputs.soft-fail
+        if: (env.RUFF_CHECK_FAILED == 'true' || env.RUFF_FORMAT_FAILED == 'true' || env.HF_PINS_FAILED == 'true') && !inputs.soft-fail
         run: |
-          Write-Output "::error::Ruff violations detected. Run 'uvx ruff check --fix .' and 'uvx ruff format .' locally."
+          Write-Output "::error::Python lint violations detected. Run 'uvx --with ruff==0.15.21 ruff check --fix .', 'uvx --with ruff==0.15.21 ruff format .', and 'npm run lint:hfpins' locally."
           exit 1

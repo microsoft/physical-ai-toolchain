@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import sys
 import types
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock
 
@@ -30,6 +33,8 @@ _install_stub("rclpy", _rclpy)
 
 
 class _StubNode:
+    parameter_overrides: ClassVar[dict[str, object]] = {}
+
     def __init__(self, name: str) -> None:
         self._name = name
         self._params: dict[str, object] = {}
@@ -41,7 +46,7 @@ class _StubNode:
         self.timers: list[tuple] = []
 
     def declare_parameter(self, key: str, default: object) -> None:
-        self._params[key] = default
+        self._params[key] = self.parameter_overrides.get(key, default)
 
     def get_parameter(self, key: str):
         param = MagicMock()
@@ -204,6 +209,11 @@ _cv2.resize = MagicMock(side_effect=lambda img, size: np.zeros((size[1], size[0]
 _install_stub("cv2", _cv2)
 
 
+import evaluation.sil.hf_revision as _hf  # noqa: E402
+
+_install_stub("inference.hf_revision", _hf)
+
+
 # inference.policy_runner / inference.robot_types
 _inference_pkg = types.ModuleType("inference")
 _install_stub("inference", _inference_pkg)
@@ -240,8 +250,8 @@ class _PolicyRunner:
         )
 
     @classmethod
-    def from_pretrained(cls, repo: str, device: str = "cuda") -> _PolicyRunner:
-        cls.last_init_kwargs = {"repo": repo, "device": device}
+    def from_pretrained(cls, repo: str, device: str = "cuda", revision: str | None = None) -> _PolicyRunner:
+        cls.last_init_kwargs = {"repo": repo, "device": device, "revision": revision}
         return cls(device=device)
 
 
@@ -288,7 +298,6 @@ _install_stub("inference.robot_types", _inference_robot_types)
 # fleet-deployment is hyphenated so it cannot be imported as a normal package.
 # Load act_inference_node by file path after stubs are installed.
 import importlib.util  # noqa: E402
-from pathlib import Path  # noqa: E402
 
 _ain_path = Path(__file__).resolve().parent.parent / "act_inference_node.py"
 _ain_spec = importlib.util.spec_from_file_location("act_inference_node", _ain_path)
@@ -302,10 +311,28 @@ _ain_spec.loader.exec_module(ain_module)
 # ---------------------------------------------------------------------------
 
 
+@contextmanager
+def _node_parameter_overrides(**overrides: object) -> Iterator[None]:
+    previous = _StubNode.parameter_overrides
+    _StubNode.parameter_overrides = overrides
+    try:
+        yield
+    finally:
+        _StubNode.parameter_overrides = previous
+
+
 @pytest.fixture
-def node():
+def local_policy_repo(tmp_path: Path) -> str:
+    policy_dir = tmp_path / "policy"
+    policy_dir.mkdir()
+    return str(policy_dir)
+
+
+@pytest.fixture
+def node(local_policy_repo: str):
     """Construct an ACTInferenceNode with all stubs in place."""
-    return ain_module.ACTInferenceNode()
+    with _node_parameter_overrides(policy_repo=local_policy_repo):
+        return ain_module.ACTInferenceNode()
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +341,7 @@ def node():
 
 
 class TestInit:
-    def test_default_parameters_and_setup(self, node):
+    def test_default_parameters_and_setup(self, node, local_policy_repo: str):
         assert node._control_hz == 30
         assert node._action_mode == "delta"
         assert node._enable_control is False
@@ -324,6 +351,55 @@ class TestInit:
         assert "/lerobot/status" in node.publishers
         assert len(node.timers) == 1
         node._runner.reset.assert_called_once()
+        assert _PolicyRunner.last_init_kwargs == {
+            "repo": local_policy_repo,
+            "device": "cuda",
+            "revision": None,
+        }
+
+    def test_remote_policy_requires_revision(self):
+        _PolicyRunner.last_init_kwargs = {}
+
+        with pytest.raises(
+            ValueError, match="policy_revision is required when loading a remote HuggingFace policy repo"
+        ):
+            ain_module.ACTInferenceNode()
+
+        assert _PolicyRunner.last_init_kwargs == {}
+
+    def test_blank_policy_repo_raises(self):
+        _PolicyRunner.last_init_kwargs = {}
+
+        with (
+            _node_parameter_overrides(policy_repo=" ", policy_revision=""),
+            pytest.raises(ValueError, match="policy repository or local path is required"),
+        ):
+            ain_module.ACTInferenceNode()
+
+        assert _PolicyRunner.last_init_kwargs == {}
+
+    def test_remote_policy_accepts_revision(self):
+        with _node_parameter_overrides(policy_revision="0123456789abcdef0123456789abcdef01234567"):
+            node = ain_module.ACTInferenceNode()
+
+        assert node._runner.device == "cuda"
+        assert _PolicyRunner.last_init_kwargs == {
+            "repo": "alizaidi/hve-robo-act-train",
+            "device": "cuda",
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+        }
+
+    def test_local_path_returns_none_revision(self, tmp_path):
+        local_dir = tmp_path / "my_model"
+        local_dir.mkdir()
+        with _node_parameter_overrides(policy_repo=str(local_dir), policy_revision=""):
+            ain_module.ACTInferenceNode()
+
+        assert _PolicyRunner.last_init_kwargs == {
+            "repo": str(local_dir),
+            "device": "cuda",
+            "revision": None,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -475,18 +551,20 @@ class TestPublishCommand:
 
 
 class TestMain:
-    def test_normal_flow_initializes_and_shuts_down(self, monkeypatch):
+    def test_normal_flow_initializes_and_shuts_down(self, monkeypatch, local_policy_repo: str):
         _rclpy.init.reset_mock()
         _rclpy.spin.reset_mock()
         _rclpy.shutdown.reset_mock()
-        ain_module.main()
+        with _node_parameter_overrides(policy_repo=local_policy_repo):
+            ain_module.main()
         _rclpy.init.assert_called_once()
         _rclpy.spin.assert_called_once()
         _rclpy.shutdown.assert_called_once()
 
-    def test_keyboard_interrupt_logs_metrics(self, monkeypatch):
+    def test_keyboard_interrupt_logs_metrics(self, monkeypatch, local_policy_repo: str):
         _rclpy.init.reset_mock()
         _rclpy.shutdown.reset_mock()
         monkeypatch.setattr(_rclpy, "spin", MagicMock(side_effect=KeyboardInterrupt))
-        ain_module.main()
+        with _node_parameter_overrides(policy_repo=local_policy_repo):
+            ain_module.main()
         _rclpy.shutdown.assert_called_once()

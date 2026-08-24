@@ -132,6 +132,7 @@ module "platform" {
 
   // Observability feature flags
   should_deploy_grafana           = var.should_deploy_grafana
+  grafana_major_version           = var.grafana_major_version
   should_deploy_monitor_workspace = var.should_deploy_monitor_workspace
   should_deploy_ampls             = var.should_deploy_ampls
   should_deploy_dce               = var.should_deploy_dce
@@ -140,6 +141,7 @@ module "platform" {
   should_enable_aml_diagnostic_logs  = var.should_enable_aml_diagnostic_logs
   aml_compute_clusters               = var.aml_compute_clusters
   aml_managed_network_isolation_mode = var.aml_managed_network_isolation_mode
+  workspace_name_suffix              = var.workspace_name_suffix
 
   // DNS zone flags
   should_include_aks_dns_zone = var.should_include_aks_dns_zone

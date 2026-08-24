@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
+from src.api.services.dataset_service.base import normalize_feature_names
 from src.api.services.dataset_service.service import (
     DatasetService,
-    _normalize_feature_names,
     _validate_dataset_id,
 )
 
@@ -754,34 +754,34 @@ class TestGetDatasetServiceSingleton:
 
 class TestNormalizeFeatureNames:
     def test_returns_none_for_none(self):
-        assert _normalize_feature_names(None) is None
+        assert normalize_feature_names(None) is None
 
     def test_returns_string_list_unchanged(self):
-        assert _normalize_feature_names(["JOINT_A", "JOINT_B"]) == ["JOINT_A", "JOINT_B"]
+        assert normalize_feature_names(["JOINT_A", "JOINT_B"]) == ["JOINT_A", "JOINT_B"]
 
     def test_flattens_list_of_lists(self):
-        assert _normalize_feature_names([["JOINT_A", "JOINT_B"], ["JOINT_C"]]) == [
+        assert normalize_feature_names([["JOINT_A", "JOINT_B"], ["JOINT_C"]]) == [
             "JOINT_A",
             "JOINT_B",
             "JOINT_C",
         ]
 
     def test_flattens_dict_values(self):
-        result = _normalize_feature_names({"x": "JOINT_A", "y": "JOINT_B"})
+        result = normalize_feature_names({"x": "JOINT_A", "y": "JOINT_B"})
         assert sorted(result) == ["JOINT_A", "JOINT_B"]
 
     def test_wraps_scalar_in_list(self):
-        assert _normalize_feature_names("only") == ["only"]
+        assert normalize_feature_names("only") == ["only"]
 
     def test_coerces_non_string_items_to_str(self):
-        assert _normalize_feature_names([1, 2.5, True]) == ["1", "2.5", "True"]
+        assert normalize_feature_names([1, 2.5, True]) == ["1", "2.5", "True"]
 
     def test_returns_none_for_empty_iterable(self):
-        assert _normalize_feature_names([]) is None
-        assert _normalize_feature_names(()) is None
+        assert normalize_feature_names([]) is None
+        assert normalize_feature_names(()) is None
 
     def test_flattens_mixed_nested_with_tuples(self):
-        assert _normalize_feature_names([("A", "B"), "C"]) == ["A", "B", "C"]
+        assert normalize_feature_names([("A", "B"), "C"]) == ["A", "B", "C"]
 
 
 class TestMaterializeBlobVideo:

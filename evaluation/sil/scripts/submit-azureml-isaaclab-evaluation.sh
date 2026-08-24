@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Submit Azure ML Isaac Lab evaluation job using evaluation/ as the code directory
-# The .amlignore file controls which files are excluded from the code snapshot
+# Submit an Azure ML Isaac Lab evaluation job. The job code snapshot stages the
+# training/rl runtime and training/utils packages alongside evaluation/sil (see
+# "Stage Code Snapshot" below); the staged .amlignore controls snapshot exclusions.
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +28,7 @@ MODEL OPTIONS:
 
 AZUREML ASSET OPTIONS:
     --environment-name NAME       AzureML environment name (default: isaaclab-training-env)
-    --environment-version VER     Environment version (default: ${DEFAULT_ISAAC_LAB_IMAGE_VERSION})
+    --environment-version VER     Environment version (default: derived from --image)
     --image IMAGE                 Container image (default: ${DEFAULT_ISAAC_LAB_IMAGE})
 
 EVALUATION OPTIONS:
@@ -68,37 +69,20 @@ derive_model_name() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//; s/-+/-/g'
 }
 
-register_environment() {
-  local name="$1" version="$2" image="$3" rg="$4" ws="$5"
-  local env_file
-  env_file=$(mktemp)
-
-  cat >"$env_file" <<EOF
-\$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
-name: $name
-version: $version
-image: $image
-EOF
-
-  info "Publishing AzureML environment ${name}:${version}"
-  az ml environment create --file "$env_file" \
-    --name "$name" --version "$version" \
-    --resource-group "$rg" --workspace-name "$ws" >/dev/null
-  rm -f "$env_file"
-}
-
 #------------------------------------------------------------------------------
 # Defaults
 #------------------------------------------------------------------------------
 
 environment_name="isaaclab-training-env"
-environment_version="${ENVIRONMENT_VERSION:-$DEFAULT_ISAAC_LAB_IMAGE_VERSION}"
 image="${IMAGE:-$DEFAULT_ISAAC_LAB_IMAGE}"
+environment_version="${ENVIRONMENT_VERSION:-}"
+environment_version_explicit=false
+[[ -n "${ENVIRONMENT_VERSION:-}" ]] && environment_version_explicit=true
 
 model_name=""
 model_version="latest"
 
-task="${TASK:-Isaac-Velocity-Rough-Anymal-C-v0}"
+task="${TASK:-}"
 framework=""
 episodes=100
 num_envs=64
@@ -127,7 +111,7 @@ while [[ $# -gt 0 ]]; do
     --model-name)           model_name="$2"; shift 2 ;;
     --model-version)        model_version="$2"; shift 2 ;;
     --environment-name)     environment_name="$2"; shift 2 ;;
-    --environment-version)  environment_version="$2"; shift 2 ;;
+    --environment-version)  environment_version="$2"; environment_version_explicit=true; shift 2 ;;
     --image)                image="$2"; shift 2 ;;
     --task)                 task="$2"; shift 2 ;;
     --framework)            framework="$2"; shift 2 ;;
@@ -150,6 +134,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$environment_version_explicit" != "true" ]]; then
+  environment_version="$(derive_azureml_environment_version_from_image "$image")"
+fi
+
 #------------------------------------------------------------------------------
 # Validation
 #------------------------------------------------------------------------------
@@ -166,9 +154,13 @@ if [[ -z "$model_name" ]]; then
   info "Auto-derived model name: $model_name"
 fi
 
-code_path="$REPO_ROOT/evaluation"
-[[ -d "$code_path/sil" ]] || fatal "SIL evaluation source not found: $code_path/sil"
-[[ -f "$code_path/.amlignore" ]] || warn "No evaluation/.amlignore found; the AML snapshot may include unrelated files"
+eval_source="$REPO_ROOT/evaluation/sil"
+rl_source="$REPO_ROOT/training/rl"
+utils_source="$REPO_ROOT/training/utils"
+[[ -d "$eval_source" ]] || fatal "SIL evaluation source not found: $eval_source"
+[[ -d "$rl_source" ]] || fatal "RL runtime source not found: $rl_source"
+[[ -d "$utils_source" ]] || fatal "Training utils source not found: $utils_source"
+[[ -f "$REPO_ROOT/evaluation/.amlignore" ]] || warn "No evaluation/.amlignore found; the AML snapshot may include unrelated files"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
@@ -227,8 +219,24 @@ model_json=$(az ml model show \
 # Register Environment
 #------------------------------------------------------------------------------
 
-register_environment "$environment_name" "$environment_version" "$image" \
-  "$resource_group" "$workspace_name"
+register_azureml_environment "$environment_name" "$environment_version" "$image" \
+  "$resource_group" "$workspace_name" "$subscription_id"
+
+#------------------------------------------------------------------------------
+# Stage Code Snapshot
+#------------------------------------------------------------------------------
+# policy_evaluation.py loads Isaac Lab policies (skrl/rsl-rl) and imports both
+# training.rl.simulation_shutdown and training.utils.integrity, so the job needs the
+# training/rl runtime and training/utils packages next to evaluation/sil. Azure ML's
+# single code root cannot span multiple top-level trees, so stage them into one directory.
+code_path="$(mktemp -d)"
+trap 'rm -rf "$code_path"' EXIT
+mkdir -p "$code_path/training" "$code_path/evaluation"
+cp "$REPO_ROOT/training/__init__.py" "$code_path/training/__init__.py"
+cp -R "$rl_source" "$code_path/training/rl"
+cp -R "$utils_source" "$code_path/training/utils"
+cp -R "$eval_source" "$code_path/evaluation/sil"
+[[ -f "$REPO_ROOT/evaluation/.amlignore" ]] && cp "$REPO_ROOT/evaluation/.amlignore" "$code_path/.amlignore"
 
 info "Code path: $code_path"
 info "Environment: ${environment_name}:${environment_version}"
@@ -269,10 +277,10 @@ cmd="$cmd --success-threshold \${{inputs.success_threshold}}"
 
 [[ "$headless" == "true" ]] && cmd="$cmd --headless"
 
-# AML snapshots evaluation/ as the code root, so recreate the top-level evaluation path
-# expected by the shell entrypoint and Python imports inside the job container.
+# The staged snapshot places evaluation/ and training/ at its root, so the entrypoint
+# path and first-party imports resolve directly.
 az_args+=(
-  --set "command=if [ ! -e evaluation ]; then ln -s . evaluation; fi && bash evaluation/sil/evaluation.sh $cmd"
+  --set "command=bash evaluation/sil/evaluation.sh $cmd"
   --set "inputs.task=${task:-auto}"
   --set "inputs.framework=${framework:-auto}"
   --set "inputs.success_threshold=${threshold:--1.0}"

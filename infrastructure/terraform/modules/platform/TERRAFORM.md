@@ -2,7 +2,7 @@
 title: Platform Module
 description: Deploys shared Azure infrastructure services for robotics ML workloads. Resources include: networking, DNS zones, security, observability, ACR, storage, ML workspace. Optional: PostgreSQL and Redis for OSMO workloads.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-05-11
+ms.date: 2026-08-03
 ms.topic: reference
 ---
 
@@ -13,21 +13,21 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 
 ## Requirements
 
-| Name      | Version         |
-|-----------|-----------------|
-| terraform | >= 1.9.8, < 2.0 |
-| azapi     | >= 2.3.0        |
-| azuread   | >= 3.0.2        |
-| azurerm   | >= 4.51.0       |
-| random    | >= 3.6.0        |
+| Name      | Version            |
+|-----------|--------------------|
+| terraform | >= 1.9.8, < 2.0    |
+| azapi     | >= 2.3.0           |
+| azuread   | >= 3.0.2           |
+| azurerm   | >= 4.51.0, < 5.0.0 |
+| random    | >= 3.6.0           |
 
 ## Providers
 
-| Name    | Version   |
-|---------|-----------|
-| azapi   | >= 2.3.0  |
-| azurerm | >= 4.51.0 |
-| random  | >= 3.6.0  |
+| Name    | Version            |
+|---------|--------------------|
+| azapi   | >= 2.3.0           |
+| azurerm | >= 4.51.0, < 5.0.0 |
+| random  | >= 3.6.0           |
 
 ## Resources
 
@@ -134,6 +134,7 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 | aml\_managed\_network\_isolation\_mode                 | AzureML workspace managed network isolation mode. This governs the AzureML workspace managed network only                                                                       | `string`                                                                                                                                                                                                                                                                                                                                                             | `"AllowOnlyApprovedOutbound"`                                                                                                                                                                                                                                                 |    no    |
 | converted\_datasets\_cool\_tier\_days                  | Number of days before tiering converted datasets to cool storage. Set to -1 to disable tiering                                                                                  | `number`                                                                                                                                                                                                                                                                                                                                                             | `90`                                                                                                                                                                                                                                                                          |    no    |
 | current\_user\_oid                                     | Object ID of the current user for role assignments. Obtained via Microsoft Graph to avoid constant updates from azurerm\_client\_config                                         | `string`                                                                                                                                                                                                                                                                                                                                                             | `null`                                                                                                                                                                                                                                                                        |    no    |
+| grafana\_major\_version                                | Azure Managed Grafana major version. Only "12" is valid for the Standard SKU with the current azurerm provider.                                                                 | `string`                                                                                                                                                                                                                                                                                                                                                             | `"12"`                                                                                                                                                                                                                                                                        |    no    |
 | instance                                               | Instance identifier for naming resources: 001, 002, etc                                                                                                                         | `string`                                                                                                                                                                                                                                                                                                                                                             | `"001"`                                                                                                                                                                                                                                                                       |    no    |
 | nat\_gateway\_zones                                    | Availability zones for NAT Gateway and its public IP. Leave empty for regions without AZ support                                                                                | `list(string)`                                                                                                                                                                                                                                                                                                                                                       | ```[ "1" ]```                                                                                                                                                                                                                                                                 |    no    |
 | postgresql\_config                                     | PostgreSQL configuration for OSMO including location, SKU, storage, zone, HA settings, and database definitions                                                                 | ```object({ location = string sku_name = string storage_mb = number version = string databases = map(object({ collation = string, charset = string })) zone = optional(string) should_enable_high_availability = optional(bool, false) standby_availability_zone = optional(string) })```                                                                            | ```{ "databases": { "osmo": { "charset": "utf8", "collation": "en_US.utf8" } }, "location": "westus3", "should_enable_high_availability": false, "sku_name": "GP_Standard_D2s_v3", "standby_availability_zone": null, "storage_mb": 32768, "version": "16", "zone": null }``` |    no    |
@@ -164,6 +165,7 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 | should\_enable\_storage\_shared\_access\_key           | Whether to enable Shared Key (SAS token) authorization for the storage account. When false, all requests must use Azure AD authentication                                       | `bool`                                                                                                                                                                                                                                                                                                                                                               | `false`                                                                                                                                                                                                                                                                       |    no    |
 | should\_include\_aks\_dns\_zone                        | Whether to include the AKS private DNS zone in core DNS zones                                                                                                                   | `bool`                                                                                                                                                                                                                                                                                                                                                               | `true`                                                                                                                                                                                                                                                                        |    no    |
 | virtual\_network\_config                               | Virtual network address configuration including address space and subnet prefixes. PE and resolver subnet prefixes are only used when should\_enable\_private\_endpoint is true | ```object({ address_space = string subnet_address_prefix_main = string subnet_address_prefix_vm = optional(string) subnet_address_prefix_pe = optional(string) subnet_address_prefix_resolver = optional(string) })```                                                                                                                                               | ```{ "address_space": "10.0.0.0/16", "subnet_address_prefix_main": "10.0.1.0/24", "subnet_address_prefix_pe": "10.0.2.0/24", "subnet_address_prefix_resolver": "10.0.9.0/28", "subnet_address_prefix_vm": "10.0.4.0/24" }```                                                  |    no    |
+| workspace\_name\_suffix                                | Optional suffix appended to the AML workspace name to avoid soft-delete naming conflicts on redeploy                                                                            | `string`                                                                                                                                                                                                                                                                                                                                                             | `""`                                                                                                                                                                                                                                                                          |    no    |
 
 ## Outputs
 
@@ -185,6 +187,7 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 | monitor\_workspace                   | Azure Monitor workspace for Prometheus metrics. Null when monitor workspace is disabled                                          |
 | nat\_gateway                         | NAT Gateway for outbound connectivity. Null when NAT Gateway is disabled                                                         |
 | network\_security\_group             | NSG for SiL subnets                                                                                                              |
+| osmo\_admin\_password                | OSMO admin password (sensitive). Used as fallback when Key Vault is not reachable from the deploy host.                          |
 | osmo\_admin\_secret\_name            | Key Vault secret name containing OSMO admin password                                                                             |
 | osmo\_workload\_identity             | OSMO workload identity for federated credentials                                                                                 |
 | postgresql                           | PostgreSQL Flexible Server for OSMO (if deployed)                                                                                |

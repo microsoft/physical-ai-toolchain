@@ -34,6 +34,7 @@ class DependencyViolation {
         - Stale: SHA is pinned but newer version available
         - VersionMismatch: Version comment does not match resolved SHA
         - MissingVersionComment: SHA pinned but no version comment present
+        - MissingPermissions: Workflow file lacks required permissions declarations
         - Empty string: Default or unclassified violation
     #>
 
@@ -44,7 +45,7 @@ class DependencyViolation {
     [string]$Version
     [string]$CurrentRef
     [string]$Severity
-    [ValidateSet('Unpinned', 'Stale', 'VersionMismatch', 'MissingVersionComment', '')]
+    [ValidateSet('Unpinned', 'Stale', 'VersionMismatch', 'MissingVersionComment', 'MissingPermissions', '')]
     [string]$ViolationType
     [string]$Description
     [string]$Remediation

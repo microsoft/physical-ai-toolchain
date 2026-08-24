@@ -1,0 +1,10 @@
+{"sequence":0,"timestamp_ns":0,"joint_positions_rad":[0.0,-1.2,1.4,-1.7,-1.57,0.0],"joint_velocities_rad_s":[0.0,0.0,0.0,0.0,0.0,0.0]}
+{"sequence":1,"timestamp_ns":100000000,"joint_positions_rad":[0.01,-1.19,1.39,-1.69,-1.56,0.01],"joint_velocities_rad_s":[0.1,0.1,-0.1,0.1,0.1,0.1]}
+{"sequence":2,"timestamp_ns":200000000,"joint_positions_rad":[0.02,-1.18,1.38,-1.68,-1.55,0.02],"joint_velocities_rad_s":[0.1,0.1,-0.1,0.1,0.1,0.1]}
+{"sequence":3,"timestamp_ns":300000000,"joint_positions_rad":[0.03,-1.17,1.37,-1.67,-1.54,0.03],"joint_velocities_rad_s":[0.1,0.1,-0.1,0.1,0.1,0.1]}
+{"sequence":4,"timestamp_ns":400000000,"joint_positions_rad":[0.04,-1.16,1.36,-1.66,-1.53,0.04],"joint_velocities_rad_s":[0.1,0.1,-0.1,0.1,0.1,0.1]}
+{"sequence":5,"timestamp_ns":500000000,"joint_positions_rad":[0.05,-1.15,1.35,-1.65,-1.52,0.05],"joint_velocities_rad_s":[0.1,0.1,-0.1,0.1,0.1,0.1]}
+{"sequence":6,"timestamp_ns":600000000,"joint_positions_rad":[0.04,-1.16,1.36,-1.66,-1.53,0.04],"joint_velocities_rad_s":[-0.1,-0.1,0.1,-0.1,-0.1,-0.1]}
+{"sequence":7,"timestamp_ns":700000000,"joint_positions_rad":[0.03,-1.17,1.37,-1.67,-1.54,0.03],"joint_velocities_rad_s":[-0.1,-0.1,0.1,-0.1,-0.1,-0.1]}
+{"sequence":8,"timestamp_ns":800000000,"joint_positions_rad":[0.02,-1.18,1.38,-1.68,-1.55,0.02],"joint_velocities_rad_s":[-0.1,-0.1,0.1,-0.1,-0.1,-0.1]}
+{"sequence":9,"timestamp_ns":900000000,"joint_positions_rad":[0.01,-1.19,1.39,-1.69,-1.56,0.01],"joint_velocities_rad_s":[-0.1,-0.1,0.1,-0.1,-0.1,-0.1]}

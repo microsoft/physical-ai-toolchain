@@ -9,7 +9,10 @@ Required env:
   AZUREML_MODEL_NAME, RUN_ID, OUTPUT_DIR
 
 Optional env:
-  AZUREML_ARTIFACTS_DEFAULT_TIMEOUT (default 7200), REPLAY_RUN_ID
+  AZUREML_ARTIFACTS_DEFAULT_TIMEOUT (default 7200), REPLAY_RUN_ID,
+  AML_SOURCE, TRAINING_FRAMEWORK, AZUREML_RESOURCE_GROUP,
+  DATA_CONFIG, BASE_MODEL, BATCH_SIZE, MAX_STEPS, SAVE_STEPS,
+  DATALOADER_WORKERS, EMBODIMENT_TAG, ISAAC_GROOT_REF
 """
 
 from __future__ import annotations
@@ -44,6 +47,17 @@ SKIP_FILES = frozenset(
     }
 )
 
+_PARAM_ENV = (
+    "DATA_CONFIG",
+    "BASE_MODEL",
+    "BATCH_SIZE",
+    "MAX_STEPS",
+    "SAVE_STEPS",
+    "DATALOADER_WORKERS",
+    "EMBODIMENT_TAG",
+    "ISAAC_GROOT_REF",
+)
+
 
 def _log_tensorboard_metrics(tb_dir: pathlib.Path) -> int:
     """Parse tensorboard event files and log scalars as MLflow metrics."""
@@ -68,6 +82,9 @@ def _log_tensorboard_metrics(tb_dir: pathlib.Path) -> int:
 
 
 def main() -> int:
+    if not os.environ.get("AZURE_RESOURCE_GROUP") and os.environ.get("AZUREML_RESOURCE_GROUP"):
+        os.environ["AZURE_RESOURCE_GROUP"] = os.environ["AZUREML_RESOURCE_GROUP"]
+
     missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
     if missing:
         print(f"aml_mirror: missing env vars: {missing}", file=sys.stderr)
@@ -100,7 +117,11 @@ def main() -> int:
             mlflow.set_tag("osmo.replay", "true")
             mlflow.set_tag("osmo.replay_source", os.environ["REPLAY_RUN_ID"])
         mlflow.set_tag("framework", os.environ.get("TRAINING_FRAMEWORK", "lerobot"))
-        mlflow.set_tag("source", "osmo-replay")
+        mlflow.set_tag("source", os.environ.get("AML_SOURCE", "osmo-replay"))
+
+        params = {k: os.environ[k] for k in _PARAM_ENV if os.environ.get(k)}
+        if params:
+            mlflow.log_params(params)
 
         tb_dir = output_dir / "runs"
         if tb_dir.exists():

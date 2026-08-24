@@ -263,7 +263,7 @@ class TestGetVideo:
         resp = client.get("/api/datasets/ds-1/episodes/0/video/il-camera")
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "video/mp4"
-        assert "immutable" in resp.headers["cache-control"]
+        assert "must-revalidate" in resp.headers["cache-control"]
 
     def test_video_unsafe_path_returns_400(self, client: TestClient, override_service, tmp_path: Path) -> None:
         video = tmp_path / "ep0.mp4"

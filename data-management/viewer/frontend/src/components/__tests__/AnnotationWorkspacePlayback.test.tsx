@@ -122,6 +122,18 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     expect(labelsPanel).toContainElement(screen.getByText('Trajectory Adjustment'))
   })
 
+  it('places the VLM judge controls after the language instruction panel', () => {
+    render(<AnnotationWorkspace />)
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /trajectory viewer/i }), {
+      button: 0,
+      ctrlKey: false,
+    })
+
+    const panelText = screen.getByTestId('trajectory-labels-panel').textContent ?? ''
+    expect(panelText.indexOf('Language Instructions')).toBeLessThan(panelText.indexOf('VLM Judge'))
+  })
+
   it('constrains the compact trajectory playback media frame so it does not dominate the viewer', () => {
     render(<AnnotationWorkspace />)
 
@@ -192,6 +204,17 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     // Graph panel is contained in the scrollable playback group panel.
     expect(playbackGroupPanel.className).toContain('overflow-y-auto')
     expect(graphPanel).toContainElement(screen.getByText('Trajectory Plot'))
+  })
+
+  it('renders a taller trajectory plot in the graph panel', () => {
+    render(<AnnotationWorkspace />)
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /trajectory viewer/i }), {
+      button: 0,
+      ctrlKey: false,
+    })
+
+    expect(screen.getByTestId('trajectory-plot').className).toContain('h-[320px]')
   })
 
   it('clears a draft graph selection when Escape is pressed', () => {

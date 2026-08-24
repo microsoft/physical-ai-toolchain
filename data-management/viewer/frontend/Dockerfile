@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # ─── Build stage ─────────────────────────────────────────────────────────────
-FROM node:26.3.0-slim@sha256:aa27a5fbf5acb298116a38133794f080406c6f8dfe52e2e2836bb55dc7cae8f0 AS build
+FROM node:26.7.0-slim@sha256:4ebb5ace66f15a24c14c492e01a8beeed4fddf970a856109f5126e703e5fe503 AS build
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json package-lock.json .npmrc ./
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY . .
 
@@ -23,7 +23,9 @@ ENV VITE_AZURE_TENANT_ID=${VITE_AZURE_TENANT_ID}
 RUN npm run build
 
 # ─── Serve stage ─────────────────────────────────────────────────────────────
-FROM nginx:1.31-alpine@sha256:8b1e78743a03dbb2c95171cc58639fef29abc8816598e27fb910ed2e621e589a AS serve
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:592b23aa79a6e6c08ba4b20f1fff700e1328895705966722608e115d62e52d39 AS serve
+
+USER root
 
 # Remove default nginx page
 RUN rm -rf /usr/share/nginx/html/*
@@ -38,6 +40,13 @@ ENV NGINX_BACKEND_HOST=backend:8000
 ENV NGINX_BACKEND_SCHEME=http
 ENV NGINX_RESOLVER=127.0.0.11
 
-EXPOSE 80
+EXPOSE 8080
+
+USER nginx
+
+# localhost resolves to IPv6 [::1] first in this image, but nginx listens on
+# IPv4 0.0.0.0:8080 only, so probe 127.0.0.1 explicitly.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --start-interval=3s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1
 
 CMD ["/bin/sh", "-c", "envsubst '${NGINX_BACKEND_HOST} ${NGINX_BACKEND_SCHEME} ${NGINX_RESOLVER}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]

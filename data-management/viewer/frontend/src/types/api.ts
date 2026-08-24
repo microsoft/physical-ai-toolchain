@@ -20,6 +20,8 @@ export interface FeatureSchema {
   dtype: string
   /** Shape of the feature array */
   shape: number[]
+  /** Optional per-dimension feature names */
+  names?: string[] | null
 }
 
 /** Task definition within a dataset */
@@ -100,6 +102,22 @@ export interface TrajectoryPoint {
   endEffectorPose: number[]
   /** Gripper state (0 = open, 1 = closed) */
   gripperState: number
+  /** Named plottable variable values */
+  variables?: Record<string, number>
+}
+
+/** Named per-frame variable available for trajectory plotting */
+export interface TrajectoryVariable {
+  /** Stable variable key used in trajectory point values */
+  key: string
+  /** Human-readable variable label */
+  label: string
+  /** Dataset feature this variable came from */
+  source: string
+  /** Feature dimension index for vector values */
+  index?: number | null
+  /** Variable category such as state, action, or signal */
+  kind: string
 }
 
 /** Complete episode data for viewing */
@@ -112,6 +130,8 @@ export interface EpisodeData {
   videoTimeWindows?: Record<string, [number, number]>
   /** Available camera names */
   cameras: string[]
+  /** Named variables available for trajectory plots */
+  trajectoryVariables?: TrajectoryVariable[]
   /** Trajectory data points */
   trajectoryData: TrajectoryPoint[]
 }

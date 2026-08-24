@@ -15,25 +15,16 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
-declare -a python_cmd
-if [[ -n "${PYTHON:-}" ]]; then
-  IFS=' ' read -r -a python_cmd <<< "${PYTHON}"
-else
-  python_cmd=(python)
-fi
-
-python_exec="/isaac-sim/kit/python/bin/python3"
-if [[ ! -x "${python_exec}" ]]; then
-  python_exec="${python_cmd[0]}"
-fi
+# python_cmd (array), python_exec, and PYTHONPATH come from the Isaac runtime prologue,
+# sourced here so run_python/run_isaaclab can reference them. The dependency install runs
+# later via setup_isaac_runtime.sh, deferred until after argument parsing.
+ISAAC_PYTHONPATH_ROOT="${SRC_DIR}"
+# shellcheck source=../../training/rl/scripts/isaac_python_prologue.sh
+source "${SRC_DIR}/training/rl/scripts/isaac_python_prologue.sh"
 
 # run_python uses raw Python for pip/dependency operations
 run_python() {
-  if [[ -n "${python_exec}" ]]; then
-    "${python_exec}" "$@"
-  else
-    "${python_cmd[@]}" "$@"
-  fi
+  "${python_exec}" "$@"
 }
 
 # run_isaaclab uses isaaclab.sh -p for simulation scripts that need full env
@@ -61,7 +52,7 @@ Options:
   --video-length      Video recording length in steps (default: 200)
   --inference-format  Inference format: onnx, jit, or both (default: both)
   --checkpoint-uri    URI to checkpoint (.pt file)
-  --checkpoint-sha256  Expected SHA256 hash for checkpoint verification
+  --checkpoint-sha256  Expected SHA256 hash for checkpoint verification (required for plain http(s) URLs)
   --headless          Run in headless mode
   -h, --help          Show this help message
 
@@ -121,39 +112,17 @@ if [[ -z "${CHECKPOINT_URI}" ]]; then
   exit 1
 fi
 
-prebundle_path="/isaac-sim/exts/omni.pip.compute/pip_prebundle"
-if [[ -d "${prebundle_path}" ]]; then
-  export PYTHONPATH="${prebundle_path}:${SRC_DIR}:${PYTHONPATH:-}"
-else
-  export PYTHONPATH="${SRC_DIR}:${PYTHONPATH:-}"
-fi
-
-INFERENCE_REQS="${SRC_DIR}/training/il/lerobot/requirements.txt"
 cleanup() {
   rm -rf "${CHECKPOINT_DIR:-}"
 }
 trap cleanup EXIT
 
-if [[ ! -f "${INFERENCE_REQS}" ]]; then
-  echo "Error: LeRobot requirements not found at ${INFERENCE_REQS}" >&2
-  exit 1
-fi
-
-if command -v uv &>/dev/null; then
-  echo "Installing inference workflow dependencies from pre-compiled requirements..."
-  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --requirement "${INFERENCE_REQS}" || \
-      uv pip install --no-cache-dir --requirement "${INFERENCE_REQS}" --index-strategy first-index \
-        --extra-index-url https://download.pytorch.org/whl/cu124
-  else
-    uv pip install --no-cache-dir --system --requirement "${INFERENCE_REQS}" || \
-      uv pip install --no-cache-dir --system --requirement "${INFERENCE_REQS}" --index-strategy first-index \
-        --extra-index-url https://download.pytorch.org/whl/cu124
-  fi
-else
-  echo "Error: uv is required to install workflow dependencies" >&2
-  exit 1
-fi
+# Install the locked RL dependencies and configure the Isaac Sim runtime (uv, PYTHONPATH,
+# python_cmd/python_exec) via the shared helper that the training entrypoint also sources.
+ISAAC_PROJECT_DIR="${SRC_DIR}/training/rl"
+ISAAC_PYTHONPATH_ROOT="${SRC_DIR}"
+# shellcheck source=../../training/rl/scripts/setup_isaac_runtime.sh
+source "${SRC_DIR}/training/rl/scripts/setup_isaac_runtime.sh"
 
 CHECKPOINT_DIR=$(mktemp -d)
 echo "=============================================="
@@ -166,26 +135,36 @@ download_checkpoint() {
   local uri="$1"
   local dst_dir="$2"
 
-  if [[ "${uri}" == runs:/* ]] || [[ "${uri}" == models:/* ]]; then
-    echo "Detected MLflow artifact URI"
+  if [[ "${uri}" == models:/* ]]; then
+    echo "Detected AzureML registered model URI"
+    run_python << MODEL_DOWNLOAD
+import os
+
+from training.utils import bootstrap_azure_ml
+
+# A registered checkpoint is a custom_model pointing at a single .pt artifact, not
+# an MLflow-format model, so mlflow.artifacts.download_artifacts("models:/...")
+# rejects it ("must be a directory containing an mlflow MLmodel"). Download via the
+# AzureML SDK, which handles arbitrary model artifacts.
+_, _, remainder = "${uri}".partition("models:/")
+name, _, version = remainder.partition("/")
+ctx = bootstrap_azure_ml(experiment_name=f"inference-{os.environ.get('TASK', 'unknown')}")
+ctx.client.models.download(name=name, version=version, download_path="${dst_dir}")
+print(f"Downloaded model {name}:{version} to ${dst_dir}")
+MODEL_DOWNLOAD
+  elif [[ "${uri}" == runs:/* ]]; then
+    echo "Detected MLflow run artifact URI"
     run_python << MLFLOW_DOWNLOAD
 import os
+
 import mlflow
 
-sub_id = os.environ.get("AZURE_SUBSCRIPTION_ID", "")
-rg = os.environ.get("AZURE_RESOURCE_GROUP", "")
-ws = os.environ.get("AZUREML_WORKSPACE_NAME", "")
+from training.utils import bootstrap_azure_ml
 
-if sub_id and rg and ws:
-    tracking_uri = (
-        f"azureml://westus3.api.azureml.ms/mlflow/v1.0/subscriptions/{sub_id}"
-        f"/resourceGroups/{rg}/providers/Microsoft.MachineLearningServices"
-        f"/workspaces/{ws}"
-    )
-    print(f"Setting MLflow tracking URI: {tracking_uri}")
-    mlflow.set_tracking_uri(tracking_uri)
-else:
-    print("Warning: Azure ML environment variables not set, using default MLflow tracking")
+# Resolve the workspace's own MLflow tracking URI (region aware) and
+# authenticate via the pod's workload identity, matching the artifact upload
+# step. A hard-coded region endpoint 404s for workspaces in other regions.
+bootstrap_azure_ml(experiment_name=f"inference-{os.environ.get('TASK', 'unknown')}")
 
 local_path = mlflow.artifacts.download_artifacts(artifact_uri="${uri}", dst_path="${dst_dir}")
 print(f"Downloaded to: {local_path}")
@@ -228,6 +207,12 @@ print(f"Downloaded: {local_file}")
 BLOB_DOWNLOAD
   else
     echo "Detected HTTP URL, using curl"
+    if [[ -z "${CHECKPOINT_SHA256}" ]]; then
+      echo "Error: --checkpoint-sha256 is required for plain http(s) checkpoint URLs" >&2
+      echo "  An unauthenticated download has no trust anchor; pin the expected SHA-256 to verify integrity." >&2
+      echo "  (MLflow runs:/ models:/ and *.blob.core.windows.net URIs are authenticated and may omit it.)" >&2
+      exit 1
+    fi
     local filename
     filename=$(basename "${uri}")
     curl -fsSL -o "${dst_dir}/${filename}" "${uri}"
@@ -261,7 +246,9 @@ mkdir -p "${EXPORT_DIR}"
 echo "=============================================="
 echo "Exporting policy to: ${EXPORT_DIR}"
 echo "=============================================="
-run_python "${SCRIPT_DIR}/export_policy.py" \
+# export_policy imports torch, so it runs under the Isaac Sim interpreter that ships the
+# container's torch/CUDA stack (the locked torch is intentionally not installed).
+run_isaaclab "${SRC_DIR}/training/packaging/scripts/export_policy.py" \
     --checkpoint "${CHECKPOINT_FILE}" \
     --output-dir "${EXPORT_DIR}"
 
@@ -283,7 +270,7 @@ run_onnx_inference() {
     return 1
   fi
 
-  if run_isaaclab -m inference.scripts.play_policy \
+  if run_isaaclab "${SCRIPT_DIR}/play_policy.py" \
       --task "${TASK}" \
       --model "${onnx_model}" \
       --format onnx \
@@ -311,7 +298,7 @@ run_jit_inference() {
     return 1
   fi
 
-  if run_isaaclab -m inference.scripts.play_policy \
+  if run_isaaclab "${SCRIPT_DIR}/play_policy.py" \
       --task "${TASK}" \
       --model "${jit_model}" \
       --format jit \
@@ -362,7 +349,7 @@ export MAX_STEPS
 export VIDEO_LENGTH
 export INFERENCE_FORMAT
 
-run_python -m inference.scripts.upload_artifacts
+run_python "${SRC_DIR}/evaluation/metrics/upload_artifacts.py"
 
 echo "=============================================="
 echo "Inference workflow complete"
@@ -370,3 +357,21 @@ echo "=============================================="
 echo "  ONNX: $( [[ ${ONNX_SUCCESS} -eq 1 ]] && echo 'SUCCESS' || echo 'SKIPPED/FAILED' )"
 echo "  JIT:  $( [[ ${JIT_SUCCESS} -eq 1 ]] && echo 'SUCCESS' || echo 'SKIPPED/FAILED' )"
 echo "=============================================="
+
+# Fail the job when the requested inference format did not run. ONNX is best-effort under
+# "both" (JIT is the primary format), so only JIT gates "both"; an explicit onnx/jit request
+# must produce a successful run of that format rather than exiting green with nothing run.
+case "${INFERENCE_FORMAT}" in
+  onnx)
+    if [[ ${ONNX_SUCCESS} -ne 1 ]]; then
+      echo "Error: ONNX inference did not complete successfully" >&2
+      exit 1
+    fi
+    ;;
+  jit | both)
+    if [[ ${JIT_SUCCESS} -ne 1 ]]; then
+      echo "Error: JIT inference did not complete successfully" >&2
+      exit 1
+    fi
+    ;;
+esac

@@ -40,7 +40,7 @@ TRAINING OPTIONS:
     -p, --policy-type TYPE        Policy architecture: act, diffusion (default: act)
     -j, --job-name NAME           Job identifier (default: lerobot-act-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
-    -i, --image IMAGE             Container image (default: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime)
+    -i, --image IMAGE             Container image (default: $DEFAULT_LEROBOT_TRAIN_IMAGE, digest-pinned in scripts/lib/common.sh)
         --policy-repo-id ID       Pre-trained policy for fine-tuning (HuggingFace repo)
         --lerobot-version VER     Specific LeRobot version
 
@@ -51,6 +51,22 @@ TRAINING HYPERPARAMETERS:
         --lr-warmup-steps N       Learning rate warmup steps (default: 1000)
         --eval-freq N             Evaluation frequency
         --save-freq N             Checkpoint save frequency (default: 5000)
+        --log-freq N              MLflow metric log frequency (default: 200)
+
+COMPUTE:
+        --num-gpus N              GPUs to request per task (default: 1). Sets the
+                                  OSMO resources.gpu request; the training wrapper
+                                  auto-detects the visible GPU count via
+                                  torch.cuda.device_count() and enables Accelerate
+                                  multi-GPU launch when N>1. Pair with --platform
+                                  to target a node pool whose SKU exposes >= N GPUs.
+        --mixed-precision MODE    Accelerate mixed-precision mode (no|fp16|bf16);
+                                  default: no. Only effective when more than one
+                                  GPU is visible to the job container.
+        --platform NAME           OSMO platform binding the GPU node pool
+                                  (default: gpu_platform, 1x A100). Use
+                                  gpu_platform_2x for 2x A100 nodes with
+                                  --num-gpus 2.
 
 VALIDATION:
         --val-split RATIO         Validation split ratio (default: 0.1 = 10%%)
@@ -99,6 +115,13 @@ EXAMPLES:
       --blob-url https://stosmorbt3dev001.blob.core.windows.net/datasets/hve-robo/hve-robo-cell \
       --no-val-split \
       -r my-act-model
+
+    # Multi-GPU training (2 GPUs, bf16 mixed precision)
+    submit-osmo-lerobot-training.sh \
+      -d lerobot/aloha_sim_insertion_human \
+      --num-gpus 2 \
+      --platform gpu_platform_2x \
+      --mixed-precision bf16
 EOF
 }
 
@@ -123,13 +146,14 @@ dataset_repo_id="${DATASET_REPO_ID:-}"
 policy_type="${POLICY_TYPE:-act}"
 job_name="${JOB_NAME:-lerobot-act-training}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
-image="${IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime}"
+image="${IMAGE:-$DEFAULT_LEROBOT_TRAIN_IMAGE}"
 policy_repo_id="${POLICY_REPO_ID:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
 dataset_root="${DATASET_ROOT:-/workspace/data}"
 blob_urls=()
 blob_urls_json="[]"
 blob_source_count=0
+use_huggingface_credential="true"
 
 training_steps="${TRAINING_STEPS:-100000}"
 batch_size="${BATCH_SIZE:-32}"
@@ -137,10 +161,14 @@ learning_rate="${LEARNING_RATE:-1e-4}"
 lr_warmup_steps="${LR_WARMUP_STEPS:-1000}"
 eval_freq="${EVAL_FREQ:-}"
 save_freq="${SAVE_FREQ:-5000}"
+log_freq="${LOG_FREQ:-}"
 
 val_split="${VAL_SPLIT:-0.1}"
 val_split_enabled=true
 system_metrics="${SYSTEM_METRICS:-true}"
+num_gpus="${OSMO_NUM_GPUS:-1}"
+mixed_precision="${MIXED_PRECISION:-no}"
+platform="${OSMO_PLATFORM:-gpu_platform}"
 
 experiment_name="${EXPERIMENT_NAME:-}"
 register_checkpoint="${REGISTER_CHECKPOINT:-}"
@@ -148,13 +176,12 @@ register_checkpoint="${REGISTER_CHECKPOINT:-}"
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
+storage_account="${AZURE_STORAGE_ACCOUNT_NAME:-$(get_storage_account)}"
+osmo_container="${OSMO_WORKFLOW_BUCKET:-osmo}"
 azure_authority_host="${AZURE_AUTHORITY_HOST:-https://login.microsoftonline.com}"
 mlflow_retries="${MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES:-3}"
 mlflow_timeout="${MLFLOW_HTTP_REQUEST_TIMEOUT:-60}"
 
-TMP_DIR="$SCRIPT_DIR/.tmp"
-ARCHIVE_PATH="$TMP_DIR/osmo-lerobot-training.zip"
-B64_PATH="$TMP_DIR/osmo-lerobot-training.b64"
 payload_root="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
 
 use_local_osmo=false
@@ -183,9 +210,13 @@ while [[ $# -gt 0 ]]; do
     --lr-warmup-steps)            lr_warmup_steps="$2"; shift 2 ;;
     --eval-freq)                  eval_freq="$2"; shift 2 ;;
     --save-freq)                  save_freq="$2"; shift 2 ;;
+    --log-freq)                   log_freq="$2"; shift 2 ;;
     --val-split)                  val_split="$2"; shift 2 ;;
     --no-val-split)               val_split_enabled=false; shift ;;
     --no-system-metrics)          system_metrics="false"; shift ;;
+    --num-gpus)                   num_gpus="$2"; shift 2 ;;
+    --mixed-precision)            mixed_precision="$2"; shift 2 ;;
+    --platform)                   platform="$2"; shift 2 ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     -r|--register-checkpoint)     register_checkpoint="$2"; shift 2 ;;
     --azure-subscription-id)      subscription_id="$2"; shift 2 ;;
@@ -204,9 +235,12 @@ done
 
 [[ "$use_local_osmo" == "true" ]] && activate_local_osmo
 
-require_tools osmo zip base64 python3
+require_tools osmo zip python3
 
 [[ -d "$REPO_ROOT/training/il" ]] || fatal "Directory training/il not found"
+entry_script="$SCRIPT_DIR/lerobot-train-osmo-entry.sh"
+[[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
+entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
 
 if [[ ${#blob_urls[@]} -gt 0 && -n "$dataset_repo_id" ]]; then
   fatal "--dataset-repo-id and --blob-url are mutually exclusive."
@@ -221,6 +255,7 @@ if [[ ${#blob_urls[@]} -gt 0 ]]; then
   validate_blob_urls "${blob_urls[@]}"
   blob_urls_json=$(json_array "${blob_urls[@]}")
   blob_source_count="${#blob_urls[@]}"
+  use_huggingface_credential="false"
 elif [[ -z "$dataset_repo_id" ]]; then
   fatal "No dataset source specified. Use --dataset-repo-id for HuggingFace Hub, or provide one or more --blob-url sources."
 fi
@@ -232,9 +267,17 @@ case "$policy_type" in
   *) fatal "Unsupported policy type: $policy_type (use: act, diffusion)" ;;
 esac
 
+case "$mixed_precision" in
+  no|fp16|bf16) ;;
+  *) fatal "--mixed-precision must be one of: no, fp16, bf16 (got '$mixed_precision')" ;;
+esac
+
+[[ "$num_gpus" =~ ^[1-9][0-9]*$ ]] || fatal "--num-gpus must be a positive integer (got '$num_gpus')"
+
 [[ -z "$subscription_id" ]] && fatal "Azure subscription ID required (set AZURE_SUBSCRIPTION_ID or deploy infra)"
 [[ -z "$resource_group" ]] && fatal "Azure resource group required (set AZURE_RESOURCE_GROUP or deploy infra)"
 [[ -z "$workspace_name" ]] && fatal "Azure ML workspace name required (set AZUREML_WORKSPACE_NAME or deploy infra)"
+[[ -z "$storage_account" ]] && fatal "Azure storage account required (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
 
 [[ "$val_split_enabled" == "false" ]] && val_split="0"
 
@@ -253,46 +296,30 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Save Freq" "$save_freq"
   print_kv "Val Split" "$val_split"
   print_kv "System Metrics" "$system_metrics"
+  print_kv "Num GPUs" "$num_gpus"
+  print_kv "Mixed Precision" "$mixed_precision"
+  print_kv "Platform" "$platform"
   [[ $blob_source_count -gt 0 ]] && print_kv "Blob URL Count" "$blob_source_count"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
   print_kv "Subscription" "$subscription_id"
   print_kv "Resource Group" "$resource_group"
   print_kv "Workspace" "$workspace_name"
+  print_kv "Storage Account" "$storage_account"
+  print_kv "Code Storage" "azure://${storage_account}/${osmo_container}/osmo-code"
   print_kv "Workflow" "$workflow"
   exit 0
 fi
 
 #------------------------------------------------------------------------------
-# Package Training Payload
+# Package and Upload Training Payload
 #------------------------------------------------------------------------------
 
-info "Packaging training payload..."
-mkdir -p "$TMP_DIR"
-rm -f "$ARCHIVE_PATH" "$B64_PATH"
-
-(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/il training/__init__.py training/stream.py training/utils \
-  -x "**/__pycache__/*" \
-  -x "*.pyc" \
-  -x "*.pyo" \
-  -x "**/.pytest_cache/*" \
-  -x "**/.mypy_cache/*" \
-  -x "**/*.egg-info/*") || fatal "Failed to create training archive"
-
-[[ -f "$ARCHIVE_PATH" ]] || fatal "Archive not created: $ARCHIVE_PATH"
-
-if base64 --help 2>&1 | grep -q '\-\-input'; then
-  base64 --input "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-else
-  base64 -i "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-fi
-
-[[ -s "$B64_PATH" ]] || fatal "Failed to encode archive"
-
-archive_size=$(wc -c < "$ARCHIVE_PATH" | tr -d ' ')
-b64_size=$(wc -c < "$B64_PATH" | tr -d ' ')
-info "Payload: ${archive_size} bytes (${b64_size} bytes base64)"
-
-encoded_payload=$(<"$B64_PATH")
+info "Packaging and uploading training payload..."
+code_url=$(stage_and_upload_code "$REPO_ROOT" \
+  "azure://${storage_account}/${osmo_container}/osmo-code" \
+  training/il training/__init__.py training/stream.py training/utils) \
+  || fatal "Failed to stage and upload training payload"
+info "Training payload uploaded: $code_url"
 
 #------------------------------------------------------------------------------
 # Build Submission Command
@@ -301,11 +328,13 @@ encoded_payload=$(<"$B64_PATH")
 submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
-  "encoded_archive=$encoded_payload"
+  --set-string "entry_script_b64=$entry_script_b64"
+  "code_url=$code_url"
   "payload_root=$payload_root"
   "dataset_repo_id=$dataset_repo_id"
   "dataset_root=$dataset_root"
   "blob_urls=$blob_urls_json"
+  "use_huggingface_credential=$use_huggingface_credential"
   "policy_type=$policy_type"
   "job_name=$job_name"
   "output_dir=$output_dir"
@@ -316,6 +345,9 @@ submit_args=(
   "save_freq=$save_freq"
   "val_split=$val_split"
   "system_metrics=$system_metrics"
+  "num_gpus=$num_gpus"
+  "mixed_precision=$mixed_precision"
+  "platform=$platform"
   "azure_authority_host=$azure_authority_host"
   "mlflow_token_refresh_retries=$mlflow_retries"
   "mlflow_http_request_timeout=$mlflow_timeout"
@@ -324,6 +356,7 @@ submit_args=(
 [[ -n "$policy_repo_id" ]]      && submit_args+=("policy_repo_id=$policy_repo_id")
 [[ -n "$lerobot_version" ]]     && submit_args+=("lerobot_version=$lerobot_version")
 [[ -n "$eval_freq" ]]           && submit_args+=("eval_freq=$eval_freq")
+[[ -n "$log_freq" ]]            && submit_args+=("log_freq=$log_freq")
 [[ -n "$experiment_name" ]]     && submit_args+=("experiment_name=$experiment_name")
 [[ -n "$register_checkpoint" ]] && submit_args+=("register_checkpoint=$register_checkpoint")
 
@@ -348,7 +381,10 @@ info "  Batch Size: $batch_size"
 info "  Learning Rate: $learning_rate"
 info "  Val Split: $val_split"
 info "  System Metrics: $system_metrics"
-info "  Payload: ${archive_size} bytes"
+info "  Num GPUs: $num_gpus"
+info "  Mixed Precision: $mixed_precision"
+info "  Platform: $platform"
+info "  Code URL: $code_url"
 [[ $blob_source_count -gt 0 ]] && info "  Data Source: Azure Blob URLs ($blob_source_count)"
 [[ -n "$policy_repo_id" ]] && info "  Fine-tune from: $policy_repo_id"
 [[ -n "$register_checkpoint" ]] && info "  Register model: $register_checkpoint"
@@ -370,6 +406,9 @@ print_kv "Training Steps" "$training_steps"
 print_kv "Batch Size" "$batch_size"
 print_kv "Learning Rate" "$learning_rate"
 print_kv "Val Split" "$val_split"
+print_kv "Num GPUs" "$num_gpus"
+print_kv "Mixed Precision" "$mixed_precision"
+print_kv "Platform" "$platform"
 print_kv "Register Model" "${register_checkpoint:-<none>}"
 print_kv "Workflow" "$workflow"
 

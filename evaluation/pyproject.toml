@@ -8,21 +8,26 @@ dependencies = [
     "azure-core==1.41.0",
     "azure-storage-blob==12.30.0",
     "azure-identity==1.25.3",
-    "azure-ai-ml==1.34.0",
+    "azure-ai-ml==1.34.1",
     "marshmallow==3.26.2",
-    "mlflow==3.13.0",
+    "mlflow==3.14.0",
     "packaging==25.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "onnx==1.21.0",
-    "onnxscript==0.7.0",
-    "onnxruntime-gpu==1.26.0",
+    "onnx==1.22.0",
+    "onnxscript==0.7.1",
+    "onnxruntime-gpu==1.28.0",
     "toml==0.10.2",
     "gymnasium==1.3.0",
     "torch==2.10.0",
+    "transformers==5.14.1",
     "tensordict==0.13.0",
-    "lerobot==0.5.1",
+    # lerobot 0.6.0 ships a minimal facade: the base install no longer bundles
+    # dataset dependencies. The SIL evaluation reads LeRobot dataset videos/parquet
+    # (av, pyarrow) and loads ACT checkpoints, so the [dataset] extra is required to
+    # restore av, pyarrow, pandas, datasets, and torchcodec.
+    "lerobot[dataset]==0.6.0",
 ]
 
 [build-system]
@@ -30,10 +35,6 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-override-dependencies = [
-    # Override lerobot's vulnerable diffusers transitive range for GHSA-98h9-4798-4q5v.
-    "diffusers==0.38.0",
-]
 package = false
 
 [tool.uv.pip]
@@ -41,11 +42,11 @@ prerelease = "allow"
 
 [dependency-groups]
 dev = [
-    "pytest==9.0.3",
+    "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
-    "hypothesis==6.155.2",
-    "matplotlib==3.10.9",
+    "hypothesis==6.161.6",
+    "matplotlib==3.11.1",
     "numpy==2.2.6",
     "torch==2.10.0",
 ]
@@ -58,6 +59,7 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--cov=sil",
+    "--cov=hil",
     "--cov=metrics",
     "--cov-report=term-missing",
     "--cov-report=xml:logs/coverage.xml",
@@ -69,7 +71,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["sil", "metrics"]
+source = ["sil", "hil", "metrics"]
 branch = true
 omit = [
     "**/conftest.py",
@@ -77,6 +79,10 @@ omit = [
     "sil/monitor_checkpoints.py",
     "sil/play.py",
     "sil/play_policy.py",
+    # CLI analysis scripts that require heavy media/dataframe deps (opencv, av,
+    # pandas) not installed in the lean evaluation CI environment.
+    "metrics/analyze_action_smoothness.py",
+    "metrics/detect_initial_objects.py",
 ]
 
 [tool.coverage.report]

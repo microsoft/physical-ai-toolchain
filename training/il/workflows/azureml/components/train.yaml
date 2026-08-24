@@ -1,0 +1,83 @@
+# LeRobot Train Component (Pipeline)
+#
+# Wraps the existing training/il/scripts/lerobot/azureml-train-entry.sh as an
+# AzureML CommandComponent for use inside lerobot-pipeline.yaml.
+#
+# Code root is the repository root so the entry script's hard-coded paths
+# (training/il/lerobot/uv.lock, training.il.scripts.lerobot.train,
+# etc.) resolve without modification.
+#
+# Compute and environment_variables (DATASET_REPO_ID, POLICY_TYPE, JOB_NAME,
+# TRAINING_*, MLFLOW_*, AZURE_*, etc.) are set at the parent pipeline job
+# step, not in this Component, because the AzureML Kubernetes extension does
+# not substitute ${{inputs.X}} template refs at runtime.
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+name: lerobot_train
+display_name: LeRobot Training
+version: "1"
+description: >-
+  Run LeRobot imitation learning training (ACT / Diffusion / pi0) with
+  MLflow integration and checkpoint upload.
+
+code: ../../../../..
+
+inputs:
+  prepared_dataset:
+    type: uri_folder
+    optional: true
+    description: Dataset prepared by the preprocess step (or mounted directly).
+  dataset_repo_id:
+    type: string
+    description: HuggingFace-style dataset repo id (set as DATASET_REPO_ID at the step level).
+  policy_type:
+    type: string
+    default: act
+    description: Policy type forwarded to lerobot-train (act / diffusion / pi0).
+  job_name:
+    type: string
+    description: Pipeline job display name (used for MLflow run naming).
+
+outputs:
+  checkpoints:
+    type: uri_folder
+    mode: upload
+    description: Trained checkpoint folder uploaded by the MLflow training wrapper.
+
+environment:
+  # Digest-pinned base image; keep in sync with DEFAULT_LEROBOT_TRAIN_IMAGE in
+  # scripts/lib/common.sh (both refreshed by scripts/update-image-digests.sh).
+  # An inline image yields an anonymous, content-hashed environment, so a base
+  # image change never collides with an immutable registered environment version.
+  image: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be
+
+# Bridge pipeline-mounted `prepared_dataset` input into the existing entry
+# script's `AZURE_ML_INPUT_dataset_asset_N` ABI so the entry script is reused
+# without modification. preprocess.py writes the dataset to
+# "{prepared_dataset}/{dataset_repo_id}/", so pass that leaf directory to
+# LeRobot. When `prepared_dataset` is not provided (e.g. when the Component is
+# invoked standalone with DATASET_ASSET_COUNT and DATASET_ASSETS set externally),
+# the bridge is a no-op.
+#
+# train.py writes checkpoints under OUTPUT_DIR/checkpoints. Keep OUTPUT_DIR on
+# local container storage because LeRobot refuses to start when the output dir
+# already exists, while AzureML pre-creates output mount directories. Bridge the
+# component's lower-case output env var to the upper-case name the wrapper reads
+# when mirroring checkpoints at job exit.
+command: >-
+  bash -c '
+  set -euo pipefail;
+  source training/il/scripts/lerobot/lerobot-azureml.sh;
+  if [[ -n "${AZURE_ML_INPUT_prepared_dataset:-}" ]]; then
+    require_relative_dataset_repo_id;
+    export AZURE_ML_INPUT_dataset_asset_0="$AZURE_ML_INPUT_prepared_dataset/$DATASET_REPO_ID";
+    export DATASET_ASSET_COUNT=1;
+    echo "[BRIDGE] Wired prepared_dataset -> AZURE_ML_INPUT_dataset_asset_0=$AZURE_ML_INPUT_dataset_asset_0";
+  fi;
+  if [[ -n "${AZURE_ML_OUTPUT_checkpoints:-}" ]]; then
+    export AZURE_ML_OUTPUT_CHECKPOINTS="$AZURE_ML_OUTPUT_checkpoints";
+  fi;
+  export OUTPUT_DIR="${OUTPUT_DIR:-/workspace/outputs/train}";
+  echo "[BRIDGE] OUTPUT_DIR=$OUTPUT_DIR";
+  bash training/il/scripts/lerobot/azureml-train-entry.sh'

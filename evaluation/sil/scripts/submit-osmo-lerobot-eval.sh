@@ -33,19 +33,23 @@ Evaluates trained policies from HuggingFace Hub or Azure ML model registry.
 
 POLICY SOURCE (one required):
         --policy-repo-id ID       HuggingFace policy repository (e.g., user/trained-policy)
+        --policy-revision SHA      HuggingFace commit SHA to pin the policy download (required for Hub)
         --from-aml-model          Load policy from AzureML model registry instead of HuggingFace
         --model-name NAME         AzureML model registry name (e.g., hve-robo-act-model)
         --model-version VERSION   AzureML model version (e.g., 4)
+        --builtin-policy          Mint a base policy from LeRobot's built-in architecture
+                                  (no external policy dependency; requires --from-blob-dataset)
 
 DATASET SOURCE (one required):
     -d, --dataset-repo-id ID     HuggingFace dataset for replay evaluation
+        --dataset-revision SHA    HuggingFace commit SHA to pin the dataset download (required for Hub)
         --from-blob-dataset       Download dataset from Azure Blob Storage
         --storage-account NAME    Azure storage account (default: from Terraform)
         --storage-container NAME  Blob container name (default: datasets)
         --blob-prefix PREFIX      Blob path prefix (e.g., hve-robo/hve-robo-cell)
     -j, --job-name NAME           Job identifier (default: lerobot-eval)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/eval)
-    -i, --image IMAGE             Container image (default: pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime)
+    -i, --image IMAGE             Container image (default: $DEFAULT_LEROBOT_EVAL_IMAGE, digest-pinned in scripts/lib/common.sh)
         --lerobot-version VER     Specific LeRobot version (default: latest)
         --eval-episodes N         Number of evaluation episodes (default: 10)
         --eval-batch-size N       Evaluation batch size (default: 10)
@@ -77,13 +81,15 @@ EOF
 # Defaults
 #------------------------------------------------------------------------------
 
-workflow="$REPO_ROOT/workflows/osmo/lerobot-infer.yaml"
+workflow="$REPO_ROOT/evaluation/sil/workflows/osmo/lerobot-eval.yaml"
 policy_repo_id="${POLICY_REPO_ID:-}"
+policy_revision="${POLICY_REVISION:-}"
 policy_type="${POLICY_TYPE:-act}"
 dataset_repo_id="${DATASET_REPO_ID:-}"
+dataset_revision="${DATASET_REVISION:-}"
 job_name="${JOB_NAME:-lerobot-eval}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/eval}"
-image="${IMAGE:-pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime}"
+image="${IMAGE:-$DEFAULT_LEROBOT_EVAL_IMAGE}"
 lerobot_version="${LEROBOT_VERSION:-}"
 
 eval_episodes="${EVAL_EPISODES:-10}"
@@ -98,7 +104,9 @@ config_preview=false
 from_aml_model=false
 model_name="${AML_MODEL_NAME:-}"
 model_version="${AML_MODEL_VERSION:-}"
+builtin_policy="${BUILTIN_POLICY:-false}"
 from_blob_dataset=false
+use_huggingface_credential="true"
 storage_account="${BLOB_STORAGE_ACCOUNT:-${AZURE_STORAGE_ACCOUNT_NAME:-}}"
 storage_container="${BLOB_STORAGE_CONTAINER:-datasets}"
 blob_prefix="${BLOB_PREFIX:-}"
@@ -106,6 +114,9 @@ blob_prefix="${BLOB_PREFIX:-}"
 subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
+
+code_storage_account="${AZURE_STORAGE_ACCOUNT_NAME:-$(get_storage_account)}"
+osmo_container="${OSMO_WORKFLOW_BUCKET:-osmo}"
 
 forward_args=()
 
@@ -118,8 +129,10 @@ while [[ $# -gt 0 ]]; do
     -h|--help)                    show_help; exit 0 ;;
     -w|--workflow)                workflow="$2"; shift 2 ;;
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
+    --policy-revision)            policy_revision="$2"; shift 2 ;;
     -p|--policy-type)             policy_type="$2"; shift 2 ;;
     -d|--dataset-repo-id)         dataset_repo_id="$2"; shift 2 ;;
+    --dataset-revision)           dataset_revision="$2"; shift 2 ;;
     -j|--job-name)                job_name="$2"; shift 2 ;;
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
     -i|--image)                   image="$2"; shift 2 ;;
@@ -130,6 +143,7 @@ while [[ $# -gt 0 ]]; do
     --mlflow-enable)              mlflow_enable="true"; shift ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --from-aml-model)             from_aml_model=true; shift ;;
+    --builtin-policy)             builtin_policy=true; shift ;;
     --model-name)                 model_name="$2"; shift 2 ;;
     --model-version)              model_version="$2"; shift 2 ;;
     --from-blob-dataset)          from_blob_dataset=true; shift ;;
@@ -153,11 +167,13 @@ done
 
 [[ "$use_local_osmo" == "true" ]] && activate_local_osmo
 
-require_tools osmo
-require_tools osmo zip base64
+require_tools osmo zip
 
-# Policy source validation
-if [[ "$from_aml_model" == "true" ]]; then
+# Policy source validation — exactly one of: --builtin-policy, --from-aml-model, --policy-repo-id
+if [[ "$builtin_policy" == "true" ]]; then
+  [[ "$from_aml_model" == "true" ]] && fatal "--builtin-policy cannot be combined with --from-aml-model"
+  [[ -n "$policy_repo_id" ]] && fatal "--builtin-policy cannot be combined with --policy-repo-id"
+elif [[ "$from_aml_model" == "true" ]]; then
   [[ -z "$model_name" ]]    && fatal "--model-name is required with --from-aml-model"
   [[ -z "$model_version" ]] && fatal "--model-version is required with --from-aml-model"
   policy_repo_id="${model_name}:${model_version}"
@@ -168,7 +184,13 @@ elif [[ "$policy_repo_id" == *:* ]]; then
   from_aml_model=true
   info "Auto-detected AzureML model: ${model_name} version ${model_version}"
 else
-  [[ -z "$policy_repo_id" ]] && fatal "--policy-repo-id is required (or use --from-aml-model)"
+  [[ -z "$policy_repo_id" ]] && fatal "A policy source is required: use --builtin-policy, --policy-repo-id, or --from-aml-model"
+  require_hf_pin "$policy_repo_id" "$policy_revision" "--policy-revision"
+fi
+
+# The built-in mint trains a single step from a local dataset, so it requires the blob dataset source.
+if [[ "$builtin_policy" == "true" && "$from_blob_dataset" != "true" ]]; then
+  fatal "--builtin-policy requires --from-blob-dataset (the base policy is minted from the local dataset)"
 fi
 
 # Dataset source validation
@@ -178,6 +200,11 @@ if [[ "$from_blob_dataset" == "true" ]]; then
   [[ -z "$storage_account" ]] && fatal "--storage-account is required with --from-blob-dataset"
 else
   [[ -z "$dataset_repo_id" ]] && fatal "--dataset-repo-id is required (or use --from-blob-dataset)"
+  [[ -z "$dataset_revision" ]] && fatal "--dataset-revision is required with --dataset-repo-id"
+fi
+
+if [[ "$from_blob_dataset" == "true" && ( "$from_aml_model" == "true" || "$builtin_policy" == "true" ) ]]; then
+  use_huggingface_credential="false"
 fi
 
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
@@ -198,6 +225,7 @@ if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Policy" "$policy_repo_id"
   print_kv "Policy Type" "$policy_type"
+  [[ "$builtin_policy" == "true" ]] && print_kv "Policy Source" "LeRobot built-in (minted base policy)"
   print_kv "Job Name" "$job_name"
   print_kv "Image" "$image"
   print_kv "Eval Episodes" "$eval_episodes"
@@ -211,41 +239,32 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Subscription" "${subscription_id:-<not set>}"
   print_kv "Resource Group" "${resource_group:-<not set>}"
   print_kv "Workspace" "${workspace_name:-<not set>}"
+  print_kv "Storage Account" "${code_storage_account:-<not set>}"
+  print_kv "Code Storage" "azure://${code_storage_account}/${osmo_container}/osmo-code"
   print_kv "Workflow" "$workflow"
   exit 0
 fi
 
 #------------------------------------------------------------------------------
-# Package Runtime Payload
+# Package and Upload Runtime Payload
 #------------------------------------------------------------------------------
 
-TMP_DIR="$SCRIPT_DIR/.tmp"
-ARCHIVE_PATH="$TMP_DIR/osmo-lerobot-inference.zip"
-B64_PATH="$TMP_DIR/osmo-lerobot-inference.b64"
 payload_root="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
+[[ -z "$code_storage_account" ]] && fatal "Azure storage account required for code upload (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
 
-info "Packaging LeRobot runtime payload..."
-mkdir -p "$TMP_DIR"
-rm -f "$ARCHIVE_PATH" "$B64_PATH"
+# Base64-encode the OSMO entry script (a lintable repo file) so the workflow
+# YAML stays script-free; OSMO writes it as a *.b64 file the task bootstrap
+# decodes. The evaluation Python modules travel inside the code archive below.
+entry_script="$SCRIPT_DIR/osmo-lerobot-eval-entry.sh"
+[[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
+entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
 
-(cd "$REPO_ROOT" && zip -qr "$ARCHIVE_PATH" training/il evaluation/sil \
-  -x "**/__pycache__/*" \
-  -x "*.pyc" \
-  -x "*.pyo" \
-  -x "**/.pytest_cache/*" \
-  -x "**/.mypy_cache/*" \
-  -x "**/*.egg-info/*") || fatal "Failed to create runtime archive"
-
-[[ -f "$ARCHIVE_PATH" ]] || fatal "Archive not created: $ARCHIVE_PATH"
-
-if base64 --help 2>&1 | grep -q '\-\-input'; then
-  base64 --input "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-else
-  base64 -i "$ARCHIVE_PATH" | tr -d '\n' > "$B64_PATH"
-fi
-
-[[ -s "$B64_PATH" ]] || fatal "Failed to encode archive"
-encoded_payload=$(<"$B64_PATH")
+info "Packaging and uploading LeRobot runtime payload..."
+code_url=$(stage_and_upload_code "$REPO_ROOT" \
+  "azure://${code_storage_account}/${osmo_container}/osmo-code" \
+  training/il evaluation/sil evaluation/metrics workflows/azureml) \
+  || fatal "Failed to stage and upload runtime payload"
+info "Runtime payload uploaded: $code_url"
 
 #------------------------------------------------------------------------------
 # Build Submission Command
@@ -254,7 +273,8 @@ encoded_payload=$(<"$B64_PATH")
 submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
-  "encoded_archive=$encoded_payload"
+  "code_url=$code_url"
+  "entry_script_b64=$entry_script_b64"
   "payload_root=$payload_root"
   "policy_repo_id=$policy_repo_id"
   "policy_type=$policy_type"
@@ -263,9 +283,12 @@ submit_args=(
   "eval_episodes=$eval_episodes"
   "eval_batch_size=$eval_batch_size"
   "record_video=$record_video"
+  "use_huggingface_credential=$use_huggingface_credential"
 )
 
+[[ -n "$policy_revision" ]] && submit_args+=("policy_revision=$policy_revision")
 [[ -n "$dataset_repo_id" ]]  && submit_args+=("dataset_repo_id=$dataset_repo_id")
+[[ -n "$dataset_revision" ]] && submit_args+=("dataset_revision=$dataset_revision")
 [[ -n "$lerobot_version" ]]  && submit_args+=("lerobot_version=$lerobot_version")
 [[ "$mlflow_enable" == "true" ]] && submit_args+=("mlflow_enable=true")
 [[ -n "$experiment_name" ]]  && submit_args+=("experiment_name=$experiment_name")
@@ -275,6 +298,9 @@ submit_args=(
 if [[ "$from_aml_model" == "true" ]]; then
   submit_args+=("aml_model_name=$model_name" "aml_model_version=$model_version")
 fi
+
+# Built-in base policy mint
+[[ "$builtin_policy" == "true" ]] && submit_args+=("builtin_policy=true")
 
 # Azure Blob dataset source
 if [[ "$from_blob_dataset" == "true" ]]; then
@@ -297,6 +323,7 @@ info "  Policy Type: $policy_type"
 info "  Job Name: $job_name"
 info "  Eval Episodes: $eval_episodes"
 info "  Image: $image"
+[[ "$builtin_policy" == "true" ]] && info "  Policy source: LeRobot built-in (minted base policy)"
 [[ -n "$dataset_repo_id" ]] && info "  Dataset: $dataset_repo_id"
 [[ "$from_blob_dataset" == "true" ]] && info "  Dataset: Azure Blob ($storage_account/$storage_container/$blob_prefix)"
 [[ "$from_aml_model" == "true" ]] && info "  Model source: AzureML registry (${model_name}:${model_version})"

@@ -1,10 +1,10 @@
 /**
  * Object detection component exports.
+ *
+ * The standalone detection panel was relocated to
+ * `@/components/annotation-panel/ObjectDetectionWidget` (open-vocabulary,
+ * single-frame). Only the canvas overlay viewer is retained here for any
+ * future per-frame visualisation needs.
  */
 
-export { DetectionCharts } from './DetectionCharts'
-export { DetectionFilters } from './DetectionFilters'
-export { DetectionPanel } from './DetectionPanel'
-export { DetectionTab } from './DetectionTab'
-export { DetectionTimeline } from './DetectionTimeline'
 export { DetectionViewer } from './DetectionViewer'

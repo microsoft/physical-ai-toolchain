@@ -30,7 +30,18 @@ jobs:
     permissions:
       contents: read
 
-  # Create or update issues for stale documentation (one issue per file)
+  # Container base-image CVE rescan (Trivy, soft-fail). Re-evaluates already-merged
+  # base images and surfaces newly-disclosed CVEs to the Security tab without
+  # failing the run; the PR gate only sees images at merge time.
+  container-rescan:
+    name: Container Rescan
+    uses: ./.github/workflows/container-scan.yml
+    with:
+      soft-fail: true
+    permissions:
+      contents: read
+      security-events: write  # Required for SARIF upload to Security tab
+
   create-stale-docs-issues:
     name: Create or Update Issues for Stale Documentation
     needs: [msdate-freshness]

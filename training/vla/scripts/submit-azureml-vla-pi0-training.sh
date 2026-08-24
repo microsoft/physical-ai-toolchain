@@ -4,8 +4,8 @@
 # policies from datasets in Azure Blob Storage (canonical) or HuggingFace (legacy
 # fallback via --hf-dataset). Reuses the policy-agnostic IL training entry script
 # (training/il/scripts/lerobot/azureml-train-entry.sh) with a VLA-specific
-# requirements lockfile injected via LEROBOT_REQUIREMENTS.
-# cspell:ignore alreadyexists
+# dependency project injected via LEROBOT_PROJECT.
+# cspell:ignore alreadyexists paligemma
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,14 +80,12 @@ TRAINING OPTIONS:
                                   Optimizer, scheduler, and step counter start fresh.
                                   Mutually exclusive with --policy-repo-id.
         --lerobot-version VER     Specific LeRobot version or "latest" (default: latest)
-        --lerobot-requirements PATH
-                                  Override compiled requirements lockfile, given as
-                                  a repo-relative path (e.g.
-                                  training/vla/lerobot/requirements.txt). The
-                                  lockfile must live inside training/ so it ships
-                                  to the container via the code asset; absolute
-                                  paths are rejected.
-                                  (default: training/vla/lerobot/requirements.txt)
+        --lerobot-project PATH    Override the LeRobot dependency project, given as
+                                  a repo-relative path (default:
+                                  training/vla/lerobot). The directory must contain
+                                  pyproject.toml and uv.lock inside training/ so it
+                                  ships with the code asset; absolute paths are
+                                  rejected.
 
 TRAINING HYPERPARAMETERS:
         --training-steps N        Total training iterations
@@ -314,7 +312,7 @@ output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
 policy_repo_id="${POLICY_REPO_ID:-}"
 init_from_policy_model="${INIT_FROM_POLICY_MODEL:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
-lerobot_requirements="${LEROBOT_REQUIREMENTS:-training/vla/lerobot/requirements.txt}"
+lerobot_project="${LEROBOT_PROJECT:-training/vla/lerobot}"
 
 dataset_asset_count_max=64
 dataset_assets=()
@@ -364,7 +362,7 @@ while [[ $# -gt 0 ]]; do
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
     --init-from-policy-model)     init_from_policy_model="$2"; shift 2 ;;
     --lerobot-version)            lerobot_version="$2"; shift 2 ;;
-    --lerobot-requirements)       lerobot_requirements="$2"; shift 2 ;;
+    --lerobot-project)            lerobot_project="$2"; shift 2 ;;
     --dataset-asset)              dataset_assets+=("$2"); shift 2 ;;
     --blob-url)                   blob_urls+=("$2"); shift 2 ;;
     --dataset-root)               dataset_root="$2"; shift 2 ;;
@@ -485,17 +483,19 @@ if [[ -n "$init_from_policy_model" ]]; then
   esac
 fi
 
-# Resolve the compiled lockfile against the repo so a missing file is caught
-# locally before submission. The path injected into the container is left
-# repo-relative — the entry script's symlink restores the training/ prefix.
-case "$lerobot_requirements" in
+# Resolve the dependency project against the repo so missing metadata is caught
+# locally before submission. The path injected into the container stays
+# repo-relative because the entry script restores the training/ prefix.
+case "$lerobot_project" in
   /*)
-    fatal "--lerobot-requirements must be a repo-relative path (got: $lerobot_requirements). The value is forwarded into the training container via LEROBOT_REQUIREMENTS and resolved against the mounted code snapshot — absolute host paths do not exist there."
+    fatal "--lerobot-project must be a repo-relative path (got: $lerobot_project). The value is forwarded into the training container via LEROBOT_PROJECT and resolved against the mounted code snapshot."
     ;;
 esac
-_lockfile_local="$REPO_ROOT/$lerobot_requirements"
-[[ -f "$_lockfile_local" ]] || fatal \
-  "--lerobot-requirements: lockfile not found at $_lockfile_local. Run 'cd training/vla/lerobot && uv pip compile pyproject.toml -o requirements.txt --python-version 3.12 --python-platform x86_64-manylinux_2_28' to regenerate."
+_project_local="$REPO_ROOT/$lerobot_project"
+[[ -f "$_project_local/pyproject.toml" ]] || fatal \
+  "--lerobot-project: pyproject.toml not found at $_project_local"
+[[ -f "$_project_local/uv.lock" ]] || fatal \
+  "--lerobot-project: uv.lock not found at $_project_local. Run 'cd training/vla/lerobot && uv lock' to regenerate."
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
@@ -527,7 +527,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Mixed Precision" "$mixed_precision"
   print_kv "HF Token" "$([[ -n "$hf_token" ]] && echo '<set>' || echo '<none>')"
   print_kv "Environment" "${environment_name}:${environment_version}"
-  print_kv "Requirements" "$lerobot_requirements"
+  print_kv "LeRobot Project" "$lerobot_project"
   exit 0
 fi
 
@@ -571,7 +571,7 @@ fi
 # The AzureML job runs training/il/scripts/lerobot/azureml-train-entry.sh, which
 # is uploaded as part of the code asset. The entry script is policy-agnostic;
 # VLA selects pi0/pi0_fast/pi05 via POLICY_TYPE and points the dependency
-# install at the VLA-specific lockfile via LEROBOT_REQUIREMENTS below.
+# install from the VLA-specific lock via LEROBOT_PROJECT below.
 # Keeping the inline command short avoids multi-line YAML escaping issues with
 # the Azure ML K8s extension.
 #------------------------------------------------------------------------------
@@ -633,10 +633,9 @@ fi
 # the container. Set every env var the entry script reads directly via
 # `--set environment_variables.X=Y` so the values are baked into the job spec.
 #
-# LEROBOT_REQUIREMENTS is the VLA-specific opt-in: the entry script defaults to
-# the IL lockfile (training/il/lerobot/requirements.txt); the VLA submit
-# script overrides it to install lerobot[pi] + transformers + scipy + the rest
-# of the pi0 dependency closure.
+# LEROBOT_PROJECT is the VLA-specific opt-in: the entry script defaults to the
+# IL project (training/il/lerobot); the VLA submit script overrides it to export
+# and install the VLA lock containing lerobot[pi], transformers, and scipy.
 az_args+=(
   --set "environment_variables.AZURE_SUBSCRIPTION_ID=$subscription_id"
   --set "environment_variables.AZURE_RESOURCE_GROUP=$resource_group"
@@ -649,7 +648,7 @@ az_args+=(
   --set "environment_variables.OUTPUT_DIR=$output_dir"
   --set "environment_variables.SAVE_FREQ=$save_freq"
   --set "environment_variables.MIXED_PRECISION=$mixed_precision"
-  --set "environment_variables.LEROBOT_REQUIREMENTS=$lerobot_requirements"
+  --set "environment_variables.LEROBOT_PROJECT=$lerobot_project"
 )
 
 [[ -n "$policy_repo_id" ]]      && az_args+=(--set "environment_variables.POLICY_REPO_ID=$policy_repo_id")
@@ -686,7 +685,7 @@ info "  Dataset: $dataset_repo_id"
 info "  Policy: $policy_type"
 info "  Job Name: $job_name"
 info "  Image: $image"
-info "  Requirements: $lerobot_requirements"
+info "  LeRobot Project: $lerobot_project"
 [[ ${#blob_urls[@]} -gt 0 ]] && info "  Data Source: Blob URLs (${#blob_urls[@]} dataset(s))"
 [[ ${#dataset_assets[@]} -gt 0 ]] && info "  Data Source: AzureML Data Assets (${#dataset_assets[@]} asset(s))"
 
@@ -727,7 +726,7 @@ print_kv "Compute" "${compute:-<not set>}"
 print_kv "Instance Type" "$instance_type"
 print_kv "Mixed Precision" "$mixed_precision"
 print_kv "Environment" "${environment_name}:${environment_version}"
-print_kv "Requirements" "$lerobot_requirements"
+print_kv "LeRobot Project" "$lerobot_project"
 print_kv "Workspace" "$workspace_name"
 [[ ${#blob_urls[@]} -gt 0 ]] && print_kv "Blob Datasets" "${#blob_urls[@]}"
 [[ ${#dataset_assets[@]} -gt 0 ]] && print_kv "Data Assets" "${#dataset_assets[@]}"

@@ -137,6 +137,16 @@ jobs:
       contents: read
       id-token: write
 
+  # Pytest: shared CI scripts component
+  pytest-shared-ci:
+    name: Pytest Shared CI
+    uses: ./.github/workflows/pytest-shared-ci.yml
+    with:
+      code-coverage: true
+    permissions:
+      contents: read
+      id-token: write
+
   # Dataviewer frontend lint, type-check, and build
   dataviewer-frontend-tests:
     name: Dataviewer Frontend Tests
@@ -227,7 +237,7 @@ jobs:
     name: Go Tests
     uses: ./.github/workflows/go-tests.yml
     with:
-      soft-fail: true
+      soft-fail: false
       code-coverage: true
     permissions:
       contents: read
@@ -259,6 +269,17 @@ jobs:
       security-events: write
       actions: read
 
+  # GPU-free import smoke gate. No path filter on main: run every domain depth.
+  smoke:
+    name: Smoke
+    uses: ./.github/workflows/smoke-cpu.yml
+    with:
+      rl: true
+      il: true
+      dataviewer: true
+    permissions:
+      contents: read
+
   # Automated release PR management via release-please
   release-please:
     needs:
@@ -276,6 +297,7 @@ jobs:
       - pytest-dm-tools
       - pytest-data-pipeline
       - pytest-inference
+      - pytest-shared-ci
       - dataviewer-frontend-tests
       - dataviewer-backend-pytests
       - evaluation-pytests
@@ -326,7 +348,7 @@ jobs:
 
       - name: Checkout release PR branch
         if: ${{ steps.release.outputs.prs_created == 'true' }}
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
           token: ${{ steps.app-token.outputs.token }}
@@ -334,7 +356,7 @@ jobs:
 
       - name: Setup uv
         if: ${{ steps.release.outputs.prs_created == 'true' }}
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
 
       - name: Regenerate uv.lock
         if: ${{ steps.release.outputs.prs_created == 'true' }}
@@ -359,66 +381,18 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          $today = [datetime]::UtcNow.ToString('yyyy-MM-dd')
-          $path = 'CHANGELOG.md'
-          $content = Get-Content -Raw -LiteralPath $path
-          $updated = [regex]::Replace($content, '(?m)^ms\.date:\s.*$', "ms.date: $today")
-          if ($updated -ceq $content) {
-            Write-Host "CHANGELOG.md ms.date already set to $today"
-            exit 0
-          }
-          Set-Content -LiteralPath $path -Value $updated -NoNewline -Encoding utf8NoBOM
-          & git config user.name 'github-actions[bot]'
-          & git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          & git remote set-url origin "https://x-access-token:$env:GH_TOKEN@github.com/$env:GITHUB_REPOSITORY.git"
-          & git add $path
-          & git commit -m 'chore: stamp ms.date in CHANGELOG.md'
-          & git push
+        run: ./scripts/ci/Update-ChangelogMsDate.ps1
 
       - name: Checkout default branch for tag signing
         if: ${{ steps.release.outputs.release_created == 'true' }}
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
       - name: Install gitsign
         if: ${{ steps.release.outputs.release_created == 'true' }}
-        run: |
-          $version = 'v0.13.0'
-          $arch = '${{ runner.arch }}'
-
-          switch ($arch) {
-            'X64' {
-              $asset = 'gitsign_0.13.0_linux_amd64'
-              $expectedSha = '011af11d57ad205b4ae4e3f41ecc8c64fbe0043c829190c0cb44fce6fce74bbb'
-            }
-            'ARM64' {
-              $asset = 'gitsign_0.13.0_linux_arm64'
-              $expectedSha = 'f0ec4732696b88f133ab6ef9ac2fe8be843ab9540bd1cc51dc4143142a858372'
-            }
-            default {
-              throw "Unsupported runner architecture: $arch"
-            }
-          }
-
-          $assetUrl = "https://github.com/sigstore/gitsign/releases/download/$version/$asset"
-          $assetPath = Join-Path $env:RUNNER_TEMP $asset
-          Invoke-WebRequest -Uri $assetUrl -OutFile $assetPath
-
-          $actualSha = (Get-FileHash -Path $assetPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actualSha -ne $expectedSha) {
-            throw "Checksum verification failed for $asset. Expected $expectedSha but got $actualSha"
-          }
-
-          $binDir = Join-Path $env:RUNNER_TEMP 'bin'
-          New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-          $gitsign = Join-Path $binDir 'gitsign'
-          Move-Item -Path $assetPath -Destination $gitsign -Force
-          chmod +x $gitsign
-          Add-Content -Path $env:GITHUB_PATH -Value $binDir
-          & $gitsign version
+        run: ./scripts/ci/Install-Gitsign.ps1
 
       # Workaround: release-please with "draft": true uses lazy tag
       # creation. The git tag is not materialized until the release is
@@ -430,36 +404,30 @@ jobs:
       # Replace both workarounds with "force-tag-creation": true in
       # release-please-config.json once release-please-action ships a
       # version that includes googleapis/release-please#2627.
+
       - name: Create signed git tag for draft release
         if: ${{ steps.release.outputs.release_created == 'true' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          git config --global gpg.format x509
-          git config --global gpg.x509.program gitsign
-          git config --global tag.gpgSign true
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git fetch --tags --force
-
-          $tag = '${{ steps.release.outputs.tag_name }}'
-          $existingTag = git tag --list $tag
-          if ($existingTag) {
-            Write-Output "Git tag $tag already exists"
-            exit 0
-          }
-
-          git remote set-url origin "https://x-access-token:${env:GH_TOKEN}@github.com/${env:GITHUB_REPOSITORY}.git"
-          git tag -s $tag $env:GITHUB_SHA -m "Release $tag"
-          git push origin "refs/tags/$tag"
-          Write-Output "Created signed git tag $tag -> $env:GITHUB_SHA"
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+        run: ./scripts/ci/New-SignedReleaseTag.ps1
 
       - name: Verify signed git tag
         if: ${{ steps.release.outputs.release_created == 'true' }}
+        shell: bash
+        env:
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
         run: |
-          $tag = '${{ steps.release.outputs.tag_name }}'
-          git tag -v $tag
+          tag_type="$(git cat-file -t "refs/tags/${TAG_NAME}")"
+          if [ "${tag_type}" != "tag" ]; then
+            echo "Expected annotated tag object for ${TAG_NAME}, found ${tag_type}"
+            exit 1
+          fi
+
+          gitsign verify-tag \
+            --certificate-identity 'https://github.com/microsoft/physical-ai-toolchain/.github/workflows/main.yml@refs/heads/main' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            "${TAG_NAME}"
 
   # Generate dependency SBOM from all package manifests
   generate-dependency-sbom:
@@ -468,23 +436,32 @@ jobs:
     name: Generate Dependency SBOM
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: write
     steps:
       - name: Checkout dependency manifests
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          persist-credentials: false
           sparse-checkout: |
             .syft.yaml
             package.json
             package-lock.json
             pyproject.toml
             uv.lock
+            data-pipeline/pyproject.toml
+            data-pipeline/uv.lock
             evaluation/pyproject.toml
             evaluation/uv.lock
+            evaluation/sil/docker/pyproject.toml
+            evaluation/sil/docker/uv.lock
             training/rl/pyproject.toml
+            training/rl/uv.lock
             training/il/lerobot/pyproject.toml
+            training/il/lerobot/uv.lock
+            workflows/osmo/pyproject.toml
+            workflows/osmo/uv.lock
             data-management/viewer/pyproject.toml
+            data-management/viewer/uv.lock
             data-management/viewer/package.json
             data-management/viewer/backend/pyproject.toml
             data-management/viewer/backend/uv.lock
@@ -503,12 +480,31 @@ jobs:
           output-file: dependencies.spdx.json
           artifact-name: ''
           dependency-snapshot: true
+          syft-version: v1.20.0
+
+      - name: Generate dependency SBOM (CycloneDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          config: .syft.yaml
+          output-file: dependencies.cdx.json
+          artifact-name: ''
+          dependency-snapshot: true
+          upload-artifact: false
+          syft-version: v1.20.0
 
       - name: Upload dependency SBOM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: sbom-dependencies
           path: dependencies.spdx.json
+
+      - name: Upload dependency SBOM (CycloneDX) artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: sbom-dependencies-cdx
+          path: dependencies.cdx.json
 
       - name: Upload dependency SBOM to release
         env:
@@ -517,6 +513,7 @@ jobs:
         run: |
           gh release upload "${TAG}" \
             dependencies.spdx.json \
+            dependencies.cdx.json \
             --clobber
         shell: bash
 
@@ -532,7 +529,9 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Download dependency SBOM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -545,6 +544,24 @@ jobs:
         run: git archive --format=tar.gz --prefix="${TAG}/" HEAD -o "source-${TAG}.tar.gz"
         shell: bash
 
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+
+      - name: Build release wheel
+        run: uv build --wheel --out-dir dist
+        shell: bash
+
+      - name: Sign release wheel (keyless Sigstore)
+        run: |
+          python -m pip install sigstore==4.3.0
+          sigstore sign dist/*.whl
+        shell: bash
+
       - name: Generate SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
         with:
@@ -552,33 +569,54 @@ jobs:
           format: spdx-json
           output-file: sbom.spdx.json
           artifact-name: ''
+          syft-version: v1.20.0
+
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          artifact-name: ''
+          upload-artifact: false
+          syft-version: v1.20.0
 
       - name: Attest build provenance
         id: attest
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
         with:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
 
+      - name: Attest wheel build provenance
+        id: attest-wheel
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: dist/*.whl
+
       - name: Attest SBOM
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
         with:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
           sbom-path: sbom.spdx.json
 
       - name: Attest dependency SBOM
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
         with:
           subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
           sbom-path: dependencies.spdx.json
 
+      - name: Attest SBOM (CycloneDX)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6  # v4.2.2
+        with:
+          subject-path: "source-${{ needs.release-please.outputs.tag_name }}.tar.gz"
+          sbom-path: sbom.cdx.json
+
       - name: Create signing artifacts for Scorecard detection
         env:
           BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+          WHEEL_BUNDLE_PATH: ${{ steps.attest-wheel.outputs.bundle-path }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          cp "${BUNDLE_PATH}" "source-${TAG}.sigstore.json"
-          jq -c '.dsseEnvelope' "${BUNDLE_PATH}" > "source-${TAG}.intoto.jsonl"
-        shell: bash
+        run: ./scripts/ci/New-SigningArtifacts.ps1
 
       - name: Upload release assets
         env:
@@ -588,8 +626,13 @@ jobs:
           gh release upload "${TAG}" \
             "source-${TAG}.tar.gz" \
             sbom.spdx.json \
+            sbom.cdx.json \
             "source-${TAG}.sigstore.json" \
             "source-${TAG}.intoto.jsonl" \
+            "wheels-${TAG}.sigstore.json" \
+            "wheels-${TAG}.intoto.jsonl" \
+            dist/*.whl \
+            dist/*.sigstore.json \
             --clobber
         shell: bash
 
@@ -603,6 +646,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Download current dependency SBOM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
@@ -631,48 +679,7 @@ jobs:
 
       - name: Generate dependency diff
         if: steps.prev-sbom.outputs.found == 'true'
-        run: |
-          python3 - <<'DIFF_SCRIPT'
-          import json, pathlib
-
-          def load_packages(path):
-              doc = json.loads(pathlib.Path(path).read_text())
-              pkgs = {}
-              for p in doc.get("packages", []):
-                  name = p.get("name", "UNKNOWN")
-                  version = p.get("versionInfo", "unknown")
-                  pkgs[name] = version
-              return pkgs
-
-          current = load_packages("dependencies.spdx.json")
-          previous = load_packages("previous/dependencies.spdx.json")
-          all_names = sorted(set(current) | set(previous))
-
-          added, removed, changed = [], [], []
-          for name in all_names:
-              cur_ver = current.get(name)
-              prev_ver = previous.get(name)
-              if cur_ver and not prev_ver:
-                  added.append(f"| {name} | {cur_ver} |")
-              elif prev_ver and not cur_ver:
-                  removed.append(f"| {name} | {prev_ver} |")
-              elif cur_ver != prev_ver:
-                  changed.append(f"| {name} | {prev_ver} | {cur_ver} |")
-
-          lines = ["# Dependency Diff\n"]
-          if added:
-              lines += ["\n## Added\n", "| Package | Version |", "| --- | --- |"] + added
-          if removed:
-              lines += ["\n## Removed\n", "| Package | Version |", "| --- | --- |"] + removed
-          if changed:
-              lines += ["\n## Changed\n", "| Package | Previous | Current |", "| --- | --- | --- |"] + changed
-          if not (added or removed or changed):
-              lines.append("\nNo dependency changes detected.")
-
-          pathlib.Path("dependency-diff.md").write_text("\n".join(lines) + "\n")
-          print(f"Diff: {len(added)} added, {len(removed)} removed, {len(changed)} changed")
-          DIFF_SCRIPT
-        shell: bash
+        run: python3 shared/ci/generate-dependency-diff.py dependencies.spdx.json previous/dependencies.spdx.json dependency-diff.md
 
       - name: Upload dependency diff to release
         if: steps.prev-sbom.outputs.found == 'true'
@@ -694,39 +701,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Append verification instructions
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          body=$(gh release view "${TAG}" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')
-
-          verification=$(cat <<'EOF'
-
-          ---
-
-          ## Artifact Verification
-
-          All release artifacts include [Sigstore](https://www.sigstore.dev/) provenance attestations. Verify with the [GitHub CLI](https://cli.github.com/):
-
-          ```bash
-          # Download the source archive
-          gh release download TAG_PLACEHOLDER --repo microsoft/physical-ai-toolchain --pattern 'source-TAG_PLACEHOLDER.tar.gz'
-
-          # Verify build provenance
-          gh attestation verify source-TAG_PLACEHOLDER.tar.gz --repo microsoft/physical-ai-toolchain
-
-          # Verify SBOM attestation
-          gh attestation verify source-TAG_PLACEHOLDER.tar.gz --repo microsoft/physical-ai-toolchain --predicate-type https://spdx.dev/Document
-          ```
-
-          EOF
-          )
-
-          verification="${verification//TAG_PLACEHOLDER/${TAG}}"
-          printf '%s\n%s\n' "$body" "$verification" > notes.md
-          gh release edit "${TAG}" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
-        shell: bash
+        run: ./scripts/ci/Add-ReleaseVerificationNotes.ps1
 
   # Promote draft release to published
   publish-release:
@@ -741,6 +725,11 @@ jobs:
       contents: read
       issues: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Generate GitHub App Token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
@@ -758,42 +747,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          $milestones = gh api --paginate "repos/$env:GITHUB_REPOSITORY/milestones?per_page=100&state=all" --jq '.[]' 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Output '::warning::API call failed while querying milestones for ${{ needs.release-please.outputs.tag_name }}'
-            exit 0
-          }
-
-          $match = @($milestones | ConvertFrom-Json) | Where-Object { $_.title -eq $env:TAG_NAME }
-          if (-not $match) {
-            Write-Output "::warning::No milestone found matching $env:TAG_NAME"
-            exit 0
-          }
-
-          $msNumber = $match.number
-          $msState = $match.state
-
-          if ($msState -eq 'closed') {
-            Write-Output "Milestone $env:TAG_NAME (#$msNumber) already closed"
-            exit 0
-          }
-
-          $detail = gh api "repos/$env:GITHUB_REPOSITORY/milestones/$msNumber" 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Output "::warning::API call failed while querying milestone details for $env:TAG_NAME (#$msNumber)"
-            exit 0
-          }
-          $openIssues = ($detail | ConvertFrom-Json).open_issues
-
-          if ($openIssues -gt 0) {
-            Write-Output "::warning::Milestone $env:TAG_NAME has $openIssues open issue(s) — triage after closure"
-          }
-
-          $null = gh api "repos/$env:GITHUB_REPOSITORY/milestones/$msNumber" --method PATCH -f state=closed 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Output "::warning::Failed to close milestone $env:TAG_NAME (#$msNumber)"
-            exit 0
-          }
-
-          Write-Output "Closed milestone $env:TAG_NAME (#$msNumber)"
+        run: ./scripts/ci/Close-ReleaseMilestone.ps1

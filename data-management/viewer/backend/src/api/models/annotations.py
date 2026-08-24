@@ -232,6 +232,29 @@ class LanguageInstructionAnnotation(SanitizedModel):
 
 
 # ============================================================================
+# Object Detection Annotation Types
+# ============================================================================
+
+
+class ObjectDetectionBox(SanitizedModel):
+    """Single saved object detection with label and bounding box."""
+
+    label: str = Field(min_length=1, max_length=100)
+    confidence: float = Field(ge=0.0, le=1.0)
+    bbox: tuple[float, float, float, float] = Field(description="Pixel bounding box (x1, y1, x2, y2)")
+
+
+class ObjectDetectionAnnotation(SanitizedModel):
+    """Open-vocabulary object detections saved for a single reference frame."""
+
+    frame_index: int = Field(ge=0)
+    camera: str = Field(default="il-camera", max_length=64)
+    queried_labels: list[Annotated[str, Field(max_length=100)]] = Field(default_factory=list, max_length=64)
+    detections: list[ObjectDetectionBox] = Field(default_factory=list, max_length=200)
+    model: str | None = Field(default=None, max_length=64)
+
+
+# ============================================================================
 # Combined Episode Annotation Types
 # ============================================================================
 
@@ -246,6 +269,7 @@ class EpisodeAnnotation(SanitizedModel):
     data_quality: DataQualityAnnotation
     anomalies: AnomalyAnnotation
     language_instruction: LanguageInstructionAnnotation | None = None
+    object_detections: list[ObjectDetectionAnnotation] = Field(default_factory=list, max_length=32)
     notes: str | None = None
 
 

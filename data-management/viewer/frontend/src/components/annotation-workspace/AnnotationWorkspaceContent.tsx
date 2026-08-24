@@ -1,4 +1,8 @@
-import { LabelPanel, LanguageInstructionWidget } from '@/components/annotation-panel'
+import {
+  LabelPanel,
+  LanguageInstructionWidget,
+  ObjectDetectionWidget,
+} from '@/components/annotation-panel'
 import { AnnotationWorkspaceDiagnosticsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceDiagnosticsPanel'
 import { AnnotationWorkspaceEditToolsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceEditToolsPanel'
 import { AnnotationWorkspacePlaybackCard } from '@/components/annotation-workspace/AnnotationWorkspacePlaybackCard'
@@ -6,8 +10,9 @@ import { AnnotationWorkspaceSubtaskListCard } from '@/components/annotation-work
 import { AnnotationWorkspaceTopBar } from '@/components/annotation-workspace/AnnotationWorkspaceTopBar'
 import { AnnotationWorkspaceTrajectoryTab } from '@/components/annotation-workspace/AnnotationWorkspaceTrajectoryTab'
 import { ExportDialog } from '@/components/export'
-import { DetectionPanel } from '@/components/object-detection'
-import { Tabs, TabsContent } from '@/components/ui/tabs'
+import { Tabs } from '@/components/ui/tabs'
+import { JudgePanel } from '@/components/vlm-judge'
+import { useAnnotationStore } from '@/stores'
 
 import type { useAnnotationWorkspaceShell } from './useAnnotationWorkspaceShell'
 
@@ -18,6 +23,12 @@ interface AnnotationWorkspaceContentProps {
 export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContentProps) {
   const currentDataset = shell.currentDataset
   const currentEpisode = shell.currentEpisode
+  // Current (draft or saved) language instruction so the judge scores against
+  // what the annotator sees in the Language Instruction widget; falls back to
+  // dataset metadata on the backend when empty.
+  const currentInstruction = useAnnotationStore(
+    (state) => state.currentAnnotation?.languageInstruction?.instruction,
+  )
 
   if (!currentDataset || !currentEpisode) {
     return null
@@ -29,6 +40,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
       canvasRef={shell.canvasRef}
       videoRef={shell.videoRef}
       videoSrc={shell.videoSrc}
+      videoUrls={shell.videoUrls}
       onVideoEnded={shell.handleVideoEnded}
       onLoadedMetadata={shell.handleLoadedMetadata}
       displayFilter={shell.displayFilter}
@@ -71,7 +83,16 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
   )
 
   const trajectoryLabelPanel = <LabelPanel episodeIndex={currentEpisode.meta.index} />
+  const trajectoryJudgePanel = (
+    <JudgePanel
+      datasetId={currentDataset.id}
+      episodeIndex={currentEpisode.meta.index}
+      instruction={currentInstruction}
+      totalEpisodes={currentDataset.totalEpisodes}
+    />
+  )
   const trajectoryLanguageInstructionPanel = <LanguageInstructionWidget />
+  const trajectoryObjectDetectionPanel = <ObjectDetectionWidget />
   const trajectoryEditToolsPanel = (
     <AnnotationWorkspaceEditToolsPanel
       onClearTransforms={shell.clearTransforms}
@@ -105,7 +126,9 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           playbackCard={trajectoryPlaybackCard}
           subtaskListCard={trajectorySubtaskListCard}
           labelPanel={trajectoryLabelPanel}
+          judgePanel={trajectoryJudgePanel}
           languageInstructionPanel={trajectoryLanguageInstructionPanel}
+          objectDetectionPanel={trajectoryObjectDetectionPanel}
           editToolsPanel={trajectoryEditToolsPanel}
           selectedRange={shell.playback.selectedRange}
           selectedSubtaskId={shell.playback.selectedSubtaskId}
@@ -118,10 +141,6 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           totalFrames={shell.totalFrames}
           onSubtaskSelectionChange={shell.playback.handleSubtaskSelectionChange}
         />
-
-        <TabsContent value="detection" className="mt-2.5 min-h-0 flex-1">
-          <DetectionPanel />
-        </TabsContent>
       </Tabs>
 
       {shell.diagnosticsEnabled && (

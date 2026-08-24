@@ -18,7 +18,7 @@ from .auth import require_auth
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token
 from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
-from .routers import analysis, annotations, datasets, detection, export, joint_config, labels
+from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
 from .routes import ai_analysis
 
 # Configure logging to show INFO level
@@ -130,6 +130,13 @@ app.include_router(ai_analysis.router, prefix="/api", tags=["ai"], dependencies=
 app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], dependencies=api_auth)
 app.include_router(joint_config.router, prefix="/api/datasets", tags=["joint-config"], dependencies=api_auth)
 app.include_router(joint_config.defaults_router, prefix="/api", tags=["joint-config"], dependencies=api_auth)
+if _config.vlm_judge_enabled:
+    app.include_router(
+        vlm_judge.router,
+        prefix="/api/datasets",
+        tags=["vlm-judge"],
+        dependencies=api_auth,
+    )
 
 
 @app.get("/health")

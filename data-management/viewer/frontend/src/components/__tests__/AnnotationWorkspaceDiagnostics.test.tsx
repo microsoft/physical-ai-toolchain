@@ -149,7 +149,7 @@ describe('AnnotationWorkspace diagnostics', () => {
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining('"type": "dialog-open"'))
   })
 
-  it('records expanded diagnostics channels for labels, subtasks, export, detection, and persistence actions', async () => {
+  it('records expanded diagnostics channels for labels, subtasks, export, and persistence actions', async () => {
     const handleSaveAndNextEpisode = vi.fn()
     mockDiagnosticsState.enabled = true
     mockDiagnosticsState.channels = ['all']
@@ -171,10 +171,6 @@ describe('AnnotationWorkspace diagnostics', () => {
       <AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />,
     )
     fireEvent.click(screen.getByRole('button', { name: /create subtask/i }))
-    fireEvent.mouseDown(screen.getByRole('tab', { name: /object detection/i }), {
-      button: 0,
-      ctrlKey: false,
-    })
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /save\s*&\s*next episode/i }))
@@ -186,7 +182,6 @@ describe('AnnotationWorkspace diagnostics', () => {
         ['labels', 'draft-change', expect.objectContaining({ episodeIndex: 0, labelCount: 1 })],
         ['export', 'dialog-open', expect.objectContaining({ activeTab: 'trajectory' })],
         ['subtasks', 'create', expect.objectContaining({ rangeStart: 2, rangeEnd: 6 })],
-        ['detection', 'tab-viewed', expect.objectContaining({ previousTab: 'trajectory' })],
         ['persistence', 'draft-saved', expect.objectContaining({ episodeIndex: 0 })],
       ]),
     )

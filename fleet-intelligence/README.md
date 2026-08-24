@@ -1,6 +1,16 @@
 # Fleet Intelligence
 
-IoT Operations telemetry, fleet-wide dashboards, drift detection, and retraining triggers for deployed robot fleets.
+The **fleet-intelligence cognition layer (T5 — Operate)**: IoT Operations telemetry, fleet-wide
+dashboards, drift detection, and retraining triggers across a fleet of deployed robots. "Fleet" means a
+fleet of robots, not Kubernetes clusters. This is the cognition layer above the implemented
+[fleet-delivery control plane](../fleet-deployment/README.md) (T4).
+
+> [!WARNING]
+> **Roadmap / placeholder, not shipped.** This domain ships **0 Python files** and design
+> specifications only. Everything below describes *intended* capability, not working code. Fully
+> autonomous retraining is a foot-gun: fleet intelligence should default to human-supervised stages
+> (T5.0–T5.1), not the autonomous closed loop (T5.3). See [tier-model.md](../docs/design/tier-model.md)
+> for canonical tier, autonomy-ladder, and fleet-vocabulary definitions.
 
 ## 📂 Directory Structure
 

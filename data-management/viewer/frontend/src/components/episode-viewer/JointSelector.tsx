@@ -157,8 +157,8 @@ function SortableChip({
       onClick={onToggle}
       className={chipClasses}
       style={style}
-      {...attributes}
-      {...listeners}
+      {...(editable ? attributes : {})}
+      {...(editable ? listeners : {})}
     >
       <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
       {label}

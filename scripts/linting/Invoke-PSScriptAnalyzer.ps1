@@ -69,7 +69,7 @@ function Invoke-PSScriptAnalyzerCore {
     # Ensure PSScriptAnalyzer module is installed
     if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
         Write-Host 'Installing PSScriptAnalyzer module...'
-        Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery
+        Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser -Repository PSGallery
     }
     Import-Module PSScriptAnalyzer -Force
     Write-Host "PSScriptAnalyzer version: $((Get-Module PSScriptAnalyzer).Version)"

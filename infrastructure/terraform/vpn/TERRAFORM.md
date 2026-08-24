@@ -2,7 +2,7 @@
 title: VPN Gateway Standalone Configuration
 description: Deploys VPN Gateway for Point-to-Site and Site-to-Site connectivity using data sources to reference existing platform infrastructure.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-05-11
+ms.date: 2026-08-03
 ms.topic: reference
 ---
 
@@ -12,16 +12,16 @@ using data sources to reference existing platform infrastructure.
 
 ## Requirements
 
-| Name      | Version         |
-|-----------|-----------------|
-| terraform | >= 1.9.8, < 2.0 |
-| azurerm   | >= 4.51.0       |
+| Name      | Version            |
+|-----------|--------------------|
+| terraform | >= 1.9.8, < 2.0    |
+| azurerm   | >= 4.51.0, < 5.0.0 |
 
 ## Providers
 
-| Name    | Version   |
-|---------|-----------|
-| azurerm | >= 4.51.0 |
+| Name    | Version            |
+|---------|--------------------|
+| azurerm | >= 4.51.0, < 5.0.0 |
 
 ## Resources
 
@@ -47,6 +47,7 @@ using data sources to reference existing platform infrastructure.
 | gateway\_subnet\_address\_prefix  | Address prefix for the GatewaySubnet (minimum /27)                                                                                                                                                            | `string`                                                                                                                                                                                                                                                                           | `"10.0.3.0/27"`                 |    no    |
 | instance                          | Instance identifier for naming resources: 001, 002, etc                                                                                                                                                       | `string`                                                                                                                                                                                                                                                                           | `"001"`                         |    no    |
 | resource\_group\_name             | Existing resource group name containing foundational resources (Otherwise 'rg-{resource\_prefix}-{environment}-{instance}')                                                                                   | `string`                                                                                                                                                                                                                                                                           | `null`                          |    no    |
+| revoked\_client\_certificates     | Revoked P2S client certificates identified by public SHA-1 thumbprint                                                                                                                                         | ```list(object({ name = string thumbprint = string }))```                                                                                                                                                                                                                          | `[]`                            |    no    |
 | root\_certificate\_name           | Name for the root certificate used in P2S authentication                                                                                                                                                      | `string`                                                                                                                                                                                                                                                                           | `"RoboticsVPNRootCert"`         |    no    |
 | root\_certificate\_public\_data   | Base64-encoded public certificate data for P2S authentication (without BEGIN/END markers)                                                                                                                     | `string`                                                                                                                                                                                                                                                                           | `null`                          |    no    |
 | virtual\_network\_name            | Existing virtual network name (Otherwise 'vnet-{resource\_prefix}-{environment}-{instance}')                                                                                                                  | `string`                                                                                                                                                                                                                                                                           | `null`                          |    no    |

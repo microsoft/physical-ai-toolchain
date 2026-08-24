@@ -171,6 +171,7 @@ cheatham
 checkbox
 checkboxes
 checkmarx
+checkov
 checkpointed
 checkpointing
 checksums
@@ -503,6 +504,7 @@ grafana
 graphql
 greenfield
 grooming
+groot
 gruntwork
 hadoop
 hardcoded
@@ -696,6 +698,7 @@ lenbuffer
 lenovo
 lerobot
 levelname
+libc
 libx
 libzstd
 lifecycle
@@ -821,6 +824,7 @@ mysql
 namespace
 namespaces
 nant
+nccl
 ncdc
 nei
 Nemotron
@@ -856,8 +860,11 @@ nvarchar
 nvas
 nvcr
 nvidia
+nvjitlink
 nvme
 nvml
+nvshmem
+nvtx
 nygard
 nzlua
 nzplsql
@@ -914,6 +921,7 @@ organisations
 organised
 osmoauth
 OSSF
+osv
 otel
 otlp
 overfitting
@@ -1182,6 +1190,7 @@ scalability
 scalesetpriority
 scenario
 schedules
+schedulingshard
 schemathesis
 schwinn
 scikit
@@ -1675,6 +1684,16 @@ ueks
 unnormalization
 updt
 zstd
+acrdev
+eeuo
+gpustat
+libsm
+libvulkan
+libxext
+libxrender
+noheader
+PYTHONUNBUFFERED
+torchcodec
 
 # Matplotlib / plotting API terms
 axhline

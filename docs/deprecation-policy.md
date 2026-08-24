@@ -3,7 +3,7 @@ sidebar_position: 99
 title: Deprecation Policy
 description: Policy for handling deprecated external interfaces including announcement, maintenance duration, migration guidance, and breaking-change communication
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-04
+ms.date: 2026-06-12
 ms.topic: reference
 keywords:
   - deprecation

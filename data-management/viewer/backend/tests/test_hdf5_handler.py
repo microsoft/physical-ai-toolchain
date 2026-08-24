@@ -5,6 +5,8 @@ Tests handler detection, capability checks, and subdirectory episode
 discovery for datasets with recording session subdirectories.
 """
 
+from __future__ import annotations
+
 import numpy as np
 import pytest
 
@@ -157,6 +159,74 @@ class TestBuildTrajectory:
         assert points[0].joint_velocities == [2.0, 2.0, 2.0, 2.0]
         assert points[0].end_effector_pose == [0.5] * 6
         assert points[0].gripper_state == pytest.approx(0.7)
+
+    def test_named_variables_are_attached_to_points(self):
+        from src.api.models.datasources import TrajectoryVariable
+        from src.api.services.dataset_service.base import build_trajectory
+
+        points = build_trajectory(
+            length=2,
+            timestamps=np.array([0.0, 1.0]),
+            joint_positions=np.zeros((2, 2)),
+            trajectory_variables=[
+                TrajectoryVariable(
+                    key="action[0]",
+                    label="target_shoulder_pan_joint",
+                    source="action",
+                    index=0,
+                ),
+                TrajectoryVariable(
+                    key="observation.gripper.is_closed",
+                    label="is_closed",
+                    source="observation.gripper.is_closed",
+                    index=None,
+                ),
+            ],
+            variable_values={
+                "action[0]": np.array([0.2, 0.4]),
+                "observation.gripper.is_closed": np.array([0.0, 1.0]),
+            },
+        )
+
+        assert points[0].variables == {
+            "action[0]": pytest.approx(0.2),
+            "observation.gripper.is_closed": pytest.approx(0.0),
+        }
+        assert points[1].variables == {
+            "action[0]": pytest.approx(0.4),
+            "observation.gripper.is_closed": pytest.approx(1.0),
+        }
+
+    def test_state_and_action_variable_labels_do_not_include_source_prefix(self):
+        from src.api.models.datasources import FeatureSchema
+        from src.api.services.dataset_service.base import build_trajectory_variables
+
+        variables, _ = build_trajectory_variables(
+            length=1,
+            feature_values={
+                "observation.state": np.array([[0.0, 1.0]]),
+                "action": np.array([[2.0, 3.0]]),
+            },
+            feature_schemas={
+                "observation.state": FeatureSchema(
+                    dtype="float32",
+                    shape=[2],
+                    names=["shoulder_pan_joint", "shoulder_lift_joint"],
+                ),
+                "action": FeatureSchema(
+                    dtype="float32",
+                    shape=[2],
+                    names=["target_shoulder_pan_joint", "target_shoulder_lift_joint"],
+                ),
+            },
+        )
+
+        assert [variable.label for variable in variables] == [
+            "shoulder_pan_joint",
+            "shoulder_lift_joint",
+            "target_shoulder_pan_joint",
+            "target_shoulder_lift_joint",
+        ]
 
     def test_clamp_gripper(self):
         from src.api.services.dataset_service.base import build_trajectory
@@ -336,6 +406,7 @@ def _make_hdf5_data(length=4, num_joints=6, cameras=None):
         timestamps=np.linspace(0.0, (length - 1) / 30.0, length),
         joint_positions=np.zeros((length, num_joints)),
         joint_velocities=np.zeros((length, num_joints)),
+        actions=np.zeros((length, num_joints)),
         end_effector_pose=np.zeros((length, 6)),
         gripper_states=np.zeros(length),
         task_index=0,

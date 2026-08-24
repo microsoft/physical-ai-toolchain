@@ -65,22 +65,28 @@ class TestProtocolConformance:
 
 
 class TestProtocolMethodBodies:
-    """Invoke Protocol method bodies directly so the `pass` statements execute."""
+    """Protocol method bodies are explicit abstract fallbacks."""
 
-    def test_protocol_pass_bodies_execute(self):
+    def test_protocol_method_bodies_raise(self):
         handler = _FakeHandler()
         path = Path(".")
-        assert DatasetFormatHandler.can_handle(handler, path) is None
-        assert DatasetFormatHandler.has_loader(handler, "ds") is None
-        assert DatasetFormatHandler.discover(handler, "ds", path) is None
-        assert DatasetFormatHandler.get_loader(handler, "ds", path) is None
-        assert DatasetFormatHandler.list_episodes(handler, "ds") is None
-        assert DatasetFormatHandler.load_episode(handler, "ds", 0) is None
-        assert DatasetFormatHandler.load_episode(handler, "ds", 0, None) is None
-        assert DatasetFormatHandler.get_trajectory(handler, "ds", 0) is None
-        assert DatasetFormatHandler.get_frame_image(handler, "ds", 0, 0, "cam") is None
-        assert DatasetFormatHandler.get_cameras(handler, "ds", 0) is None
-        assert DatasetFormatHandler.get_video_path(handler, "ds", 0, "cam") is None
+        calls = [
+            lambda: DatasetFormatHandler.can_handle(handler, path),
+            lambda: DatasetFormatHandler.has_loader(handler, "ds"),
+            lambda: DatasetFormatHandler.discover(handler, "ds", path),
+            lambda: DatasetFormatHandler.get_loader(handler, "ds", path),
+            lambda: DatasetFormatHandler.list_episodes(handler, "ds"),
+            lambda: DatasetFormatHandler.load_episode(handler, "ds", 0),
+            lambda: DatasetFormatHandler.load_episode(handler, "ds", 0, None),
+            lambda: DatasetFormatHandler.get_trajectory(handler, "ds", 0),
+            lambda: DatasetFormatHandler.get_frame_image(handler, "ds", 0, 0, "cam"),
+            lambda: DatasetFormatHandler.get_cameras(handler, "ds", 0),
+            lambda: DatasetFormatHandler.get_video_path(handler, "ds", 0, "cam"),
+        ]
+
+        for call in calls:
+            with pytest.raises(NotImplementedError):
+                call()
 
 
 class TestBuildTrajectory:

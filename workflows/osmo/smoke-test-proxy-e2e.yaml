@@ -1,0 +1,39 @@
+# AML->OSMO Proxy Smoke-Test Workflow
+#
+# CPU-only target workflow for validating the OSMO proxy end-to-end:
+#   1. AML proxy job submits this workflow via POST /api/pool/{pool}/workflow
+#   2. OSMO schedules and runs the write-output task
+#   3. Task writes a timestamped result file to the declared output URL
+#   4. Proxy polls to COMPLETED, logs Tier 1 metrics, registers data asset
+#
+# The output_url variable must be injected at submission via OSMO_SET_VARIABLES:
+#   export OSMO_SET_VARIABLES='[{"name":"output_url","value":"azure://<account>/<container>/proxy-smoke-test/"}]'
+#
+# No GPU or platform binding required -- runs on any available CPU node.
+# This workflow is never modified by the proxy.
+
+workflow:
+  name: proxy-e2e-smoke-test
+  resources:
+    default:
+      cpu: 1
+      memory: 512Mi
+      storage: 1Gi
+  tasks:
+    - name: write-output
+      image: ubuntu:22.04
+      resource: default
+      command: ["bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          mkdir -p /osmo/data/output
+          echo "proxy smoke test passed at $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > /osmo/data/output/result.txt
+          echo "hostname: $(hostname)" >> /osmo/data/output/result.txt
+          cat /osmo/data/output/result.txt
+      outputs:
+        - url: "{{output_url}}"
+
+default-values:
+  output_url: azure://placeholder/proxy-smoke-test/

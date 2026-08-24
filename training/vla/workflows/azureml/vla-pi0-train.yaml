@@ -8,7 +8,7 @@
 # - Setting compute target
 # - Building the command with all training parameters
 # - Setting all input values (dataset, policy type, Azure context, etc.)
-# - Injecting LEROBOT_REQUIREMENTS to point at training/vla/lerobot/requirements.txt
+# - Injecting LEROBOT_PROJECT to point at training/vla/lerobot
 #
 # This file defines:
 # - The job structure and schema
@@ -66,7 +66,7 @@ command: echo "Command will be set by submission script"
 environment_variables:
   AZURE_AUTHORITY_HOST: https://login.microsoftonline.com
   TRAINING_CHECKPOINT_OUTPUT: ${{outputs.checkpoints}}
-  # LEROBOT_REQUIREMENTS: <set by script to training/vla/lerobot/requirements.txt>
+  # LEROBOT_PROJECT: <set by script to training/vla/lerobot>
   # MLFLOW_HTTP_REQUEST_TIMEOUT: <set by script>
   # HF_TOKEN: <set by script when --hf-token / $HF_TOKEN is provided; required
   #            for the gated google/paligemma-3b-pt-224 backbone>

@@ -12,9 +12,13 @@ if "training" not in sys.modules:
     _training.rl = MagicMock()
     _training.rl.simulation_shutdown = MagicMock()
     _training.rl.simulation_shutdown.prepare_for_shutdown = MagicMock()
+    _training.utils = MagicMock()
+    _training.utils.integrity = MagicMock()
     sys.modules["training"] = _training
     sys.modules["training.rl"] = _training.rl
     sys.modules["training.rl.simulation_shutdown"] = _training.rl.simulation_shutdown
+    sys.modules["training.utils"] = _training.utils
+    sys.modules["training.utils.integrity"] = _training.utils.integrity
 
 import numpy as np
 import pytest

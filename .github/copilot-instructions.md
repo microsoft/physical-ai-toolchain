@@ -13,6 +13,12 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 
 **Artifacts:** Do not create or modify tests, scripts, or one-off markdown docs unless explicitly requested.
 
+**Environment-specific artifacts:** Never commit values discovered from a deployed environment, including Azure resource identifiers, subscription or tenant identifiers, service endpoints, cluster or registry names, generated OSMO platform values, image digest manifests, kubeconfigs, OSMO profiles, and credential files.
+
+* Generate non-secret deployment details under `infrastructure/setup/generated/<environment>/`, which is gitignored, by following `.github/skills/environment-deployment/SKILL.md`.
+* Keep kubeconfigs, OSMO profiles, tokens, registry credentials, Terraform state, and other secrets outside the generated bundle and outside Git.
+* Treat checked-in RFC1918 addresses, resource shapes, and other clearly documented values as instructional defaults or examples. Do not remove or replace them solely because they resemble environment configuration.
+
 **Comment policy:** Never include thought processes, step-by-step reasoning, or narrative comments in code.
 
 * Keep comments brief and factual; describe **behavior/intent, invariants, edge cases**.
@@ -107,6 +113,16 @@ Detailed template and structure in `.github/instructions/shell-scripts.instructi
 * Package management: `uv` (not pip); `hatchling` builds; Python >=3.12
 * Child configs extend root ruff config: `extend = "../../pyproject.toml"`
 * `from __future__ import annotations` required as the first import in every module
+
+### Dependency Locking
+
+Every Python subproject carries a committed `uv.lock` next to its `pyproject.toml`. The lock is the single resolution source of truth — runtime-flat `requirements.txt` files are NOT committed; they are derived at build time.
+
+* Regenerate a lock with `uv lock` (or `uv lock --upgrade`) after editing `pyproject.toml` — never hand-edit `uv.lock`, and never run `uv pip compile` to produce a committed flat file.
+* Derive runtime dependencies at build/submit time via `uv export --frozen --no-hashes --no-emit-project` piped into `uv pip install --no-deps`. `--frozen` guarantees the lock is read, not regenerated.
+* Do not reintroduce committed flat requirements files (for example `requirements-aml-mirror.txt`); derive them from the lock instead.
+* Dependabot regenerates affected locks natively. The read-only `uv lock --check` CI gate (`uv-lock-consistency.yml`, run via `npm run lint:uvlock`) fails any PR whose lock drifts from its manifest, so no manual `uv lock` step is required on Dependabot PRs.
+* `[tool.uv] environments` constrains the universal lock to supported platforms (for example linux x86_64 for GPU/Isaac subprojects). Preserve these markers when regenerating.
 
 ### Import Ordering
 
@@ -299,9 +315,9 @@ Detailed rules in `.github/instructions/docs-style-and-conventions.instructions.
 
 GitHub Copilot Coding Agent runs in a cloud GitHub Actions environment, separate from the local devcontainer. The `.github/workflows/copilot-setup-steps.yml` workflow pre-installs tools so the cloud agent can author code, run linters, and execute tests with the same capabilities a local contributor has in `.devcontainer/devcontainer.json`.
 
-The cloud-agent workflow does NOT install: `actionlint` (devcontainer-only, used for `npm run lint:yaml`), `golangci-lint`, `terraform-docs`, `osmo`, `ngc`, Azure CLI, kubectl, helm, k9s. These are Azure-deployment or local-validation tools the agent does not need to author or test code.
+The cloud-agent workflow installs `actionlint` for `npm run lint:yaml`. It does NOT install: `golangci-lint`, `terraform-docs`, `osmo`, `ngc`, Azure CLI, kubectl, helm, k9s. These are Azure-deployment or local-validation tools the agent does not need to author or test code.
 
-The cloud-agent workflow installs `gh aw` (GitHub Agentic Workflows CLI) without version pinning. The latest stable release is installed at session start because `gh aw` maintains backward compatibility with older compiled workflows, lock files embed their `compiler_version` for auditability, and the extension releases multiple times per week making pinning impractical.
+The cloud-agent workflow installs `gh aw` (GitHub Agentic Workflows CLI) pinned to a released tag (`gh extension install github/gh-aw --pin <tag>`) so every session resolves a fixed, auditable version instead of upstream HEAD. Pin to a stable release at or above the `compiler_version` embedded in the repo's `.lock.yml` files — `gh aw` reads workflows compiled by older versions — and bump the `--pin` ref when adopting a newer release.
 
 ### Environment Synchronization
 
@@ -321,6 +337,10 @@ The `Bootstrap hve-core RPI persona` step in `copilot-setup-steps.yml` runs **ou
 The `Physical-AI RPI` umbrella (`.github/agents/physical-ai-rpi.agent.md`) and its hidden generic worker (`.github/agents/physical-ai-rpi-worker.agent.md`) read those files at session start. The worker resolves a `persona: <stem>` dispatch parameter to a workspace path under `.copilot-tracking/upstream/hve-core-rpi/subagents/`, so new upstream personas auto-onboard via the next bootstrap with no change in this repo.
 
 See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the full umbrella/worker rationale.
+
+## hve-core Derived Files
+
+Follow the baseline conventions in [`scripts/README.md`](../scripts/README.md). `scripts/security/Test-HveCoreFreshness.ps1` compares source-header entries with a resolved upstream `main` commit and release entries with the RPI `UPSTREAM_REF` and a resolved latest non-draft release commit.
 
 ## Git Workflow
 
@@ -361,8 +381,7 @@ OSMO is an external orchestration platform for multi-cluster Kubernetes workload
 * Two payload strategies:
   * Base64-encoded archive: ~1MB limit, embedded in workflow YAML
   * Dataset folder injection: unlimited size, versioned, folder name in workflow env vars
-* Config types: SERVICE, WORKFLOW, DATASET, BACKEND, POOL, POD_TEMPLATE, RESOURCE_VALIDATION, BACKEND_TEST, ROLE
-* Apply config: `osmo config update <TYPE> [name] --file <path>`
+* Configuration mode: ConfigMap; all config is in Helm values files
 * Namespace layout:
   * `osmo-control-plane` — service components
   * `osmo-operator` — backend operator
@@ -371,6 +390,7 @@ OSMO is an external orchestration platform for multi-cluster Kubernetes workload
 * `oauth2Proxy.enabled: false` REQUIRED in Helm values when no OIDC provider is configured
 * Prerelease mode: `OSMO_USE_PRERELEASE=true` switches both chart and image versions
 * Service URL exposed via AzureML ingress controller internal load balancer
+* Storage: workload identity only — credential shape `azure://<account>/<container>`
 
 ## AzureML Integration
 
@@ -395,7 +415,7 @@ Training runs in NVIDIA Isaac Lab containers on GPU nodes via AzureML or OSMO.
   * Python path: `/isaac-sim/kit/python/bin/python3` (NOT system Python)
   * `PYTHON` env var: set to `/workspace/isaaclab/isaaclab.sh -p` (wrapper activating correct conda env)
 * EULA acceptance: all jobs MUST set `ACCEPT_EULA: "Y"` and `PRIVACY_CONSENT: "Y"`
-* numpy: forcibly pinned to `>=1.26.0,<2.0.0` in `train.sh` for ABI compatibility with Isaac Sim
+* numpy: pinned to `1.26.4` in `training/rl/pyproject.toml` (locked in `training/rl/uv.lock`) for ABI compatibility with Isaac Sim
 * Shutdown bug: Isaac Sim 4.x hangs after `env.close()` on vGPU nodes; fixed via `simulation_shutdown.py` with timeline stop + SIGKILL watchdog
 * Vulkan: `NVIDIA_DRIVER_CAPABILITIES=all` required (Isaac Sim needs Vulkan for rendering)
 * RL frameworks: SKRL (primary), RSL-RL (alternative)
@@ -434,12 +454,14 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | `data-management/viewer/backend/**` | `cd data-management/viewer/backend && pytest` and `ruff check src/` |
 | `training/**/*.py` | `cd training && ruff check . && pytest` |
 | `evaluation/**/*.py` | `cd evaluation && ruff check . && pytest` |
+| `*.py`, workflow YAML with HF downloads | `npm run lint:hfpins` (HuggingFace revision-pin guard) |
 | `data-pipeline/**/*.py` | `cd data-pipeline && ruff check .` |
+| `uv.lock`, `pyproject.toml` | `uv lock` (regenerate the lock), `npm run lint:uvlock` (verify lock/manifest consistency) |
 | Any file | `npm run spell-check` |
 
 ### Linting
 
-* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` + `lint:go` in sequence
+* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` + `lint:go` + `lint:sh` + `lint:py` + `lint:hfpins` + `lint:uvlock` in sequence
 * `npm run spell-check` and `npm run format:tables` are NOT included in `lint:all` — run them separately
 * `npm run lint:md:fix` and `npm run format:tables` auto-fix markdown issues
 * `.copilot-tracking/` is excluded from markdown linting via `.markdownlint-cli2.jsonc`
@@ -469,9 +491,9 @@ Terraform validation is per-directory — each deployment directory has its own 
 ## CI/CD Pipeline
 
 * Two orchestrators: `main.yml` (push to main), `pr-validation.yml` (PRs) using reusable `workflow_call` workflows
-* PR validation sequence: spell check → markdown lint → table format → frontmatter → PSScriptAnalyzer → YAML lint → link check → Python lint → Python tests → frontend tests → Pester → dependency review → dependency pinning → CodeQL
+* PR validation sequence: spell check → markdown lint → table format → frontmatter → PSScriptAnalyzer → YAML lint → link check → Python lint → Python tests → uv lock consistency → frontend tests → Pester → dependency review → dependency pinning → CodeQL
 * Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
-* Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main)
+* Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main), container image digest freshness (weekly)
 * Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)
 * Codecov: 12+ flags including `pytest-*`, `vitest`/`vitest-*`, `pester`, `go`, `terraform`; 80-100% range; carryforward enabled; OIDC tokenless upload via `codecov/codecov-action@v6`
 

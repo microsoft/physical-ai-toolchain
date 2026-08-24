@@ -25,7 +25,27 @@ class DetectionRequest(SanitizedModel):
     )
     model: str = Field(
         default="yolo11n",
-        description="YOLO model variant: yolo11n, yolo11s, yolo11m, yolo11l, yolo11x",
+        description=(
+            "YOLO model variant. Closed-vocabulary: yolo11n, yolo11s, yolo11m, yolo11l, yolo11x. "
+            "Open-vocabulary (used when 'labels' is supplied): yolov8s-world, yolov8m-world, "
+            "yolov8l-world, yolov8x-worldv2."
+        ),
+    )
+    labels: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional open-vocabulary class names. When provided, detection switches to "
+            "YOLO-World and only returns boxes matching these labels."
+        ),
+        max_length=64,
+    )
+    camera: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Camera/stream key to source frames from (e.g. 'observation.images.color'). "
+            "When omitted the episode's first available camera is used."
+        ),
     )
 
     @field_validator("frames")
@@ -36,6 +56,18 @@ class DetectionRequest(SanitizedModel):
         if any(frame < 0 for frame in frames):
             raise ValueError("Frame indices must be non-negative")
         return frames
+
+    @field_validator("labels")
+    @classmethod
+    def validate_labels(cls, labels: list[str] | None) -> list[str] | None:
+        if labels is None:
+            return None
+        cleaned = [label.strip() for label in labels if label and label.strip()]
+        if not cleaned:
+            return None
+        if any(len(label) > 100 for label in cleaned):
+            raise ValueError("Each label must be at most 100 characters")
+        return cleaned
 
 
 class Detection(SanitizedModel):
