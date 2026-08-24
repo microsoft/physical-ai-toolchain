@@ -12,8 +12,8 @@ requires-python = ">=3.12"
 #
 # This file is a fork of training/il/lerobot/pyproject.toml. The VLA fork
 # differs in two ways:
-#   1. lerobot is installed with the `[pi]` extra, which pulls transformers
-#      and scipy (required by pi0 / pi0_fast / pi05 policy code paths).
+#   1. lerobot is installed with the `[dataset,pi]` extras, which provide the
+#      dataset/video runtime plus pi0 / pi0_fast / pi05 dependencies.
 #   2. transformers and scipy are pinned as direct dependencies so they
 #      appear in the compiled lockfile (the IL lockfile excludes them).
 #
@@ -30,7 +30,7 @@ dependencies = [
     # resolution is enabled for telemetry; keep storage clients on stable rails.
     "azure-storage-file-datalake==12.25.0",
     "azure-storage-file-share==12.26.0",
-    # marshmallow held at 3.x because azure-ai-ml==1.33.0 imports symbols that
+    # marshmallow held at 3.x because azure-ai-ml==1.34.1 imports symbols that
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
@@ -48,13 +48,11 @@ dependencies = [
     "datasets==5.0.1",
     "pyarrow==25.0.0",
     "huggingface-hub==1.25.1",
-    # lerobot[pi] pulls transformers + scipy as transitive extras required by
-    # the pi0 / pi0_fast / pi05 policy implementations. The extra is documented
-    # by upstream lerobot at packages/lerobot/pyproject.toml under
-    # [project.optional-dependencies].pi.
-    "lerobot[pi]==0.6.0",
+    # lerobot[dataset,pi] supplies the dataset/video runtime plus dependencies
+    # required by the pi0 / pi0_fast / pi05 policy implementations.
+    "lerobot[dataset,pi]==0.6.0",
     # transformers and scipy pinned explicitly so they land in the lockfile
-    # at known-good versions instead of floating with lerobot[pi]'s range.
+    # at known-good versions instead of floating with lerobot's ranges.
     # transformers 5.5.0 includes the latest security fixes while preserving
     # the tokenizer and processor API used by lerobot 0.6.0.
     "transformers==5.5.0",
