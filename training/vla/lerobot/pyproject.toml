@@ -59,13 +59,10 @@ dependencies = [
     # the tokenizer and processor API used by lerobot 0.6.0.
     "transformers==5.5.0",
     "scipy==1.16.3",
-    # safetensors and tokenizers pinned to stable releases to avoid uv's
-    # prerelease resolver landing on `0.8.0rc1` / `0.23.0rc0` from the
-    # transitive ranges of accelerate / lerobot / transformers. Required
-    # because [tool.uv].prerelease = "allow" is on (for Azure / OpenTelemetry
-    # betas) and unpinned safetensors/tokenizers would otherwise drift to RCs.
+    # safetensors is pinned to a stable release. transformers==5.5.0 requires
+    # tokenizers<=0.23.0, whose compatible 0.23.x build is 0.23.0rc0.
     "safetensors==0.8.0",
-    "tokenizers==0.23.1",
+    "tokenizers==0.23.0rc0",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
@@ -128,11 +125,6 @@ override-dependencies = [
     # while preserving compatibility with
     # the Azure storage backend used by the AzureML run output mounts.
     "datasets==5.0.1",
-    # tokenizers: transformers==5.5.0 caps at <=0.23.0, but PyPI has no stable
-    # 0.23.0 release — only 0.23.0rc0 — and the only stable in the 0.23.x line
-    # is 0.23.1. Override the upstream cap to land on stable 0.23.1 (minor
-    # patch, ABI-compatible) rather than the RC.
-    "tokenizers==0.23.1",
 ]
 package = false
 
@@ -143,6 +135,8 @@ package = false
 # Expected (and only) prerelease pins after audit:
 #   - msal==1.38.0rc1 — no stable 1.38.x has shipped yet; the 1.38 line ships
 #     the AzureCliCredential / msal-extensions cache fix our azure-identity
+#   - tokenizers==0.23.0rc0 — transformers==5.5.0 requires <=0.23.0 and no
+#     stable 0.23.0 release exists
 #     dependency chain requires. Downgrading to msal 1.37.x reintroduces the
 #     stale-token bug we hit before.
 #   - opentelemetry-instrumentation-* `*b1` betas (e.g. 0.63b1) plus
