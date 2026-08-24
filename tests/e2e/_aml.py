@@ -263,6 +263,51 @@ def submit_aml_lerobot_training(
     return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML LeRobot training")
 
 
+def submit_aml_vla_pi0_training(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    blob_url: str,
+    training_steps: int,
+    save_freq: int,
+    batch_size: int,
+    register_model_name: str,
+) -> AzureMLJob:
+    experiment_name = e2e_name("vla-pi0-training-e2e-aml")
+    log_e2e(
+        "Submitting AzureML VLA pi0 training job "
+        f"for dataset={blob_url}, training_steps={training_steps}, "
+        f"save_freq={save_freq}, batch_size={batch_size}, experiment={experiment_name}"
+    )
+    result = run_command(
+        [
+            str(repo_root / "training/vla/scripts/submit-azureml-vla-pi0-training.sh"),
+            "--blob-url",
+            blob_url,
+            "--policy-type",
+            "pi0",
+            "--training-steps",
+            str(training_steps),
+            "--save-freq",
+            str(save_freq),
+            "--batch-size",
+            str(batch_size),
+            "--eval-freq",
+            str(training_steps + 1),
+            "--experiment-name",
+            experiment_name,
+            *_submit_workspace_args(aml_workspace),
+            "--register-checkpoint",
+            register_model_name,
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"AzureML VLA pi0 e2e submission failed\n\n{format_command_failure(result)}")
+
+    return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML VLA pi0 training")
+
+
 _AML_LEROBOT_EVAL_MODEL_ENV = "E2E_AML_LEROBOT_EVAL_MODEL"
 _AML_ISAAC_EVAL_MODEL_ENV = "E2E_AML_ISAAC_EVAL_MODEL"
 
