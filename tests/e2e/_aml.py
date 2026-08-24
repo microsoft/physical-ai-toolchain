@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Mapping
@@ -274,10 +275,12 @@ def submit_aml_vla_pi0_training(
     register_model_name: str,
 ) -> AzureMLJob:
     experiment_name = e2e_name("vla-pi0-training-e2e-aml")
+    instance_type = os.environ.get("E2E_AML_INSTANCE_TYPE", "gpu")
     log_e2e(
         "Submitting AzureML VLA pi0 training job "
         f"for dataset={blob_url}, training_steps={training_steps}, "
-        f"save_freq={save_freq}, batch_size={batch_size}, experiment={experiment_name}"
+        f"save_freq={save_freq}, batch_size={batch_size}, experiment={experiment_name}, "
+        f"instance_type={instance_type or '<managed-compute>'}"
     )
     result = run_command(
         [
@@ -294,6 +297,9 @@ def submit_aml_vla_pi0_training(
             str(batch_size),
             "--eval-freq",
             str(training_steps + 1),
+            "--instance-type",
+            instance_type,
+            "--train-expert-only",
             "--experiment-name",
             experiment_name,
             *_submit_workspace_args(aml_workspace),

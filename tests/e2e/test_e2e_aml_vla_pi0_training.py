@@ -34,7 +34,6 @@ from tests.e2e._mlflow import assert_aml_lerobot_job_has_mlflow_tracking
 
 @pytest.mark.e2e
 @pytest.mark.usefixtures("aml_compute_target")
-@pytest.mark.usefixtures("ensure_gpu_nodes_available")
 def test_aml_vla_pi0_training_e2e(
     request: pytest.FixtureRequest,
     aml_workspace: AzureMLWorkspace,

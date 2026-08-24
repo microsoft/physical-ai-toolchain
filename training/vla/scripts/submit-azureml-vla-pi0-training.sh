@@ -113,11 +113,10 @@ AZURE CONTEXT:
                                   (default: gpu). pi0 full fine-tuning (~3B
                                   params + paligemma backbone) needs a high-
                                   memory GPU; 40 GB+ HBM (A100/H100-class) is
-                                  recommended. On smaller GPUs (e.g. 24 GB),
-                                  pass --policy.train_expert_only=true via the
-                                  trailing `--` forwarding to freeze the VLM
-                                  backbone and train only the action expert,
-                                  which fits in less memory. The value is
+                                  recommended. On smaller GPUs, use
+                                  --train-expert-only to freeze the VLM backbone
+                                  and train only the action expert, which fits
+                                  in less memory. The instance type value is
                                   forwarded to the job as resources.instance_type
                                   whenever non-empty. On AzureML managed
                                   AmlCompute the cluster's VM SKU determines GPU
@@ -129,6 +128,8 @@ AZURE CONTEXT:
                                   Shipped multi-GPU Kubernetes types:
                                   gpu2/gpuspot2, gpu4/gpuspot4 (see
                                   infrastructure/setup/manifests/azureml-instance-types.yaml).
+        --train-expert-only       Freeze the VLM backbone and train only the
+                                  action expert and projections
         --mixed-precision MODE    Accelerate mixed-precision mode (no|fp16|bf16);
                                   default: bf16. pi0 was trained in bf16 upstream;
                                   bf16 is the recommended default for memory and
@@ -334,6 +335,7 @@ mlflow_timeout="${MLFLOW_HTTP_REQUEST_TIMEOUT:-60}"
 
 compute="${AZUREML_COMPUTE:-$(get_compute_target)}"
 instance_type="gpu"
+train_expert_only=false
 mixed_precision="${MIXED_PRECISION:-bf16}"
 hf_token="${HF_TOKEN:-}"
 experiment_name=""
@@ -378,6 +380,7 @@ while [[ $# -gt 0 ]]; do
     --mlflow-http-timeout)        mlflow_timeout="$2"; shift 2 ;;
     --compute)                    compute="$2"; shift 2 ;;
     --instance-type)              instance_type="$2"; shift 2 ;;
+    --train-expert-only)          train_expert_only=true; shift ;;
     --mixed-precision)            mixed_precision="$2"; shift 2 ;;
     --hf-token)                   hf_token="$2"; shift 2 ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
@@ -524,6 +527,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Workspace" "$workspace_name"
   print_kv "Compute" "${compute:-<not set>}"
   print_kv "Instance Type" "$instance_type"
+  print_kv "Train Expert Only" "$train_expert_only"
   print_kv "Mixed Precision" "$mixed_precision"
   print_kv "HF Token" "$([[ -n "$hf_token" ]] && echo '<set>' || echo '<none>')"
   print_kv "Environment" "${environment_name}:${environment_version}"
@@ -658,6 +662,7 @@ az_args+=(
 [[ -n "$batch_size" ]]          && az_args+=(--set "environment_variables.BATCH_SIZE=$batch_size")
 [[ -n "$eval_freq" ]]           && az_args+=(--set "environment_variables.EVAL_FREQ=$eval_freq")
 [[ -n "$register_checkpoint" ]] && az_args+=(--set "environment_variables.REGISTER_CHECKPOINT=$register_checkpoint")
+[[ "$train_expert_only" == "true" ]] && az_args+=(--set "environment_variables.TRAIN_EXPERT_ONLY=true")
 [[ -n "$hf_token" ]] && az_args+=(--set "environment_variables.HF_TOKEN=$hf_token")
 
 if [[ ${#dataset_assets[@]} -gt 0 ]]; then
@@ -724,6 +729,7 @@ print_kv "Policy Type" "$policy_type"
 print_kv "Image" "$image"
 print_kv "Compute" "${compute:-<not set>}"
 print_kv "Instance Type" "$instance_type"
+print_kv "Train Expert Only" "$train_expert_only"
 print_kv "Mixed Precision" "$mixed_precision"
 print_kv "Environment" "${environment_name}:${environment_version}"
 print_kv "LeRobot Project" "$lerobot_project"
