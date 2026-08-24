@@ -60,9 +60,7 @@ def test_aml_vla_pi0_training_e2e(
         batch_size=1,
         register_model_name=register_model_name,
     )
-    request.addfinalizer(
-        lambda: cleanup_aml_job_and_model_versions(job, repo_root, aml_workspace, register_model_name)
-    )
+    request.addfinalizer(lambda: cleanup_aml_job_and_model_versions(job, repo_root, aml_workspace, register_model_name))
 
     log_e2e(f"Waiting for AzureML VLA pi0 training job {job.name} to start")
     wait_until_aml_started(job, repo_root, timeout_minutes=15, poll_interval_seconds=30)
