@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Submit LeRobot VLA pi0 training to Azure ML
-# Installs LeRobot[pi] dynamically and trains pi0/pi0_fast/pi05 vision-language-action
+# Installs LeRobot[dataset,pi] dynamically and trains pi0/pi0_fast/pi05 vision-language-action
 # policies from datasets in Azure Blob Storage (canonical) or HuggingFace (legacy
 # fallback via --hf-dataset). Reuses the policy-agnostic IL training entry script
 # (training/il/scripts/lerobot/azureml-train-entry.sh) with a VLA-specific
@@ -639,7 +639,7 @@ fi
 #
 # LEROBOT_PROJECT is the VLA-specific opt-in: the entry script defaults to the
 # IL project (training/il/lerobot); the VLA submit script overrides it to export
-# and install the VLA lock containing lerobot[pi], transformers, and scipy.
+# and install the VLA lock containing lerobot[dataset,pi], transformers, and scipy.
 az_args+=(
   --set "environment_variables.AZURE_SUBSCRIPTION_ID=$subscription_id"
   --set "environment_variables.AZURE_RESOURCE_GROUP=$resource_group"

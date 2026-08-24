@@ -4,7 +4,7 @@
 # Values below are placeholders and will be overridden at submission time.
 #
 # The script is responsible for:
-# - Setting the environment (VLA pi0 PyTorch image with lerobot[pi])
+# - Setting the environment (VLA pi0 PyTorch image with lerobot[dataset,pi])
 # - Setting compute target
 # - Building the command with all training parameters
 # - Setting all input values (dataset, policy type, Azure context, etc.)
