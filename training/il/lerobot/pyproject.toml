@@ -57,10 +57,8 @@ dependencies = [
     # via azure-identity, msal, pyjwt, google-auth, and the azure-storage clients.
     # azureml-mlflow caps cryptography < 49.0.0, so 49.0.0 is also overridden below.
     "cryptography==49.0.0",
-    # Pin wrapt to the latest stable in the 1.x line. opentelemetry-instrumentation
-    # constrains wrapt below 2.0 and above 1.0, but with prerelease resolution
-    # enabled below uv would otherwise pick the 1.17.4 release candidate over
-    # 1.17.3 stable.
+    # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
+    # prerelease resolution from selecting a release candidate.
     "wrapt==2.2.2",
 ]
 

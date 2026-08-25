@@ -9,14 +9,14 @@ echo "=== LeRobot AzureML Training ==="
 # `training.il.scripts...` resolve when cwd is the contents of training/.
 if [[ ! -e training ]]; then ln -s . training; fi
 
-# Install runtime dependencies from pre-compiled requirements
+# Install runtime dependencies from the selected locked project.
 apt-get update -qq && apt-get install -y -qq ffmpeg git build-essential >/dev/null 2>&1
 # --break-system-packages bypasses PEP 668 (externally-managed-environment)
 # enforced by Debian-packaged Python in PyTorch 2.4.1+ containers. Safe here
 # because the container is ephemeral and isolated from any host system Python.
 pip install --quiet --break-system-packages uv==0.7.12
 
-LEROBOT_PROJECT="training/il/lerobot"
+LEROBOT_PROJECT="${LEROBOT_PROJECT:-training/il/lerobot}"
 if [[ ! -f "${LEROBOT_PROJECT}/uv.lock" ]]; then
   echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT}/uv.lock" >&2
   exit 1
@@ -28,8 +28,9 @@ fi
 # subsequent `python3` and `lerobot-train` invocations resolve through the
 # venv's bin directory once it is on PATH.
 #
-# `--no-deps` is required: the flat requirement set is exported at build time
-# from training/il/lerobot/uv.lock, and pyproject.toml carries
+# `--no-config` keeps root project constraints from overriding the selected
+# lockfile. `--no-deps` is required: the flat requirement set is exported at runtime
+# from the selected project's uv.lock, and pyproject.toml carries
 # `override-dependencies` entries (e.g., azure-storage-blob==12.30.0 above
 # azureml-mlflow's cap) that are honored only during locking. Re-resolving at
 # install time would fail with the same conflicts the overrides were added to
@@ -40,7 +41,19 @@ uv venv --python 3.12 "${LEROBOT_VENV}"
 # shellcheck disable=SC1091
 source "${LEROBOT_VENV}/bin/activate"
 uv export --frozen --no-hashes --no-emit-project --project "${LEROBOT_PROJECT}" \
-  | uv pip install --no-cache-dir --no-deps -r -
+  | uv pip install --no-config --no-cache-dir --no-deps -r -
+
+# HuggingFace login: must run before any code path that pulls gated models or
+# datasets from the Hub. pi0 reaches the Hub during policy init to download the
+# google/paligemma-3b-pt-224 backbone, which is gated, so logging in only on
+# the "no mounted assets" branch (the original placement) breaks the
+# blob-storage and data-asset paths where datasets are local but the backbone
+# is still pulled. Lift the login here so it runs once per container whenever
+# the caller forwards HF_TOKEN, before train.py is invoked. No-op for callers
+# that don't set HF_TOKEN.
+if [[ -n "${HF_TOKEN:-}" ]]; then
+  python3 -c "import os; from huggingface_hub import login; login(token=os.environ['HF_TOKEN'], add_to_git_credential=False)"
+fi
 
 # Build args forwarded to the MLflow training wrapper. Only flags whose values
 # are not derivable from environment variables go here. The wrapper at
@@ -164,9 +177,6 @@ if [[ ${total_sources} -eq 0 ]]; then
     echo "ERROR: no dataset_asset_*, no blob URLs, and DATASET_REPO_ID is empty." >&2
     echo "Pass --dataset-asset, --blob-url, or --dataset-repo-id to submit-azureml-lerobot-training.sh." >&2
     exit 1
-  fi
-  if [[ -n "${HF_TOKEN:-}" ]]; then
-    python3 -c "import os; from huggingface_hub import login; login(token=os.environ['HF_TOKEN'], add_to_git_credential=False)"
   fi
   # video_backend=pyav avoids torchcodec's dynamic-link dependency on
   # libnvrtc.so (shipped as a pip wheel whose lib/ is not on LD_LIBRARY_PATH

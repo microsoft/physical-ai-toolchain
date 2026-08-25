@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Mapping
@@ -261,6 +262,59 @@ def submit_aml_lerobot_training(
         raise AssertionError(f"AzureML LeRobot e2e submission failed\n\n{format_command_failure(result)}")
 
     return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML LeRobot training")
+
+
+def submit_aml_vla_pi0_training(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    blob_url: str,
+    training_steps: int,
+    save_freq: int,
+    batch_size: int,
+    log_freq: int,
+    register_model_name: str,
+) -> AzureMLJob:
+    experiment_name = e2e_name("vla-pi0-training-e2e-aml")
+    instance_type = os.environ.get("E2E_AML_INSTANCE_TYPE", "")
+    log_e2e(
+        "Submitting AzureML VLA pi0 training job "
+        f"for dataset={blob_url}, training_steps={training_steps}, "
+        f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}, "
+        f"instance_type={instance_type or '<managed-compute>'}"
+    )
+    result = run_command(
+        [
+            str(repo_root / "training/vla/scripts/submit-azureml-vla-pi0-training.sh"),
+            "--blob-url",
+            blob_url,
+            "--policy-type",
+            "pi0",
+            "--training-steps",
+            str(training_steps),
+            "--save-freq",
+            str(save_freq),
+            "--batch-size",
+            str(batch_size),
+            "--log-freq",
+            str(log_freq),
+            "--eval-freq",
+            str(training_steps + 1),
+            "--instance-type",
+            instance_type,
+            "--train-expert-only",
+            "--experiment-name",
+            experiment_name,
+            *_submit_workspace_args(aml_workspace),
+            "--register-checkpoint",
+            register_model_name,
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"AzureML VLA pi0 e2e submission failed\n\n{format_command_failure(result)}")
+
+    return _aml_job_from_submission(result, aml_workspace, experiment_name, "AzureML VLA pi0 training")
 
 
 _AML_LEROBOT_EVAL_MODEL_ENV = "E2E_AML_LEROBOT_EVAL_MODEL"
@@ -743,3 +797,25 @@ def cancel_aml_job(job: AzureMLJob, repo_root: Path) -> None:
         ],
         cwd=repo_root,
     )
+
+
+def cleanup_aml_job_and_model_versions(
+    job: AzureMLJob,
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    model_name: str,
+) -> None:
+    """Cancel an AzureML job before archiving every model version it registered."""
+    cancel_aml_job(job, repo_root)
+    if not job.is_terminal:
+        terminal_status = wait_for_status(
+            lambda: _aml_status(fetch_aml_job_payload(job, repo_root)),
+            goal_description=f"AzureML job {job.name} cleanup",
+            timeout_minutes=10,
+            poll_interval_seconds=15,
+            success_statuses={"Completed", *AML_FAILURE_STATES},
+            status_log_prefix="Cleanup poll status",
+        )
+        _mark_job_terminal(job, terminal_status)
+
+    archive_all_model_versions(repo_root, aml_workspace, model_name)
