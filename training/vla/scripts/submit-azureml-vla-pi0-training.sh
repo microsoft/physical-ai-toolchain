@@ -5,7 +5,7 @@
 # fallback via --hf-dataset). Reuses the policy-agnostic IL training entry script
 # (training/il/scripts/lerobot/azureml-train-entry.sh) with a VLA-specific
 # dependency project injected via LEROBOT_PROJECT.
-# cspell:ignore alreadyexists paligemma
+# cspell:ignore alreadyexists
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,8 +53,8 @@ DATA SOURCE (combinable):
 
 AZUREML ASSET OPTIONS:
     --environment-name NAME       AzureML environment name (default: vla-pi0-training-env)
-    --environment-version VER     Environment version (default: 1.0.0)
-    --image IMAGE                 Container image (default: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime)
+    --environment-version VER     Environment version (default: derived from --image)
+    --image IMAGE                 Container image (default: $DEFAULT_LEROBOT_TRAIN_IMAGE, digest-pinned in scripts/lib/common.sh)
     --assets-only                 Register environment without submitting job
 
 TRAINING OPTIONS:
@@ -92,6 +92,7 @@ TRAINING HYPERPARAMETERS:
         --batch-size N            Training batch size
         --eval-freq N             Evaluation frequency
         --save-freq N             Checkpoint save frequency (default: 5000)
+        --log-freq N              MLflow metric log frequency (default: 200)
 
 CHECKPOINT REGISTRATION:
     -r, --register-checkpoint NAME  Model name for Azure ML registration
@@ -200,58 +201,6 @@ EOF
 # Helpers
 #------------------------------------------------------------------------------
 
-ensure_ml_extension() {
-  az extension show --name ml &>/dev/null ||
-    fatal "Azure ML CLI extension not installed. Run: az extension add --name ml"
-}
-
-register_environment() {
-  local name="$1" version="$2" image="$3" rg="$4" ws="$5" sub="$6"
-  local env_file create_log status
-  env_file=$(mktemp)
-  create_log=$(mktemp)
-
-  cat >"$env_file" <<EOF
-\$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
-name: $name
-version: $version
-image: $image
-EOF
-
-  info "Publishing AzureML environment ${name}:${version}"
-  set +e
-  az ml environment create --file "$env_file" \
-    --name "$name" --version "$version" \
-    --resource-group "$rg" --workspace-name "$ws" \
-    --subscription "$sub" >"$create_log" 2>&1
-  status=$?
-  set -e
-
-  rm -f "$env_file"
-
-  if [[ $status -eq 0 ]]; then
-    rm -f "$create_log"
-    return 0
-  fi
-
-  # AzureML environment versions are immutable; the CLI returns an
-  # "already exists" / "AlreadyExists" / HTTP 409 error when re-registering
-  # an existing version. Treat that as success since the existing artifact
-  # is what subsequent commands will reference. Surface any other failure
-  # (auth, quota, network, schema) so the caller can stop before submitting
-  # a job that would fail at runtime.
-  if grep -qiE 'already exists|alreadyexists|http 409|status code: ?409' "$create_log"; then
-    warn "Environment ${name}:${version} already exists; reusing existing version"
-    rm -f "$create_log"
-    return 0
-  fi
-
-  error "Failed to publish AzureML environment ${name}:${version}"
-  cat "$create_log" >&2
-  rm -f "$create_log"
-  return 1
-}
-
 render_job_file_with_mounted_inputs() {
   local source_file="$1" rendered_file="$2" init_model="$3"
   shift 3
@@ -301,8 +250,10 @@ PY
 #------------------------------------------------------------------------------
 
 environment_name="vla-pi0-training-env"
-environment_version="1.0.0"
-image="${IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime}"
+environment_version="${ENVIRONMENT_VERSION:-}"
+environment_version_explicit=false
+[[ -n "${ENVIRONMENT_VERSION:-}" ]] && environment_version_explicit=true
+image="${IMAGE:-$DEFAULT_LEROBOT_TRAIN_IMAGE}"
 assets_only=false
 
 job_file="$REPO_ROOT/training/vla/workflows/azureml/vla-pi0-train.yaml"
@@ -324,6 +275,7 @@ training_steps="${TRAINING_STEPS:-}"
 batch_size="${BATCH_SIZE:-}"
 eval_freq="${EVAL_FREQ:-}"
 save_freq="${SAVE_FREQ:-5000}"
+log_freq="${LOG_FREQ:-}"
 
 register_checkpoint="${REGISTER_CHECKPOINT:-}"
 
@@ -353,7 +305,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                    show_help; exit 0 ;;
     --environment-name)           environment_name="$2"; shift 2 ;;
-    --environment-version)        environment_version="$2"; shift 2 ;;
+    --environment-version)        environment_version="$2"; environment_version_explicit=true; shift 2 ;;
     --image|-i)                   image="$2"; shift 2 ;;
     --assets-only)                assets_only=true; shift ;;
     -w|--job-file)                job_file="$2"; shift 2 ;;
@@ -372,6 +324,7 @@ while [[ $# -gt 0 ]]; do
     --batch-size)                 batch_size="$2"; shift 2 ;;
     --eval-freq)                  eval_freq="$2"; shift 2 ;;
     --save-freq)                  save_freq="$2"; shift 2 ;;
+    --log-freq)                   log_freq="$2"; shift 2 ;;
     -r|--register-checkpoint)     register_checkpoint="$2"; shift 2 ;;
     --subscription-id)            subscription_id="$2"; shift 2 ;;
     --resource-group)             resource_group="$2"; shift 2 ;;
@@ -393,12 +346,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$environment_version_explicit" != "true" ]]; then
+  environment_version="$(derive_azureml_environment_version_from_image "$image")"
+fi
+
 #------------------------------------------------------------------------------
 # Validation
 #------------------------------------------------------------------------------
 
 require_tools az python3
-ensure_ml_extension
+require_az_extension ml
 
 [[ -n "$subscription_id" ]] || fatal "AZURE_SUBSCRIPTION_ID required"
 [[ -n "$resource_group" ]] || fatal "AZURE_RESOURCE_GROUP required"
@@ -510,6 +467,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Training Steps" "${training_steps:-<default>}"
   print_kv "Batch Size" "${batch_size:-<default>}"
   print_kv "Save Freq" "$save_freq"
+  print_kv "Log Freq" "${log_freq:-<default>}"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
   print_kv "Init From Model" "${init_from_policy_model:-<none>}"
   if [[ ${#dataset_assets[@]} -gt 0 ]]; then
@@ -539,7 +497,7 @@ fi
 # Register Environment
 #------------------------------------------------------------------------------
 
-register_environment "$environment_name" "$environment_version" "$image" \
+register_azureml_environment "$environment_name" "$environment_version" "$image" \
   "$resource_group" "$workspace_name" "$subscription_id"
 
 info "Environment: ${environment_name}:${environment_version}"
@@ -548,6 +506,9 @@ if [[ "$assets_only" == "true" ]]; then
   info "Assets prepared; skipping job submission per --assets-only"
   exit 0
 fi
+
+managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
+  "$compute" "$resource_group" "$workspace_name")
 
 #------------------------------------------------------------------------------
 # Pre-submission Checks
@@ -599,6 +560,7 @@ az_args=(
 [[ -n "$instance_type" ]] && az_args+=(--set "resources.instance_type=$instance_type")
 [[ -n "$experiment_name" ]] && az_args+=(--set "experiment_name=$experiment_name")
 [[ -n "$display_name" ]] && az_args+=(--set "display_name=$display_name")
+[[ -n "$managed_identity_client_id" ]] && az_args+=(--set "environment_variables.AZURE_CLIENT_ID=$managed_identity_client_id")
 
 az_args+=(--set "command=$train_cmd")
 
@@ -661,6 +623,7 @@ az_args+=(
 [[ -n "$training_steps" ]]      && az_args+=(--set "environment_variables.TRAINING_STEPS=$training_steps")
 [[ -n "$batch_size" ]]          && az_args+=(--set "environment_variables.BATCH_SIZE=$batch_size")
 [[ -n "$eval_freq" ]]           && az_args+=(--set "environment_variables.EVAL_FREQ=$eval_freq")
+[[ -n "$log_freq" ]]            && az_args+=(--set "environment_variables.LOG_FREQ=$log_freq")
 [[ -n "$register_checkpoint" ]] && az_args+=(--set "environment_variables.REGISTER_CHECKPOINT=$register_checkpoint")
 [[ "$train_expert_only" == "true" ]] && az_args+=(--set "environment_variables.TRAIN_EXPERT_ONLY=true")
 [[ -n "$hf_token" ]] && az_args+=(--set "environment_variables.HF_TOKEN=$hf_token")

@@ -17,6 +17,26 @@ AML_COMPUTE_NAME_MAX_LENGTH = 16
 TFVARS_FALLBACK_OUTPUT_KEYS = ("resource_group", "azureml_workspace", "aks_cluster", "storage_account")
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "requires_hf_token: marks tests that require HF_TOKEN for gated Hugging Face model access",
+    )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if item.get_closest_marker("requires_hf_token") is None:
+        return
+    if os.environ.get("HF_TOKEN", "").strip():
+        return
+
+    pytest.fail(
+        f"{item.nodeid} requires HF_TOKEN for gated Hugging Face model access",
+        pytrace=False,
+    )
+
+
 @dataclass(frozen=True)
 class TerraformOutputs:
     values: dict[str, Any]

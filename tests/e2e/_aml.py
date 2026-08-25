@@ -272,6 +272,7 @@ def submit_aml_vla_pi0_training(
     training_steps: int,
     save_freq: int,
     batch_size: int,
+    log_freq: int,
     register_model_name: str,
 ) -> AzureMLJob:
     experiment_name = e2e_name("vla-pi0-training-e2e-aml")
@@ -279,7 +280,7 @@ def submit_aml_vla_pi0_training(
     log_e2e(
         "Submitting AzureML VLA pi0 training job "
         f"for dataset={blob_url}, training_steps={training_steps}, "
-        f"save_freq={save_freq}, batch_size={batch_size}, experiment={experiment_name}, "
+        f"save_freq={save_freq}, batch_size={batch_size}, log_freq={log_freq}, experiment={experiment_name}, "
         f"instance_type={instance_type or '<managed-compute>'}"
     )
     result = run_command(
@@ -295,6 +296,8 @@ def submit_aml_vla_pi0_training(
             str(save_freq),
             "--batch-size",
             str(batch_size),
+            "--log-freq",
+            str(log_freq),
             "--eval-freq",
             str(training_steps + 1),
             "--instance-type",

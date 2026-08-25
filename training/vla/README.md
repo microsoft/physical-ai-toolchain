@@ -1,6 +1,6 @@
 # VLA Training
 
-Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[pi]`. Jobs submit to Azure ML as a single `CommandJob`, reusing the IL LeRobot entry script with a VLA dependency lockfile and policy whitelist.
+Vision-Language-Action (VLA) training for `pi0`, `pi0_fast`, and `pi05` policies via `lerobot[dataset,pi]`. Jobs submit to Azure ML as a single `CommandJob`, reusing the IL LeRobot entry script with a VLA dependency lockfile and policy whitelist.
 NVIDIA GR00T fine-tuning runs through OSMO using the same lifecycle domain.
 
 ## 📁 Directory Structure
@@ -14,7 +14,7 @@ vla/
 │           ├── modality_config.py              # GR00T N1.7+ example modality config
 │           └── README.md                       # How to adapt for a custom embodiment
 ├── lerobot/
-│   ├── pyproject.toml                           # lerobot[pi] dependencies and overrides
+│   ├── pyproject.toml                           # lerobot[dataset,pi] dependencies and overrides
 │   └── uv.lock                                  # Reproducible Linux x86_64 dependency lock
 ├── scripts/
 │   ├── groot/
@@ -79,6 +79,22 @@ The model input uses download mode and forwards its local path to LeRobot as `po
 ```
 
 The training script writes the registration manifest under `outputs/checkpoints/`; AzureML's job-completion hook publishes the model version.
+
+## 🧪 End-to-End Test
+
+The Azure ML pi0 E2E test initializes pi0 from the gated
+[`google/paligemma-3b-pt-224`](https://huggingface.co/google/paligemma-3b-pt-224)
+backbone. Accept the model access conditions on Hugging Face, then export a read token
+authorized for the model before running the test:
+
+```bash
+export HF_TOKEN="$(cat /secure/path/to/hf-token)"
+uv run pytest -o addopts='' -vv -s -m e2e tests/e2e/test_e2e_aml_vla_pi0_training.py
+```
+
+Pytest fails during client-side setup before resolving Azure fixtures or submitting a
+job when `HF_TOKEN` is unset or empty. Other E2E tests require this variable only when
+they carry the `requires_hf_token` marker.
 
 ## 🚀 GR00T-N1.5 Fine-Tuning
 

@@ -26,12 +26,13 @@ from tests.e2e._aml import (
     wait_until_aml_completed,
     wait_until_aml_started,
 )
-from tests.e2e._common import e2e_name, env_value, log_e2e
+from tests.e2e._common import e2e_name, log_e2e
 from tests.e2e._lerobot_dataset import stage_synthetic_lerobot_dataset
 from tests.e2e._mlflow import assert_aml_lerobot_job_has_mlflow_tracking
 
 
 @pytest.mark.e2e
+@pytest.mark.requires_hf_token
 @pytest.mark.usefixtures("aml_compute_target")
 def test_aml_vla_pi0_training_e2e(
     request: pytest.FixtureRequest,
@@ -39,10 +40,6 @@ def test_aml_vla_pi0_training_e2e(
     repo_root: Path,
     storage_account: str,
 ) -> None:
-    hf_token = env_value("HF_TOKEN")
-    if hf_token is None:
-        pytest.skip("HF_TOKEN is required to download the gated PaliGemma backbone")
-
     log_e2e("Starting AzureML VLA pi0 training e2e test")
     dataset = stage_synthetic_lerobot_dataset(
         request,
@@ -58,6 +55,7 @@ def test_aml_vla_pi0_training_e2e(
         training_steps=2,
         save_freq=1,
         batch_size=1,
+        log_freq=1,
         register_model_name=register_model_name,
     )
     request.addfinalizer(lambda: cleanup_aml_job_and_model_versions(job, repo_root, aml_workspace, register_model_name))
