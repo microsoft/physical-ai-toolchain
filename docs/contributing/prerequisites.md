@@ -48,11 +48,11 @@ Install these tools before contributing:
 
 The dev container requests a GPU only when Dev Containers detects one. Configure the host according to its platform:
 
-| Host                              | Docker runtime configuration                                                                  |
-|-----------------------------------|-----------------------------------------------------------------------------------------------|
-| x86_64 with an NVIDIA GPU         | Install NVIDIA Container Toolkit; automatic `--gpus all` handling normally requires no change |
-| NVIDIA ARM64 host in CSV mode     | Set `nvidia` as Docker's default runtime                                                       |
-| Host without an NVIDIA GPU        | Retain the default `runc` runtime; the dev container starts without GPU devices                |
+| Host                          | Docker runtime configuration                                                                  |
+|-------------------------------|-----------------------------------------------------------------------------------------------|
+| x86_64 with an NVIDIA GPU     | Install NVIDIA Container Toolkit; automatic `--gpus all` handling normally requires no change |
+| NVIDIA ARM64 host in CSV mode | Set `nvidia` as Docker's default runtime                                                      |
+| Host without an NVIDIA GPU    | Retain the default `runc` runtime; the dev container starts without GPU devices               |
 
 On NVIDIA ARM64 hosts, the NVIDIA Container Runtime can auto-detect CSV mode and reject the
 `--gpus all` request unless Docker invokes the `nvidia` runtime. Confirm that Docker has registered the runtime:
@@ -98,8 +98,8 @@ Please use the NVIDIA Container Runtime (e.g. specify the --runtime=nvidia flag)
 Attaching the GPU is not sufficient. CUDA also requires the container user to hold the host groups that own the GPU
 device nodes. [.devcontainer/devcontainer.json](../../.devcontainer/devcontainer.json) grants them through `runArgs`:
 
-| Device node         | Host group | Required for                              |
-|---------------------|------------|-------------------------------------------|
+| Device node         | Host group | Required for                               |
+|---------------------|------------|--------------------------------------------|
 | `/dev/nvmap`        | `video`    | Tegra memory manager on NVIDIA ARM64 hosts |
 | `/dev/dri/renderD*` | `render`   | DRM render node that CUDA opens            |
 

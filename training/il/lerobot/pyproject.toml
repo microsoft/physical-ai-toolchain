@@ -88,7 +88,7 @@ prerelease = "allow"
 # appears in `dependencies` above, otherwise resolution drifts. Remove an
 # override only when the upstream constraint that required it is lifted.
 #
-# WARNING: the override list is tightly coupled to lerobot==0.6.0's and
+# WARNING: the override list is tightly coupled to lerobot==0.6.1's and
 # azureml-mlflow==1.62.0.post5's published constraints. When bumping either,
 # audit every entry against the new release's pyproject so we neither hide a
 # legitimate upper bound nor leave a stale override in place.
@@ -104,7 +104,7 @@ override-dependencies = [
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mirror the
     # direct pin to take 3.14.0.
     "mlflow-skinny==3.14.0",
-    # packaging: lerobot==0.6.0 caps below 26.0 and azureml-mlflow caps below
+    # packaging: lerobot==0.6.1 caps below 26.0 and azureml-mlflow caps below
     # 26.x; mirror the direct pin.
     "packaging==26.2",
     # numpy: lerobot==0.6.1 caps below 2.3.0; retain 2.4.6 for the broader runtime stack.
