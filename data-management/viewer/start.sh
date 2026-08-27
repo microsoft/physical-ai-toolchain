@@ -225,7 +225,10 @@ start_backend() {
         cd "${BACKEND_DIR}"
         # shellcheck source=/dev/null
         source .venv/bin/activate
-        exec uvicorn src.api.main:app --reload --port "${BACKEND_PORT}" 2>&1
+        exec uvicorn src.api.main:app \
+            --reload \
+            --reload-dir src \
+            --port "${BACKEND_PORT}" 2>&1
     ) &
     BACKEND_PID=$!
 
