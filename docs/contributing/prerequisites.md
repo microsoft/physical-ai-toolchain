@@ -93,6 +93,42 @@ invoking the NVIDIA Container Runtime Hook directly (e.g. specifying the docker 
 Please use the NVIDIA Container Runtime (e.g. specify the --runtime=nvidia flag) instead
 ```
 
+### GPU Device Group Access
+
+Attaching the GPU is not sufficient. CUDA also requires the container user to hold the host groups that own the GPU
+device nodes. [.devcontainer/devcontainer.json](../../.devcontainer/devcontainer.json) grants them through `runArgs`:
+
+| Device node         | Host group | Required for                              |
+|---------------------|------------|-------------------------------------------|
+| `/dev/nvmap`        | `video`    | Tegra memory manager on NVIDIA ARM64 hosts |
+| `/dev/dri/renderD*` | `render`   | DRM render node that CUDA opens            |
+
+The committed configuration assumes the host `render` group is GID `993`. Confirm the value on the host:
+
+```bash
+stat -c '%g %G' /dev/dri/renderD128
+```
+
+If the GID differs, update the matching `--group-add` entry and rebuild the dev container. Group names do not
+transfer across the container boundary, so the numeric GID is required; inside the container it resolves to whichever
+name holds that GID, commonly `systemd-resolve`.
+
+Missing membership produces a misleading failure. `nvidia-smi` lists the GPU and `torch.cuda.device_count()` returns
+`1`, but `torch.cuda.is_available()` returns `False`:
+
+```text
+CUDA initialization: Unexpected error from cudaGetDeviceCount(). Error 801: operation not supported
+```
+
+Verify device access and CUDA inside the dev container:
+
+```bash
+test -r /dev/nvmap && test -r /dev/dri/renderD128 && echo "device access OK"
+python -c "import torch; print('cuda:', torch.cuda.is_available())"
+```
+
+Both commands must succeed, and the second must print `cuda: True`.
+
 ## Azure Access Requirements
 
 Deploying this architecture requires Azure subscription access with specific permissions and quotas:
