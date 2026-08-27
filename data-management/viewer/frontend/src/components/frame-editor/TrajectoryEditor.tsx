@@ -256,6 +256,17 @@ function ArmEditor({
  */
 export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
   const { currentFrame } = usePlaybackControls()
+
+  return (
+    <TrajectoryEditorFrame key={currentFrame} className={className} currentFrame={currentFrame} />
+  )
+}
+
+interface TrajectoryEditorFrameProps extends TrajectoryEditorProps {
+  currentFrame: number
+}
+
+function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFrameProps) {
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
   const {
     trajectoryAdjustments,
@@ -287,15 +298,6 @@ export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
   const [leftGripper, setLeftGripper] = useState<number | undefined>(
     currentAdjustment?.leftGripperOverride,
   )
-
-  // Sync local state when frame changes
-  useEffect(() => {
-    const adj = trajectoryAdjustments.get(currentFrame)
-    setRightArmDelta(adj?.rightArmDelta ?? [0, 0, 0])
-    setLeftArmDelta(adj?.leftArmDelta ?? [0, 0, 0])
-    setRightGripper(adj?.rightGripperOverride)
-    setLeftGripper(adj?.leftGripperOverride)
-  }, [currentFrame, trajectoryAdjustments])
 
   // Check if there are any changes
   const hasFrameChanges = useMemo(() => {

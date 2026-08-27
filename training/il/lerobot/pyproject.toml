@@ -37,16 +37,19 @@ dependencies = [
     "pyarrow==25.0.0",
     "matplotlib==3.11.1",
     "huggingface-hub==1.25.1",
-    # The `dataset` extra pulls the video/dataset stack LeRobot loads eagerly at
-    # import (`av`, `jsonlines`, `pandas`); without it `lerobot-train` aborts with
-    # ImportError: 'av' is required. Runtime installs use `--no-deps`, so the extra
-    # must be declared here to enter the lock and the build-time export.
-    "lerobot[dataset]==0.6.0",
+    # Use PyAV on ARM because LeRobot's dataset extra pulls TorchCodec, whose
+    # published wheels do not match the CUDA 13.0 SBSA PyTorch build.
+    "lerobot[av-dep]==0.6.1",
+    "pandas==2.3.3",
+    "jsonlines==4.0.0",
+    "wandb==0.27.2",
+    "torch==2.10.0; platform_machine == 'aarch64' or platform_machine == 'arm64'",
+    "torchvision==0.25.0; platform_machine == 'aarch64' or platform_machine == 'arm64'",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.14.0",
-    "torchcodec==0.15.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "torchcodec==0.15.0; platform_machine == 'x86_64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
     "gitpython==3.1.57",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
@@ -67,10 +70,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# Constrain the universal lock to the AzureML/OSMO deployment target so the
-# resolution yields a single marker per package, suitable for `--no-deps`
-# installs and a deterministic build-time `uv export`.
-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# Resolve both the AzureML/OSMO x86_64 target and local NVIDIA Thor systems.
+environments = ["sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]
 # Required for prerelease transitives pulled by the resolved tree, including
 # Azure/OpenTelemetry instrumentation betas, wrapt release candidates, and
 # safetensors release candidates. `uv lock` reads prerelease from `[tool.uv]`
@@ -102,13 +103,19 @@ override-dependencies = [
     # packaging: lerobot==0.6.0 caps below 26.0 and azureml-mlflow caps below
     # 26.x; mirror the direct pin.
     "packaging==26.2",
-    # numpy: lerobot==0.6.0 caps below 2.3.0; we need 2.4.6 to align with torchcodec.
+    # numpy: lerobot==0.6.1 caps below 2.3.0; retain 2.4.6 for the broader runtime stack.
     "numpy==2.4.6",
-    # torchcodec: lerobot==0.6.0 caps below 0.12.0; 0.14.0 ships the manylinux
-    # 2.28 wheel needed by the AzureML CUDA container.
-    "torchcodec==0.15.0",
-    # datasets: lerobot==0.6.0 caps below 5.0.0; 5.0.0 is needed for Parquet
+    # datasets: lerobot==0.6.1 caps below 5.0.0; 5.0.0 is needed for Parquet
     # performance improvements and compatibility with newer pyarrow.
     "datasets==5.0.0",
 ]
 package = false
+
+[[tool.uv.index]]
+name = "jetson-ai-lab-cu130"
+url = "https://pypi.jetson-ai-lab.io/sbsa/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "jetson-ai-lab-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" }]
+torchvision = [{ index = "jetson-ai-lab-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" }]

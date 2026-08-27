@@ -410,6 +410,11 @@ else
 fi
 
 # CSI Secrets Store: keeps secrets in sync with Key Vault after initial creation
+managed_secrets=(osmo-default-admin)
+[[ "$include_postgres_secret" == "true" ]] && managed_secrets+=(db-secret)
+[[ "$include_redis_secret" == "true" ]] && managed_secrets+=(redis-secret)
+kubectl label secret -n "$NS_OSMO_CONTROL_PLANE" "${managed_secrets[@]}" \
+    secrets-store.csi.k8s.io/managed=true --overwrite >/dev/null
 apply_secret_provider_class "$NS_OSMO_CONTROL_PLANE" "$kv_name" "$osmo_identity_client_id" "$tenant_id" "$include_redis_secret" "$include_postgres_secret"
 
 #------------------------------------------------------------------------------

@@ -146,6 +146,31 @@ class TestCamerasAndVideo:
         path = handler.get_video_path(DATASET_ID, 0, "fake_camera")
         assert path is None
 
+    def test_get_video_path_regenerates_invalid_cached_clip(self, monkeypatch, tmp_path):
+        source_path = tmp_path / "source.mp4"
+        source_path.write_bytes(b"source")
+        loader = FakeLoader()
+        loader.base_path = tmp_path
+        loader.get_video_path = lambda idx, camera: source_path
+        loader.get_video_time_window = lambda idx, camera: (0.0, 1.0)
+        handler = LeRobotFormatHandler()
+        handler._loaders["ds"] = loader
+        cache_path = handler._video_cache_path("ds", 0, "observation.images.cam0")
+        assert cache_path is not None
+        cache_path.parent.mkdir(parents=True)
+        cache_path.write_bytes(b"corrupt")
+
+        monkeypatch.setattr(handler, "_is_valid_video_file", lambda path: path != cache_path)
+
+        def regenerate(source, window, target):
+            target.write_bytes(b"valid")
+            return True
+
+        monkeypatch.setattr(handler, "_generate_episode_video_clip", regenerate)
+
+        assert handler.get_video_path("ds", 0, "observation.images.cam0") == str(cache_path)
+        assert cache_path.read_bytes() == b"valid"
+
 
 class TestFfmpegExtraction:
     """Test ffmpeg-based frame extraction."""

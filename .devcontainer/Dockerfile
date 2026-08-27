@@ -1,5 +1,26 @@
 ARG BASE_IMAGE=
-FROM ${BASE_IMAGE:-mcr.microsoft.com/devcontainers/python:3.12-bookworm}
+FROM nvidia/cuda:13.0.3-cudnn-runtime-ubuntu24.04 AS cuda-runtime
+RUN apt-get update && \
+	apt-get install -y --no-install-recommends cuda-cupti-13-0=13.0.85-1 && \
+	mkdir /opt/nvpl && \
+	if [ "$(dpkg --print-architecture)" = "arm64" ]; then \
+		apt-get install -y --no-install-recommends libcudss0-cuda-13=0.8.0.10-1 libnvpl-blas0=0.6.0-1 libnvpl-lapack0=0.4.0.1-1 && \
+		cp -a /usr/lib/*-linux-gnu/libcudss/13/libcudss*.so* /usr/lib/*-linux-gnu/libnvpl*.so* /opt/nvpl/; \
+	fi && \
+	rm -rf /var/lib/apt/lists/*
+
+FROM ${BASE_IMAGE:-mcr.microsoft.com/devcontainers/base:ubuntu-24.04}
+
+RUN apt-get update && \
+	apt-get install -y --no-install-recommends python3 python3-venv python-is-python3 && \
+	rm -rf /var/lib/apt/lists/*
+
+COPY --from=cuda-runtime /usr/local/cuda-13.0 /usr/local/cuda-13.0
+COPY --from=cuda-runtime /usr/lib/*-linux-gnu/libcudnn*.so* /usr/local/cuda-13.0/lib64/
+COPY --from=cuda-runtime /opt/nvpl/ /usr/local/cuda-13.0/lib64/
+RUN ln -s /usr/local/cuda-13.0 /usr/local/cuda
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64"
 
 ARG NPM_CONFIG_REGISTRY=
 ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}

@@ -375,6 +375,22 @@ describe('TrajectoryEditor', () => {
     expect((numberInputs[0] as HTMLInputElement).value).toBe('0.2500')
   })
 
+  it('loads frame-specific adjustments when the current frame changes', () => {
+    const adjustments = new Map<number, TrajectoryAdjustment>([
+      [1, { frameIndex: 1, rightArmDelta: [0.25, 0, 0] }],
+    ])
+    const { playbackState } = setup({ trajectory: { trajectoryAdjustments: adjustments } })
+    const { rerender } = render(<TrajectoryEditor />)
+
+    mockedPlaybackControls.mockReturnValue({ ...playbackState, currentFrame: 1 })
+    rerender(<TrajectoryEditor />)
+
+    const numberInputs = screen
+      .getAllByRole('spinbutton')
+      .filter((element) => (element as HTMLInputElement).step === '0.001')
+    expect((numberInputs[0] as HTMLInputElement).value).toBe('0.2500')
+  })
+
   it('ArmEditor per-arm reset button resets only the right arm delta', async () => {
     const user = userEvent.setup()
     setup()
