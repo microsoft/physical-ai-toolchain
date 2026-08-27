@@ -92,8 +92,17 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	"forwardPorts": [8080],
 
-	// "optional" attaches host GPUs when they are available and still builds on
-	// GPU-less hosts. Host-specific device groups belong in a local override.
+	// GPU device nodes are group-restricted: /dev/nvmap is root:video and
+	// /dev/dri/renderD* is root:render (GID 993 here). CUDA initialization fails
+	// with error 801 unless the container user holds both; adjust 993 if the host
+	// render group differs. "gpu": "optional" attaches devices when present and
+	// still builds on GPU-less hosts.
+	"runArgs": [
+		"--group-add",
+		"video",
+		"--group-add",
+		"993"
+	],
 	"hostRequirements": {
 		"gpu": "optional"
 	},
