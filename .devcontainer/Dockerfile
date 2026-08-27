@@ -29,4 +29,6 @@ ARG PIP_INDEX_URL=
 ENV PIP_INDEX_URL=${PIP_INDEX_URL:-https://pypi.org/simple/}
 
 ARG UV_DEFAULT_INDEX=
-ENV UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX:-https://pypi.org/simple/}
+# No trailing slash: uv records this URL verbatim in uv.lock, so a slash here
+# makes every locally regenerated lock drift from the CI-generated one.
+ENV UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX:-https://pypi.org/simple}
