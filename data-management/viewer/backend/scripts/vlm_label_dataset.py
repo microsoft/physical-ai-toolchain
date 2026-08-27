@@ -342,9 +342,7 @@ def label_dataset(
     episodes = list(iter_episodes(dataset_root, views=selected_views, limit=limit))
     prior_rows = _load_jsonl_rows(jsonl_path) if resume else []
     latest_rows = {int(row["episode_index"]): row for row in prior_rows}
-    completed_indices = {
-        episode_index for episode_index, row in latest_rows.items() if row.get("error") is None
-    }
+    completed_indices = {episode_index for episode_index, row in latest_rows.items() if row.get("error") is None}
     pending_episodes = [record for record in episodes if record.episode_index not in completed_indices]
     _LOGGER.info(
         "Labeling %d episodes from %s (views: %s, skipped: %d)",
