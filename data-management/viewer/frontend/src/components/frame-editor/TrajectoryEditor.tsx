@@ -256,9 +256,18 @@ function ArmEditor({
  */
 export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
   const { currentFrame } = usePlaybackControls()
+  // Remount per episode+frame so the editor inputs always start from that frame's
+  // stored adjustment instead of retaining the previously edited frame's values.
+  const episodeKey = useEpisodeStore(
+    (state) => state.currentEpisode?.meta?.id ?? state.currentEpisode?.meta?.index,
+  )
 
   return (
-    <TrajectoryEditorFrame key={currentFrame} className={className} currentFrame={currentFrame} />
+    <TrajectoryEditorFrame
+      key={`${episodeKey}:${currentFrame}`}
+      className={className}
+      currentFrame={currentFrame}
+    />
   )
 }
 
@@ -356,6 +365,15 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
     setLeftGripper(undefined)
   }, [])
 
+  // Clearing every stored adjustment must also drop this frame's pending edits.
+  const handleClearAll = useCallback(() => {
+    setRightArmDelta([0, 0, 0])
+    setLeftArmDelta([0, 0, 0])
+    setRightGripper(undefined)
+    setLeftGripper(undefined)
+    clearTrajectoryAdjustments()
+  }, [clearTrajectoryAdjustments])
+
   if (!currentPoint) {
     return (
       <div className={cn('text-muted-foreground p-4 text-sm', className)}>
@@ -431,12 +449,7 @@ function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFram
 
       {/* Clear all adjustments */}
       {hasAnyAdjustments && (
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={clearTrajectoryAdjustments}
-          className="w-full"
-        >
+        <Button variant="destructive" size="sm" onClick={handleClearAll} className="w-full">
           <Trash2 className="mr-1 h-4 w-4" />
           Clear All Trajectory Adjustments ({trajectoryAdjustments.size})
         </Button>

@@ -91,16 +91,12 @@
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	"forwardPorts": [8080],
-	"runArgs": [
-		"--runtime",
-		"nvidia",
-		"--gpus",
-		"all",
-		"--group-add",
-		"video",
-		"--group-add",
-		"993"
-	],
+
+	// "optional" attaches host GPUs when they are available and still builds on
+	// GPU-less hosts. Host-specific device groups belong in a local override.
+	"hostRequirements": {
+		"gpu": "optional"
+	},
 
 	// Container environment variables
 	"containerEnv": {

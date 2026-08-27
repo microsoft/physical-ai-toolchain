@@ -1,5 +1,5 @@
 ARG BASE_IMAGE=
-FROM nvidia/cuda:13.0.3-cudnn-runtime-ubuntu24.04 AS cuda-runtime
+FROM nvidia/cuda:13.0.3-cudnn-runtime-ubuntu24.04@sha256:14f6d08d1cd4a96effbfe3101d0b56326f552c199d05e4979ee0bd616df5811b AS cuda-runtime
 RUN apt-get update && \
 	apt-get install -y --no-install-recommends cuda-cupti-13-0=13.0.85-1 && \
 	mkdir /opt/nvpl && \

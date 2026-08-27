@@ -81,10 +81,12 @@ def load_episode_metadata(dataset_dir: str) -> dict[int, dict]:
 
 
 def find_data_file(dataset_dir: str, ep_idx: int, info: dict, episode_meta: dict | None = None) -> str | None:
-    if episode_meta and info.get("data_path"):
+    chunk_index = (episode_meta or {}).get("data/chunk_index")
+    file_index = (episode_meta or {}).get("data/file_index")
+    if chunk_index is not None and file_index is not None and info.get("data_path"):
         candidate = Path(dataset_dir) / info["data_path"].format(
-            chunk_index=int(episode_meta["data/chunk_index"]),
-            file_index=int(episode_meta["data/file_index"]),
+            chunk_index=int(chunk_index),
+            file_index=int(file_index),
             episode_index=ep_idx,
         )
         if candidate.exists():
@@ -109,11 +111,13 @@ def find_video_file(
     info: dict,
     episode_meta: dict | None = None,
 ) -> str | None:
-    if episode_meta and info.get("video_path"):
+    chunk_index = (episode_meta or {}).get(f"videos/{video_key}/chunk_index")
+    file_index = (episode_meta or {}).get(f"videos/{video_key}/file_index")
+    if chunk_index is not None and file_index is not None and info.get("video_path"):
         candidate = Path(dataset_dir) / info["video_path"].format(
             video_key=video_key,
-            chunk_index=int(episode_meta[f"videos/{video_key}/chunk_index"]),
-            file_index=int(episode_meta[f"videos/{video_key}/file_index"]),
+            chunk_index=int(chunk_index),
+            file_index=int(file_index),
             episode_index=ep_idx,
         )
         if candidate.exists():
