@@ -18,7 +18,7 @@
       the pull-request head ref, executing untrusted code in a privileged context.
 
     Adapted from microsoft/hve-core scripts/security/Test-DangerousWorkflow.ps1
-    as of commit b70237d08d5caf6918b9de9952a243a8588b92dc (2026-07-02).
+    as of commit b70237d08d5caf6918b9de9952a243a8588b92dc.
 
     Local divergences from upstream (each marked inline with a '# LOCAL' comment):
 

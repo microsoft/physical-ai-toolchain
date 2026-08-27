@@ -26,6 +26,8 @@ from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
+_TASK_DESCRIPTION_COLUMNS = ("task", "__index_level_0__", "task_description")
+
 
 def _column_to_numpy(table: pa.Table, name: str) -> NDArray:
     """Extract a pyarrow column as a numpy array, stacking list elements."""
@@ -446,7 +448,7 @@ class LeRobotLoader:
                                     task_str = ep_tasks
                                 else:
                                     task_str = None
-                                task_idx = task_to_index.get(task_str, 0)
+                                task_idx = task_to_index.get(task_str, 0) if isinstance(task_str, str) else 0
                             else:
                                 task_idx = 0
                             result[idx] = {
@@ -892,9 +894,7 @@ class LeRobotLoader:
                 table = pq.read_table(tasks_parquet)
                 cols = table.column_names
                 if "task_index" in cols:
-                    # LeRobot v3 serializes the task string as the parquet index
-                    # (``__index_level_0__``); older exports use a ``task`` column.
-                    task_col = "task" if "task" in cols else next((c for c in cols if c != "task_index"), None)
+                    task_col = next((column for column in _TASK_DESCRIPTION_COLUMNS if column in cols), None)
                     if task_col is not None:
                         indices = table.column("task_index").to_pylist()
                         strings = table.column(task_col).to_pylist()

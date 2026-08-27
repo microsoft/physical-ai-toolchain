@@ -197,6 +197,12 @@ output "osmo_workload_identity" {
   value       = module.platform.osmo_workload_identity
 }
 
+output "osmo_admin_password" {
+  description = "OSMO admin password (sensitive). Fallback when Key Vault is unreachable from the deploy host."
+  value       = module.platform.osmo_admin_password
+  sensitive   = true
+}
+
 // ============================================================
 // Conversion Pipeline Outputs (Optional)
 // ============================================================

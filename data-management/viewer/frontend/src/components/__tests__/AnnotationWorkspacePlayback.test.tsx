@@ -44,6 +44,10 @@ describe('AnnotationWorkspace playback and trajectory tab flows', () => {
     expect(screen.getByText('Motion Metrics')).toBeInTheDocument()
     expect(screen.getByText('VLM Judge')).toBeInTheDocument()
     expect(screen.getByText('Episode Labels')).toBeInTheDocument()
+    expect(screen.getByText(/saved analysis results appear/i)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/results are written to this episode's labels/i),
+    ).not.toBeInTheDocument()
   })
 
   it('shows subtask controls in the default trajectory viewer', () => {

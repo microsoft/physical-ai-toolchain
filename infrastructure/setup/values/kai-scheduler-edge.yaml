@@ -1,0 +1,11 @@
+# CPU-only KAI Scheduler configuration for a single-node K3s edge cluster.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+replicaCount: 1
+priorityClassName: system-cluster-critical

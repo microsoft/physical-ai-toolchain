@@ -8,6 +8,7 @@ import { Check, Download, Plus, X } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -17,6 +18,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import type { ImportableAnalysisField } from '@/hooks/use-labels'
 import {
   IMPORTABLE_ANALYSIS_FIELDS,
@@ -46,6 +48,8 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
   const [newLabel, setNewLabel] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [importMessage, setImportMessage] = useState<string | null>(null)
+  const [importPrefix, setImportPrefix] = useState('')
+  const [shouldOverwrite, setShouldOverwrite] = useState(false)
   const [pendingDeleteLabel, setPendingDeleteLabel] = useState<string | null>(null)
   const availableLabels = useLabelStore((state) => state.availableLabels)
   const episodeAnalysis = useLabelStore((state) => state.episodeAnalysis)
@@ -122,8 +126,13 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
 
   const handleImport = useCallback(
     async (field: ImportableAnalysisField) => {
+      setImportMessage(null)
       try {
-        const result = await importLabels.mutateAsync({ field })
+        const result = await importLabels.mutateAsync({
+          field,
+          prefix: importPrefix.trim() || undefined,
+          overwrite: shouldOverwrite,
+        })
         const added = result.labels_added.length
         setImportMessage(
           `Imported ${added} ${ANALYSIS_FIELD_LABELS[field]} label${added === 1 ? '' : 's'} ` +
@@ -135,7 +144,7 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
         setErrorMessage(`Failed to import labels: ${detail}`)
       }
     },
-    [importLabels],
+    [importLabels, importPrefix, shouldOverwrite],
   )
 
   return (
@@ -223,6 +232,31 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
       {importableFields.length > 0 && (
         <div className="space-y-1.5 border-t pt-3">
           <p className="text-muted-foreground text-xs font-medium">Import from analysis</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="analysis-label-prefix" className="text-xs">
+                Label prefix
+              </Label>
+              <Input
+                id="analysis-label-prefix"
+                value={importPrefix}
+                onChange={(event) => setImportPrefix(event.target.value)}
+                placeholder="Use field default"
+                maxLength={32}
+                className="h-7 text-xs"
+              />
+            </div>
+            <div className="flex items-end gap-2 pb-1">
+              <Checkbox
+                id="overwrite-analysis-labels"
+                checked={shouldOverwrite}
+                onCheckedChange={(checked) => setShouldOverwrite(checked === true)}
+              />
+              <Label htmlFor="overwrite-analysis-labels" className="text-xs">
+                Replace existing imported labels
+              </Label>
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2">
             {importableFields.map((field) => (
               <Button

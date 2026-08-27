@@ -1,0 +1,32 @@
+# Reference AzureML InstanceTypes for a generic GPU deployment.
+# Generate deployment-specific InstanceTypes from Terraform outputs instead of applying this file directly.
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: defaultinstancetype
+spec:
+  resources:
+    requests:
+      cpu: "1"
+      memory: "4Gi"
+    limits:
+      cpu: "2"
+      memory: "8Gi"
+---
+apiVersion: amlarc.azureml.com/v1alpha1
+kind: InstanceType
+metadata:
+  name: gpuspot
+spec:
+  nodeSelector:
+    agentpool: gpu
+    accelerator: nvidia
+    kubernetes.azure.com/scalesetpriority: spot
+  resources:
+    requests:
+      cpu: "4"
+      memory: "16Gi"
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+      nvidia.com/gpu: 1

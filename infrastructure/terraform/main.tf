@@ -141,6 +141,7 @@ module "platform" {
   should_enable_aml_diagnostic_logs  = var.should_enable_aml_diagnostic_logs
   aml_compute_clusters               = var.aml_compute_clusters
   aml_managed_network_isolation_mode = var.aml_managed_network_isolation_mode
+  workspace_name_suffix              = var.workspace_name_suffix
 
   // DNS zone flags
   should_include_aks_dns_zone = var.should_include_aks_dns_zone

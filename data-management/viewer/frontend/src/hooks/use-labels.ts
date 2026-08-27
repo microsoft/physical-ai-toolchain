@@ -100,8 +100,11 @@ async function importAnalysisLabels(
  */
 export function useDatasetLabels() {
   const currentDataset = useDatasetStore((state) => state.currentDataset)
+  const labelDatasetId = useLabelStore((state) => state.datasetId)
+  const prepareDatasetLabels = useLabelStore((state) => state.prepareDatasetLabels)
   const setAvailableLabels = useLabelStore((state) => state.setAvailableLabels)
-  const setAllEpisodeLabels = useLabelStore((state) => state.setAllEpisodeLabels)
+  const setDatasetEpisodeLabels = useLabelStore((state) => state.setDatasetEpisodeLabels)
+  const reconcileEpisodeLabels = useLabelStore((state) => state.reconcileEpisodeLabels)
   const setAllEpisodeAnalysis = useLabelStore((state) => state.setAllEpisodeAnalysis)
   const setLoaded = useLabelStore((state) => state.setLoaded)
 
@@ -113,13 +116,30 @@ export function useDatasetLabels() {
   })
 
   useEffect(() => {
-    if (query.data) {
+    prepareDatasetLabels(currentDataset?.id ?? null)
+  }, [currentDataset?.id, prepareDatasetLabels])
+
+  useEffect(() => {
+    if (query.data && query.data.dataset_id === currentDataset?.id) {
       setAvailableLabels(query.data.available_labels)
-      setAllEpisodeLabels(query.data.episodes)
+      if (labelDatasetId === query.data.dataset_id) {
+        reconcileEpisodeLabels(query.data.dataset_id, query.data.episodes)
+      } else {
+        setDatasetEpisodeLabels(query.data.dataset_id, query.data.episodes)
+      }
       setAllEpisodeAnalysis(query.data.analysis ?? {})
       setLoaded(true)
     }
-  }, [query.data, setAvailableLabels, setAllEpisodeLabels, setAllEpisodeAnalysis, setLoaded])
+  }, [
+    currentDataset?.id,
+    labelDatasetId,
+    query.data,
+    reconcileEpisodeLabels,
+    setAllEpisodeAnalysis,
+    setAvailableLabels,
+    setDatasetEpisodeLabels,
+    setLoaded,
+  ])
 
   return query
 }
@@ -204,20 +224,27 @@ export function useRemoveLabelOption() {
 export function useImportAnalysisLabels() {
   const currentDataset = useDatasetStore((state) => state.currentDataset)
   const setAvailableLabels = useLabelStore((state) => state.setAvailableLabels)
-  const setAllEpisodeLabels = useLabelStore((state) => state.setAllEpisodeLabels)
+  const reconcileEpisodeLabels = useLabelStore((state) => state.reconcileEpisodeLabels)
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
-    mutationFn: ({ field, overwrite }: { field: ImportableAnalysisField; overwrite?: boolean }) => {
+    mutationFn: ({
+      field,
+      prefix,
+      overwrite,
+    }: {
+      field: ImportableAnalysisField
+      prefix?: string
+      overwrite?: boolean
+    }) => {
       if (!currentDataset) throw new Error('No dataset selected')
-      return importAnalysisLabels(currentDataset.id, field, { overwrite })
+      return importAnalysisLabels(currentDataset.id, field, { prefix, overwrite })
     },
     onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: labelKeys.dataset(data.dataset_id) })
+      if (useDatasetStore.getState().currentDataset?.id !== data.dataset_id) return
       setAvailableLabels(data.available_labels)
-      setAllEpisodeLabels(data.episodes)
-      if (currentDataset) {
-        queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) })
-      }
+      reconcileEpisodeLabels(data.dataset_id, data.episodes)
     },
   })
 

@@ -303,6 +303,8 @@ def _find_video_file(ds_dir: str, vk: str, ep_idx: int) -> str | None:
 
 
 def main() -> int:
+    global JOINT_NAMES
+
     import av
     import pyarrow.parquet as pq
     from lerobot.policies.act.modeling_act import ACTPolicy
@@ -349,6 +351,11 @@ def main() -> int:
     with open(os.path.join(dataset_dir, "meta", "info.json")) as f:
         info = json.load(f)
     fps = info["fps"]
+
+    # Resolve dimension labels from the dataset's action feature names so plots
+    # carry real joint names; fall back to generic dim_N labels otherwise.
+    action_names = info.get("features", {}).get("action", {}).get("names")
+    JOINT_NAMES = list(action_names) if isinstance(action_names, list) else []
 
     # Identify video key from features
     features = info.get("features", {})

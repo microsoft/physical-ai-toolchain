@@ -13,6 +13,12 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 
 **Artifacts:** Do not create or modify tests, scripts, or one-off markdown docs unless explicitly requested.
 
+**Environment-specific artifacts:** Never commit values discovered from a deployed environment, including Azure resource identifiers, subscription or tenant identifiers, service endpoints, cluster or registry names, generated OSMO platform values, image digest manifests, kubeconfigs, OSMO profiles, and credential files.
+
+* Generate non-secret deployment details under `infrastructure/setup/generated/<environment>/`, which is gitignored, by following `.github/skills/environment-deployment/SKILL.md`.
+* Keep kubeconfigs, OSMO profiles, tokens, registry credentials, Terraform state, and other secrets outside the generated bundle and outside Git.
+* Treat checked-in RFC1918 addresses, resource shapes, and other clearly documented values as instructional defaults or examples. Do not remove or replace them solely because they resemble environment configuration.
+
 **Comment policy:** Never include thought processes, step-by-step reasoning, or narrative comments in code.
 
 * Keep comments brief and factual; describe **behavior/intent, invariants, edge cases**.
@@ -332,6 +338,10 @@ The `Physical-AI RPI` umbrella (`.github/agents/physical-ai-rpi.agent.md`) and i
 
 See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the full umbrella/worker rationale.
 
+## hve-core Derived Files
+
+Follow the baseline conventions in [`scripts/README.md`](../scripts/README.md). `scripts/security/Test-HveCoreFreshness.ps1` compares source-header entries with a resolved upstream `main` commit and release entries with the RPI `UPSTREAM_REF` and a resolved latest non-draft release commit.
+
 ## Git Workflow
 
 Full specification in `.github/instructions/commit-message.instructions.md`.
@@ -483,7 +493,7 @@ Terraform validation is per-directory — each deployment directory has its own 
 * Two orchestrators: `main.yml` (push to main), `pr-validation.yml` (PRs) using reusable `workflow_call` workflows
 * PR validation sequence: spell check → markdown lint → table format → frontmatter → PSScriptAnalyzer → YAML lint → link check → Python lint → Python tests → uv lock consistency → frontend tests → Pester → dependency review → dependency pinning → CodeQL
 * Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
-* Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main)
+* Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main), container image digest freshness (weekly)
 * Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)
 * Codecov: 12+ flags including `pytest-*`, `vitest`/`vitest-*`, `pester`, `go`, `terraform`; 80-100% range; carryforward enabled; OIDC tokenless upload via `codecov/codecov-action@v6`
 

@@ -11,6 +11,7 @@ source "$SCRIPT_DIR/defaults.conf"
 
 VALUES_DIR="$SCRIPT_DIR/values"
 MANIFESTS_DIR="$SCRIPT_DIR/manifests"
+SETUP_SCRIPTS_DIR="$SCRIPT_DIR/scripts"
 
 show_help() {
   cat << EOF
@@ -21,6 +22,8 @@ Deploy NVIDIA GPU Operator and KAI Scheduler to an AKS cluster.
 OPTIONS:
     -h, --help               Show this help message
     -t, --tf-dir DIR         Terraform directory (default: $DEFAULT_TF_DIR)
+    --kubeconfig PATH        Isolated AKS kubeconfig output
+    --context NAME           Explicit AKS context (default: cluster name)
     --gpu-version VERSION    GPU Operator version (default: $GPU_OPERATOR_VERSION)
     --kai-version VERSION    KAI Scheduler version (default: $KAI_SCHEDULER_VERSION)
     --skip-gpu-operator      Skip GPU Operator installation
@@ -36,6 +39,8 @@ EOF
 
 # Defaults
 tf_dir="$SCRIPT_DIR/$DEFAULT_TF_DIR"
+kubeconfig=""
+context=""
 gpu_version="$GPU_OPERATOR_VERSION"
 kai_version="$KAI_SCHEDULER_VERSION"
 skip_gpu=false
@@ -46,6 +51,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)            show_help; exit 0 ;;
     -t|--tf-dir)          tf_dir="$2"; shift 2 ;;
+    --kubeconfig)         kubeconfig="$2"; shift 2 ;;
+    --context)            context="$2"; shift 2 ;;
     --gpu-version)        gpu_version="$2"; shift 2 ;;
     --kai-version)        kai_version="$2"; shift 2 ;;
     --skip-gpu-operator)  skip_gpu=true; shift ;;
@@ -66,10 +73,14 @@ tf_output=$(read_terraform_outputs "$tf_dir")
 
 cluster=$(tf_require "$tf_output" "aks_cluster.value.name" "AKS cluster name")
 rg=$(tf_require "$tf_output" "resource_group.value.name" "Resource group")
+kubeconfig="${kubeconfig:-$HOME/.kube/physical-ai-toolchain/${cluster}.yaml}"
+context="${context:-$cluster}"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Cluster" "$cluster"
+  print_kv "Kubeconfig" "$kubeconfig"
+  print_kv "Context" "$context"
   print_kv "Resource Group" "$rg"
   print_kv "GPU Operator" "$([[ $skip_gpu == true ]] && echo 'Skipped' || echo "$gpu_version")"
   print_kv "KAI Scheduler" "$([[ $skip_kai == true ]] && echo 'Skipped' || echo "$kai_version")"
@@ -91,7 +102,7 @@ kai_values="$VALUES_DIR/kai-scheduler.yaml"
 #------------------------------------------------------------------------------
 section "Connect and Prepare Cluster"
 
-connect_aks "$rg" "$cluster"
+connect_aks "$rg" "$cluster" "$kubeconfig" "$context"
 
 #------------------------------------------------------------------------------
 # Install GPU Operator
@@ -133,10 +144,21 @@ if [[ "$skip_gpu" == "false" ]]; then
   # These nodes have nvidia.com/gpu.deploy.driver=false and need the GRID driver
   # instead of the datacenter driver managed by the GPU Operator.
   grid_manifest="$MANIFESTS_DIR/gpu-grid-driver-installer.yaml"
+  grid_scripts_dir="$SETUP_SCRIPTS_DIR/gpu-grid-driver-installer"
+  grid_bootstrap_script="$grid_scripts_dir/bootstrap-grid-driver-installer.sh"
+  grid_install_script="$grid_scripts_dir/install-grid-driver.sh"
   if [[ -f "$grid_manifest" ]]; then
     rtx_nodes=$(kubectl get nodes -l nvidia.com/gpu.deploy.driver=false -o name 2>/dev/null || true)
     if [[ -n "$rtx_nodes" ]]; then
       info "vGPU nodes detected (nvidia.com/gpu.deploy.driver=false) — applying GRID driver DaemonSet..."
+      [[ -f "$grid_bootstrap_script" ]] || fatal "GRID driver bootstrap script not found: $grid_bootstrap_script"
+      [[ -f "$grid_install_script" ]] || fatal "GRID driver install script not found: $grid_install_script"
+      kubectl create configmap gpu-grid-driver-installer-scripts \
+        -n "$NS_GPU_OPERATOR" \
+        --from-file=bootstrap-grid-driver-installer.sh="$grid_bootstrap_script" \
+        --from-file=install-grid-driver.sh="$grid_install_script" \
+        --dry-run=client -o yaml \
+        | kubectl apply -f -
       kubectl apply -f "$grid_manifest"
       info "GRID driver DaemonSet applied. Monitor with: kubectl logs -n gpu-operator -l app.kubernetes.io/name=gpu-grid-driver-installer -c installer"
     fi

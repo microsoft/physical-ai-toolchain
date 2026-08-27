@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:20260715.v1@sha256:781357bf297986d448355ab33b319ffa991561b1f013eac98531ffed9a35bd38
+FROM mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:20260727.v1@sha256:8916404aaa9e106539965397f3fb441b5244b6a904de63cef3489669339ac7a7
 
 # Fail the build if any stage of a piped RUN command fails (matches set -euo pipefail
 # used by the shell scripts and OSMO YAML paths); the default /bin/sh -c masks a failing

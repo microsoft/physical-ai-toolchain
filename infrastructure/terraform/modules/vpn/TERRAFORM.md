@@ -2,7 +2,7 @@
 title: VPN Gateway Module
 description: Deploys Azure VPN Gateway for Point-to-Site and Site-to-Site connectivity. Creates GatewaySubnet within the platform's virtual network.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-05-11
+ms.date: 2026-08-03
 ms.topic: reference
 ---
 
@@ -12,16 +12,16 @@ Creates GatewaySubnet within the platform's virtual network.
 
 ## Requirements
 
-| Name      | Version         |
-|-----------|-----------------|
-| terraform | >= 1.9.8, < 2.0 |
-| azurerm   | >= 4.51.0       |
+| Name      | Version            |
+|-----------|--------------------|
+| terraform | >= 1.9.8, < 2.0    |
+| azurerm   | >= 4.51.0, < 5.0.0 |
 
 ## Providers
 
-| Name    | Version   |
-|---------|-----------|
-| azurerm | >= 4.51.0 |
+| Name    | Version            |
+|---------|--------------------|
+| azurerm | >= 4.51.0, < 5.0.0 |
 
 ## Resources
 
@@ -46,6 +46,7 @@ Creates GatewaySubnet within the platform's virtual network.
 | aad\_auth\_config                 | Azure AD authentication configuration for P2S VPN. tenant\_id defaults to current Azure client tenant if not specified. Uses Microsoft-registered Azure VPN application by default. Requires OpenVPN protocol | ```object({ should_enable = bool tenant_id = optional(string) audience_id = optional(string, "c632b3df-fb67-4d84-bdcf-b95ad541b5c8") })```                                                                                                                                         | ```{ "audience_id": "c632b3df-fb67-4d84-bdcf-b95ad541b5c8", "should_enable": false, "tenant_id": null }``` |    no    |
 | gateway\_subnet\_address\_prefix  | Address prefix for the GatewaySubnet (minimum /27)                                                                                                                                                            | `string`                                                                                                                                                                                                                                                                           | `"10.0.3.0/27"`                                                                                            |    no    |
 | instance                          | Instance identifier for naming resources: 001, 002, etc                                                                                                                                                       | `string`                                                                                                                                                                                                                                                                           | `"001"`                                                                                                    |    no    |
+| revoked\_client\_certificates     | Revoked P2S client certificates identified by public SHA-1 thumbprint; private key and CA material are not accepted                                                                                           | ```list(object({ name = string thumbprint = string }))```                                                                                                                                                                                                                          | `[]`                                                                                                       |    no    |
 | root\_certificate\_name           | Name for the root certificate used in P2S authentication                                                                                                                                                      | `string`                                                                                                                                                                                                                                                                           | `"RoboticsVPNRootCert"`                                                                                    |    no    |
 | root\_certificate\_public\_data   | Base64-encoded public certificate data for P2S authentication (without BEGIN/END markers)                                                                                                                     | `string`                                                                                                                                                                                                                                                                           | `null`                                                                                                     |    no    |
 | should\_enable\_nat\_gateway      | Whether NAT Gateway is enabled for outbound connectivity. When true, disables default outbound access for GatewaySubnet                                                                                       | `bool`                                                                                                                                                                                                                                                                             | `true`                                                                                                     |    no    |

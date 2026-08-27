@@ -555,56 +555,33 @@ describe('fetchVlmJudgeStatus', () => {
 })
 
 describe('runVlmJudge', () => {
-  it('polls the returned cache key until the job has a result', async () => {
-    mockFetch
-      .mockResolvedValueOnce(jsonResponse({ csrf_token: 'csrf-1' }))
-      .mockResolvedValueOnce(
-        jsonResponse(
-          {
-            enabled: true,
-            cached: false,
-            job_status: 'pending',
-            judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
-            prompt_version: 'outcome-mcq-v1',
-            cache_key: 'a'.repeat(64),
-            result: null,
-          },
-          { status: 202 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          enabled: true,
-          cached: true,
-          job_status: 'done',
-          judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
-          prompt_version: 'outcome-mcq-v1',
-          cache_key: 'a'.repeat(64),
-          result: {
-            episode_id: 'ds-1/episode_000000',
-            instruction: 'Pick',
-            judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
-            prompt_version: 'outcome-mcq-v1',
-            n_frames: 6,
-            outcome_success: true,
-            outcome_confidence: 1,
-            outcome_n_valid_votes: 3,
-            progress_per_frame: [100],
-            voc: 1,
-            milestones: [],
-            failure_mode: null,
-            cached: false,
-          },
-        }),
-      )
+  it('returns the completed synchronous judge response without polling', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ csrf_token: 'csrf-1' })).mockResolvedValueOnce(
+      jsonResponse({
+        episode_id: 'ds-1/episode_000000',
+        instruction: 'Pick',
+        judge_model: 'Qwen/Qwen3-VL-4B-Instruct',
+        prompt_version: 'outcome-mcq-v1',
+        n_frames: 6,
+        outcome_success: true,
+        outcome_confidence: 1,
+        outcome_n_valid_votes: 3,
+        progress_per_frame: [100],
+        voc: 1,
+        milestones: [],
+        failure_mode: null,
+        cached: true,
+      }),
+    )
 
-    const pending = runVlmJudge('ds-1', 0, { processMethod: 'gvl' })
-    await expect(pending).resolves.toMatchObject({ episodeId: 'ds-1/episode_000000' })
+    await expect(runVlmJudge('ds-1', 0, { processMethod: 'gvl' })).resolves.toMatchObject({
+      episodeId: 'ds-1/episode_000000',
+      cached: true,
+    })
+    expect(mockFetch).toHaveBeenCalledTimes(2)
     expect(mockFetch).toHaveBeenLastCalledWith(
-      '/api/datasets/ds-1/episodes/0/judge?cache_key=' + 'a'.repeat(64),
-      {
-        headers: {},
-      },
+      '/api/datasets/ds-1/episodes/0/judge',
+      expect.objectContaining({ method: 'POST' }),
     )
   })
 })

@@ -74,8 +74,8 @@ export const EpisodeAnalysisCard = memo(function EpisodeAnalysisCard({
 
       {!record ? (
         <p className="text-muted-foreground text-xs">
-          No saved analysis for this episode yet. Run the VLM judge or motion analysis and it will
-          be persisted alongside the dataset.
+          No saved analysis for this episode yet. Persist an analysis record through the API or the
+          VLM dataset-labeling script to show it here.
         </p>
       ) : (
         <div className="space-y-3">

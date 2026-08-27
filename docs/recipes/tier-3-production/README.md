@@ -1,4 +1,10 @@
-# T3 — Production: Single-Site Declarative Deployment (Advanced)
+---
+title: T3 Production Single-Site Deployment
+description: Run declarative single-site deployment and progressive Ubuntu HiL validation without Azure Arc.
+author: Microsoft Robotics-AI Team
+ms.date: 2026-07-17
+ms.topic: overview
+---
 
 > [!NOTE]
 > **Advanced tier.** Most teams should run the full training lifecycle at [T0 — Dev](../tier-0-dev/README.md) or
@@ -29,6 +35,8 @@ deliberately does not duplicate them:
   and the deployment gating service used to swap policies safely.
 - [Infrastructure: cluster setup](../../infrastructure/cluster-setup.md) and
   [advanced cluster setup](../../infrastructure/cluster-setup-advanced.md): standing up the runtime.
+- [Ubuntu HiL OSMO Backend](ubuntu-hil-osmo-backend.md): move one Ubuntu desktop through host-ready,
+  optional private reachability, connected, and CPU/no-command validated milestones.
 
 ## 🎓 Graduate When
 
@@ -41,3 +49,8 @@ deliberately does not duplicate them:
 - [Tier model (canonical reference)](../../design/tier-model.md)
 - [Architecture: T3 — Production](../../contributing/architecture.md#t3--production)
 - [T2 — Pilot](../tier-2-pilot/README.md) · [T4 — Scale](../tier-4-scale/README.md)
+
+<!-- markdownlint-disable MD036 -->
+*🤖 Crafted with precision by ✨Copilot following brilliant human instruction,
+then carefully refined by our team of discerning human reviewers.*
+<!-- markdownlint-enable MD036 -->

@@ -119,7 +119,10 @@ check_prerequisites() {
 }
 
 wait_for_backend() {
-    local url="http://localhost:${BACKEND_PORT}/health"
+    # Use IPv4 loopback explicitly because uvicorn binds to 127.0.0.1 by default.
+    # On systems where localhost resolves to ::1 first, curl localhost can fail
+    # even when the backend is healthy.
+    local url="http://127.0.0.1:${BACKEND_PORT}/health"
     local elapsed=0
 
     log_info "Waiting for backend to be ready..."
@@ -143,6 +146,24 @@ start_backend() {
     local vlm_judge_package_spec="${REPO_ROOT}/evaluation/vlm_judge"
     local should_install_vlm_judge=false
 
+    # Resolve VLM_JUDGE_ENABLED from shell env first, then fall back to backend/.env
+    # so that setting it only in .env (the common local-dev pattern) still triggers install.
+    if [[ -z "${VLM_JUDGE_ENABLED:-}" ]] && [[ -f "${BACKEND_DIR}/.env" ]]; then
+        local env_vlm_enabled
+        env_vlm_enabled="$(grep -E '^VLM_JUDGE_ENABLED=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2-)"
+        if [[ -n "${env_vlm_enabled}" ]]; then
+            VLM_JUDGE_ENABLED="${env_vlm_enabled}"
+        fi
+    fi
+    # Similarly resolve VLM_JUDGE_BACKEND from .env when not already set.
+    if [[ -z "${VLM_JUDGE_BACKEND:-}" ]] && [[ -f "${BACKEND_DIR}/.env" ]]; then
+        local env_vlm_backend
+        env_vlm_backend="$(grep -E '^VLM_JUDGE_BACKEND=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2-)"
+        if [[ -n "${env_vlm_backend}" ]]; then
+            VLM_JUDGE_BACKEND="${env_vlm_backend}"
+        fi
+    fi
+
     if [[ "${VLM_JUDGE_ENABLED:-false}" == "true" ]]; then
         should_install_vlm_judge=true
         if [[ "${VLM_JUDGE_BACKEND:-echo}" == "qwen3-vl" ]]; then
@@ -158,8 +179,18 @@ start_backend() {
         log_info "Defaulting DATAVIEWER_AUTH_DISABLED=true for local development"
     fi
 
-    # Resolve datasets directory: prefer explicit DATA_DIR, otherwise default
-    # to <repo>/datasets (../../datasets relative to this script).
+    # Resolve datasets directory: prefer explicit DATA_DIR, then backend/.env,
+    # otherwise default to <repo>/datasets.
+    if [[ -z "${DATA_DIR:-}" ]]; then
+        if [[ -f "${BACKEND_DIR}/.env" ]]; then
+            local env_data_dir
+            env_data_dir="$(grep -E '^DATA_DIR=' "${BACKEND_DIR}/.env" | tail -n 1 | cut -d '=' -f 2-)"
+            if [[ -n "${env_data_dir}" ]]; then
+                DATA_DIR="${env_data_dir}"
+                log_info "Using DATA_DIR from backend/.env: ${DATA_DIR}"
+            fi
+        fi
+    fi
     if [[ -z "${DATA_DIR:-}" ]]; then
         DATA_DIR="${REPO_ROOT}/datasets"
         log_info "Defaulting DATA_DIR=${DATA_DIR}"

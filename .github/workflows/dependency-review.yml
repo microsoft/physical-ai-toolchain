@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -33,6 +33,8 @@ jobs:
           # GHSA-7qhf-v65m-g5f3: mlflow — unauthenticated FastAPI job endpoints under /ajax-api/3.0/jobs/*; no upstream fix; server-side only (CVE-2026-0545)
           # GHSA-46r5-x6jq-v8g6: mlflow — AJAX artifact download authorization bypass; no upstream fix; server-side only, repo uses client only (CVE-2026-33866)
           # GHSA-fh64-r2vc-xvhr: mlflow — stored XSS via YAML MLmodel artifacts; fixed in 3.11.1; blocked by azureml-mlflow<=3.9.0 ceiling; server-side only (CVE-2026-33865)
+          # GHSA-rrmf-rvhw-rf47: torch — torch.jit.script memory corruption; fixed in 2.13.0; lerobot<2.12.0 constraint blocks upgrade; repo runs trusted local training code only
+          # GHSA-h35f-9h28-mq5c: setuptools — macOS Unicode normalization bypass when publishing sdists; runtime lock installs wheels on Linux and never publishes packages
           allow-ghsas: >-
             GHSA-wf7f-8fxf-xfxc,
             GHSA-pgqp-8h46-6x4j,
@@ -40,4 +42,6 @@ jobs:
             GHSA-hqmj-h5c6-369m,
             GHSA-7qhf-v65m-g5f3,
             GHSA-46r5-x6jq-v8g6,
-            GHSA-fh64-r2vc-xvhr
+            GHSA-fh64-r2vc-xvhr,
+            GHSA-rrmf-rvhw-rf47,
+            GHSA-h35f-9h28-mq5c
