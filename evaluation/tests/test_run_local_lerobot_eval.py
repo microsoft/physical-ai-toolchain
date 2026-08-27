@@ -19,10 +19,14 @@ torch = pytest.importorskip("torch")
 if "pyarrow" not in sys.modules:
     _pa = types.ModuleType("pyarrow")
     _pq = types.ModuleType("pyarrow.parquet")
+    _pc = types.ModuleType("pyarrow.compute")
     _pq.read_table = MagicMock()
+    _pc.equal = MagicMock()
     _pa.parquet = _pq
+    _pa.compute = _pc
     sys.modules["pyarrow"] = _pa
     sys.modules["pyarrow.parquet"] = _pq
+    sys.modules["pyarrow.compute"] = _pc
 
 if "av" not in sys.modules:
     sys.modules["av"] = types.ModuleType("av")
@@ -81,25 +85,29 @@ def _make_args(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
-def _patch_av(monkeypatch: pytest.MonkeyPatch, frames: list[np.ndarray]) -> None:
+def _patch_av(monkeypatch: pytest.MonkeyPatch, frames: list[np.ndarray], *, fps: float = 1.0) -> None:
     av_mod = types.ModuleType("av")
 
     class _Frame:
-        def __init__(self, arr):
+        def __init__(self, arr, time):
             self._arr = arr
+            self.time = time
 
         def to_ndarray(self, format="rgb24"):
             return self._arr
 
     class _Stream:
-        pass
+        time_base = 0.001
 
     class _Container:
         def __init__(self):
             self.streams = SimpleNamespace(video=[_Stream()])
 
+        def seek(self, _offset, stream=None, backward=True):
+            pass
+
         def decode(self, _stream):
-            return [_Frame(f) for f in frames]
+            return [_Frame(f, i / fps) for i, f in enumerate(frames)]
 
         def close(self):
             pass
@@ -171,9 +179,9 @@ def _setup_run_evaluation(
     table.__getitem__ = lambda self, col: _getitem(col)
     monkeypatch.setattr(_mod.pq, "read_table", lambda _path: table)
 
-    # Stub video decoding.
+    # Stub video decoding; run_evaluation passes the episode timestamp window.
     frames = [np.zeros((96, 96, 3), dtype=np.uint8) for _ in range(n_frames)]
-    monkeypatch.setattr(_mod, "load_video_frames", lambda _p: frames)
+    monkeypatch.setattr(_mod, "load_video_frames", lambda _p, *_a, **_k: frames)
 
     # Stub policy loader.
     policy = MagicMock()
@@ -271,6 +279,14 @@ class TestLoadVideoFrames:
         result = _mod.load_video_frames("/tmp/x.mp4")
         assert len(result) == 2
         assert result[0].shape == (4, 4, 3)
+
+    def test_restricts_frames_to_episode_time_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        frames = [np.full((2, 2, 3), i, dtype=np.uint8) for i in range(4)]
+        _patch_av(monkeypatch, frames)
+
+        result = _mod.load_video_frames("/tmp/x.mp4", 1.0, 3.0)
+
+        assert [int(f[0, 0, 0]) for f in result] == [1, 2]
 
 
 # ---------------- TestDownloadAmlModel ----------------
