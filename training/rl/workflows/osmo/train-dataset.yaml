@@ -12,9 +12,12 @@ workflow:
   tasks:
     - name: isaac-training
       image: "{{ image }}"
-      command:
-        - /bin/bash
-        - /tmp/entry.sh
+      command: ["bash", "-euc"]
+      args:
+        - |
+          base64 -d /tmp/entry.sh.b64 > /tmp/entry.sh
+          [ -s /tmp/entry.sh ] || { echo "ERROR: /tmp/entry.sh is empty — submit via training/rl/scripts/submit-osmo-dataset-training.sh" >&2; exit 1; }
+          exec bash /tmp/entry.sh
       environment:
         NVIDIA_DRIVER_CAPABILITIES: "all"
         TASK: "{{ task }}"
@@ -22,7 +25,8 @@ workflow:
         MAX_ITERATIONS: "{{ max_iterations }}"
         ACCEPT_EULA: "Y"
         PRIVACY_CONSENT: "Y"
-        TRAINING_ROOT: "{{input:0}}/{{ dataset_name }}/training/rl"
+        OSMO_INPUT_0: "{{input:0}}"
+        OSMO_DATASET_NAME: "{{ dataset_name }}"
         AZURE_SUBSCRIPTION_ID: "{{ azure_subscription_id }}"
         AZURE_RESOURCE_GROUP: "{{ azure_resource_group }}"
         AZUREML_WORKSPACE_NAME: "{{ azure_workspace_name }}"
@@ -40,43 +44,8 @@ workflow:
             name: "{{ dataset_bucket }}/{{ dataset_name }}"
             localpath: "{{ training_localpath }}"
       files:
-        - path: /tmp/entry.sh
-          contents: |
-            #!/bin/bash
-            set -euo pipefail
-
-            TRAINING_ROOT="${TRAINING_ROOT:-{{input:0}}/training-code/training/rl}"
-
-            if [[ ! -d "${TRAINING_ROOT}" ]]; then
-              echo "Error: Training root not found at ${TRAINING_ROOT}" >&2
-              echo "Contents of {{input:0}}:" >&2
-              ls -la "{{input:0}}/" || true
-              exit 1
-            fi
-
-            echo "Training folder mounted at: ${TRAINING_ROOT}"
-            ls -la "${TRAINING_ROOT}"
-
-            TRAINING_PACKAGE_ROOT="$(cd "${TRAINING_ROOT}/../.." && pwd)"
-            export PYTHONPATH="${TRAINING_PACKAGE_ROOT}:${PYTHONPATH:-}"
-
-            MODE="train"
-            if [[ "${RUN_AZURE_SMOKE_TEST:-0}" == "1" ]]; then
-              MODE="smoke-test"
-            fi
-
-            train_args=(
-              --mode "${MODE}"
-              --task "${TASK:-}"
-              --num_envs "${NUM_ENVS:-}"
-              --max_iterations "${MAX_ITERATIONS:-}"
-              --checkpoint-uri "${CHECKPOINT_URI:-}"
-              --checkpoint-mode "${CHECKPOINT_MODE:-from-scratch}"
-              --register-checkpoint "${REGISTER_CHECKPOINT:-}"
-              --headless
-            )
-
-            bash "${TRAINING_ROOT}/scripts/train.sh" "${train_args[@]}"
+        - path: /tmp/entry.sh.b64
+          contents: "{{entry_script_b64}}"
 
 default-values:
   # Submission scripts set image from scripts/lib/common.sh via --set-string.
@@ -88,6 +57,7 @@ default-values:
   dataset_bucket: training
   dataset_name: training-code
   training_localpath: ""
+  entry_script_b64: ""
   azure_subscription_id: ""
   azure_resource_group: ""
   azure_workspace_name: ""

@@ -527,6 +527,12 @@ variable "aml_managed_network_isolation_mode" {
   }
 }
 
+variable "workspace_name_suffix" {
+  type        = string
+  description = "Optional suffix appended to the AML workspace name to avoid soft-delete naming conflicts on redeploy"
+  default     = ""
+}
+
 variable "aml_compute_clusters" {
   type = map(object({
     vm_size                   = string

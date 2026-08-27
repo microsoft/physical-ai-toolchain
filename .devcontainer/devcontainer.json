@@ -3,7 +3,15 @@
 {
 	"name": "physical-ai-toolchain-devcontainer",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"args": {
+			"BASE_IMAGE": "${localEnv:PHYSICAL_AI_DEVCONTAINER_IMAGE}",
+			"NPM_CONFIG_REGISTRY": "${localEnv:NPM_CONFIG_REGISTRY}",
+			"PIP_INDEX_URL": "${localEnv:PIP_INDEX_URL}",
+			"UV_DEFAULT_INDEX": "${localEnv:UV_DEFAULT_INDEX}"
+		}
+	},
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
 		"ghcr.io/devcontainers/features/common-utils:2": {},

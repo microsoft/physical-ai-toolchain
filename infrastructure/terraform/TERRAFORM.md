@@ -2,7 +2,7 @@
 title: Robotics Blueprint
 description: Deploys robotics infrastructure with NVIDIA GPU support, KAI Scheduler, and optional Azure Machine Learning integration.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-24
+ms.date: 2026-08-03
 ms.topic: reference
 ---
 
@@ -16,23 +16,23 @@ Architecture:
 
 ## Requirements
 
-| Name      | Version         |
-|-----------|-----------------|
-| terraform | >= 1.9.8, < 2.0 |
-| azapi     | >= 2.3.0        |
-| azuread   | >= 3.0.2        |
-| azurerm   | >= 4.51.0       |
-| fabric    | >= 1.3.0        |
-| msgraph   | >= 0.2.0        |
-| tls       | >= 4.0.6        |
+| Name      | Version            |
+|-----------|--------------------|
+| terraform | >= 1.9.8, < 2.0    |
+| azapi     | >= 2.3.0           |
+| azuread   | >= 3.0.2           |
+| azurerm   | >= 4.51.0, < 5.0.0 |
+| fabric    | >= 1.3.0           |
+| msgraph   | >= 0.2.0           |
+| tls       | >= 4.0.6           |
 
 ## Providers
 
-| Name      | Version   |
-|-----------|-----------|
-| azurerm   | >= 4.51.0 |
-| msgraph   | >= 0.2.0  |
-| terraform | n/a       |
+| Name      | Version            |
+|-----------|--------------------|
+| azurerm   | >= 4.51.0, < 5.0.0 |
+| msgraph   | >= 0.2.0           |
+| terraform | n/a                |
 
 ## Resources
 
@@ -117,6 +117,7 @@ Architecture:
 | system\_node\_pool\_zones                              | Availability zones for AKS system node pool. Set to null or empty for regional deployment (no zone constraint)                                                                                                                      | `list(string)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `null`                                                                                                                                                                                                                                                                                                                                                                                                                    |    no    |
 | tags                                                   | Tags to apply to all resources                                                                                                                                                                                                      | `map(string)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | `{}`                                                                                                                                                                                                                                                                                                                                                                                                                      |    no    |
 | virtual\_network\_config                               | Configuration for the virtual network including address space and subnet prefixes. PE subnet prefix is required when private endpoints are enabled. Resolver subnet enables DNS resolution for VPN clients and on-premises networks | ```object({ address_space = string subnet_address_prefix = string subnet_address_prefix_vm = optional(string, "10.0.4.0/24") subnet_address_prefix_pe = optional(string, "10.0.2.0/24") subnet_address_prefix_resolver = optional(string, "10.0.9.0/28") })```                                                                                                                                                                                                                                | ```{ "address_space": "10.0.0.0/16", "subnet_address_prefix": "10.0.1.0/24", "subnet_address_prefix_pe": "10.0.2.0/24", "subnet_address_prefix_resolver": "10.0.9.0/28", "subnet_address_prefix_vm": "10.0.4.0/24" }```                                                                                                                                                                                                   |    no    |
+| workspace\_name\_suffix                                | Optional suffix appended to the AML workspace name to avoid soft-delete naming conflicts on redeploy                                                                                                                                | `string`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `""`                                                                                                                                                                                                                                                                                                                                                                                                                      |    no    |
 
 ## Outputs
 
@@ -144,6 +145,7 @@ Architecture:
 | ml\_workload\_identity                            | ML workload identity for federated credentials.                                                               |
 | network\_security\_group                          | Shared network security group for robotics infrastructure.                                                    |
 | node\_pools                                       | GPU node pool configurations for OSMO pool and pod template generation. Null when AKS deployment is disabled. |
+| osmo\_admin\_password                             | OSMO admin password (sensitive). Fallback when Key Vault is unreachable from the deploy host.                 |
 | osmo\_workload\_identity                          | OSMO workload identity for deployment scripts                                                                 |
 | postgresql                                        | PostgreSQL Flexible Server object.                                                                            |
 | postgresql\_connection\_info                      | PostgreSQL connection information for OSMO control plane.                                                     |

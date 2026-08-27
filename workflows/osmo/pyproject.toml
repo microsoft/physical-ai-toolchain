@@ -10,7 +10,7 @@ dependencies = [
     "mlflow==3.13.0",
     "azureml-mlflow==1.62.0.post5",
     "azure-identity==1.25.3",
-    "azure-ai-ml==1.34.0",
+    "azure-ai-ml==1.34.1",
     "tbparse==0.0.9",
 ]
 

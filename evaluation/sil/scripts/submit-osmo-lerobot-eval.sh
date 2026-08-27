@@ -106,6 +106,7 @@ model_name="${AML_MODEL_NAME:-}"
 model_version="${AML_MODEL_VERSION:-}"
 builtin_policy="${BUILTIN_POLICY:-false}"
 from_blob_dataset=false
+use_huggingface_credential="true"
 storage_account="${BLOB_STORAGE_ACCOUNT:-${AZURE_STORAGE_ACCOUNT_NAME:-}}"
 storage_container="${BLOB_STORAGE_CONTAINER:-datasets}"
 blob_prefix="${BLOB_PREFIX:-}"
@@ -202,6 +203,10 @@ else
   [[ -z "$dataset_revision" ]] && fatal "--dataset-revision is required with --dataset-repo-id"
 fi
 
+if [[ "$from_blob_dataset" == "true" && ( "$from_aml_model" == "true" || "$builtin_policy" == "true" ) ]]; then
+  use_huggingface_credential="false"
+fi
+
 [[ -f "$workflow" ]] || fatal "Workflow template not found: $workflow"
 [[ -d "$REPO_ROOT/training/il" ]] || fatal "Directory training/il not found"
 
@@ -247,10 +252,17 @@ fi
 payload_root="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
 [[ -z "$code_storage_account" ]] && fatal "Azure storage account required for code upload (set AZURE_STORAGE_ACCOUNT_NAME or deploy infra)"
 
+# Base64-encode the OSMO entry script (a lintable repo file) so the workflow
+# YAML stays script-free; OSMO writes it as a *.b64 file the task bootstrap
+# decodes. The evaluation Python modules travel inside the code archive below.
+entry_script="$SCRIPT_DIR/osmo-lerobot-eval-entry.sh"
+[[ -f "$entry_script" ]] || fatal "Entry script not found: $entry_script"
+entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
+
 info "Packaging and uploading LeRobot runtime payload..."
 code_url=$(stage_and_upload_code "$REPO_ROOT" \
   "azure://${code_storage_account}/${osmo_container}/osmo-code" \
-  training/il evaluation/sil) \
+  training/il evaluation/sil evaluation/metrics workflows/azureml) \
   || fatal "Failed to stage and upload runtime payload"
 info "Runtime payload uploaded: $code_url"
 
@@ -262,6 +274,7 @@ submit_args=(
   workflow submit "$workflow"
   --set-string "image=$image"
   "code_url=$code_url"
+  "entry_script_b64=$entry_script_b64"
   "payload_root=$payload_root"
   "policy_repo_id=$policy_repo_id"
   "policy_type=$policy_type"
@@ -270,6 +283,7 @@ submit_args=(
   "eval_episodes=$eval_episodes"
   "eval_batch_size=$eval_batch_size"
   "record_video=$record_video"
+  "use_huggingface_credential=$use_huggingface_credential"
 )
 
 [[ -n "$policy_revision" ]] && submit_args+=("policy_revision=$policy_revision")

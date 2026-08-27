@@ -2,6 +2,7 @@
 # Deploy Azure Container Storage for Arc (ACSA) resources for ROS2 recording sync
 set -o errexit -o nounset
 
+# Resolve repository paths and load shared helpers plus the ACSA deployment defaults.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))"
 # shellcheck source=../../scripts/lib/common.sh
@@ -11,6 +12,7 @@ source "$SCRIPT_DIR/defaults.conf"
 
 ARC_DIR="$SCRIPT_DIR/../arc"
 
+# Describe the cluster, storage, connectivity, and manifest options supported by this deployment.
 show_help() {
   cat << EOF
 Usage: $(basename "$0") [OPTIONS]
@@ -25,6 +27,8 @@ OPTIONS:
     --cluster-resource-group NAME   Resource group of Arc cluster (or ARC_RESOURCE_GROUP)
     --storage-account NAME          Storage account name override
     --storage-resource-group NAME   Storage account resource group (or STORAGE_ACCOUNT_RESOURCE_GROUP)
+    --kubeconfig PATH               Explicit edge kubeconfig (required for direct mode)
+    --context NAME                  Explicit edge context (required for direct mode)
     --connectivity-mode MODE        direct|proxy (default: direct)
     --proxy-port PORT               Arc proxy port (default: 47011)
     --config-preview                Print configuration and exit
@@ -35,6 +39,7 @@ EXAMPLES:
 EOF
 }
 
+# Poll an Arc extension until it succeeds, fails, or reaches the configured timeout.
 wait_for_extension_state() {
   local extension_name="${1:?extension name required}"
   local desired_state="${2:?desired state required}"
@@ -66,6 +71,7 @@ wait_for_extension_state() {
   fatal "Timed out waiting for extension $extension_name to reach state $desired_state"
 }
 
+# Start a temporary Arc proxy and wait until kubectl can reach the connected cluster through it.
 start_arc_proxy() {
   local kubeconfig_file="${1:?kubeconfig file required}"
   local log_file="${2:?log file required}"
@@ -80,9 +86,12 @@ start_arc_proxy() {
 
   proxy_pid=$!
   export KUBECONFIG="$kubeconfig_file"
+  proxy_context=""
 
   for ((attempt = 1; attempt <= 20; attempt++)); do
-    if kubectl cluster-info >/dev/null 2>&1; then
+    proxy_context=$(command kubectl config current-context --kubeconfig "$kubeconfig_file" 2>/dev/null || true)
+    if [[ -n "$proxy_context" ]] && \
+       command kubectl --kubeconfig "$kubeconfig_file" --context "$proxy_context" cluster-info >/dev/null 2>&1; then
       info "Arc proxy connectivity established"
       return 0
     fi
@@ -92,6 +101,7 @@ start_arc_proxy() {
   fatal "Failed to establish kubectl connectivity through Arc proxy (log: $log_file)"
 }
 
+# Remove temporary proxy processes, kubeconfig files, rendered manifests, and error logs on exit.
 cleanup_proxy() {
   if [[ -n "${proxy_pid:-}" ]] && kill -0 "$proxy_pid" >/dev/null 2>&1; then
     pkill -P "$proxy_pid" >/dev/null 2>&1 || true
@@ -111,11 +121,9 @@ cleanup_proxy() {
     rm -rf "$render_dir"
   fi
 
-  if [[ -n "${role_assignment_error_file:-}" && -f "$role_assignment_error_file" ]]; then
-    rm -f "$role_assignment_error_file"
-  fi
 }
 
+# Create a missing extension or update an existing one with the requested immutable configuration.
 install_or_update_extension() {
   local extension_name="${1:?extension name required}"
   local extension_type="${2:?extension type required}"
@@ -149,13 +157,15 @@ install_or_update_extension() {
   fi
 }
 
-# Defaults
+# Set defaults for Terraform discovery, cluster access, extension versions, and retry behavior.
 tf_dir="$SCRIPT_DIR/$DEFAULT_TF_DIR"
 cluster_name="${ARC_CLUSTER_NAME:-}"
 cluster_resource_group="${ARC_RESOURCE_GROUP:-}"
 storage_account_name="${STORAGE_ACCOUNT_NAME:-}"
 storage_account_resource_group="${STORAGE_ACCOUNT_RESOURCE_GROUP:-}"
 storage_scope=""
+kubeconfig="${EDGE_KUBECONFIG:-}"
+context="${EDGE_K3S_CONTEXT:-}"
 connectivity_mode="${ACSA_CONNECTIVITY_MODE:-direct}"
 proxy_port="${ACSA_PROXY_PORT:-47011}"
 config_preview=false
@@ -165,6 +175,7 @@ cert_manager_release_train="${CERT_MANAGER_RELEASE_TRAIN:-stable}"
 principal_id_max_retries="${ACSA_PRINCIPAL_ID_MAX_RETRIES:-12}"
 principal_id_retry_seconds="${ACSA_PRINCIPAL_ID_RETRY_SECONDS:-10}"
 
+# Apply command-line overrides before discovering resource names and validating the connection mode.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)                    show_help; exit 0 ;;
@@ -173,6 +184,8 @@ while [[ $# -gt 0 ]]; do
     --cluster-resource-group)     cluster_resource_group="$2"; shift 2 ;;
     --storage-account)            storage_account_name="$2"; shift 2 ;;
     --storage-resource-group)     storage_account_resource_group="$2"; shift 2 ;;
+    --kubeconfig)                 kubeconfig="$2"; shift 2 ;;
+    --context)                    context="$2"; shift 2 ;;
     --connectivity-mode)          connectivity_mode="$2"; shift 2 ;;
     --proxy-port)                 proxy_port="$2"; shift 2 ;;
     --config-preview)             config_preview=true; shift ;;
@@ -180,15 +193,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-require_tools az terraform jq kubectl envsubst
-require_az_extension k8s-extension
-require_az_extension connectedk8s
-
 #------------------------------------------------------------------------------
 # Gather Configuration
 #------------------------------------------------------------------------------
 
+# Discover cluster and storage values from Terraform state when explicit options did not provide them.
 if [[ -f "$tf_dir/terraform.tfstate" ]]; then
+  require_tools terraform jq
   info "Reading terraform outputs from $tf_dir..."
   tf_output=$(read_terraform_outputs "$tf_dir")
 
@@ -213,6 +224,7 @@ else
   warn "terraform.tfstate not found in $tf_dir; skipping terraform output discovery"
 fi
 
+# Reject unsupported connectivity modes and show the complete plan when preview mode is requested.
 if [[ "$connectivity_mode" != "direct" && "$connectivity_mode" != "proxy" ]]; then
   fatal "Invalid connectivity mode: $connectivity_mode (expected: direct|proxy)"
 fi
@@ -225,6 +237,8 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Storage Account" "${storage_account_name:-<required>}"
   print_kv "Storage RG" "${storage_account_resource_group:-<cluster-rg>}"
   print_kv "Connectivity" "$connectivity_mode"
+  print_kv "Kubeconfig" "${kubeconfig:-<required for direct mode>}"
+  print_kv "Context" "${context:-<required for direct mode>}"
   print_kv "Edge Namespace" "$EDGE_NAMESPACE"
   print_kv "ACSA Extension" "$ACSA_EXTENSION_NAME@$ACSA_EXTENSION_VERSION ($ACSA_RELEASE_TRAIN)"
   print_kv "Cert Extension" "$cert_manager_extension_name@$cert_manager_extension_version ($cert_manager_release_train)"
@@ -238,42 +252,65 @@ if [[ "$config_preview" == "true" ]]; then
   exit 0
 fi
 
+require_tools az kubectl envsubst
+
+# Require the target identifiers, verify Azure extensions, and derive the Blob container resource scope.
 [[ -n "$cluster_name" ]] || fatal "Cluster name is required (--cluster-name or ARC_CLUSTER_NAME)"
 [[ -n "$cluster_resource_group" ]] || fatal "Cluster resource group is required (--cluster-resource-group or ARC_RESOURCE_GROUP)"
 [[ -n "$storage_account_name" ]] || fatal "Storage account name is required (--storage-account or terraform output)"
+if [[ "$connectivity_mode" == "direct" ]]; then
+  [[ -n "$kubeconfig" ]] || fatal "--kubeconfig is required for direct connectivity"
+  [[ -n "$context" ]] || fatal "--context is required for direct connectivity"
+fi
+
+require_az_extension k8s-extension
+require_az_extension connectedk8s
 
 subscription_id=$(az account show --query id -o tsv)
 if [[ -z "$storage_scope" ]]; then
   storage_scope="/subscriptions/${subscription_id}/resourceGroups/${storage_account_resource_group:-$cluster_resource_group}/providers/Microsoft.Storage/storageAccounts/${storage_account_name}"
 fi
+container_scope="${storage_scope}/blobServices/default/containers/${BLOB_CONTAINER_NAME}"
+
+# Ensure the destination Blob container exists before the cluster-side storage integration is installed.
+az storage container create \
+  --account-name "$storage_account_name" \
+  --name "$BLOB_CONTAINER_NAME" \
+  --auth-mode login \
+  --output none
 
 #------------------------------------------------------------------------------
 # Prepare Cluster Connectivity
 #------------------------------------------------------------------------------
 section "Prepare Cluster Connectivity"
 
+# Select direct kubeconfig access or establish a temporary Arc proxy, then verify the K3s target.
 proxy_pid=""
 proxy_kubeconfig=""
 proxy_log_file=""
 render_dir=""
-role_assignment_error_file=""
 trap cleanup_proxy EXIT
 
 if [[ "$connectivity_mode" == "proxy" ]]; then
   proxy_kubeconfig=$(mktemp)
   proxy_log_file=$(mktemp)
   start_arc_proxy "$proxy_kubeconfig" "$proxy_log_file"
+  kubeconfig="$proxy_kubeconfig"
+  context="$proxy_context"
+  [[ -n "$context" ]] || fatal "Arc proxy kubeconfig does not contain a current context"
+  activate_kube_target "$kubeconfig" "$context"
 else
-  verify_cluster_connectivity
+  activate_kube_target "$kubeconfig" "$context"
 fi
 
-ensure_namespace "$EDGE_NAMESPACE"
+ensure_namespace "$kubeconfig" "$context" "$EDGE_NAMESPACE"
 
 #------------------------------------------------------------------------------
 # Install cert-manager and ACSA Extensions
 #------------------------------------------------------------------------------
 section "Install cert-manager and ACSA Extensions"
 
+# Install or update both required Arc extensions and wait for each provisioning operation to succeed.
 install_or_update_extension \
   "$cert_manager_extension_name" \
   "microsoft.certmanagement" \
@@ -296,6 +333,7 @@ wait_for_extension_state "$ACSA_EXTENSION_NAME" "Succeeded"
 #------------------------------------------------------------------------------
 section "Assign Blob Role to ACSA Managed Identity"
 
+# Wait for the ACSA identity to appear, then ensure its Blob role assignment exists.
 acsa_principal_id=""
 for ((attempt = 1; attempt <= principal_id_max_retries; attempt++)); do
   acsa_principal_id=$(az k8s-extension show \
@@ -315,21 +353,14 @@ done
 
 [[ -n "$acsa_principal_id" && "$acsa_principal_id" != "null" ]] || fatal "ACSA managed identity principal ID is unavailable"
 
-role_assignment_error_file=$(mktemp)
-if az role assignment create \
-  --assignee-object-id "$acsa_principal_id" \
-  --assignee-principal-type ServicePrincipal \
-  --role "Storage Blob Data Owner" \
-  --scope "$storage_scope" \
-  --output none 2>"$role_assignment_error_file"; then
-  info "Storage Blob Data Owner role assigned"
-else
-  if grep -qi "already exists" "$role_assignment_error_file"; then
-    info "Storage Blob Data Owner role assignment already exists"
-  else
-    cat "$role_assignment_error_file" >&2
-    fatal "Failed to assign Storage Blob Data Owner role"
-  fi
+if [[ -z "$(az role assignment list --assignee-object-id "$acsa_principal_id" \
+    --role "Storage Blob Data Contributor" --scope "$container_scope" --query '[0].id' -o tsv)" ]]; then
+  az role assignment create \
+    --assignee-object-id "$acsa_principal_id" \
+    --assignee-principal-type ServicePrincipal \
+    --role "Storage Blob Data Contributor" \
+    --scope "$container_scope" \
+    --output none
 fi
 
 #------------------------------------------------------------------------------
@@ -337,12 +368,7 @@ fi
 #------------------------------------------------------------------------------
 section "Create Container and Apply ACSA Manifests"
 
-az storage container create \
-  --account-name "$storage_account_name" \
-  --name "$BLOB_CONTAINER_NAME" \
-  --auth-mode login \
-  --output none
-
+# Render and apply the repository manifests.
 render_dir=$(mktemp -d)
 
 export EDGE_NAMESPACE
@@ -364,18 +390,11 @@ envsubst < "$ARC_DIR/acsa-ingest-subvolume.yaml" > "$render_dir/acsa-ingest-subv
 kubectl apply -f "$render_dir/acsa-pvc.yaml"
 kubectl apply -f "$render_dir/acsa-ingest-subvolume.yaml"
 
-kubectl -n "$EDGE_NAMESPACE" wait --for=jsonpath='{.status.phase}'=Bound "pvc/$ACSA_PVC_NAME" --timeout=180s
-
-if kubectl -n "$EDGE_NAMESPACE" get "edgevolumes/$ACSA_PVC_NAME" >/dev/null 2>&1; then
-  kubectl -n "$EDGE_NAMESPACE" wait --for=jsonpath='{.status.state}'=deployed "edgevolumes/$ACSA_PVC_NAME" --timeout=180s
-else
-  warn "EdgeVolume $ACSA_PVC_NAME not found yet; skipping deployed-state wait"
-fi
-
 #------------------------------------------------------------------------------
 # Deployment Summary
 #------------------------------------------------------------------------------
 section "Deployment Summary"
+# Report the connected cluster, storage target, and applied ACSA resources for operator follow-up.
 print_kv "Cluster" "$cluster_name"
 print_kv "Cluster RG" "$cluster_resource_group"
 print_kv "Connectivity" "$connectivity_mode"

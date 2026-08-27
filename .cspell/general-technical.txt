@@ -6,6 +6,7 @@ acrolinx
 activex
 acunetix
 addfinalizer
+addinivalue
 adobe
 adrm
 adrs
@@ -711,6 +712,7 @@ linktype
 linq
 linting
 linuxvm
+manylinux
 livecache
 liveops
 Llamacpp
@@ -936,6 +938,7 @@ owaspzap
 Oxley
 paas
 palantir
+paligemma
 palettegen
 paletteuse
 palo
@@ -1052,6 +1055,7 @@ pylance
 pyodbc
 pypi
 pytest
+pytrace
 python
 PYTHONHASHSEED
 PYTHONPATH
@@ -1409,6 +1413,7 @@ Trino
 trivy
 trufflehog
 trustexitcode
+tryfirst
 turbonomic
 twilio
 typeparam

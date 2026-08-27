@@ -1,0 +1,374 @@
+---
+name: environment-deployment
+description: "Generate, transfer, and consume environment-specific Azure, AKS, OSMO, ACR, and Azure ML deployment bundles. Use when: discovering deployed environment details; creating OSMO image manifests or platform values; preparing a HiL host; uploading or downloading deployment files through Azure Key Vault; or deploying with generated environment configuration."
+---
+
+# Environment Deployment
+
+Generate non-secret deployment details from Terraform desired state and read-only Azure, Kubernetes, and OSMO discovery. Store generated artifacts under the gitignored `infrastructure/setup/generated/<environment>/` directory.
+
+## Goal
+
+Produce a validated non-secret environment bundle or a host-bound HiL handoff whose target, ownership, transfer, and next operation are explicit. Keep discovery read-only and keep generated environment values outside tracked source.
+
+## Flow
+
+1. Resolve the environment, desired-state sources, available read-only tools, and requested bundle consumers.
+2. Verify target identities and generate only the required allowlisted artifacts under the gitignored environment directory.
+3. Validate hashes, immutable references, file safety, and the absence of credentials before use.
+4. Preview the selected deployment or, for HiL, publish the exact host-bound catalog to Key Vault and hand off to the local consumer.
+
+## Inputs
+
+- Environment name and Terraform directory
+- Existing isolated Kubernetes context when live cluster verification is available
+- Optional isolated authenticated OSMO profile for read-only service verification
+- Requested deployment consumers and explicit version overrides
+- For HiL publication, the host identity, existing backend and pool, approved service URL, protected registry configuration, Key Vault name, and optional public VPN inputs
+
+## Safety Boundaries
+
+Follow these rules for every environment bundle:
+
+- Do not modify Azure resources, Kubernetes resources, OSMO configuration, or the active OSMO profile during discovery.
+- Do not run `terraform apply`, `kubectl apply`, Helm upgrade/install, OSMO update/set/delete commands, or Azure create/update/delete commands while generating a bundle.
+- Do not upload artifacts or publish credentials during read-only discovery.
+- Do not write discovered values into tracked files, documentation, examples, tests, or source defaults.
+- Do not replace instructional RFC1918 addresses or example resource shapes solely because they differ from the deployed environment.
+- Do not include Terraform state, secret values, kubeconfig contents, OSMO profiles, tokens, registry credentials, VPN keys, certificates, or absolute local paths in a bundle.
+- Use an isolated kubeconfig and explicit context. Verify the AKS resource ID before reading cluster state.
+- Ask before changing an Azure CLI subscription or OSMO profile when the requested task is discovery only.
+- Use existing protected password or token files for non-interactive login. Never request secrets through chat.
+
+## Bundle Layout
+
+Create only the artifacts needed by the deployment:
+
+```text
+infrastructure/setup/generated/<environment>/
+├── deployment.json
+├── osmo-platforms.yaml
+├── osmo-images.json
+└── azureml-instance-types.yaml
+```
+
+`deployment.json` is required. The other files are optional when the corresponding component is not deployed.
+
+Use lowercase letters, numbers, and hyphens for `<environment>`. Keep artifact filenames stable because the Key Vault transfer scripts use this allowlist.
+
+## Prerequisites
+
+Use every available discovery tool. Record unavailable tools and skipped checks in `deployment.json`.
+
+| Tool      | Purpose                                                           | Required                             |
+|-----------|-------------------------------------------------------------------|--------------------------------------|
+| Terraform | Read desired resources and node-pool configuration                | Yes                                  |
+| Azure CLI | Verify Azure identity and live resource metadata                  | Yes                                  |
+| jq        | Select explicit non-secret fields and write JSON                  | Yes                                  |
+| kubectl   | Verify AKS nodes, labels, taints, GPU capacity, and OSMO endpoint | When AKS is reachable                |
+| osmo      | Verify the authenticated service and available pools              | When an isolated profile is supplied |
+| Helm      | Read the deployed OSMO image version and values                   | When OSMO is deployed                |
+
+For private resources, connect to the VPN before live Azure, AKS, Key Vault, or OSMO checks.
+
+## Generate a Bundle
+
+This is an agent-led discovery workflow, not a static checked-in generator. The agent executes the available read-only commands below, renders files from the current Terraform and live resource data, validates the result, and reports every skipped probe. Do not reuse artifacts from another environment.
+
+### 1. Establish the target
+
+Collect or infer:
+
+- Environment name
+- Terraform directory, normally `infrastructure/terraform`
+- Isolated kubeconfig path, normally `$HOME/.kube/physical-ai-toolchain/<aks-cluster>.yaml`
+- Explicit Kubernetes context
+- Optional isolated OSMO profile directory
+- Optional OSMO image version when OSMO is not deployed yet
+
+Create `infrastructure/setup/generated/<environment>/`. Do not create a tracked placeholder in this directory.
+
+### 2. Read Terraform desired state
+
+Run `terraform output -json` from the Terraform directory. Select only explicit output fields; never copy raw output or state into the bundle.
+
+Read these values when present:
+
+| Terraform output     | Bundle use                                      |
+|----------------------|-------------------------------------------------|
+| `resource_group`     | Resource group name and location                |
+| `key_vault_name`     | Key Vault bundle transfer                       |
+| `aks_cluster`        | AKS name and resource ID                        |
+| `node_pools`         | GPU pool VM sizes, priority, labels, and taints |
+| `container_registry` | ACR name and login server                       |
+| `storage_account`    | Storage account name                            |
+| `azureml_workspace`  | Azure ML workspace name                         |
+| `osmo_workload_identity` | OSMO workload identity ID and Entra metadata |
+
+Fail when the resource group, Key Vault, or requested AKS/ACR values are missing. Do not infer names from naming conventions when Terraform exposes them.
+
+### 3. Verify Azure
+
+Use read-only Azure CLI calls:
+
+1. Read the active account with `az account show`.
+2. Confirm its subscription matches the subscription segment of the AKS resource ID.
+3. Read the resource group with `az group show`.
+4. Read AKS with `az aks show` and compare its normalized resource ID with Terraform.
+5. Read ACR with `az acr show` and compare its name and login server with Terraform.
+6. Read Key Vault metadata with `az keyvault show`; do not enumerate or read unrelated secret values.
+7. Read `osmo_workload_identity` with `az identity show --ids`, and confirm its ID, client ID, and tenant ID match Terraform.
+
+Stop on any identity or resource mismatch. Do not switch subscriptions silently.
+
+### 4. Verify Kubernetes
+
+When kubectl is available and AKS is reachable:
+
+1. Use `verify_existing_aks_kubeconfig` before refreshing credentials.
+2. Use `connect_aks` from `scripts/lib/common.sh` only when the user requested credential setup.
+3. Otherwise require an existing isolated kubeconfig and use `verify_kube_target`.
+4. Read nodes with an explicit kubeconfig and context.
+5. For each Terraform GPU pool, compare:
+   - `agentpool` label
+   - `node.kubernetes.io/instance-type` label
+   - Terraform node labels
+   - Terraform taints
+   - `status.allocatable["nvidia.com/gpu"]`
+6. Read `azureml/azureml-ingress-nginx-internal-lb` and form `http://<RFC1918-address>` from its assigned ingress IP.
+
+Scale-to-zero pools may have no live nodes. Generate their configuration from Terraform and record live capacity as unavailable instead of omitting the pool.
+
+### 5. Verify OSMO
+
+Do not run `osmo login` during discovery. If the caller supplies an isolated authenticated profile, set `XDG_CONFIG_HOME` to it and run read-only checks:
+
+- `osmo version`
+- `osmo pool list --format-type json`
+
+When Helm is available, read the deployed OSMO release with the same isolated kubeconfig and context. Prefer `global.osmoImageTag` from deployed values for the image version. Fall back to `OSMO_IMAGE_VERSION` from `infrastructure/setup/defaults.conf` only for a new deployment.
+
+Record whether OSMO and Helm verification succeeded. Do not copy profile data into the bundle.
+
+### 6. Generate OSMO platform values
+
+Generate `osmo-platforms.yaml` from `node_pools`.
+
+For each GPU pool:
+
+- Create one pod template with `agentpool` and `node.kubernetes.io/instance-type` selectors.
+- Add Terraform node labels that constrain scheduling.
+- Convert each Terraform taint into a matching `Exists` or `Equal` toleration.
+- Add the `nvidia.com/gpu` `NoSchedule` toleration when the pool uses it.
+- Set requests and limits to the literal OSMO Jinja value `{{USER_GPU}}`.
+- Create a platform under `services.configs.pools.default.platforms`.
+- Use a default GPU count no greater than verified per-node allocatable capacity. Use `1` when the pool is scaled to zero and capacity cannot be verified.
+- Keep `USER_CPU`, `USER_MEMORY`, `USER_STORAGE`, and `USER_SHM_SIZE` as instructional defaults unless the user supplies workload requirements.
+
+Use unique lowercase identifiers derived from the pool key. Preserve both braces in every OSMO Jinja expression.
+
+### 7. Generate Azure ML InstanceTypes
+
+Generate `azureml-instance-types.yaml` from the same pool data:
+
+- Always include `defaultinstancetype` for CPU workloads.
+- Create one GPU InstanceType per pool with the pool selector and constraining Terraform labels.
+- Use `gpuspot` for the first spot pool and `gpu` for the first regular pool when those names are unambiguous; otherwise use `gpu-<pool>`.
+- Set the GPU limit to a value no greater than verified per-node capacity. Use `1` for scale-to-zero pools without live capacity.
+- Do not generate multi-GPU InstanceTypes without verified capacity or an explicit user requirement.
+
+The deployment consumes this file through `02-deploy-azureml-extension.sh --instance-types-manifest`.
+
+### 8. Generate the immutable ACR image manifest
+
+Generate `osmo-images.json` only when OSMO images are mirrored to ACR. Use this component allowlist:
+
+- `agent`
+- `backend-listener`
+- `backend-worker`
+- `client`
+- `delayed-job-monitor`
+- `init-container`
+- `logger`
+- `router`
+- `service`
+- `web-ui`
+- `worker`
+
+For each component, read the digest for `osmo/<component>:<image-version>` with `az acr manifest show-metadata`. Confirm the repository tag has writes and deletes disabled with `az acr repository show`. Fail if a component, digest, or immutability setting is missing.
+
+Write this shape:
+
+```json
+{
+  "schema_version": 1,
+  "registry": "<acr-name>",
+  "login_server": "<acr-login-server>",
+  "image_version": "<version>",
+  "images": {
+    "<component>": {
+      "repository": "osmo/<component>",
+      "digest": "sha256:<64-lowercase-hex>"
+    }
+  }
+}
+```
+
+### 9. Generate deployment metadata
+
+Write `deployment.json` last. Use relative artifact filenames and SHA-256 digests. Include:
+
+```json
+{
+  "schema_version": 1,
+  "environment": "<environment>",
+  "generated_at": "<UTC-RFC3339>",
+  "subscription_id": "<subscription-id>",
+  "tenant_id": "<tenant-id>",
+  "resource_group": "<resource-group>",
+  "location": "<azure-region>",
+  "key_vault_name": "<key-vault>",
+  "aks_cluster": "<aks-cluster>",
+  "aks_resource_id": "<aks-resource-id>",
+  "acr_name": "<acr-name-or-empty>",
+  "acr_login_server": "<login-server-or-empty>",
+  "azureml_workspace": "<workspace-or-empty>",
+  "storage_account": "<storage-account-or-empty>",
+  "osmo_service_url": "<private-osmo-url>",
+  "osmo_chart_version": "<chart-version-or-empty>",
+  "osmo_image_version": "<image-version-or-empty>",
+  "osmo_workflow_data_uri": "azure://<storage-account>/<container>/workflows/data",
+  "osmo_workload_identity": {
+    "id": "<user-assigned-managed-identity-resource-id>",
+    "principal_id": "<managed-identity-principal-id>",
+    "client_id": "<managed-identity-client-id>",
+    "tenant_id": "<managed-identity-tenant-id>"
+  },
+  "artifacts": {
+    "osmo_platforms": {"file": "osmo-platforms.yaml", "sha256": "<digest>"},
+    "osmo_images": {"file": "osmo-images.json", "sha256": "<digest>"},
+    "azureml_instance_types": {"file": "azureml-instance-types.yaml", "sha256": "<digest>"}
+  },
+  "verification": {
+    "terraform": true,
+    "azure_cli": true,
+    "kubectl": true,
+    "helm": true,
+    "osmo": true
+  }
+}
+```
+
+Set `osmo_workflow_data_uri` from the configured OSMO `workflow_data.credential.endpoint`, not a naming convention. It must match `azure://<account>/<container>/workflows/data`. Omit optional artifact entries when their files do not exist. Set unavailable verification tools to `false`; do not claim checks that did not run.
+
+### 10. Validate
+
+Before using or uploading the bundle:
+
+- Confirm every artifact is a regular non-symlink file.
+- Confirm `deployment.json` matches the active subscription, Terraform resource group, Key Vault, and AKS resource ID.
+- Confirm `osmo_workflow_data_uri` is the configured Azure workflow-data endpoint and `osmo_workload_identity` matches Terraform and Azure identity metadata.
+- Confirm artifact paths are relative filenames without `..`.
+- Recalculate and compare every artifact SHA-256.
+- Validate `osmo-images.json` against `verify_acr_image_manifest` when ACR is used.
+- Run `kubectl apply --dry-run=client -f` for the Azure ML InstanceTypes when kubectl is available.
+- Search the bundle for private keys, bearer tokens, password fields, Docker auth, kubeconfig client data, and absolute home-directory paths. Stop if any are found.
+- Confirm `git check-ignore infrastructure/setup/generated/<environment>/deployment.json` succeeds.
+
+## Use the Bundle
+
+Pass generated artifacts explicitly; do not copy them back into tracked `values/` or `manifests/` directories.
+
+| Deployment         | Generated argument                                                                                                      |
+|--------------------|-------------------------------------------------------------------------------------------------------------------------|
+| Azure ML extension | `02-deploy-azureml-extension.sh --instance-types-manifest <bundle>/azureml-instance-types.yaml`                         |
+| OSMO control plane | `03-deploy-osmo.sh --platform-values <bundle>/osmo-platforms.yaml --use-acr --image-manifest <bundle>/osmo-images.json` |
+
+Read the image version, service URL, AKS resource ID, and resource names from `deployment.json`. Run each deployment script with `--config-preview` first. Deployment scripts may change Azure or Kubernetes resources; obtain user confirmation before continuing from discovery into deployment.
+
+## Transfer a Generic Non-Secret Bundle
+
+Upload the allowlisted bundle from the trusted deployment host:
+
+```bash
+infrastructure/setup/upload-environment-bundle.sh --environment <environment> --config-preview
+infrastructure/setup/upload-environment-bundle.sh --environment <environment>
+```
+
+The uploader requires Key Vault secret write permission. It never changes RBAC.
+
+Each UTF-8 artifact must be no larger than 24,000 bytes. Omit an optional file and its `deployment.json` artifact entry together. Existing Key Vault versions may remain, but consumers follow the current `deployment.json` allowlist.
+
+Do not run concurrent uploads for the same environment. The uploader publishes artifacts first and `deployment.json` last so consumers either receive a coherent bundle or fail its digest checks.
+
+For a generic, non-HiL consumer, authenticate to Azure, connect to the private network or VPN, and download the bundle:
+
+```bash
+infrastructure/setup/download-environment-bundle.sh --environment <environment> --resource-group <resource-group> --config-preview
+infrastructure/setup/download-environment-bundle.sh --environment <environment> --resource-group <resource-group>
+```
+
+The downloader requires the Key Vault Secrets User role and private endpoint connectivity when the vault is private.
+
+Configure local clients from the protected bundle:
+
+```bash
+infrastructure/setup/connect-environment.sh --environment <environment> --config-preview
+infrastructure/setup/connect-environment.sh --environment <environment>
+```
+
+Use `--osmo-method dev --osmo-username <user>` only for an explicitly approved development deployment. Use protected files with `--password-file` or `--token-file` for service authentication.
+
+`download-environment-bundle.sh` and `connect-environment.sh` remain generic non-HiL utilities. They do not retrieve or configure host-bound HiL credentials.
+
+## Prepare and Connect an Ubuntu HiL Host
+
+Complete this journey when an existing OSMO backend and pool are ready: the environment owner publishes the generic non-secret bundle separately from the host-bound protected inputs, then the Ubuntu consumer connects only its owned local K3s target with the catalog-bound artifacts.
+
+### Publish Host-Bound Inputs
+
+The environment owner runs `infrastructure/setup/04-prepare-osmo-hil-node.sh` after verifying the existing OSMO backend and pool. Supply the generated bundle, approved service URL, existing backend and pool, protected OSMO profile, pull-only registry configuration, and token expiry. The script publishes the generic bundle and the exact host-bound catalog separately, writing the catalog last.
+
+Key Vault is the only scripted protected-artifact transfer. Before publication, the environment owner manually creates the exact secret resources and grants the Ubuntu identity data-plane access to each named inbound secret only. Use `Key Vault Secrets User` for inbound secrets and `Key Vault Secrets Officer` only for the host-specific CSR secret. Verify that the Ubuntu identity has no direct or inherited vault-wide data-plane role.
+
+Key Vault networking and RBAC are manual environment-owner actions. The publisher does not assign roles, modify Key Vault networking, or make a private vault reachable. Complete any bounded network-access window and restore private-only access before the consumer continues.
+
+The publisher reuses the exact catalog-pinned OSMO token and token-metadata secret versions when they are valid and unexpired. `--renew-token` forces a new issuance. An absent catalog or valid expired token metadata issues a new token. Stop on a malformed or inaccessible catalog, or a token-metadata binding or digest mismatch. The publisher does not delete token versions.
+
+Manual SCP is outside this repository HiL flow. An operator may use it only as an out-of-band procedure that does not invoke repository HiL publisher, VPN, or consumer scripts and does not use retired transfer arguments.
+
+### Connect the Ubuntu Consumer
+
+After the Ubuntu host and any required VPN are ready, run the consumer boundary:
+
+```bash
+data-pipeline/setup/hil/02-connect-osmo-backend.sh \
+  --environment <environment> \
+  --host-name <host> \
+  --tenant-id <tenant-id> \
+  --subscription <subscription-id> \
+  --vault-name <vault>
+```
+
+The consumer retrieves the catalog and declared artifacts from Key Vault. It validates catalog structure, artifact digests, token metadata, token digest, backend binding, and expiry before any Kubernetes mutation. A Key Vault access, network, target, catalog, or integrity failure stops the run.
+
+The consumer validates the exact catalog-bound inputs and changes only the owned local K3s target. It does not administer Azure resources, AKS, Key Vault networking or RBAC, or remote OSMO desired state. Do not use `download-environment-bundle.sh` or `connect-environment.sh` as the Ubuntu HiL path.
+
+## Success Criteria
+
+- Generated bundle files contain only the approved non-secret fields and remain under the gitignored environment directory.
+- Every available read-only target check passes or is recorded as unavailable without a false verification claim.
+- Deployment consumers receive explicit validated artifact paths instead of copied tracked values.
+- A HiL publication uses Key Vault, preserves exact catalog-pinned artifact versions, and publishes the catalog last.
+- No discovery action mutates Azure, Kubernetes, OSMO, Key Vault, or a client profile.
+
+## Stop Rules
+
+- Stop when Terraform, Azure, AKS, ACR, Key Vault, or OSMO identity does not match the selected environment.
+- Stop when a generated artifact contains a credential, private key, kubeconfig, profile, absolute home path, or unverified mutable reference.
+- Stop before deployment, publication, role assignment, network change, or credential issuance unless the caller requested that separate action and its owner prerequisites are satisfied.
+- Stop the Key Vault path on access, network, target, catalog, token, or integrity failure.
+
+## Handoff
+
+Return the generated bundle path, validation results, unavailable checks, and the exact next preview command. For HiL preparation, identify the trusted Key Vault publisher command, the local consumer command, and any environment-owner RBAC or network checkpoint that remains.

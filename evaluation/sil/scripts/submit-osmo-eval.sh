@@ -195,6 +195,14 @@ if [[ ! -f "$REPO_ROOT/training/packaging/scripts/export_policy.py" ]]; then
   exit 1
 fi
 
+entry_script="$SCRIPT_DIR/osmo-eval-entry.sh"
+if [[ ! -f "$entry_script" ]]; then
+  echo "Entry script not found: $entry_script" >&2
+  exit 1
+fi
+
+entry_script_b64="$(base64 < "$entry_script" | tr -d '\n')"
+
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Checkpoint URI" "$CHECKPOINT_URI_VALUE"
@@ -224,6 +232,7 @@ submit_args=(
   workflow submit "$WORKFLOW_TEMPLATE"
   --set-string "image=$IMAGE_VALUE"
   "code_url=$CODE_URL"
+  "entry_script_b64=$entry_script_b64"
   "task=$TASK_VALUE"
   "num_envs=$NUM_ENVS_VALUE"
   "max_steps=$MAX_STEPS_VALUE"

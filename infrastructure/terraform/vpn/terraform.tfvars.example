@@ -15,11 +15,21 @@ instance        = "001"
 // Point-to-Site (P2S) Certificate Authentication
 root_certificate_name = "RoboticsVPNRootCert"
 
+aad_auth_config = {
+	should_enable = false
+}
+
 // [Optional]
 // Generate a self-signed root certificate and paste base64-encoded public key:
 //   openssl req -x509 -nodes -newkey rsa:2048 -keyout vpn-root-key.pem -out vpn-root-cert.pem -days 365 -subj "/CN=RoboticsVPNRootCA"
-//   openssl x509 -in vpn-root-cert.pem -outform der | base64 -w0
+//   openssl x509 -in vpn-root-cert.pem -outform der | base64 | tr -d '\n'
 root_certificate_public_data = "YOUR_BASE64_ENCODED_ROOT_CERTIFICATE_HERE"
+
+// Revoke a compromised client certificate by its public SHA-1 thumbprint.
+// revoked_client_certificates = [{
+//   name       = "hil-lab-01"
+//   thumbprint = "0123456789ABCDEF0123456789ABCDEF01234567"
+// }]
 
 // [Optional]
 // VPN Gateway configuration. Defaults to VpnGw1AZ with all 3 availability zones.

@@ -559,6 +559,11 @@ def main() -> int:
             if value:
                 cmd.append(f"{arg_name}={value}")
 
+    if "--policy.train_expert_only" not in cli_text:
+        train_expert_only = os.environ.get("TRAIN_EXPERT_ONLY", "")
+        if train_expert_only:
+            cmd.append(f"--policy.train_expert_only={train_expert_only}")
+
     # Source tag for MLflow lineage: {platform}-lerobot-{datasource}.
     # AZUREML_RUN_ID is set automatically by Azure ML on job pods; absent on OSMO.
     # BLOB_URLS discriminates blob-fed runs from HuggingFace downloads on either platform.

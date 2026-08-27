@@ -12,7 +12,7 @@
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "lint:md:fix": "markdownlint-cli2 \"**/*.md\" --fix",
     "lint:ps": "pwsh -File scripts/linting/Invoke-PSScriptAnalyzer.ps1",
-    "lint:py": "uvx ruff check .",
+    "lint:py": "uvx --with ruff==0.15.21 ruff check .",
     "lint:hfpins": "uv run --no-project python3 scripts/security/check_hf_pins.py",
     "lint:links": "pwsh -File scripts/linting/Invoke-LinkLanguageCheck.ps1",
     "lint:go": "pwsh -File scripts/linting/Invoke-GoLint.ps1",
@@ -37,10 +37,10 @@
   "devDependencies": {
     "cspell": "10.0.1",
     "husky": "9.1.7",
-    "lint-staged": "17.0.8",
-    "markdown-link-check": "3.14.2",
+    "lint-staged": "17.3.0",
+    "markdown-link-check": "3.15.0",
     "markdown-table-formatter": "1.7.0",
-    "markdownlint-cli2": "0.23.0"
+    "markdownlint-cli2": "0.23.2"
   },
   "overrides": {
     "smol-toml": "1.6.1"

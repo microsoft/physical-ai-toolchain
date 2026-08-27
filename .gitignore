@@ -74,6 +74,7 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+**/.artifacts/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
@@ -463,6 +464,12 @@ venv/
 .hypothesis/
 **/out/*
 .copilot-tracking/
+
+# Environment-specific deployment artifacts
+infrastructure/setup/generated/
+infrastructure/setup/config/out/
+infrastructure/setup/values/osmo-images-*.json
+infrastructure/setup/values/osmo-platforms-*.yaml
 
 # Local scanner output (Trivy/Grype via scripts/security/generate-vex.sh)
 .scan/

@@ -1,0 +1,72 @@
+# AML -> OSMO Proxy Job
+#
+# Submits an OSMO workflow YAML to the OSMO REST API from inside AKS,
+# polls to terminal state, logs Tier 1 metrics to MLflow, and registers
+# declared output blob paths as AML data assets.
+#
+# OSMO workflow YAMLs are never modified by this job.
+#
+# Prerequisites:
+#   - AML workspace attached to AKS (infrastructure/setup/02-deploy-azureml-extension.sh)
+#   - OSMO deployed on the same cluster (infrastructure/setup/03-deploy-osmo.sh)
+#   - WORKFLOW_YAML path must be relative to the repo root (code upload)
+#
+# Submit via: workflows/azureml/submit-osmo-proxy-job.sh
+# Or directly:
+#   az ml job create --file workflows/azureml/osmo-proxy-job.yaml \
+#     --workspace-name <ws> --resource-group <rg> \
+#     --set environment_variables.WORKFLOW_YAML=<path>
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+display_name: OSMO Proxy Job
+description: AML->OSMO proxy -- submits an OSMO workflow and logs metrics back to AML Studio.
+experiment_name: osmo-proxy
+identity:
+  type: managed_identity
+
+code: ../..
+
+environment:
+  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:latest
+
+compute: azureml:k8s-compute
+
+resources:
+  instance_type: cpu-standard
+  shm_size: 512m
+
+command: >-
+  pip install --quiet uv &&
+  uv --directory workflows/azureml/osmo-proxy export --frozen --no-hashes --no-emit-project |
+  uv pip install --no-deps --quiet --system -r /dev/stdin &&
+  python workflows/azureml/osmo-proxy/osmo_proxy.py --workflow-yaml ${WORKFLOW_YAML}
+
+environment_variables:
+  # Auth mode: dev (default, uses x-osmo-user header) or token (Bearer from KV).
+  OSMO_AUTH_MODE: dev
+  OSMO_USERNAME: admin
+
+  # OSMO cluster endpoint -- in-cluster gateway (reachable only from AKS pods).
+  OSMO_GATEWAY_URL: http://osmo-gateway.osmo-control-plane.svc.cluster.local
+  OSMO_POOL: default
+
+  POLL_INTERVAL_SECS: "30"
+
+  # OSMO workflow YAML path relative to repo root (set by submission script).
+  WORKFLOW_YAML: workflows/osmo/smoke-test-proxy-e2e.yaml
+
+  # Uncomment and set for template variable substitution:
+  # OSMO_SET_VARIABLES: '[{"name": "output_url", "value": "azure://account/container/path/"}]'
+
+  # Uncomment for Tier 2 spec-driven blob metrics:
+  # OSMO_METRICS_SPEC: workflows/osmo/osmo-metrics-spec-schema.yaml
+
+  # Required for data asset registration and Tier 2 blob auth (set by submission script):
+  # AML_SUBSCRIPTION_ID: placeholder
+  # AML_RESOURCE_GROUP: placeholder
+  # AML_WORKSPACE_NAME: placeholder
+  # AZURE_CLIENT_ID: placeholder
+
+  # Token auth mode -- uncomment and set OSMO_AUTH_MODE=token:
+  # OSMO_TOKEN: ${{secrets.osmo_proxy_token}}
