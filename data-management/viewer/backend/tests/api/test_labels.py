@@ -295,6 +295,25 @@ def test_import_analysis_labels_overwrites_stale_namespace_and_is_idempotent(cli
     assert invalidations == []
 
 
+def test_import_analysis_labels_overwrite_removes_stale_values_without_current_analysis(client):
+    client.put("/api/datasets/test/episodes/0/labels", json={"labels": ["SUCCESS", "OBJECT: OLD"]})
+    client.put("/api/datasets/test/episodes/1/labels", json={"labels": ["OBJECT: STALE"]})
+    client.put("/api/datasets/test/episodes/0/analysis", json={"object": "new"})
+    client.put("/api/datasets/test/episodes/1/analysis", json={"notes": "No object value"})
+
+    response = client.post(
+        "/api/datasets/test/labels/import-from-analysis",
+        json={"field": "object", "overwrite": True},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["episodes"]["0"] == ["SUCCESS", "OBJECT: NEW"]
+    assert body["episodes"]["1"] == []
+    assert "OBJECT: OLD" not in body["available_labels"]
+    assert "OBJECT: STALE" not in body["available_labels"]
+
+
 def test_import_analysis_labels_rejects_unsupported_field(client):
     """Free-text and unknown analysis fields cannot become dataset labels."""
     response = client.post(

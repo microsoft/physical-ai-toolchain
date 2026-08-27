@@ -110,4 +110,44 @@ describe('LabelPanel', () => {
     expect(screen.getByText(/failed to update labels/i)).toBeInTheDocument()
     expect(screen.getByText(/network down/i)).toBeInTheDocument()
   })
+
+  it('imports detected analysis fields with custom prefix and overwrite enabled', async () => {
+    const user = userEvent.setup()
+    useLabelStore.getState().setAllEpisodeAnalysis({
+      '3': { object: 'red cube', grasp_success: true },
+    })
+    mockImportAnalysisLabels.mockResolvedValueOnce({
+      labels_added: ['ITEM: RED CUBE'],
+      episodes_updated: 1,
+    })
+
+    render(<LabelPanel episodeIndex={3} />)
+
+    expect(screen.getByRole('button', { name: /^object$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^grasp$/i })).toBeInTheDocument()
+    await user.type(screen.getByRole('textbox', { name: /label prefix/i }), 'ITEM')
+    await user.click(screen.getByRole('checkbox', { name: /replace existing imported labels/i }))
+    await user.click(screen.getByRole('button', { name: /^object$/i }))
+
+    expect(mockImportAnalysisLabels).toHaveBeenCalledWith({
+      field: 'object',
+      prefix: 'ITEM',
+      overwrite: true,
+    })
+    expect(screen.getByText(/imported 1 object label across 1 episode/i)).toBeInTheDocument()
+  })
+
+  it('shows an import error without reporting success', async () => {
+    const user = userEvent.setup()
+    useLabelStore.getState().setAllEpisodeAnalysis({ '3': { object: 'red cube' } })
+    mockImportAnalysisLabels.mockRejectedValueOnce(new Error('server unavailable'))
+
+    render(<LabelPanel episodeIndex={3} />)
+
+    await user.click(screen.getByRole('button', { name: /^object$/i }))
+
+    expect(screen.getByText(/failed to import labels/i)).toBeInTheDocument()
+    expect(screen.getByText(/server unavailable/i)).toBeInTheDocument()
+    expect(screen.queryByText(/^imported/i)).not.toBeInTheDocument()
+  })
 })

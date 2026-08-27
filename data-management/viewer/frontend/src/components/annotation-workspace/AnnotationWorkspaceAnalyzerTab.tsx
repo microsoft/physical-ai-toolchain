@@ -34,7 +34,7 @@ export function AnnotationWorkspaceAnalyzerTab({
             <h3 className="text-sm font-semibold">Automated Episode Analysis</h3>
             <p className="text-muted-foreground text-xs">
               Score motion quality from the joint trajectory and judge task success with the VLM.
-              Results are written to this episode's labels.
+              Saved analysis results appear here after they are written to the dataset.
             </p>
           </div>
           {motionMetricsPanel}

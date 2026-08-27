@@ -440,30 +440,40 @@ async def import_analysis_labels(
     namespace = f"{prefix}:"
     labels_file = await _load_labels(dataset_id)
 
-    added_options: list[str] = []
-    updated: set[str] = set()
-
+    generated_by_episode: dict[str, list[str]] = {}
+    generated_options: list[str] = []
     for key, record in labels_file.analysis.items():
-        new_labels = _analysis_value_labels(prefix, getattr(record, field, None))
-        if not new_labels:
-            continue
+        generated = _analysis_value_labels(prefix, getattr(record, field, None))
+        generated_by_episode[key] = generated
+        for label in generated:
+            if label not in generated_options:
+                generated_options.append(label)
 
+    original_options = labels_file.available_labels.copy()
+    if body.overwrite:
+        next_options = [label for label in original_options if not label.startswith(namespace)]
+    else:
+        next_options = original_options.copy()
+    for label in generated_options:
+        if label not in next_options:
+            next_options.append(label)
+    labels_file.available_labels = next_options
+    added_options = [label for label in generated_options if label not in original_options]
+
+    updated: set[str] = set()
+    episode_keys = set(labels_file.episodes) | set(generated_by_episode)
+    for key in episode_keys:
         current = labels_file.episodes.get(key, [])
         merged = [existing for existing in current if not (body.overwrite and existing.startswith(namespace))]
-        for label in new_labels:
+        for label in generated_by_episode.get(key, []):
             if label not in merged:
                 merged.append(label)
-            if label not in labels_file.available_labels and label not in added_options:
-                added_options.append(label)
 
         if merged != current:
             labels_file.episodes[key] = merged
             updated.add(key)
 
-    for label in added_options:
-        labels_file.available_labels.append(label)
-
-    if updated or added_options:
+    if updated or labels_file.available_labels != original_options:
         await _save_labels(dataset_id, labels_file)
         dataset_service.invalidate_episode_cache(dataset_id)
 
