@@ -1,8 +1,8 @@
 ---
 title: Conversion Pipeline Module
-description: The conversion pipeline reuses the platform-owned ADLS Gen2 data-lake account (stdl...) for raw -> converted storage. This module owns only the Event Grid system topic + subscription that route BlobCreated events to the conversion subscriber, an in-account dead-letter container, and the Fabric capacity + workspace.
+description: "The conversion pipeline reuses the platform-owned ADLS Gen2 data-lake account (stdl...) for raw -> converted storage. This module owns only the Event Grid system topic + subscription that route BlobCreated events to the conversion subscriber, an in-account dead-letter container, and the Fabric capacity + workspace."
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-03
+ms.date: 2026-08-31
 ms.topic: reference
 ---
 
@@ -15,19 +15,19 @@ capacity + workspace.
 
 ## Requirements
 
-| Name      | Version            |
-|-----------|--------------------|
-| terraform | >= 1.9.8, < 2.0    |
-| azurerm   | >= 4.51.0, < 5.0.0 |
-| fabric    | >= 1.3.0           |
+| Name      | Version           |
+|-----------|-------------------|
+| terraform | >= 1.9.8, < 2.0   |
+| azurerm   | >= 5.1.0, < 5.4.0 |
+| fabric    | >= 1.3.0          |
 
 ## Providers
 
-| Name      | Version            |
-|-----------|--------------------|
-| azurerm   | >= 4.51.0, < 5.0.0 |
-| fabric    | >= 1.3.0           |
-| terraform | n/a                |
+| Name      | Version           |
+|-----------|-------------------|
+| azurerm   | >= 5.1.0, < 5.4.0 |
+| fabric    | >= 1.3.0          |
+| terraform | n/a               |
 
 ## Resources
 

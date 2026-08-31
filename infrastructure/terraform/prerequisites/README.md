@@ -2,7 +2,7 @@
 title: Prerequisites
 description: Azure subscription initialization and resource provider registration
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - prerequisites
@@ -14,6 +14,11 @@ Azure subscription initialization and resource provider registration. Configures
 
 > [!NOTE]
 > Complete prerequisites including tooling requirements, version constraints, and Azure quota checks are in the [Prerequisites](../../docs/infrastructure/prerequisites.md) guide.
+
+<!-- markdownlint-disable-next-line MD028 -->
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../../docs/infrastructure/azurerm-v5-migration.md) before registration and deployment. Do not substitute fresh-deployment commands for the migration procedure.
 
 ## 🚀 Quick Start
 

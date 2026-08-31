@@ -3,7 +3,7 @@ sidebar_position: 8
 title: Private DNS Configuration
 description: DNS zone setup for OSMO UI access through private endpoints
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - dns
@@ -24,6 +24,9 @@ Internal DNS resolution for the OSMO UI service running on an internal LoadBalan
 * OSMO UI service running with internal LoadBalancer IP
 
 ## 🚀 Usage
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
 
 Get the OSMO UI LoadBalancer IP from your cluster:
 

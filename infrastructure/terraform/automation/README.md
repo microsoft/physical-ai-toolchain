@@ -2,7 +2,7 @@
 title: Cluster Automation
 description: Azure Automation Account for scheduled cluster operations and runbooks
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-08-31
 ms.topic: reference
 keywords:
   - automation
@@ -16,6 +16,9 @@ Azure Automation Account for scheduled cluster operations. Manages start/stop sc
 > Complete automation configuration including schedule setup and runbook details is in the [Cluster Automation](../../../docs/infrastructure/automation.md) guide.
 
 ## 🚀 Quick Start
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../../docs/infrastructure/azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
 
 ```bash
 cd infrastructure/terraform/automation

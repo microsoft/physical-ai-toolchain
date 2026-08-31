@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-29
+ms.date: 2026-08-31
 ms.topic: reference
 keywords:
   - architecture
@@ -174,6 +174,9 @@ terraform output dns_server_ip
 # AzureML compute clusters keyed by cluster name
 terraform output -json aml_compute_clusters | jq -r '."gpu-cluster".name'
 ```
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before using the following fresh-deployment commands. Do not run them against existing infrastructure.
 
 ## 🔧 Optional Components
 

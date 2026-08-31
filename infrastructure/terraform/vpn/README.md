@@ -2,7 +2,7 @@
 title: VPN Gateway
 description: Point-to-site VPN connectivity for secure access to the private AKS cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - vpn
@@ -16,6 +16,9 @@ Point-to-site VPN for secure remote access to the private AKS cluster and Azure 
 > Complete VPN configuration including authentication options, client setup, and site-to-site configuration is in the [VPN Gateway Configuration](../../../docs/infrastructure/vpn.md) guide.
 
 ## 🚀 Quick Start
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../../docs/infrastructure/azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
 
 ```bash
 cd infrastructure/terraform/vpn

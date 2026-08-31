@@ -3,7 +3,7 @@ sidebar_position: 2
 title: "Quickstart: Clone to First Training Job"
 description: Deploy infrastructure and submit your first robotics training job in 9 steps
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-10
+ms.date: 2026-08-31
 ms.topic: tutorial
 keywords:
   - quickstart
@@ -50,6 +50,9 @@ Use the devcontainer (recommended) or run local setup:
 ## Step 2: Configure Azure Subscription
 
 Authenticate with Azure and register required resource providers.
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../infrastructure/azurerm-v5-migration.md) before registration or deployment. Do not substitute this fresh-deployment quickstart for the migration procedure.
 
 ```bash
 source infrastructure/terraform/prerequisites/az-sub-init.sh

@@ -4,7 +4,7 @@ title: Infrastructure Deployment
 slug: infrastructure-deployment
 description: Terraform configuration and deployment for AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - terraform
@@ -39,6 +39,9 @@ Terraform creates role assignments for managed identities, requiring `Microsoft.
 > Use subscription scope if creating a new resource group (`should_create_resource_group = true`). Use resource group scope if the resource group already exists.
 
 **Alternative**: Owner role (grants more permissions than required).
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
 
 ## 🚀 Quick Start
 

@@ -2,7 +2,7 @@
 title: Conversion Pipeline Module
 description: Terraform module that provisions Event Grid and Microsoft Fabric on the platform-owned data-lake account for the raw -> converted ingest pipeline
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-28
+ms.date: 2026-08-31
 ms.topic: reference
 ---
 
@@ -15,7 +15,7 @@ The module is opt-in. The root composition gates it behind `should_deploy_conver
 | Requirement                 | Notes                                                                                                                                                                  |
 |-----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Terraform                   | `>= 1.9.8, < 2.0`                                                                                                                                                      |
-| `azurerm` provider          | `>= 4.51.0`                                                                                                                                                            |
+| `azurerm` provider          | `>= 5.1.0, < 5.4.0`                                                                                                                                                    |
 | `microsoft/fabric` provider | `1.3.0`                                                                                                                                                                |
 | Operator identity           | Member of a security group allow-listed under the Fabric tenant admin setting "Service principals can use Fabric APIs" (or the equivalent user/CLI-context allow-list) |
 | Authentication              | `az login` against the target tenant. The Fabric provider falls back to Azure CLI auth when no provider block is declared                                              |
@@ -27,6 +27,9 @@ The module is opt-in. The root composition gates it behind `should_deploy_conver
 ## 🚀 Usage
 
 The module is composed by the root `infrastructure/terraform/main.tf`. To enable in any environment, set both flags in the corresponding tfvars file under `infrastructure/examples/`:
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../../../docs/infrastructure/azurerm-v5-migration.md) before enabling this module. Do not use fresh-deployment commands against existing infrastructure.
 
 ```hcl
 should_deploy_conversion_pipeline = true

@@ -3,7 +3,7 @@ sidebar_position: 9
 title: Cluster Automation
 description: Scheduled start and stop automation for AKS cluster cost management
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-08-31
 ms.topic: reference
 keywords:
   - automation
@@ -23,6 +23,9 @@ Azure Automation account for scheduled infrastructure operations. Runs PowerShel
 * Core variables matching parent deployment (`environment`, `resource_prefix`, `location`)
 
 ## 🚀 Usage
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
 
 ```bash
 cd infrastructure/terraform/automation

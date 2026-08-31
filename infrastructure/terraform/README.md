@@ -2,7 +2,7 @@
 title: Infrastructure as Code
 description: Terraform configuration for Azure resources including AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-29
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - terraform
@@ -21,6 +21,9 @@ Terraform configuration for the robotics reference architecture. Deploys Azure r
 > Private AKS clusters require VPN connectivity. Deploy [VPN Gateway](vpn/) before accessing cluster resources.
 
 <!-- markdownlint-enable MD028 -->
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../docs/infrastructure/azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
 
 ## 🚀 Quick Start
 

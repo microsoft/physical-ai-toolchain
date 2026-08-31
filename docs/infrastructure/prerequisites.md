@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Prerequisites
 description: Azure subscription initialization and resource provider registration for robotics deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - prerequisites
@@ -23,6 +23,9 @@ Azure CLI initialization and subscription setup required before Terraform deploy
 |-------------------------------|----------------------------------------------|
 | `az-sub-init.sh`              | Azure login and `ARM_SUBSCRIPTION_ID` export |
 | `register-azure-providers.sh` | Register required Azure resource providers   |
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before registration and deployment. Do not substitute fresh-deployment commands for the migration procedure.
 
 ## 🚀 Usage
 

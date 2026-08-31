@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Deployment Guide
 description: Infrastructure deployment and cluster configuration for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-08-31
 ms.topic: overview
 keywords:
   - deployment
@@ -28,6 +28,9 @@ End-to-end deployment of Azure infrastructure and Kubernetes services for the ro
 | [Cluster Setup](cluster-setup.md)                       | Kubernetes service deployment and OSMO configuration                     |
 | [Cluster Operations](cluster-setup-advanced.md)         | Accessing OSMO, troubleshooting, and optional scripts                    |
 | [Cleanup and Destroy](cleanup.md)                       | Remove cluster components and destroy Azure infrastructure               |
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before following fresh-deployment guidance. Do not use fresh-deployment commands against existing infrastructure.
 
 ## 📋 Deployment Order
 

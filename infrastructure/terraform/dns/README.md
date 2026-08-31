@@ -2,7 +2,7 @@
 title: Private DNS for OSMO UI
 description: Private DNS zone for OSMO UI hostname resolution on the internal load balancer
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - dns
@@ -16,6 +16,9 @@ Private DNS zone for OSMO UI hostname resolution. Maps the OSMO UI hostname to t
 > Complete DNS configuration and resolution flow details are in the [Private DNS Configuration](../../../docs/infrastructure/dns.md) guide.
 
 ## 🚀 Quick Start
+
+> [!CAUTION]
+> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../../docs/infrastructure/azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
 
 ```bash
 # Get the OSMO UI LoadBalancer IP
