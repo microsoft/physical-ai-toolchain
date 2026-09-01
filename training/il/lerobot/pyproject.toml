@@ -58,12 +58,12 @@ dependencies = [
     "gitpython==3.1.57",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
-    # Pin cryptography to 49.0.0, the current release (Dependabot-tracked in the
+    # Pin cryptography to 50.0.0, the current release (Dependabot-tracked in the
     # lerobot-dependencies group). 48.0.1 is the security floor: wheels below it
     # bundle a vulnerable OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive
     # via azure-identity, msal, pyjwt, google-auth, and the azure-storage clients.
-    # azureml-mlflow caps cryptography < 49.0.0, so 49.0.0 is also overridden below.
-    "cryptography==49.0.0",
+    # azureml-mlflow caps cryptography < 49.0.0, so 50.0.0 is also overridden below.
+    "cryptography==50.0.0",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
     "wrapt==2.2.2",
@@ -96,11 +96,10 @@ override-dependencies = [
     # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; we
     # need 12.30.0 for the AzureCliCredential fix shipped in that release.
     "azure-storage-blob==12.30.0",
-    # cryptography: the direct pin (49.0.0) exceeds azureml-mlflow==1.62.0.post5's
+    # cryptography: the direct pin (50.0.0) exceeds azureml-mlflow==1.62.0.post5's
     # cryptography<49.0.0 cap, so resolution fails without this override. Force the
-    # direct pin to win; cryptography keeps a stable API, so running one major above
-    # azureml-mlflow's declared ceiling is safe.
-    "cryptography==49.0.0",
+    # direct pin to win; cryptography keeps a stable API across these releases.
+    "cryptography==50.0.0",
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mirror the
     # direct pin to take 3.14.0.
     "mlflow-skinny==3.14.0",
