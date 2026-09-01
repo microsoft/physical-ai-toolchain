@@ -199,8 +199,7 @@ def wait_for_status(
                 elapsed_seconds = max(0, int(now - started_at))
                 remaining_seconds = max(0, int(deadline - now))
                 log_e2e(
-                    f"{status_log_prefix}={last_status} "
-                    f"(elapsed={elapsed_seconds}s, remaining={remaining_seconds}s)"
+                    f"{status_log_prefix}={last_status} (elapsed={elapsed_seconds}s, remaining={remaining_seconds}s)"
                 )
                 next_heartbeat_at = now + _STATUS_HEARTBEAT_INTERVAL_SECONDS
 
