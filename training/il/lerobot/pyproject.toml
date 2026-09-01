@@ -24,31 +24,31 @@ dependencies = [
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
-    "mlflow-skinny==3.14.0",
+    "mlflow-skinny==3.15.1",
     "packaging==26.2",
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
     "pydantic==2.13.4",
-    "sentry-sdk==2.66.1",
+    "sentry-sdk==2.68.1",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "datasets==5.0.0",
-    "pyarrow==25.0.0",
+    "datasets==5.0.1",
+    "pyarrow==25.0.1",
     "matplotlib==3.11.1",
-    "huggingface-hub==1.25.1",
+    "huggingface-hub==1.28.0",
     # The `dataset` extra pulls the video/dataset stack LeRobot loads eagerly at
     # import (`av`, `jsonlines`, `pandas`); without it `lerobot-train` aborts with
     # ImportError: 'av' is required. Runtime installs use `--no-deps`, so the extra
     # must be declared here to enter the lock and the build-time export.
-    "lerobot[dataset]==0.6.0",
+    "lerobot[dataset]==0.6.1",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.14.0",
-    "torchcodec==0.15.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "torchcodec==0.16.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
-    "gitpython==3.1.57",
+    "gitpython==3.1.59",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
     # Pin cryptography to 49.0.0, the current release (Dependabot-tracked in the
@@ -59,7 +59,7 @@ dependencies = [
     "cryptography==50.0.0",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
-    "wrapt==2.2.2",
+    "wrapt==2.3.0",
 ]
 
 [build-system]
@@ -98,7 +98,7 @@ override-dependencies = [
     "cryptography==50.0.0",
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mirror the
     # direct pin to take 3.14.0.
-    "mlflow-skinny==3.14.0",
+    "mlflow-skinny==3.15.1",
     # packaging: lerobot==0.6.0 caps below 26.0 and azureml-mlflow caps below
     # 26.x; mirror the direct pin.
     "packaging==26.2",
@@ -106,9 +106,9 @@ override-dependencies = [
     "numpy==2.4.6",
     # torchcodec: lerobot==0.6.0 caps below 0.12.0; 0.14.0 ships the manylinux
     # 2.28 wheel needed by the AzureML CUDA container.
-    "torchcodec==0.15.0",
+    "torchcodec==0.16.0",
     # datasets: lerobot==0.6.0 caps below 5.0.0; 5.0.0 is needed for Parquet
     # performance improvements and compatibility with newer pyarrow.
-    "datasets==5.0.0",
+    "datasets==5.0.1",
 ]
 package = false
