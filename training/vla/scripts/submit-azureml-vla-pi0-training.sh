@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Submit LeRobot behavioral cloning training to Azure ML
-# Installs LeRobot dynamically and trains ACT/Diffusion policies from datasets in
-# Azure Blob Storage (canonical) or HuggingFace (legacy fallback via --hf-dataset).
+# Submit LeRobot VLA pi0 training to Azure ML
+# Installs LeRobot[dataset,pi] dynamically and trains pi0/pi0_fast/pi05 vision-language-action
+# policies from datasets in Azure Blob Storage (canonical) or HuggingFace (legacy
+# fallback via --hf-dataset). Reuses the policy-agnostic IL training entry script
+# (training/il/scripts/lerobot/azureml-train-entry.sh) with a VLA-specific
+# dependency project injected via LEROBOT_PROJECT.
+# cspell:ignore alreadyexists
 set -o errexit -o nounset
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,9 +32,9 @@ fi
 
 show_help() {
   cat << 'EOF'
-Usage: submit-azureml-lerobot-training.sh [OPTIONS] [-- az-ml-job-flags]
+Usage: submit-azureml-vla-pi0-training.sh [OPTIONS] [-- az-ml-job-flags]
 
-Submit LeRobot behavioral cloning training to Azure ML.
+Submit LeRobot VLA pi0 training to Azure ML.
 
 OPTIONS:
     -d, --dataset-repo-id ID     Dataset logical name for folder naming (default: dataset)
@@ -48,17 +52,23 @@ DATA SOURCE (combinable):
                                       (default: /workspace/data)
 
 AZUREML ASSET OPTIONS:
-    --environment-name NAME       AzureML environment name (default: lerobot-training-env)
+    --environment-name NAME       AzureML environment name (default: vla-pi0-training-env)
     --environment-version VER     Environment version (default: derived from --image)
     --image IMAGE                 Container image (default: $DEFAULT_LEROBOT_TRAIN_IMAGE, digest-pinned in scripts/lib/common.sh)
     --assets-only                 Register environment without submitting job
 
 TRAINING OPTIONS:
-    -w, --job-file PATH           Job YAML template (default: training/il/workflows/azureml/lerobot-train.yaml)
-    -p, --policy-type TYPE        Policy architecture: act, diffusion (default: act)
-    -j, --job-name NAME           Job identifier (default: lerobot-act-training)
+    -w, --job-file PATH           Job YAML template (default: training/vla/workflows/azureml/vla-pi0-train.yaml)
+    -p, --policy-type TYPE        Policy architecture: pi0, pi0_fast, pi05 (default: pi0)
+    -j, --job-name NAME           Job identifier (default: vla-pi0-training)
     -o, --output-dir DIR          Container output directory (default: /workspace/outputs/train)
-        --policy-repo-id ID       Pre-trained policy for fine-tuning (HuggingFace repo)
+        --policy-repo-id ID       HuggingFace Hub repo_id forwarded to lerobot as
+                                  policy.repo_id. lerobot uses this for hub-push
+                                  naming and checkpoint metadata; the entry script
+                                  passes --policy.push_to_hub=false so no upload
+                                  occurs. To warm-start from an existing AzureML-
+                                  registered model use --init-from-policy-model
+                                  instead.
         --init-from-policy-model URI
                                   Warm-start weights from a previously registered AzureML
                                   model. Accepted forms:
@@ -70,6 +80,12 @@ TRAINING OPTIONS:
                                   Optimizer, scheduler, and step counter start fresh.
                                   Mutually exclusive with --policy-repo-id.
         --lerobot-version VER     Specific LeRobot version or "latest" (default: latest)
+        --lerobot-project PATH    Override the LeRobot dependency project, given as
+                                  a repo-relative path (default:
+                                  training/vla/lerobot). The directory must contain
+                                  pyproject.toml and uv.lock inside training/ so it
+                                  ships with the code asset; absolute paths are
+                                  rejected.
 
 TRAINING HYPERPARAMETERS:
         --training-steps N        Total training iterations
@@ -86,21 +102,40 @@ AZURE CONTEXT:
         --resource-group NAME     Azure resource group
         --workspace-name NAME     Azure ML workspace
         --compute TARGET          Compute target override
-        --instance-type NAME      Instance type (default: gpuspot). Only honoured
-                                  on AzureML-on-Kubernetes compute. On AzureML
-                                  managed AmlCompute the script detects the
-                                  compute type and drops the flag (GPU count
-                                  visible to the job container comes from the
-                                  cluster's VM SKU). The training wrapper
-                                  auto-detects the visible GPU count via
+        --hf-token TOKEN          HuggingFace access token forwarded to the
+                                  container as HF_TOKEN (default: $HF_TOKEN if
+                                  set). Required for pi0 training when the
+                                  policy initializes from the gated
+                                  google/paligemma-3b-pt-224 backbone (i.e.
+                                  unless --init-from-policy-model points at an
+                                  already-materialized checkpoint). Also used
+                                  on the HuggingFace Hub dataset path.
+        --instance-type NAME      Instance type for AzureML-on-Kubernetes compute
+                                  (default: gpu). pi0 full fine-tuning (~3B
+                                  params + paligemma backbone) needs a high-
+                                  memory GPU; 40 GB+ HBM (A100/H100-class) is
+                                  recommended. On smaller GPUs, use
+                                  --train-expert-only to freeze the VLM backbone
+                                  and train only the action expert, which fits
+                                  in less memory. The instance type value is
+                                  forwarded to the job as resources.instance_type
+                                  whenever non-empty. On AzureML managed
+                                  AmlCompute the cluster's VM SKU determines GPU
+                                  count, so pass --instance-type '' to omit
+                                  the field. The training wrapper auto-detects
+                                  the visible GPU count via
                                   torch.cuda.device_count() on both paths and
                                   enables Accelerate multi-GPU launch when N>1.
                                   Shipped multi-GPU Kubernetes types:
                                   gpu2/gpuspot2, gpu4/gpuspot4 (see
                                   infrastructure/setup/manifests/azureml-instance-types.yaml).
+        --train-expert-only       Freeze the VLM backbone and train only the
+                                  action expert and projections
         --mixed-precision MODE    Accelerate mixed-precision mode (no|fp16|bf16);
-                                  default: no. Only effective when more than
-                                  one GPU is visible to the job container.
+                                  default: bf16. pi0 was trained in bf16 upstream;
+                                  bf16 is the recommended default for memory and
+                                  numerical-stability reasons. Only effective when
+                                  more than one GPU is visible to the job container.
         --experiment-name NAME    Experiment name override
         --display-name NAME       Display name override
         --stream                  Stream logs after submission
@@ -118,81 +153,53 @@ Values resolved: CLI > Environment variables > Terraform outputs
 Additional arguments after -- are forwarded to az ml job create.
 
 EXAMPLES:
-    # ACT training with HuggingFace dataset
-    submit-azureml-lerobot-training.sh -d lerobot/aloha_sim_insertion_human
+    # pi0 training with HuggingFace dataset
+    submit-azureml-vla-pi0-training.sh -d lerobot/aloha_sim_insertion_human
 
-    # Diffusion policy with custom hyperparameters
-    submit-azureml-lerobot-training.sh \
+    # pi0_fast with custom hyperparameters
+    submit-azureml-vla-pi0-training.sh \
       -d user/custom-dataset \
-      -p diffusion \
+      -p pi0_fast \
       --training-steps 50000 \
-      --batch-size 16
+      --batch-size 8
 
-    # Warm-start a new run from a previously registered checkpoint
-    submit-azureml-lerobot-training.sh \
+    # Warm-start a new pi0 run from a previously registered checkpoint
+    submit-azureml-vla-pi0-training.sh \
       -d user/dataset \
-      --init-from-policy-model azureml:lerobot-act:7
+      --init-from-policy-model azureml:vla-pi0:7
 
-    # Register trained model and stream logs
-    submit-azureml-lerobot-training.sh \
+    # Register trained pi0 model and stream logs
+    submit-azureml-vla-pi0-training.sh \
       -d user/dataset \
-      -r my-act-model \
+      -r my-pi0-model \
       --stream
 
-    # Fine-tune from pre-trained policy
-    submit-azureml-lerobot-training.sh \
+    # Fine-tune from pre-trained pi0 policy
+    submit-azureml-vla-pi0-training.sh \
       -d user/dataset \
-      --policy-repo-id user/pretrained-act \
+      --policy-repo-id user/pretrained-pi0 \
       --training-steps 10000
 
-    # Single blob dataset
-    submit-azureml-lerobot-training.sh \
-      --blob-url "https://mystorageaccount.blob.core.windows.net/datasets/pusht" \
-      -r pusht-model
-
-    # Multiple blob datasets (merged)
-    submit-azureml-lerobot-training.sh \
-      --blob-url "https://account1.blob.core.windows.net/train/pusht" \
-      --blob-url "https://account2.blob.core.windows.net/val/pusht" \
-      -r merged-pusht-model
-
     # AzureML data asset (native mount, no download)
-    submit-azureml-lerobot-training.sh \
+    submit-azureml-vla-pi0-training.sh \
       --dataset-asset azureml:pusht-episodes:3 \
-      -r pusht-model
-
-    # Multiple data assets (merged)
-    submit-azureml-lerobot-training.sh \
-      --dataset-asset azureml:episodes-day1:2 \
-      --dataset-asset azureml:episodes-day2:1 \
-      -r merged-model
-
-    # Combined: data assets + blob datasets (all merged)
-    submit-azureml-lerobot-training.sh \
-      --dataset-asset azureml:pusht-episodes:3 \
-      --blob-url "https://account.blob.core.windows.net/extra/pusht" \
-      -r combined-model
+      -r pusht-pi0-model
 
     # Single-node multi-GPU training (4 GPUs on a gpu4 InstanceType, bf16)
-    submit-azureml-lerobot-training.sh \
+    submit-azureml-vla-pi0-training.sh \
       -d user/dataset \
       --instance-type gpu4 \
       --mixed-precision bf16 \
-      --batch-size 8
+      --batch-size 4
 
     # Register environment only (no job submission)
-    submit-azureml-lerobot-training.sh -d placeholder --assets-only
+    submit-azureml-vla-pi0-training.sh -d placeholder --assets-only
 EOF
 }
 
 #------------------------------------------------------------------------------
 # Helpers
 #------------------------------------------------------------------------------
-
-ensure_ml_extension() {
-  az extension show --name ml &>/dev/null ||
-    fatal "Azure ML CLI extension not installed. Run: az extension add --name ml"
-}
 
 render_job_file_with_mounted_inputs() {
   local source_file="$1" rendered_file="$2" init_model="$3"
@@ -242,21 +249,22 @@ PY
 # Defaults
 #------------------------------------------------------------------------------
 
-environment_name="lerobot-training-env"
+environment_name="vla-pi0-training-env"
 environment_version="${ENVIRONMENT_VERSION:-}"
 environment_version_explicit=false
 [[ -n "${ENVIRONMENT_VERSION:-}" ]] && environment_version_explicit=true
 image="${IMAGE:-$DEFAULT_LEROBOT_TRAIN_IMAGE}"
 assets_only=false
 
-job_file="$REPO_ROOT/training/il/workflows/azureml/lerobot-train.yaml"
+job_file="$REPO_ROOT/training/vla/workflows/azureml/vla-pi0-train.yaml"
 dataset_repo_id="${DATASET_REPO_ID:-}"
-policy_type="${POLICY_TYPE:-act}"
-job_name="${JOB_NAME:-lerobot-act-training}"
+policy_type="${POLICY_TYPE:-pi0}"
+job_name="${JOB_NAME:-vla-pi0-training}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
 policy_repo_id="${POLICY_REPO_ID:-}"
 init_from_policy_model="${INIT_FROM_POLICY_MODEL:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
+lerobot_project="${LEROBOT_PROJECT:-training/vla/lerobot}"
 
 dataset_asset_count_max=64
 dataset_assets=()
@@ -278,8 +286,10 @@ mlflow_retries="${MLFLOW_TRACKING_TOKEN_REFRESH_RETRIES:-3}"
 mlflow_timeout="${MLFLOW_HTTP_REQUEST_TIMEOUT:-60}"
 
 compute="${AZUREML_COMPUTE:-$(get_compute_target)}"
-instance_type="gpuspot"
-mixed_precision="${MIXED_PRECISION:-no}"
+instance_type="gpu"
+train_expert_only=false
+mixed_precision="${MIXED_PRECISION:-bf16}"
+hf_token="${HF_TOKEN:-}"
 experiment_name=""
 display_name=""
 stream_logs=false
@@ -306,6 +316,7 @@ while [[ $# -gt 0 ]]; do
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
     --init-from-policy-model)     init_from_policy_model="$2"; shift 2 ;;
     --lerobot-version)            lerobot_version="$2"; shift 2 ;;
+    --lerobot-project)            lerobot_project="$2"; shift 2 ;;
     --dataset-asset)              dataset_assets+=("$2"); shift 2 ;;
     --blob-url)                   blob_urls+=("$2"); shift 2 ;;
     --dataset-root)               dataset_root="$2"; shift 2 ;;
@@ -322,7 +333,9 @@ while [[ $# -gt 0 ]]; do
     --mlflow-http-timeout)        mlflow_timeout="$2"; shift 2 ;;
     --compute)                    compute="$2"; shift 2 ;;
     --instance-type)              instance_type="$2"; shift 2 ;;
+    --train-expert-only)          train_expert_only=true; shift ;;
     --mixed-precision)            mixed_precision="$2"; shift 2 ;;
+    --hf-token)                   hf_token="$2"; shift 2 ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
     --stream)                     stream_logs=true; shift ;;
@@ -342,7 +355,7 @@ fi
 #------------------------------------------------------------------------------
 
 require_tools az python3
-ensure_ml_extension
+require_az_extension ml
 
 [[ -n "$subscription_id" ]] || fatal "AZURE_SUBSCRIPTION_ID required"
 [[ -n "$resource_group" ]] || fatal "AZURE_RESOURCE_GROUP required"
@@ -355,8 +368,8 @@ elif [[ -z "$dataset_repo_id" ]]; then
 fi
 
 case "$policy_type" in
-  act|diffusion) ;;
-  *) fatal "Unsupported policy type: $policy_type (use: act, diffusion)" ;;
+  pi0|pi0_fast|pi05) ;;
+  *) fatal "Unsupported policy type: $policy_type (use: pi0, pi0_fast, pi05)" ;;
 esac
 
 if [[ -n "$init_from_policy_model" && -n "$policy_repo_id" ]]; then
@@ -430,6 +443,20 @@ if [[ -n "$init_from_policy_model" ]]; then
   esac
 fi
 
+# Resolve the dependency project against the repo so missing metadata is caught
+# locally before submission. The path injected into the container stays
+# repo-relative because the entry script restores the training/ prefix.
+case "$lerobot_project" in
+  /*)
+    fatal "--lerobot-project must be a repo-relative path (got: $lerobot_project). The value is forwarded into the training container via LEROBOT_PROJECT and resolved against the mounted code snapshot."
+    ;;
+esac
+_project_local="$REPO_ROOT/$lerobot_project"
+[[ -f "$_project_local/pyproject.toml" ]] || fatal \
+  "--lerobot-project: pyproject.toml not found at $_project_local"
+[[ -f "$_project_local/uv.lock" ]] || fatal \
+  "--lerobot-project: uv.lock not found at $_project_local. Run 'cd training/vla/lerobot && uv lock' to regenerate."
+
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Dataset" "$dataset_repo_id"
@@ -440,6 +467,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Training Steps" "${training_steps:-<default>}"
   print_kv "Batch Size" "${batch_size:-<default>}"
   print_kv "Save Freq" "$save_freq"
+  print_kv "Log Freq" "${log_freq:-<default>}"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
   print_kv "Init From Model" "${init_from_policy_model:-<none>}"
   if [[ ${#dataset_assets[@]} -gt 0 ]]; then
@@ -457,8 +485,11 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Workspace" "$workspace_name"
   print_kv "Compute" "${compute:-<not set>}"
   print_kv "Instance Type" "$instance_type"
+  print_kv "Train Expert Only" "$train_expert_only"
   print_kv "Mixed Precision" "$mixed_precision"
+  print_kv "HF Token" "$([[ -n "$hf_token" ]] && echo '<set>' || echo '<none>')"
   print_kv "Environment" "${environment_name}:${environment_version}"
+  print_kv "LeRobot Project" "$lerobot_project"
   exit 0
 fi
 
@@ -488,7 +519,7 @@ rendered_job_file=""
 resolved_job_file="$job_file"
 trap '[[ -n "${rendered_job_file:-}" ]] && rm -f "$rendered_job_file"' EXIT
 if [[ -n "$init_from_policy_model" || ${#dataset_assets[@]} -gt 0 ]]; then
-  rendered_job_file=$(mktemp "${TMPDIR:-/tmp}/lerobot-job.XXXXXX")
+  rendered_job_file=$(mktemp "${TMPDIR:-/tmp}/vla-pi0-job.XXXXXX")
   mv "$rendered_job_file" "${rendered_job_file}.yml"
   rendered_job_file="${rendered_job_file}.yml"
   if [[ ${#dataset_assets[@]} -gt 0 ]]; then
@@ -503,8 +534,11 @@ fi
 # Build Training Command
 #
 # The AzureML job runs training/il/scripts/lerobot/azureml-train-entry.sh, which
-# is uploaded as part of the code asset. Keeping the inline command short avoids
-# multi-line YAML escaping issues with the Azure ML K8s extension.
+# is uploaded as part of the code asset. The entry script is policy-agnostic;
+# VLA selects pi0/pi0_fast/pi05 via POLICY_TYPE and points the dependency
+# install from the VLA-specific lock via LEROBOT_PROJECT below.
+# Keeping the inline command short avoids multi-line YAML escaping issues with
+# the Azure ML K8s extension.
 #------------------------------------------------------------------------------
 
 train_cmd="bash il/scripts/lerobot/azureml-train-entry.sh"
@@ -553,7 +587,6 @@ az_args+=(
 [[ -n "$register_checkpoint" ]] && az_args+=(--set "inputs.register_checkpoint=$register_checkpoint")
 
 if [[ ${#blob_urls[@]} -gt 0 ]]; then
-  python3 "$REPO_ROOT/training/il/scripts/lerobot/_validate_blob_urls.py" "${blob_urls[@]}"
   blob_urls_json=$(python3 -c "import json; import sys; print(json.dumps(sys.argv[1:]))" "${blob_urls[@]}")
   az_args+=(--set "inputs.blob_urls=$blob_urls_json")
   az_args+=(--set "inputs.dataset_root=$dataset_root")
@@ -565,6 +598,10 @@ fi
 # refs in `environment_variables` at runtime: it passes the literal string into
 # the container. Set every env var the entry script reads directly via
 # `--set environment_variables.X=Y` so the values are baked into the job spec.
+#
+# LEROBOT_PROJECT is the VLA-specific opt-in: the entry script defaults to the
+# IL project (training/il/lerobot); the VLA submit script overrides it to export
+# and install the VLA lock containing lerobot[dataset,pi], transformers, and scipy.
 az_args+=(
   --set "environment_variables.AZURE_SUBSCRIPTION_ID=$subscription_id"
   --set "environment_variables.AZURE_RESOURCE_GROUP=$resource_group"
@@ -577,6 +614,7 @@ az_args+=(
   --set "environment_variables.OUTPUT_DIR=$output_dir"
   --set "environment_variables.SAVE_FREQ=$save_freq"
   --set "environment_variables.MIXED_PRECISION=$mixed_precision"
+  --set "environment_variables.LEROBOT_PROJECT=$lerobot_project"
 )
 
 [[ -n "$policy_repo_id" ]]      && az_args+=(--set "environment_variables.POLICY_REPO_ID=$policy_repo_id")
@@ -587,6 +625,8 @@ az_args+=(
 [[ -n "$eval_freq" ]]           && az_args+=(--set "environment_variables.EVAL_FREQ=$eval_freq")
 [[ -n "$log_freq" ]]            && az_args+=(--set "environment_variables.LOG_FREQ=$log_freq")
 [[ -n "$register_checkpoint" ]] && az_args+=(--set "environment_variables.REGISTER_CHECKPOINT=$register_checkpoint")
+[[ "$train_expert_only" == "true" ]] && az_args+=(--set "environment_variables.TRAIN_EXPERT_ONLY=true")
+[[ -n "$hf_token" ]] && az_args+=(--set "environment_variables.HF_TOKEN=$hf_token")
 
 if [[ ${#dataset_assets[@]} -gt 0 ]]; then
   dataset_assets_json=$(python3 -c "import json; import sys; print(json.dumps(sys.argv[1:]))" "${dataset_assets[@]}")
@@ -608,18 +648,19 @@ az_args+=(--query "name" -o "tsv")
 # Submit Job
 #------------------------------------------------------------------------------
 
-info "Submitting AzureML LeRobot training job..."
+info "Submitting AzureML LeRobot VLA pi0 training job..."
 info "  Dataset: $dataset_repo_id"
 info "  Policy: $policy_type"
 info "  Job Name: $job_name"
 info "  Image: $image"
+info "  LeRobot Project: $lerobot_project"
 [[ ${#blob_urls[@]} -gt 0 ]] && info "  Data Source: Blob URLs (${#blob_urls[@]} dataset(s))"
 [[ ${#dataset_assets[@]} -gt 0 ]] && info "  Data Source: AzureML Data Assets (${#dataset_assets[@]} asset(s))"
 
 # Ctrl+C between az invocation and a successful return leaves the operator
 # unsure whether the job was accepted. Print a clear pointer to the portal so
 # they can resolve the ambiguity instead of blindly resubmitting.
-# shellcheck disable=SC2317,SC2329  # invoked indirectly via `trap`
+# shellcheck disable=SC2329  # invoked indirectly via `trap`
 _interrupt_message() {
   error "Interrupted while waiting for az ml job create. The job may have been submitted."
   error "Check: https://ml.azure.com/runs?wsid=/subscriptions/${subscription_id}/resourceGroups/${resource_group}/providers/Microsoft.MachineLearningServices/workspaces/${workspace_name}"
@@ -651,8 +692,10 @@ print_kv "Policy Type" "$policy_type"
 print_kv "Image" "$image"
 print_kv "Compute" "${compute:-<not set>}"
 print_kv "Instance Type" "$instance_type"
+print_kv "Train Expert Only" "$train_expert_only"
 print_kv "Mixed Precision" "$mixed_precision"
 print_kv "Environment" "${environment_name}:${environment_version}"
+print_kv "LeRobot Project" "$lerobot_project"
 print_kv "Workspace" "$workspace_name"
 [[ ${#blob_urls[@]} -gt 0 ]] && print_kv "Blob Datasets" "${#blob_urls[@]}"
 [[ ${#dataset_assets[@]} -gt 0 ]] && print_kv "Data Assets" "${#dataset_assets[@]}"

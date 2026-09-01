@@ -31,30 +31,35 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check hve-core-derived files against latest release
+      - name: Check hve-core-derived files against reviewed upstream baselines
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/security/Test-HveCoreFreshness.ps1
 
       - name: Create or update tracking issue
-        if: steps.check.outputs.stale-count != '0'
+        if: "!cancelled() && steps.check.outputs.attention-count != '' && steps.check.outputs.attention-count != '0'"
         env:
           GH_TOKEN: ${{ github.token }}
-          STALE_COUNT: ${{ steps.check.outputs.stale-count }}
+          DRIFT_COUNT: ${{ steps.check.outputs.drift-count }}
+          ERROR_COUNT: ${{ steps.check.outputs.error-count }}
         run: |
           . ./scripts/security/Test-HveCoreFreshness.ps1
           $data = Get-Content 'hve-core-freshness-results.json' -Raw | ConvertFrom-Json
           $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           $checkDate = Get-Date -Format 'yyyy-MM-dd' -AsUTC
           $body = Format-HveCoreIssueBody -Result $data -RunUrl $runUrl -CheckDate $checkDate
-          $title = "security: hve-core upstream updates available ($env:STALE_COUNT stale)"
+          $title = "security: hve-core freshness needs attention ($env:DRIFT_COUNT drifted, $env:ERROR_COUNT check errors)"
           $existing = Get-HveCoreTrackingIssue
-          if ($existing) { gh issue edit $existing --title $title --body $body; gh issue comment $existing --body "🔄 Weekly scan: $env:STALE_COUNT item(s) stale as of $checkDate. [Workflow run]($runUrl)." }
+          if ($existing) {
+            gh issue edit $existing --title $title --body $body
+            if ($LASTEXITCODE -ne 0) { throw "Could not update hve-core freshness issue #$existing" }
+            gh issue comment $existing --body "🔄 Weekly scan: $env:DRIFT_COUNT drifted, $env:ERROR_COUNT check errors as of $checkDate. [Workflow run]($runUrl)."
+          }
           else { gh issue create --title $title --body $body --label "dependencies,automated,needs-triage" }
 
       - name: Close resolved tracking issue
-        if: steps.check.outputs.stale-count == '0'
+        if: steps.check.outputs.attention-count == '0'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

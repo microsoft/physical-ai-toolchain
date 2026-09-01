@@ -85,7 +85,12 @@ def test_aml_il_lifecycle_e2e(
 ) -> None:
     log_e2e("Starting AzureML IL (LeRobot) lifecycle e2e test")
     policy_source = resolve_aml_lerobot_eval_policy_override()
-    dataset = stage_synthetic_lerobot_dataset(request, repo_root, storage_account)
+    dataset = stage_synthetic_lerobot_dataset(
+        request,
+        repo_root,
+        storage_account,
+        container="ml-workspace",
+    )
     if policy_source is None:
         register_model_name = e2e_name("il-e2e-aml-model")
         job = submit_aml_lerobot_training(

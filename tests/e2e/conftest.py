@@ -17,6 +17,26 @@ AML_COMPUTE_NAME_MAX_LENGTH = 16
 TFVARS_FALLBACK_OUTPUT_KEYS = ("resource_group", "azureml_workspace", "aks_cluster", "storage_account")
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "requires_hf_token: marks tests that require HF_TOKEN for gated Hugging Face model access",
+    )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    if item.get_closest_marker("requires_hf_token") is None:
+        return
+    if os.environ.get("HF_TOKEN", "").strip():
+        return
+
+    pytest.fail(
+        f"{item.nodeid} requires HF_TOKEN for gated Hugging Face model access",
+        pytrace=False,
+    )
+
+
 @dataclass(frozen=True)
 class TerraformOutputs:
     values: dict[str, Any]
@@ -366,7 +386,7 @@ def _cluster_has_scalable_gpu_node_pool(repo_root: Path) -> bool:
 
     tf_outputs = _terraform_outputs(repo_root)
     resource_group = os.environ.get("AZURE_RESOURCE_GROUP") or tf_outputs.try_key_value("resource_group")
-    cluster_name = tf_outputs.try_key_value("aks_cluster")
+    cluster_name = os.environ.get("AKS_CLUSTER_NAME") or tf_outputs.try_key_value("aks_cluster")
     if not resource_group or not cluster_name:
         return False
 

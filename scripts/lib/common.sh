@@ -95,6 +95,24 @@ EOF
   info "Environment ${name}:${version} already exists with matching image; continuing"
 }
 
+resolve_azureml_compute_identity_client_id() {
+  local compute_target="${1:-}" resource_group="${2:?resource group required}"
+  local workspace_name="${3:?workspace name required}" client_id="${AZURE_CLIENT_ID:-}"
+
+  if [[ -z "$client_id" && -n "$compute_target" ]]; then
+    # Toolchain compute targets have exactly one user-assigned managed identity.
+    client_id=$(az ml compute show \
+      --name "${compute_target#azureml:}" \
+      --resource-group "$resource_group" \
+      --workspace-name "$workspace_name" \
+      --query "identity.user_assigned_identities[0].client_id" \
+      --output tsv)
+    [[ "$client_id" == "None" ]] && client_id=""
+  fi
+
+  printf '%s' "$client_id"
+}
+
 # Check for required tools
 require_tools() {
   local missing=()

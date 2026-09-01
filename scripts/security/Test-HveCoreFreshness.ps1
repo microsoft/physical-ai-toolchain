@@ -5,15 +5,16 @@
 
 <#
 .SYNOPSIS
-    Checks hve-core-derived files against the latest upstream release.
+    Checks hve-core-derived files against their reviewed upstream baselines.
 
 .DESCRIPTION
-    Resolves the newest non-draft microsoft/hve-core release and compares each
-    hve-core-derived file's upstream blob SHA at the pinned UPSTREAM_REF (the last
-    reviewed upstream ref, read from the RPI bootstrap workflow) against the same
-    upstream path at the latest release. Writes a JSON results file consumed by the
-    tracking-issue steps and, when running under GitHub Actions, emits the stale item
-    count to GITHUB_OUTPUT.
+    Compares each hve-core-derived file's upstream blob SHA at its reviewed source
+    revision against its current upstream target. Modules use the RPI bootstrap's
+    pinned UPSTREAM_REF and the latest release. Security linters use the source
+    revision recorded in their headers and upstream main, which also covers files
+    not present in a release. Writes a JSON results file consumed by the tracking-
+    issue steps and, under GitHub Actions, emits attention-count, drift-count, and
+    error-count to GITHUB_OUTPUT.
 
 .PARAMETER ResultsFile
     Output JSON results path. Default: hve-core-freshness-results.json.
@@ -54,18 +55,25 @@ $script:UpstreamRepo = 'microsoft/hve-core'
 $script:SetupWorkflow = '.github/workflows/copilot-setup-steps.yml'
 $script:IssueMarker = 'automation:hve-core-freshness'
 $script:IssueSearch = "in:body $script:IssueMarker is:open"
+$script:FullShaPattern = '^[0-9a-fA-F]{40}$'
+$script:ShortShaLength = 7
 
-# These are hve-core-derived modules; the check compares each file's UPSTREAM blob SHA
-# at the pinned ref vs the latest release, so local adaptations never cause false drift.
-# "drift" means upstream changed the file since the pinned ref and the change should
-# be reviewed and ported.
+class HveCoreFileValidationException : System.Exception {
+    HveCoreFileValidationException([string]$message) : base($message) {}
+}
+
+# Release entries use the RPI pin; source-header entries require the exact header
+# "Adapted from microsoft/hve-core <path> as of commit <40-hex SHA>" and track main.
+# Blob-to-blob comparisons avoid false drift from intentional local adaptations.
 $script:DerivedFiles = @(
-    'scripts/security/Modules/SecurityHelpers.psm1'
-    'scripts/security/Modules/SecurityClasses.psm1'
-    'scripts/linting/Modules/LintingHelpers.psm1'
-    'scripts/tests/Mocks/GitMocks.psm1'
-    'scripts/lib/Modules/CIHelpers.psm1'
-    'scripts/linting/Modules/FrontmatterValidation.psm1'
+    [ordered]@{ Path = 'scripts/security/Modules/SecurityHelpers.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/security/Modules/SecurityClasses.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/linting/Modules/LintingHelpers.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/tests/Mocks/GitMocks.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/lib/Modules/CIHelpers.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/linting/Modules/FrontmatterValidation.psm1'; Baseline = 'release' }
+    [ordered]@{ Path = 'scripts/security/Test-WorkflowPermissions.ps1'; Baseline = 'source-header' }
+    [ordered]@{ Path = 'scripts/security/Test-DangerousWorkflow.ps1'; Baseline = 'source-header' }
 )
 
 # ============================================================
@@ -90,10 +98,54 @@ function Get-PinnedHveCoreRef {
     }
 
     $content = Get-Content -Path $Path -Raw
-    $sha = if ($content -match 'UPSTREAM_REF:\s*([0-9a-fA-F]{7,40})') { $Matches[1] } else { $null }
-    $tag = if ($content -match 'hve-core release:\s*(\S+)') { $Matches[1] } else { 'unknown' }
+    $sha = if ($content -match '(?m)^\s*UPSTREAM_REF:\s*[''"]?([0-9a-fA-F]{40})[''"]?\s*(?:#.*)?$') {
+        $Matches[1]
+    }
+    else {
+        $null
+    }
+    $tag = if ($content -match 'hve-core release:\s*([A-Za-z0-9._/+.-]{1,128})(?:\s|$)') { $Matches[1] } else { 'unknown' }
 
     return [ordered]@{ Tag = $tag; Sha = $sha }
+}
+
+function Get-HveCoreFileSource {
+    <#
+    .SYNOPSIS
+        Reads an hve-core source path and commit from a vendored file's header.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    if (-not (Test-Path $Path)) {
+        throw [HveCoreFileValidationException]::new("Derived file not found locally: $Path")
+    }
+
+    $content = Get-Content -Path $Path -Raw
+    if ([string]::IsNullOrWhiteSpace($content)) {
+        throw [HveCoreFileValidationException]::new("Derived file is empty: $Path")
+    }
+    $headerEnd = $content.IndexOf('#>')
+    if ($headerEnd -lt 0) {
+        throw [HveCoreFileValidationException]::new("Could not find a comment-based help header in $Path")
+    }
+    $header = $content.Substring(0, $headerEnd + 2)
+    $pattern = 'Adapted from\s+microsoft/hve-core\s+(\S+)\s+as of commit\s+([0-9a-fA-F]{40})(?:\.|\s|$)'
+    $sourceMatches = [regex]::Matches($header, $pattern)
+    if ($sourceMatches.Count -eq 0) {
+        throw [HveCoreFileValidationException]::new("Could not extract hve-core source revision from $Path")
+    }
+    if ($sourceMatches.Count -gt 1) {
+        throw [HveCoreFileValidationException]::new("Found multiple hve-core source revisions in $Path")
+    }
+    $match = $sourceMatches[0]
+
+    return [ordered]@{
+        Path = $match.Groups[1].Value
+        Sha  = $match.Groups[2].Value.ToLowerInvariant()
+    }
 }
 
 function Select-LatestRelease {
@@ -116,19 +168,21 @@ function Select-LatestRelease {
 function Get-DriftState {
     <#
     .SYNOPSIS
-        Classify a derived file's state from its pinned and latest upstream blob SHAs.
-        Returns 'missing-upstream', 'drift', or 'current'.
+        Classify a derived file's state from its baseline and target upstream blob SHAs.
+        Returns 'missing-both', 'missing-baseline', 'missing-target', 'drift', or 'current'.
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][AllowEmptyString()][string]$PinnedUpstreamSha,
-        [Parameter(Mandatory = $false)][AllowEmptyString()][string]$LatestUpstreamSha
+        [Parameter(Mandatory)][AllowEmptyString()][string]$BaselineUpstreamSha,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$TargetUpstreamSha
     )
 
-    $p = $PinnedUpstreamSha.ToLowerInvariant()
-    $l = $LatestUpstreamSha.ToLowerInvariant()
-    if (-not $l) { return 'missing-upstream' }
-    if ($p -ne $l) { return 'drift' }
+    $baseline = $BaselineUpstreamSha.ToLowerInvariant()
+    $target = $TargetUpstreamSha.ToLowerInvariant()
+    if (-not $baseline -and -not $target) { return 'missing-both' }
+    if (-not $baseline) { return 'missing-baseline' }
+    if (-not $target) { return 'missing-target' }
+    if ($baseline -ne $target) { return 'drift' }
     return 'current'
 }
 
@@ -144,41 +198,57 @@ function Get-HveCoreBlobSha {
         [Parameter(Mandatory)][string]$Ref
     )
 
-    $out = gh api "repos/$Repo/contents/$Path`?ref=$Ref" --jq '.sha' 2>&1
-    if ($LASTEXITCODE -eq 0) { return ("$out").Trim() }
+    $out = gh api --method GET "repos/$Repo/contents/$Path" -f "ref=$Ref" --jq '.sha' 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $sha = ("$out").Trim()
+        if ($sha -notmatch $script:FullShaPattern) {
+            throw "gh api returned an invalid blob SHA for ${Path}@${Ref}: $out"
+        }
+        return $sha
+    }
 
-    # A genuine 404 means the file is absent at that ref (a real 'missing-upstream').
+    # A genuine 404 means the file is absent at that ref.
     # Any other failure (transient, auth, rate limit) must fail loudly rather than
     # masquerade as drift and file a false tracking issue.
-    if ("$out" -match 'HTTP 404|Not Found') { return '' }
+    if ("$out" -match 'HTTP 404') { return '' }
     throw "gh api failed for ${Path}@${Ref}: $out"
 }
 
 function Get-HveCoreFileDrift {
     <#
     .SYNOPSIS
-        Compares a single upstream path's blob SHA at the pinned ref against the latest
-        release and returns a drift record. Local copies are never consulted, so local
+        Compares a single upstream path's blob SHA at its baseline ref against its target
+        ref and returns a drift record. Local copies are never consulted, so local
         adaptations cannot cause false drift.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Repo,
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$PinnedRef,
-        [Parameter(Mandatory)][string]$LatestRef
+        [Parameter(Mandatory)][string]$BaselineRef,
+        [Parameter(Mandatory)][string]$TargetRef
     )
 
-    $pinnedUp = Get-HveCoreBlobSha -Repo $Repo -Path $Path -Ref $PinnedRef
-    $latestUp = Get-HveCoreBlobSha -Repo $Repo -Path $Path -Ref $LatestRef
-    $state = Get-DriftState -PinnedUpstreamSha $pinnedUp -LatestUpstreamSha $latestUp
+    $baselineUpstreamSha = Get-HveCoreBlobSha -Repo $Repo -Path $Path -Ref $BaselineRef
+    $targetUpstreamSha = Get-HveCoreBlobSha -Repo $Repo -Path $Path -Ref $TargetRef
+    $state = Get-DriftState -BaselineUpstreamSha $baselineUpstreamSha -TargetUpstreamSha $targetUpstreamSha
+    if ($state -eq 'missing-both') {
+        throw [HveCoreFileValidationException]::new(
+            "Upstream path '$Path' is absent at both baseline ref '$BaselineRef' and target ref '$TargetRef'"
+        )
+    }
+    $baselineRefUrl = [uri]::EscapeDataString($BaselineRef)
+    $targetRefUrl = [uri]::EscapeDataString($TargetRef)
 
     return [ordered]@{
-        Path              = $Path
-        PinnedUpstreamSha = if ($pinnedUp) { $pinnedUp } else { '' }
-        LatestUpstreamSha = if ($latestUp) { $latestUp } else { '' }
-        Drift             = ($state -ne 'current')
-        State             = $state
+        Path                = $Path
+        BaselineUpstreamSha = $baselineUpstreamSha
+        TargetUpstreamSha   = $targetUpstreamSha
+        BaselineRef         = $BaselineRef
+        TargetRef           = $TargetRef
+        ComparisonUrl       = "https://github.com/$Repo/compare/$baselineRefUrl...$targetRefUrl"
+        Drift               = ($state -ne 'current')
+        State               = $state
     }
 }
 
@@ -194,26 +264,133 @@ function Get-HveCoreStateLabel {
 
     switch ($State) {
         'drift'            { return '⚠️ Upstream advanced' }
-        'missing-upstream' { return '❓ Not found at latest release' }
-        default            { return '✅ Current' }
+        'missing-baseline' { return '❓ Not found at baseline ref' }
+        'missing-target'   { return '❓ Not found at target ref' }
+        'error'            { return '❌ Check failed' }
+        'current'          { return '✅ Current' }
+        default {
+            $stateText = ConvertTo-HveCoreMarkdownText -Value $State
+            return "❓ Unknown state: $stateText"
+        }
     }
 }
 
-function Format-HveCoreDriftRow {
+function ConvertTo-HveCoreMarkdownText {
     <#
     .SYNOPSIS
-        Formats one drift record as a markdown table row: path, short pinned/latest blob
-        SHAs, and a status label.
+        Encodes untrusted text for safe use inside a markdown table or link label.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
+    )
+
+    return ([System.Net.WebUtility]::HtmlEncode($Value) `
+            -replace '\[', '&#91;' `
+            -replace '\]', '&#93;' `
+            -replace '\(', '&#40;' `
+            -replace '\)', '&#41;' `
+            -replace '\|', '&#124;' `
+            -replace '`', '&#96;')
+}
+
+function Get-HveCoreShortSha {
+    <#
+    .SYNOPSIS
+        Shortens a SHA for display while preserving empty and short values.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
+    )
+
+    return $Value.Substring(0, [Math]::Min($script:ShortShaLength, $Value.Length))
+}
+
+function Format-HveCoreDriftCells {
+    <#
+    .SYNOPSIS
+        Formats the shared display values for a drift record.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][object]$File
     )
 
+    $baselineSha = Get-HveCoreShortSha -Value $File.BaselineUpstreamSha
+    $targetSha = Get-HveCoreShortSha -Value $File.TargetUpstreamSha
+    $baselineRef = if ($File.BaselineRef -match $script:FullShaPattern) {
+        Get-HveCoreShortSha -Value $File.BaselineRef
+    }
+    else {
+        $File.BaselineRef
+    }
+    $targetRef = if ($File.TargetRef -match $script:FullShaPattern) {
+        Get-HveCoreShortSha -Value $File.TargetRef
+    }
+    else {
+        $File.TargetRef
+    }
+    $baselineRef = ConvertTo-HveCoreMarkdownText -Value $baselineRef
+    $targetRef = ConvertTo-HveCoreMarkdownText -Value $targetRef
+
     $status = Get-HveCoreStateLabel -State $File.State
-    $pSha = if ($File.PinnedUpstreamSha) { $File.PinnedUpstreamSha.Substring(0, [Math]::Min(7, $File.PinnedUpstreamSha.Length)) } else { '' }
-    $lSha = if ($File.LatestUpstreamSha) { $File.LatestUpstreamSha.Substring(0, [Math]::Min(7, $File.LatestUpstreamSha.Length)) } else { '' }
-    return "| ``$($File.Path)`` | $pSha | $lSha | $status |"
+    if ($File.State -eq 'error' -and $File.Error) {
+        $message = "$($File.Error)" -replace '[\r\n]+', ' '
+        $message = ConvertTo-HveCoreMarkdownText -Value $message
+        $status = "$status — <code>$message</code>"
+    }
+
+    $baseline = switch ($File.Baseline) {
+        'source-header' { 'Source header' }
+        'release' { 'Release' }
+        default {
+            $baselineText = if ($File.Baseline) { "$($File.Baseline)" } else { 'unknown' }
+            ConvertTo-HveCoreMarkdownText -Value $baselineText
+        }
+    }
+
+    return [ordered]@{
+        Baseline    = $baseline
+        Status      = $status
+        BaselineSha = $baselineSha
+        TargetSha   = $targetSha
+        Comparison  = if ($File.ComparisonUrl) { "[$baselineRef → $targetRef]($($File.ComparisonUrl))" } else { '' }
+    }
+}
+
+function Format-HveCoreDriftRow {
+    <#
+    .SYNOPSIS
+        Formats one drift record as a markdown table row with its upstream comparison,
+        short baseline/target blob SHAs, and status label.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$File
+    )
+
+    $cells = Format-HveCoreDriftCells -File $File
+    return "| ``$($File.Path)`` | $($cells.Baseline) | $($cells.Comparison) | $($cells.BaselineSha) | $($cells.TargetSha) | $($cells.Status) |"
+}
+
+function Get-HveCoreTrustedReleaseUrl {
+    <#
+    .SYNOPSIS
+        Validates that a release URL is an absolute HTTPS URL on github.com.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowNull()][AllowEmptyString()][string]$Value
+    )
+
+    $uri = $null
+    if (-not [uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -or
+        $uri.Scheme -ne 'https' -or
+        $uri.Host -ne 'github.com') {
+        throw "Unexpected hve-core release URL: $Value"
+    }
+    return $uri.AbsoluteUri
 }
 
 function Format-HveCoreIssueBody {
@@ -230,27 +407,35 @@ function Format-HveCoreIssueBody {
 
     $pin = $Result.Pin
     $files = @($Result.Files)
-    $latestLink = "[$($Result.LatestTag)]($($Result.LatestUrl))"
+    $latestTagText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestTag
+    $latestUrl = Get-HveCoreTrustedReleaseUrl -Value $Result.LatestUrl
+    $latestLink = "[$latestTagText]($latestUrl)"
+    $pinnedTagText = ConvertTo-HveCoreMarkdownText -Value $pin.PinnedTag
+    $latestMainShaText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestMainSha
 
     $fileRows = ($files | ForEach-Object { Format-HveCoreDriftRow -File $_ }) -join "`n"
 
     $compareBase = if ($pin.PinnedTag -ne 'unknown') { $pin.PinnedTag } else { $pin.PinnedSha }
+    $compareBase = [uri]::EscapeDataString($compareBase)
+    $latestTagUrl = [uri]::EscapeDataString($Result.LatestTag)
 
     return @"
 ## hve-core Upstream Freshness Report
 
-Latest reviewed hve-core release: $latestLink
-Drift baseline: ``$($pin.PinnedTag)`` (``UPSTREAM_REF`` in ``$($pin.File)``)
+Latest hve-core release: $latestLink
+Release-file baseline: ``$pinnedTagText`` (``UPSTREAM_REF`` in ``$($pin.File)``)
+Source-header target: ``$latestMainShaText``
+Action required: $($Result.DriftCount) drifted, $($Result.ErrorCount) check errors
 
 ### Derived Files
 
-| File | Pinned Upstream blob | Latest Upstream blob | Status |
-|------|----------------------|----------------------|--------|
+| File | Baseline | Upstream comparison | Baseline upstream blob | Target upstream blob | Status |
+|------|----------|---------------------|------------------------|----------------------|--------|
 $fileRows
 
 ### How to Refresh
 
-Review the upstream changes and port any relevant ones into the locally-adapted copy; do not blindly overwrite (these files carry intentional local adaptations). Compare link: https://github.com/microsoft/hve-core/compare/$compareBase...$($Result.LatestTag)
+Review the upstream changes and port any relevant ones into the locally-adapted copy; do not blindly overwrite (these files carry intentional local adaptations). Each row links to its exact baseline comparison. After refreshing a source-header file, update its ``as of commit`` SHA to the reviewed upstream revision. Release baseline: https://github.com/microsoft/hve-core/compare/$compareBase...$latestTagUrl
 
 Run ``npm run lint:ps`` and ``npm run test:ps`` after changes.
 
@@ -275,21 +460,21 @@ function Format-HveCoreJobSummary {
     $pin = $Result.Pin
     $files = @($Result.Files)
 
-    $fileRows = foreach ($f in $files) {
-        $fStatus = Get-HveCoreStateLabel -State $f.State
-        $pSha = if ($f.PinnedUpstreamSha) { $f.PinnedUpstreamSha.Substring(0, [Math]::Min(7, $f.PinnedUpstreamSha.Length)) } else { '' }
-        $lSha = if ($f.LatestUpstreamSha) { $f.LatestUpstreamSha.Substring(0, [Math]::Min(7, $f.LatestUpstreamSha.Length)) } else { '' }
-        "| $($f.Path) | $pSha | $lSha | $fStatus |"
-    }
+    $latestTagText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestTag
+    $pinnedTagText = ConvertTo-HveCoreMarkdownText -Value $pin.PinnedTag
+    $latestMainShaText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestMainSha
+    $fileRows = $files | ForEach-Object { Format-HveCoreDriftRow -File $_ }
 
     return @"
 ## hve-core Upstream Freshness
 
-Latest release: $($Result.LatestTag)
-Drift baseline: $($pin.PinnedTag)
+Latest release: $latestTagText
+Release-file baseline: $pinnedTagText
+Source-header target: $latestMainShaText
+Action required: $($Result.DriftCount) drifted, $($Result.ErrorCount) check errors
 
-| Derived File | Pinned blob | Latest blob | Status |
-|--------------|-------------|-------------|--------|
+| File | Baseline | Upstream comparison | Baseline upstream blob | Target upstream blob | Status |
+|------|----------|---------------------|------------------------|----------------------|--------|
 $($fileRows -join "`n")
 "@
 }
@@ -302,8 +487,10 @@ function Get-HveCoreTrackingIssue {
     [CmdletBinding()]
     param()
 
-    $n = gh issue list --search $script:IssueSearch --limit 1 --json number --jq '.[0].number // empty'
-    if ($LASTEXITCODE -ne 0) { return $null }
+    $n = gh issue list --search $script:IssueSearch --limit 1 --json number --jq '.[0].number // empty' 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not query existing hve-core freshness issue: $n"
+    }
     return $(if ($n) { $n.Trim() } else { $null })
 }
 
@@ -335,11 +522,59 @@ function Resolve-HveCoreCommitSha {
         [Parameter(Mandatory)][string]$Ref
     )
 
-    $sha = gh api "repos/$Repo/commits/$Ref" --jq '.sha' 2>&1
+    $encodedRef = [uri]::EscapeDataString($Ref)
+    $sha = gh api "repos/$Repo/commits/$encodedRef" --jq '.sha' 2>&1
     if ($LASTEXITCODE -ne 0 -or -not $sha) {
         throw "Could not resolve ref '$Ref' in ${Repo}: $sha"
     }
-    return ("$sha").Trim()
+    $sha = ("$sha").Trim()
+    if ($sha -notmatch $script:FullShaPattern) {
+        throw "Could not resolve ref '$Ref' in ${Repo}: invalid commit SHA '$sha'"
+    }
+    return $sha
+}
+
+function Get-HveCoreFileDriftForBaseline {
+    <#
+    .SYNOPSIS
+        Resolves one derived-file baseline and returns its upstream drift record.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$File,
+        [Parameter(Mandatory)][string]$PinnedReleaseSha,
+        [Parameter(Mandatory)][string]$LatestReleaseSha,
+        [Parameter(Mandatory)][string]$LatestMainSha
+    )
+
+    $path = $File.Path
+    if (-not (Test-Path $path)) {
+        throw [HveCoreFileValidationException]::new("Derived file not found locally: $path")
+    }
+
+    switch ($File.Baseline) {
+        'source-header' {
+            $source = Get-HveCoreFileSource -Path $path
+            if ($source.Path -cne $path) {
+                throw [HveCoreFileValidationException]::new(
+                    "Vendored path '$path' must match its recorded hve-core source path, but the header records '$($source.Path)'"
+                )
+            }
+            $result = Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $source.Path -BaselineRef $source.Sha -TargetRef $LatestMainSha
+            if ($result.State -eq 'missing-baseline') {
+                throw [HveCoreFileValidationException]::new(
+                    "Recorded source path '$($source.Path)' is absent at its recorded commit '$($source.Sha)'"
+                )
+            }
+            return $result
+        }
+        'release' {
+            return Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $path -BaselineRef $PinnedReleaseSha -TargetRef $LatestReleaseSha
+        }
+        default {
+            throw [HveCoreFileValidationException]::new("Unsupported hve-core baseline '$($File.Baseline)' for $path")
+        }
+    }
 }
 
 # ============================================================
@@ -364,6 +599,8 @@ function Invoke-HveCoreFreshnessCheck {
 
         $latestSha = Resolve-HveCoreCommitSha -Repo $script:UpstreamRepo -Ref $latestTag
         Write-Host "Latest hve-core release: $latestTag ($latestSha)"
+        $latestMainSha = Resolve-HveCoreCommitSha -Repo $script:UpstreamRepo -Ref 'main'
+        Write-Host "Latest hve-core main: $latestMainSha"
 
         $pinRef = Get-PinnedHveCoreRef -Path $script:SetupWorkflow
         if (-not $pinRef -or -not $pinRef.Sha) {
@@ -380,35 +617,90 @@ function Invoke-HveCoreFreshnessCheck {
             File      = $script:SetupWorkflow
         }
 
-        # --- Derived file drift ---
-        $fileResults = foreach ($path in $script:DerivedFiles) {
-            if (-not (Test-Path $path)) {
-                throw "Derived file not found locally: $path"
+        $fileResults = foreach ($file in $script:DerivedFiles) {
+            $path = $file.Path
+            try {
+                $r = Get-HveCoreFileDriftForBaseline -File $file -PinnedReleaseSha $pinRef.Sha -LatestReleaseSha $latestSha -LatestMainSha $latestMainSha
+                $r['Baseline'] = $file.Baseline
+            }
+            catch [HveCoreFileValidationException] {
+                $r = [ordered]@{
+                    Path                = $path
+                    Baseline            = $file.Baseline
+                    BaselineUpstreamSha = ''
+                    TargetUpstreamSha   = ''
+                    BaselineRef         = ''
+                    TargetRef           = ''
+                    ComparisonUrl       = ''
+                    Drift               = $false
+                    State               = 'error'
+                    Error               = $_.Exception.Message
+                }
             }
 
-            $r = Get-HveCoreFileDrift -Repo $script:UpstreamRepo -Path $path -PinnedRef $pinRef.Sha -LatestRef $latestTag
-            $icon = if ($r.Drift) { 'DRIFT' } else { 'OK' }
-            Write-Host "$icon $path : $($r.State)"
+            $status = if ($r.State -eq 'error') { 'ERROR' } elseif ($r.Drift) { 'DRIFT' } else { 'OK' }
+            Write-Host "$status $path : $($r.State)"
             $r
         }
         $fileResults = @($fileResults)
 
         $driftCount = @($fileResults | Where-Object { $_.Drift }).Count
-        $staleCount = $driftCount
-        Write-Host "`nStale: $driftCount / $($fileResults.Count) derived files drifted"
+        $errorCount = @($fileResults | Where-Object { $_.State -eq 'error' }).Count
+        $attentionCount = $driftCount + $errorCount
+        Write-Host "`nAction required: $driftCount drifted, $errorCount check errors"
 
         [ordered]@{
-            LatestTag = $latestTag
-            LatestUrl = $latestUrl
-            Pin       = $pin
-            Files     = $fileResults
+            LatestTag     = $latestTag
+            LatestReleaseSha = $latestSha
+            LatestUrl     = $latestUrl
+            LatestMainSha = $latestMainSha
+            DriftCount    = $driftCount
+            ErrorCount    = $errorCount
+            Pin           = $pin
+            Files         = $fileResults
         } | ConvertTo-Json -Depth 5 | Set-Content $ResultsFile
 
-        return [ordered]@{ StaleCount = $staleCount; LatestTag = $latestTag }
+        return [ordered]@{
+            AttentionCount = $attentionCount
+            DriftCount     = $driftCount
+            ErrorCount     = $errorCount
+            LatestTag      = $latestTag
+        }
     }
     finally {
         Pop-Location
     }
+}
+
+function Write-HveCoreGitHubOutputs {
+    <#
+    .SYNOPSIS
+        Appends freshness counters to a GitHub Actions output file.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Outcome,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    "attention-count=$($Outcome.AttentionCount)" >> $Path
+    "drift-count=$($Outcome.DriftCount)" >> $Path
+    "error-count=$($Outcome.ErrorCount)" >> $Path
+}
+
+function Get-HveCoreFreshnessExitCode {
+    <#
+    .SYNOPSIS
+        Returns a non-zero exit code for validation errors while leaving drift as
+        an issue-triaged signal.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Outcome
+    )
+
+    if ($Outcome.ErrorCount -gt 0) { return 2 }
+    return 0
 }
 
 function Resolve-RepoRoot {
@@ -440,7 +732,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         Write-Host "Results File   : $ResultsFile"
         Write-Host "Repo Root      : $resolvedRoot"
         Write-Host 'Derived Files :'
-        $script:DerivedFiles | ForEach-Object { Write-Host "  - $_" }
+        $script:DerivedFiles | ForEach-Object { Write-Host "  - $($_.Path) [$($_.Baseline)]" }
         exit 0
     }
 
@@ -454,9 +746,13 @@ if ($MyInvocation.InvocationName -ne '.') {
     try {
         $outcome = Invoke-HveCoreFreshnessCheck -RepoRoot $resolvedRoot -ResultsFile $ResultsFile
         if ($env:GITHUB_OUTPUT) {
-            "stale-count=$($outcome.StaleCount)" >> $env:GITHUB_OUTPUT
+            Write-HveCoreGitHubOutputs -Outcome $outcome -Path $env:GITHUB_OUTPUT
         }
-        exit 0
+        $exitCode = Get-HveCoreFreshnessExitCode -Outcome $outcome
+        if ($exitCode -ne 0) {
+            Write-Error -ErrorAction Continue "hve-core freshness check failed with $($outcome.ErrorCount) validation error(s)"
+        }
+        exit $exitCode
     }
     catch {
         Write-Error $_
