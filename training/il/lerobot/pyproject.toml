@@ -56,7 +56,7 @@ dependencies = [
     # bundle a vulnerable OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive
     # via azure-identity, msal, pyjwt, google-auth, and the azure-storage clients.
     # azureml-mlflow caps cryptography < 49.0.0, so 49.0.0 is also overridden below.
-    "cryptography==49.0.0",
+    "cryptography==50.0.0",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
     "wrapt==2.2.2",
@@ -95,7 +95,7 @@ override-dependencies = [
     # cryptography<49.0.0 cap, so resolution fails without this override. Force the
     # direct pin to win; cryptography keeps a stable API, so running one major above
     # azureml-mlflow's declared ceiling is safe.
-    "cryptography==49.0.0",
+    "cryptography==50.0.0",
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mirror the
     # direct pin to take 3.14.0.
     "mlflow-skinny==3.14.0",
