@@ -330,17 +330,32 @@ Treat `.github/workflows/copilot-setup-steps.yml` and `.devcontainer/devcontaine
 
 The weekly `copilot-setup-steps.yml` cron and `Test-BinaryFreshness.ps1` weekly run together surface upstream drift across both surfaces.
 
-### Cloud-Agent RPI Wrapper
+### Cloud-Agent RPI Skills
 
-The `Bootstrap hve-core RPI persona` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the latest `microsoft/hve-core@main` `rpi-agent.agent.md` plus every `subagents/*.agent.md` into `.copilot-tracking/upstream/hve-core-rpi/`.
+The `Bootstrap hve-core RPI skills` step in `copilot-setup-steps.yml` runs **outside** the cloud-agent firewall and downloads the complete RPI skill suite from a pinned `microsoft/hve-core` commit into immediate subdirectories of `.github/skills/`.
 
-The `Physical-AI RPI` umbrella (`.github/agents/physical-ai-rpi.agent.md`) and its hidden generic worker (`.github/agents/physical-ai-rpi-worker.agent.md`) read those files at session start. The worker resolves a `persona: <stem>` dispatch parameter to a workspace path under `.copilot-tracking/upstream/hve-core-rpi/subagents/`, so new upstream personas auto-onboard via the next bootstrap with no change in this repo.
+The generated `.github/skills/rpi-*/` directories are gitignored and excluded from repository Markdown linting. The standalone bootstrap script stages downloads before installation, accepts Markdown blobs only, verifies each pinned Git blob SHA, requires all eight skill entry points, rejects unexpected top-level content, and records the resolved commit, file paths, and blob SHAs in `.github/skills/.rpi-audit.json`. Bootstrap failure is fatal because no local fallback provides these workflows.
 
-See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the full umbrella/worker rationale.
+The cloud agent discovers the `rpi-quick`, `rpi-research`, `rpi-plan`, `rpi-implement`, and `rpi-review` workflows directly from their `SKILL.md` files. The bootstrap also preserves `rpi-challenger`, `rpi-plan-critique`, `rpi-walkthrough`, and every bundled reference and template.
+
+The current immutable commit predates a published hve-core release containing the skill-forward layout. Prefer a released commit on upgrades; when none exists, review the complete upstream commit and tree before changing `UPSTREAM_REF`.
+
+Before starting RPI work, verify `.github/skills/.rpi-audit.json` exists and contains the expected pinned `resolved_sha`; otherwise stop with a bootstrap failure. Treat `.copilot-tracking/` files as session scratch because the directory is gitignored.
+
+In cloud-agent PR work, persist each completed RPI phase as a PR comment and maintain an `RPI Artifact Index` in the PR description with the phase comment links and resolved upstream SHA. If PR write tools are unavailable, include the complete phase artifacts in the final response rather than claiming durable persistence.
+
+When RPI work touches repository-specific surfaces, preserve these safeguards:
+
+* `training/rl/**` and `training/rl/scripts/train.sh`: verify Isaac Sim ABI compatibility for numpy, torch, tensordict, ONNX Runtime GPU, SciPy, scikit-learn, PyArrow, OpenCV, and pynvml changes.
+* `evaluation/**/Dockerfile*` and `Dockerfile.lerobot-eval`: cross-check CUDA and cuDNN base-image changes against torch and ONNX Runtime GPU.
+* `infrastructure/terraform/**`: call out AzureRM provider major-version changes explicitly.
+* `data-management/viewer/**`: apply the FastAPI and React rules in `.github/instructions/dataviewer.instructions.md`.
+
+See [docs/reference/copilot-artifacts.md](../docs/reference/copilot-artifacts.md) for the RPI skill inventory.
 
 ## hve-core Derived Files
 
-Follow the baseline conventions in [`scripts/README.md`](../scripts/README.md). `scripts/security/Test-HveCoreFreshness.ps1` compares source-header entries with a resolved upstream `main` commit and release entries with the RPI `UPSTREAM_REF` and a resolved latest non-draft release commit.
+Follow the baseline conventions in [`scripts/README.md`](../scripts/README.md). `scripts/security/Test-HveCoreFreshness.ps1` compares source-header entries with a resolved upstream `main` commit and release entries with `HVE_CORE_DERIVED_FILES_REF` and a resolved latest non-draft release commit.
 
 ## Git Workflow
 

@@ -70,6 +70,7 @@
 		"yolov"
 	],
 	"ignorePaths": [
+		".agent/reviews/**",
 		"**/.github/chatmodes/**",
 		"**/node_modules/**",
 		"**/vscode-extension/**",
