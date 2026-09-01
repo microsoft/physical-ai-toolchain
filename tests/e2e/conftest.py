@@ -337,6 +337,8 @@ def aks_kubeconfig(repo_root: Path, tmp_path_factory: pytest.TempPathFactory) ->
         pytest.skip("Azure CLI is not installed")
     if shutil.which("kubectl") is None:
         pytest.skip("kubectl is not installed")
+    if shutil.which("kubelogin") is None:
+        pytest.skip("kubelogin is not installed")
 
     subscription_id = os.environ.get("AZURE_SUBSCRIPTION_ID") or _subscription_id_from_az_cli()
     resource_group, cluster_name = _resolve_aks_target(repo_root)
@@ -366,9 +368,44 @@ def aks_kubeconfig(repo_root: Path, tmp_path_factory: pytest.TempPathFactory) ->
     if result.returncode != 0:
         pytest.skip(f"Unable to obtain credentials for AKS cluster {cluster_name}\n\n{format_command_failure(result)}")
 
+    kubeconfig.chmod(0o600)
+    result = run_command(
+        [
+            "kubelogin",
+            "convert-kubeconfig",
+            "--kubeconfig",
+            str(kubeconfig),
+            "--context",
+            cluster_name,
+            "-l",
+            "azurecli",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        pytest.skip(
+            f"Unable to configure Azure CLI login for AKS cluster {cluster_name}\n\n"
+            f"{format_command_failure(result)}"
+        )
+
     previous_kubeconfig = os.environ.get("KUBECONFIG")
     os.environ["KUBECONFIG"] = str(kubeconfig)
     try:
+        result = run_command(
+            [
+                "kubectl",
+                "--kubeconfig",
+                str(kubeconfig),
+                "--context",
+                cluster_name,
+                "--request-timeout=30s",
+                "get",
+                "--raw=/readyz",
+            ],
+            cwd=repo_root,
+        )
+        if result.returncode != 0:
+            pytest.skip(f"AKS cluster {cluster_name} is unreachable\n\n{format_command_failure(result)}")
         yield kubeconfig
     finally:
         if previous_kubeconfig is None:
