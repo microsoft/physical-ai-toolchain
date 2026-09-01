@@ -96,19 +96,26 @@ EOF
 }
 
 resolve_azureml_compute_identity_client_id() {
-  local compute_target="${1:-}" resource_group="${2:?resource group required}"
-  local workspace_name="${3:?workspace name required}" client_id="${AZURE_CLIENT_ID:-}"
+  local compute_target="${1:-}" resource_group="${2:-}"
+  local workspace_name="${3:-}" subscription_id="${4:-}" client_id
 
-  if [[ -z "$client_id" && -n "$compute_target" ]]; then
-    # Toolchain compute targets have exactly one user-assigned managed identity.
-    client_id=$(az ml compute show \
-      --name "${compute_target#azureml:}" \
-      --resource-group "$resource_group" \
-      --workspace-name "$workspace_name" \
-      --query "identity.user_assigned_identities[0].client_id" \
-      --output tsv)
-    [[ "$client_id" == "None" ]] && client_id=""
+  [[ -n "$resource_group" ]] || fatal "Azure resource group is required to resolve the compute identity"
+  [[ -n "$workspace_name" ]] || fatal "Azure ML workspace is required to resolve the compute identity"
+  [[ -n "$subscription_id" ]] || fatal "Azure subscription ID is required to resolve the compute identity"
+  [[ -n "$compute_target" ]] || return 0
+
+  # Repository-managed computes attach one user-assigned identity. An empty result
+  # leaves system-assigned computes on the runtime credential chain.
+  if ! client_id=$(az ml compute show \
+    --name "${compute_target#azureml:}" \
+    --resource-group "$resource_group" \
+    --workspace-name "$workspace_name" \
+    --subscription "$subscription_id" \
+    --query "identity.user_assigned_identities[0].client_id" \
+    --output tsv); then
+    fatal "Failed to resolve managed identity for Azure ML compute '$compute_target'"
   fi
+  [[ "$client_id" == "None" ]] && client_id=""
 
   printf '%s' "$client_id"
 }

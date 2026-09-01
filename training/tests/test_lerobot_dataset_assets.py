@@ -310,6 +310,10 @@ class TestRegisterModelLineage:
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SUBMIT_SCRIPT = _REPO_ROOT / "training/il/scripts/submit-azureml-lerobot-training.sh"
 _ENTRY_SCRIPT = _REPO_ROOT / "training/il/scripts/lerobot/azureml-train-entry.sh"
+_OSMO_TRAIN_SCRIPT = _REPO_ROOT / "training/il/scripts/submit-osmo-lerobot-training.sh"
+_OSMO_EVAL_SCRIPT = _REPO_ROOT / "evaluation/sil/scripts/submit-osmo-lerobot-eval.sh"
+_OSMO_TRAIN_WORKFLOW = _REPO_ROOT / "training/il/workflows/osmo/lerobot-train.yaml"
+_OSMO_EVAL_WORKFLOW = _REPO_ROOT / "evaluation/sil/workflows/osmo/lerobot-eval.yaml"
 
 
 # Stub `az` covering only the calls that `submit-azureml-lerobot-training.sh`
@@ -388,6 +392,95 @@ def _run_submit_job(*args: str, env_extra: dict[str, str]) -> subprocess.Complet
         env=env,
         timeout=60,
     )
+
+
+def _run_osmo_preview(script: Path, *args: str) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env.update(
+        {
+            "AZURE_SUBSCRIPTION_ID": "sub",
+            "AZURE_RESOURCE_GROUP": "rg",
+            "AZUREML_WORKSPACE_NAME": "ws",
+            "AZURE_STORAGE_ACCOUNT_NAME": "account",
+        }
+    )
+    return subprocess.run(
+        ["bash", str(script), *args, "--config-preview"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+
+
+@pytest.mark.parametrize(
+    ("script", "args", "expected"),
+    [
+        (
+            _OSMO_TRAIN_SCRIPT,
+            ("--blob-url", "https://account.blob.core.windows.net/datasets/prefix"),
+            "false",
+        ),
+        (
+            _OSMO_TRAIN_SCRIPT,
+            (
+                "--blob-url",
+                "https://account.blob.core.windows.net/datasets/prefix",
+                "--policy-repo-id",
+                "user/policy",
+            ),
+            "true",
+        ),
+        (
+            _OSMO_EVAL_SCRIPT,
+            (
+                "--from-blob-dataset",
+                "--storage-account",
+                "account",
+                "--blob-prefix",
+                "prefix",
+                "--from-aml-model",
+                "--model-name",
+                "policy",
+                "--model-version",
+                "1",
+            ),
+            "false",
+        ),
+        (
+            _OSMO_EVAL_SCRIPT,
+            (
+                "--from-blob-dataset",
+                "--storage-account",
+                "account",
+                "--blob-prefix",
+                "prefix",
+                "--policy-repo-id",
+                "user/policy",
+                "--policy-revision",
+                "0123456789abcdef0123456789abcdef01234567",
+            ),
+            "true",
+        ),
+    ],
+)
+def test_osmo_preview_reports_huggingface_credential_decision(
+    script: Path,
+    args: tuple[str, ...],
+    expected: str,
+) -> None:
+    proc = _run_osmo_preview(script, *args)
+
+    assert proc.returncode == 0, proc.stderr
+    assert f"HuggingFace Credential: {expected}" in proc.stdout
+
+
+@pytest.mark.parametrize("workflow", [_OSMO_TRAIN_WORKFLOW, _OSMO_EVAL_WORKFLOW])
+def test_osmo_workflow_only_removes_huggingface_credential_on_explicit_false(workflow: Path) -> None:
+    contents = workflow.read_text(encoding="utf-8")
+
+    assert '{% if use_huggingface_credential != "false" %}' in contents
+    assert 'use_huggingface_credential: "true"' in contents
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -632,6 +725,8 @@ def test_job_submission_declares_mounted_inputs_in_rendered_yaml(tmp_path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     captured_job_file = tmp_path / "captured-job.yml"
+    captured_job_args = tmp_path / "captured-job-args.txt"
+    captured_compute_args = tmp_path / "captured-compute-args.txt"
     az = fake_bin / "az"
     az.write_text(
         """#!/usr/bin/env bash
@@ -645,7 +740,14 @@ if [[ "$1" == "ml" && "$2" == "environment" && "$3" == "create" ]]; then
   exit 0
 fi
 
+if [[ "$1" == "ml" && "$2" == "compute" && "$3" == "show" ]]; then
+  printf '%s\n' "$*" >"$CAPTURE_COMPUTE_ARGS"
+  printf 'compute-client-id\n'
+  exit 0
+fi
+
 if [[ "$1" == "ml" && "$2" == "job" && "$3" == "create" ]]; then
+  printf '%s\n' "$*" >"$CAPTURE_JOB_ARGS"
   job_file=""
   while [[ $# -gt 0 ]]; do
     if [[ "$1" == "--file" ]]; then
@@ -675,12 +777,19 @@ exit 2
         "--compute",
         "c",
         env_extra={
+            "AZURE_CLIENT_ID": "unrelated-host-client-id",
+            "CAPTURE_COMPUTE_ARGS": str(captured_compute_args),
+            "CAPTURE_JOB_ARGS": str(captured_job_args),
             "CAPTURE_JOB_FILE": str(captured_job_file),
             "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
         },
     )
 
     assert proc.returncode == 0, proc.stderr
+    assert "--subscription sub" in captured_compute_args.read_text(encoding="utf-8")
+    assert "--name c" in captured_compute_args.read_text(encoding="utf-8")
+    assert "environment_variables.AZURE_CLIENT_ID=compute-client-id" in captured_job_args.read_text(encoding="utf-8")
+    assert "unrelated-host-client-id" not in captured_job_args.read_text(encoding="utf-8")
     rendered = captured_job_file.read_text(encoding="utf-8")
     parsed = yaml.safe_load(rendered)
     assert parsed["inputs"]["dataset_asset_0"] == {
@@ -693,6 +802,49 @@ exit 2
         "mode": "download",
         "path": "azureml:model:2",
     }
+
+
+def test_job_submission_stops_when_compute_identity_lookup_fails(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    az = fake_bin / "az"
+    az.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$1" == "extension" && "$2" == "show" ]]; then
+  exit 0
+fi
+
+if [[ "$1" == "ml" && "$2" == "environment" && "$3" == "create" ]]; then
+  exit 0
+fi
+
+if [[ "$1" == "ml" && "$2" == "compute" && "$3" == "show" ]]; then
+  echo "compute unavailable" >&2
+  exit 2
+fi
+
+echo "unexpected az call: $*" >&2
+exit 3
+""",
+        encoding="utf-8",
+    )
+    az.chmod(0o755)
+
+    proc = _run_submit_job(
+        "--dataset-asset",
+        "azureml:ds:1",
+        "--compute",
+        "missing-compute",
+        env_extra={
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+    )
+
+    assert proc.returncode != 0
+    assert "Failed to resolve managed identity for Azure ML compute 'missing-compute'" in proc.stderr
+    assert "ml job create" not in proc.stderr
 
 
 def test_entrypoint_combines_sources_without_empty_array_nounset_expansion(tmp_path):

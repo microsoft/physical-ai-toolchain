@@ -23,6 +23,7 @@ import pytest
 from tests.e2e._aml import (
     _AML_LEROBOT_EVAL_MODEL_ENV,
     AzureMLWorkspace,
+    _is_model_not_found_error,
     aml_lerobot_policy_source_from_model,
     archive_all_model_versions,
     assert_job_has_checkpoint,
@@ -73,6 +74,19 @@ def test_resolve_aml_lerobot_eval_policy_override_none(monkeypatch: pytest.Monke
     source = resolve_aml_lerobot_eval_policy_override()
 
     assert source is None
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        ("(ModelNotFound) The model does not exist.", True),
+        ('{"error": {"code": "ModelNotFound", "message": "missing"}}', True),
+        ("Request failed while handling ModelNotFound documentation.", False),
+        ("Authentication failed because the refresh token expired.", False),
+    ],
+)
+def test_is_model_not_found_error(stderr: str, expected: bool) -> None:
+    assert _is_model_not_found_error(stderr) is expected
 
 
 @pytest.mark.e2e

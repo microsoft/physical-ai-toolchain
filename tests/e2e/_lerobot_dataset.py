@@ -425,14 +425,13 @@ def stage_synthetic_lerobot_dataset(
 ) -> StagedDataset:
     """Generate the synthetic dataset, upload it to blob, and register teardown cleanup.
 
+    The explicit container overrides ``E2E_IL_DATASET_CONTAINER``; callers that
+    omit it retain the OSMO container default.
+
     Returns the staged location so a test can drive training or evaluation from
     Azure Blob Storage without a HuggingFace token.
     """
-    container = (
-        container
-        or env_value(_IL_DATASET_CONTAINER_ENV, _DEFAULT_IL_DATASET_CONTAINER)
-        or _DEFAULT_IL_DATASET_CONTAINER
-    )
+    container = container or env_value(_IL_DATASET_CONTAINER_ENV, "") or _DEFAULT_IL_DATASET_CONTAINER
 
     dataset_dir = _materialize_synthetic_dataset(
         request, prefix="il-e2e-dataset-", log_message="Generating synthetic LeRobot v3.0 dataset"

@@ -477,7 +477,7 @@ if [[ "$assets_only" == "true" ]]; then
 fi
 
 managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
-  "$compute" "$resource_group" "$workspace_name")
+  "$compute" "$resource_group" "$workspace_name" "$subscription_id")
 
 #------------------------------------------------------------------------------
 # Pre-submission Checks
