@@ -449,9 +449,7 @@ class TestLoadSkrl:
         monkeypatch.setattr(policy_evaluation, "safe_load_skrl_checkpoint", mock)
         return mock
 
-    def test_to_dict_cfg_creates_runner_and_loads_checkpoint(
-        self, mock_safe_load_skrl_checkpoint: MagicMock
-    ) -> None:
+    def test_to_dict_cfg_creates_runner_and_loads_checkpoint(self, mock_safe_load_skrl_checkpoint: MagicMock) -> None:
         cfg = MagicMock()
         cfg.to_dict.return_value = {"a": 1}
         stubs, runner_mod = _skrl_module_stubs(cfg=cfg)
