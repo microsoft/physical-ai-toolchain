@@ -255,7 +255,7 @@ if [[ ${#blob_urls[@]} -gt 0 ]]; then
   validate_blob_urls "${blob_urls[@]}"
   blob_urls_json=$(json_array "${blob_urls[@]}")
   blob_source_count="${#blob_urls[@]}"
-  use_huggingface_credential="false"
+  [[ -z "$policy_repo_id" ]] && use_huggingface_credential="false"
 elif [[ -z "$dataset_repo_id" ]]; then
   fatal "No dataset source specified. Use --dataset-repo-id for HuggingFace Hub, or provide one or more --blob-url sources."
 fi
@@ -284,6 +284,7 @@ esac
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Source Mode" "$([[ $blob_source_count -gt 0 ]] && echo 'azure-blob' || echo 'huggingface')"
+  print_kv "HuggingFace Credential" "$use_huggingface_credential"
   print_kv "Dataset" "$dataset_repo_id"
   print_kv "Policy Type" "$policy_type"
   print_kv "Job Name" "$job_name"
@@ -398,6 +399,7 @@ osmo "${submit_args[@]}" || fatal "Failed to submit workflow"
 section "Deployment Summary"
 print_kv "Dataset" "$dataset_repo_id"
 print_kv "Source Mode" "$([[ $blob_source_count -gt 0 ]] && echo 'azure-blob' || echo 'huggingface')"
+print_kv "HuggingFace Credential" "$use_huggingface_credential"
 print_kv "Blob URLs" "$blob_source_count"
 print_kv "Policy Type" "$policy_type"
 print_kv "Job Name" "$job_name"

@@ -21,7 +21,7 @@ workflow:
       inputs:
         - url: "{{ code_url }}"
           regex: ".*"
-{% if use_huggingface_credential == "true" %}
+{% if use_huggingface_credential != "false" %}
       credentials:
         huggingface:
           HF_TOKEN: hf_token

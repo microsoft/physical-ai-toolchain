@@ -22,6 +22,10 @@ from tests.e2e._common import (
 
 AML_STARTED_STATES = {"Queued", "Preparing", "Starting", "Running", "Finalizing", "Completed"}
 AML_FAILURE_STATES = {"Canceled", "Cancelled", "Failed", "NotResponding"}
+_MODEL_NOT_FOUND_PATTERNS = (
+    re.compile(r"(?m)^\s*\(ModelNotFound\)"),
+    re.compile(r'"code"\s*:\s*"ModelNotFound"'),
+)
 
 
 @dataclass
@@ -89,6 +93,10 @@ def _model_versions(payload: Any) -> list[int]:
     return versions
 
 
+def _is_model_not_found_error(stderr: str) -> bool:
+    return any(pattern.search(stderr) for pattern in _MODEL_NOT_FOUND_PATTERNS)
+
+
 def _list_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model_name: str) -> list[int]:
     """List concrete integer versions registered under an AzureML model name."""
     result = run_command(
@@ -106,7 +114,7 @@ def _list_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model
         cwd=repo_root,
     )
     if result.returncode != 0:
-        if "ModelNotFound" in result.stderr:
+        if _is_model_not_found_error(result.stderr):
             return []
         raise AssertionError(
             f"Failed to list AzureML model versions for {model_name!r}\n\n{format_command_failure(result)}"

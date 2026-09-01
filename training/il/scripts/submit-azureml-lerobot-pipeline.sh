@@ -353,13 +353,13 @@ if [[ "$config_preview" == "true" ]]; then
 fi
 
 train_managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
-  "$compute_train" "$resource_group" "$workspace_name")
+  "$compute_train" "$resource_group" "$workspace_name" "$subscription_id")
 evaluate_managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
-  "$compute_evaluate" "$resource_group" "$workspace_name")
+  "$compute_evaluate" "$resource_group" "$workspace_name" "$subscription_id")
 register_managed_identity_client_id=""
 if [[ "$with_register" == "true" ]]; then
   register_managed_identity_client_id=$(resolve_azureml_compute_identity_client_id \
-    "$compute_register" "$resource_group" "$workspace_name")
+    "$compute_register" "$resource_group" "$workspace_name" "$subscription_id")
 fi
 
 #------------------------------------------------------------------------------

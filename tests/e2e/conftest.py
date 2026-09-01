@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any
 import pytest
 
 from tests.e2e._aml import AzureMLWorkspace
-from tests.e2e._common import run_command
+from tests.e2e._common import format_command_failure, run_command
 
 AML_COMPUTE_NAME_MAX_LENGTH = 16
 TFVARS_FALLBACK_OUTPUT_KEYS = ("resource_group", "azureml_workspace", "aks_cluster", "storage_account")
@@ -309,6 +310,53 @@ def ensure_osmo_cli_available(repo_root: Path) -> None:
         pytest.skip("OSMO CLI is unavailable or not authenticated")
 
 
+@pytest.fixture(scope="session")
+def aks_kubeconfig(repo_root: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """Select the configured AKS cluster through an isolated kubeconfig."""
+    if shutil.which("az") is None:
+        pytest.skip("Azure CLI is not installed")
+    if shutil.which("kubectl") is None:
+        pytest.skip("kubectl is not installed")
+
+    subscription_id = os.environ.get("AZURE_SUBSCRIPTION_ID") or _subscription_id_from_az_cli()
+    resource_group, cluster_name = _resolve_aks_target(repo_root)
+    if not resource_group or not cluster_name:
+        pytest.skip("AKS cluster is not configured in env vars, Terraform outputs, or terraform.tfvars")
+
+    kubeconfig = tmp_path_factory.mktemp("e2e-kubeconfig") / "config"
+    result = run_command(
+        [
+            "az",
+            "aks",
+            "get-credentials",
+            "--subscription",
+            subscription_id,
+            "--resource-group",
+            resource_group,
+            "--name",
+            cluster_name,
+            "--file",
+            str(kubeconfig),
+            "--context",
+            cluster_name,
+            "--overwrite-existing",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"Unable to obtain credentials for AKS cluster {cluster_name}\n\n{format_command_failure(result)}")
+
+    previous_kubeconfig = os.environ.get("KUBECONFIG")
+    os.environ["KUBECONFIG"] = str(kubeconfig)
+    try:
+        yield kubeconfig
+    finally:
+        if previous_kubeconfig is None:
+            os.environ.pop("KUBECONFIG", None)
+        else:
+            os.environ["KUBECONFIG"] = previous_kubeconfig
+
+
 def _is_gpu_vm_size(vm_size: str) -> bool:
     # Azure N-series VMs (NC/ND/NV/NG families) are the GPU-accelerated SKUs.
     return vm_size.strip().lower().startswith("standard_n")
@@ -324,6 +372,13 @@ def _is_scalable_gpu_node_pool(pool: Any) -> bool:
 
     vm_size = pool.get("vmSize")
     return isinstance(vm_size, str) and _is_gpu_vm_size(vm_size)
+
+
+def _resolve_aks_target(repo_root: Path) -> tuple[str | None, str | None]:
+    tf_outputs = _terraform_outputs(repo_root)
+    resource_group = os.environ.get("AZURE_RESOURCE_GROUP") or tf_outputs.try_key_value("resource_group")
+    cluster_name = os.environ.get("AKS_CLUSTER_NAME") or tf_outputs.try_key_value("aks_cluster")
+    return resource_group, cluster_name
 
 
 def _cluster_has_present_gpu_node(repo_root: Path) -> bool:
@@ -364,9 +419,7 @@ def _cluster_has_scalable_gpu_node_pool(repo_root: Path) -> bool:
     if shutil.which("az") is None:
         return False
 
-    tf_outputs = _terraform_outputs(repo_root)
-    resource_group = os.environ.get("AZURE_RESOURCE_GROUP") or tf_outputs.try_key_value("resource_group")
-    cluster_name = os.environ.get("AKS_CLUSTER_NAME") or tf_outputs.try_key_value("aks_cluster")
+    resource_group, cluster_name = _resolve_aks_target(repo_root)
     if not resource_group or not cluster_name:
         return False
 
@@ -395,7 +448,7 @@ def _cluster_has_scalable_gpu_node_pool(repo_root: Path) -> bool:
 
 
 @pytest.fixture(scope="session")
-def ensure_gpu_nodes_available(repo_root: Path) -> None:
+def ensure_gpu_nodes_available(repo_root: Path, aks_kubeconfig: Path) -> None:
     """Ensures the cluster can run GPU workloads, skipping tests if it cannot.
 
     The cluster qualifies if it currently has a registered GPU node, or if it has an
