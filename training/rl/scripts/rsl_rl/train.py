@@ -147,6 +147,8 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 from tensordict import TensorDict
 
+from training.utils.integrity import safe_load_rsl_rl_checkpoint
+
 try:
     import isaaclab_aeon.tasks  # noqa: F401
 except ImportError:
@@ -697,7 +699,7 @@ def main(
     runner.add_git_repo_to_log(__file__)
     if resume_path:
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-        runner.load(resume_path)
+        safe_load_rsl_rl_checkpoint(resume_path, runner=runner)
 
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
