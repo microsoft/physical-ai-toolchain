@@ -138,7 +138,7 @@ Write-Info 'All required tools found'
 
 Write-Section 'UV Package Manager Setup'
 
-$UvVersion = '0.11.21'
+$UvVersion = '0.12.8'
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Info "Installing uv package manager v$UvVersion..."
