@@ -14,11 +14,9 @@ on:
   push:
     paths:
       - .github/workflows/copilot-setup-steps.yml
-      - scripts/ci/bootstrap-hve-core-rpi-skills.sh
   pull_request:
     paths:
       - .github/workflows/copilot-setup-steps.yml
-      - scripts/ci/bootstrap-hve-core-rpi-skills.sh
   # Weekly drift check: surfaces broken action SHAs, yanked packages, or
   # registry outages on a Monday morning instead of mid-Copilot-session.
   schedule:
@@ -125,7 +123,7 @@ jobs:
 
       # Run the external-content bootstrap last. A failed Copilot setup step
       # skips later steps but still starts the agent with the completed setup.
-      # UPSTREAM_REF is pinned to the reviewed skill-consolidation commit because
+      # RPI_SKILLS_REF is pinned to the reviewed skill-consolidation commit because
       # no published hve-core release contains this skill layout. Prefer a release
       # SHA on future upgrades; otherwise review the commit and complete tree.
       - name: Bootstrap hve-core RPI skills
@@ -133,6 +131,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # microsoft/hve-core derived-files release: hve-core-v3.2.2 (2026-03-23)
           HVE_CORE_DERIVED_FILES_REF: e69486a5f809ede45c63c0a31358c12912bd5168
-          UPSTREAM_REPO: microsoft/hve-core
-          UPSTREAM_REF: 130ab64338bb77e912e603693672c31f14bc60c6
-        run: bash scripts/ci/bootstrap-hve-core-rpi-skills.sh
+          RPI_SKILLS_REF: 130ab64338bb77e912e603693672c31f14bc60c6
+        run: |
+          skills=(
+            rpi-quick
+            rpi-research
+            rpi-plan
+            rpi-implement
+            rpi-review
+            rpi-challenger
+            rpi-plan-critique
+            rpi-walkthrough
+          )
+          for skill in "${skills[@]}"; do
+            gh skill install microsoft/hve-core \
+              ".github/skills/rpi/${skill}/SKILL.md" \
+              --pin "$RPI_SKILLS_REF" \
+              --dir .github/skills \
+              --force
+          done

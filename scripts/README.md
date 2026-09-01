@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-06
+ms.date: 2026-09-01
 ms.topic: reference
 keywords:
   - scripts
@@ -49,7 +49,6 @@ CI bootstrap and release automation.
 
 | Script                                | Purpose                                                 |
 |---------------------------------------|---------------------------------------------------------|
-| `ci/bootstrap-hve-core-rpi-skills.sh` | Provision the verified RPI skill suite for cloud agents |
 | `ci/Add-ReleaseVerificationNotes.ps1` | Add release verification notes                          |
 | `ci/Close-ReleaseMilestone.ps1`       | Close the milestone associated with a completed release |
 | `ci/Install-Gitsign.ps1`              | Install the pinned gitsign release                      |

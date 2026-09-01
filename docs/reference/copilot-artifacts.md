@@ -4,7 +4,7 @@ description: >-
   Inventory and reference for GitHub Copilot agents, instructions, prompts,
   and skills configured in this repository.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-18
+ms.date: 2026-09-01
 ms.topic: reference
 keywords:
   - copilot
@@ -139,15 +139,13 @@ discovery (frontmatter only) → instructions (SKILL.md body) → resources
 
 ### rpi-* skill suite
 
-The cloud-agent setup workflow downloads the complete RPI skill suite from
-a pinned `microsoft/hve-core` commit into gitignored `.github/skills/rpi-*/`
-directories. Each skill is an immediate child of `.github/skills/`, as required
-for discovery. Local clones do not contain these skills unless the setup
-workflow has provisioned them. Each skill retains its upstream references and
-templates, and `.github/skills/.rpi-audit.json` records the resolved commit,
-installed file paths, and verified Git blob SHAs. All eight skill entry points
-are required. Unexpected top-level content fails bootstrap rather than changing
-the installed skill surface implicitly.
+The cloud-agent setup workflow uses `gh skill install` to download eight
+explicit RPI skill paths from a pinned `microsoft/hve-core` commit into
+gitignored `.github/skills/rpi-*/` directories. Each skill is an immediate
+child of `.github/skills/`, as required for discovery. Local clones do not
+contain these skills unless the setup workflow has provisioned them. Each skill
+retains its upstream references and templates, and the GitHub CLI injects the
+source commit and tree metadata into its `SKILL.md` front matter.
 
 | Skill               | Purpose                                             |
 |---------------------|-----------------------------------------------------|

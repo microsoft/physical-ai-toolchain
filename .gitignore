@@ -466,9 +466,6 @@ venv/
 .agent/
 .copilot-tracking/
 .github/skills/rpi-*/
-.github/skills/.rpi-audit.json
-.github/skills/.rpi-backup.*
-.github/skills/.rpi-staging.*
 
 # Environment-specific deployment artifacts
 infrastructure/setup/generated/
