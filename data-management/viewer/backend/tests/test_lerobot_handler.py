@@ -5,6 +5,8 @@ Tests handler discovery, episode listing, episode loading,
 trajectory extraction, camera discovery, and video path resolution.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from src.api.services.dataset_service.lerobot_handler import LeRobotFormatHandler
@@ -170,6 +172,24 @@ class TestCamerasAndVideo:
 
         assert handler.get_video_path("ds", 0, "observation.images.cam0") == str(cache_path)
         assert cache_path.read_bytes() == b"valid"
+
+    def test_get_video_path_retains_valid_cached_clip(self, monkeypatch, tmp_path):
+        loader = FakeLoader()
+        loader.base_path = tmp_path
+        loader.get_video_time_window = lambda idx, camera: (0.0, 1.0)
+        handler = LeRobotFormatHandler()
+        handler._loaders["ds"] = loader
+        cache_path = handler._video_cache_path("ds", 0, "observation.images.cam0")
+        assert cache_path is not None
+        cache_path.parent.mkdir(parents=True)
+        cache_path.write_bytes(b"valid")
+        monkeypatch.setattr(handler, "_is_valid_video_file", lambda path: path == cache_path)
+        generate = MagicMock(side_effect=AssertionError("valid cached clip must not be regenerated"))
+        monkeypatch.setattr(handler, "_generate_episode_video_clip", generate)
+
+        assert handler.get_video_path("ds", 0, "observation.images.cam0") == str(cache_path)
+        assert cache_path.read_bytes() == b"valid"
+        generate.assert_not_called()
 
 
 class TestFfmpegExtraction:
