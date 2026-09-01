@@ -394,7 +394,17 @@ def _run_submit_job(*args: str, env_extra: dict[str, str]) -> subprocess.Complet
     )
 
 
-def _run_osmo_preview(script: Path, *args: str) -> subprocess.CompletedProcess:
+def _write_executable(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _run_osmo_preview(tmp_path: Path, script: Path, *args: str) -> subprocess.CompletedProcess:
+    fake_bin = tmp_path / "osmo-preview-bin"
+    fake_bin.mkdir()
+    _write_executable(fake_bin / "osmo", "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(fake_bin / "zip", "#!/usr/bin/env bash\nexit 0\n")
+
     env = os.environ.copy()
     env.update(
         {
@@ -402,6 +412,10 @@ def _run_osmo_preview(script: Path, *args: str) -> subprocess.CompletedProcess:
             "AZURE_RESOURCE_GROUP": "rg",
             "AZUREML_WORKSPACE_NAME": "ws",
             "AZURE_STORAGE_ACCOUNT_NAME": "account",
+            "DATASET_REPO_ID": "",
+            "HF_TOKEN": "",
+            "POLICY_REPO_ID": "",
+            "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
         }
     )
     return subprocess.run(
@@ -465,11 +479,12 @@ def _run_osmo_preview(script: Path, *args: str) -> subprocess.CompletedProcess:
     ],
 )
 def test_osmo_preview_reports_huggingface_credential_decision(
+    tmp_path: Path,
     script: Path,
     args: tuple[str, ...],
     expected: str,
 ) -> None:
-    proc = _run_osmo_preview(script, *args)
+    proc = _run_osmo_preview(tmp_path, script, *args)
 
     assert proc.returncode == 0, proc.stderr
     assert f"HuggingFace Credential: {expected}" in proc.stdout
@@ -481,11 +496,6 @@ def test_osmo_workflow_only_removes_huggingface_credential_on_explicit_false(wor
 
     assert '{% if use_huggingface_credential != "false" %}' in contents
     assert 'use_huggingface_credential: "true"' in contents
-
-
-def _write_executable(path: Path, content: str) -> None:
-    path.write_text(content, encoding="utf-8")
-    path.chmod(0o755)
 
 
 def _entrypoint_env(tmp_path: Path, *, extra: dict[str, str] | None = None) -> dict[str, str]:
