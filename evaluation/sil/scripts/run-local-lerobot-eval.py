@@ -80,16 +80,31 @@ def load_episode_metadata(dataset_dir: str) -> dict[int, dict]:
     return metadata
 
 
+def _resolve_dataset_file(dataset_dir: str, relative_path: str) -> Path | None:
+    dataset_root = Path(dataset_dir).resolve()
+    candidate_path = Path(relative_path)
+    if candidate_path.is_absolute():
+        return None
+
+    candidate = (dataset_root / candidate_path).resolve()
+    if not candidate.is_relative_to(dataset_root):
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def find_data_file(dataset_dir: str, ep_idx: int, info: dict, episode_meta: dict | None = None) -> str | None:
     chunk_index = (episode_meta or {}).get("data/chunk_index")
     file_index = (episode_meta or {}).get("data/file_index")
     if chunk_index is not None and file_index is not None and info.get("data_path"):
-        candidate = Path(dataset_dir) / info["data_path"].format(
-            chunk_index=int(chunk_index),
-            file_index=int(file_index),
-            episode_index=ep_idx,
+        candidate = _resolve_dataset_file(
+            dataset_dir,
+            info["data_path"].format(
+                chunk_index=int(chunk_index),
+                file_index=int(file_index),
+                episode_index=ep_idx,
+            ),
         )
-        if candidate.exists():
+        if candidate is not None:
             return str(candidate)
 
     chunks_size = info.get("chunks_size", 1000)
@@ -114,24 +129,28 @@ def find_video_file(
     chunk_index = (episode_meta or {}).get(f"videos/{video_key}/chunk_index")
     file_index = (episode_meta or {}).get(f"videos/{video_key}/file_index")
     if chunk_index is not None and file_index is not None and info.get("video_path"):
-        candidate = Path(dataset_dir) / info["video_path"].format(
-            video_key=video_key,
-            chunk_index=int(chunk_index),
-            file_index=int(file_index),
-            episode_index=ep_idx,
+        candidate = _resolve_dataset_file(
+            dataset_dir,
+            info["video_path"].format(
+                video_key=video_key,
+                chunk_index=int(chunk_index),
+                file_index=int(file_index),
+                episode_index=ep_idx,
+            ),
         )
-        if candidate.exists():
+        if candidate is not None:
             return str(candidate)
 
     chunks_size = info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
-        os.path.join(dataset_dir, "videos", video_key, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
-        os.path.join(dataset_dir, "videos", video_key, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
+        os.path.join("videos", video_key, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
+        os.path.join("videos", video_key, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
     ]
     for c in candidates:
-        if os.path.exists(c):
-            return c
+        candidate = _resolve_dataset_file(dataset_dir, c)
+        if candidate is not None:
+            return str(candidate)
     return None
 
 
