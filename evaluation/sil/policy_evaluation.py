@@ -36,7 +36,7 @@ import numpy as np
 import torch
 
 from training.rl.simulation_shutdown import prepare_for_shutdown
-from training.utils.integrity import safe_load_checkpoint, safe_load_framework_checkpoint
+from training.utils.integrity import safe_load_checkpoint, safe_load_skrl_checkpoint
 
 _LOGGER = logging.getLogger("isaaclab.eval")
 
@@ -181,7 +181,7 @@ def _load_skrl(
     # Create Runner which instantiates models based on config
     runner = Runner(env, agent_dict)
 
-    safe_load_framework_checkpoint(checkpoint_path, loader=runner.agent.load)
+    safe_load_skrl_checkpoint(checkpoint_path, agent=runner.agent)
     runner.agent.enable_training_mode(enabled=False, apply_to_models=True)
 
     _LOGGER.info("SKRL agent loaded and set to eval mode")

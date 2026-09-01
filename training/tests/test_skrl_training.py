@@ -766,9 +766,9 @@ class TestSetupAgentCheckpoint:
     def test_loads_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         runner = SimpleNamespace(agent=MagicMock())
         loader = MagicMock()
-        monkeypatch.setattr(_MOD, "safe_load_framework_checkpoint", loader)
+        monkeypatch.setattr(_MOD, "safe_load_skrl_checkpoint", loader)
         _MOD._setup_agent_checkpoint(runner, "/abs/ckpt.pt")
-        loader.assert_called_once_with("/abs/ckpt.pt", loader=runner.agent.load)
+        loader.assert_called_once_with("/abs/ckpt.pt", agent=runner.agent)
         runner.agent.load.assert_not_called()
 
 
@@ -1356,7 +1356,7 @@ class TestInitializeRunner:
         mlflow_module = SimpleNamespace()
         modules = _make_training_modules(runner_cls=runner_cls, mlflow_module=mlflow_module)
         wrapper = mocker.patch.object(_MOD, "create_mlflow_logging_wrapper", return_value="wrapped")
-        safe_loader = mocker.patch.object(_MOD, "safe_load_framework_checkpoint")
+        safe_loader = mocker.patch.object(_MOD, "safe_load_skrl_checkpoint")
         state = _MOD.LaunchState(
             agent_dict={"agent": {}}, random_seed=1, rollouts=1, log_dir=tmp_path, resume_path="ckpt.pt"
         )
@@ -1366,7 +1366,7 @@ class TestInitializeRunner:
 
         assert result is runner
         runner_cls.assert_called_once_with(env, state.agent_dict)
-        safe_loader.assert_called_once_with("ckpt.pt", loader=runner.agent.load)
+        safe_loader.assert_called_once_with("ckpt.pt", agent=runner.agent)
         runner.agent.load.assert_not_called()
         wrapper.assert_called_once_with(agent=runner.agent, mlflow_module=mlflow_module, metric_filter=None)
         assert runner.agent.update == "wrapped"

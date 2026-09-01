@@ -790,10 +790,10 @@ class TestMain:
         runner.load = MagicMock()
         safe_loader = MagicMock()
         monkeypatch.setattr(_MOD, "DistillationRunner", lambda *a, **k: runner)
-        monkeypatch.setattr(_MOD, "safe_load_framework_checkpoint", safe_loader)
+        monkeypatch.setattr(_MOD, "safe_load_rsl_rl_checkpoint", safe_loader)
 
         _MOD.main(env_cfg, agent_cfg)
-        safe_loader.assert_called_once_with("/fake/ckpt.pt", loader=runner.load)
+        safe_loader.assert_called_once_with("/fake/ckpt.pt", runner=runner)
         runner.load.assert_not_called()
 
     def test_main_distributed_assigns_local_rank(self, monkeypatch, tmp_path):

@@ -98,7 +98,7 @@ from isaaclab_rl.rsl_rl import (
 from isaaclab_tasks.utils.hydra import hydra_task_config
 from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 
-from training.utils.integrity import safe_load_framework_checkpoint
+from training.utils.integrity import safe_load_rsl_rl_checkpoint
 
 
 class CheckpointMonitor:
@@ -200,7 +200,7 @@ class CheckpointMonitor:
         else:
             raise ValueError(f"Unsupported runner class: {self.agent_cfg.class_name}")
 
-        safe_load_framework_checkpoint(checkpoint_path, loader=runner.load)
+        safe_load_rsl_rl_checkpoint(checkpoint_path, runner=runner)
 
         # Get inference policy
         policy = runner.get_inference_policy(device=self.env.unwrapped.device)

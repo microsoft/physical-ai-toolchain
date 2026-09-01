@@ -444,13 +444,13 @@ def _skrl_module_stubs(decorator_calls_inner: bool = True, cfg: object | None = 
 
 class TestLoadSkrl:
     @pytest.fixture(autouse=True)
-    def mock_safe_load_framework_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    def mock_safe_load_skrl_checkpoint(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         mock = MagicMock()
-        monkeypatch.setattr(policy_evaluation, "safe_load_framework_checkpoint", mock)
+        monkeypatch.setattr(policy_evaluation, "safe_load_skrl_checkpoint", mock)
         return mock
 
     def test_to_dict_cfg_creates_runner_and_loads_checkpoint(
-        self, mock_safe_load_framework_checkpoint: MagicMock
+        self, mock_safe_load_skrl_checkpoint: MagicMock
     ) -> None:
         cfg = MagicMock()
         cfg.to_dict.return_value = {"a": 1}
@@ -462,7 +462,7 @@ class TestLoadSkrl:
 
         runner_mod.Runner.assert_called_once_with(env, {"a": 1})
         runner_instance = runner_mod.Runner.return_value
-        mock_safe_load_framework_checkpoint.assert_called_once_with("ckpt.pt", loader=runner_instance.agent.load)
+        mock_safe_load_skrl_checkpoint.assert_called_once_with("ckpt.pt", agent=runner_instance.agent)
         runner_instance.agent.load.assert_not_called()
         runner_instance.agent.enable_training_mode.assert_called_once_with(enabled=False, apply_to_models=True)
         assert agent is runner_instance.agent
@@ -478,12 +478,12 @@ class TestLoadSkrl:
         assert runner_mod.Runner.call_args.args[1] == {"b": 2}
 
     def test_load_skrl_rejects_weights_only_incompatible_payload_and_skips_load(
-        self, mock_safe_load_framework_checkpoint: MagicMock
+        self, mock_safe_load_skrl_checkpoint: MagicMock
     ) -> None:
         cfg = {"b": 2}
         stubs, runner_mod = _skrl_module_stubs(cfg=cfg)
         env = MagicMock()
-        mock_safe_load_framework_checkpoint.side_effect = ValueError("add_safe_globals")
+        mock_safe_load_skrl_checkpoint.side_effect = ValueError("add_safe_globals")
 
         with patch.dict(sys.modules, stubs), pytest.raises(ValueError, match="add_safe_globals"):
             _load_skrl("evil.pt", "Reach-v0", env)

@@ -134,7 +134,7 @@ class TestRslRlCheckpointRouting:
         runner.get_inference_policy.return_value = "policy"
         module.OnPolicyRunner = MagicMock(return_value=runner)
         safe_loader = MagicMock()
-        module.safe_load_framework_checkpoint = safe_loader
+        module.safe_load_rsl_rl_checkpoint = safe_loader
         monitor = object.__new__(module.CheckpointMonitor)
         monitor.agent_cfg = SimpleNamespace(
             class_name="OnPolicyRunner",
@@ -145,7 +145,7 @@ class TestRslRlCheckpointRouting:
 
         policy = monitor._load_policy("/fake/model.pt")
 
-        safe_loader.assert_called_once_with("/fake/model.pt", loader=runner.load)
+        safe_loader.assert_called_once_with("/fake/model.pt", runner=runner)
         runner.load.assert_not_called()
         assert policy == "policy"
 
@@ -158,7 +158,7 @@ class TestRslRlCheckpointRouting:
         )
         runner = MagicMock()
         module.OnPolicyRunner = MagicMock(return_value=runner)
-        module.safe_load_framework_checkpoint = MagicMock(side_effect=ValueError("add_safe_globals"))
+        module.safe_load_rsl_rl_checkpoint = MagicMock(side_effect=ValueError("add_safe_globals"))
         monitor = object.__new__(module.CheckpointMonitor)
         monitor.agent_cfg = SimpleNamespace(
             class_name="OnPolicyRunner",
@@ -187,7 +187,7 @@ class TestRslRlCheckpointRouting:
         marker = tmp_path / "executed"
         torch.save(_Malicious(marker), path)
         runner = MagicMock()
-        runner.load.side_effect = lambda checkpoint_path: torch.load(checkpoint_path, weights_only=False)
+        runner.device = "cpu"
         module.OnPolicyRunner = MagicMock(return_value=runner)
         monitor = object.__new__(module.CheckpointMonitor)
         monitor.agent_cfg = SimpleNamespace(
@@ -225,7 +225,7 @@ class TestRslRlCheckpointRouting:
             pass
 
         safe_loader = MagicMock()
-        module.safe_load_framework_checkpoint = safe_loader
+        module.safe_load_rsl_rl_checkpoint = safe_loader
         runner.get_inference_policy.side_effect = StopAfterCheckpointRouting
         env_cfg = SimpleNamespace(
             scene=SimpleNamespace(num_envs=1),
@@ -246,5 +246,5 @@ class TestRslRlCheckpointRouting:
         with pytest.raises(StopAfterCheckpointRouting):
             module.main(env_cfg, agent_cfg)
 
-        safe_loader.assert_called_once_with("/fake/model.pt", loader=runner.load)
+        safe_loader.assert_called_once_with("/fake/model.pt", runner=runner)
         runner.load.assert_not_called()
