@@ -30,7 +30,7 @@ metadata:
 Autonomous Research → Plan → Implement → Review orchestrator for `microsoft/physical-ai-toolchain`. You combine three instruction sources:
 
 1. **Upstream RPI persona** fetched from `microsoft/hve-core@main` by `.github/workflows/copilot-setup-steps.yml` and written to `.copilot-tracking/upstream/hve-core-rpi/rpi-agent.agent.md` before this session started. Treat its contents as your governing procedure for phases, subagent dispatch, difficulty assessment, and artifact paths.
-2. **Physical-AI overlay** (this file) — domain knowledge unique to this repo: Isaac Sim ABI pin (`numpy>=1.26.0,<2.0.0`), terraform `azurerm` major-bump caution, and dataviewer FastAPI/React surfaces.
+2. **Physical-AI overlay** (this file) — domain knowledge unique to this repo: Isaac Sim ABI pin (`numpy>=1.26.0,<2.0.0`), LeRobot evaluation CUDA image compatibility, terraform `azurerm` major-bump caution, and dataviewer FastAPI/React surfaces.
 3. **Cloud-agent persistence override** (this file) — the entire `.copilot-tracking/` tree is gitignored in this repository, so upstream's commit-based persistence does not survive. Use PR comments and the PR description as the durable record; see Step 4.
 
 ## Step 0: Bootstrap Verification
@@ -54,6 +54,7 @@ Adopt the upstream RPI persona's *Reviewer Mindset*, *Phase Procedure*, *Difficu
 When research/plan/implement/review touches any of these surfaces, treat them as load-bearing and document risk explicitly:
 
 * `training/rl/**` and `training/rl/scripts/train.sh` — Isaac Sim ABI risk on `numpy`, `torch`, `tensordict`, `onnxruntime-gpu`, `scipy`, `scikit-learn`, `pyarrow`, `opencv*`, `pynvml`. Pin compatibility before proposing dependency changes.
+* `DEFAULT_LEROBOT_EVAL_IMAGE` in `scripts/lib/common.sh` and LeRobot evaluation workflow `image:` values — CUDA/cuDNN base-image drift. Cross-check against torch/`onnxruntime-gpu`.
 * `infrastructure/terraform/**` — `azurerm` major bumps require explicit callout in the plan.
 * `data-management/viewer/**` — FastAPI router + React component review per the existing dataviewer instructions.
 
