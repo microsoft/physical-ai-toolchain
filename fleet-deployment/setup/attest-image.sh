@@ -10,6 +10,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 source "$REPO_ROOT/scripts/lib/common.sh"
 # shellcheck source=defaults.conf
 source "$SCRIPT_DIR/defaults.conf"
+OPENVEX_SCHEMA="$REPO_ROOT/scripts/security/openvex-0.2.0.schema.json"
+OPENVEX_VALIDATOR="$REPO_ROOT/scripts/security/validate_openvex.py"
 
 show_help() {
   cat << EOF
@@ -145,7 +147,7 @@ case "$mode" in
   sigstore)
     require_tools cosign
     if [[ "$skip_vex" != "true" ]]; then
-      require_tools jq
+      require_tools uv
     fi
     ;;
   notation) require_tools oras ;;
@@ -156,81 +158,10 @@ fi
 
 if [[ "$mode" == "sigstore" && "$skip_vex" != "true" ]]; then
   image_digest="${image##*@}"
-  jq -e --arg digest "$image_digest" '
-    def non_empty_string:
-      type == "string" and length > 0;
-    def valid_timestamp:
-      type == "string"
-      and test(
-        "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])"
-        + "T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?Z$"
-      );
-    def allowed_status:
-      . == "under_investigation"
-      or . == "not_affected"
-      or . == "affected"
-      or . == "fixed";
-    def digest_purl:
-      type == "string"
-      and test("^pkg:oci/.+@sha256:[0-9a-f]{64}\\?.*repository_url=[^&]+");
-    def duplicate_pairs:
-      [
-        .statements[] as $statement
-        | $statement.products[]
-        | [$statement.vulnerability.name, .["@id"]]
-      ]
-      | group_by(.)
-      | map(select(length > 1));
-
-    (.["@context"] | type == "string" and startswith("https://openvex.dev/ns/"))
-    and (.["@id"] | non_empty_string)
-    and (.author | non_empty_string)
-    and (.version | type == "number" and . >= 1 and . == floor)
-    and (.timestamp | valid_timestamp)
-    and (
-      (has("last_updated") | not)
-      or (.last_updated | valid_timestamp)
-    )
-    and (.statements | type == "array" and length > 0)
-    and all(
-      .statements[];
-      (.vulnerability.name | non_empty_string)
-      and (.products | type == "array" and length > 0)
-      and all(.products[]; (.["@id"] | digest_purl))
-      and (.status | allowed_status)
-      and (
-        (has("timestamp") | not)
-        or (.timestamp | valid_timestamp)
-      )
-      and (
-        .status != "not_affected"
-        or (
-          .justification == "component_not_present"
-          or .justification == "vulnerable_code_not_present"
-          or .justification == "vulnerable_code_not_in_execute_path"
-          or .justification == "vulnerable_code_cannot_be_controlled_by_adversary"
-          or .justification == "inline_mitigations_already_exist"
-        )
-        and (.status_notes | non_empty_string)
-      )
-      and (
-        .status != "affected"
-        or (
-          (.action_statement | non_empty_string)
-          and (.status_notes | non_empty_string)
-        )
-      )
-      and (
-        .status != "fixed"
-        or (.status_notes | non_empty_string)
-      )
-    )
-    and ((duplicate_pairs | length) == 0)
-    and any(
-      .statements[].products[];
-      (.["@id"] | contains("@" + $digest + "?"))
-    )
-  ' "$vex_path" >/dev/null ||
+  uv run --frozen --no-sync python "$OPENVEX_VALIDATOR" \
+    --schema "$OPENVEX_SCHEMA" \
+    --image-digest "$image_digest" \
+    "$vex_path" ||
     fatal "OpenVEX document is invalid or does not identify image digest $image_digest: $vex_path"
 fi
 

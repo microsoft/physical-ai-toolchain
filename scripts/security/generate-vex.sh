@@ -18,8 +18,8 @@ DEFAULT_ID_BASE="https://github.com/microsoft/physical-ai-toolchain/security/vex
 DEFAULT_SEVERITY="HIGH,CRITICAL"
 DEFAULT_OUTPUT="$REPO_ROOT/security/vex/inference-base.openvex.json"
 DEFAULT_SCAN_DIR="$REPO_ROOT/.scan"
-# jq stores numbers as IEEE-754 doubles; leave one exact integer for version + 1.
-MAX_VERSION=9007199254740990
+OPENVEX_SCHEMA="$SCRIPT_DIR/openvex-0.2.0.schema.json"
+OPENVEX_VALIDATOR="$SCRIPT_DIR/validate_openvex.py"
 
 show_help() {
   cat << EOF
@@ -154,7 +154,7 @@ for token in "${severity_tokens[@]}"; do
 done
 severity=$(IFS=,; printf '%s' "${canonical_severities[*]}")
 
-require_tools jq trivy grype
+require_tools jq trivy grype uv
 # digest resolution: prefer crane, fall back to docker buildx
 if command -v crane &>/dev/null; then
   resolve_digest() { crane digest "$1"; }
@@ -340,94 +340,23 @@ fi
 cve_count=$(wc -l < "$cve_list" | tr -d ' ')
 print_kv "Unique CVEs" "$cve_count"
 
+if [[ "$cve_count" -eq 0 && ! -e "$output" ]]; then
+  section "Deployment Summary"
+  print_kv "Image"         "$image_ref"
+  print_kv "OpenVEX file"  "<not created>"
+  print_kv "Unique CVEs"   "$cve_count"
+  info "No vulnerabilities found; OpenVEX v0.2.0 requires at least one statement."
+  exit 0
+fi
+
 #------------------------------------------------------------------------------
 # Merge OpenVEX document
 #------------------------------------------------------------------------------
 section "Merge OpenVEX document"
 
 validate_vex_document() {
-  jq -ce --argjson max_version "$MAX_VERSION" '
-    def non_empty_string:
-      type == "string" and length > 0;
-    def valid_timestamp:
-      type == "string"
-      and test(
-        "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])"
-        + "T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?Z$"
-      );
-    def allowed_status:
-      . == "under_investigation"
-      or . == "not_affected"
-      or . == "affected"
-      or . == "fixed";
-    def allowed_justification:
-      . == "component_not_present"
-      or . == "vulnerable_code_not_present"
-      or . == "vulnerable_code_not_in_execute_path"
-      or . == "vulnerable_code_cannot_be_controlled_by_adversary"
-      or . == "inline_mitigations_already_exist";
-    def digest_purl:
-      type == "string"
-      and test("^pkg:oci/.+@sha256:[0-9a-f]{64}\\?.*repository_url=[^&]+");
-    def duplicate_pairs:
-      [
-        .statements[]? as $statement
-        | $statement.products[]?
-        | [$statement.vulnerability.name, .["@id"]]
-      ]
-      | group_by(.)
-      | map(select(length > 1) | .[0]);
-
-    if (.version | type) != "number"
-      or .version < 1
-      or .version > $max_version
-      or .version != (.version | floor)
-    then error("version must be an incrementable positive integer")
-    elif (.timestamp | valid_timestamp | not)
-    then error("timestamp must be a UTC RFC 3339 timestamp")
-    elif has("last_updated") and (.last_updated | valid_timestamp | not)
-    then error("last_updated must be a UTC RFC 3339 timestamp")
-    elif has("statements") and (.statements | type) != "array"
-    then error("statements must be an array")
-    elif any(.statements[]?; (.vulnerability.name | non_empty_string | not))
-    then error("every statement must identify its vulnerability by name")
-    elif any(.statements[]?; (.products | type) != "array" or (.products | length) == 0)
-    then error("every statement must identify at least one product")
-    elif any(.statements[]?.products[]?; (.["@id"] | digest_purl | not))
-    then error("every product must use a digest-pinned OCI package URL")
-    elif any(.statements[]?; has("timestamp") and (.timestamp | valid_timestamp | not))
-    then error("statement timestamps must be UTC RFC 3339 timestamps")
-    elif any(.statements[]?; (.status | allowed_status | not))
-    then error("every statement must use an allowed status")
-    elif any(
-      .statements[]?;
-      .status == "not_affected"
-      and (
-        (.justification | allowed_justification | not)
-        or (.status_notes | non_empty_string | not)
-      )
-    )
-    then error("not_affected statements require an allowed justification and status_notes")
-    elif any(
-      .statements[]?;
-      .status == "affected"
-      and (
-        (.action_statement | non_empty_string | not)
-        or (.status_notes | non_empty_string | not)
-      )
-    )
-    then error("affected statements require action_statement and status_notes")
-    elif any(
-      .statements[]?;
-      .status == "fixed"
-      and (.status_notes | non_empty_string | not)
-    )
-    then error("fixed statements require status_notes")
-    elif (duplicate_pairs | length) > 0
-    then error("duplicate vulnerability/product pairs: \(duplicate_pairs)")
-    else .
-    end
-  ' "$1"
+  uv run --frozen --no-sync python "$OPENVEX_VALIDATOR" --schema "$OPENVEX_SCHEMA" "$1" &&
+    jq -ce . "$1"
 }
 
 if [[ -f "$output" ]]; then
@@ -463,7 +392,7 @@ vex_id="${id_base}/${product}/${date_slug}-v${next_version}-${revision_nonce}"
 # New statements remain under_investigation until evidence supports another
 # status. Existing statements retain their status and effective timestamp.
 script_rel="scripts/security/$(basename "$0")"
-generator="$script_rel --image $image_ref --severity $severity"
+tooling="$script_rel using Trivy and Grype scanner evidence; human-reviewed; published with Sigstore"
 output_tmp=$(mktemp "${output}.tmp.XXXXXX") ||
   fatal "Failed to create temporary output beside $output"
 
@@ -473,12 +402,7 @@ jq -n \
   --arg ts "$timestamp" \
   --argjson version "$next_version" \
   --arg purl "$purl" \
-  --arg image "$image" \
-  --arg image_ref "$image_ref" \
-  --arg digest "$digest" \
-  --arg product "$product" \
-  --arg severity "$severity" \
-  --arg generator "$generator" \
+  --arg tooling "$tooling" \
   --argjson previous "$previous_document" \
   --argjson existing "$existing_statements" \
   --rawfile cves "$cve_list" \
@@ -503,14 +427,7 @@ jq -n \
       "author": $author,
       "timestamp": $ts,
       "version": $version,
-      "_source": {
-        "image": $image,
-        "image_ref": $image_ref,
-        "digest": $digest,
-        "product": $product,
-        "severity_filter": $severity,
-        "generator": $generator
-      },
+      "tooling": $tooling,
       "statements": (
         $existing + (
           $generated

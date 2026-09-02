@@ -22,7 +22,17 @@ BeforeAll {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$ATTEST_LOG"
 '@
-        & chmod +x (Join-Path $bin 'az') (Join-Path $bin 'oras') (Join-Path $bin 'cosign')
+        Set-Content -Path (Join-Path $bin 'uv') -Encoding utf8 -Value @'
+#!/usr/bin/env bash
+[[ "$1" == "run" && "$2" == "--frozen" && "$3" == "--no-sync" && "$4" == "python" ]] || exit 2
+shift 4
+exec python3 "$@"
+'@
+        & chmod +x `
+            (Join-Path $bin 'az') `
+            (Join-Path $bin 'oras') `
+            (Join-Path $bin 'cosign') `
+            (Join-Path $bin 'uv')
         @{
             Root = $root
             Bin = $bin
@@ -43,6 +53,7 @@ printf '%s\n' "$*" >> "$ATTEST_LOG"
             author = 'Test'
             timestamp = '2026-01-01T00:00:00Z'
             version = 1
+            tooling = 'Generated for tests; human-reviewed; published with Sigstore'
             statements = @(
                 @{
                     vulnerability = @{ name = 'CVE-2026-0001' }
@@ -169,6 +180,141 @@ Describe 'attest-image.sh' -Tag 'Unit' -Skip:(-not $script:BashPresent) {
 
             $result.ExitCode | Should -Not -Be 0
             $result.Output | Should -Match 'does not identify image digest'
+            Test-Path $workspace.Log | Should -BeFalse
+        }
+        finally {
+            Remove-Item -Recurse -Force $workspace.Root
+        }
+    }
+
+    It 'rejects malformed digest-pinned OCI package URLs' {
+        $workspace = New-AttestWorkspace
+        $digest = 'a' * 64
+        $invalidProductIds = @(
+            "pkg:oci/model@sha256:${digest}?repository_url=",
+            "pkg:oci/model@sha256:${digest}?x=repository_url=example.azurecr.io",
+            "pkg:oci/@sha256:${digest}?repository_url=example.azurecr.io",
+            "pkg:oci/model@sha256:${digest}?repository_url=example.azurecr.io#fragment"
+        )
+        try {
+            foreach ($productId in $invalidProductIds) {
+                Set-ValidVexDocument -Path $workspace.Vex
+                $document = Get-Content $workspace.Vex -Raw | ConvertFrom-Json
+                $document.statements[0].products[0].'@id' = $productId
+                $document | ConvertTo-Json -Depth 10 | Set-Content -Path $workspace.Vex -Encoding utf8
+
+                $result = Invoke-AttestImage `
+                    -Workspace $workspace `
+                    -Arguments @('--skip-sbom', '--vex-file', $workspace.Vex)
+
+                $result.ExitCode | Should -Not -Be 0
+                $result.Output | Should -Match 'every product must use a digest-pinned OCI package URL'
+                Test-Path $workspace.Log | Should -BeFalse
+            }
+        }
+        finally {
+            Remove-Item -Recurse -Force $workspace.Root
+        }
+    }
+
+    It 'rejects a document without tooling provenance' {
+        $workspace = New-AttestWorkspace
+        try {
+            Set-ValidVexDocument -Path $workspace.Vex
+            $document = Get-Content $workspace.Vex -Raw | ConvertFrom-Json
+            $document.PSObject.Properties.Remove('tooling')
+            $document | ConvertTo-Json -Depth 10 | Set-Content -Path $workspace.Vex -Encoding utf8
+
+            $result = Invoke-AttestImage `
+                -Workspace $workspace `
+                -Arguments @('--skip-sbom', '--vex-file', $workspace.Vex)
+
+            $result.ExitCode | Should -Not -Be 0
+            $result.Output | Should -Match 'tooling must be a non-empty string'
+            Test-Path $workspace.Log | Should -BeFalse
+        }
+        finally {
+            Remove-Item -Recurse -Force $workspace.Root
+        }
+    }
+
+    It 'rejects a document with an unsupported OpenVEX context' {
+        $workspace = New-AttestWorkspace
+        try {
+            Set-ValidVexDocument -Path $workspace.Vex
+            $document = Get-Content $workspace.Vex -Raw | ConvertFrom-Json
+            $document.'@context' = 'https://openvex.dev/ns/not-a-version'
+            $document | ConvertTo-Json -Depth 10 | Set-Content -Path $workspace.Vex -Encoding utf8
+
+            $result = Invoke-AttestImage `
+                -Workspace $workspace `
+                -Arguments @('--skip-sbom', '--vex-file', $workspace.Vex)
+
+            $result.ExitCode | Should -Not -Be 0
+            $result.Output | Should -Match '@context must be https://openvex.dev/ns/v0.2.0'
+            Test-Path $workspace.Log | Should -BeFalse
+        }
+        finally {
+            Remove-Item -Recurse -Force $workspace.Root
+        }
+    }
+
+    It 'rejects an impossible document timestamp' {
+        $workspace = New-AttestWorkspace
+        try {
+            Set-ValidVexDocument -Path $workspace.Vex
+            $document = Get-Content $workspace.Vex -Raw | ConvertFrom-Json
+            $document.timestamp = '2026-02-31T00:00:00Z'
+            $document | ConvertTo-Json -Depth 10 | Set-Content -Path $workspace.Vex -Encoding utf8
+
+            $result = Invoke-AttestImage `
+                -Workspace $workspace `
+                -Arguments @('--skip-sbom', '--vex-file', $workspace.Vex)
+
+            $result.ExitCode | Should -Not -Be 0
+            $result.Output | Should -Match 'timestamp must be a valid RFC 3339 date-time'
+            Test-Path $workspace.Log | Should -BeFalse
+        }
+        finally {
+            Remove-Item -Recurse -Force $workspace.Root
+        }
+    }
+
+    It 'rejects a string-valued statement version' {
+        $workspace = New-AttestWorkspace
+        try {
+            Set-ValidVexDocument -Path $workspace.Vex
+            $document = Get-Content $workspace.Vex -Raw | ConvertFrom-Json
+            $document.statements[0] | Add-Member -NotePropertyName version -NotePropertyValue '1'
+            $document | ConvertTo-Json -Depth 10 | Set-Content -Path $workspace.Vex -Encoding utf8
+
+            $result = Invoke-AttestImage `
+                -Workspace $workspace `
+                -Arguments @('--skip-sbom', '--vex-file', $workspace.Vex)
+
+            $result.ExitCode | Should -Not -Be 0
+            $result.Output | Should -Match "'1' is not of type 'integer'"
+            Test-Path $workspace.Log | Should -BeFalse
+        }
+        finally {
+            Remove-Item -Recurse -Force $workspace.Root
+        }
+    }
+
+    It 'rejects a document ID that is not an absolute IRI' {
+        $workspace = New-AttestWorkspace
+        try {
+            Set-ValidVexDocument -Path $workspace.Vex
+            $document = Get-Content $workspace.Vex -Raw | ConvertFrom-Json
+            $document.'@id' = 'not an IRI'
+            $document | ConvertTo-Json -Depth 10 | Set-Content -Path $workspace.Vex -Encoding utf8
+
+            $result = Invoke-AttestImage `
+                -Workspace $workspace `
+                -Arguments @('--skip-sbom', '--vex-file', $workspace.Vex)
+
+            $result.ExitCode | Should -Not -Be 0
+            $result.Output | Should -Match '@id must be an absolute IRI'
             Test-Path $workspace.Log | Should -BeFalse
         }
         finally {

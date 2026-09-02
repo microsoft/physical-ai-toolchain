@@ -44,7 +44,17 @@ cat <<'JSON'
 {"matches":[{"vulnerability":{"id":"CVE-2026-0002","severity":"Critical"}}]}
 JSON
 '@
-        & chmod +x (Join-Path $bin 'crane') (Join-Path $bin 'trivy') (Join-Path $bin 'grype')
+        Set-Content -Path (Join-Path $bin 'uv') -Encoding utf8 -Value @'
+#!/usr/bin/env bash
+[[ "$1" == "run" && "$2" == "--frozen" && "$3" == "--no-sync" && "$4" == "python" ]] || exit 2
+shift 4
+exec python3 "$@"
+'@
+        & chmod +x `
+            (Join-Path $bin 'crane') `
+            (Join-Path $bin 'trivy') `
+            (Join-Path $bin 'grype') `
+            (Join-Path $bin 'uv')
 
         Set-Content -Path (Join-Path $scan 'trivy.json') -Encoding utf8 -Value @'
 {"Results":[{"Vulnerabilities":[{"VulnerabilityID":"CVE-2026-0001","Severity":"HIGH"},{"VulnerabilityID":"CVE-2026-0002","Severity":"CRITICAL"}]}]}
@@ -120,6 +130,7 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
             author = 'Test'
             timestamp = '2026-01-01T00:00:00Z'
             version = 1
+            tooling = 'Generated for tests; human-reviewed; published with Sigstore'
             last_updated = '2026-01-01T00:00:00Z'
             statements = @(
                 @{
@@ -182,7 +193,9 @@ Describe 'generate-vex.sh' -Tag 'Unit' -Skip:(-not $script:ToolsPresent) {
     }
 
     It 'normalizes an integer-valued JSON version before incrementing it' {
-        $existing = '{"timestamp":"2026-01-01T00:00:00Z","version":1.0,"statements":[]}'
+        $existing = @"
+{"@context":"https://openvex.dev/ns/v0.2.0","@id":"https://example.test/vex/v1","author":"Test","timestamp":"2026-01-01T00:00:00Z","version":1.0,"tooling":"Generated for tests; human-reviewed; published with Sigstore","statements":[{"vulnerability":{"name":"CVE-2026-0001"},"products":[{"@id":"$script:Purl"}],"status":"under_investigation"}]}
+"@
         Set-Content -Path $script:Workspace.Output -Value $existing -Encoding utf8 -NoNewline
 
         Invoke-Generator -Workspace $script:Workspace
@@ -312,6 +325,18 @@ exec /bin/mv "$@"
         Test-Path $script:Workspace.Output | Should -BeFalse
     }
 
+    It 'does not create an empty document when scanners report no findings' {
+        Set-Content -Path (Join-Path $script:Workspace.Scan 'trivy.json') -Encoding utf8 -Value '{"Results":[]}'
+        Set-Content -Path (Join-Path $script:Workspace.Scan 'grype.json') -Encoding utf8 -Value '{"matches":[]}'
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Be 0
+        $script:GeneratorOutput | Should -Match 'OpenVEX file:\s+<not created>'
+        $script:GeneratorOutput | Should -Match 'OpenVEX v0.2.0 requires at least one statement'
+        Test-Path $script:Workspace.Output | Should -BeFalse
+    }
+
     It 'rejects duplicate vulnerability and product pairs without changing the document' {
         $statement = @{
             vulnerability = @{ name = 'CVE-2026-0001' }
@@ -324,6 +349,7 @@ exec /bin/mv "$@"
             author = 'Test'
             timestamp = '2026-01-01T00:00:00Z'
             version = 1
+            tooling = 'Generated for tests; human-reviewed; published with Sigstore'
             statements = @($statement, $statement)
         } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
         $before = Get-Content $script:Workspace.Output -Raw
@@ -331,7 +357,31 @@ exec /bin/mv "$@"
         Invoke-Generator -Workspace $script:Workspace
 
         $script:GeneratorExit | Should -Not -Be 0
-        $script:GeneratorOutput | Should -Match 'duplicate vulnerability/product pairs'
+        $script:GeneratorOutput | Should -Match 'duplicate vulnerability/product pair'
+        Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
+    }
+
+    It 'rejects an existing document without tooling provenance' {
+        @{
+            '@context' = 'https://openvex.dev/ns/v0.2.0'
+            '@id' = 'https://example.test/vex/v1'
+            author = 'Test'
+            timestamp = '2026-01-01T00:00:00Z'
+            version = 1
+            statements = @(
+                @{
+                    vulnerability = @{ name = 'CVE-2026-0001' }
+                    products = @(@{ '@id' = $script:Purl })
+                    status = 'under_investigation'
+                }
+            )
+        } | ConvertTo-Json -Depth 10 | Set-Content -Path $script:Workspace.Output -Encoding utf8
+        $before = Get-Content $script:Workspace.Output -Raw
+
+        Invoke-Generator -Workspace $script:Workspace
+
+        $script:GeneratorExit | Should -Not -Be 0
+        $script:GeneratorOutput | Should -Match 'tooling must be a non-empty string'
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
     }
 
@@ -342,6 +392,7 @@ exec /bin/mv "$@"
             author = 'Test'
             timestamp = '2026-01-01T00:00:00Z'
             version = 1
+            tooling = 'Generated for tests; human-reviewed; published with Sigstore'
             statements = @(
                 @{
                     vulnerability = @{ name = 'CVE-2026-0001' }
@@ -459,7 +510,8 @@ exec /bin/mv "$@"
             author = 'Original Author'
             timestamp = '2026-01-01T00:00:00Z'
             version = 1
-            '_note' = 'keep me'
+            tooling = 'Original test tooling'
+            role = 'Document issuer'
             statements = @(
                 @{
                     vulnerability = @{ name = 'CVE-2026-0001' }
@@ -474,18 +526,17 @@ exec /bin/mv "$@"
 
         $script:GeneratorExit | Should -Be 0
         $document = Get-Content $script:Workspace.Output -Raw | ConvertFrom-Json
-        $document.'_note' | Should -Be 'keep me'
+        $document.role | Should -Be 'Document issuer'
         $document.PSObject.Properties.Name | Should -Not -Contain 'last_updated'
         $document.author | Should -Be 'Original Author'
+        $document.tooling | Should -Match 'generate-vex.sh using Trivy and Grype'
         $statement = $document.statements | Where-Object { $_.vulnerability.name -eq 'CVE-2026-0001' }
         $statement.timestamp.ToUniversalTime().ToString('o') | Should -Be '2025-06-01T12:00:00.0000000Z'
     }
 
     It 'uses an explicit author instead of the existing document author' {
-        Set-Content `
-            -Path $script:Workspace.Output `
-            -Value '{"author":"Original","timestamp":"2026-01-01T00:00:00Z","version":1,"statements":[]}' `
-            -Encoding utf8
+        Invoke-Generator -Workspace $script:Workspace
+        $script:GeneratorExit | Should -Be 0
 
         Invoke-Generator `
             -Workspace $script:Workspace `
@@ -518,7 +569,6 @@ exec /bin/mv "$@"
 
         $script:GeneratorExit | Should -Be 0
         $document = Get-Content $script:Workspace.Output -Raw | ConvertFrom-Json
-        $document.'_source'.image_ref | Should -Be "registry.example.com:5000/nested/test-product@sha256:$script:Digest"
         $document.statements[0].products[0].'@id' |
             Should -Be "pkg:oci/test-product@sha256:${script:Digest}?repository_url=registry.example.com:5000/nested"
     }
@@ -578,7 +628,8 @@ exec /bin/mv "$@"
     }
 
     It 'leaves the existing document intact when the atomic replacement fails' {
-        Set-Content -Path $script:Workspace.Output -Value '{"timestamp":"2026-01-01T00:00:00Z","version":1,"statements":[]}' -Encoding utf8
+        Invoke-Generator -Workspace $script:Workspace
+        $script:GeneratorExit | Should -Be 0
         Set-Content -Path (Join-Path $script:Workspace.Bin 'mv') -Encoding utf8 -Value "#!/usr/bin/env bash`nexit 1`n"
         & chmod +x (Join-Path $script:Workspace.Bin 'mv')
         $before = Get-Content $script:Workspace.Output -Raw
@@ -589,6 +640,16 @@ exec /bin/mv "$@"
         Get-Content $script:Workspace.Output -Raw | Should -BeExactly $before
         Get-ChildItem "$($script:Workspace.Output).tmp.*" -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
     }
+}
+
+Describe 'OpenVEX code ownership' -Tag 'Unit' {
+    It 'requires security-owner review for committed VEX documents' {
+        $codeowners = Join-Path $PSScriptRoot '../../../.github/CODEOWNERS'
+        $content = Get-Content $codeowners -Raw
+
+        $content | Should -Match '(?m)^/security/vex/\s+@microsoft/edge-ai-core-dev\s*$'
+    }
+
 }
 
 Describe 'committed OpenVEX documents' -Tag 'Unit' {
@@ -621,6 +682,7 @@ Describe 'committed OpenVEX documents' -Tag 'Unit' {
             $document.version | Should -BeGreaterThan 0
             $document.timestamp.ToUniversalTime().ToString('o') | Should -Match 'Z$'
             $document.'@id' | Should -Not -BeNullOrEmpty
+            $document.tooling | Should -Not -BeNullOrEmpty
             $ids += $document.'@id'
 
             foreach ($statement in $document.statements) {
