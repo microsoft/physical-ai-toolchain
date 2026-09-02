@@ -24,6 +24,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'scripts/lib/Get-VerifiedDownload.ps1')
 
 #region Helper Functions
 
@@ -68,6 +69,64 @@ function Assert-Tools {
     }
 }
 
+function Install-Uv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Version,
+
+        [Parameter(Mandatory)]
+        [string]$ExpectedHash,
+
+        [Parameter(Mandatory)]
+        [bool]$IsWindowsPlatform
+    )
+
+    Write-Info "Installing uv package manager v$Version..."
+    if ($IsWindowsPlatform -and [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+        throw 'USERPROFILE is required to locate the Windows uv installation'
+    }
+    $installerDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+    $installerExitCode = -1
+    try {
+        New-Item -ItemType Directory -Path $installerDirectory | Out-Null
+        if (-not $IsWindowsPlatform) {
+            chmod 700 $installerDirectory
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Failed to restrict uv installer directory permissions'
+            }
+        }
+
+        $download = Invoke-VerifiedDownload `
+            -Url "https://astral.sh/uv/$Version/install.ps1" `
+            -DestinationDirectory $installerDirectory `
+            -FileName 'uv-install.ps1' `
+            -ExpectedHash $ExpectedHash
+        $global:LASTEXITCODE = 0
+        & $download.Path
+        $installerExitCode = $LASTEXITCODE
+    }
+    finally {
+        Remove-Item -LiteralPath $installerDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($IsWindowsPlatform) {
+        $env:PATH = "$env:USERPROFILE\.local\bin;$env:USERPROFILE\.cargo\bin;$env:PATH"
+    }
+    else {
+        $env:PATH = "$HOME/.local/bin:$HOME/.cargo/bin:$env:PATH"
+    }
+    $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
+    $reportedVersion = if ($uvCommand) { (uv --version) -join ' ' } else { '' }
+    if (
+        $installerExitCode -ne 0 -or
+        -not $uvCommand -or
+        $reportedVersion -notmatch ('\b' + [regex]::Escape($Version) + '\b')
+    ) {
+        throw "Failed to install uv v$Version"
+    }
+}
+
 #endregion
 
 $ScriptDir = $PSScriptRoot
@@ -75,7 +134,7 @@ $VenvDir = Join-Path $ScriptDir '.venv'
 
 # Devcontainer recommendation
 Write-Host ''
-Write-Host ([char]0x1F4A1 + ' RECOMMENDED: Use the Dev Container for the best experience.')
+Write-Host ([System.Char]::ConvertFromUtf32(0x1F4A1) + ' RECOMMENDED: Use the Dev Container for the best experience.')
 Write-Host ''
 Write-Host 'The devcontainer includes all tools pre-configured:'
 Write-Host '  - Azure CLI, Terraform, kubectl, helm, jq'
@@ -139,23 +198,14 @@ Write-Info 'All required tools found'
 Write-Section 'UV Package Manager Setup'
 
 $UvVersion = '0.11.21'
+# SHA-256 for https://astral.sh/uv/0.11.21/install.ps1.
+$UvInstallerSha256 = '0ce635ed6670498d72930763357d9e44251887130d2eafd6aa9ba4f8299ec216'
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Info "Installing uv package manager v$UvVersion..."
-    $uvInstaller = Join-Path ([System.IO.Path]::GetTempPath()) 'uv-install.ps1'
-    try {
-        Invoke-WebRequest -Uri "https://astral.sh/uv/$UvVersion/install.ps1" -OutFile $uvInstaller -UseBasicParsing
-        & $uvInstaller
-    }
-    finally {
-        Remove-Item $uvInstaller -Force -ErrorAction SilentlyContinue
-    }
-    if (-not $IsWindows) {
-        $env:PATH = "$HOME/.local/bin:$HOME/.cargo/bin:$env:PATH"
-    }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to install uv v$UvVersion"
-    }
+    Install-Uv `
+        -Version $UvVersion `
+        -ExpectedHash $UvInstallerSha256 `
+        -IsWindowsPlatform $IsWindows
 }
 
 Write-Info "Using uv: $(uv --version)"

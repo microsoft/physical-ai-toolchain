@@ -2,7 +2,7 @@
 title: Scripts
 description: CI/CD scripts, shared libraries, linting, security, and Pester tests for the Physical AI Toolchain.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-06
+ms.date: 2026-09-02
 ms.topic: reference
 keywords:
   - scripts
@@ -66,16 +66,19 @@ PowerShell scripts for validating code quality and documentation.
 
 Security scanning and dependency management scripts.
 
-| Script                                | Purpose                                                                                       |
-|---------------------------------------|-----------------------------------------------------------------------------------------------|
-| `security/Test-DependencyPinning.ps1` | Validate dependency pinning compliance                                                        |
-| `security/Test-SHAStaleness.ps1`      | Check for outdated SHA pins                                                                   |
-| `security/Test-BinaryFreshness.ps1`   | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab    |
-| `security/Test-HveCoreFreshness.ps1`  | Check hve-core-derived files against their reviewed release or source-header baselines        |
-| `security/zap-to-sarif.py`            | Convert ZAP results to SARIF format                                                           |
-| `update-chart-hashes.sh`              | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
+| Script                                     | Purpose                                                                                       |
+|--------------------------------------------|-----------------------------------------------------------------------------------------------|
+| `security/Test-DependencyPinning.ps1`      | Validate dependency pinning compliance                                                        |
+| `security/Test-SHAStaleness.ps1`           | Check for outdated SHA pins                                                                   |
+| `security/Test-BinaryFreshness.ps1`        | Validate pinned binary hashes and Helm chart versions; emits SARIF for GitHub Security tab    |
+| `security/Modules/PinnedToolVersions.psm1` | Provide pin discovery functions for binary freshness checks                                   |
+| `security/Test-HveCoreFreshness.ps1`       | Check hve-core-derived files against their reviewed release or source-header baselines        |
+| `security/zap-to-sarif.py`                 | Convert ZAP results to SARIF format                                                           |
+| `update-chart-hashes.sh`                   | Refresh pinned Helm chart versions and SHA-256 hashes in `infrastructure/setup/defaults.conf` |
 
-The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the values pinned in `.devcontainer/install-dev-deps.sh` and `.devcontainer/devcontainer.json`, and queries upstream Helm repositories for chart version drift. Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script.
+The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.yml` workflow on a weekly schedule. It downloads each pinned GPG key, installer, and CLI archive, compares SHA-256 hashes against the canonical pin files listed below, and queries upstream Helm repositories for chart version drift.
+
+Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script.
 
 The `Test-HveCoreFreshness.ps1` script is invoked by the `check-hve-core-freshness.yml` workflow on a weekly schedule. Each derived file declares a baseline. `release` files compare the **upstream** blob SHA at the pinned `UPSTREAM_REF` against one resolved, immutable newest non-draft release revision. `source-header` files compare the revision recorded in their header against one resolved, immutable upstream `main` revision. This reports relevant upstream changes before they appear in a release.
 
@@ -83,21 +86,30 @@ Source-header files must include `Adapted from microsoft/hve-core <upstream-path
 
 ### 🔗 Where Pins Live
 
-Pins are split across two files by structural necessity, not duplication. Each file owns a different class of artifact:
+The `check-binary-freshness.yml` workflow discovers supported literal assignment forms for its configured developer tools in tracked shell, PowerShell, JSON, and JSONC files through `security/Modules/PinnedToolVersions.psm1`. Shell assignments may use supported declarations, defaults, control-flow prefixes, and parenthesized command groups. PowerShell assignments may be unscoped, explicitly scoped, or environment scoped.
 
-| Artifact class                                    | Canonical location                   | Why it lives there                                                                                        |
-|---------------------------------------------------|--------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| Helm chart versions + SHAs                        | `infrastructure/setup/defaults.conf` | Sourced by runtime shell deploy scripts (`infrastructure/setup/*.sh`); bash-overridable via `.env.local`. |
-| Dev container binaries (OSMO CLI, NGC CLI) + SHAs | `.devcontainer/devcontainer.json`    | Consumed during Docker image build, before any shell can source bash variables.                           |
+New assignment sites in those formats do not require workflow registration. Discovery excludes `scripts/tests/Fixtures/` and `*.Tests.ps1`; executable test helpers remain monitored. Pins in other file formats require discovery support or explicit workflow handling.
+
+Integrity pins live with the bootstrap path that consumes them. Each location owns a different artifact class:
+
+| Artifact class                                            | Canonical location                                                              | Why it lives there                                                                                        |
+|-----------------------------------------------------------|---------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| Helm chart versions + SHAs                                | `infrastructure/setup/defaults.conf`                                            | Sourced by runtime shell deploy scripts (`infrastructure/setup/*.sh`); bash-overridable via `.env.local`. |
+| Dev container binaries (TFLint, OSMO CLI, NGC CLI) + SHAs | `.devcontainer/devcontainer.json`                                               | Consumed during Docker image build, before any shell can source bash variables.                           |
+| VM development dependencies + SHAs                        | `infrastructure/setup/optional/isaac-sim-vm/scripts/install-dev-deps.sh`        | Consumed by the Isaac Sim VM bootstrap.                                                                   |
+| ThinLinc server archive + SHA-256                         | `infrastructure/setup/optional/isaac-sim-vm/scripts/install-thinlinc-silent.sh` | Consumed by the optional ThinLinc bootstrap.                                                              |
+| PowerShell bootstrap uv installer + SHA-256               | `setup-dev.ps1`                                                                 | Consumed by the PowerShell development bootstrap and verified before execution.                           |
+
+The uv version is intentionally replicated across bootstrap entry points. Update every discovered assignment together; the freshness workflow reports inconsistent values.
 
 All other references to these pins are read-only consumers:
 
-| Consumer                                    | Role                                                                                              |
-|---------------------------------------------|---------------------------------------------------------------------------------------------------|
-| `scripts/update-chart-hashes.sh`            | Writes chart versions + SHAs back into `defaults.conf` via `sed`; no other file touched.          |
-| `scripts/security/Test-BinaryFreshness.ps1` | Reads both canonical files (`Get-ShellVariable`, `Get-JsonVariable`) to compare against upstream. |
-| `docs/contributing/component-updates.md`    | Documents `defaults.conf` as authoritative for chart pins.                                        |
-| `.env.local.example`                        | User-override stubs only — does not redefine defaults.                                            |
+| Consumer                                    | Role                                                                                                 |
+|---------------------------------------------|------------------------------------------------------------------------------------------------------|
+| `scripts/update-chart-hashes.sh`            | Writes chart versions + SHAs back into `defaults.conf` via `sed`; no other file touched.             |
+| `scripts/security/Test-BinaryFreshness.ps1` | Reads the canonical pin files with format-specific extractors to compare artifacts against upstream. |
+| `docs/contributing/component-updates.md`    | Documents `defaults.conf` as authoritative for chart pins.                                           |
+| `.env.local.example`                        | User-override stubs only — does not redefine defaults.                                               |
 
 ### 🔄 Updating Chart Pins
 
