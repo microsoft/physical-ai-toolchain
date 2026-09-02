@@ -67,9 +67,7 @@ class FakeArm:
         torque_off: bool = True,
         torque_on: bool = True,
     ) -> None:
-        self.bus = FakeBus(
-            calibrated=calibrated, torque_off=torque_off, torque_on=torque_on
-        )
+        self.bus = FakeBus(calibrated=calibrated, torque_off=torque_off, torque_on=torque_on)
 
     @property
     def is_calibrated(self) -> bool:

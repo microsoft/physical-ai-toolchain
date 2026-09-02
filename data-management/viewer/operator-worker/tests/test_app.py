@@ -132,9 +132,7 @@ def _profile() -> dict:
         "fingerprint": "",
     }
     parsed = WorkerProfile.model_validate(profile)
-    return parsed.model_copy(
-        update={"fingerprint": parsed.computed_fingerprint()}
-    ).model_dump(mode="json")
+    return parsed.model_copy(update={"fingerprint": parsed.computed_fingerprint()}).model_dump(mode="json")
 
 
 def _settings() -> dict:
@@ -223,16 +221,12 @@ def test_initialize_run_stop_emits_one_cleanup(monkeypatch) -> None:
     ]
     input_stream = DelayedStopStream(commands[:2], commands[2], runtime.started)
     output_stream = io.StringIO()
-    monkeypatch.setattr(
-        "operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1"
-    )
+    monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
         input_stream=input_stream,
         output_stream=output_stream,
-        runtime_factory=lambda _profile, settings: (
-            captured_settings.append(settings) or runtime
-        ),
+        runtime_factory=lambda _profile, settings: captured_settings.append(settings) or runtime,
         resource_fingerprint=lambda _profile, _mode: "resource",
     )
 
@@ -312,14 +306,10 @@ def test_record_mode_acknowledges_episode_commands_and_finishes(monkeypatch) -> 
         },
     ]
     output = io.StringIO()
-    monkeypatch.setattr(
-        "operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1"
-    )
+    monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
-        input_stream=io.StringIO(
-            "".join(json.dumps(command) + "\n" for command in commands)
-        ),
+        input_stream=io.StringIO("".join(json.dumps(command) + "\n" for command in commands)),
         output_stream=output,
         runtime_factory=lambda _profile, _settings: runtime,
         resource_fingerprint=lambda _profile, _mode: "resource",
@@ -374,9 +364,7 @@ def test_record_stop_discards_the_session_before_cleanup(monkeypatch) -> None:
             "command_id": "discard-session",
         },
     ]
-    monkeypatch.setattr(
-        "operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1"
-    )
+    monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
         input_stream=DelayedStopStream(commands[:2], commands[2], runtime.started),
@@ -413,14 +401,10 @@ def test_wrong_session_run_fails_before_motion_and_cleans_once(monkeypatch) -> N
             "sequence": 2,
         },
     ]
-    monkeypatch.setattr(
-        "operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1"
-    )
+    monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
-        input_stream=io.StringIO(
-            "".join(json.dumps(command) + "\n" for command in commands)
-        ),
+        input_stream=io.StringIO("".join(json.dumps(command) + "\n" for command in commands)),
         output_stream=io.StringIO(),
         runtime_factory=lambda _profile, _settings: runtime,
         resource_fingerprint=lambda _profile, _mode: "resource",
@@ -458,14 +442,10 @@ def test_stop_before_run_cleans_without_enabling_motion(monkeypatch) -> None:
         },
     ]
     output = io.StringIO()
-    monkeypatch.setattr(
-        "operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1"
-    )
+    monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
-        input_stream=io.StringIO(
-            "".join(json.dumps(command) + "\n" for command in commands)
-        ),
+        input_stream=io.StringIO("".join(json.dumps(command) + "\n" for command in commands)),
         output_stream=output,
         runtime_factory=lambda _profile, _settings: runtime,
         resource_fingerprint=lambda _profile, _mode: "resource",
@@ -474,9 +454,7 @@ def test_stop_before_run_cleans_without_enabling_motion(monkeypatch) -> None:
     assert app.run() == 0
     assert "enable_motion" not in runtime.events
     assert runtime.cleanup_calls == 1
-    assert (
-        json.loads(output.getvalue().splitlines()[-1])["command_id"] == "cancel-start"
-    )
+    assert json.loads(output.getvalue().splitlines()[-1])["command_id"] == "cancel-start"
 
 
 def test_stop_latched_after_run_prevents_motion_enable(monkeypatch) -> None:
@@ -511,14 +489,10 @@ def test_stop_latched_after_run_prevents_motion_enable(monkeypatch) -> None:
         },
     ]
     output = io.StringIO()
-    monkeypatch.setattr(
-        "operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1"
-    )
+    monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
-        input_stream=io.StringIO(
-            "".join(json.dumps(command) + "\n" for command in commands)
-        ),
+        input_stream=io.StringIO("".join(json.dumps(command) + "\n" for command in commands)),
         output_stream=output,
         runtime_factory=lambda _profile, _settings: runtime,
         resource_fingerprint=lambda _profile, _mode: "resource",
@@ -526,10 +500,7 @@ def test_stop_latched_after_run_prevents_motion_enable(monkeypatch) -> None:
 
     assert app.run() == 0
     assert "enable_motion" not in runtime.events
-    assert (
-        json.loads(output.getvalue().splitlines()[-1])["command_id"]
-        == "stop-before-enable"
-    )
+    assert json.loads(output.getvalue().splitlines()[-1])["command_id"] == "stop-before-enable"
 
 
 def test_stop_during_cancelled_acquisition_correlates_cleanup(monkeypatch) -> None:
@@ -562,14 +533,10 @@ def test_stop_during_cancelled_acquisition_correlates_cleanup(monkeypatch) -> No
         },
     ]
     output = io.StringIO()
-    monkeypatch.setattr(
-        "operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1"
-    )
+    monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
-        input_stream=io.StringIO(
-            "".join(json.dumps(command) + "\n" for command in commands)
-        ),
+        input_stream=io.StringIO("".join(json.dumps(command) + "\n" for command in commands)),
         output_stream=output,
         runtime_factory=lambda _profile, _settings: runtime,
         resource_fingerprint=lambda _profile, _mode: "resource",
@@ -578,10 +545,7 @@ def test_stop_during_cancelled_acquisition_correlates_cleanup(monkeypatch) -> No
     with pytest.raises(RuntimeError, match="cancelled"):
         app.run()
 
-    assert (
-        json.loads(output.getvalue().splitlines()[-1])["command_id"]
-        == "cancel-acquisition"
-    )
+    assert json.loads(output.getvalue().splitlines()[-1])["command_id"] == "cancel-acquisition"
 
 
 def test_profile_fingerprint_mismatch_fails_before_acquisition(monkeypatch) -> None:
@@ -598,9 +562,7 @@ def test_profile_fingerprint_mismatch_fails_before_acquisition(monkeypatch) -> N
         "resource_fingerprint": "resource",
         "settings": _settings(),
     }
-    monkeypatch.setattr(
-        "operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1"
-    )
+    monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
         input_stream=io.StringIO(json.dumps(command) + "\n"),
@@ -652,14 +614,10 @@ def test_teleoperation_failure_preserves_first_cleanup_failure(monkeypatch) -> N
         },
     ]
     output = io.StringIO()
-    monkeypatch.setattr(
-        "operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1"
-    )
+    monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
-        input_stream=io.StringIO(
-            "".join(json.dumps(command) + "\n" for command in commands)
-        ),
+        input_stream=io.StringIO("".join(json.dumps(command) + "\n" for command in commands)),
         output_stream=output,
         runtime_factory=lambda _profile, _settings: runtime,
         resource_fingerprint=lambda _profile, _mode: "resource",

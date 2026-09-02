@@ -5,12 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-RecordingAction = Literal[
-    "save", "rerecord", "pause", "resume", "finish", "cancel"
-]
-RecordingPhase = Literal[
-    "recording", "paused", "complete", "finalized", "cancelled"
-]
+RecordingAction = Literal["save", "rerecord", "pause", "resume", "finish", "cancel"]
+RecordingPhase = Literal["recording", "paused", "complete", "finalized", "cancelled"]
 
 
 class WritableDataset(Protocol):
@@ -68,9 +64,7 @@ class RecordingSession:
     def command(self, action: RecordingAction) -> RecordingCommandResult:
         if action == "save":
             self._save_pending()
-            self.phase = (
-                "complete" if self.episode_index >= self.num_episodes else "recording"
-            )
+            self.phase = "complete" if self.episode_index >= self.num_episodes else "recording"
         elif action == "rerecord":
             if self.dataset.has_pending_frames():
                 self.dataset.clear_episode_buffer()

@@ -18,9 +18,7 @@ class Follower(Protocol):
 
 
 class Policy(Protocol):
-    def predict(
-        self, observation: dict[str, Any], task: str
-    ) -> list[list[float]]: ...
+    def predict(self, observation: dict[str, Any], task: str) -> list[list[float]]: ...
 
     def close(self) -> None: ...
 

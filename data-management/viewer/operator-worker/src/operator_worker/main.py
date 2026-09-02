@@ -34,11 +34,7 @@ def main() -> int:
     os.fstat(lease_fd)
     if args.deenergize or args.camera_check:
         profile = WorkerProfile.model_validate_json(os.environ["OPERATOR_PROFILE_JSON"])
-        report = (
-            deenergize_profile(profile)
-            if args.deenergize
-            else check_profile_cameras(profile)
-        )
+        report = deenergize_profile(profile) if args.deenergize else check_profile_cameras(profile)
         print(
             json.dumps(
                 {

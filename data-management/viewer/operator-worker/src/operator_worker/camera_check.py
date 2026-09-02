@@ -35,6 +35,4 @@ def check_profile_cameras(profile: WorkerProfile) -> CleanupReport:
             warmup_s=1,
         )
     )
-    return check_cameras(
-        [CameraResource("wrist", wrist), CameraResource("front", front)]
-    )
+    return check_cameras([CameraResource("wrist", wrist), CameraResource("front", front)])

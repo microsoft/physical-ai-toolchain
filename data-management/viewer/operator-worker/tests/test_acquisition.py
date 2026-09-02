@@ -51,9 +51,7 @@ def test_failure_rolls_back_in_reverse_order(failure_index: int) -> None:
 
 def test_success_releases_follower_first() -> None:
     events: list[str] = []
-    resources = [
-        FakeResource(name, events) for name in ("wrist", "front", "leader", "follower")
-    ]
+    resources = [FakeResource(name, events) for name in ("wrist", "front", "leader", "follower")]
     transaction = ResourceTransaction(resources)
 
     transaction.acquire_all()
@@ -70,9 +68,7 @@ def test_success_releases_follower_first() -> None:
 
 def test_acquisition_cleanup_failure_cannot_be_masked() -> None:
     events: list[str] = []
-    transaction = ResourceTransaction(
-        [FakeResource("follower", events, fails=True, release_fails=True)]
-    )
+    transaction = ResourceTransaction([FakeResource("follower", events, fails=True, release_fails=True)])
 
     with pytest.raises(AcquisitionError, match="cleanup errors"):
         transaction.acquire_all()

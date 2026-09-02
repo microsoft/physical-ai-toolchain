@@ -56,12 +56,8 @@ class TeleoperationLoop:
         stop_event: Event | None = None,
         expected_action_keys: set[str] | None = None,
         observation_processor: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-        teleop_action_processor: (
-            Callable[[tuple[dict[str, float], dict[str, Any]]], dict[str, float]] | None
-        ) = None,
-        robot_action_processor: (
-            Callable[[tuple[dict[str, float], dict[str, Any]]], dict[str, float]] | None
-        ) = None,
+        teleop_action_processor: (Callable[[tuple[dict[str, float], dict[str, Any]]], dict[str, float]] | None) = None,
+        robot_action_processor: (Callable[[tuple[dict[str, float], dict[str, Any]]], dict[str, float]] | None) = None,
         clock: Callable[[], float] = time.perf_counter,
         max_action_age_s: float | None = None,
         max_consecutive_overruns: int = 3,
@@ -69,9 +65,7 @@ class TeleoperationLoop:
         telemetry_hz: int = 10,
         on_telemetry: Callable[[JointTelemetry], None] | None = None,
         extra_observation: Callable[[], dict[str, Any]] | None = None,
-        on_step: (
-            Callable[[dict[str, Any], dict[str, float], dict[str, float]], None] | None
-        ) = None,
+        on_step: (Callable[[dict[str, Any], dict[str, float], dict[str, float]], None] | None) = None,
     ) -> None:
         if fps <= 0:
             raise ValueError("fps must be greater than zero")
@@ -81,9 +75,7 @@ class TeleoperationLoop:
         self.stop_event = stop_event or Event()
         self.expected_action_keys = expected_action_keys
         self.observation_processor = observation_processor or (lambda value: value)
-        self.teleop_action_processor = teleop_action_processor or (
-            lambda value: value[0]
-        )
+        self.teleop_action_processor = teleop_action_processor or (lambda value: value[0])
         self.robot_action_processor = robot_action_processor or (lambda value: value[0])
         self.clock = clock
         self.max_action_age_s = max_action_age_s or (1.0 / fps)
@@ -122,24 +114,17 @@ class TeleoperationLoop:
                 sent_action = self.follower.send_action(action)
                 if self.on_step is not None:
                     self.on_step(observation, raw_action, sent_action)
-                if (
-                    self.on_telemetry is not None
-                    and iterations % self.telemetry_interval == 0
-                ):
+                if self.on_telemetry is not None and iterations % self.telemetry_interval == 0:
                     self.on_telemetry(
                         JointTelemetry(
                             elapsed_s=self.clock() - session_start,
-                            leader={
-                                key: float(value) for key, value in raw_action.items()
-                            },
+                            leader={key: float(value) for key, value in raw_action.items()},
                             follower={
                                 key: float(value)
                                 for key, value in observation.items()
                                 if isinstance(value, (int, float))
                             },
-                            commanded={
-                                key: float(value) for key, value in sent_action.items()
-                            },
+                            commanded={key: float(value) for key, value in sent_action.items()},
                         )
                     )
             except Exception as error:
@@ -155,9 +140,7 @@ class TeleoperationLoop:
                 total_overruns += 1
                 if consecutive_overruns >= self.max_consecutive_overruns:
                     self.stop_event.set()
-                    raise TeleoperationError(
-                        "Teleoperation loop overrun limit exceeded"
-                    )
+                    raise TeleoperationError("Teleoperation loop overrun limit exceeded")
             else:
                 consecutive_overruns = 0
             if self.on_metrics is not None and len(durations) == self.fps:
@@ -183,15 +166,7 @@ class TeleoperationLoop:
                 self.stop_event.wait(remaining)
 
     def _validate_action(self, action: dict[str, float]) -> None:
-        if (
-            self.expected_action_keys is not None
-            and set(action) != self.expected_action_keys
-        ):
-            raise TeleoperationError(
-                "Leader action does not contain the complete expected joint set"
-            )
-        if not all(
-            isinstance(value, (int, float)) and math.isfinite(float(value))
-            for value in action.values()
-        ):
+        if self.expected_action_keys is not None and set(action) != self.expected_action_keys:
+            raise TeleoperationError("Leader action does not contain the complete expected joint set")
+        if not all(isinstance(value, (int, float)) and math.isfinite(float(value)) for value in action.values()):
             raise TeleoperationError("Leader action contains a non-finite value")

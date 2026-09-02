@@ -18,8 +18,7 @@ def _identity(path: Path) -> tuple[str, str, str]:
     for candidate in (current, *current.parents):
         try:
             return tuple(
-                (candidate / name).read_text(encoding="utf-8").strip()
-                for name in ("idVendor", "idProduct", "serial")
+                (candidate / name).read_text(encoding="utf-8").strip() for name in ("idVendor", "idProduct", "serial")
             )  # type: ignore[return-value]
         except OSError:
             continue
@@ -34,9 +33,7 @@ def verify_tty_identity(
 ) -> None:
     observed = _identity(sys_tty_root / port.resolve().name)
     if observed != expected:
-        raise IdentityError(
-            f"TTY identity mismatch for {port}: expected {expected}, observed {observed}"
-        )
+        raise IdentityError(f"TTY identity mismatch for {port}: expected {expected}, observed {observed}")
 
 
 def compute_resource_fingerprint(
@@ -49,9 +46,7 @@ def compute_resource_fingerprint(
 ) -> str:
     leader_identity = _identity(sys_tty_root / profile.leader.port.resolve().name)
     follower_identity = _identity(sys_tty_root / profile.follower.port.resolve().name)
-    wrist_identity = _identity(
-        sys_video_root / profile.wrist_camera.path.resolve().name
-    )
+    wrist_identity = _identity(sys_video_root / profile.wrist_camera.path.resolve().name)
     expected_leader = (
         profile.leader.usb_vendor_id,
         profile.leader.usb_product_id,
@@ -87,18 +82,12 @@ def compute_resource_fingerprint(
         "mode": mode,
         "leader_device": leader_identity,
         "follower_device": follower_identity,
-        "leader_calibration": hashlib.sha256(
-            profile.leader.calibration_file.read_bytes()
-        ).hexdigest(),
-        "follower_calibration": hashlib.sha256(
-            profile.follower.calibration_file.read_bytes()
-        ).hexdigest(),
+        "leader_calibration": hashlib.sha256(profile.leader.calibration_file.read_bytes()).hexdigest(),
+        "follower_calibration": hashlib.sha256(profile.follower.calibration_file.read_bytes()).hexdigest(),
         "wrist_camera": wrist_identity,
         "front_camera": {
             "sdk_serial": profile.front_camera.usb_serial,
             "usb_descriptor_serial": profile.front_camera.usb_descriptor_serial,
         },
     }
-    return hashlib.sha256(
-        json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

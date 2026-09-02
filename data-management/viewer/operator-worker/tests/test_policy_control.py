@@ -63,9 +63,7 @@ def test_policy_loop_clamps_commands_and_stops_at_duration() -> None:
 
     loop.run()
 
-    assert policy.prompts == [
-        "Pick up the rubber puck on the right bin and place on the front"
-    ]
+    assert policy.prompts == ["Pick up the rubber puck on the right bin and place on the front"]
     assert follower.sent == [
         {
             "shoulder_pan.pos": 2.0,

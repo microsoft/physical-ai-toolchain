@@ -49,13 +49,9 @@ class Runtime(Protocol):
 
     def set_rate_callback(self, callback: Callable[[LoopMetrics], None]) -> None: ...
 
-    def set_telemetry_callback(
-        self, callback: Callable[[JointTelemetry], None]
-    ) -> None: ...
+    def set_telemetry_callback(self, callback: Callable[[JointTelemetry], None]) -> None: ...
 
-    def set_preview_callback(
-        self, callback: Callable[[str, bytes, float], None]
-    ) -> None: ...
+    def set_preview_callback(self, callback: Callable[[str, bytes, float], None]) -> None: ...
 
     def request_stop(self) -> None: ...
 
@@ -121,26 +117,15 @@ class WorkerApplication:
             initialize.profile_fingerprint != profile.fingerprint
             or profile.computed_fingerprint() != profile.fingerprint
         ):
-            raise RuntimeError(
-                "Initialize profile fingerprint does not match the profile snapshot"
-            )
-        if (
-            self.resource_fingerprint(profile, initialize.settings.mode)
-            != initialize.resource_fingerprint
-        ):
-            raise RuntimeError(
-                "Initialize resource fingerprint does not match current hardware identity"
-            )
+            raise RuntimeError("Initialize profile fingerprint does not match the profile snapshot")
+        if self.resource_fingerprint(profile, initialize.settings.mode) != initialize.resource_fingerprint:
+            raise RuntimeError("Initialize resource fingerprint does not match current hardware identity")
         runtime = self.runtime_factory(profile, initialize.settings)
         self._runtime = runtime
         if self._stop_requested.is_set():
             self._request_cancel(runtime)
-        runtime.set_rate_callback(
-            lambda metrics: self._emit_rate(initialize.service_instance_id, metrics)
-        )
-        runtime.set_telemetry_callback(
-            lambda sample: self._emit_telemetry(initialize.service_instance_id, sample)
-        )
+        runtime.set_rate_callback(lambda metrics: self._emit_rate(initialize.service_instance_id, metrics))
+        runtime.set_telemetry_callback(lambda sample: self._emit_telemetry(initialize.service_instance_id, sample))
         runtime.set_preview_callback(
             lambda camera, jpeg, captured_at_s: self._emit_preview(
                 initialize.service_instance_id, camera, jpeg, captured_at_s
@@ -162,11 +147,7 @@ class WorkerApplication:
                         "wrist": "acquired",
                         "front": "acquired",
                         "follower": "acquired_torque_off",
-                        **(
-                            {"policy": "ready"}
-                            if initialize.settings.mode == "policy"
-                            else {"leader": "acquired"}
-                        ),
+                        **({"policy": "ready"} if initialize.settings.mode == "policy" else {"leader": "acquired"}),
                     },
                 )
             )
@@ -259,9 +240,7 @@ class WorkerApplication:
             if teleop_thread is not None:
                 teleop_thread.join(timeout=2.0)
                 if teleop_thread.is_alive():
-                    raise RuntimeError(
-                        "Teleoperation loop did not stop within the cleanup deadline"
-                    )
+                    raise RuntimeError("Teleoperation loop did not stop within the cleanup deadline")
             self._raise_teleop_error()
             if command_id == "worker-exit" and self._pending_stop is not None:
                 self._validate_context(
@@ -281,9 +260,7 @@ class WorkerApplication:
             if teleop_thread is not None and teleop_thread.is_alive():
                 teleop_thread.join(timeout=2.0)
             cleanup = runtime.cleanup()
-            upload_attempted, upload_succeeded, upload_error = (
-                runtime.upload_after_cleanup()
-            )
+            upload_attempted, upload_succeeded, upload_error = runtime.upload_after_cleanup()
             self._emit(
                 WorkerCleanup(
                     service_instance_id=initialize.service_instance_id,
@@ -339,9 +316,7 @@ class WorkerApplication:
                 if isinstance(expected_type, tuple)
                 else expected_type.__name__
             )
-            raise RuntimeError(
-                f"Expected {expected_name}, received {type(command).__name__}"
-            )
+            raise RuntimeError(f"Expected {expected_name}, received {type(command).__name__}")
         return command
 
     def _run_session(self, runtime: Runtime, mode: str) -> None:
@@ -432,10 +407,7 @@ class WorkerApplication:
     ) -> None:
         if session_id != self.session_id:
             raise RuntimeError("Command session does not match the worker session")
-        if (
-            expected_service_instance_id is not None
-            and service_instance_id != expected_service_instance_id
-        ):
+        if expected_service_instance_id is not None and service_instance_id != expected_service_instance_id:
             raise RuntimeError("Command service instance does not match initialization")
         if minimum_sequence is not None:
             if sequence < minimum_sequence:

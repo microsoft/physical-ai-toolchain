@@ -55,9 +55,7 @@ class GrootPolicyClient:
         if ready.get("type") != "ready":
             raise RuntimeError(ready.get("message", "GR00T runtime failed to start"))
 
-    def predict(
-        self, observation: dict[str, Any], task: str
-    ) -> list[list[float]]:
+    def predict(self, observation: dict[str, Any], task: str) -> list[list[float]]:
         import cv2  # type: ignore[import-untyped]
 
         images: dict[str, str] = {}

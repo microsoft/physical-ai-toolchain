@@ -39,9 +39,7 @@ logging.basicConfig(
 
 # Suppress verbose Azure SDK HTTP request logging
 logging.getLogger("azure").setLevel(logging.WARNING)
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
-    logging.WARNING
-)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 # Load .env before any config or service singletons are initialized so that
 # all env vars are available to get_app_config() on first access.
@@ -74,15 +72,9 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
             profiles={profile.name: profile},
             runner=OperatorPreflightRunner(
                 data_root=Path(_config.data_path),
-                policy_python=(
-                    Path(_config.operator_policy_python)
-                    if _config.operator_policy_python
-                    else None
-                ),
+                policy_python=(Path(_config.operator_policy_python) if _config.operator_policy_python else None),
                 policy_checkpoint=(
-                    Path(_config.operator_policy_checkpoint)
-                    if _config.operator_policy_checkpoint
-                    else None
+                    Path(_config.operator_policy_checkpoint) if _config.operator_policy_checkpoint else None
                 ),
             ),
         )
@@ -163,14 +155,9 @@ async def unhandled_exception_handler(request, exc: Exception) -> JSONResponse:
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(
-    request, exc: RequestValidationError
-) -> JSONResponse:
+async def validation_exception_handler(request, exc: RequestValidationError) -> JSONResponse:
     """Return validation errors without internal paths."""
-    errors = [
-        {"loc": error.get("loc"), "msg": error.get("msg"), "type": error.get("type")}
-        for error in exc.errors()
-    ]
+    errors = [{"loc": error.get("loc"), "msg": error.get("msg"), "type": error.get("type")} for error in exc.errors()]
     return JSONResponse(status_code=422, content={"detail": errors})
 
 
@@ -179,9 +166,7 @@ async def validation_exception_handler(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     ContentSizeLimitMiddleware,
-    max_content_length=int(
-        os.environ.get("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024))
-    ),
+    max_content_length=int(os.environ.get("MAX_REQUEST_BODY_BYTES", str(10 * 1024 * 1024))),
 )
 app.add_middleware(
     CORSMiddleware,
@@ -199,27 +184,13 @@ app.add_middleware(
 
 # All /api/* routes require authentication (health and csrf-token are on app directly)
 api_auth = [Depends(require_auth)]
-app.include_router(
-    export.router, prefix="/api/datasets", tags=["export"], dependencies=api_auth
-)
-app.include_router(
-    detection.router, prefix="/api/datasets", tags=["detection"], dependencies=api_auth
-)
-app.include_router(
-    datasets.router, prefix="/api/datasets", tags=["datasets"], dependencies=api_auth
-)
-app.include_router(
-    annotations.router, prefix="/api", tags=["annotations"], dependencies=api_auth
-)
-app.include_router(
-    analysis.router, prefix="/api/analysis", tags=["analysis"], dependencies=api_auth
-)
-app.include_router(
-    ai_analysis.router, prefix="/api", tags=["ai"], dependencies=api_auth
-)
-app.include_router(
-    labels.router, prefix="/api/datasets", tags=["labels"], dependencies=api_auth
-)
+app.include_router(export.router, prefix="/api/datasets", tags=["export"], dependencies=api_auth)
+app.include_router(detection.router, prefix="/api/datasets", tags=["detection"], dependencies=api_auth)
+app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"], dependencies=api_auth)
+app.include_router(annotations.router, prefix="/api", tags=["annotations"], dependencies=api_auth)
+app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"], dependencies=api_auth)
+app.include_router(ai_analysis.router, prefix="/api", tags=["ai"], dependencies=api_auth)
+app.include_router(labels.router, prefix="/api/datasets", tags=["labels"], dependencies=api_auth)
 app.include_router(
     joint_config.router,
     prefix="/api/datasets",
@@ -258,15 +229,11 @@ async def health_check():
         # In Azure mode the local base_path is irrelevant; treat the blob
         # provider's presence as the storage health signal.
         if _config.storage_backend == "azure":
-            checks["storage"] = (
-                "healthy" if service._blob_provider is not None else "unhealthy"
-            )
+            checks["storage"] = "healthy" if service._blob_provider is not None else "unhealthy"
         elif hasattr(service, "base_path"):
             from pathlib import Path as _Path
 
-            checks["storage"] = (
-                "healthy" if _Path(service.base_path).exists() else "unhealthy"
-            )
+            checks["storage"] = "healthy" if _Path(service.base_path).exists() else "unhealthy"
         else:
             checks["storage"] = "healthy"
     except Exception:
@@ -274,9 +241,7 @@ async def health_check():
 
     overall = "healthy" if all(v == "healthy" for v in checks.values()) else "degraded"
     status_code = 200 if overall == "healthy" else 503
-    return JSONResponse(
-        content={"status": overall, "checks": checks}, status_code=status_code
-    )
+    return JSONResponse(content={"status": overall, "checks": checks}, status_code=status_code)
 
 
 @app.get("/api/csrf-token", tags=["auth"])

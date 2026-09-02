@@ -118,9 +118,7 @@ class TestLoadConfig:
         with pytest.raises(ValueError, match="OPERATOR_HOST_LEASE_PATH"):
             load_config()
 
-    def test_unauthenticated_lerobot_requires_explicit_loopback(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
+    def test_unauthenticated_lerobot_requires_explicit_loopback(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("OPERATOR_ADAPTER_MODE", "lerobot")
         monkeypatch.setenv("OPERATOR_HOST_LEASE_PATH", "/tmp/operator.lock")
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")

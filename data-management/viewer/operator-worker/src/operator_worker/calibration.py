@@ -26,9 +26,7 @@ def validate_calibration_file(path: Path) -> dict[str, dict[str, int]]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise CalibrationError(
-            f"Calibration file is unavailable or malformed: {path}"
-        ) from error
+        raise CalibrationError(f"Calibration file is unavailable or malformed: {path}") from error
     if not isinstance(payload, dict) or tuple(payload) != JOINTS:
         raise CalibrationError("Calibration must contain the ordered SO-101 joint set")
     ids: set[int] = set()
@@ -40,18 +38,12 @@ def validate_calibration_file(path: Path) -> dict[str, dict[str, int]]:
             raise CalibrationError(f"Calibration entry is invalid: {joint}")
         motor_id = values["id"]
         if motor_id in ids or motor_id not in range(1, 7):
-            raise CalibrationError(
-                "Calibration motor IDs must be unique values 1 through 6"
-            )
+            raise CalibrationError("Calibration motor IDs must be unique values 1 through 6")
         ids.add(motor_id)
         if values["drive_mode"] not in (0, 1):
             raise CalibrationError("Calibration drive mode must be 0 or 1")
         if not (0 <= values["range_min"] < values["range_max"] <= 4095):
-            raise CalibrationError(
-                "Calibration ranges must be ordered within 0 through 4095"
-            )
+            raise CalibrationError("Calibration ranges must be ordered within 0 through 4095")
         if not (-4095 <= values["homing_offset"] <= 4095):
-            raise CalibrationError(
-                "Calibration homing offset is outside the supported range"
-            )
+            raise CalibrationError("Calibration homing offset is outside the supported range")
     return payload

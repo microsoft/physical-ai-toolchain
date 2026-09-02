@@ -113,16 +113,12 @@ class ArmResource:
         self.verify_identity()
         self.arm.bus.disable_torque(num_retry=5)
         if not self.arm.is_calibrated:
-            raise ResourceSafetyError(
-                f"{self.name} motor calibration does not match the profile"
-            )
+            raise ResourceSafetyError(f"{self.name} motor calibration does not match the profile")
         self.configure_torque_off(self.arm.bus)
         self.arm.bus.disable_torque(num_retry=5)
         torque = self.arm.bus.sync_read("Torque_Enable")
         if not self._torque_map_matches(torque, expected_value=0):
-            raise ResourceSafetyError(
-                f"{self.name} failed to verify torque off after configuration"
-            )
+            raise ResourceSafetyError(f"{self.name} failed to verify torque off after configuration")
         self.torque_verified_off = True
         if self.motion_capable:
             positions = self.arm.bus.sync_read("Present_Position")
@@ -134,9 +130,7 @@ class ArmResource:
         self.arm.bus.enable_torque()
         torque = self.arm.bus.sync_read("Torque_Enable")
         if not self._torque_map_matches(torque, expected_value=1):
-            raise ResourceSafetyError(
-                f"{self.name} failed to verify torque enable on every motor"
-            )
+            raise ResourceSafetyError(f"{self.name} failed to verify torque enable on every motor")
         self._motion_enabled = True
         self.torque_verified_off = False
 
@@ -163,14 +157,9 @@ class ArmResource:
         if errors:
             raise ResourceSafetyError("; ".join(errors))
 
-    def _torque_map_matches(
-        self, torque: dict[str, Any], *, expected_value: int
-    ) -> bool:
+    def _torque_map_matches(self, torque: dict[str, Any], *, expected_value: int) -> bool:
         if not torque:
             return False
-        if (
-            self.expected_motor_names is not None
-            and set(torque) != self.expected_motor_names
-        ):
+        if self.expected_motor_names is not None and set(torque) != self.expected_motor_names:
             return False
         return all(int(value) == expected_value for value in torque.values())

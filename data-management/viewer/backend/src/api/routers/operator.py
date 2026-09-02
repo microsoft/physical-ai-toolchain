@@ -31,9 +31,7 @@ from ..services.operator_service import (
     OperatorService,
 )
 
-router = APIRouter(
-    dependencies=[Depends(require_csrf_token), Depends(require_operator_access)]
-)
+router = APIRouter(dependencies=[Depends(require_csrf_token), Depends(require_operator_access)])
 
 
 def get_operator_service(request: Request) -> OperatorService:
@@ -46,16 +44,11 @@ def get_operator_service(request: Request) -> OperatorService:
 
 def get_preflight_service(request: Request) -> OperatorPreflightService:
     operator_service = getattr(request.app.state, "operator_service", None)
-    if (
-        operator_service is None
-        or not operator_service.capabilities().preflight_enabled
-    ):
+    if operator_service is None or not operator_service.capabilities().preflight_enabled:
         raise HTTPException(status_code=409, detail="Operator preflight is disabled")
     service = getattr(request.app.state, "operator_preflight_service", None)
     if service is None:
-        raise HTTPException(
-            status_code=503, detail="Operator preflight service is unavailable"
-        )
+        raise HTTPException(status_code=503, detail="Operator preflight service is unavailable")
     return service
 
 
@@ -87,9 +80,7 @@ async def get_camera_frame(
     except KeyError as error:
         raise HTTPException(status_code=404, detail="Operator camera not found") from error
     except LookupError as error:
-        raise HTTPException(
-            status_code=404, detail="Operator camera frame unavailable"
-        ) from error
+        raise HTTPException(status_code=404, detail="Operator camera frame unavailable") from error
     return Response(
         content=frame.jpeg,
         media_type="image/jpeg",
@@ -112,16 +103,12 @@ async def stream_events(
     async def event_source():
         async for event_type, snapshot in service.events(last_event_id, once=once):
             event_id = f"{snapshot.service_instance_id}:{snapshot.revision}"
-            yield (
-                f"id: {event_id}\nevent: {event_type}\ndata: {snapshot.model_dump_json()}\n\n"
-            )
+            yield (f"id: {event_id}\nevent: {event_type}\ndata: {snapshot.model_dump_json()}\n\n")
 
     return StreamingResponse(event_source(), media_type="text/event-stream")
 
 
-@router.post(
-    "/preflights", response_model=PreflightResult, status_code=status.HTTP_202_ACCEPTED
-)
+@router.post("/preflights", response_model=PreflightResult, status_code=status.HTTP_202_ACCEPTED)
 async def create_preflight(
     request: PreflightRequest,
     _hardware_access: None = Depends(require_hardware_access),
@@ -133,9 +120,7 @@ async def create_preflight(
     except OperatorPreflightConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except OperatorPreflightNotFoundError as error:
-        raise HTTPException(
-            status_code=404, detail="Operator profile not found"
-        ) from error
+        raise HTTPException(status_code=404, detail="Operator profile not found") from error
 
 
 @router.get("/preflights/{preflight_id}", response_model=PreflightResult)
@@ -166,9 +151,7 @@ async def cancel_preflight(
         raise HTTPException(status_code=404, detail="Preflight not found") from error
 
 
-@router.post(
-    "/sessions", response_model=OperatorStatus, status_code=status.HTTP_201_CREATED
-)
+@router.post("/sessions", response_model=OperatorStatus, status_code=status.HTTP_201_CREATED)
 async def start_session(
     request: StartSessionRequest,
     _hardware_access: None = Depends(require_hardware_access),

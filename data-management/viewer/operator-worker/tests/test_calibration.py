@@ -39,12 +39,8 @@ def test_valid_six_joint_calibration_passes(tmp_path: Path) -> None:
     assert tuple(result) == JOINTS
 
 
-@pytest.mark.parametrize(
-    "mutation", ["missing", "duplicate_id", "degenerate", "out_of_range"]
-)
-def test_invalid_calibration_fails_without_prompt(
-    tmp_path: Path, mutation: str
-) -> None:
+@pytest.mark.parametrize("mutation", ["missing", "duplicate_id", "degenerate", "out_of_range"])
+def test_invalid_calibration_fails_without_prompt(tmp_path: Path, mutation: str) -> None:
     payload = _calibration()
     if mutation == "missing":
         payload.pop("gripper")

@@ -22,8 +22,15 @@ from .protocol import (
 class SimulatedWorkerClient:
     """Executable subprocess client used by the Phase 1 simulator."""
 
-    def __init__(self, *, timeout_s: float, behavior: str = "normal") -> None:
+    def __init__(
+        self,
+        *,
+        timeout_s: float,
+        behavior: str = "normal",
+        startup_timeout_s: float | None = None,
+    ) -> None:
         self._timeout_s = timeout_s
+        self._startup_timeout_s = startup_timeout_s or timeout_s
         self._behavior = behavior
         self._process: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task[None] | None = None
@@ -73,7 +80,7 @@ class SimulatedWorkerClient:
         if self._ready is None:
             raise RuntimeError("worker readiness is unavailable")
         try:
-            await asyncio.wait_for(asyncio.shield(self._ready), timeout=self._timeout_s)
+            await asyncio.wait_for(asyncio.shield(self._ready), timeout=self._startup_timeout_s)
         except TimeoutError as error:
             raise RuntimeError("worker startup timed out") from error
 
@@ -100,9 +107,7 @@ class SimulatedWorkerClient:
         process = self._require_process()
         if process.stdin is None:
             raise RuntimeError("worker input is unavailable")
-        acknowledgement_future: asyncio.Future[WorkerAcknowledgement] = (
-            asyncio.get_running_loop().create_future()
-        )
+        acknowledgement_future: asyncio.Future[WorkerAcknowledgement] = asyncio.get_running_loop().create_future()
         self._pending[command_id] = acknowledgement_future
         message = WorkerCommand(
             session_id=session_id,
@@ -171,9 +176,7 @@ class SimulatedWorkerClient:
                     return
                 if isinstance(event, WorkerReady):
                     if event.mode is not self._mode:
-                        self._fail_waiters(
-                            RuntimeError("worker protocol mode mismatch")
-                        )
+                        self._fail_waiters(RuntimeError("worker protocol mode mismatch"))
                         return
                     if self._ready is not None and not self._ready.done():
                         self._ready.set_result(event)
@@ -186,13 +189,11 @@ class SimulatedWorkerClient:
                     if pending is not None and not pending.done():
                         pending.set_exception(RuntimeError(event.message))
         finally:
-            self._fail_waiters(
-                RuntimeError("worker exited before completing the request")
-            )
+            self._fail_waiters(RuntimeError("worker exited before completing the request"))
 
     async def _wait_launched(self) -> None:
         try:
-            await asyncio.wait_for(self._launched.wait(), timeout=self._timeout_s)
+            await asyncio.wait_for(self._launched.wait(), timeout=self._startup_timeout_s)
         except TimeoutError as error:
             raise RuntimeError("worker launch timed out") from error
 
@@ -203,9 +204,7 @@ class SimulatedWorkerClient:
             if not pending.done():
                 pending.set_exception(error)
 
-    def _require_process(
-        self, *, allow_exited: bool = False
-    ) -> asyncio.subprocess.Process:
+    def _require_process(self, *, allow_exited: bool = False) -> asyncio.subprocess.Process:
         process = self._process
         if process is None or (not allow_exited and process.returncode is not None):
             raise RuntimeError("worker is not running")

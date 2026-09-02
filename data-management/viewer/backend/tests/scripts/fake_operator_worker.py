@@ -16,10 +16,8 @@ def main() -> int:
         print(
             json.dumps(
                 {
-                    "cleanup_complete": os.environ.get("FAKE_RECOVERY", "true")
-                    == "true",
-                    "torque_verified_off": os.environ.get("FAKE_RECOVERY", "true")
-                    == "true",
+                    "cleanup_complete": os.environ.get("FAKE_RECOVERY", "true") == "true",
+                    "torque_verified_off": os.environ.get("FAKE_RECOVERY", "true") == "true",
                     "released": ["follower", "leader"],
                     "errors": [],
                 }
@@ -110,18 +108,12 @@ def main() -> int:
                     "sequence": worker_sequence,
                     "command_id": command["command_id"],
                     "action": command["action"],
-                    "dataset_id": initialize.get("settings", {}).get(
-                        "dataset_id", "demo"
-                    ),
+                    "dataset_id": initialize.get("settings", {}).get("dataset_id", "demo"),
                     "episode_index": episode_index,
                     "phase": (
                         "finalized"
                         if command["action"] == "finish"
-                        else (
-                            "paused"
-                            if command["action"] == "pause"
-                            else "recording"
-                        )
+                        else ("paused" if command["action"] == "pause" else "recording")
                     ),
                     "finalized": command["action"] == "finish",
                 }

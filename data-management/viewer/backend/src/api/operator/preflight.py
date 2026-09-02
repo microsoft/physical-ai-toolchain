@@ -25,9 +25,7 @@ class PreflightRun:
         self.checks = checks
         self.resource_fingerprint = resource_fingerprint
         self.ownership_complete = ownership_complete
-        self.start_eligible = all(
-            check.outcome is not PreflightCheckOutcome.BLOCKING for check in checks
-        )
+        self.start_eligible = all(check.outcome is not PreflightCheckOutcome.BLOCKING for check in checks)
 
 
 class OperatorPreflightRunner:
@@ -54,17 +52,11 @@ class OperatorPreflightRunner:
         self.sys_video_root = sys_video_root
         self.sys_usb_root = sys_usb_root
         self.proc_root = proc_root
-        self.free_bytes = free_bytes or (
-            lambda path: os.statvfs(path).f_bavail * os.statvfs(path).f_frsize
-        )
-        self.device_mode_check = device_mode_check or (
-            lambda path: stat.S_ISCHR(path.stat().st_mode)
-        )
+        self.free_bytes = free_bytes or (lambda path: os.statvfs(path).f_bavail * os.statvfs(path).f_frsize)
+        self.device_mode_check = device_mode_check or (lambda path: stat.S_ISCHR(path.stat().st_mode))
         self.access_check = access_check
         self.environ = environ if environ is not None else os.environ
-        self.credential_path = credential_path or (
-            Path.home() / ".cache/huggingface/token"
-        )
+        self.credential_path = credential_path or (Path.home() / ".cache/huggingface/token")
         self.policy_python = policy_python
         self.policy_checkpoint = policy_checkpoint
 
@@ -99,54 +91,38 @@ class OperatorPreflightRunner:
             ]
         )
         checks.append(ownership_check)
-        fingerprint = hashlib.sha256(
-            json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        fingerprint = hashlib.sha256(json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return PreflightRun(checks, fingerprint, ownership_complete)
 
     def _policy_runtime_check(self, evidence: dict[str, object]) -> PreflightCheck:
         python = self.policy_python
         checkpoint = self.policy_checkpoint
         if python is None or not python.is_file() or not os.access(python, os.X_OK):
-            return self._blocking(
-                "policy_runtime", "Configured GR00T Python executable is unavailable"
-            )
+            return self._blocking("policy_runtime", "Configured GR00T Python executable is unavailable")
         required = (
             "config.json",
             "model.safetensors",
             "policy_preprocessor.json",
             "policy_postprocessor.json",
         )
-        if checkpoint is None or any(
-            not (checkpoint / name).is_file() for name in required
-        ):
-            return self._blocking(
-                "policy_runtime", "Configured GR00T checkpoint is incomplete"
-            )
+        if checkpoint is None or any(not (checkpoint / name).is_file() for name in required):
+            return self._blocking("policy_runtime", "Configured GR00T checkpoint is incomplete")
         return PreflightCheck(
             name="policy_runtime",
             outcome=PreflightCheckOutcome.PASSED,
             detail="GR00T runtime and checkpoint verified",
         )
 
-    def _arm_check(
-        self, role: str, arm: ArmProfile, evidence: dict[str, object]
-    ) -> PreflightCheck:
+    def _arm_check(self, role: str, arm: ArmProfile, evidence: dict[str, object]) -> PreflightCheck:
         if not arm.port.is_symlink() or not arm.port.exists():
             return self._blocking(f"{role}_device", "Stable device link is missing")
         target = arm.port.resolve()
-        if not self.device_mode_check(target) or not self.access_check(
-            target, os.R_OK | os.W_OK
-        ):
-            return self._blocking(
-                f"{role}_device", "Device is not an accessible character device"
-            )
+        if not self.device_mode_check(target) or not self.access_check(target, os.R_OK | os.W_OK):
+            return self._blocking(f"{role}_device", "Device is not an accessible character device")
         identity = self._identity(self.sys_tty_root / target.name)
         expected = (arm.usb_vendor_id, arm.usb_product_id, arm.usb_serial)
         if identity != expected:
-            return self._blocking(
-                f"{role}_device", "USB identity does not match the profile"
-            )
+            return self._blocking(f"{role}_device", "USB identity does not match the profile")
         evidence[f"{role}_device"] = identity
         return PreflightCheck(
             name=f"{role}_device",
@@ -154,16 +130,12 @@ class OperatorPreflightRunner:
             detail="Stable USB identity verified",
         )
 
-    def _calibration_check(
-        self, role: str, arm: ArmProfile, evidence: dict[str, object]
-    ) -> PreflightCheck:
+    def _calibration_check(self, role: str, arm: ArmProfile, evidence: dict[str, object]) -> PreflightCheck:
         try:
             content = arm.calibration_file.read_bytes()
             payload = json.loads(content)
         except (OSError, json.JSONDecodeError):
-            return self._blocking(
-                f"{role}_calibration", "Calibration file is missing or malformed"
-            )
+            return self._blocking(f"{role}_calibration", "Calibration file is missing or malformed")
         expected = {
             "shoulder_pan",
             "shoulder_lift",
@@ -185,22 +157,16 @@ class OperatorPreflightRunner:
             detail="Six-joint calibration verified",
         )
 
-    def _wrist_check(
-        self, profile: OperatorProfile, evidence: dict[str, object]
-    ) -> PreflightCheck:
+    def _wrist_check(self, profile: OperatorProfile, evidence: dict[str, object]) -> PreflightCheck:
         camera = profile.wrist_camera
         if not camera.path.is_symlink() or not camera.path.exists():
             return self._blocking("wrist_camera", "Stable wrist camera path is missing")
         target = camera.path.resolve()
         if not self.device_mode_check(target) or not self.access_check(target, os.R_OK):
-            return self._blocking(
-                "wrist_camera", "Wrist camera is not an accessible character device"
-            )
+            return self._blocking("wrist_camera", "Wrist camera is not an accessible character device")
         identity = self._identity(self.sys_video_root / target.name)
         if identity[:2] != (camera.usb_vendor_id, camera.usb_product_id):
-            return self._blocking(
-                "wrist_camera", "Wrist camera identity does not match"
-            )
+            return self._blocking("wrist_camera", "Wrist camera identity does not match")
         evidence["wrist_camera"] = identity
         return PreflightCheck(
             name="wrist_camera",
@@ -208,9 +174,7 @@ class OperatorPreflightRunner:
             detail="Wrist camera identity verified",
         )
 
-    def _front_check(
-        self, profile: OperatorProfile, evidence: dict[str, object]
-    ) -> PreflightCheck:
+    def _front_check(self, profile: OperatorProfile, evidence: dict[str, object]) -> PreflightCheck:
         camera = profile.front_camera
         matches: set[str] = set()
         if self.sys_usb_root.is_dir():
@@ -228,8 +192,7 @@ class OperatorPreflightRunner:
                     {
                         identity[2]
                         for device in self.sys_usb_root.iterdir()
-                        if (identity := self._identity(device))[:2]
-                        == (camera.usb_vendor_id, camera.usb_product_id)
+                        if (identity := self._identity(device))[:2] == (camera.usb_vendor_id, camera.usb_product_id)
                     }
                 )
                 if self.sys_usb_root.is_dir()
@@ -251,21 +214,13 @@ class OperatorPreflightRunner:
             detail="Configured RealSense identity verified",
         )
 
-    def _storage_check(
-        self, profile: OperatorProfile, evidence: dict[str, object]
-    ) -> PreflightCheck:
+    def _storage_check(self, profile: OperatorProfile, evidence: dict[str, object]) -> PreflightCheck:
         root = self.data_root.resolve()
-        if not root.is_dir() or not self.access_check(
-            root, os.R_OK | os.W_OK | os.X_OK
-        ):
-            return self._blocking(
-                "dataset_storage", "Dataset root is not a writable directory"
-            )
+        if not root.is_dir() or not self.access_check(root, os.R_OK | os.W_OK | os.X_OK):
+            return self._blocking("dataset_storage", "Dataset root is not a writable directory")
         available = self.free_bytes(root)
         if available < profile.minimum_free_bytes:
-            return self._blocking(
-                "dataset_storage", "Dataset root has insufficient free space"
-            )
+            return self._blocking("dataset_storage", "Dataset root has insufficient free space")
         return PreflightCheck(
             name="dataset_storage",
             outcome=PreflightCheckOutcome.PASSED,
@@ -280,12 +235,9 @@ class OperatorPreflightRunner:
                 detail="Upload not requested",
             )
         if not self.environ.get("HF_TOKEN") and not (
-            self.credential_path.is_file()
-            and self.access_check(self.credential_path, os.R_OK)
+            self.credential_path.is_file() and self.access_check(self.credential_path, os.R_OK)
         ):
-            return self._blocking(
-                "upload_credentials", "Hugging Face credentials are unavailable"
-            )
+            return self._blocking("upload_credentials", "Hugging Face credentials are unavailable")
         return PreflightCheck(
             name="upload_credentials",
             outcome=PreflightCheckOutcome.PASSED,
@@ -344,11 +296,7 @@ class OperatorPreflightRunner:
         return (
             PreflightCheck(
                 name="device_ownership",
-                outcome=(
-                    PreflightCheckOutcome.PASSED
-                    if complete
-                    else PreflightCheckOutcome.WARNING
-                ),
+                outcome=(PreflightCheckOutcome.PASSED if complete else PreflightCheckOutcome.WARNING),
                 detail=(
                     "No visible external device holder"
                     if complete

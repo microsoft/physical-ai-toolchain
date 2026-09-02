@@ -91,11 +91,7 @@ _OVERRIDES = {
 
 def load_operator_profile(path: Path, *, environ: Mapping[str, str]) -> OperatorProfile:
     """Load a strict profile and apply only documented environment overrides."""
-    unknown = sorted(
-        key
-        for key in environ
-        if key.startswith("OPERATOR_SO101_") and key not in _OVERRIDES
-    )
+    unknown = sorted(key for key in environ if key.startswith("OPERATOR_SO101_") and key not in _OVERRIDES)
     if unknown:
         raise OperatorProfileError(f"Unknown OPERATOR_SO101 override: {unknown[0]}")
     try:
@@ -129,7 +125,5 @@ def load_operator_profile(path: Path, *, environ: Mapping[str, str]) -> Operator
     if len(set(profile.actuator_names)) != len(profile.actuator_names):
         raise OperatorProfileError("Operator actuator names must be unique")
     canonical = profile.model_dump(mode="json", exclude={"fingerprint"})
-    fingerprint = hashlib.sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return profile.model_copy(update={"fingerprint": fingerprint})

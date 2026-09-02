@@ -213,6 +213,4 @@ HardwareWorkerEvent = Annotated[
     | HardwareWorkerCommandAcknowledgement,
     Field(discriminator="type"),
 ]
-HARDWARE_WORKER_EVENT_ADAPTER: TypeAdapter[HardwareWorkerEvent] = TypeAdapter(
-    HardwareWorkerEvent
-)
+HARDWARE_WORKER_EVENT_ADAPTER: TypeAdapter[HardwareWorkerEvent] = TypeAdapter(HardwareWorkerEvent)

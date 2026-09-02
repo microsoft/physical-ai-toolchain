@@ -84,13 +84,9 @@ class SessionSettings(StrictModel):
     policy_checkpoint: Path | None = None
     policy_cuda_visible_devices: str | None = None
 
-    @field_validator(
-        "dataset_root", "policy_python", "policy_checkpoint", mode="before"
-    )
+    @field_validator("dataset_root", "policy_python", "policy_checkpoint", mode="before")
     @classmethod
-    def decode_optional_path(
-        cls, value: object, info: ValidationInfo
-    ) -> Path | str | None:
+    def decode_optional_path(cls, value: object, info: ValidationInfo) -> Path | str | None:
         if value is None:
             return None
         if not isinstance(value, (str, Path)):
@@ -115,6 +111,4 @@ class WorkerProfile(StrictModel):
 
     def computed_fingerprint(self) -> str:
         canonical = self.model_dump(mode="json", exclude={"fingerprint"})
-        return hashlib.sha256(
-            json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        return hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

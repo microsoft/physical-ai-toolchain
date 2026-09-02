@@ -39,9 +39,7 @@ def main() -> int:
     policy = GrootPolicy.from_pretrained(args.checkpoint, strict=False)
     policy.to("cuda").eval()
     policy.config.device = "cuda"
-    preprocessor, postprocessor = make_pre_post_processors(
-        policy.config, pretrained_path=str(args.checkpoint)
-    )
+    preprocessor, postprocessor = make_pre_post_processors(policy.config, pretrained_path=str(args.checkpoint))
     _emit({"type": "ready"})
     for line in sys.stdin:
         try:
@@ -49,9 +47,7 @@ def main() -> int:
             if request.get("type") != "predict":
                 raise ValueError("Unsupported GR00T request")
             batch = {
-                "observation.state": torch.tensor(
-                    [request["state"]], dtype=torch.float32
-                ),
+                "observation.state": torch.tensor([request["state"]], dtype=torch.float32),
                 "observation.images.wrist": _decode_image(request["images"]["wrist"]),
                 "observation.images.front": _decode_image(request["images"]["front"]),
                 "task": [request["task"]],

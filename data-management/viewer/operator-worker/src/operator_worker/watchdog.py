@@ -82,9 +82,7 @@ class WatchdogController:
         self.process.wait(timeout=5)
 
 
-def start_watchdog(
-    profile: WorkerProfile, *, backend_pid: int, lease_fd: int
-) -> WatchdogController:
+def start_watchdog(profile: WorkerProfile, *, backend_pid: int, lease_fd: int) -> WatchdogController:
     """Launch a lease-inheriting watchdog before hardware acquisition."""
     read_fd, write_fd = os.pipe()
     environment = {

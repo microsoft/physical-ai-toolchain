@@ -38,9 +38,7 @@ class SessionState(StrEnum):
     FAILED = "failed"
 
 
-OperatorAction = Literal[
-    "save", "rerecord", "pause", "resume", "finish", "cancel"
-]
+OperatorAction = Literal["save", "rerecord", "pause", "resume", "finish", "cancel"]
 SaveDestination = Literal["local", "local_and_hub"]
 
 
@@ -77,9 +75,7 @@ class OperatorSessionSettings(BaseModel):
     @model_validator(mode="after")
     def require_hub_repository(self) -> OperatorSessionSettings:
         if self.save_destination == "local_and_hub" and not self.hub_repo_id:
-            raise ValueError(
-                "hub_repo_id is required for local and Hugging Face storage"
-            )
+            raise ValueError("hub_repo_id is required for local and Hugging Face storage")
         return self
 
     @classmethod

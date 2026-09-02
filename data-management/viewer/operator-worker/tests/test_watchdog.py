@@ -33,16 +33,16 @@ def test_watchdog_disarms_without_recovery(tmp_path) -> None:
     os.close(write_fd)
     calls = []
     try:
-        assert watchdog_loop(
+        result = watchdog_loop(
             read_fd,
             backend_pid=os.getpid(),
             worker_pid=999_999,
             profile=_profile(tmp_path),
-            deenergize=lambda profile: calls.append(profile)
-            or CleanupReport(True, (), ()),
+            deenergize=lambda profile: calls.append(profile) or CleanupReport(True, (), ()),
         )
     finally:
         os.close(read_fd)
+    assert result
     assert calls == []
 
 
@@ -51,14 +51,14 @@ def test_watchdog_recovers_after_backend_and_worker_loss(tmp_path) -> None:
     os.close(write_fd)
     calls = []
     try:
-        assert watchdog_loop(
+        result = watchdog_loop(
             read_fd,
             backend_pid=999_998,
             worker_pid=999_999,
             profile=_profile(tmp_path),
-            deenergize=lambda profile: calls.append(profile)
-            or CleanupReport(True, ("follower", "leader"), ()),
+            deenergize=lambda profile: calls.append(profile) or CleanupReport(True, ("follower", "leader"), ()),
         )
     finally:
         os.close(read_fd)
+    assert result
     assert len(calls) == 1

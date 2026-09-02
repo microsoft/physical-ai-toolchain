@@ -38,16 +38,12 @@ class OperatorPreflightService:
     def create(self, request: PreflightRequest) -> PreflightResult:
         if previous := self._commands.get(request.command_id):
             if previous[0] != request:
-                raise OperatorPreflightConflictError(
-                    "command_id was already used with another payload"
-                )
+                raise OperatorPreflightConflictError("command_id was already used with another payload")
             return self.get(previous[1])
         profile = self.profiles.get(request.profile)
         if profile is None:
             raise OperatorPreflightNotFoundError(request.profile)
-        run = self.runner.run(
-            profile, mode=request.mode, upload_requested=request.upload_requested
-        )
+        run = self.runner.run(profile, mode=request.mode, upload_requested=request.upload_requested)
         created_at = self.now()
         result = PreflightResult(
             preflight_id=str(uuid4()),
@@ -71,10 +67,7 @@ class OperatorPreflightService:
         result = self._results.get(preflight_id)
         if result is None:
             raise OperatorPreflightNotFoundError(preflight_id)
-        if (
-            result.lifecycle is PreflightLifecycle.COMPLETED
-            and self.now() >= result.expires_at
-        ):
+        if result.lifecycle is PreflightLifecycle.COMPLETED and self.now() >= result.expires_at:
             result = result.model_copy(
                 update={
                     "lifecycle": PreflightLifecycle.EXPIRED,
@@ -87,17 +80,13 @@ class OperatorPreflightService:
     def cancel(self, preflight_id: str, *, command_id: str) -> PreflightResult:
         if previous := self._cancel_commands.get(command_id):
             if previous != preflight_id:
-                raise OperatorPreflightConflictError(
-                    "command_id was already used with another payload"
-                )
+                raise OperatorPreflightConflictError("command_id was already used with another payload")
             return self.get(preflight_id)
         result = self.get(preflight_id)
         if result.lifecycle is PreflightLifecycle.CANCELLED:
             self._cancel_commands[command_id] = preflight_id
             return result
-        result = result.model_copy(
-            update={"lifecycle": PreflightLifecycle.CANCELLED, "start_eligible": False}
-        )
+        result = result.model_copy(update={"lifecycle": PreflightLifecycle.CANCELLED, "start_eligible": False})
         self._results[preflight_id] = result
         self._cancel_commands[command_id] = preflight_id
         return result
@@ -105,16 +94,9 @@ class OperatorPreflightService:
     def consume(self, preflight_id: str) -> PreflightResult:
         """Atomically consume one current eligible preflight for session start."""
         result = self.get(preflight_id)
-        if (
-            result.lifecycle is not PreflightLifecycle.COMPLETED
-            or not result.start_eligible
-        ):
-            raise OperatorPreflightConflictError(
-                "Preflight is not eligible for consumption"
-            )
-        result = result.model_copy(
-            update={"lifecycle": PreflightLifecycle.CONSUMED, "start_eligible": False}
-        )
+        if result.lifecycle is not PreflightLifecycle.COMPLETED or not result.start_eligible:
+            raise OperatorPreflightConflictError("Preflight is not eligible for consumption")
+        result = result.model_copy(update={"lifecycle": PreflightLifecycle.CONSUMED, "start_eligible": False})
         self._results[preflight_id] = result
         return result
 
@@ -123,9 +105,7 @@ class OperatorPreflightService:
             oldest_id = next(iter(self._results))
             self._results.pop(oldest_id, None)
             self._commands = {
-                command_id: value
-                for command_id, value in self._commands.items()
-                if value[1] != oldest_id
+                command_id: value for command_id, value in self._commands.items() if value[1] != oldest_id
             }
             self._cancel_commands = {
                 command_id: preflight_id

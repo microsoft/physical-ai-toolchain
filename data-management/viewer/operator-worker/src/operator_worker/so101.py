@@ -106,9 +106,7 @@ class SO101Runtime:
             on_metrics=self.rate_callback,
             on_telemetry=self.telemetry_callback,
             extra_observation=self._read_camera_frames,
-            on_step=lambda observation, _raw, _sent: self._publish_previews(
-                observation
-            ),
+            on_step=lambda observation, _raw, _sent: self._publish_previews(observation),
         ).run()
 
     def record(self) -> None:
@@ -130,9 +128,7 @@ class SO101Runtime:
                 return
             observation_frame = build_dataset_frame(features, observation, OBS_STR)
             action_frame = build_dataset_frame(features, sent_action, ACTION)
-            session.add_frame(
-                {**observation_frame, **action_frame, "task": self.settings.task}
-            )
+            session.add_frame({**observation_frame, **action_frame, "task": self.settings.task})
             self._apply_recording_commands()
 
         TeleoperationLoop(
@@ -197,20 +193,13 @@ class SO101Runtime:
         dataset_released: tuple[str, ...] = ()
         if self.discard_requested:
             try:
-                if _discard_dataset(
-                    self.settings.dataset_root, self.settings.dataset_id
-                ):
+                if _discard_dataset(self.settings.dataset_root, self.settings.dataset_id):
                     dataset_released = ("dataset",)
             except Exception as error:
                 recording_errors.append(f"dataset discard failed: {error}")
-        torque_verified_off = (
-            self.leader_resource.torque_verified_off
-            and self.follower_resource.torque_verified_off
-        )
+        torque_verified_off = self.leader_resource.torque_verified_off and self.follower_resource.torque_verified_off
         return CleanupReport(
-            cleanup_complete=(
-                report.cleanup_complete and torque_verified_off and not recording_errors
-            ),
+            cleanup_complete=(report.cleanup_complete and torque_verified_off and not recording_errors),
             released=(*report.released, *dataset_released),
             errors=(*report.errors, *recording_errors),
             torque_verified_off=torque_verified_off,
@@ -251,9 +240,7 @@ class SO101Runtime:
             if frame is None:
                 continue
             bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            encoded, jpeg = cv2.imencode(
-                ".jpg", bgr_frame, [cv2.IMWRITE_JPEG_QUALITY, 70]
-            )
+            encoded, jpeg = cv2.imencode(".jpg", bgr_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
             if not encoded:
                 continue
             payload = jpeg.tobytes()
@@ -266,8 +253,7 @@ class SO101Runtime:
         session = self.recording_session
         if (
             self.discard_requested
-            or
-            session is None
+            or session is None
             or self.settings.save_destination != "local_and_hub"
             or session.phase != "finalized"
         ):
@@ -279,11 +265,7 @@ class SO101Runtime:
         return True, True, None
 
     def _initialize_recording(self) -> None:
-        if (
-            self.settings.dataset_root is None
-            or self.settings.dataset_id is None
-            or self.settings.repo_id is None
-        ):
+        if self.settings.dataset_root is None or self.settings.dataset_id is None or self.settings.repo_id is None:
             raise RuntimeError("Record mode requires a resolved local dataset path")
         from lerobot.datasets.lerobot_dataset import LeRobotDataset  # type: ignore[import-untyped]
         from lerobot.datasets.pipeline_features import (  # type: ignore[import-untyped]
@@ -308,16 +290,12 @@ class SO101Runtime:
         features = combine_feature_dicts(
             aggregate_pipeline_dataset_features(
                 pipeline=self.teleop_action_processor,
-                initial_features=create_initial_features(
-                    action=self.follower.action_features
-                ),
+                initial_features=create_initial_features(action=self.follower.action_features),
                 use_videos=True,
             ),
             aggregate_pipeline_dataset_features(
                 pipeline=self.observation_processor,
-                initial_features=create_initial_features(
-                    observation=observation_features
-                ),
+                initial_features=create_initial_features(observation=observation_features),
                 use_videos=True,
             ),
         )
@@ -480,9 +458,7 @@ def build_so101_runtime(
         ],
         cancel_requested=active_stop_event.is_set,
     )
-    teleop_action_processor, robot_action_processor, observation_processor = (
-        make_default_processors()
-    )
+    teleop_action_processor, robot_action_processor, observation_processor = make_default_processors()
     policy_client = next(
         (resource for resource in transaction._resources if isinstance(resource, GrootPolicyClient)),
         None,

@@ -43,11 +43,7 @@ async def require_operator_access(
     if user.get("auth_method") == "apikey":
         expected = os.environ.get("DATAVIEWER_OPERATOR_API_KEY", "")
         supplied = request.headers.get("X-Operator-API-Key", "")
-        if (
-            not expected
-            or not supplied
-            or not secrets.compare_digest(expected, supplied)
-        ):
+        if not expected or not supplied or not secrets.compare_digest(expected, supplied):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Operator API key required",
@@ -67,14 +63,9 @@ async def require_hardware_access(
     """Authorize a side-effect-free hardware readiness operation."""
     if os.environ.get("OPERATOR_ADAPTER_MODE", "disabled").lower() != "lerobot":
         return
-    auth_disabled = (
-        os.environ.get("DATAVIEWER_AUTH_DISABLED", "false").lower() == "true"
-    )
+    auth_disabled = os.environ.get("DATAVIEWER_AUTH_DISABLED", "false").lower() == "true"
     if auth_disabled:
-        allowed = (
-            os.environ.get("OPERATOR_ALLOW_UNAUTHENTICATED_LOOPBACK", "false").lower()
-            == "true"
-        )
+        allowed = os.environ.get("OPERATOR_ALLOW_UNAUTHENTICATED_LOOPBACK", "false").lower() == "true"
         server_host = request.scope.get("server", ("", 0))[0]
         client_host = request.scope.get("client", ("", 0))[0]
         host = request.headers.get("host", "")
@@ -93,36 +84,25 @@ async def require_hardware_access(
         return
 
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Hardware access denied"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hardware access denied")
     auth_method = user.get("auth_method")
     if auth_method == "apikey":
         expected = os.environ.get("DATAVIEWER_OPERATOR_API_KEY", "")
         general = os.environ.get("DATAVIEWER_API_KEY", "")
         supplied = request.headers.get("X-Operator-API-Key", "")
-        if (
-            not expected
-            or expected == general
-            or not secrets.compare_digest(expected, supplied)
-        ):
+        if not expected or expected == general or not secrets.compare_digest(expected, supplied):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Operator API key required",
             )
         return
-    if (
-        auth_method == "easy_auth"
-        and os.environ.get("OPERATOR_TRUST_EASY_AUTH", "false").lower() != "true"
-    ):
+    if auth_method == "easy_auth" and os.environ.get("OPERATOR_TRUST_EASY_AUTH", "false").lower() != "true":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Easy Auth is not trusted for hardware access",
         )
     if "Operator" not in _roles(user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Operator role required"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Operator role required")
 
 
 async def require_operator_csrf(request: Request) -> None:
@@ -133,11 +113,7 @@ async def require_operator_csrf(request: Request) -> None:
         return
     cookie_token = request.cookies.get(CSRF_COOKIE_NAME)
     header_token = request.headers.get(CSRF_HEADER_NAME)
-    if (
-        not cookie_token
-        or not header_token
-        or not secrets.compare_digest(cookie_token, header_token)
-    ):
+    if not cookie_token or not header_token or not secrets.compare_digest(cookie_token, header_token):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operator CSRF token missing or invalid",
