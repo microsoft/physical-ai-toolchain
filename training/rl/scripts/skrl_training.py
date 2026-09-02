@@ -30,6 +30,7 @@ from training.rl.scripts.skrl_mlflow_agent import create_mlflow_logging_wrapper
 from training.rl.simulation_shutdown import prepare_for_shutdown
 from training.stream import install_ansi_stripping
 from training.utils import AzureMLContext, set_env_defaults
+from training.utils.integrity import safe_load_skrl_checkpoint
 
 _LOGGER = logging.getLogger("isaaclab.skrl")
 
@@ -522,7 +523,8 @@ def _setup_agent_checkpoint(runner: Any, resume_path: str | None) -> None:
 
     if not resume_path:
         return
-    runner.agent.load(resume_path)
+
+    safe_load_skrl_checkpoint(resume_path, agent=runner.agent)
 
 
 def _apply_mlflow_logging(runner: Any, mlflow: Any | None) -> None:
