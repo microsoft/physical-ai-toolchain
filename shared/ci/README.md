@@ -82,11 +82,11 @@ The CPU depth is also the cheap baseline that runs on every PR, while the runtim
 >
 > Only the expensive runtime-image depth is path-gated, and those filters must fail open: when in doubt, run. Do not add an `if:` or path filter to `import-smoke`.
 
-### Install is `--no-deps`; the import is what catches drift
+### Install preserves the committed resolution
 
-The domain locks encode pyproject `override-dependencies`. Re-resolving at install time discards those overrides and fails (for example an `azure-storage-blob` pin conflict), so the smoke installs the exact committed lock with `--no-deps`. The consequence is deliberate: dependency resolution does not run at install, so a dependency or ABI skew installs cleanly and is caught only by the subsequent import.
+The domain locks encode pyproject `override-dependencies` and package sources. The IL runtime-image smoke uses frozen `uv sync`, matching its production entrypoints and preserving the explicit PyTorch CUDA index. The RL runtime-image smoke exports the lock and installs it with `--no-deps`, matching `training/rl/scripts/train.sh`. Both paths install the committed resolution rather than resolving dependencies again.
 
-The import step is therefore load-bearing, not a formality — dropping it would leave the gate green-while-broken for the ABI class. For the CPU depth, `--torch-backend cpu` redirects the lock's CUDA-pinned torch to CPU wheels, and the standalone `nvidia-*`/`cuda-*` wheels are stripped (CPU torch needs none, and they are multi-gigabyte).
+The import step is load-bearing: dependency or ABI skew can install cleanly and fail only when imported. For the CPU depth, the export removes the CUDA local-version suffix before `--torch-backend cpu` selects CPU wheels, and strips standalone `nvidia-*` and `cuda-*` packages.
 
 ### Per-domain runtime images and interpreters
 

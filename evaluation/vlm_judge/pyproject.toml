@@ -4,26 +4,26 @@ version = "0.1.0"
 description = "VLM-as-judge harness for robot manipulation episodes"
 requires-python = ">=3.12"
 dependencies = [
-    "av==15.1.0",
-    "pandas==3.0.3",
-    "Pillow==12.2.0",
-    "pyarrow==24.0.0",
+    "av==18.1.0",
+    "pandas==3.0.5",
+    "Pillow==12.3.0",
+    "pyarrow==25.0.1",
 ]
 
 [project.optional-dependencies]
 api = [
-    "fastapi==0.138.0",
+    "fastapi==0.141.1",
     "pydantic==2.13.4",
-    "uvicorn[standard]==0.49.0",
+    "uvicorn[standard]==0.52.4",
 ]
 openai = [
-    "openai==2.43.0",
+    "openai==3.3.1",
 ]
 qwen3-vl = [
-    "accelerate==1.13.0",
-    "torch==2.10.0",
-    "torchvision==0.25.0",
-    "transformers==5.12.1",
+    "accelerate==1.14.0",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    "transformers==5.15.1",
 ]
 
 [build-system]
@@ -36,3 +36,12 @@ package-dir = { "evaluation.vlm_judge" = "." }
 
 [tool.uv]
 prerelease = "allow"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }]
+torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }]

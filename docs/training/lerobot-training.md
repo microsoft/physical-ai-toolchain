@@ -3,7 +3,7 @@ sidebar_position: 5
 title: LeRobot Training
 description: Behavioral cloning training with ACT and Diffusion policies on Azure ML and OSMO platforms
 author: Microsoft Robotics-AI Team
-ms.date: 2026-07-14
+ms.date: 2026-09-02
 ms.topic: how-to
 keywords:
   - lerobot
@@ -297,15 +297,15 @@ Data assets and blob URLs can be combined. All sources are merged automatically 
 
 ## 🔒 Runtime Dependency Lockfile
 
-AzureML LeRobot jobs derive their runtime dependencies at build time from the committed `training/il/lerobot/uv.lock`, the single resolution source of truth. The entrypoints run `uv export --frozen --no-hashes --no-emit-project` and pipe the result into `uv pip install --no-deps`, so the lock — not a committed flat file — is the runtime contract. Regenerate the lock after any `training/il/lerobot/pyproject.toml` change:
+Azure ML and OSMO LeRobot jobs derive their runtime dependencies at build time from the committed `training/il/lerobot/uv.lock`, the single resolution source of truth. The entrypoints run `uv sync --active --frozen --no-config --no-install-project` against the LeRobot project, so the lock and its package-source mappings are the runtime contract. Regenerate the lock after any `training/il/lerobot/pyproject.toml` change:
 
 ```bash
 cd training/il/lerobot
 uv lock
 ```
 
-`[tool.uv] environments` constrains the universal lock to the AzureML CUDA target (`sys_platform == 'linux' and platform_machine == 'x86_64'`), so `uv export` emits a single-marker, runtime-flat requirement set without macOS-only wheels.
-The override-dependencies and `prerelease = "allow"` under `[tool.uv]` keep the resolution valid; for example, `lerobot==0.5.1` requires `torch<2.11`, so the lock pins the latest resolver-compatible Torch 2.10 series instead of the invalid Torch 2.12 output an unconstrained compile would produce.
+`[tool.uv] environments` constrains the universal lock to the AzureML and OSMO Linux x86_64 target. The frozen lock resolves Torch 2.11 with Torchvision 0.26 from the official CUDA 12.8 index and preserves that package source during runtime installation.
+The `override-dependencies` and `prerelease = "allow"` settings under `[tool.uv]` keep the remaining Azure ML and LeRobot dependency exceptions explicit and reproducible.
 
 Some pins are corrections, not regressions: `av<16` and `cmake<4.2` come from LeRobot's declared constraints. Dependabot regenerates `uv.lock` natively, and the read-only `uv lock --check` CI gate fails any PR whose lock drifts from `pyproject.toml`.
 

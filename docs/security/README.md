@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Security Documentation
 description: Index of security documentation including threat model and deployment security guide
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-18
+ms.date: 2026-09-02
 ms.topic: overview
 keywords:
   - security
@@ -66,7 +66,7 @@ Run `scripts/update-chart-hashes.sh` locally whenever a pinned Helm chart versio
 
 `Test-DependencyPinning.ps1 -Apply` rewrites tag-pinned GitHub Actions references with their resolved commit SHAs in place; run it manually to remediate pinning findings.
 
-`Test-DependencyPinning.ps1` also flags unpinned inline `pip install` / `uv pip install` commands embedded in workflow YAML and shell scripts, scanned under the `shell-inline-pip` type. A compliant install uses an exact `==` pin, a lockfile (`-r`/`--requirement`, or a `uv export | uv pip install` pipe), or an editable local project (`-e .`). To exempt an intentional non-pin, add a `# pinning-ignore` comment on the install line:
+`Test-DependencyPinning.ps1` also flags unpinned inline `pip install` / `uv pip install` commands embedded in workflow YAML and shell scripts, scanned under the `shell-inline-pip` type. A compliant install uses an exact `==` pin, a lockfile (`-r`/`--requirement`, a `uv export | uv pip install` pipe, or frozen `uv sync`), or an editable local project (`-e .`). To exempt an intentional non-pin, add a `# pinning-ignore` comment on the install line:
 
 ```bash
 uv pip install "numpy>=1.26,<2.0"  # pinning-ignore

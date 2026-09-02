@@ -46,8 +46,8 @@ source /opt/lerobot-venv/bin/activate
 # Unpack training scripts delivered via the OSMO url: input. The code
 # archive arrives as a downloaded object under the input mount rather
 # than an env var: a single env string is capped at 128 KiB
-# (MAX_ARG_STRLEN) and the archive (which ships the lerobot uv.lock
-# for `uv export`) exceeds that, failing the container execve E2BIG.
+# (MAX_ARG_STRLEN) and the archive (which ships the LeRobot project and
+# lock for frozen synchronization) exceeds that, failing execve with E2BIG.
 PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
 mkdir -p "${PAYLOAD_ROOT}"
 ARCHIVE_PATH="$(find "${OSMO_INPUT_0}" -maxdepth 2 -name '*.zip' | head -n1)"
@@ -72,14 +72,13 @@ else
   echo "Data Source: HuggingFace Hub"
 fi
 
-# Install runtime dependencies from a build-time export of the lock
+# Install runtime dependencies directly from the frozen lock.
 LEROBOT_PROJECT="${PAYLOAD_ROOT}/training/il/lerobot"
 if [[ ! -f "${LEROBOT_PROJECT}/uv.lock" ]]; then
   echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT}/uv.lock" >&2
   exit 1
 fi
-uv export --frozen --no-hashes --no-emit-project --project "${LEROBOT_PROJECT}" \
-  | uv pip install --no-cache-dir --no-deps -r -
+uv sync --active --frozen --no-config --no-install-project --project "${LEROBOT_PROJECT}"
 
 # Build training command arguments
 TRAIN_ARGS=(

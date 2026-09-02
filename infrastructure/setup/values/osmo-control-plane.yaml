@@ -203,9 +203,9 @@ services:
     resources:
       requests:
         cpu: "100m"
-        memory: "256Mi"
+        memory: "512Mi"
       limits:
-        memory: "1Gi"
+        memory: "4Gi"
 
   # UI service configuration
   ui:

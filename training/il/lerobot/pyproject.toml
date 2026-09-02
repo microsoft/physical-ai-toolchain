@@ -3,14 +3,13 @@ name = "robotics-training-il"
 version = "0.1.0"
 description = "LeRobot workflow runtime dependencies"
 requires-python = ">=3.12"
-# Direct dependencies for the AzureML LeRobot training entrypoint. All versions
-# are pinned exactly because runtime consumers install with `uv pip install
-# --no-deps` from a build-time export of uv.lock; pip's resolver does NOT run in
-# the container. Regenerate the lock after any change here:
+# Direct dependencies for the Azure ML and OSMO LeRobot runtime entrypoints.
+# Consumers install directly from the frozen lock, preserving this resolution
+# and its per-package indexes. Regenerate the lock after any change here:
 #   cd training/il/lerobot
 #   uv lock
 dependencies = [
-    "numpy==2.4.6",
+    "numpy==2.5.2",
     "azure-core==1.41.0",
     "azure-storage-blob==12.30.0",
     "azure-identity==1.25.3",
@@ -24,42 +23,44 @@ dependencies = [
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
-    "mlflow-skinny==3.14.0",
-    "packaging==26.2",
+    "mlflow-skinny==3.15.2",
+    "packaging==26.3",
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
     "pydantic==2.13.4",
-    "sentry-sdk==2.66.1",
+    "sentry-sdk==2.68.1",
+    "hf-xet==1.6.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "datasets==5.0.0",
-    "pyarrow==25.0.0",
+    "datasets==5.0.1",
+    "pyarrow==25.0.1",
     "matplotlib==3.11.1",
-    "huggingface-hub==1.25.1",
+    "huggingface-hub==1.28.0",
     # The `dataset` extra pulls the video/dataset stack LeRobot loads eagerly at
     # import (`av`, `jsonlines`, `pandas`); without it `lerobot-train` aborts with
-    # ImportError: 'av' is required. Runtime installs use `--no-deps`, so the extra
-    # must be declared here to enter the lock and the build-time export.
-    "lerobot[dataset]==0.6.0",
+    # ImportError: 'av' is required.
+    "lerobot[dataset]==0.6.1",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.14.0",
-    "torchcodec==0.15.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "torchcodec==0.16.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
-    "gitpython==3.1.57",
+    "gitpython==3.1.60",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
-    # Pin cryptography to 49.0.0, the current release (Dependabot-tracked in the
-    # lerobot-dependencies group). 48.0.1 is the security floor: wheels below it
-    # bundle a vulnerable OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive
-    # via azure-identity, msal, pyjwt, google-auth, and the azure-storage clients.
-    # azureml-mlflow caps cryptography < 49.0.0, so 49.0.0 is also overridden below.
-    "cryptography==50.0.0",
+    # Pin cryptography to 50.0.1 (Dependabot-tracked in the lerobot-dependencies
+    # group). 48.0.1 is the security floor: wheels below it bundle a vulnerable
+    # OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive via azure-identity,
+    # msal, pyjwt, google-auth, and the azure-storage clients. azureml-mlflow caps
+    # cryptography < 49.0.0, so the 50.0.1 pin is also overridden below.
+    "cryptography==50.0.1",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
-    "wrapt==2.2.2",
+    "wrapt==2.3.0",
 ]
 
 [build-system]
@@ -68,8 +69,7 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 # Constrain the universal lock to the AzureML/OSMO deployment target so the
-# resolution yields a single marker per package, suitable for `--no-deps`
-# installs and a deterministic build-time `uv export`.
+# resolution remains specific to the runtime platform.
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 # Required for prerelease transitives pulled by the resolved tree, including
 # Azure/OpenTelemetry instrumentation betas, wrapt release candidates, and
@@ -83,32 +83,38 @@ prerelease = "allow"
 # appears in `dependencies` above, otherwise resolution drifts. Remove an
 # override only when the upstream constraint that required it is lifted.
 #
-# WARNING: the override list is tightly coupled to lerobot==0.6.0's and
+# WARNING: the override list is tightly coupled to lerobot==0.6.1's and
 # azureml-mlflow==1.62.0.post5's published constraints. When bumping either,
 # audit every entry against the new release's pyproject so we neither hide a
 # legitimate upper bound nor leave a stale override in place.
 override-dependencies = [
-    # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; we
-    # need 12.30.0 for the AzureCliCredential fix shipped in that release.
+    # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; mirror
+    # the direct 12.30.0 pin.
     "azure-storage-blob==12.30.0",
-    # cryptography: the direct pin (49.0.0) exceeds azureml-mlflow==1.62.0.post5's
-    # cryptography<49.0.0 cap, so resolution fails without this override. Force the
-    # direct pin to win; cryptography keeps a stable API, so running one major above
-    # azureml-mlflow's declared ceiling is safe.
-    "cryptography==50.0.0",
+    # cryptography: the direct 50.0.1 pin exceeds
+    # azureml-mlflow==1.62.0.post5's cryptography<49.0.0 cap; mirror it here.
+    "cryptography==50.0.1",
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mirror the
-    # direct pin to take 3.14.0.
-    "mlflow-skinny==3.14.0",
-    # packaging: lerobot==0.6.0 caps below 26.0 and azureml-mlflow caps below
+    # direct pin to take 3.15.2.
+    "mlflow-skinny==3.15.2",
+    # packaging: lerobot==0.6.1 caps below 26.0 and azureml-mlflow caps below
     # 26.x; mirror the direct pin.
-    "packaging==26.2",
-    # numpy: lerobot==0.6.0 caps below 2.3.0; we need 2.4.6 to align with torchcodec.
-    "numpy==2.4.6",
-    # torchcodec: lerobot==0.6.0 caps below 0.12.0; 0.14.0 ships the manylinux
-    # 2.28 wheel needed by the AzureML CUDA container.
-    "torchcodec==0.15.0",
-    # datasets: lerobot==0.6.0 caps below 5.0.0; 5.0.0 is needed for Parquet
-    # performance improvements and compatibility with newer pyarrow.
-    "datasets==5.0.0",
+    "packaging==26.3",
+    # numpy: lerobot==0.6.1 caps below 2.3.0; mirror the direct 2.5.2 pin.
+    "numpy==2.5.2",
+    # torchcodec: lerobot==0.6.1 caps below 0.12.0; 0.16.0 provides a CPython
+    # 3.12 manylinux_2_28 x86_64 wheel for the target platform.
+    "torchcodec==0.16.0",
+    # datasets: lerobot==0.6.1 caps below 5.0.0; 5.0.1 fixes CVE-2026-66007.
+    "datasets==5.0.1",
 ]
 package = false
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }

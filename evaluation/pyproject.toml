@@ -4,30 +4,33 @@ version = "0.1.0"
 description = "Evaluation workflow runtime dependencies"
 requires-python = ">=3.12"
 dependencies = [
+    # Held below 2.3 because lerobot==0.6.1 declares numpy<2.3.
     "numpy==2.2.6",
     "azure-core==1.41.0",
     "azure-storage-blob==12.30.0",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.34.1",
     "marshmallow==3.26.2",
-    "mlflow==3.14.0",
+    "mlflow-skinny==3.15.2",
+    "matplotlib==3.11.1",
+    # Held below 26 because lerobot==0.6.1 declares packaging<26.
     "packaging==25.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
     "onnx==1.22.0",
     "onnxscript==0.7.1",
-    "onnxruntime-gpu==1.28.0",
+    "onnxruntime-gpu==1.29.0",
     "toml==0.10.2",
     "gymnasium==1.3.0",
-    "torch==2.10.0",
-    "transformers==5.14.1",
-    "tensordict==0.13.0",
-    # lerobot 0.6.0 ships a minimal facade: the base install no longer bundles
-    # dataset dependencies. The SIL evaluation reads LeRobot dataset videos/parquet
-    # (av, pyarrow) and loads ACT checkpoints, so the [dataset] extra is required to
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    "transformers==5.15.1",
+    "tensordict==0.14.0",
+    # The SIL evaluation reads LeRobot dataset videos/parquet (av, pyarrow)
+    # and loads ACT checkpoints, so the [dataset] extra is required to
     # restore av, pyarrow, pandas, datasets, and torchcodec.
-    "lerobot[dataset]==0.6.0",
+    "lerobot[dataset]==0.6.1",
 ]
 
 [build-system]
@@ -35,7 +38,19 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
+environments = [
+    "sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'AMD64')",
+]
 package = false
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'AMD64')" }]
+torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'AMD64')" }]
 
 [tool.uv.pip]
 prerelease = "allow"
@@ -45,10 +60,10 @@ dev = [
     "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
-    "hypothesis==6.161.6",
+    "hypothesis==6.165.10",
     "matplotlib==3.11.1",
     "numpy==2.2.6",
-    "torch==2.10.0",
+    "torch==2.11.0",
 ]
 
 [tool.pytest.ini_options]
