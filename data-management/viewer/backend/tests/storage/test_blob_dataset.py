@@ -32,6 +32,12 @@ def _make_blob(name: str):
     return blob
 
 
+def _make_directory_blob(name: str):
+    blob = _make_blob(name)
+    blob.metadata = {"hdi_isfolder": "true"}
+    return blob
+
+
 def _build_provider(mock_client=None):
     from src.api.storage.blob_dataset import BlobDatasetProvider
 
@@ -544,7 +550,14 @@ class TestSyncDatasetToLocal(TestCase):
             "org/repo/extra/episode_0.hdf5",  # skipped
         ]
         mock_container = MagicMock()
-        mock_container.list_blobs.return_value = _AsyncIter(_make_blob(n) for n in names)
+        mock_container.list_blobs.return_value = _AsyncIter(
+            [
+                _make_directory_blob("org/repo/data"),
+                _make_directory_blob("org/repo/data/chunk-000"),
+                _make_blob("org/repo/.cache/huggingface/download.lock"),
+                *(_make_blob(name) for name in names),
+            ]
+        )
         mock_client = MagicMock()
         mock_client.get_container_client.return_value = mock_container
         provider = _build_provider(mock_client)
@@ -559,6 +572,7 @@ class TestSyncDatasetToLocal(TestCase):
             assert (local_dir / "meta" / "info.json").read_bytes() == b"data"
             assert (local_dir / "data" / "chunk-000" / "file-000.parquet").exists()
             assert not (local_dir / "videos").exists()
+            assert not (local_dir / ".cache").exists()
             assert read_mock.await_count == 2
 
     @patch("src.api.storage.blob_dataset.AZURE_AVAILABLE", True)
@@ -584,7 +598,12 @@ class TestSyncMetaOnly(TestCase):
             "org/repo/meta/something_else.json",  # filtered out
         ]
         mock_container = MagicMock()
-        mock_container.list_blobs.return_value = _AsyncIter(_make_blob(n) for n in names)
+        mock_container.list_blobs.return_value = _AsyncIter(
+            [
+                _make_directory_blob("org/repo/meta/episodes"),
+                *(_make_blob(name) for name in names),
+            ]
+        )
         mock_client = MagicMock()
         mock_client.get_container_client.return_value = mock_container
         provider = _build_provider(mock_client)

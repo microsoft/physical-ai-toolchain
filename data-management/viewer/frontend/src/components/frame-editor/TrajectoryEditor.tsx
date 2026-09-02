@@ -256,6 +256,26 @@ function ArmEditor({
  */
 export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
   const { currentFrame } = usePlaybackControls()
+  // Remount per episode+frame so the editor inputs always start from that frame's
+  // stored adjustment instead of retaining the previously edited frame's values.
+  const episodeKey = useEpisodeStore(
+    (state) => state.currentEpisode?.meta?.id ?? state.currentEpisode?.meta?.index,
+  )
+
+  return (
+    <TrajectoryEditorFrame
+      key={`${episodeKey}:${currentFrame}`}
+      className={className}
+      currentFrame={currentFrame}
+    />
+  )
+}
+
+interface TrajectoryEditorFrameProps extends TrajectoryEditorProps {
+  currentFrame: number
+}
+
+function TrajectoryEditorFrame({ className, currentFrame }: TrajectoryEditorFrameProps) {
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
   const {
     trajectoryAdjustments,
@@ -287,15 +307,6 @@ export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
   const [leftGripper, setLeftGripper] = useState<number | undefined>(
     currentAdjustment?.leftGripperOverride,
   )
-
-  // Sync local state when frame changes
-  useEffect(() => {
-    const adj = trajectoryAdjustments.get(currentFrame)
-    setRightArmDelta(adj?.rightArmDelta ?? [0, 0, 0])
-    setLeftArmDelta(adj?.leftArmDelta ?? [0, 0, 0])
-    setRightGripper(adj?.rightGripperOverride)
-    setLeftGripper(adj?.leftGripperOverride)
-  }, [currentFrame, trajectoryAdjustments])
 
   // Check if there are any changes
   const hasFrameChanges = useMemo(() => {
@@ -353,6 +364,15 @@ export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
     setLeftArmDelta([0, 0, 0])
     setLeftGripper(undefined)
   }, [])
+
+  // Clearing every stored adjustment must also drop this frame's pending edits.
+  const handleClearAll = useCallback(() => {
+    setRightArmDelta([0, 0, 0])
+    setLeftArmDelta([0, 0, 0])
+    setRightGripper(undefined)
+    setLeftGripper(undefined)
+    clearTrajectoryAdjustments()
+  }, [clearTrajectoryAdjustments])
 
   if (!currentPoint) {
     return (
@@ -429,12 +449,7 @@ export function TrajectoryEditor({ className }: TrajectoryEditorProps) {
 
       {/* Clear all adjustments */}
       {hasAnyAdjustments && (
-        <Button
-          variant="destructive"
-          size="sm"
-          onClick={clearTrajectoryAdjustments}
-          className="w-full"
-        >
+        <Button variant="destructive" size="sm" onClick={handleClearAll} className="w-full">
           <Trash2 className="mr-1 h-4 w-4" />
           Clear All Trajectory Adjustments ({trajectoryAdjustments.size})
         </Button>
