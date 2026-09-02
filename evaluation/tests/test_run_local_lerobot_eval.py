@@ -14,15 +14,21 @@ import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
+pyarrow = pytest.importorskip("pyarrow")
+av = pytest.importorskip("av")
 
 # Stub heavy / external deps before script import.
 if "pyarrow" not in sys.modules:
     _pa = types.ModuleType("pyarrow")
     _pq = types.ModuleType("pyarrow.parquet")
+    _pc = types.ModuleType("pyarrow.compute")
     _pq.read_table = MagicMock()
+    _pc.equal = MagicMock()
     _pa.parquet = _pq
+    _pa.compute = _pc
     sys.modules["pyarrow"] = _pa
     sys.modules["pyarrow.parquet"] = _pq
+    sys.modules["pyarrow.compute"] = _pc
 
 if "av" not in sys.modules:
     sys.modules["av"] = types.ModuleType("av")
@@ -81,25 +87,29 @@ def _make_args(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
-def _patch_av(monkeypatch: pytest.MonkeyPatch, frames: list[np.ndarray]) -> None:
+def _patch_av(monkeypatch: pytest.MonkeyPatch, frames: list[np.ndarray], *, fps: float = 1.0) -> None:
     av_mod = types.ModuleType("av")
 
     class _Frame:
-        def __init__(self, arr):
+        def __init__(self, arr, time):
             self._arr = arr
+            self.time = time
 
         def to_ndarray(self, format="rgb24"):
             return self._arr
 
     class _Stream:
-        pass
+        time_base = 0.001
 
     class _Container:
         def __init__(self):
             self.streams = SimpleNamespace(video=[_Stream()])
 
+        def seek(self, _offset, stream=None, backward=True):
+            pass
+
         def decode(self, _stream):
-            return [_Frame(f) for f in frames]
+            return [_Frame(f, i / fps) for i, f in enumerate(frames)]
 
         def close(self):
             pass
@@ -171,9 +181,9 @@ def _setup_run_evaluation(
     table.__getitem__ = lambda self, col: _getitem(col)
     monkeypatch.setattr(_mod.pq, "read_table", lambda _path: table)
 
-    # Stub video decoding.
+    # Stub video decoding; run_evaluation passes the episode timestamp window.
     frames = [np.zeros((96, 96, 3), dtype=np.uint8) for _ in range(n_frames)]
-    monkeypatch.setattr(_mod, "load_video_frames", lambda _p: frames)
+    monkeypatch.setattr(_mod, "load_video_frames", lambda _p, *_a, **_k: frames)
 
     # Stub policy loader.
     policy = MagicMock()
@@ -221,6 +231,36 @@ class TestResolveDevice:
 
 
 class TestFindDataFile:
+    def test_metadata_template_resolves_shared_file(self, tmp_path: Path) -> None:
+        shared_file = tmp_path / "data" / "chunk-002" / "file-003.parquet"
+        shared_file.parent.mkdir(parents=True)
+        shared_file.touch()
+
+        result = _mod.find_data_file(
+            str(tmp_path),
+            7,
+            {"data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet"},
+            {"data/chunk_index": 2, "data/file_index": 3},
+        )
+
+        assert result == str(shared_file)
+
+    @pytest.mark.parametrize("path_kind", ["absolute", "traversal"])
+    def test_metadata_template_rejects_paths_outside_dataset(self, tmp_path: Path, path_kind: str) -> None:
+        outside_file = tmp_path.parent / "outside.parquet"
+        outside_file.touch()
+        (tmp_path / "data").mkdir()
+        data_path = str(outside_file) if path_kind == "absolute" else "data/../../outside.parquet"
+
+        result = _mod.find_data_file(
+            str(tmp_path),
+            0,
+            {"data_path": data_path},
+            {"data/chunk_index": 0, "data/file_index": 0},
+        )
+
+        assert result is None
+
     def test_first_candidate(self, tmp_path: Path) -> None:
         d = tmp_path / "data" / "chunk-000"
         d.mkdir(parents=True)
@@ -243,6 +283,38 @@ class TestFindDataFile:
 
 
 class TestFindVideoFile:
+    def test_metadata_template_resolves_shared_file(self, tmp_path: Path) -> None:
+        shared_file = tmp_path / "videos" / "cam" / "chunk-002" / "file-003.mp4"
+        shared_file.parent.mkdir(parents=True)
+        shared_file.touch()
+
+        result = _mod.find_video_file(
+            str(tmp_path),
+            "cam",
+            7,
+            {"video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4"},
+            {"videos/cam/chunk_index": 2, "videos/cam/file_index": 3},
+        )
+
+        assert result == str(shared_file)
+
+    @pytest.mark.parametrize("path_kind", ["absolute", "traversal"])
+    def test_metadata_template_rejects_paths_outside_dataset(self, tmp_path: Path, path_kind: str) -> None:
+        outside_file = tmp_path.parent / "outside.mp4"
+        outside_file.touch()
+        (tmp_path / "videos" / "cam").mkdir(parents=True)
+        video_path = str(outside_file) if path_kind == "absolute" else "videos/{video_key}/../../../outside.mp4"
+
+        result = _mod.find_video_file(
+            str(tmp_path),
+            "cam",
+            0,
+            {"video_path": video_path},
+            {"videos/cam/chunk_index": 0, "videos/cam/file_index": 0},
+        )
+
+        assert result is None
+
     def test_first_candidate(self, tmp_path: Path) -> None:
         d = tmp_path / "videos" / "key" / "chunk-000"
         d.mkdir(parents=True)
@@ -260,6 +332,14 @@ class TestFindVideoFile:
     def test_no_candidate_returns_none(self, tmp_path: Path) -> None:
         assert _mod.find_video_file(str(tmp_path), "key", 0, {}) is None
 
+    @pytest.mark.parametrize("video_key", ["../../outside", "/tmp/outside"])
+    def test_legacy_fallback_rejects_unsafe_video_keys(self, tmp_path: Path, video_key: str) -> None:
+        outside_file = tmp_path.parent / "outside" / "chunk-000" / "episode_000000.mp4"
+        outside_file.parent.mkdir(parents=True, exist_ok=True)
+        outside_file.touch()
+
+        assert _mod.find_video_file(str(tmp_path), video_key, 0, {}) is None
+
 
 # ---------------- TestLoadVideoFrames ----------------
 
@@ -271,6 +351,125 @@ class TestLoadVideoFrames:
         result = _mod.load_video_frames("/tmp/x.mp4")
         assert len(result) == 2
         assert result[0].shape == (4, 4, 3)
+
+    def test_restricts_frames_to_episode_time_window(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        frames = [np.full((2, 2, 3), i, dtype=np.uint8) for i in range(4)]
+        _patch_av(monkeypatch, frames)
+
+        result = _mod.load_video_frames("/tmp/x.mp4", 1.0, 3.0)
+
+        assert [int(f[0, 0, 0]) for f in result] == [1, 2]
+
+
+class TestSharedFileLayoutIntegration:
+    @staticmethod
+    def _write_shared_dataset(tmp_path: Path, episode_indices: list[int]) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        info = _write_info(tmp_path, fps=2, action_dim=1, state_dim=1)
+        info["features"]["observation.images.cam"] = info["features"].pop("observation.images.color")
+        info.update(
+            {
+                "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+                "video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4",
+                "total_episodes": 2,
+            }
+        )
+        (tmp_path / "meta" / "info.json").write_text(json.dumps(info))
+        episodes_file = tmp_path / "meta" / "episodes" / "chunk-000" / "file-000.parquet"
+        episodes_file.parent.mkdir(parents=True)
+        episode_rows = {
+            "episode_index": [0, 1],
+            "data/chunk_index": [0, 0],
+            "data/file_index": [0, 0],
+            "videos/observation.images.cam/chunk_index": [0, 0],
+            "videos/observation.images.cam/file_index": [0, 0],
+            "videos/observation.images.cam/from_timestamp": [0.0, 1.0],
+            "videos/observation.images.cam/to_timestamp": [1.0, 2.0],
+        }
+        pq.write_table(pa.table(episode_rows), episodes_file)
+
+        data_file = tmp_path / "data" / "chunk-000" / "file-000.parquet"
+        data_file.parent.mkdir(parents=True)
+        timestamps = [index + offset for index in episode_indices for offset in (0.0, 0.5)]
+        pq.write_table(
+            pa.table(
+                {
+                    "episode_index": [index for index in episode_indices for _ in range(2)],
+                    "timestamp": timestamps,
+                    "observation.state": [[float(index)] for index in episode_indices for _ in range(2)],
+                    "action": [[float(index)] for index in episode_indices for _ in range(2)],
+                }
+            ),
+            data_file,
+        )
+
+        video_file = tmp_path / "videos" / "observation.images.cam" / "chunk-000" / "file-000.mp4"
+        video_file.parent.mkdir(parents=True)
+        container = av.open(str(video_file), mode="w")
+        stream = container.add_stream("mpeg4", rate=2)
+        stream.width = 8
+        stream.height = 8
+        stream.pix_fmt = "yuv420p"
+        for value in (0, 60, 120, 180):
+            frame = av.VideoFrame.from_ndarray(np.full((8, 8, 3), value, dtype=np.uint8), format="rgb24")
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+        container.close()
+
+    @staticmethod
+    def _patch_policy(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        policy = MagicMock()
+        policy.parameters.return_value = [torch.zeros(1)]
+        policy.select_action.return_value = torch.zeros(1, 1)
+        policy.to.return_value = policy
+        sys.modules["lerobot.policies.act.modeling_act"].ACTPolicy = SimpleNamespace(
+            from_pretrained=lambda _path, revision=None: policy
+        )
+        monkeypatch.setattr(_mod, "_load_normalizer_stats", lambda *_args: None)
+        return policy
+
+    def test_real_parquet_and_video_shared_file_layout(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        self._write_shared_dataset(tmp_path, [0, 1])
+        policy = self._patch_policy(monkeypatch)
+        output_dir = tmp_path / "out"
+
+        _mod.run_evaluation(_make_args(dataset_dir=str(tmp_path), output_dir=str(output_dir), episodes=2))
+
+        metadata = _mod.load_episode_metadata(str(tmp_path))
+        resolved_video = _mod.find_video_file(
+            str(tmp_path),
+            "observation.images.cam",
+            1,
+            json.loads((tmp_path / "meta" / "info.json").read_text()),
+            metadata[1],
+        )
+        frames = _mod.load_video_frames(
+            resolved_video,
+            metadata[1]["videos/observation.images.cam/from_timestamp"],
+            metadata[1]["videos/observation.images.cam/to_timestamp"],
+        )
+
+        assert np.load(output_dir / "ep000_predictions.npz")["ground_truth"].tolist() == [[0.0]]
+        assert np.load(output_dir / "ep001_predictions.npz")["ground_truth"].tolist() == [[1.0]]
+        assert len(frames) == 2
+        assert policy.select_action.call_count == 2
+
+    def test_shared_file_without_episode_rows_is_skipped(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        self._write_shared_dataset(tmp_path, [1])
+        policy = self._patch_policy(monkeypatch)
+        output_dir = tmp_path / "out"
+        load_video = MagicMock(side_effect=AssertionError("video must not be decoded for an empty episode"))
+        monkeypatch.setattr(_mod, "load_video_frames", load_video)
+
+        _mod.run_evaluation(_make_args(dataset_dir=str(tmp_path), output_dir=str(output_dir), episodes=1))
+
+        assert not (output_dir / "eval_results.json").exists()
+        load_video.assert_not_called()
+        policy.select_action.assert_not_called()
 
 
 # ---------------- TestDownloadAmlModel ----------------
