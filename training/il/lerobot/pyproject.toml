@@ -24,19 +24,19 @@ dependencies = [
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
-    "mlflow-skinny==3.14.0",
+    "mlflow-skinny==3.15.2",
     "packaging==26.2",
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
     "pydantic==2.13.4",
-    "sentry-sdk==2.66.1",
+    "sentry-sdk==2.68.1",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "datasets==5.0.0",
-    "pyarrow==25.0.0",
+    "datasets==5.0.1",
+    "pyarrow==25.0.1",
     "matplotlib==3.11.1",
-    "huggingface-hub==1.25.1",
+    "huggingface-hub==1.28.0",
     # `av-dep` rather than `dataset`: the dataset extra requires TorchCodec, which
     # publishes no SBSA CUDA 13 wheel. PyAV also keeps the decoder identical on
     # every target — lerobot.utils.import_utils.get_safe_default_video_backend()
@@ -55,7 +55,7 @@ dependencies = [
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.14.0",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny).
-    "gitpython==3.1.57",
+    "gitpython==3.1.60",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
     # Pin cryptography to 50.0.0, the current release (Dependabot-tracked in the
@@ -63,10 +63,10 @@ dependencies = [
     # bundle a vulnerable OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive
     # via azure-identity, msal, pyjwt, google-auth, and the azure-storage clients.
     # azureml-mlflow caps cryptography < 49.0.0, so 50.0.0 is also overridden below.
-    "cryptography==50.0.0",
+    "cryptography==50.0.1",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
-    "wrapt==2.2.2",
+    "wrapt==2.3.0",
 ]
 
 [build-system]
@@ -99,10 +99,10 @@ override-dependencies = [
     # cryptography: the direct pin (50.0.0) exceeds azureml-mlflow==1.62.0.post5's
     # cryptography<49.0.0 cap, so resolution fails without this override. Force the
     # direct pin to win; cryptography keeps a stable API across these releases.
-    "cryptography==50.0.0",
+    "cryptography==50.0.1",
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mirror the
     # direct pin to take 3.14.0.
-    "mlflow-skinny==3.14.0",
+    "mlflow-skinny==3.15.2",
     # packaging: lerobot==0.6.1 caps below 26.0 and azureml-mlflow caps below
     # 26.x; mirror the direct pin.
     "packaging==26.2",
@@ -110,7 +110,7 @@ override-dependencies = [
     "numpy==2.4.6",
     # datasets: lerobot==0.6.1 caps below 5.0.0; 5.0.0 is needed for Parquet
     # performance improvements and compatibility with newer pyarrow.
-    "datasets==5.0.0",
+    "datasets==5.0.1",
 ]
 package = false
 
