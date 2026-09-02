@@ -37,17 +37,23 @@ dependencies = [
     "pyarrow==25.0.1",
     "matplotlib==3.11.1",
     "huggingface-hub==1.28.0",
-    # The `dataset` extra pulls the video/dataset stack LeRobot loads eagerly at
-    # import (`av`, `jsonlines`, `pandas`); without it `lerobot-train` aborts with
-    # ImportError: 'av' is required.
-    "lerobot[dataset]==0.6.1",
-    "torch==2.11.0",
-    "torchvision==0.26.0",
+    # `av-dep` rather than `dataset`: the dataset extra requires TorchCodec, which
+    # publishes no SBSA CUDA 13 wheel. PyAV also keeps the decoder identical on
+    # every target — lerobot.utils.import_utils.get_safe_default_video_backend()
+    # selects TorchCodec whenever it is importable, so installing it on x86_64
+    # only would decode training and evaluation frames through different backends.
+    "lerobot[av-dep]==0.6.1",
+    # lerobot.datasets imports pandas and jsonlines eagerly, but both ship in the
+    # `dataset` extra we no longer select. Runtime installs use `--no-deps`, so
+    # they must be declared here to enter the lock and the build-time export.
+    "pandas==2.3.3",
+    "jsonlines==4.0.0",
+    "torch==2.11.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "torchvision==0.26.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.14.0",
-    "torchcodec==0.16.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
     "gitpython==3.1.60",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
@@ -68,8 +74,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# Constrain the universal lock to the AzureML/OSMO deployment target so the
-# resolution remains specific to the runtime platform.
+# Constrain the universal lock to the AzureML/OSMO deployment target.
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 # Required for prerelease transitives pulled by the resolved tree, including
 # Azure/OpenTelemetry instrumentation betas, wrapt release candidates, and
@@ -102,9 +107,6 @@ override-dependencies = [
     "packaging==26.3",
     # numpy: lerobot==0.6.1 caps below 2.3.0; mirror the direct 2.5.2 pin.
     "numpy==2.5.2",
-    # torchcodec: lerobot==0.6.1 caps below 0.12.0; 0.16.0 provides a CPython
-    # 3.12 manylinux_2_28 x86_64 wheel for the target platform.
-    "torchcodec==0.16.0",
     # datasets: lerobot==0.6.1 caps below 5.0.0; 5.0.1 fixes CVE-2026-66007.
     "datasets==5.0.1",
 ]
