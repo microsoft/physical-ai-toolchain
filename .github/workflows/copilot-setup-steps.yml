@@ -150,3 +150,10 @@ jobs:
               --dir .github/skills \
               --force
           done
+
+          tracking_instruction=".github/instructions/hve-core/copilot-tracking.instructions.md"
+          mkdir -p "$(dirname "$tracking_instruction")"
+          gh api \
+            "repos/microsoft/hve-core/contents/.github/instructions/hve-core/copilot-tracking.instructions.md?ref=$RPI_SKILLS_REF" \
+            --header "Accept: application/vnd.github.raw+json" \
+            > "$tracking_instruction"

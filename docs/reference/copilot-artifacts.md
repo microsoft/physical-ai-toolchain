@@ -29,6 +29,7 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 | Instruction | Commit Messages            | Conventional Commits format for all commit messages | `.github/instructions/commit-message.instructions.md`             |
 | Instruction | Dataviewer                 | Coding standards for dataviewer development         | `.github/instructions/dataviewer.instructions.md`                 |
 | Instruction | Docs Style and Conventions | Writing standards for all markdown files            | `.github/instructions/docs-style-and-conventions.instructions.md` |
+| Instruction | RPI Tracking               | Shared RPI working-artifact conventions             | `.github/instructions/hve-core/copilot-tracking.instructions.md`  |
 | Instruction | Shell Scripts              | Implementation standards for bash scripts           | `.github/instructions/shell-scripts.instructions.md`              |
 | Prompt      | `/chatlog`                 | Create and maintain conversation logs               | `.github/prompts/chatlog.prompt.md`                               |
 | Prompt      | `/check-training-status`   | Monitor OSMO training job progress                  | `.github/prompts/check-training-status.prompt.md`                 |
@@ -139,13 +140,9 @@ discovery (frontmatter only) → instructions (SKILL.md body) → resources
 
 ### rpi-* skill suite
 
-The cloud-agent setup workflow uses `gh skill install` to download eight
-explicit RPI skill paths from a pinned `microsoft/hve-core` commit into
-gitignored `.github/skills/rpi-*/` directories. Each skill is an immediate
-child of `.github/skills/`, as required for discovery. Local clones do not
-contain these skills unless the setup workflow has provisioned them. Each skill
-retains its upstream references and templates, and the GitHub CLI injects the
-source commit and tree metadata into its `SKILL.md` front matter.
+The cloud-agent setup workflow uses `gh skill install` to download eight explicit RPI skill paths from a pinned `microsoft/hve-core` commit into gitignored `.github/skills/rpi-*/` directories. It also downloads the shared `copilot-tracking.instructions.md` from the same commit into `.github/instructions/hve-core/`.
+
+Each skill is an immediate child of `.github/skills/`, as required for discovery. Local clones do not contain these runtime artifacts unless the setup workflow has provisioned them. Each skill retains its upstream references and templates, and the GitHub CLI injects the source commit and tree metadata into its `SKILL.md` front matter.
 
 | Skill               | Purpose                                             |
 |---------------------|-----------------------------------------------------|

@@ -158,6 +158,20 @@ Describe 'RPI bootstrap workflow contract' -Tag 'Contract' {
         $declaredSkills | Should -Be $script:RequiredRpiSkills
     }
 
+    It 'Downloads the shared tracking instruction from the reviewed commit' {
+        $script:RpiStep.run | Should -Match (
+            'tracking_instruction="\.github/instructions/hve-core/copilot-tracking\.instructions\.md"'
+        )
+        $script:RpiStep.run | Should -Match 'gh api'
+        $script:RpiStep.run | Should -Match (
+            'copilot-tracking\.instructions\.md\?ref=\$RPI_SKILLS_REF'
+        )
+        $script:RpiStep.run | Should -Match (
+            '--header "Accept: application/vnd\.github\.raw\+json"'
+        )
+        $script:RpiStep.run | Should -Match '> "\$tracking_instruction"'
+    }
+
     It 'Runs last and fails the setup workflow on installation errors' {
         $steps = @($script:CheckedInWorkflow.jobs.'copilot-setup-steps'.steps)
 
@@ -165,11 +179,19 @@ Describe 'RPI bootstrap workflow contract' -Tag 'Contract' {
         $script:RpiStep.PSObject.Properties.Name | Should -Not -Contain 'continue-on-error'
     }
 
-    It 'Keeps the generated skills gitignored and untracked' {
+    It 'Keeps the generated RPI artifacts ignored and untracked' {
         $gitignore = Get-Content -Path (Join-Path $script:RepoRoot '.gitignore') -Raw
-        $trackedFiles = @(git -C $script:RepoRoot ls-files -- '.github/skills/rpi-*')
+        $markdownlintConfig = Get-Content -Path (Join-Path $script:RepoRoot '.markdownlint-cli2.jsonc') -Raw
+        $cspellConfig = Get-Content -Path (Join-Path $script:RepoRoot '.cspell.json') -Raw
+        $trackingInstruction = '.github/instructions/hve-core/copilot-tracking.instructions.md'
+        $trackedFiles = @(git -C $script:RepoRoot ls-files -- '.github/skills/rpi-*' $trackingInstruction)
 
         $gitignore | Should -Match '(?m)^\.github/skills/rpi-\*/$'
+        $gitignore | Should -Match (
+            '(?m)^\.github/instructions/hve-core/copilot-tracking\.instructions\.md$'
+        )
+        $markdownlintConfig | Should -Match ([regex]::Escape($trackingInstruction))
+        $cspellConfig | Should -Match ([regex]::Escape($trackingInstruction))
         $trackedFiles | Should -BeNullOrEmpty
     }
 }
