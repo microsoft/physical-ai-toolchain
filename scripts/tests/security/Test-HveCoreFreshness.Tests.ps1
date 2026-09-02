@@ -139,26 +139,13 @@ Describe 'RPI bootstrap workflow contract' -Tag 'Contract' {
             Where-Object { $_.name -eq 'Bootstrap hve-core RPI skills' }
     }
 
-    It 'Pins every GitHub CLI installation to the reviewed commit' {
+    It 'Pins every RPI download to the reviewed commit' {
         $script:RpiStep | Should -HaveCount 1
         $script:RpiStep.env.RPI_SKILLS_REF | Should -Be $script:ResolvedRpiSha
         $script:RpiStep.run | Should -Match 'gh skill install microsoft/hve-core'
         $script:RpiStep.run | Should -Match '--pin "\$RPI_SKILLS_REF"'
         $script:RpiStep.run | Should -Match '--dir \.github/skills'
         $script:RpiStep.run | Should -Match '--force'
-    }
-
-    It 'Installs only the eight reviewed skill paths' {
-        foreach ($skill in $script:RequiredRpiSkills) {
-            $script:RpiStep.run | Should -Match ([regex]::Escape($skill))
-        }
-        $declaredSkills = @([regex]::Matches($script:RpiStep.run, '(?m)^\s+rpi-[a-z-]+$') |
-                ForEach-Object { $_.Value.Trim() })
-
-        $declaredSkills | Should -Be $script:RequiredRpiSkills
-    }
-
-    It 'Downloads the shared tracking instruction from the reviewed commit' {
         $script:RpiStep.run | Should -Match (
             'tracking_instruction="\.github/instructions/hve-core/copilot-tracking\.instructions\.md"'
         )
@@ -170,6 +157,16 @@ Describe 'RPI bootstrap workflow contract' -Tag 'Contract' {
             '--header "Accept: application/vnd\.github\.raw\+json"'
         )
         $script:RpiStep.run | Should -Match '> "\$tracking_instruction"'
+    }
+
+    It 'Installs only the eight reviewed skill paths' {
+        foreach ($skill in $script:RequiredRpiSkills) {
+            $script:RpiStep.run | Should -Match ([regex]::Escape($skill))
+        }
+        $declaredSkills = @([regex]::Matches($script:RpiStep.run, '(?m)^\s+rpi-[a-z-]+$') |
+                ForEach-Object { $_.Value.Trim() })
+
+        $declaredSkills | Should -Be $script:RequiredRpiSkills
     }
 
     It 'Runs last and fails the setup workflow on installation errors' {
@@ -184,7 +181,7 @@ Describe 'RPI bootstrap workflow contract' -Tag 'Contract' {
         $markdownlintConfig = Get-Content -Path (Join-Path $script:RepoRoot '.markdownlint-cli2.jsonc') -Raw
         $cspellConfig = Get-Content -Path (Join-Path $script:RepoRoot '.cspell.json') -Raw
         $trackingInstruction = '.github/instructions/hve-core/copilot-tracking.instructions.md'
-        $trackedFiles = @(git -C $script:RepoRoot ls-files -- '.github/skills/rpi-*' $trackingInstruction)
+        $trackedSkills = @(git -C $script:RepoRoot ls-files -- '.github/skills/rpi-*')
 
         $gitignore | Should -Match '(?m)^\.github/skills/rpi-\*/$'
         $gitignore | Should -Match (
@@ -192,7 +189,8 @@ Describe 'RPI bootstrap workflow contract' -Tag 'Contract' {
         )
         $markdownlintConfig | Should -Match ([regex]::Escape($trackingInstruction))
         $cspellConfig | Should -Match ([regex]::Escape($trackingInstruction))
-        $trackedFiles | Should -BeNullOrEmpty
+        $trackedSkills | Should -BeNullOrEmpty
+        Test-Path -Path (Join-Path $script:RepoRoot $trackingInstruction) | Should -BeFalse
     }
 }
 
