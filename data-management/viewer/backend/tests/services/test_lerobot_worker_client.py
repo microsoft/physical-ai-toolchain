@@ -20,7 +20,14 @@ _FAKE_WORKER = Path(__file__).parents[1] / "scripts/fake_operator_worker.py"
 
 
 @contextmanager
-def _client(*, behavior: str = "normal", on_preview=None) -> Iterator[LerobotWorkerClient]:
+def _client(
+    *,
+    behavior: str = "normal",
+    on_log=None,
+    on_preview=None,
+    on_rate=None,
+    on_telemetry=None,
+) -> Iterator[LerobotWorkerClient]:
     lease_fd = os.open("/dev/null", os.O_RDONLY)
     try:
         yield LerobotWorkerClient(
@@ -32,24 +39,42 @@ def _client(*, behavior: str = "normal", on_preview=None) -> Iterator[LerobotWor
             resource_fingerprint="resource",
             environment={"FAKE_WORKER_BEHAVIOR": behavior},
             lease_fd=lease_fd,
+            on_log=on_log,
             on_preview=on_preview,
+            on_rate=on_rate,
+            on_telemetry=on_telemetry,
         )
     finally:
         os.close(lease_fd)
 
 
 async def test_initialize_run_and_cleanup_sequence() -> None:
+    logs = []
     previews = []
-    with _client(on_preview=previews.append) as client:
+    rates = []
+    telemetry = []
+    with _client(
+        on_log=logs.append,
+        on_preview=previews.append,
+        on_rate=rates.append,
+        on_telemetry=telemetry.append,
+    ) as client:
         await client.launch("session-1", OperatorMode.TELEOPERATE)
         await client.wait_ready()
+        for _ in range(50):
+            if rates and telemetry:
+                break
+            await asyncio.sleep(0.01)
         acknowledgement = await client.command("session-1", "stop-1", "cancel")
 
         assert acknowledgement.cleanup_complete is True
         assert client.torque_verified_off is True
         assert "fake stderr" in client.stderr_text
+        assert logs == ["fake stderr"]
         assert previews[0].camera == "wrist"
         assert previews[0].jpeg_base64 == "anBlZw=="
+        assert rates[0].actual_hz == 29.5
+        assert telemetry[0].commanded == {"joint": 3.0}
         assert await client.wait() == 0
 
 
@@ -114,6 +139,25 @@ async def test_bad_protocol_version_fails_closed() -> None:
         await client.terminate()
 
 
+@pytest.mark.parametrize(
+    ("behavior", "message"),
+    [
+        ("bad_session", "session mismatch"),
+        ("bad_runtime", "runtime contract"),
+        ("bad_nonce", "nonce mismatch"),
+        ("torque_off", "confirm follower torque"),
+    ],
+)
+async def test_handshake_contract_failures_are_rejected(behavior: str, message: str) -> None:
+    with _client(behavior=behavior) as client:
+        await client.launch("session-1", OperatorMode.TELEOPERATE)
+
+        with pytest.raises(RuntimeError, match=message):
+            await client.wait_ready()
+
+        await client.terminate()
+
+
 async def test_environment_is_allowlisted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SHOULD_NOT_REACH_WORKER", "secret")
     with _client() as client:
@@ -129,6 +173,14 @@ async def test_environment_is_allowlisted(monkeypatch: pytest.MonkeyPatch) -> No
 async def test_recovery_worker_confirms_torque_off() -> None:
     with _client() as client:
         assert await client.recover() is True
+
+
+async def test_recovery_worker_rejects_unconfirmed_torque_off() -> None:
+    with _client() as client:
+        client.environment["FAKE_RECOVERY"] = "false"
+
+        assert await client.recover() is False
+        assert client.torque_verified_off is False
 
 
 async def test_startup_failure_accepts_unsolicited_confirmed_cleanup() -> None:

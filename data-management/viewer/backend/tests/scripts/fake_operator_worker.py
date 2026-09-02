@@ -31,8 +31,8 @@ def main() -> int:
         {
             "protocol_version": 999 if behavior == "bad_version" else 2,
             "type": "hello",
-            "session_id": session_id,
-            "worker_version": "0.1.0",
+            "session_id": "other-session" if behavior == "bad_session" else session_id,
+            "worker_version": "0.0.0" if behavior == "bad_runtime" else "0.1.0",
             "python_version": "3.12.3",
             "lerobot_version": "0.6.1",
             "pid": os.getpid(),
@@ -64,7 +64,7 @@ def main() -> int:
             "service_instance_id": initialize["service_instance_id"],
             "session_id": session_id,
             "sequence": 1,
-            "startup_nonce": initialize["startup_nonce"],
+            "startup_nonce": "wrong-nonce" if behavior == "bad_nonce" else initialize["startup_nonce"],
             "resources": {"follower": "acquired_torque_off"},
         }
     )
@@ -76,7 +76,7 @@ def main() -> int:
             "service_instance_id": run["service_instance_id"],
             "session_id": session_id,
             "sequence": 2,
-            "torque_enabled": True,
+            "torque_enabled": behavior != "torque_off",
         }
     )
     emit(
@@ -91,7 +91,35 @@ def main() -> int:
             "jpeg_base64": "anBlZw==",
         }
     )
-    worker_sequence = 3
+    emit(
+        {
+            "protocol_version": 2,
+            "type": "rate",
+            "service_instance_id": run["service_instance_id"],
+            "session_id": session_id,
+            "sequence": 4,
+            "target_hz": 30.0,
+            "actual_hz": 29.5,
+            "loop_p50_ms": 1.0,
+            "loop_p95_ms": 2.0,
+            "loop_max_ms": 3.0,
+            "overruns": 1,
+        }
+    )
+    emit(
+        {
+            "protocol_version": 2,
+            "type": "telemetry",
+            "service_instance_id": run["service_instance_id"],
+            "session_id": session_id,
+            "sequence": 5,
+            "elapsed_s": 1.0,
+            "leader": {"joint": 1.0},
+            "follower": {"joint": 2.0},
+            "commanded": {"joint": 3.0},
+        }
+    )
+    worker_sequence = 5
     episode_index = 0
     while command_line := sys.stdin.readline():
         command = json.loads(command_line)
