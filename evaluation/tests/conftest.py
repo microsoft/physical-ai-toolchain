@@ -2,23 +2,32 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 # Stub the cross-package training.rl.simulation_shutdown import used by sil.policy_evaluation
-# so test collection does not require the training package on PYTHONPATH.
+# while loading the lightweight checkpoint integrity module used by security tests.
 if "training" not in sys.modules:
+    integrity_path = Path(__file__).resolve().parents[2] / "training" / "utils" / "integrity.py"
+    integrity_spec = importlib.util.spec_from_file_location("training.utils.integrity", integrity_path)
+    if integrity_spec is None or integrity_spec.loader is None:
+        raise RuntimeError(f"Unable to load checkpoint integrity helpers from {integrity_path}")
+    integrity_module = importlib.util.module_from_spec(integrity_spec)
+    integrity_spec.loader.exec_module(integrity_module)
+
     _training = MagicMock()
     _training.rl = MagicMock()
     _training.rl.simulation_shutdown = MagicMock()
     _training.rl.simulation_shutdown.prepare_for_shutdown = MagicMock()
     _training.utils = MagicMock()
-    _training.utils.integrity = MagicMock()
+    _training.utils.integrity = integrity_module
     sys.modules["training"] = _training
     sys.modules["training.rl"] = _training.rl
     sys.modules["training.rl.simulation_shutdown"] = _training.rl.simulation_shutdown
     sys.modules["training.utils"] = _training.utils
-    sys.modules["training.utils.integrity"] = _training.utils.integrity
+    sys.modules["training.utils.integrity"] = integrity_module
 
 import numpy as np
 import pytest

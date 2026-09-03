@@ -37,26 +37,33 @@ dependencies = [
     "pyarrow==25.0.0",
     "matplotlib==3.11.1",
     "huggingface-hub==1.25.1",
-    # The `dataset` extra pulls the video/dataset stack LeRobot loads eagerly at
-    # import (`av`, `jsonlines`, `pandas`); without it `lerobot-train` aborts with
-    # ImportError: 'av' is required. Runtime installs use `--no-deps`, so the extra
-    # must be declared here to enter the lock and the build-time export.
-    "lerobot[dataset]==0.6.0",
+    # `av-dep` rather than `dataset`: the dataset extra requires TorchCodec, which
+    # publishes no SBSA CUDA 13 wheel. PyAV also keeps the decoder identical on
+    # every target — lerobot.utils.import_utils.get_safe_default_video_backend()
+    # selects TorchCodec whenever it is importable, so installing it on x86_64
+    # only would decode training and evaluation frames through different backends.
+    "lerobot[av-dep]==0.6.1",
+    # lerobot.datasets imports pandas and jsonlines eagerly, but both ship in the
+    # `dataset` extra we no longer select. Runtime installs use `--no-deps`, so
+    # they must be declared here to enter the lock and the build-time export.
+    "pandas==2.3.3",
+    "jsonlines==4.0.0",
+    "torch==2.10.0; platform_machine == 'aarch64' or platform_machine == 'arm64'",
+    "torchvision==0.25.0; platform_machine == 'aarch64' or platform_machine == 'arm64'",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.14.0",
-    "torchcodec==0.15.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
-    # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
+    # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny).
     "gitpython==3.1.57",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
-    # Pin cryptography to 49.0.0, the current release (Dependabot-tracked in the
+    # Pin cryptography to 50.0.0, the current release (Dependabot-tracked in the
     # lerobot-dependencies group). 48.0.1 is the security floor: wheels below it
     # bundle a vulnerable OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive
     # via azure-identity, msal, pyjwt, google-auth, and the azure-storage clients.
-    # azureml-mlflow caps cryptography < 49.0.0, so 49.0.0 is also overridden below.
-    "cryptography==49.0.0",
+    # azureml-mlflow caps cryptography < 49.0.0, so 50.0.0 is also overridden below.
+    "cryptography==50.0.0",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
     "wrapt==2.2.2",
@@ -67,10 +74,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# Constrain the universal lock to the AzureML/OSMO deployment target so the
-# resolution yields a single marker per package, suitable for `--no-deps`
-# installs and a deterministic build-time `uv export`.
-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# Resolve both the AzureML/OSMO x86_64 target and local NVIDIA Thor systems.
+environments = ["sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]
 # Required for prerelease transitives pulled by the resolved tree, including
 # Azure/OpenTelemetry instrumentation betas, wrapt release candidates, and
 # safetensors release candidates. `uv lock` reads prerelease from `[tool.uv]`
@@ -83,7 +88,7 @@ prerelease = "allow"
 # appears in `dependencies` above, otherwise resolution drifts. Remove an
 # override only when the upstream constraint that required it is lifted.
 #
-# WARNING: the override list is tightly coupled to lerobot==0.6.0's and
+# WARNING: the override list is tightly coupled to lerobot==0.6.1's and
 # azureml-mlflow==1.62.0.post5's published constraints. When bumping either,
 # audit every entry against the new release's pyproject so we neither hide a
 # legitimate upper bound nor leave a stale override in place.
@@ -91,24 +96,29 @@ override-dependencies = [
     # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; we
     # need 12.30.0 for the AzureCliCredential fix shipped in that release.
     "azure-storage-blob==12.30.0",
-    # cryptography: the direct pin (49.0.0) exceeds azureml-mlflow==1.62.0.post5's
+    # cryptography: the direct pin (50.0.0) exceeds azureml-mlflow==1.62.0.post5's
     # cryptography<49.0.0 cap, so resolution fails without this override. Force the
-    # direct pin to win; cryptography keeps a stable API, so running one major above
-    # azureml-mlflow's declared ceiling is safe.
-    "cryptography==49.0.0",
+    # direct pin to win; cryptography keeps a stable API across these releases.
+    "cryptography==50.0.0",
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mirror the
     # direct pin to take 3.14.0.
     "mlflow-skinny==3.14.0",
-    # packaging: lerobot==0.6.0 caps below 26.0 and azureml-mlflow caps below
+    # packaging: lerobot==0.6.1 caps below 26.0 and azureml-mlflow caps below
     # 26.x; mirror the direct pin.
     "packaging==26.2",
-    # numpy: lerobot==0.6.0 caps below 2.3.0; we need 2.4.6 to align with torchcodec.
+    # numpy: lerobot==0.6.1 caps below 2.3.0; retain 2.4.6 for the broader runtime stack.
     "numpy==2.4.6",
-    # torchcodec: lerobot==0.6.0 caps below 0.12.0; 0.14.0 ships the manylinux
-    # 2.28 wheel needed by the AzureML CUDA container.
-    "torchcodec==0.15.0",
-    # datasets: lerobot==0.6.0 caps below 5.0.0; 5.0.0 is needed for Parquet
+    # datasets: lerobot==0.6.1 caps below 5.0.0; 5.0.0 is needed for Parquet
     # performance improvements and compatibility with newer pyarrow.
     "datasets==5.0.0",
 ]
 package = false
+
+[[tool.uv.index]]
+name = "jetson-ai-lab-cu130"
+url = "https://pypi.jetson-ai-lab.io/sbsa/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "jetson-ai-lab-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" }]
+torchvision = [{ index = "jetson-ai-lab-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" }]
