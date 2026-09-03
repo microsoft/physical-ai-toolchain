@@ -48,8 +48,8 @@ dependencies = [
     # they must be declared here to enter the lock and the build-time export.
     "pandas==2.3.3",
     "jsonlines==4.0.0",
-    "torch==2.11.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
-    "torchvision==0.26.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
@@ -74,8 +74,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# Constrain the universal lock to the AzureML/OSMO deployment target.
-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# Resolve both the Azure ML/OSMO x86_64 target and local NVIDIA Thor systems.
+environments = ["sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]
 # Required for prerelease transitives pulled by the resolved tree, including
 # Azure/OpenTelemetry instrumentation betas, wrapt release candidates, and
 # safetensors release candidates. `uv lock` reads prerelease from `[tool.uv]`
@@ -117,6 +117,17 @@ name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
 [tool.uv.sources]
-torch = { index = "pytorch-cu128" }
-torchvision = { index = "pytorch-cu128" }
+torch = [
+    { index = "pytorch-cu128", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
+    { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
+    { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
+]

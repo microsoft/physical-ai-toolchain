@@ -304,7 +304,7 @@ cd training/il/lerobot
 uv lock
 ```
 
-`[tool.uv] environments` constrains the universal lock to the AzureML and OSMO Linux x86_64 target. The frozen lock resolves Torch 2.11 with Torchvision 0.26 from the official CUDA 12.8 index and preserves that package source during runtime installation.
+`[tool.uv] environments` constrains the universal lock to Linux x86_64 and ARM64 targets. The frozen lock resolves Torch 2.11 with Torchvision 0.26 from the official CUDA 12.8 index for Azure ML and OSMO x86_64 jobs and the official CUDA 13.0 index for NVIDIA Thor ARM64 systems, preserving the architecture-specific package source during runtime installation.
 The `override-dependencies` and `prerelease = "allow"` settings under `[tool.uv]` keep the remaining Azure ML and LeRobot dependency exceptions explicit and reproducible.
 
 Some pins are corrections, not regressions: `av<16` and `cmake<4.2` come from LeRobot's declared constraints. Dependabot regenerates `uv.lock` natively, and the read-only `uv lock --check` CI gate fails any PR whose lock drifts from `pyproject.toml`.

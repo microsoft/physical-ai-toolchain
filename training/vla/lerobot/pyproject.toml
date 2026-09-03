@@ -84,8 +84,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# Constrain the universal lock to the Linux x86_64 AzureML deployment target.
-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# Resolve both the Azure ML/OSMO x86_64 target and local NVIDIA Thor systems.
+environments = ["sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]
 # Required for prerelease transitives that we intentionally accept in the
 # resolved tree. Audit the full set after regenerating the lock:
 #   uv export --frozen --no-hashes --no-emit-project | grep -E '[0-9][ab][0-9]+|rc[0-9]+'
@@ -136,6 +136,17 @@ name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
 [tool.uv.sources]
-torch = { index = "pytorch-cu128" }
-torchvision = { index = "pytorch-cu128" }
+torch = [
+    { index = "pytorch-cu128", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
+    { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
+    { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
+]
