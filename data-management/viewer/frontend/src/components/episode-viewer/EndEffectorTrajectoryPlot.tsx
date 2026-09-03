@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 import { cn } from '@/lib/utils'
 
-import type { EndEffectorTrajectory } from './end-effector-trajectories'
+import { type EndEffectorTrajectory, getEndEffectorViewBounds } from './end-effector-trajectories'
 
 interface EndEffectorTrajectoryPlotProps {
   trajectories: readonly EndEffectorTrajectory[]
@@ -33,6 +33,7 @@ export function EndEffectorTrajectoryPlot({
       })),
     [trajectories],
   )
+  const viewBounds = useMemo(() => getEndEffectorViewBounds(trajectories), [trajectories])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -46,15 +47,28 @@ export function EndEffectorTrajectoryPlot({
       preserveDrawingBuffer: true,
     })
     renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio, 2))
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 10)
-    camera.position.set(0.55, 0.42, 0.55)
+    const maxSpan = Math.max(viewBounds?.maxSpan ?? 0.3, 0.18)
+    const center = new THREE.Vector3(...(viewBounds?.center ?? [0, 0.14, 0]))
+    const halfVerticalFov = (38 * Math.PI) / 360
+    const cameraDistance = (maxSpan / 2 / Math.tan(halfVerticalFov)) * 1.8
+    const camera = new THREE.PerspectiveCamera(
+      38,
+      1,
+      Math.max(cameraDistance / 1_000, 0.001),
+      Math.max(cameraDistance * 10, 10),
+    )
+    camera.position
+      .copy(center)
+      .addScaledVector(new THREE.Vector3(1, 0.75, 1).normalize(), cameraDistance)
     const controls = new OrbitControls(camera, canvas)
     controls.enableDamping = true
-    controls.target.set(0, 0.14, 0)
-    controls.minDistance = 0.25
-    controls.maxDistance = 1.5
+    controls.target.copy(center)
+    controls.minDistance = maxSpan * 0.2
+    controls.maxDistance = Math.max(cameraDistance * 4, 1.5)
 
-    scene.add(new THREE.GridHelper(0.8, 16, 0x64748b, 0x334155))
+    const grid = new THREE.GridHelper(Math.max(maxSpan * 2, 0.8), 16, 0x64748b, 0x334155)
+    grid.position.set(center.x, 0, center.z)
+    scene.add(grid)
     scene.add(new THREE.AxesHelper(0.18))
 
     for (const trajectory of renderedTrajectories) {
@@ -102,7 +116,7 @@ export function EndEffectorTrajectoryPlot({
       })
       renderer.dispose()
     }
-  }, [renderedTrajectories])
+  }, [renderedTrajectories, viewBounds])
 
   useEffect(() => {
     for (const trajectory of renderedTrajectories) {

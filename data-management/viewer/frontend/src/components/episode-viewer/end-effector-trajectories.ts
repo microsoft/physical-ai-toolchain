@@ -10,6 +10,38 @@ export interface EndEffectorTrajectory {
   markerColor: string
 }
 
+export interface EndEffectorViewBounds {
+  center: EndEffectorPoint
+  maxSpan: number
+}
+
+export function getEndEffectorViewBounds(
+  trajectories: readonly EndEffectorTrajectory[],
+): EndEffectorViewBounds | null {
+  const points = trajectories
+    .flatMap((trajectory) => trajectory.points)
+    .filter((point) => point.every(Number.isFinite))
+  if (points.length === 0) return null
+
+  const minimum = [...points[0]]
+  const maximum = [...points[0]]
+  for (const point of points.slice(1)) {
+    for (const axis of [0, 1, 2] as const) {
+      minimum[axis] = Math.min(minimum[axis], point[axis])
+      maximum[axis] = Math.max(maximum[axis], point[axis])
+    }
+  }
+  const center = minimum.map((value, axis) => (value + maximum[axis]) / 2) as [
+    number,
+    number,
+    number,
+  ]
+  return {
+    center,
+    maxSpan: Math.max(...maximum.map((value, axis) => value - minimum[axis])),
+  }
+}
+
 const SO101_LINKS = {
   baseHeight: 0.115,
   upperArm: 0.105,
@@ -26,10 +58,18 @@ const SO101_JOINT_NAMES = [
   'gripper.pos',
 ]
 
-function jointValue(joints: Record<string, number>, name: string): number {
+const SO101_KINEMATIC_JOINTS = ['shoulder_pan', 'shoulder_lift', 'elbow_flex', 'wrist_flex']
+
+function jointAliases(name: string): string[] {
   const camelName = name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
+  return [`${name}.pos`, name, `${camelName}.pos`, camelName]
+}
+
+function jointValue(joints: Record<string, number>, name: string): number {
   return (
-    joints[`${name}.pos`] ?? joints[name] ?? joints[`${camelName}.pos`] ?? joints[camelName] ?? 0
+    jointAliases(name)
+      .map((alias) => joints[alias])
+      .find((value) => value !== undefined) ?? 0
   )
 }
 
@@ -121,10 +161,45 @@ function buildRecordedCartesianTrajectories(episode: EpisodeData): EndEffectorTr
   ]
 }
 
-function buildSo101Samples(episode: EpisodeData): Record<string, number>[] {
+function buildDirectCartesianTrajectory(episode: EpisodeData): EndEffectorTrajectory[] | null {
+  const points = (episode.trajectoryData ?? []).flatMap((point) => {
+    const [x, y, z] = point.endEffectorPose ?? []
+    return [x, y, z].every((value) => typeof value === 'number' && Number.isFinite(value))
+      ? ([[x, z, y]] as EndEffectorPoint[])
+      : []
+  })
+  if (points.length === 0) return null
+
+  return [
+    {
+      id: 'end-effector',
+      label: 'End effector',
+      points,
+      lineColor: '#06b6d4',
+      markerColor: '#f43f5e',
+    },
+  ]
+}
+
+function buildSo101Samples(episode: EpisodeData): Record<string, number>[] | null {
   const stateVariables = (episode.trajectoryVariables ?? [])
     .filter((variable) => variable.source === 'observation.state')
     .sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
+  const stateLabels = new Set(stateVariables.map((variable) => variable.label))
+  if (
+    stateVariables.length > 0 &&
+    !SO101_KINEMATIC_JOINTS.every((name) =>
+      jointAliases(name).some((alias) => stateLabels.has(alias)),
+    )
+  ) {
+    return null
+  }
+  if (
+    stateVariables.length === 0 &&
+    (episode.trajectoryData?.[0]?.jointPositions.length ?? 0) !== SO101_JOINT_NAMES.length
+  ) {
+    return null
+  }
   const names = stateVariables.length
     ? stateVariables.map((variable) => variable.label)
     : SO101_JOINT_NAMES
@@ -142,9 +217,10 @@ function buildSo101Samples(episode: EpisodeData): Record<string, number>[] {
 }
 
 export function buildEpisodeEndEffectorTrajectories(episode: EpisodeData): EndEffectorTrajectory[] {
-  return (
-    buildRecordedCartesianTrajectories(episode) ?? [
-      buildSo101EndEffectorTrajectory(buildSo101Samples(episode)),
-    ]
-  )
+  const recorded =
+    buildRecordedCartesianTrajectories(episode) ?? buildDirectCartesianTrajectory(episode)
+  if (recorded) return recorded
+
+  const so101Samples = buildSo101Samples(episode)
+  return so101Samples ? [buildSo101EndEffectorTrajectory(so101Samples)] : []
 }
