@@ -25,9 +25,6 @@ Internal DNS resolution for the OSMO UI service running on an internal LoadBalan
 
 ## 🚀 Usage
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
-
 Get the OSMO UI LoadBalancer IP from your cluster:
 
 ```bash

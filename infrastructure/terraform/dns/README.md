@@ -17,9 +17,6 @@ Private DNS zone for OSMO UI hostname resolution. Maps the OSMO UI hostname to t
 
 ## 🚀 Quick Start
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../../docs/infrastructure/azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
-
 ```bash
 # Get the OSMO UI LoadBalancer IP
 kubectl get svc -n osmo-control-plane osmo-gateway -o jsonpath='{.status.loadBalancer.ingress[0].ip}'

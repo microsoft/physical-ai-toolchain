@@ -17,9 +17,6 @@ Azure subscription initialization and resource provider registration. Configures
 
 <!-- markdownlint-disable-next-line MD028 -->
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../../docs/infrastructure/azurerm-v5-migration.md) before registration and deployment. Do not substitute fresh-deployment commands for the migration procedure.
-
 ## 🚀 Quick Start
 
 ```bash

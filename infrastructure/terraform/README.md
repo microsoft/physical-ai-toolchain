@@ -22,9 +22,6 @@ Terraform configuration for the robotics reference architecture. Deploys Azure r
 
 <!-- markdownlint-enable MD028 -->
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../docs/infrastructure/azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
-
 ## 🚀 Quick Start
 
 ```bash

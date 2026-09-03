@@ -52,9 +52,6 @@ Use the devcontainer (recommended) or run local setup:
 
 Authenticate with Azure and register required resource providers.
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../infrastructure/azurerm-v5-migration.md) before registration or deployment. Do not substitute this fresh-deployment quickstart for the migration procedure.
-
 ```bash
 source infrastructure/terraform/prerequisites/az-sub-init.sh
 bash infrastructure/terraform/prerequisites/register-azure-providers.sh

@@ -40,9 +40,6 @@ Terraform creates role assignments for managed identities, requiring `Microsoft.
 
 **Alternative**: Owner role (grants more permissions than required).
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
-
 ## 🚀 Quick Start
 
 ```bash

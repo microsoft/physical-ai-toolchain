@@ -29,9 +29,6 @@ End-to-end deployment of Azure infrastructure and Kubernetes services for the ro
 | [Cluster Operations](cluster-setup-advanced.md)         | Accessing OSMO, troubleshooting, and optional scripts                    |
 | [Cleanup and Destroy](cleanup.md)                       | Remove cluster components and destroy Azure infrastructure               |
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before following fresh-deployment guidance. Do not use fresh-deployment commands against existing infrastructure.
-
 ## 📋 Deployment Order
 
 1. [Prerequisites](prerequisites.md) — Azure CLI login, subscription setup (2 min)

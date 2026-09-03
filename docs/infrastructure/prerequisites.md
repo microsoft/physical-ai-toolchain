@@ -24,9 +24,6 @@ Azure CLI initialization and subscription setup required before Terraform deploy
 | `az-sub-init.sh`              | Azure login and `ARM_SUBSCRIPTION_ID` export |
 | `register-azure-providers.sh` | Register required Azure resource providers   |
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before registration and deployment. Do not substitute fresh-deployment commands for the migration procedure.
-
 ## 🚀 Usage
 
 Source the initialization script to set `ARM_SUBSCRIPTION_ID` for Terraform:

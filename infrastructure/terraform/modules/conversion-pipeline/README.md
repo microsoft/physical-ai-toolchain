@@ -28,9 +28,6 @@ The module is opt-in. The root composition gates it behind `should_deploy_conver
 
 The module is composed by the root `infrastructure/terraform/main.tf`. To enable in any environment, set both flags in the corresponding tfvars file under `infrastructure/examples/`:
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../../../../docs/infrastructure/azurerm-v5-migration.md) before enabling this module. Do not use fresh-deployment commands against existing infrastructure.
-
 ```hcl
 should_deploy_conversion_pipeline = true
 should_create_data_lake_storage   = true

@@ -175,9 +175,6 @@ terraform output dns_server_ip
 terraform output -json aml_compute_clusters | jq -r '."gpu-cluster".name'
 ```
 
-> [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](azurerm-v5-migration.md) before using the following fresh-deployment commands. Do not run them against existing infrastructure.
-
 ## 🔧 Optional Components
 
 Standalone deployments extend the base infrastructure.

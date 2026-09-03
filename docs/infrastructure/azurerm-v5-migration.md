@@ -13,9 +13,6 @@ keywords:
 
 Migrate existing AzureRM v4 deployments with state-backed plans and secure backups. Complete this procedure for each deployed Terraform root before using AzureRM v5 to change Azure resources.
 
-> [!CAUTION]
-> Do not use fresh-deployment commands against existing infrastructure. AzureRM v5 can refresh state into a format that AzureRM v4 cannot read. A provider downgrade over v5-refreshed state is unsupported.
-
 ## Identify Deployed Roots
 
 Treat each deployment root as an independent state owner. Migrate only roots that have authentic state and preserve the original variables and command arguments used for each deployment.

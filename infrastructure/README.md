@@ -43,7 +43,7 @@ infrastructure/
 ## 🚀 Quick Start
 
 > [!CAUTION]
-> Existing AzureRM v4 deployments require the [AzureRM v5 migration procedure](../docs/infrastructure/azurerm-v5-migration.md) before using these fresh-deployment commands. Do not run them against existing infrastructure.
+> The AzureRM v5 upgrade affects the Main, VPN, DNS, and Automation Terraform roots. It also updates the Automation, conversion pipeline, data viewer, platform, SIL, and VPN modules. Existing AzureRM v4 deployments must complete the [AzureRM v5 migration procedure](../docs/infrastructure/azurerm-v5-migration.md) for each deployed root before using fresh-deployment commands.
 
 ### 1. Initialize Azure subscription
 
