@@ -101,7 +101,9 @@ class LerobotWorkerClient:
         self._event_phase = "hello"
         self._mode = OperatorMode.TELEOPERATE
         self._next_command_sequence = 3
-        self._command_acks: dict[str, asyncio.Future[HardwareWorkerCommandAcknowledgement]] = {}
+        self._command_acks: dict[
+            str, asyncio.Future[HardwareWorkerCommandAcknowledgement]
+        ] = {}
 
     @property
     def pid(self) -> int | None:
@@ -173,7 +175,9 @@ class LerobotWorkerClient:
         self._next_command_sequence += 1
         if action == "cancel":
             cleanup_timeout_s = (
-                max(self.stop_timeout_s, 120.0) if self._mode is OperatorMode.RECORD else self.stop_timeout_s
+                max(self.stop_timeout_s, 120.0)
+                if self._mode is OperatorMode.RECORD
+                else self.stop_timeout_s
             )
             cleanup = await self._send_stop(
                 session_id,
@@ -185,7 +189,9 @@ class LerobotWorkerClient:
                 session_id=session_id,
                 command_id=command_id,
                 action="cancel",
-                cleanup_complete=(cleanup.cleanup_complete and cleanup.torque_verified_off),
+                cleanup_complete=(
+                    cleanup.cleanup_complete and cleanup.torque_verified_off
+                ),
             )
         if self._mode is not OperatorMode.RECORD:
             raise RuntimeError("Episode commands require record mode")
@@ -205,7 +211,9 @@ class LerobotWorkerClient:
             ).model_dump_json()
         )
         try:
-            progress = await asyncio.wait_for(asyncio.shield(acknowledgement), timeout=max(self.timeout_s, 120.0))
+            progress = await asyncio.wait_for(
+                asyncio.shield(acknowledgement), timeout=max(self.timeout_s, 120.0)
+            )
         except TimeoutError as error:
             raise RuntimeError("LeRobot worker command timed out") from error
         cleanup = None
@@ -221,8 +229,12 @@ class LerobotWorkerClient:
             dataset_id=progress.dataset_id,
             episode_index=progress.episode_index,
             recording_phase=progress.phase,
-            upload_attempted=(cleanup.upload_attempted if cleanup is not None else False),
-            upload_succeeded=(cleanup.upload_succeeded if cleanup is not None else False),
+            upload_attempted=(
+                cleanup.upload_attempted if cleanup is not None else False
+            ),
+            upload_succeeded=(
+                cleanup.upload_succeeded if cleanup is not None else False
+            ),
             upload_error=cleanup.upload_error if cleanup is not None else None,
         )
 
@@ -248,7 +260,9 @@ class LerobotWorkerClient:
         )
         return await self._await_cleanup(timeout_s=timeout_s)
 
-    async def _await_cleanup(self, *, timeout_s: float | None = None) -> HardwareWorkerCleanup:
+    async def _await_cleanup(
+        self, *, timeout_s: float | None = None
+    ) -> HardwareWorkerCleanup:
         if self._cleanup is None:
             raise RuntimeError("LeRobot worker cleanup channel is unavailable")
         try:
@@ -260,7 +274,9 @@ class LerobotWorkerClient:
             raise RuntimeError("LeRobot worker cleanup timed out") from error
         self.torque_verified_off = cleanup.torque_verified_off
         if self._process is not None:
-            await asyncio.wait_for(self._process.wait(), timeout=timeout_s or self.stop_timeout_s)
+            await asyncio.wait_for(
+                self._process.wait(), timeout=timeout_s or self.stop_timeout_s
+            )
         return cleanup
 
     async def terminate(self) -> bool:
@@ -280,7 +296,9 @@ class LerobotWorkerClient:
     async def recover(self) -> bool:
         """Run the bus-only torque-off recovery mode under the inherited lease."""
         environment = self.build_environment(self._session_id or "recovery")
-        environment["OPERATOR_PROFILE_JSON"] = json.dumps(self.profile, separators=(",", ":"))
+        environment["OPERATOR_PROFILE_JSON"] = json.dumps(
+            self.profile, separators=(",", ":")
+        )
         process = await asyncio.create_subprocess_exec(
             *self.command_line,
             "--deenergize",
@@ -302,13 +320,19 @@ class LerobotWorkerClient:
             process.kill()
             await process.wait()
             return False
-        self._stderr.extend(self._sanitize_log(stderr.decode(errors="replace")).splitlines(keepends=True))
+        self._stderr.extend(
+            self._sanitize_log(stderr.decode(errors="replace")).splitlines(
+                keepends=True
+            )
+        )
         try:
             result = json.loads(stdout)
         except json.JSONDecodeError:
             return False
         recovered = bool(
-            process.returncode == 0 and result.get("cleanup_complete") and result.get("torque_verified_off")
+            process.returncode == 0
+            and result.get("cleanup_complete")
+            and result.get("torque_verified_off")
         )
         self.torque_verified_off = recovered
         return recovered
@@ -361,7 +385,9 @@ class LerobotWorkerClient:
                 try:
                     event = HARDWARE_WORKER_EVENT_ADAPTER.validate_json(line)
                 except ValidationError:
-                    self._fail_futures(RuntimeError("LeRobot worker protocol violation"))
+                    self._fail_futures(
+                        RuntimeError("LeRobot worker protocol violation")
+                    )
                     return
                 if not isinstance(event, HardwareWorkerHello):
                     if (
@@ -369,37 +395,52 @@ class LerobotWorkerClient:
                         or event.session_id != self._session_id
                         or event.sequence <= self._last_worker_sequence
                     ):
-                        self._fail_futures(RuntimeError("LeRobot worker protocol context violation"))
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker protocol context violation")
+                        )
                         return
                     self._last_worker_sequence = event.sequence
                 if isinstance(event, HardwareWorkerHello):
-                    if self._event_phase != "hello" or event.session_id != self._session_id:
-                        self._fail_futures(RuntimeError("LeRobot worker protocol session mismatch"))
+                    if (
+                        self._event_phase != "hello"
+                        or event.session_id != self._session_id
+                    ):
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker protocol session mismatch")
+                        )
                         return
                     if self._hello is not None and not self._hello.done():
                         self._hello.set_result(event)
                 elif isinstance(event, HardwareWorkerInitialized):
                     if self._event_phase != "initialized":
-                        self._fail_futures(RuntimeError("LeRobot worker event order violation"))
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker event order violation")
+                        )
                         return
                     if self._initialized is not None and not self._initialized.done():
                         self._initialized.set_result(event)
                 elif isinstance(event, HardwareWorkerRunning):
                     if self._event_phase != "running":
-                        self._fail_futures(RuntimeError("LeRobot worker event order violation"))
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker event order violation")
+                        )
                         return
                     if self._running is not None and not self._running.done():
                         self._event_phase = "active"
                         self._running.set_result(event)
                 elif (
-                    isinstance(event, HardwareWorkerCleanup) and self._cleanup is not None and not self._cleanup.done()
+                    isinstance(event, HardwareWorkerCleanup)
+                    and self._cleanup is not None
+                    and not self._cleanup.done()
                 ):
                     if event.command_id == "worker-exit" and self._event_phase in {
                         "initialized",
                         "running",
                         "active",
                     }:
-                        self.torque_verified_off = event.cleanup_complete and event.torque_verified_off
+                        self.torque_verified_off = (
+                            event.cleanup_complete and event.torque_verified_off
+                        )
                         self._cleanup.set_result(event)
                         self._fail_futures(
                             RuntimeError(
@@ -409,39 +450,56 @@ class LerobotWorkerClient:
                             )
                         )
                         return
-                    if self._event_phase != "cleanup" or event.command_id != self._expected_cleanup_command_id:
-                        self._fail_futures(RuntimeError("LeRobot worker cleanup command mismatch"))
+                    if (
+                        self._event_phase != "cleanup"
+                        or event.command_id != self._expected_cleanup_command_id
+                    ):
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker cleanup command mismatch")
+                        )
                         return
                     self._cleanup.set_result(event)
                 elif isinstance(event, HardwareWorkerRate):
                     if self._event_phase not in {"active", "cleanup"}:
-                        self._fail_futures(RuntimeError("LeRobot worker event order violation"))
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker event order violation")
+                        )
                         return
                     if self.on_rate is not None:
                         self.on_rate(event)
                 elif isinstance(event, HardwareWorkerTelemetry):
                     if self._event_phase not in {"active", "cleanup"}:
-                        self._fail_futures(RuntimeError("LeRobot worker event order violation"))
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker event order violation")
+                        )
                         return
                     if self.on_telemetry is not None:
                         self.on_telemetry(event)
                 elif isinstance(event, HardwareWorkerPreview):
                     if self._event_phase not in {"active", "cleanup"}:
-                        self._fail_futures(RuntimeError("LeRobot worker event order violation"))
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker event order violation")
+                        )
                         return
                     if self.on_preview is not None:
                         self.on_preview(event)
                 elif isinstance(event, HardwareWorkerCommandAcknowledgement):
                     if self._event_phase not in {"active", "cleanup"}:
-                        self._fail_futures(RuntimeError("LeRobot worker event order violation"))
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker event order violation")
+                        )
                         return
                     future = self._command_acks.get(event.command_id)
                     if future is None or future.done():
-                        self._fail_futures(RuntimeError("LeRobot worker command mismatch"))
+                        self._fail_futures(
+                            RuntimeError("LeRobot worker command mismatch")
+                        )
                         return
                     future.set_result(event)
         finally:
-            self._fail_futures(RuntimeError("LeRobot worker exited during protocol exchange"))
+            self._fail_futures(
+                RuntimeError("LeRobot worker exited during protocol exchange")
+            )
 
     async def _drain_stderr(self) -> None:
         if self._process is None or self._process.stderr is None:
@@ -490,7 +548,9 @@ class LerobotWorkerClient:
         return re.sub(r"(?<!\w)/(?:[^\s:]+/?)+", "<path>", message)
 
     @staticmethod
-    async def _read_limited(stream: asyncio.StreamReader | None, limit: int = 65_536) -> bytes:
+    async def _read_limited(
+        stream: asyncio.StreamReader | None, limit: int = 65_536
+    ) -> bytes:
         if stream is None:
             return b""
         data = await stream.read(limit + 1)

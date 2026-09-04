@@ -90,7 +90,9 @@ def test_ignore_behaviors_emit_only_readiness(
     behavior: str,
 ) -> None:
     signal_calls: list[tuple[signal.Signals, signal.Handlers]] = []
-    monkeypatch.setattr(signal, "signal", lambda number, handler: signal_calls.append((number, handler)))
+    monkeypatch.setattr(
+        signal, "signal", lambda number, handler: signal_calls.append((number, handler))
+    )
 
     messages = _run(
         monkeypatch,

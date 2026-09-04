@@ -15,11 +15,12 @@ prompt_version, agent_config) so re-running over the same episode is free.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
@@ -38,6 +39,9 @@ from ..validation import (
     sanitize_user_string,
     validate_path_containment,
 )
+
+if TYPE_CHECKING:
+    from evaluation.vlm_judge.dataset import EpisodeRecord
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +133,11 @@ class JudgeResponse(BaseModel):
     response_model=JudgeStatus,
 )
 async def get_episode_judgment(
-    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    dataset_id: str = Depends(
+        path_string_param(
+            "dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id"
+        )
+    ),
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     service: DatasetService = Depends(get_dataset_service),
     config: AppConfig = Depends(get_app_config),
@@ -139,7 +147,7 @@ async def get_episode_judgment(
     if judge_service is None:
         return JudgeStatus(enabled=False, cached=False)
 
-    record = _resolve_episode(service, dataset_id, episode_idx)
+    record = await _resolve_episode(service, dataset_id, episode_idx)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Episode {episode_idx} not found")
 
@@ -175,7 +183,11 @@ async def get_episode_judgment(
 )
 async def run_episode_judgment(
     payload: JudgeRequest,
-    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    dataset_id: str = Depends(
+        path_string_param(
+            "dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id"
+        )
+    ),
     episode_idx: int = Depends(path_int_param("episode_idx", ge=0)),
     service: DatasetService = Depends(get_dataset_service),
     config: AppConfig = Depends(get_app_config),
@@ -188,7 +200,9 @@ async def run_episode_judgment(
             detail="VLM judge is disabled. Set VLM_JUDGE_ENABLED=true to enable.",
         )
 
-    record = _resolve_episode(service, dataset_id, episode_idx, views=tuple(payload.views or ()))
+    record = await _resolve_episode(
+        service, dataset_id, episode_idx, views=tuple(payload.views or ())
+    )
     if record is None:
         raise HTTPException(status_code=404, detail=f"Episode {episode_idx} not found")
 
@@ -199,12 +213,17 @@ async def run_episode_judgment(
             detail="No task instruction available; provide one via the request body",
         )
 
-    if payload.process_method is not None and payload.process_method not in PROCESS_METHODS:
+    if (
+        payload.process_method is not None
+        and payload.process_method not in PROCESS_METHODS
+    ):
         raise HTTPException(
             status_code=422,
             detail=f"process_method must be one of {list(PROCESS_METHODS)}",
         )
-    effective_method = payload.process_method or judge_service.config.agent.process_method
+    effective_method = (
+        payload.process_method or judge_service.config.agent.process_method
+    )
 
     # Detect cache hit before invoking the backend so we can flag it on the wire.
     cache = judge_service.cache_for(_judge_cache_dir(service, dataset_id))
@@ -215,7 +234,9 @@ async def run_episode_judgment(
         prompt_version=_prompt_version(),
         from_s=record.from_timestamp,
         to_s=record.to_timestamp,
-        agent_config=replace(judge_service.config.agent, process_method=effective_method),
+        agent_config=replace(
+            judge_service.config.agent, process_method=effective_method
+        ),
     )
     was_cached = not payload.force and cache.get(cache_key) is not None
 
@@ -241,11 +262,17 @@ async def run_episode_judgment(
     except Exception as err:  # backend / model errors surface as 502
         safe_dataset_id = dataset_id.replace("\r", "").replace("\n", "")
         safe_episode_idx = int(episode_idx)
-        logger.exception("VLM judge failed for %s/%d", safe_dataset_id, safe_episode_idx)
-        raise HTTPException(status_code=502, detail=f"VLM backend error: {err}") from err
+        logger.exception(
+            "VLM judge failed for %s/%d", safe_dataset_id, safe_episode_idx
+        )
+        raise HTTPException(
+            status_code=502, detail=f"VLM backend error: {err}"
+        ) from err
 
     payload_out = result.to_dict()
-    return JudgeResponse(cached=was_cached, process_method=effective_method, **payload_out)
+    return JudgeResponse(
+        cached=was_cached, process_method=effective_method, **payload_out
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -253,13 +280,13 @@ async def run_episode_judgment(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_episode(
+async def _resolve_episode(
     service: DatasetService,
     dataset_id: str,
     episode_idx: int,
     *,
     views: tuple[str, ...] = (),
-):
+) -> EpisodeRecord | None:
     """Return the matching ``EpisodeRecord`` or ``None`` if not found."""
     from evaluation.vlm_judge.dataset import iter_episodes
 
@@ -272,6 +299,12 @@ def _resolve_episode(
     dataset_root = _dataset_root(service, dataset_id)
     if not dataset_root.exists():
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+
+    dataset = await service.get_dataset(dataset_id)
+    if dataset is not None and service.dataset_has_hdf5(dataset_id):
+        return await _resolve_hdf5_episode(
+            service, dataset_root, dataset_id, episode_idx, views
+        )
 
     try:
         for record in iter_episodes(
@@ -286,6 +319,91 @@ def _resolve_episode(
     return None
 
 
+async def _resolve_hdf5_episode(
+    service: DatasetService,
+    dataset_root: Path,
+    dataset_id: str,
+    episode_idx: int,
+    views: tuple[str, ...],
+) -> EpisodeRecord | None:
+    """Resolve an HDF5 episode through the format-aware dataset service."""
+    from evaluation.vlm_judge.dataset import EpisodeRecord
+
+    dataset = await service.get_dataset(dataset_id)
+    episode = await service.get_episode(dataset_id, episode_idx)
+    if dataset is None or episode is None:
+        return None
+
+    available_views = tuple(episode.cameras) or tuple(
+        await service.get_episode_cameras(dataset_id, episode_idx)
+    )
+    selected_views = views or available_views
+    missing_views = [view for view in selected_views if view not in available_views]
+    if missing_views:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Requested views not present in dataset: {missing_views}. Available: {available_views}",
+        )
+    if not selected_views:
+        raise HTTPException(
+            status_code=400, detail=f"Episode {episode_idx} has no video views"
+        )
+
+    video_paths: dict[str, Path] = {}
+    for view in selected_views:
+        video_path = await run_in_threadpool(
+            service.get_video_file_path, dataset_id, episode_idx, view
+        )
+        if video_path is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Video unavailable for episode {episode_idx}, view {view!r}",
+            )
+        resolved_path = Path(video_path).resolve()
+        if (
+            not service.is_safe_video_path(str(resolved_path))
+            or not resolved_path.is_file()
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid video path for episode {episode_idx}, view {view!r}",
+            )
+        video_paths[view] = resolved_path
+
+    instruction = next(
+        (
+            task.description
+            for task in dataset.tasks
+            if task.task_index == episode.meta.task_index
+        ),
+        "",
+    )
+    if not instruction:
+        instruction = _load_hdf5_task(dataset_root)
+
+    return EpisodeRecord(
+        episode_id=f"{dataset_id}/episode_{episode_idx:06d}",
+        episode_index=episode_idx,
+        instruction=instruction,
+        fps=dataset.fps,
+        length=episode.meta.length,
+        video_paths=video_paths,
+        from_timestamp=None,
+        to_timestamp=None,
+    )
+
+
+def _load_hdf5_task(dataset_root: Path) -> str:
+    """Load the dataset-level task used by Dataviewer HDF5 exports."""
+    metadata_path = dataset_root / "meta" / "dataset.json"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    task = metadata.get("task")
+    return task if isinstance(task, str) else ""
+
+
 def _dataset_root(service: DatasetService, dataset_id: str) -> Path:
     """Resolve the on-disk root of ``dataset_id`` under the local data dir."""
     base_path = getattr(service, "base_path", None)
@@ -295,7 +413,9 @@ def _dataset_root(service: DatasetService, dataset_id: str) -> Path:
             detail="VLM judge requires a local dataset path (base_path)",
         )
     base_root = validate_path_containment(Path(base_path), Path(base_path))
-    root = validate_path_containment(base_root.joinpath(*_dataset_path_parts(dataset_id)), base_root)
+    root = validate_path_containment(
+        base_root.joinpath(*_dataset_path_parts(dataset_id)), base_root
+    )
     return root
 
 
@@ -305,7 +425,13 @@ def _dataset_path_parts(dataset_id: str) -> tuple[str, ...]:
     if not parts:
         raise HTTPException(status_code=400, detail="Invalid dataset_id")
     for part in parts:
-        if "\x00" in part or part in ("", ".", "..") or "/" in part or "\\" in part or Path(part).name != part:
+        if (
+            "\x00" in part
+            or part in ("", ".", "..")
+            or "/" in part
+            or "\\" in part
+            or Path(part).name != part
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="Path traversal detected: resolved path escapes dataset directory",

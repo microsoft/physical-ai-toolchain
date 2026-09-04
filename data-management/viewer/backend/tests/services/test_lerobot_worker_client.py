@@ -148,7 +148,9 @@ async def test_bad_protocol_version_fails_closed() -> None:
         ("torque_off", "confirm follower torque"),
     ],
 )
-async def test_handshake_contract_failures_are_rejected(behavior: str, message: str) -> None:
+async def test_handshake_contract_failures_are_rejected(
+    behavior: str, message: str
+) -> None:
     with _client(behavior=behavior) as client:
         await client.launch("session-1", OperatorMode.TELEOPERATE)
 

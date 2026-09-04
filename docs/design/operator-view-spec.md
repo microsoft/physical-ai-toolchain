@@ -2,7 +2,7 @@
 title: Dataviewer Operator View
 description: Architecture and feature specification for SO-101 teleoperation and recording inside the dataviewer
 author: Physical AI Toolchain contributors
-ms.date: 2026-07-22
+ms.date: 2026-09-04
 ms.topic: design
 ---
 
@@ -17,7 +17,7 @@ The Physical AI Operator repository demonstrates a complete Collect, Validate, a
 The first integration targets the SO-101 hardware configuration proven by the local `teleoperate.sh` and `record.sh` scripts:
 
 | Device    | Configuration                                                                                          |
-| --------- | ------------------------------------------------------------------------------------------------------ |
+|-----------|--------------------------------------------------------------------------------------------------------|
 | Leader    | SO-101 leader, `/dev/so101_leader`, ID `my_leader_arm`                                                 |
 | Follower  | SO-101 follower, `/dev/so101_follower`, ID `my_follower_arm`                                           |
 | Wrist     | OpenCV camera at the stable Sonix `/dev/v4l/by-id/...-video-index0` path, 640x480 at 30 FPS            |
@@ -27,7 +27,7 @@ The first integration targets the SO-101 hardware configuration proven by the lo
 ## Design Decisions
 
 | Decision              | Selected approach                                                                                   | Rationale                                                                                                 |
-| --------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+|-----------------------|-----------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
 | Application placement | Add a top-level `Analyze` and `Operate` mode switch to the dataviewer shell                         | Operation must work before a dataset exists and needs a dedicated full-height workspace                   |
 | Hardware runtime      | Launch a separately locked worker environment through an executable subprocess protocol             | LeRobot dependency constraints conflict with the dataviewer backend and hardware loops must stay isolated |
 | Control plane         | Keep session ownership, API authorization, status, and worker supervision in the dataviewer backend | Reuses the existing auth, CSRF, lifecycle, and diagnostics infrastructure                                 |
@@ -48,12 +48,12 @@ The first release includes:
 * Browser-controlled recording with save, rerecord, finish, and cancel actions
 * Live session state, device health, logs, episode progress, and camera previews
 * Local dataset finalization and handoff to the Analyze workspace
+* Bounded GR00T policy rollout when a server-side runtime and checkpoint are configured
 * Behavior tests with a simulated adapter and opt-in hardware smoke tests
 
 The first release excludes:
 
 * UR, ROS 2, RTDE, and Robotiq support
-* Trained-policy playback and autonomous motion
 * Digital twin rendering
 * Calibration and motor setup from the browser
 * Automatic device permission changes or `sudo` execution
@@ -62,7 +62,7 @@ The first release excludes:
 ## Reuse Boundaries
 
 | Source                  | Reuse directly                                                                                          | Adapt or replace                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+|-------------------------|---------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
 | Dataviewer              | FastAPI auth and CSRF, TanStack Query, API client, diagnostics, UI primitives, dataset discovery        | Extend the shell with a top-level mode and add operator-specific service, routes, hooks, and UI |
 | LeRobot                 | SO-101 configs and factories, processor pipelines, camera configs, dataset writer, compatibility checks | Wrap the record and teleoperate loops with explicit commands and event reporting                |
 | Physical AI Operator    | Session vocabulary, single-session ownership, preflight model, rate tracking, episode metadata concepts | Do not import ROS nodes, Flask assets, UR drivers, or ROS topic transport                       |
@@ -89,41 +89,38 @@ flowchart LR
 
 ### Backend Modules
 
-| Module                             | Responsibility                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------- |
-| `api/routers/operator.py`          | Authenticated status, preflight, session, command, event, and preview endpoints |
-| `api/services/operator_service.py` | Single-session lock, worker ownership, state reduction, event fan-out, cleanup  |
-| `api/operator/models.py`           | Pydantic request, response, profile, command, event, and status models          |
-| `api/operator/profiles.py`         | Profile loading, path containment, environment overrides, and validation        |
-| `api/operator/protocol.py`         | Versioned command, event, acknowledgement, revision, and cleanup models         |
-| `api/operator/worker_client.py`    | Executable subprocess supervision and serialized protocol transport             |
-| `operator-worker/`                 | Separately locked simulated and LeRobot worker environments                     |
-| `config/operator/so101.yaml`       | SO-101 ports, IDs, calibration paths, cameras, timing, and dataset defaults     |
+| Module                                  | Responsibility                                                                  |
+|-----------------------------------------|---------------------------------------------------------------------------------|
+| `api/routers/operator.py`               | Authenticated status, preflight, session, command, event, and preview endpoints |
+| `api/services/operator_service.py`      | Single-session lock, worker ownership, state reduction, event fan-out, cleanup  |
+| `api/operator/models.py`                | Pydantic request, response, profile, command, event, and status models          |
+| `api/operator/profiles.py`              | Profile loading, path containment, environment overrides, and validation        |
+| `api/operator/protocol.py`              | Versioned command, event, acknowledgement, revision, and cleanup models         |
+| `api/operator/worker_client.py`         | Simulated subprocess supervision and protocol v1 transport                      |
+| `api/operator/lerobot_worker_client.py` | LeRobot subprocess supervision and protocol v2 transport                        |
+| `operator-worker/`                      | Separately locked LeRobot hardware environment                                  |
+| `api/operator/profile_data/so101.toml`  | SO-101 identities, calibration paths, cameras, timing, and recording defaults   |
 
 ### Frontend Modules
 
-| Module                                      | Responsibility                                                                   |
-| ------------------------------------------- | -------------------------------------------------------------------------------- |
-| `components/operator/OperatorWorkspace.tsx` | Full operator layout and state composition                                       |
-| `components/operator/OperatorHeader.tsx`    | Mode, connection state, session timer, stop action, and profile selector         |
-| `components/operator/PreflightPanel.tsx`    | Device readiness checks and actionable failures                                  |
-| `components/operator/SessionControls.tsx`   | Teleoperate or Record configuration and lifecycle actions                        |
-| `components/operator/CameraGrid.tsx`        | Stable two-camera layout with health and FPS                                     |
-| `components/operator/EpisodeControls.tsx`   | Save, rerecord, finish, and cancel commands during recording                     |
-| `components/operator/SessionLog.tsx`        | Bounded live event and log stream                                                |
-| `hooks/use-operator.ts`                     | TanStack queries, mutations, SSE lifecycle, invalidation, and reconnect behavior |
-| `api/operator.ts`                           | Typed operator API client                                                        |
+| Module                                           | Responsibility                                                                   |
+|--------------------------------------------------|----------------------------------------------------------------------------------|
+| `components/operator/OperatorWorkspace.tsx`      | Full operator layout and state composition                                       |
+| `components/operator/OperatorSessionConfig.tsx`  | Teleoperate, Record, and Policy configuration                                    |
+| `components/operator/OperatorCameraPreview.tsx`  | Worker-owned camera previews                                                     |
+| `components/operator/OperatorTelemetryPlot.tsx`  | Leader, follower, and commanded joint traces                                     |
+| `components/operator/OperatorTrajectoryPlot.tsx` | Shared SO-101 end-effector trajectory view                                       |
+| `hooks/use-operator.ts`                          | TanStack queries, mutations, SSE lifecycle, invalidation, and reconnect behavior |
+| `api/operator.ts`                                | Typed operator API client                                                        |
 
 ## Session Model
 
 The backend owns the authoritative state. The browser renders state and requests transitions but never assumes that a command succeeded before the worker confirms it.
 
 | State       | Meaning                                                        | Allowed actions                        |
-| ----------- | -------------------------------------------------------------- | -------------------------------------- |
+|-------------|----------------------------------------------------------------|----------------------------------------|
 | `disabled`  | Operator support is not configured                             | None                                   |
 | `idle`      | No worker exists                                               | Run preflight                          |
-| `checking`  | Preflight probes are running                                   | Cancel check                           |
-| `ready`     | Required checks passed                                         | Start teleoperation or recording       |
 | `starting`  | Worker is connecting hardware                                  | Stop session                           |
 | `running`   | Teleoperation or recording loop is active                      | Mode-specific commands, stop session   |
 | `stopping`  | Graceful disconnect and dataset finalization are in progress   | None                                   |
@@ -136,15 +133,17 @@ Recording adds a nested phase: `recording`, `resetting`, `saving`, or `finalizin
 ## API Contract
 
 | Method   | Endpoint                                       | Purpose                                                              |
-| -------- | ---------------------------------------------- | -------------------------------------------------------------------- |
+|----------|------------------------------------------------|----------------------------------------------------------------------|
 | `GET`    | `/api/operator/capabilities`                   | Report feature enablement, profiles, modes, and adapter version      |
 | `GET`    | `/api/operator/status`                         | Return the current authoritative session snapshot                    |
-| `POST`   | `/api/operator/preflight`                      | Probe profile configuration and connected devices                    |
+| `POST`   | `/api/operator/preflights`                     | Probe profile configuration and connected devices                    |
+| `GET`    | `/api/operator/preflights/{preflight_id}`      | Read current preflight evidence                                      |
+| `DELETE` | `/api/operator/preflights/{preflight_id}`      | Cancel preflight evidence                                            |
 | `POST`   | `/api/operator/sessions`                       | Start one `teleoperate` or `record` session                          |
 | `POST`   | `/api/operator/sessions/{session_id}/commands` | Send an idempotent `save`, `rerecord`, `finish`, or `cancel` command |
 | `DELETE` | `/api/operator/sessions/{session_id}`          | Cancel the named session, then escalate cleanup after a timeout      |
 | `GET`    | `/api/operator/events`                         | Stream status, health, progress, diagnostics, and bounded logs       |
-| `GET`    | `/api/operator/cameras/{camera}/mjpeg`         | Stream a worker-owned camera preview                                 |
+| `GET`    | `/api/operator/cameras/{camera}/frame`         | Return the latest worker-owned JPEG preview                          |
 
 All mutations require the existing CSRF token and a client-generated `command_id`. All routes require the existing authentication dependency plus operator authorization. The backend rejects commands that do not match the current state, stale session IDs, and reused command IDs with conflicting payloads.
 
@@ -154,8 +153,10 @@ Command outcomes are explicit:
 
 * `save` commits the pending episode and starts the reset phase
 * `rerecord` discards the pending episode and restarts that episode
+* `pause` stops frame writes while teleoperation remains active
+* `resume` restarts frame writes for the pending episode
 * `finish` commits the pending episode, finalizes locally, and ends as `completed`
-* `cancel` discards only uncommitted data, preserves committed episodes locally, skips upload, and ends as `cancelled`
+* `cancel` discards the complete dataset created by the session, skips upload, and ends as `cancelled`
 
 ## SO-101 Profile
 
@@ -182,7 +183,7 @@ The shell header gains a compact segmented control for `Analyze` and `Operate`. 
 The Operate layout uses three stable regions:
 
 | Region     | Contents                                                                                         |
-| ---------- | ------------------------------------------------------------------------------------------------ |
+|------------|--------------------------------------------------------------------------------------------------|
 | Top bar    | Profile, mode, state, elapsed time, device summary, and persistent Stop Session action           |
 | Main       | Wrist and front camera previews with fixed aspect ratios, FPS, stale state, and connection state |
 | Side panel | Preflight, task and dataset fields, recording controls, episode progress, and bounded logs       |
@@ -193,7 +194,9 @@ The physical hardware emergency stop remains the only control labeled E-stop. Th
 
 Recording writes directly below the local dataviewer data root. The worker reports the resolved repository ID because current LeRobot creation appends a timestamp. The service invalidates dataset discovery only after `finalize()` completes and all cameras and serial devices disconnect.
 
-The completion screen provides `Analyze Dataset`, which switches to Analyze mode and selects the new dataset. Upload to Hugging Face is opt-in per session and runs after local finalization. Upload failure does not hide or delete the valid local dataset.
+After completion, the operator switches to Analyze mode and selects the new dataset. Dataset discovery refreshes every 30 seconds and on browser focus. Upload to Hugging Face is opt-in per session and runs after local finalization. Upload failure does not hide or delete the valid local dataset.
+
+Recorded tasks are written into every LeRobot frame and become the episode instruction used by annotation and VLM judging. Analyze mode can add **End effector 3D** beside camera playback using recorded Cartesian poses, HDF5 end-effector poses, or recognized SO-101 joint telemetry.
 
 ## Safety and Failure Handling
 
@@ -212,26 +215,26 @@ The completion screen provides `Analyze Dataset`, which switches to Analyze mode
 
 ## Features
 
-| Phase | Feature                               | Deliverable                                                                                             | Acceptance signal                                                                              |
-| ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| 1     | Shell and simulated operator contract | Top-level mode switch, service-owned state, subprocess simulator, status and session-addressed commands | Frontend and backend behavior tests pass without hardware; Analyze behavior remains unchanged  |
-| 2     | SO-101 profile and preflight          | Validated profile loader, stable-device checks, calibration/camera/storage probes, readiness UI         | Missing, swapped, busy, or non-writable devices produce specific blocking results              |
-| 3     | Teleoperation worker                  | Supervised LeRobot worker, start/stop lifecycle, live rates, bounded logs, graceful cleanup             | Leader drives follower; Stop Session disconnects both arms and releases serial ports           |
-| 4     | Browser-controlled recording          | Dataset setup, explicit episode command channel, progress, finalization, optional Hub upload            | Save, rerecord, finish, and cancel produce the expected local LeRobot episodes                 |
-| 5     | Live camera workspace                 | Worker-owned JPEG sampling, MJPEG endpoints, fixed wrist/front layout, stale and FPS indicators         | Both configured cameras render without a second process opening either camera                  |
-| 6     | Dataset handoff and diagnostics       | Discovery invalidation, Analyze Dataset transition, operator diagnostic events, recovery states         | A completed recording opens in the existing episode analyzer without restarting the dataviewer |
-| 7     | Policy playback                       | Model selection, explicit motion confirmation, rollout worker, run controls, evaluation recording       | Deferred until recording is stable and a separate motion-safety review is complete             |
+| Phase | Feature                               | Deliverable                                                                                             | Acceptance signal                                                                               |
+|-------|---------------------------------------|---------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| 1     | Shell and simulated operator contract | Top-level mode switch, service-owned state, subprocess simulator, status and session-addressed commands | Frontend and backend behavior tests pass without hardware; Analyze behavior remains unchanged   |
+| 2     | SO-101 profile and preflight          | Validated profile loader, stable-device checks, calibration/camera/storage probes, readiness UI         | Missing, swapped, busy, or non-writable devices produce specific blocking results               |
+| 3     | Teleoperation worker                  | Supervised LeRobot worker, start/stop lifecycle, live rates, bounded logs, graceful cleanup             | Leader drives follower; Stop Session disconnects both arms and releases serial ports            |
+| 4     | Browser-controlled recording          | Dataset setup, explicit episode command channel, progress, finalization, optional Hub upload            | Save, rerecord, finish, and cancel produce the expected local LeRobot episodes                  |
+| 5     | Live camera workspace                 | Worker-owned JPEG sampling, MJPEG endpoints, fixed wrist/front layout, stale and FPS indicators         | Both configured cameras render without a second process opening either camera                   |
+| 6     | Dataset handoff and diagnostics       | Discovery invalidation, Analyze Dataset transition, operator diagnostic events, recovery states         | A completed recording opens in the existing episode analyzer without restarting the dataviewer  |
+| 7     | Policy playback                       | Server-selected GR00T runtime, bounded rollout worker, task controls, duration cap, and target clamp    | Preflight verifies the runtime; every target is clamped to at most 5 degrees from current state |
 
 ## Test Strategy
 
 | Level                | Coverage                                                                                           | Execution                       |
-| -------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------- |
+|----------------------|----------------------------------------------------------------------------------------------------|---------------------------------|
 | Backend unit         | State transitions, profile validation, command guards, event sequencing, cleanup, log redaction    | `npm run validate:backend`      |
 | Backend API          | Auth, CSRF, conflicts, simulated start/command/stop, reconnect snapshot, disabled feature behavior | `npm run validate:backend`      |
 | Frontend component   | Mode switch, preflight failures, running session, episode commands, reconnect, completion handoff  | `npm run validate:frontend`     |
 | Frontend integration | Analyze regression and simulated Operate workflow                                                  | `npm run validate:frontend`     |
 | Hardware smoke       | Stable ports, both cameras, teleoperate, stop, one short record, rerecord, finalization            | Opt-in local marker and profile |
-| Full validation      | Backend and frontend checks                                                                        | `npm run validate`              |
+| Full validation      | Backend, operator-worker, and frontend checks                                                      | `npm run validate`              |
 
 Hardware tests never run in default CI. They require an explicit environment marker, the `so101` profile, physical access to the stop controls, and an operator present.
 

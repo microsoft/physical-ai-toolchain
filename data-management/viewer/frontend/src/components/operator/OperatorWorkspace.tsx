@@ -164,7 +164,7 @@ export function OperatorWorkspace({ operator }: OperatorWorkspaceProps) {
             {cameras.map((camera) => (
               <OperatorCameraPreview
                 key={camera.name}
-                active={status?.state === 'running'}
+                active={status?.state === 'running' && capabilities?.adapterMode === 'lerobot'}
                 camera={camera.name}
               />
             ))}
@@ -439,7 +439,7 @@ export function OperatorWorkspace({ operator }: OperatorWorkspaceProps) {
                   <Button
                     type="button"
                     variant="destructive"
-                    title="Cancel this session and delete all of its recordings"
+                    title="Cancel this session and delete every episode recorded in this session"
                     onClick={() => void operator.stopSession()}
                     disabled={operator.isPending}
                   >

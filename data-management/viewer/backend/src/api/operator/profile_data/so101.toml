@@ -18,7 +18,7 @@ logical_id = "my_leader_arm"
 usb_vendor_id = "1a86"
 usb_product_id = "55d3"
 usb_serial = "5AE6083728"
-calibration_file = "/home/alizaidi/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/my_leader_arm.json"
+calibration_file = "~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/my_leader_arm.json"
 
 [follower]
 port = "/dev/so101_follower"
@@ -26,7 +26,7 @@ logical_id = "my_follower_arm"
 usb_vendor_id = "1a86"
 usb_product_id = "55d3"
 usb_serial = "5AE6057231"
-calibration_file = "/home/alizaidi/.cache/huggingface/lerobot/calibration/robots/so_follower/my_follower_arm.json"
+calibration_file = "~/.cache/huggingface/lerobot/calibration/robots/so_follower/my_follower_arm.json"
 
 [wrist_camera]
 path = "/dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB2.0_CAM1_USB2.0_CAM1-video-index0"

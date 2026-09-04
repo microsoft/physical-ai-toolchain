@@ -51,7 +51,9 @@ class WorkerClient(Protocol):
 
     async def wait(self) -> int: ...
 
-    async def command(self, session_id: str, command_id: str, action: OperatorAction): ...
+    async def command(
+        self, session_id: str, command_id: str, action: OperatorAction
+    ): ...
 
     async def terminate(self) -> bool: ...
 
@@ -102,7 +104,9 @@ def _resolve_worker_settings(
     settings = request.settings or OperatorSessionSettings.for_mode(request.mode)
     unknown_cameras = set(settings.camera_fps) - camera_names
     if unknown_cameras:
-        raise OperatorPreconditionError(f"Unknown operator camera: {sorted(unknown_cameras)[0]}")
+        raise OperatorPreconditionError(
+            f"Unknown operator camera: {sorted(unknown_cameras)[0]}"
+        )
     resolved = settings.model_dump(mode="json")
     resolved["mode"] = request.mode.value
     resolved["dataset_root"] = None
@@ -113,7 +117,9 @@ def _resolve_worker_settings(
     resolved["policy_cuda_visible_devices"] = None
     if request.mode is OperatorMode.POLICY:
         if settings.max_relative_target is None or settings.max_relative_target > 5:
-            raise OperatorPreconditionError("Policy mode requires a follower target clamp of at most 5 degrees")
+            raise OperatorPreconditionError(
+                "Policy mode requires a follower target clamp of at most 5 degrees"
+            )
         if policy_python is None or policy_checkpoint is None:
             raise OperatorPreconditionError("GR00T policy runtime is not configured")
         resolved["policy_python"] = str(policy_python)
@@ -133,11 +139,15 @@ def _resolve_worker_settings(
                 collision_index += 1
             dataset_id = candidate.name
         if candidate.parent != root:
-            raise OperatorPreconditionError("Recording dataset path must remain below the configured data root")
+            raise OperatorPreconditionError(
+                "Recording dataset path must remain below the configured data root"
+            )
         resolved["dataset_root"] = str(candidate)
         resolved["dataset_id"] = dataset_id
         resolved["repo_id"] = (
-            settings.hub_repo_id if settings.save_destination == "local_and_hub" else f"local/{dataset_id}"
+            settings.hub_repo_id
+            if settings.save_destination == "local_and_hub"
+            else f"local/{dataset_id}"
         )
     return resolved
 
@@ -185,7 +195,9 @@ class OperatorService:
         self._command_timeout_s = command_timeout_s
         self._simulated_behavior = simulated_behavior
         self._preflight_service = preflight_service
-        self._worker_executable = Path(worker_executable).resolve() if worker_executable else None
+        self._worker_executable = (
+            Path(worker_executable).resolve() if worker_executable else None
+        )
         self._host_lease_fd = host_lease_fd
         self._startup_timeout_s = startup_timeout_s
         self._stop_timeout_s = stop_timeout_s
@@ -193,7 +205,9 @@ class OperatorService:
         self._data_root = (data_root or Path(".")).expanduser().resolve()
         self._now = now
         self._policy_python = Path(policy_python).resolve() if policy_python else None
-        self._policy_checkpoint = Path(policy_checkpoint).resolve() if policy_checkpoint else None
+        self._policy_checkpoint = (
+            Path(policy_checkpoint).resolve() if policy_checkpoint else None
+        )
         self._policy_cuda_visible_devices = policy_cuda_visible_devices
         self._lock = asyncio.Lock()
         self._worker: WorkerClient | None = None
@@ -201,7 +215,9 @@ class OperatorService:
         self._expected_worker_exit: WorkerClient | None = None
         self._terminal_transition = asyncio.Event()
         self._terminal_transition.set()
-        self._active_start: tuple[str, OperatorMode, asyncio.Task[OperatorStatus]] | None = None
+        self._active_start: (
+            tuple[str, OperatorMode, asyncio.Task[OperatorStatus]] | None
+        ) = None
         self._handled_starts: dict[str, _HandledStart] = {}
         self._handled_commands: dict[str, _HandledCommand] = {}
         self._events: deque[OperatorStatus] = deque(maxlen=128)
@@ -209,7 +225,9 @@ class OperatorService:
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._camera_frames: dict[str, OperatorCameraFrame] = {}
         initial_state = (
-            SessionState.DISABLED if self._adapter_mode is OperatorAdapterMode.DISABLED else SessionState.IDLE
+            SessionState.DISABLED
+            if self._adapter_mode is OperatorAdapterMode.DISABLED
+            else SessionState.IDLE
         )
         self._status = OperatorStatus(
             service_instance_id=str(uuid4()),
@@ -217,7 +235,7 @@ class OperatorService:
         )
 
     def capabilities(self) -> OperatorCapabilities:
-        """Return immutable feature capabilities."""
+        """Return immutable capabilities for the configured operator adapter."""
         enabled = self._adapter_mode is not OperatorAdapterMode.DISABLED
         hardware_start_enabled = (
             self._adapter_mode is OperatorAdapterMode.LEROBOT
@@ -225,11 +243,16 @@ class OperatorService:
             and self._host_lease_fd is not None
         )
         policy_enabled = (
-            hardware_start_enabled and self._policy_python is not None and self._policy_checkpoint is not None
+            hardware_start_enabled
+            and self._policy_python is not None
+            and self._policy_checkpoint is not None
         )
         if self._adapter_mode is OperatorAdapterMode.DISABLED:
             reason = "Operator mode is disabled"
-        elif self._adapter_mode is OperatorAdapterMode.LEROBOT and not hardware_start_enabled:
+        elif (
+            self._adapter_mode is OperatorAdapterMode.LEROBOT
+            and not hardware_start_enabled
+        ):
             reason = "LeRobot operator worker is not configured"
         else:
             reason = None
@@ -268,7 +291,9 @@ class OperatorService:
             adapter_mode=self._adapter_mode,
             adapter_version=1,
             protocol_version=(
-                HARDWARE_PROTOCOL_VERSION if self._adapter_mode is OperatorAdapterMode.LEROBOT else PROTOCOL_VERSION
+                HARDWARE_PROTOCOL_VERSION
+                if self._adapter_mode is OperatorAdapterMode.LEROBOT
+                else PROTOCOL_VERSION
             ),
             modes=(
                 [
@@ -277,13 +302,20 @@ class OperatorService:
                     *([OperatorMode.POLICY] if policy_enabled else []),
                 ]
                 if hardware_start_enabled
-                else (list(OperatorMode) if self._adapter_mode is OperatorAdapterMode.SIMULATED else [])
+                else (
+                    list(OperatorMode)
+                    if self._adapter_mode is OperatorAdapterMode.SIMULATED
+                    else []
+                )
             ),
             profiles=["so101"] if enabled else [],
             robots=robots,
             cameras=cameras,
-            preflight_enabled=self._adapter_mode is not OperatorAdapterMode.DISABLED,
-            session_start_enabled=(self._adapter_mode is OperatorAdapterMode.SIMULATED or hardware_start_enabled),
+            preflight_enabled=self._adapter_mode is OperatorAdapterMode.LEROBOT,
+            session_start_enabled=(
+                self._adapter_mode is OperatorAdapterMode.SIMULATED
+                or hardware_start_enabled
+            ),
             reason=reason,
         )
 
@@ -305,13 +337,17 @@ class OperatorService:
         async with self._lock:
             if handled := self._handled_starts.get(request.command_id):
                 if handled.mode is not request.mode:
-                    raise OperatorConflictError("command_id was already used with another payload")
+                    raise OperatorConflictError(
+                        "command_id was already used with another payload"
+                    )
                 return handled.status.model_copy(deep=True)
             if self._active_start is not None:
                 command_id, mode, task = self._active_start
                 if command_id == request.command_id:
                     if mode is not request.mode:
-                        raise OperatorConflictError("command_id was already used with another payload")
+                        raise OperatorConflictError(
+                            "command_id was already used with another payload"
+                        )
                     start_task = task
                 else:
                     raise OperatorConflictError("An operator session is already active")
@@ -325,14 +361,26 @@ class OperatorService:
                 if self._adapter_mode is OperatorAdapterMode.LEROBOT:
                     preflight = self._validate_lerobot_preflight(request)
                     if self._worker_executable is None:
-                        raise NotImplementedError("LeRobot operator worker is not configured")
-                    if not self._worker_executable.is_file() or not os.access(self._worker_executable, os.X_OK):
-                        raise OperatorPreconditionError("LeRobot operator worker is not executable")
+                        raise NotImplementedError(
+                            "LeRobot operator worker is not configured"
+                        )
+                    if not self._worker_executable.is_file() or not os.access(
+                        self._worker_executable, os.X_OK
+                    ):
+                        raise OperatorPreconditionError(
+                            "LeRobot operator worker is not executable"
+                        )
                     preflight_service = self._preflight_service
                     profile_name = request.profile
                     preflight_id = request.preflight_id
-                    if preflight_service is None or profile_name is None or preflight_id is None:
-                        raise OperatorPreconditionError("LeRobot start requires preflight evidence")
+                    if (
+                        preflight_service is None
+                        or profile_name is None
+                        or preflight_id is None
+                    ):
+                        raise OperatorPreconditionError(
+                            "LeRobot start requires preflight evidence"
+                        )
                     profile = preflight_service.profiles[profile_name]
                     camera_names = {"wrist", "front"}
                     worker_settings = _resolve_worker_settings(
@@ -363,16 +411,19 @@ class OperatorService:
                         recovery_timeout_s=self._recovery_timeout_s,
                     )
                 elif self._adapter_mode is OperatorAdapterMode.SIMULATED:
-                    worker_settings = (request.settings or OperatorSessionSettings.for_mode(request.mode)).model_dump(
-                        mode="json"
-                    )
+                    worker_settings = (
+                        request.settings
+                        or OperatorSessionSettings.for_mode(request.mode)
+                    ).model_dump(mode="json")
                     worker = SimulatedWorkerClient(
                         timeout_s=self._command_timeout_s,
                         behavior=self._simulated_behavior,
                         startup_timeout_s=self._startup_timeout_s,
                     )
                 else:
-                    raise OperatorDisabledError("LeRobot operator adapter is not implemented")
+                    raise OperatorDisabledError(
+                        "LeRobot operator adapter is not implemented"
+                    )
                 if self._status.state in {
                     SessionState.STARTING,
                     SessionState.RUNNING,
@@ -399,18 +450,24 @@ class OperatorService:
                     overruns=0,
                     latest_worker_log=None,
                     latest_telemetry=None,
-                    session_settings=OperatorSessionSettings.model_validate(worker_settings),
+                    session_settings=OperatorSessionSettings.model_validate(
+                        worker_settings
+                    ),
                     dataset_id=worker_settings.get("dataset_id"),
                     episode_index=0,
                     recording_phase=None,
                     upload_status="not_requested",
                     upload_error=None,
                 )
-                start_task = asyncio.create_task(self._complete_start(request, session_id, worker))
+                start_task = asyncio.create_task(
+                    self._complete_start(request, session_id, worker)
+                )
                 self._active_start = (request.command_id, request.mode, start_task)
         return await asyncio.shield(start_task)
 
-    async def command(self, session_id: str, command: OperatorCommand) -> OperatorStatus:
+    async def command(
+        self, session_id: str, command: OperatorCommand
+    ) -> OperatorStatus:
         """Apply one idempotent command to the named active session."""
         async with self._lock:
             self._validate_session(session_id)
@@ -418,15 +475,22 @@ class OperatorService:
             handled = self._handled_commands.get(command.command_id)
             if handled is not None:
                 if handled.payload != payload:
-                    raise OperatorConflictError("command_id was already used with another payload")
+                    raise OperatorConflictError(
+                        "command_id was already used with another payload"
+                    )
                 return handled.status.model_copy(deep=True)
             allowed_states = {SessionState.RUNNING}
             if command.action == "cancel":
                 allowed_states.add(SessionState.STARTING)
             if self._status.state not in allowed_states:
                 raise OperatorConflictError("Operator session is not running")
-            if self._status.mode in {OperatorMode.TELEOPERATE, OperatorMode.POLICY} and command.action != "cancel":
-                raise OperatorConflictError("Teleoperation and policy sessions only accept cancel")
+            if (
+                self._status.mode in {OperatorMode.TELEOPERATE, OperatorMode.POLICY}
+                and command.action != "cancel"
+            ):
+                raise OperatorConflictError(
+                    "Teleoperation and policy sessions only accept cancel"
+                )
 
             worker = self._worker
             if worker is None:
@@ -459,7 +523,9 @@ class OperatorService:
         async with self._lock:
             if self._worker is not worker or self._status.session_id != session_id:
                 result = self.status()
-                self._handled_commands[command.command_id] = _HandledCommand(payload, result)
+                self._handled_commands[command.command_id] = _HandledCommand(
+                    payload, result
+                )
                 return result
             if command.action == "finish":
                 next_state = SessionState.COMPLETED
@@ -479,19 +545,30 @@ class OperatorService:
                     if acknowledgement.episode_index is not None
                     else self._status.episode_index
                 ),
-                recording_phase=(acknowledgement.recording_phase or self._status.recording_phase),
+                recording_phase=(
+                    acknowledgement.recording_phase or self._status.recording_phase
+                ),
                 upload_status=(
                     "succeeded"
                     if acknowledgement.upload_succeeded
-                    else ("failed" if acknowledgement.upload_attempted else self._status.upload_status)
+                    else (
+                        "failed"
+                        if acknowledgement.upload_attempted
+                        else self._status.upload_status
+                    )
                 ),
                 upload_error=acknowledgement.upload_error,
-                cleanup_unconfirmed=(command.action in {"finish", "cancel"} and not acknowledgement.cleanup_complete),
+                cleanup_unconfirmed=(
+                    command.action in {"finish", "cancel"}
+                    and not acknowledgement.cleanup_complete
+                ),
             )
             if command.action in {"finish", "cancel"}:
                 self._terminal_transition.set()
             result = self.status()
-            self._handled_commands[command.command_id] = _HandledCommand(payload, result)
+            self._handled_commands[command.command_id] = _HandledCommand(
+                payload, result
+            )
             return result
 
     async def stop(self, session_id: str, *, command_id: str) -> OperatorStatus:
@@ -557,24 +634,35 @@ class OperatorService:
     ) -> OperatorStatus:
         try:
             await worker.launch(session_id, request.mode)
-            self._monitor_task = asyncio.create_task(self._monitor_worker(worker, session_id))
+            self._monitor_task = asyncio.create_task(
+                self._monitor_worker(worker, session_id)
+            )
             await worker.wait_ready()
             wait_for_terminal = False
             async with self._lock:
-                if self._worker is worker and self._status.state is SessionState.STARTING:
-                    self._replace_status(state=SessionState.RUNNING, worker_pid=worker.pid)
+                if (
+                    self._worker is worker
+                    and self._status.state is SessionState.STARTING
+                ):
+                    self._replace_status(
+                        state=SessionState.RUNNING, worker_pid=worker.pid
+                    )
                 elif self._status.state is SessionState.STOPPING:
                     wait_for_terminal = True
                 if wait_for_terminal:
                     result = None
                 else:
                     result = self.status()
-                    self._handled_starts[request.command_id] = _HandledStart(request.mode, result)
+                    self._handled_starts[request.command_id] = _HandledStart(
+                        request.mode, result
+                    )
             if wait_for_terminal:
                 await self._terminal_transition.wait()
                 async with self._lock:
                     result = self.status()
-                    self._handled_starts[request.command_id] = _HandledStart(request.mode, result)
+                    self._handled_starts[request.command_id] = _HandledStart(
+                        request.mode, result
+                    )
             if result is None:
                 raise RuntimeError("Operator start did not produce a status")
             return result
@@ -589,7 +677,9 @@ class OperatorService:
                         error=str(error),
                     )
                 result = self.status()
-                self._handled_starts[request.command_id] = _HandledStart(request.mode, result)
+                self._handled_starts[request.command_id] = _HandledStart(
+                    request.mode, result
+                )
             raise RuntimeError(str(error)) from error
         finally:
             async with self._lock:
@@ -646,7 +736,9 @@ class OperatorService:
                 ),
             )
 
-    def _event_replay(self, last_event_id: str | None) -> tuple[str, list[OperatorStatus]]:
+    def _event_replay(
+        self, last_event_id: str | None
+    ) -> tuple[str, list[OperatorStatus]]:
         if not last_event_id:
             return "snapshot", [self.status()]
         try:
@@ -656,7 +748,11 @@ class OperatorService:
             return "snapshot", [self.status()]
         if service_instance_id != self._status.service_instance_id:
             return "snapshot", [self.status()]
-        replay = [event.model_copy(deep=True) for event in self._events if event.revision > revision]
+        replay = [
+            event.model_copy(deep=True)
+            for event in self._events
+            if event.revision > revision
+        ]
         if not replay and revision < self._status.revision:
             return "snapshot", [self.status()]
         return "status", replay
@@ -665,25 +761,40 @@ class OperatorService:
         if not self._status.session_id or session_id != self._status.session_id:
             raise OperatorConflictError("Stale session ID")
 
-    def _validate_lerobot_preflight(self, request: StartSessionRequest) -> PreflightResult:
-        if not request.profile or not request.preflight_id or not request.preflight_fingerprint:
+    def _validate_lerobot_preflight(
+        self, request: StartSessionRequest
+    ) -> PreflightResult:
+        if (
+            not request.profile
+            or not request.preflight_id
+            or not request.preflight_fingerprint
+        ):
             raise OperatorPreconditionError("LeRobot start requires preflight evidence")
         if self._preflight_service is None:
             raise OperatorPreconditionError("Operator preflight service is unavailable")
         try:
             result = self._preflight_service.get(request.preflight_id)
         except KeyError as error:
-            raise OperatorPreconditionError("Operator preflight was not found") from error
+            raise OperatorPreconditionError(
+                "Operator preflight was not found"
+            ) from error
         if result.lifecycle is not PreflightLifecycle.COMPLETED:
             raise OperatorPreconditionError("Operator preflight is not current")
         if result.profile != request.profile or result.mode is not request.mode:
-            raise OperatorPreconditionError("Operator preflight does not match the requested session")
+            raise OperatorPreconditionError(
+                "Operator preflight does not match the requested session"
+            )
         if result.resource_fingerprint != request.preflight_fingerprint:
             raise OperatorPreconditionError("Operator preflight fingerprint changed")
-        if result.profile_fingerprint != self._preflight_service.profiles[request.profile].fingerprint:
+        if (
+            result.profile_fingerprint
+            != self._preflight_service.profiles[request.profile].fingerprint
+        ):
             raise OperatorPreconditionError("Operator profile fingerprint changed")
         if not result.start_eligible:
-            raise OperatorPreconditionError("Operator preflight is not eligible for start")
+            raise OperatorPreconditionError(
+                "Operator preflight is not eligible for start"
+            )
         return result
 
     def _replace_status(self, **changes: object) -> None:

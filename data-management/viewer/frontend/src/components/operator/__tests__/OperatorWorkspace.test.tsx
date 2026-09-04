@@ -79,6 +79,25 @@ describe('OperatorWorkspace', () => {
     expect(operator.startSession).toHaveBeenNthCalledWith(2, 'record')
   })
 
+  it('does not activate hardware camera previews for simulated sessions', () => {
+    render(
+      <OperatorWorkspace
+        operator={createOperator({
+          status: {
+            ...createOperator().status!,
+            state: 'running',
+            sessionId: 'simulated-session',
+            mode: 'teleoperate',
+            workerPid: 1234,
+          },
+        })}
+      />,
+    )
+
+    expect(screen.getByText('wrist camera stopped')).toBeInTheDocument()
+    expect(screen.getByText('front camera stopped')).toBeInTheDocument()
+  })
+
   it('shows explicit recording commands for a running record session', async () => {
     const operator = createOperator({
       status: {
@@ -157,6 +176,10 @@ describe('OperatorWorkspace', () => {
     expect(screen.getByRole('button', { name: 'Discard Episode' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Finish Recording' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Pause Recording' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Discard Recording' })).toHaveAttribute(
+      'title',
+      'Cancel this session and delete every episode recorded in this session',
+    )
     expect(screen.getByTestId('episode-progress')).toHaveTextContent('Episode 1 of 50')
     expect(screen.getByText('30 FPS')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Wrist camera' })).toBeInTheDocument()

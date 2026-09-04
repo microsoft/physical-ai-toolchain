@@ -19,6 +19,7 @@ FRONTEND_DIR="${SCRIPT_DIR}/frontend"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-30}"
+BACKEND_GRACEFUL_SHUTDOWN_TIMEOUT="${BACKEND_GRACEFUL_SHUTDOWN_TIMEOUT:-5}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -64,6 +65,8 @@ Environment Variables:
     BACKEND_PORT    Backend port (default: 8000)
     FRONTEND_PORT   Frontend port (default: 5173)
     HEALTH_TIMEOUT  Seconds to wait for backend health (default: 30)
+    BACKEND_GRACEFUL_SHUTDOWN_TIMEOUT
+                    Seconds to wait for active requests during reload (default: 5)
 
 Examples:
     ./start.sh                                    # Start both services
@@ -168,7 +171,6 @@ start_backend() {
         should_install_vlm_judge=true
         if [[ "${VLM_JUDGE_BACKEND:-echo}" == "qwen3-vl" ]]; then
             vlm_judge_package_spec="${vlm_judge_package_spec}[qwen3-vl]"
-            backend_install_extras=".[dev,analysis,export,vlm-judge]"
         elif [[ "${VLM_JUDGE_BACKEND:-echo}" == "openai-compat" ]]; then
             vlm_judge_package_spec="${vlm_judge_package_spec}[openai]"
         fi
@@ -228,6 +230,7 @@ start_backend() {
         exec uvicorn src.api.main:app \
             --reload \
             --reload-dir src \
+            --timeout-graceful-shutdown "${BACKEND_GRACEFUL_SHUTDOWN_TIMEOUT}" \
             --port "${BACKEND_PORT}" 2>&1
     ) &
     BACKEND_PID=$!

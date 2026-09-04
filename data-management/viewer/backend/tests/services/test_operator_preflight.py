@@ -36,7 +36,9 @@ _JOINTS = (
 def _write_calibration(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({name: {"id": index} for index, name in enumerate(_JOINTS, start=1)}),
+        json.dumps(
+            {name: {"id": index} for index, name in enumerate(_JOINTS, start=1)}
+        ),
         encoding="utf-8",
     )
 
@@ -98,8 +100,7 @@ fps = 30
 episode_time_s = 60
 reset_time_s = 30
 upload_default = false
-""".strip()
-        + "\n",
+""".strip() + "\n",
         encoding="utf-8",
     )
 
@@ -170,11 +171,33 @@ def _prepare_ready_host(root: Path) -> tuple[Path, Path]:
 
 class TestOperatorProfiles:
     def test_checked_in_profile_disables_relative_target_clamp(self) -> None:
-        profile_path = Path(__file__).parents[2] / "src/api/operator/profile_data/so101.toml"
+        profile_path = (
+            Path(__file__).parents[2] / "src/api/operator/profile_data/so101.toml"
+        )
 
         profile = load_operator_profile(profile_path, environ={})
 
         assert profile.max_relative_target is None
+
+    def test_checked_in_profile_resolves_portable_calibration_paths(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        profile_path = (
+            Path(__file__).parents[2] / "src/api/operator/profile_data/so101.toml"
+        )
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        profile = load_operator_profile(profile_path, environ={})
+
+        calibration_root = tmp_path / ".cache/huggingface/lerobot/calibration"
+        assert profile.leader.calibration_file == (
+            calibration_root / "teleoperators/so_leader/my_leader_arm.json"
+        )
+        assert profile.follower.calibration_file == (
+            calibration_root / "robots/so_follower/my_follower_arm.json"
+        )
 
     def test_loads_strict_profile_and_allowlisted_override(
         self,
@@ -215,7 +238,9 @@ class TestOperatorProfiles:
     def test_rejects_unknown_version_and_coerced_types(self, tmp_path: Path) -> None:
         profile_path, _ = _prepare_ready_host(tmp_path)
         profile_path.write_text(
-            profile_path.read_text(encoding="utf-8").replace("version = 1", "version = 2"),
+            profile_path.read_text(encoding="utf-8").replace(
+                "version = 1", "version = 2"
+            ),
             encoding="utf-8",
         )
         with pytest.raises(OperatorProfileError):
@@ -223,7 +248,9 @@ class TestOperatorProfiles:
 
         _write_profile(profile_path, tmp_path)
         profile_path.write_text(
-            profile_path.read_text(encoding="utf-8").replace("fps = 30", 'fps = "30"', 1),
+            profile_path.read_text(encoding="utf-8").replace(
+                "fps = 30", 'fps = "30"', 1
+            ),
             encoding="utf-8",
         )
         with pytest.raises(OperatorProfileError):
@@ -257,9 +284,14 @@ class TestOperatorPreflightRunner:
 
         assert result.start_eligible is True
         assert result.resource_fingerprint
-        assert all(check.outcome is not PreflightCheckOutcome.BLOCKING for check in result.checks)
+        assert all(
+            check.outcome is not PreflightCheckOutcome.BLOCKING
+            for check in result.checks
+        )
 
-    def test_realsense_interfaces_with_one_serial_count_as_one_camera(self, tmp_path: Path) -> None:
+    def test_realsense_interfaces_with_one_serial_count_as_one_camera(
+        self, tmp_path: Path
+    ) -> None:
         profile_path, data_root = _prepare_ready_host(tmp_path)
         _create_sysfs_usb_device(
             tmp_path,
@@ -280,7 +312,9 @@ class TestOperatorPreflightRunner:
             access_check=lambda _path, _mode: True,
         )
 
-        result = runner.run(load_operator_profile(profile_path, environ={}), mode=OperatorMode.RECORD)
+        result = runner.run(
+            load_operator_profile(profile_path, environ={}), mode=OperatorMode.RECORD
+        )
 
         front = next(check for check in result.checks if check.name == "front_camera")
         assert front.outcome is PreflightCheckOutcome.PASSED
@@ -290,7 +324,9 @@ class TestOperatorPreflightRunner:
         [
             (lambda root: (root / "dev/so101_leader").unlink(), "leader_device"),
             (
-                lambda root: (root / "calibration/follower.json").write_text("{}", encoding="utf-8"),
+                lambda root: (root / "calibration/follower.json").write_text(
+                    "{}", encoding="utf-8"
+                ),
                 "follower_calibration",
             ),
             (
@@ -328,7 +364,9 @@ class TestOperatorPreflightRunner:
 
         assert result.start_eligible is False
         assert (
-            next(check for check in result.checks if check.name == expected_check).outcome
+            next(
+                check for check in result.checks if check.name == expected_check
+            ).outcome
             is PreflightCheckOutcome.BLOCKING
         )
 
@@ -345,10 +383,14 @@ class TestOperatorPreflightRunner:
             access_check=lambda _path, _mode: True,
         )
 
-        result = runner.run(load_operator_profile(profile_path, environ={}), mode=OperatorMode.RECORD)
+        result = runner.run(
+            load_operator_profile(profile_path, environ={}), mode=OperatorMode.RECORD
+        )
 
         assert (
-            next(check for check in result.checks if check.name == "dataset_storage").outcome
+            next(
+                check for check in result.checks if check.name == "dataset_storage"
+            ).outcome
             is PreflightCheckOutcome.BLOCKING
         )
 
@@ -374,7 +416,9 @@ class TestOperatorPreflightRunner:
         )
 
         assert (
-            next(check for check in result.checks if check.name == "upload_credentials").outcome
+            next(
+                check for check in result.checks if check.name == "upload_credentials"
+            ).outcome
             is PreflightCheckOutcome.BLOCKING
         )
 
@@ -394,9 +438,13 @@ class TestOperatorPreflightRunner:
             access_check=lambda _path, _mode: True,
         )
 
-        result = runner.run(load_operator_profile(profile_path, environ={}), mode=OperatorMode.RECORD)
+        result = runner.run(
+            load_operator_profile(profile_path, environ={}), mode=OperatorMode.RECORD
+        )
 
-        ownership = next(check for check in result.checks if check.name == "device_ownership")
+        ownership = next(
+            check for check in result.checks if check.name == "device_ownership"
+        )
         assert ownership.outcome is PreflightCheckOutcome.BLOCKING
         assert ownership.remediation
         assert result.start_eligible is False
@@ -419,9 +467,9 @@ class TestOperatorPreflightRunner:
         )
 
         missing = missing_runner.run(profile, mode=OperatorMode.POLICY)
-        assert next(check for check in missing.checks if check.name == "policy_runtime").outcome is (
-            PreflightCheckOutcome.BLOCKING
-        )
+        assert next(
+            check for check in missing.checks if check.name == "policy_runtime"
+        ).outcome is (PreflightCheckOutcome.BLOCKING)
 
         python = tmp_path / "policy-python"
         python.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -449,11 +497,13 @@ class TestOperatorPreflightRunner:
         )
 
         ready = ready_runner.run(profile, mode=OperatorMode.POLICY)
-        assert next(check for check in ready.checks if check.name == "policy_runtime").outcome is (
-            PreflightCheckOutcome.PASSED
-        )
+        assert next(
+            check for check in ready.checks if check.name == "policy_runtime"
+        ).outcome is (PreflightCheckOutcome.PASSED)
 
-    def test_device_and_calibration_validation_fail_closed(self, tmp_path: Path) -> None:
+    def test_device_and_calibration_validation_fail_closed(
+        self, tmp_path: Path
+    ) -> None:
         profile_path, data_root = _prepare_ready_host(tmp_path)
         profile = load_operator_profile(profile_path, environ={})
         inaccessible = OperatorPreflightRunner(
@@ -466,12 +516,12 @@ class TestOperatorPreflightRunner:
             device_mode_check=lambda _path: False,
             access_check=lambda _path, _mode: True,
         ).run(profile, mode=OperatorMode.RECORD)
-        assert next(check for check in inaccessible.checks if check.name == "leader_device").outcome is (
-            PreflightCheckOutcome.BLOCKING
-        )
-        assert next(check for check in inaccessible.checks if check.name == "wrist_camera").outcome is (
-            PreflightCheckOutcome.BLOCKING
-        )
+        assert next(
+            check for check in inaccessible.checks if check.name == "leader_device"
+        ).outcome is (PreflightCheckOutcome.BLOCKING)
+        assert next(
+            check for check in inaccessible.checks if check.name == "wrist_camera"
+        ).outcome is (PreflightCheckOutcome.BLOCKING)
 
         profile.leader.calibration_file.write_text("not-json", encoding="utf-8")
         malformed = OperatorPreflightRunner(
@@ -484,9 +534,9 @@ class TestOperatorPreflightRunner:
             device_mode_check=lambda _path: True,
             access_check=lambda _path, _mode: True,
         ).run(profile, mode=OperatorMode.RECORD)
-        assert next(check for check in malformed.checks if check.name == "leader_calibration").outcome is (
-            PreflightCheckOutcome.BLOCKING
-        )
+        assert next(
+            check for check in malformed.checks if check.name == "leader_calibration"
+        ).outcome is (PreflightCheckOutcome.BLOCKING)
 
     def test_storage_credentials_and_visibility_report_exact_readiness(
         self,
@@ -515,10 +565,12 @@ class TestOperatorPreflightRunner:
             upload_requested=True,
         )
 
-        assert next(check for check in result.checks if check.name == "upload_credentials").outcome is (
-            PreflightCheckOutcome.PASSED
+        assert next(
+            check for check in result.checks if check.name == "upload_credentials"
+        ).outcome is (PreflightCheckOutcome.PASSED)
+        ownership = next(
+            check for check in result.checks if check.name == "device_ownership"
         )
-        ownership = next(check for check in result.checks if check.name == "device_ownership")
         assert ownership.outcome is PreflightCheckOutcome.WARNING
         assert result.ownership_complete is False
 
@@ -528,7 +580,9 @@ class TestOperatorPreflightRunner:
         )._storage_check(profile, {})
         assert missing_storage.outcome is PreflightCheckOutcome.BLOCKING
 
-    def test_front_camera_nodes_require_matching_video_identity(self, tmp_path: Path) -> None:
+    def test_front_camera_nodes_require_matching_video_identity(
+        self, tmp_path: Path
+    ) -> None:
         profile_path, data_root = _prepare_ready_host(tmp_path)
         profile = load_operator_profile(profile_path, environ={})
         front_usb = tmp_path / "sys/bus/usb/devices/usb-front"
@@ -581,7 +635,9 @@ class TestOperatorPreflightService:
         assert cancelled.start_eligible is False
 
         with pytest.raises(OperatorPreflightConflictError, match="payload"):
-            service.create(request.model_copy(update={"mode": OperatorMode.TELEOPERATE}))
+            service.create(
+                request.model_copy(update={"mode": OperatorMode.TELEOPERATE})
+            )
 
         fresh = service.create(request.model_copy(update={"command_id": "preflight-2"}))
         current_time += timedelta(seconds=30)
@@ -684,7 +740,9 @@ class TestOperatorPreflightService:
         )
         cancelled = service.cancel(result.preflight_id, command_id="cancel")
         assert service.cancel(result.preflight_id, command_id="cancel") == cancelled
-        assert service.cancel(result.preflight_id, command_id="cancel-again") == cancelled
+        assert (
+            service.cancel(result.preflight_id, command_id="cancel-again") == cancelled
+        )
 
         other = service.create(
             PreflightRequest(
