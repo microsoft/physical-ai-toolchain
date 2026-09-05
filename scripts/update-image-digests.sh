@@ -5,7 +5,8 @@
 # References are discovered automatically: every "<image>:<tag>@sha256:<digest>" is
 # re-resolved to its current registry digest and rewritten in place. Dockerfiles and
 # compose files are owned by Dependabot; gh-aw compiled workflows are compiler-owned.
-# Test fixtures and Pester test files are also excluded.
+# Test fixtures and Pester test files are also excluded. AzureML environment versions
+# derived from shared image defaults are synchronized in the same run.
 # Check mode reports drift without modifying source files, optionally writing SARIF.
 set -o errexit -o nounset -o pipefail
 
@@ -22,8 +23,8 @@ Usage: $(basename "$0") [OPTIONS]
 Discover every "<image>:<tag>@sha256:<digest>" reference in tracked files, resolve each
 tag to its current registry digest, and rewrite the pins in place. Dockerfiles, compose
 files, gh-aw compiled workflows, test fixtures, and Pester test files are skipped.
-AzureML environment references (azureml:<name>:latest) are not digest pins and are
-left untouched. Check mode is a CI signal that supports SARIF and exits 2 on drift.
+AzureML environment versions derived from checked-in image defaults are synchronized.
+Check mode is a CI signal that supports SARIF and exits 2 on drift.
 Dry-run mode is a local preview of the changes that write mode would apply.
 Anonymous OCI registries are supported. Anonymous pull tokens are acquired only for
 Docker Hub and NGC; other registries that require authentication are not supported.
@@ -99,6 +100,14 @@ exclude_paths=(
   ':(exclude,glob)**/tests/Fixtures/**'
   ':(exclude,glob)**/*.Tests.ps1'
 )
+azureml_pin_specs=(
+  'DEFAULT_ISAAC_LAB_IMAGE|isaaclab-training-env|training/rl/workflows/azureml/train.yaml'
+  'DEFAULT_ISAAC_LAB_IMAGE|isaaclab-training-env|evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml'
+  'DEFAULT_LEROBOT_TRAIN_IMAGE|lerobot-training-env|training/il/workflows/azureml/lerobot-train.yaml'
+  'DEFAULT_LEROBOT_EVAL_IMAGE|lerobot-inference-env|evaluation/sil/workflows/azureml/lerobot-eval.yaml'
+  'DEFAULT_LEROBOT_TRAIN_IMAGE|vla-pi0-training-env|training/vla/workflows/azureml/vla-pi0-train.yaml'
+)
+azureml_environment_line_re="^[[:space:]]*(-[[:space:]]*)?[\"']?environment[\"']?[[:space:]]*:[[:space:]]*[\"']?azureml:"
 
 cd "$REPO_ROOT"
 
@@ -187,8 +196,8 @@ record_drift() {
       start_column=$((consumed + ${#prefix} + boundary_length + 1))
       end_column=$((start_column + ${#matched_ref}))
       if [[ "$pinned_digest" != "$digest" ]]; then
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-          "$file" "$line_number" "$start_column" "$end_column" \
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "container-image-digest-drift" "$file" "$line_number" "$start_column" "$end_column" \
           "$ref" "$pinned_digest" "$digest" >>"$drift_report"
       fi
       next_offset=$((${#prefix} + ${#full_match}))
@@ -225,13 +234,14 @@ write_sarif() {
   sarif_tmp="$(mktemp "$output_dir/.image-digest-freshness.XXXXXX")"
   if ! jq -Rn '
       [inputs | split("\t") | {
-        file: .[0],
-        line: (.[1] | tonumber),
-        startColumn: (.[2] | tonumber),
-        endColumn: (.[3] | tonumber),
-        ref: .[4],
-        pinned: .[5],
-        resolved: .[6]
+        rule: .[0],
+        file: .[1],
+        line: (.[2] | tonumber),
+        startColumn: (.[3] | tonumber),
+        endColumn: (.[4] | tonumber),
+        ref: .[5],
+        pinned: .[6],
+        resolved: .[7]
       }] as $findings
       | {
           version: "2.1.0",
@@ -241,23 +251,40 @@ write_sarif() {
               driver: {
                 name: "Container Image Digest Freshness",
                 informationUri: "https://github.com/microsoft/physical-ai-toolchain",
-                rules: [{
-                  id: "container-image-digest-drift",
-                  shortDescription: {
-                    text: "Pinned container image digest differs from the tag digest"
+                rules: [
+                  {
+                    id: "container-image-digest-drift",
+                    shortDescription: {
+                      text: "Pinned container image digest differs from the tag digest"
+                    },
+                    helpUri: "https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-image-digests.sh",
+                    defaultConfiguration: { level: "warning" }
                   },
-                  helpUri: "https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-image-digests.sh",
-                  defaultConfiguration: { level: "warning" }
-                }]
+                  {
+                    id: "azureml-environment-version-drift",
+                    shortDescription: {
+                      text: "Azure ML environment version differs from the image-derived version"
+                    },
+                    helpUri: "https://github.com/microsoft/physical-ai-toolchain/blob/main/scripts/update-image-digests.sh",
+                    defaultConfiguration: { level: "warning" }
+                  }
+                ]
               }
             },
             results: [
               $findings[] | {
-                ruleId: "container-image-digest-drift",
+                ruleId: .rule,
                 level: "warning",
                 message: {
-                  text: ("Pinned digest " + .pinned + " for " + .ref
-                    + " differs from the registry digest " + .resolved + ".")
+                  text: (
+                    if .rule == "container-image-digest-drift" then
+                      "Pinned digest " + .pinned + " for " + .ref
+                        + " differs from the registry digest " + .resolved + "."
+                    else
+                      "Pinned Azure ML environment version " + .pinned + " for " + .ref
+                        + " differs from the image-derived version " + .resolved + "."
+                    end
+                  )
                 },
                 locations: [{
                   physicalLocation: {
@@ -281,18 +308,72 @@ write_sarif() {
   sarif_report_path="$output"
 }
 
+read_checked_in_image_default() {
+  local variable="$1" lines line_count line prefix suffix image
+  lines=$(grep -E "^${variable}=" "$REPO_ROOT/scripts/lib/common.sh" || true)
+  [[ -n "$lines" ]] || fatal "No checked-in default for $variable in scripts/lib/common.sh"
+  line_count=$(printf '%s\n' "$lines" | grep -c .)
+  [[ "$line_count" -eq 1 ]] || fatal "Expected one checked-in default for $variable in scripts/lib/common.sh, found $line_count"
+  line="$lines"
+  prefix="${variable}=\"\${${variable}:-"
+  suffix='}"'
+  [[ "$line" == "$prefix"*"$suffix" ]] || fatal "Could not parse checked-in default for $variable"
+  image="${line#"$prefix"}"
+  printf '%s\n' "${image%"$suffix"}"
+}
+
+apply_file_update() {
+  local file="$1" candidate="$2"
+  if cmp -s "$file" "$candidate"; then
+    return 1
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    info "[dry-run] Would update $file"
+    diff -u "$file" "$candidate" || true
+  else
+    # Overwrite in place so the target retains its permissions.
+    cp "$candidate" "$file"
+    info "Updated $file"
+  fi
+  return 0
+}
+
 #------------------------------------------------------------------------------
 # Discover
 #------------------------------------------------------------------------------
-section "Discovering Digest Pins"
+section "Discovering Pins"
 
 refs=$(git grep -hoE "$digest_ref_re" -- "${exclude_paths[@]}" 2>/dev/null |
   sed -E 's/@sha256:[0-9a-f]{64}//' | sort -u || true)
 files=$(git grep -lE "$digest_ref_re" -- "${exclude_paths[@]}" 2>/dev/null || true)
+azureml_files=""
+for spec in "${azureml_pin_specs[@]}"; do
+  spec_file="${spec##*|}"
+  if [[ -f "$spec_file" ]]; then
+    azureml_files=$(printf '%s\n%s\n' "$azureml_files" "$spec_file" | grep -v '^$' | sort -u)
+  fi
+done
+if [[ -n "$azureml_files" ]]; then
+  expected_azureml_files=$(printf '%s\n' "${azureml_pin_specs[@]}" | cut -d'|' -f3 | sort -u)
+  missing_expected_azureml_files=$(comm -23 \
+    <(printf '%s\n' "$expected_azureml_files" | grep -v '^$' | sort -u) \
+    <(printf '%s\n' "$azureml_files" | grep -v '^$' | sort -u))
+  [[ -z "$missing_expected_azureml_files" ]] \
+    || fatal "AzureML environment pin targets not found: $(printf '%s' "$missing_expected_azureml_files" | tr '\n' ' ')"
+  discovered_azureml_files=$(git grep --untracked -lE "$azureml_environment_line_re" -- \
+    ':(glob)**/workflows/**/*.yaml' ':(glob)**/workflows/**/*.yml' "${exclude_paths[@]}" 2>/dev/null || true)
+  missing_azureml_files=$(comm -23 \
+    <(printf '%s\n' "$discovered_azureml_files" | grep -v '^$' | sort -u) \
+    <(printf '%s\n' "$azureml_files" | grep -v '^$' | sort -u))
+  [[ -z "$missing_azureml_files" ]] \
+    || fatal "AzureML environment pin targets missing from azureml_pin_specs: $(printf '%s' "$missing_azureml_files" | tr '\n' ' ')"
+fi
+files_in_scope=$(printf '%s\n%s\n' "$files" "$azureml_files" | grep -v '^$' | sort -u)
 [[ -n "$refs" ]] || fatal "No digest-pinned image references found under $REPO_ROOT"
 
 ref_count=$(printf '%s\n' "$refs" | grep -c .)
-file_count=$(printf '%s\n' "$files" | grep -c .)
+file_count=$(printf '%s\n' "$files_in_scope" | grep -c .)
 print_kv "Images Discovered" "$ref_count"
 print_kv "Files Discovered" "$file_count"
 
@@ -300,7 +381,7 @@ if [[ "$config_preview" == "true" ]]; then
   section "Discovered Images"
   while IFS= read -r ref; do print_kv "Image" "$ref"; done <<<"$refs"
   section "Discovered Files"
-  while IFS= read -r file; do print_kv "File" "$file"; done <<<"$files"
+  while IFS= read -r file; do print_kv "File" "$file"; done <<<"$files_in_scope"
   exit 0
 fi
 
@@ -310,7 +391,9 @@ fi
 section "Resolving Digests"
 
 digest_map="$(mktemp)"
+azureml_update_map="$(mktemp)"
 drift_report=""
+affected_files_report="$(mktemp)"
 tmp=""
 tmp_new=""
 sarif_tmp=""
@@ -321,7 +404,7 @@ else
   tmp="$(mktemp)"
   tmp_new="$(mktemp)"
 fi
-trap 'rm -f "$digest_map" "$drift_report" "$tmp" "$tmp_new" "$sarif_tmp"' EXIT
+trap 'rm -f "$digest_map" "$azureml_update_map" "$affected_files_report" "$drift_report" "$tmp" "$tmp_new" "$sarif_tmp"' EXIT
 while IFS= read -r ref; do
   digest=$(resolve_digest "$ref")
   [[ "$digest" =~ ^${digest_value_re}$ ]] || fatal "Could not resolve a valid digest for $ref"
@@ -329,11 +412,27 @@ while IFS= read -r ref; do
   print_kv "$ref" "$digest"
 done <<<"$refs"
 
+if [[ -n "$azureml_files" ]]; then
+  # Validate every AzureML synchronization target before writing any file.
+  while IFS='|' read -r variable environment_name file; do
+    image=$(read_checked_in_image_default "$variable")
+    ref="${image%@*}"
+    digest=$(awk -v ref="$ref" '$1 == ref { print $2; exit }' "$digest_map")
+    [[ "$digest" == sha256:* ]] || fatal "No resolved digest found for $variable ($ref)"
+    version=$(derive_azureml_environment_version_from_image "${ref}@${digest}")
+    replacement="environment: azureml:${environment_name}:${version}"
+    grep -qE "^[[:space:]]*(-[[:space:]]*)?[\"']?environment[\"']?[[:space:]]*:[[:space:]]*[\"']?azureml:${environment_name}:[A-Za-z0-9._-]+[\"']?[[:space:]]*$" "$file" \
+      || fatal "Could not find AzureML environment pin in $file"
+    printf '%s\t%s\t%s\n' "$environment_name" "$file" "$replacement" >>"$azureml_update_map"
+  done < <(printf '%s\n' "${azureml_pin_specs[@]}")
+fi
+
 #------------------------------------------------------------------------------
 # Evaluate
 #------------------------------------------------------------------------------
 section "Evaluating Pins"
 
+azureml_updated=0
 affected_file_count=0
 if [[ "$check" == "true" ]]; then
   while IFS= read -r file; do
@@ -343,14 +442,30 @@ if [[ "$check" == "true" ]]; then
       record_drift "$file" "$ref" "$ref_re" "$digest"
     done <"$digest_map"
   done <<<"$files"
-  drift_files="$(cut -f1 "$drift_report" | sort -u)"
-  if [[ -n "$drift_files" ]]; then
-    affected_file_count=$(printf '%s\n' "$drift_files" | grep -c .)
-  fi
-  while IFS=$'\t' read -r file line_number _ _ ref pinned_digest digest; do
+  cut -f2 "$drift_report" | sort -u >>"$affected_files_report"
+  while IFS=$'\t' read -r _ file line_number _ _ ref pinned_digest digest; do
     [[ -n "$file" ]] || continue
     warn "Digest drift detected at $file:$line_number for $ref ($pinned_digest -> $digest)"
   done <"$drift_report"
+
+  while IFS=$'\t' read -r environment_name environment_file replacement; do
+    [[ -n "$environment_file" ]] || continue
+    environment_ref="${replacement#environment: }"
+    if ! grep -qE "^[[:space:]]*(-[[:space:]]*)?[\"']?environment[\"']?[[:space:]]*:[[:space:]]*[\"']?${environment_ref}[\"']?[[:space:]]*$" "$environment_file"; then
+      environment_match=$(grep -nE "^[[:space:]]*(-[[:space:]]*)?[\"']?environment[\"']?[[:space:]]*:[[:space:]]*[\"']?azureml:${environment_name}:[A-Za-z0-9._-]+[\"']?[[:space:]]*$" "$environment_file")
+      line_number="${environment_match%%:*}"
+      line_text="${environment_match#*:}"
+      pinned_ref=$(printf '%s\n' "$line_text" | grep -oE "azureml:${environment_name}:[A-Za-z0-9._-]+")
+      pinned_version="${pinned_ref##*:}"
+      resolved_version="${environment_ref##*:}"
+      azureml_updated=$((azureml_updated + 1))
+      printf '%s\n' "$environment_file" >>"$affected_files_report"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "azureml-environment-version-drift" "$environment_file" "$line_number" "1" "$(( ${#line_text} + 1 ))" \
+        "azureml:${environment_name}" "$pinned_version" "$resolved_version" >>"$drift_report"
+      warn "AzureML environment drift detected in $environment_file for $environment_name"
+    fi
+  done <"$azureml_update_map"
 else
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
@@ -364,24 +479,27 @@ else
       mv "$tmp_new" "$tmp"
     done <"$digest_map"
 
-    if cmp -s "$file" "$tmp"; then
-      continue
+    while IFS=$'\t' read -r environment_name environment_file replacement; do
+      [[ "$environment_file" == "$file" ]] || continue
+      environment_ref="${replacement#environment: }"
+      sed -E "s#^([[:space:]]*(-[[:space:]]*)?[\"']?environment[\"']?[[:space:]]*:[[:space:]]*)[\"']?azureml:${environment_name}:[A-Za-z0-9._-]+[\"']?[[:space:]]*\$#\1${environment_ref}#" "$tmp" >"$tmp_new"
+      if ! cmp -s "$tmp" "$tmp_new"; then
+        azureml_updated=$((azureml_updated + 1))
+      fi
+      mv "$tmp_new" "$tmp"
+    done <"$azureml_update_map"
+
+    if apply_file_update "$file" "$tmp"; then
+      affected_file_count=$((affected_file_count + 1))
     fi
-    affected_file_count=$((affected_file_count + 1))
-    if [[ "$dry_run" == "true" ]]; then
-      info "[dry-run] Would update $file"
-      diff -u "$file" "$tmp" || true
-    else
-      # Overwrite in place (cp keeps the target's own permissions, unlike mv from the 0600 mktemp file).
-      cp "$tmp" "$file"
-      info "Updated $file"
-    fi
-  done <<<"$files"
+  done <<<"$files_in_scope"
 fi
 
 drift_count=0
 if [[ "$check" == "true" ]]; then
   drift_count=$(wc -l <"$drift_report" | tr -d '[:space:]')
+  sort -u "$affected_files_report" -o "$affected_files_report"
+  affected_file_count=$(grep -c . "$affected_files_report" || true)
 fi
 
 if [[ -n "$sarif_output" ]]; then
@@ -393,17 +511,28 @@ fi
 #------------------------------------------------------------------------------
 section "Deployment Summary"
 print_kv "Images Checked" "$ref_count"
+print_kv "Environment References Changed" "$azureml_updated"
 if [[ "$check" == "true" ]]; then
   print_kv "Drift Findings" "$drift_count"
   print_kv "Files With Drift" "$affected_file_count"
 elif [[ "$dry_run" == "true" ]]; then
   print_kv "Files To Update" "$affected_file_count"
+  print_kv "Files Updated" "$affected_file_count"
 else
   print_kv "Files Changed" "$affected_file_count"
+  print_kv "Files Updated" "$affected_file_count"
 fi
 print_kv "Check Mode" "$check"
 print_kv "Dry Run" "$dry_run"
 [[ -z "$sarif_report_path" ]] || print_kv "SARIF Report" "$sarif_report_path"
+
+if [[ "$azureml_updated" -gt 0 && "$check" != "true" ]]; then
+  if [[ "$dry_run" == "true" ]]; then
+    warn "[dry-run] Changed AzureML environment versions would require registration before direct template submission"
+  else
+    warn "Register changed AzureML environment versions before direct template submission"
+  fi
+fi
 
 if [[ "$check" == "true" && "$drift_count" -gt 0 ]]; then
   exit 2

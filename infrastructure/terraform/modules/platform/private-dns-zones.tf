@@ -22,11 +22,10 @@ resource "azurerm_private_dns_zone" "core" {
 resource "azurerm_private_dns_zone_virtual_network_link" "core" {
   for_each = local.pe_enabled ? local.core_dns_zones : {}
 
-  name                  = "vnet-link-${each.key}"
-  resource_group_name   = var.resource_group.name
-  private_dns_zone_name = azurerm_private_dns_zone.core[each.key].name
-  virtual_network_id    = azurerm_virtual_network.main.id
-  registration_enabled  = false
+  name                 = "vnet-link-${each.key}"
+  private_dns_zone_id  = azurerm_private_dns_zone.core[each.key].id
+  virtual_network_id   = azurerm_virtual_network.main.id
+  registration_enabled = false
 }
 
 // ============================================================
@@ -44,11 +43,10 @@ resource "azurerm_private_dns_zone" "postgresql" {
 resource "azurerm_private_dns_zone_virtual_network_link" "postgresql" {
   count = var.should_deploy_postgresql ? 1 : 0
 
-  name                  = "vnet-link-postgresql"
-  resource_group_name   = var.resource_group.name
-  private_dns_zone_name = azurerm_private_dns_zone.postgresql[0].name
-  virtual_network_id    = azurerm_virtual_network.main.id
-  registration_enabled  = false
+  name                 = "vnet-link-postgresql"
+  private_dns_zone_id  = azurerm_private_dns_zone.postgresql[0].id
+  virtual_network_id   = azurerm_virtual_network.main.id
+  registration_enabled = false
 }
 
 // Redis DNS Zone (conditional on deployment and PE enabled)
@@ -62,9 +60,8 @@ resource "azurerm_private_dns_zone" "redis" {
 resource "azurerm_private_dns_zone_virtual_network_link" "redis" {
   count = var.should_deploy_redis && local.pe_enabled ? 1 : 0
 
-  name                  = "vnet-link-redis"
-  resource_group_name   = var.resource_group.name
-  private_dns_zone_name = azurerm_private_dns_zone.redis[0].name
-  virtual_network_id    = azurerm_virtual_network.main.id
-  registration_enabled  = false
+  name                 = "vnet-link-redis"
+  private_dns_zone_id  = azurerm_private_dns_zone.redis[0].id
+  virtual_network_id   = azurerm_virtual_network.main.id
+  registration_enabled = false
 }

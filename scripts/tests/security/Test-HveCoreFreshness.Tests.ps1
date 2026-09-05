@@ -5,16 +5,29 @@
 
 BeforeAll {
     . $PSScriptRoot/../../security/Test-HveCoreFreshness.ps1
+    Import-Module powershell-yaml -Force
 
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:SetupPath = Join-Path $TestDrive 'copilot-setup-steps.yml'
     @'
-      - name: Bootstrap hve-core RPI persona
+      - name: Bootstrap hve-core RPI skills
         env:
-          # microsoft/hve-core release: hve-core-v3.2.2 (2026-03-23)
-          UPSTREAM_REF: e69486a5f809ede45c63c0a31358c12912bd5168
+          # microsoft/hve-core derived-files release: hve-core-v3.2.2 (2026-03-23)
+          HVE_CORE_DERIVED_FILES_REF: e69486a5f809ede45c63c0a31358c12912bd5168
         run: echo bootstrap
 '@ | Set-Content -Path $script:SetupPath -Encoding utf8
+
+    $script:ResolvedRpiSha = '130ab64338bb77e912e603693672c31f14bc60c6'
+    $script:RequiredRpiSkills = @(
+        'rpi-quick'
+        'rpi-research'
+        'rpi-plan'
+        'rpi-implement'
+        'rpi-review'
+        'rpi-challenger'
+        'rpi-plan-critique'
+        'rpi-walkthrough'
+    )
 }
 
 Describe 'DerivedFiles configuration' -Tag 'Unit' {
@@ -79,7 +92,7 @@ Describe 'Get-PinnedHveCoreRef' -Tag 'Unit' {
         Get-PinnedHveCoreRef -Path (Join-Path $TestDrive 'missing.yml') | Should -BeNullOrEmpty
     }
 
-    It 'Returns a null Sha when UPSTREAM_REF is absent' {
+    It 'Returns a null Sha when HVE_CORE_DERIVED_FILES_REF is absent' {
         $p = Join-Path $TestDrive 'no-ref.yml'
         "env:`n  FOO: bar" | Set-Content -Path $p -Encoding utf8
         $ref = Get-PinnedHveCoreRef -Path $p
@@ -87,19 +100,97 @@ Describe 'Get-PinnedHveCoreRef' -Tag 'Unit' {
         $ref.Tag | Should -Be 'unknown'
     }
 
-    It 'Rejects a shortened or suffixed UPSTREAM_REF' {
+    It 'Selects the derived-files ref when the runtime pin is also present' {
+        $p = Join-Path $TestDrive 'two-refs.yml'
+        @"
+env:
+  RPI_SKILLS_REF: $($script:ResolvedRpiSha)
+  # microsoft/hve-core derived-files release: hve-core-v3.2.2
+  HVE_CORE_DERIVED_FILES_REF: e69486a5f809ede45c63c0a31358c12912bd5168
+"@ | Set-Content -Path $p -Encoding utf8
+
+        $ref = Get-PinnedHveCoreRef -Path $p
+
+        $ref.Sha | Should -Be 'e69486a5f809ede45c63c0a31358c12912bd5168'
+    }
+
+    It 'Rejects a shortened or suffixed HVE_CORE_DERIVED_FILES_REF' {
         $p = Join-Path $TestDrive 'invalid-ref.yml'
-        "env:`n  UPSTREAM_REF: deadbeef-fix" | Set-Content -Path $p -Encoding utf8
+        "env:`n  HVE_CORE_DERIVED_FILES_REF: deadbeef-fix" | Set-Content -Path $p -Encoding utf8
 
         (Get-PinnedHveCoreRef -Path $p).Sha | Should -BeNullOrEmpty
     }
 
     It 'Returns unknown for an invalid release tag' {
         $p = Join-Path $TestDrive 'invalid-tag.yml'
-        "env:`n  # microsoft/hve-core release: bad](tag`n  UPSTREAM_REF: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" |
+        "env:`n  # microsoft/hve-core derived-files release: bad](tag`n  HVE_CORE_DERIVED_FILES_REF: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" |
             Set-Content -Path $p -Encoding utf8
 
         (Get-PinnedHveCoreRef -Path $p).Tag | Should -Be 'unknown'
+    }
+}
+
+Describe 'RPI bootstrap workflow contract' -Tag 'Contract' {
+    BeforeAll {
+        $script:CheckedInSetupPath = Join-Path $script:RepoRoot '.github/workflows/copilot-setup-steps.yml'
+        $script:CheckedInSetup = Get-Content -Path $script:CheckedInSetupPath -Raw
+        $script:CheckedInWorkflow = ConvertFrom-Yaml $script:CheckedInSetup
+        $script:RpiStep = @($script:CheckedInWorkflow.jobs.'copilot-setup-steps'.steps) |
+            Where-Object { $_.name -eq 'Bootstrap hve-core RPI skills' }
+    }
+
+    It 'Pins every RPI download to the reviewed commit' {
+        $script:RpiStep | Should -HaveCount 1
+        $script:RpiStep.env.RPI_SKILLS_REF | Should -Be $script:ResolvedRpiSha
+        $script:RpiStep.run | Should -Match 'gh skill install microsoft/hve-core'
+        $script:RpiStep.run | Should -Match '--pin "\$RPI_SKILLS_REF"'
+        $script:RpiStep.run | Should -Match '--dir \.github/skills'
+        $script:RpiStep.run | Should -Match '--force'
+        $script:RpiStep.run | Should -Match (
+            'tracking_instruction="\.github/instructions/hve-core/copilot-tracking\.instructions\.md"'
+        )
+        $script:RpiStep.run | Should -Match 'gh api'
+        $script:RpiStep.run | Should -Match (
+            'copilot-tracking\.instructions\.md\?ref=\$RPI_SKILLS_REF'
+        )
+        $script:RpiStep.run | Should -Match (
+            '--header "Accept: application/vnd\.github\.raw\+json"'
+        )
+        $script:RpiStep.run | Should -Match '> "\$tracking_instruction"'
+    }
+
+    It 'Installs only the eight reviewed skill paths' {
+        foreach ($skill in $script:RequiredRpiSkills) {
+            $script:RpiStep.run | Should -Match ([regex]::Escape($skill))
+        }
+        $declaredSkills = @([regex]::Matches($script:RpiStep.run, '(?m)^\s+rpi-[a-z-]+$') |
+                ForEach-Object { $_.Value.Trim() })
+
+        $declaredSkills | Should -Be $script:RequiredRpiSkills
+    }
+
+    It 'Runs last and fails the setup workflow on installation errors' {
+        $steps = @($script:CheckedInWorkflow.jobs.'copilot-setup-steps'.steps)
+
+        $steps[-1].name | Should -Be 'Bootstrap hve-core RPI skills'
+        $script:RpiStep.PSObject.Properties.Name | Should -Not -Contain 'continue-on-error'
+    }
+
+    It 'Keeps the generated RPI artifacts ignored and untracked' {
+        $gitignore = Get-Content -Path (Join-Path $script:RepoRoot '.gitignore') -Raw
+        $markdownlintConfig = Get-Content -Path (Join-Path $script:RepoRoot '.markdownlint-cli2.jsonc') -Raw
+        $cspellConfig = Get-Content -Path (Join-Path $script:RepoRoot '.cspell.json') -Raw
+        $trackingInstruction = '.github/instructions/hve-core/copilot-tracking.instructions.md'
+        $trackedSkills = @(git -C $script:RepoRoot ls-files -- '.github/skills/rpi-*')
+
+        $gitignore | Should -Match '(?m)^\.github/skills/rpi-\*/$'
+        $gitignore | Should -Match (
+            '(?m)^\.github/instructions/hve-core/copilot-tracking\.instructions\.md$'
+        )
+        $markdownlintConfig | Should -Match ([regex]::Escape($trackingInstruction))
+        $cspellConfig | Should -Match ([regex]::Escape($trackingInstruction))
+        $trackedSkills | Should -BeNullOrEmpty
+        Test-Path -Path (Join-Path $script:RepoRoot $trackingInstruction) | Should -BeFalse
     }
 }
 
@@ -536,6 +627,7 @@ Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
         $r = [pscustomobject]@{
             LatestTag = 'hve-core-v9'
             LatestUrl = 'https://github.com/microsoft/hve-core/releases/tag/hve-core-v9'
+            LatestMainSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
             DriftCount = 1
             ErrorCount = 0
             Pin = [pscustomobject]@{
@@ -562,6 +654,7 @@ Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
         $body | Should -Match 'hve-core-v9'
         $body | Should -Match 'scripts/x\.psm1'
         $body | Should -Match 'compare/hve-core-v1\.\.\.hve-core-v9'
+        $body | Should -Match 'Release-file baseline: `hve-core-v1` \(`HVE_CORE_DERIVED_FILES_REF`'
         $body | Should -Match '\[aaaaaaa → bbbbbbb\]\(https://github\.com/microsoft/hve-core/compare/a\.\.\.b\)'
         $body | Should -Match 'Action required: 1 drifted, 0 check errors'
         $body | Should -Match '\| File \| Baseline \| Upstream comparison \| Baseline upstream blob \| Target upstream blob \| Status \|'
@@ -572,6 +665,7 @@ Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
         $r = [pscustomobject]@{
             LatestTag = 'hve-core-v9'
             LatestUrl = 'https://github.com/microsoft/hve-core/releases/tag/hve-core-v9'
+            LatestMainSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
             DriftCount = 1
             ErrorCount = 0
             Pin = [pscustomobject]@{
@@ -597,6 +691,7 @@ Describe 'Format-HveCoreIssueBody' -Tag 'Unit' {
 
         $body | Should -Match 'compare/abcdef1234567890\.\.\.hve-core-v9'
         $body | Should -Not -Match 'compare/unknown'
+        $body | Should -Match 'Release-file baseline: `abcdef1234567890`'
     }
 
     It 'Rejects a release URL outside GitHub' {
@@ -842,13 +937,13 @@ Describe 'Invoke-HveCoreFreshnessCheck' -Tag 'Unit' {
         $result.ErrorCount | Should -Be 1
     }
 
-    It 'Throws before checking files when UPSTREAM_REF is unavailable' {
+    It 'Throws before checking files when HVE_CORE_DERIVED_FILES_REF is unavailable' {
         $resultsFile = Join-Path $TestDrive 'results-without-pin.json'
         Mock Get-PinnedHveCoreRef { $null }
 
         {
             Invoke-HveCoreFreshnessCheck -RepoRoot $script:RepoRoot -ResultsFile $resultsFile
-        } | Should -Throw '*Could not extract UPSTREAM_REF*'
+        } | Should -Throw '*Could not extract HVE_CORE_DERIVED_FILES_REF*'
         Should -Invoke Get-HveCoreFileDriftForBaseline -Times 0 -Exactly
         Test-Path $resultsFile | Should -BeFalse
     }
@@ -984,5 +1079,19 @@ Describe 'Test-HveCoreFreshness entry point' -Tag 'Unit' {
         "$output" | Should -Match 'Test-DangerousWorkflow\.ps1 \[source-header\]'
         "$output" | Should -Match 'SecurityHelpers\.psm1 \[release\]'
         "$output" | Should -Not -Match 'OrderedDictionary'
+    }
+
+    It 'Uses the pinned SHA when the bootstrap ref has no release tag' {
+        $r = [pscustomobject]@{
+            LatestTag = 'hve-core-v9'
+            LatestMainSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            Pin = [pscustomobject]@{
+                PinnedTag = 'unknown'
+                PinnedSha = 'abcdef1234567890'
+            }
+            Files = @()
+        }
+
+        (Format-HveCoreJobSummary -Result $r) | Should -Match 'Release-file baseline: abcdef1234567890'
     }
 }

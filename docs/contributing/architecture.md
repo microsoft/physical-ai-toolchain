@@ -175,10 +175,10 @@ backend operator to a separate Ubuntu K3s cluster. The backend operator
 initiates an outbound connection to OSMO, so the AKS service does not need to
 initiate connections into the HiL site.
 
-| Mode | OSMO endpoint | Edge requirement | Use |
-|------|---------------|------------------|-----|
-| Public | Dedicated trusted HTTPS ingress or load balancer | Outbound Internet access and endpoint policy | Simplest onboarding path without VPN |
-| Private | Internal OSMO load balancer over VPN/private routing | Route and private DNS resolution from the Ubuntu site | Preferred restricted-network path |
+| Mode    | OSMO endpoint                                        | Edge requirement                                      | Use                                  |
+|---------|------------------------------------------------------|-------------------------------------------------------|--------------------------------------|
+| Public  | Dedicated trusted HTTPS ingress or load balancer     | Outbound Internet access and endpoint policy          | Simplest onboarding path without VPN |
+| Private | Internal OSMO load balancer over VPN/private routing | Route and private DNS resolution from the Ubuntu site | Preferred restricted-network path    |
 
 Making the AKS API server public does not expose the OSMO application endpoint.
 Public mode requires a separate, authenticated HTTPS OSMO endpoint. Private
@@ -298,9 +298,9 @@ A complete example pipeline demonstrates the full path from trained checkpoint t
 
 Software-in-the-loop (SiL) and hardware-in-the-loop (HiL) evaluation pipelines for trained policies. SiL runs locally at `T0`; both approaches use Isaac Sim to emulate the target robot, with the trained policy controlling the simulation.
 
-| Approach | Infrastructure                                                                                         | Policy Host                     |
-|----------|--------------------------------------------------------------------------------------------------------|---------------------------------|
-| SiL      | Any available compute that can serve the policy as an inference endpoint                               | AzureML managed endpoint or AKS |
+| Approach | Infrastructure                                                                                                  | Policy Host                     |
+|----------|-----------------------------------------------------------------------------------------------------------------|---------------------------------|
+| SiL      | Any available compute that can serve the policy as an inference endpoint                                        | AzureML managed endpoint or AKS |
 | HiL      | Target deployment hardware, including an Ubuntu K3s HiL host, running the containerized TensorRT or ONNX policy | Edge device matching production |
 
 Evaluation metrics capture to:
@@ -387,19 +387,20 @@ HVE-Core artifacts are registered via the extension's `package.json` `contribute
 
 This repository defines project-specific artifacts in `.github/` that extend HVE-Core with domain knowledge:
 
-| Artifact Type | Count | Purpose                                                                          |
-|---------------|-------|----------------------------------------------------------------------------------|
-| Agents        | 2     | OSMO training manager, dataviewer developer                                      |
-| Instructions  | 4     | Copilot instructions, dataviewer conventions, documentation style, shell scripts |
-| Prompts       | 4     | OSMO training submission, LeRobot pipeline, dataviewer workflows                 |
-| Skills        | 2     | Dataviewer interaction, OSMO LeRobot training                                    |
+| Artifact Type | Count | Purpose                                                                      |
+|---------------|-------|------------------------------------------------------------------------------|
+| Agents        | 2     | OSMO training manager, dataviewer developer                                  |
+| Instructions  | 5     | Four committed instructions and runtime-provisioned RPI tracking conventions |
+| Prompts       | 4     | OSMO training submission, LeRobot pipeline, dataviewer workflows             |
+| Skills        | 15    | Seven committed domain skills and eight runtime-provisioned RPI skills       |
 
 Project artifacts are auto-discovered by VS Code from the `.github/` directory without explicit registration.
 
-Two workflow chains compose these artifacts:
+Three workflow chains compose these artifacts:
 
 - **OSMO Training Manager**: `osmo-training-manager` agent → `osmo-lerobot-training` skill → training submission prompts
 - **Dataviewer Developer**: `dataviewer-developer` agent → `dataviewer` skill → dataviewer instruction conventions
+- **RPI**: `rpi-quick` → `rpi-research` → `rpi-plan` / `rpi-plan-critique` → `rpi-implement` → `rpi-review`
 
 ### Artifact Types and Loading
 

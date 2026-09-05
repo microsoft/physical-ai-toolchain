@@ -3,7 +3,6 @@ Integration tests for annotation API endpoints.
 """
 
 import asyncio
-import os
 import tempfile
 from datetime import UTC, datetime
 
@@ -29,10 +28,11 @@ from src.api.models.datasources import DatasetInfo, FeatureSchema
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     """Create test client with isolated singletons and empty temp data path."""
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["DATA_DIR"] = tmp
+        monkeypatch.setenv("DATA_DIR", tmp)
+        monkeypatch.setenv("STORAGE_BACKEND", "local")
 
         import src.api.config as config_mod
         import src.api.services.annotation_service as ann_mod
