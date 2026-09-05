@@ -75,6 +75,7 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 **/.artifacts/
+/outputs/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
@@ -344,6 +345,7 @@ paket-files/
 
 # Python Tools for Visual Studio (PTVS)
 **/__pycache__/
+**/*.egg-info/
 *.pyc
 
 # Hypothesis testing framework cache

@@ -1,19 +1,25 @@
-# Dataset Analysis Tool
+---
+title: Dataset Analysis Tool
+description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
+author: Microsoft
+ms.date: 2026-08-27
+ms.topic: overview
+---
 
 A full-stack application for analyzing and annotating robotic training data from episode-based datasets. Features include episode browsing, frame annotation, and export capabilities.
 
-## Architecture
+## 🏗️ Architecture
 
 - **Backend**: FastAPI (Python) - serves REST API on port 8000
 - **Frontend**: React + Vite + TypeScript - runs on port 5173 with API proxy
 
-## Prerequisites
+## 📋 Prerequisites
 
 - Python 3.12+
 - Node.js 18+
 - npm
 
-## Installation
+## 📦 Installation
 
 ### Backend Setup
 
@@ -35,7 +41,7 @@ cd frontend
 npm install
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 Copy `backend/.env.example` to `backend/.env` and set values for your environment.
 
@@ -206,16 +212,16 @@ Enable the judge via `start.sh`, or install the backend `vlm-judge` extra before
 launching the backend manually. Install `vlm-judge-local` when using the
 in-process `qwen3-vl` backend without `start.sh`.
 
-| Variable              | Default                     | Description                                                       |
-|-----------------------|-----------------------------|-------------------------------------------------------------------|
-| `VLM_JUDGE_ENABLED`   | `false`                     | Mount the `/judge` router                                         |
-| `VLM_JUDGE_BACKEND`   | `echo`                      | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo` |
-| `VLM_JUDGE_MODEL_ID`  | `Qwen/Qwen3-VL-4B-Instruct` | HF model id or remote model name                                  |
-| `VLM_JUDGE_BASE_URL`  | —                           | OpenAI-compatible server URL (`openai-compat` only)              |
-| `VLM_JUDGE_API_KEY`   | —                           | Bearer token for the remote backend                              |
-| `VLM_JUDGE_N_FRAMES`  | `12`                        | Frames sampled per episode                                       |
-| `VLM_JUDGE_PROCESS_METHOD` | `gvl`                  | Process-reward method: `gvl` (shuffle-and-rank) or `chronological` |
-| `VLM_JUDGE_CACHE_DIR` | —                           | Fallback judgment cache; the viewer caches per dataset under `annotations/vlm_judge/` |
+| Variable                   | Default                     | Description                                                                           |
+|----------------------------|-----------------------------|---------------------------------------------------------------------------------------|
+| `VLM_JUDGE_ENABLED`        | `false`                     | Mount the `/judge` router                                                             |
+| `VLM_JUDGE_BACKEND`        | `echo`                      | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo`           |
+| `VLM_JUDGE_MODEL_ID`       | `Qwen/Qwen3-VL-4B-Instruct` | HF model id or remote model name                                                      |
+| `VLM_JUDGE_BASE_URL`       | —                           | OpenAI-compatible server URL (`openai-compat` only)                                   |
+| `VLM_JUDGE_API_KEY`        | —                           | Bearer token for the remote backend                                                   |
+| `VLM_JUDGE_N_FRAMES`       | `12`                        | Frames sampled per episode                                                            |
+| `VLM_JUDGE_PROCESS_METHOD` | `gvl`                       | Process-reward method: `gvl` (shuffle-and-rank) or `chronological`                    |
+| `VLM_JUDGE_CACHE_DIR`      | —                           | Fallback judgment cache; the viewer caches per dataset under `annotations/vlm_judge/` |
 
 > [!NOTE]
 > **Process-reward method (`VLM_JUDGE_PROCESS_METHOD`).** The per-frame progress
@@ -258,13 +264,13 @@ uv run --project ../../evaluation/vlm_judge --extra api --extra qwen3-vl \
 
 The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../evaluation/vlm_judge/openai_shim.py)):
 
-| Variable                          | Default                     | Description                                                            |
-|-----------------------------------|-----------------------------|------------------------------------------------------------------------|
-| `VLM_SHIM_HOST`                   | `127.0.0.1`                 | Bind address; the shim has no auth, so keep it on loopback             |
-| `VLM_SHIM_PORT`                   | `8001`                      | Listen port                                                            |
-| `VLM_SHIM_MODEL_ID`               | `Qwen/Qwen3-VL-4B-Instruct` | Hugging Face model id to load                                          |
-| `VLM_SHIM_DEVICE_MAP`             | `auto`                      | Transformers device map                                                |
-| `VLM_SHIM_DTYPE`                  | `bfloat16`                  | Model dtype                                                            |
+| Variable                          | Default                     | Description                                                           |
+|-----------------------------------|-----------------------------|-----------------------------------------------------------------------|
+| `VLM_SHIM_HOST`                   | `127.0.0.1`                 | Bind address; the shim has no auth, so keep it on loopback            |
+| `VLM_SHIM_PORT`                   | `8001`                      | Listen port                                                           |
+| `VLM_SHIM_MODEL_ID`               | `Qwen/Qwen3-VL-4B-Instruct` | Hugging Face model id to load                                         |
+| `VLM_SHIM_DEVICE_MAP`             | `auto`                      | Transformers device map                                               |
+| `VLM_SHIM_DTYPE`                  | `bfloat16`                  | Model dtype                                                           |
 | `VLM_SHIM_ALLOW_REMOTE_IMAGES`    | `false`                     | Fetch `http(s)` image URLs server-side; off restricts to `data:` URIs |
 | `VLM_SHIM_REMOTE_IMAGE_TIMEOUT_S` | `10`                        | Per-fetch timeout (seconds) when remote images are enabled            |
 
@@ -355,7 +361,7 @@ Browser → Entra ID (MSAL.js PKCE) → access_token
 
 The backend accesses Azure Storage using managed identity, not the user's token. User authentication and storage authentication are independent.
 
-## Running the Application
+## 🚀 Running the Application
 
 ### Quick Start (Recommended)
 
@@ -392,7 +398,7 @@ npm run dev
 
 The application will be available at `http://localhost:5173`.
 
-## Annotation Features
+## 🏷️ Annotation Features
 
 The annotation workspace exposes per-episode controls grouped by panel. Persisted state is stored alongside the dataset and surfaced through the REST API.
 
@@ -421,7 +427,71 @@ Each episode can carry a structured `LanguageInstructionAnnotation` for vision-l
 
 When a dataset task description is available, the widget seeds the instruction with `source = template` via the "Use as Instruction" button. Otherwise, "Add Instruction" creates a blank instruction with `source = human`. The source can be changed at any time through the dropdown.
 
-## Container Deployment
+### Episode Analyzer
+
+The **Episode Analyzer** tab combines trajectory metrics, VLM judgments, persisted analysis, episode labels, and language instructions. The run panels and persisted record have distinct storage behavior.
+
+| Surface              | Behavior                                                                                          |
+|----------------------|---------------------------------------------------------------------------------------------------|
+| Motion Analysis      | Computes metrics for the current trajectory and keeps the query result in browser memory          |
+| VLM Judge            | Scores outcome and process progress, then caches the full judgment under `annotations/vlm_judge/` |
+| Episode Analysis     | Reads the persisted `analysis` record for the episode from `meta/episode_labels.json`             |
+| Episode Labels       | Imports supported persisted analysis fields into filterable labels                                |
+| Language Instruction | Supplies the task goal used by the VLM judge                                                      |
+
+Running Motion Analysis or VLM Judge does not write `meta/episode_labels.json`. Persist structured results through `PUT /api/datasets/{dataset_id}/episodes/{episode_idx}/analysis`, or use the dataset-labeling CLI with `--write-analysis`.
+
+#### Motion metrics
+
+| Metric                | Meaning                                                                                                |
+|-----------------------|--------------------------------------------------------------------------------------------------------|
+| Raw smoothness        | Reciprocal root-mean-square jerk; higher is smoother but degree-scale trajectories often approach zero |
+| Normalized smoothness | Rescaled jerk score selected by the smoothness mode; higher is smoother                                |
+| Efficiency            | Direct start-to-end distance divided by traveled path length; higher is more direct                    |
+| Jitter                | Fraction of velocity-spectrum power above the configured frequency threshold; lower is better          |
+| Hesitations           | Count of sustained near-zero velocity segments                                                         |
+| Corrections           | Count of significant velocity-direction reversals                                                      |
+| Overall motion score  | Composite score from 1 to 5 derived from smoothness, efficiency, jitter, hesitations, and corrections  |
+
+The **Log-scaled** mode compresses the jerk range with `log10` and is the default for comparing degree-scale robot trajectories. The **Radian-based** mode converts degree-based jerk to radians before applying the reciprocal score.
+
+#### Import analysis fields as labels
+
+The label panel shows import buttons only for analysis fields present in the dataset. Enter an optional label prefix before importing. Enable **Replace existing imported labels** to remove stale labels in the same prefix namespace before applying current values. Unsaved label edits remain in the browser while the server response is reconciled.
+
+Supported fields include object, pickup location, grasp outcome, place outcome, motion score, motion flags, and source. Free-text movement notes and instructions remain analysis data because importing them would create unbounded label sets.
+
+### VLM dataset-labeling CLI
+
+`backend/scripts/vlm_label_dataset.py` runs Qwen3-VL across a LeRobot v2.1 or v3.0 dataset. It writes full rows to `labels.jsonl` and a flat summary to `labels.csv`.
+
+```bash
+cd data-management/viewer/backend
+uv run --extra vlm-judge --with-editable ../../../evaluation/vlm_judge \
+  python scripts/vlm_label_dataset.py \
+  --dataset-root /data/my-dataset \
+  --dataset-id owner--my-dataset \
+  --output-dir /data/my-dataset/vlm-labels \
+  --n-frames 16 \
+  --resume \
+  --write-analysis
+```
+
+| Option             | Behavior                                                                                                                             |
+|--------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `--dataset-id`     | Writes the canonical dataviewer ID into generated metadata; set it for nested IDs such as `owner--dataset`                           |
+| `--resume`         | Loads existing `labels.jsonl`, skips successful episode indices, retries failed rows, appends attempts, and regenerates `labels.csv` |
+| `--write-analysis` | Merges successful rows into `<dataset-root>/meta/episode_labels.json` without replacing labels or unrelated analysis fields          |
+| `--views`          | Restricts the model input to selected video feature keys; all detected video views are used by default                               |
+| `--limit`          | Processes only the first requested number of episodes                                                                                |
+| `--scene-context`  | Adds dataset-specific scene context to the model prompt                                                                              |
+
+Without `--write-analysis`, the JSONL and CSV files remain standalone exports and do not appear in the Episode Analysis card. Error rows remain in JSONL and CSV for inspection but are not merged into the dataset analysis map.
+
+> [!WARNING]
+> Stop other writers for the same dataset before using `--write-analysis`. The command replaces the metadata file atomically, but concurrent read-modify-write operations can still overwrite each other.
+
+## 🚢 Container Deployment
 
 ### Docker Compose (local)
 
@@ -462,7 +532,7 @@ docker build -t dataviewer-backend ./backend
 docker build -t dataviewer-frontend ./frontend
 ```
 
-## Development
+## 🧪 Development
 
 ### Backend Development
 
@@ -501,7 +571,7 @@ npm run format:fix   # Prettier auto-fix
 npm run build        # Production build
 ```
 
-## API Documentation
+## 📖 API Documentation
 
 Once the backend is running, visit:
 

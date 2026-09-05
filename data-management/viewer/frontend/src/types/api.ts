@@ -136,6 +136,31 @@ export interface EpisodeData {
   trajectoryData: TrajectoryPoint[]
 }
 
+/**
+ * Structured per-episode analysis persisted beside the dataset (VLM-derived
+ * labels + computed motion metrics). Served snake_case inside the dataset
+ * labels file, so fields stay snake_case here.
+ */
+export interface EpisodeAnalysisRecord {
+  pick_from?: string | null
+  object?: string | null
+  grasp_success?: boolean | null
+  place_success?: boolean | null
+  movement_quality?: string | null
+  notes?: string | null
+  instruction?: string | null
+  duration_s?: number | null
+  smoothness?: number | null
+  normalized_smoothness?: number | null
+  efficiency?: number | null
+  jitter?: number | null
+  hesitation_count?: number | null
+  correction_count?: number | null
+  motion_score?: number | null
+  motion_flags?: string[]
+  source?: string | null
+}
+
 // ============================================================================
 // Auto-Analysis Types
 // ============================================================================
