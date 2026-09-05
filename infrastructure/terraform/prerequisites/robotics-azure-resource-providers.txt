@@ -15,3 +15,16 @@ Microsoft.Dashboard
 Microsoft.Insights
 Microsoft.OperationalInsights
 Microsoft.OperationsManagement
+Microsoft.App
+Microsoft.Authorization
+Microsoft.Automation
+Microsoft.Cache
+Microsoft.ContainerRegistry
+Microsoft.ContainerService
+Microsoft.DBforPostgreSQL
+Microsoft.EventGrid
+Microsoft.Fabric
+Microsoft.KeyVault
+Microsoft.MachineLearningServices
+Microsoft.Network
+Microsoft.Storage

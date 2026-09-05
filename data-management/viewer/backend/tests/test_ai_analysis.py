@@ -52,6 +52,23 @@ class TestTrajectoryAnalyzer:
         assert metrics.smoothness == 1.0
         assert metrics.overall_score == 3
 
+    def test_normalized_smoothness_modes_discriminate_degree_scale_trajectory(self):
+        timestamps = np.linspace(0.0, 0.25, 8)
+        steps = np.arange(8, dtype=np.float64)
+        positions = np.column_stack([steps**3, (steps**3) * 0.5])
+
+        log_metrics = TrajectoryAnalyzer(smoothness_mode="log-scaled").analyze(positions, timestamps)
+        radian_metrics = TrajectoryAnalyzer(smoothness_mode="radian-based").analyze(positions, timestamps)
+
+        assert log_metrics.smoothness < 0.01
+        assert log_metrics.normalized_smoothness > log_metrics.smoothness
+        assert radian_metrics.normalized_smoothness > radian_metrics.smoothness
+        assert log_metrics.normalized_smoothness != pytest.approx(radian_metrics.normalized_smoothness)
+
+    def test_invalid_smoothness_mode_raises_value_error(self):
+        with pytest.raises(ValueError, match="smoothness_mode must be one of"):
+            TrajectoryAnalyzer(smoothness_mode="invalid")
+
     def test_multiple_episodes_produce_valid_scores(self, loader):
         analyzer = TrajectoryAnalyzer()
         for idx in [0, 15, 30, 63]:
@@ -101,9 +118,39 @@ class TestAIAnalysisEndpoints:
         assert resp.status_code == 200
         data = resp.json()
         assert "smoothness" in data
+        assert "normalized_smoothness" in data
         assert "efficiency" in data
         assert "overall_score" in data
         assert 1 <= data["overall_score"] <= 5
+
+    @pytest.mark.parametrize("mode", ["log-scaled", "radian-based"])
+    def test_trajectory_analysis_endpoint_honors_smoothness_mode(self, client, mode):
+        timestamps = np.linspace(0.0, 0.25, 8)
+        steps = np.arange(8, dtype=np.float64)
+        positions = np.column_stack([steps**3, (steps**3) * 0.5])
+        payload = {
+            "positions": positions.tolist(),
+            "timestamps": timestamps.tolist(),
+            "smoothness_mode": mode,
+        }
+
+        response = client.post("/api/ai/trajectory-analysis", json=payload)
+
+        expected = TrajectoryAnalyzer(smoothness_mode=mode).analyze(positions, timestamps)
+        assert response.status_code == 200
+        assert response.json()["normalized_smoothness"] == pytest.approx(expected.normalized_smoothness)
+
+    def test_trajectory_analysis_endpoint_rejects_invalid_smoothness_mode(self, client):
+        response = client.post(
+            "/api/ai/trajectory-analysis",
+            json={
+                "positions": [[0.0], [1.0], [8.0], [27.0]],
+                "timestamps": [0.0, 0.1, 0.2, 0.3],
+                "smoothness_mode": "invalid",
+            },
+        )
+
+        assert response.status_code == 422
 
     def test_trajectory_analysis_too_short(self, client):
         payload = {

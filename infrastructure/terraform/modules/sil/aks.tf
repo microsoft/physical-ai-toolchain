@@ -47,6 +47,11 @@ resource "azurerm_kubernetes_cluster" "main" {
   role_based_access_control_enabled = true
   node_os_upgrade_channel           = "NodeImage"
 
+  node_provisioning_profile {
+    mode               = "Manual"
+    default_node_pools = "Auto"
+  }
+
   default_node_pool {
     name                        = "system"
     vm_size                     = var.aks_config.system_node_pool_vm_size

@@ -729,6 +729,24 @@ class TestV2EpisodeLayout:
 
         assert tasks == {0: "align", 1: "grasp", 2: "release"}
 
+    def test_get_tasks_parquet_uses_known_v3_task_column(self, v2_dataset):
+        """Unrelated parquet columns must never be treated as task descriptions."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.table(
+            {
+                "task_index": [0, 1],
+                "chunk_index": [7, 8],
+                "__index_level_0__": ["align", "release"],
+            }
+        )
+        pq.write_table(table, v2_dataset / "meta" / "tasks.parquet")
+
+        loader = LeRobotLoader(v2_dataset)
+
+        assert loader.get_tasks() == {0: "align", 1: "release"}
+
     def test_get_tasks_returns_empty_when_missing(self, v2_dataset):
         """No tasks metadata files means an empty dict, not an exception."""
         for name in ("tasks.jsonl", "tasks.parquet"):

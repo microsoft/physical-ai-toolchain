@@ -42,12 +42,14 @@ prerelease = "allow"
 
 [dependency-groups]
 dev = [
+    "av==15.1.0",
     "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
     "hypothesis==6.161.6",
     "matplotlib==3.11.1",
     "numpy==2.2.6",
+    "pyarrow==23.0.1",
     "torch==2.10.0",
 ]
 
