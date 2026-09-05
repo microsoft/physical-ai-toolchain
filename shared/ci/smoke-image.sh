@@ -13,6 +13,8 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 
 # Source of truth for the LeRobot runtime image (the default-values block).
 LEROBOT_WORKFLOW="training/il/workflows/osmo/lerobot-train.yaml"
+# Source of truth for the Azure ML evaluation runtime image.
+EVALUATION_COMPONENT="evaluation/sil/workflows/azureml/components/evaluate.yaml"
 # Lightweight linux/amd64 image with uv preinstalled, used for the CPU smoke.
 CPU_IMAGE="ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
 
@@ -26,7 +28,8 @@ mounted at /workspace. Requires Docker.
 DOMAIN:
     rl            Reinforcement learning (training/rl)
     il            Imitation learning / LeRobot (training/il/lerobot)
-    evaluation    Software-in-the-loop evaluation (evaluation) -- --mode cpu only
+    vla           Vision-language-action / LeRobot (training/vla/lerobot) -- --mode cpu only
+    evaluation    Software-in-the-loop evaluation (evaluation)
 
 OPTIONS:
     -m, --mode MODE    image (default) runs the domain's production container;
@@ -36,7 +39,7 @@ OPTIONS:
 EXAMPLES:
     $(basename "$0") rl                 # runtime-image smoke (Isaac Lab)
     $(basename "$0") il --mode cpu      # CPU import smoke in Docker
-    $(basename "$0") evaluation -m cpu
+    $(basename "$0") evaluation         # runtime-image smoke (PyTorch)
 EOF
 }
 
@@ -60,8 +63,8 @@ done
 
 if [[ "$mode" == "cpu" ]]; then
     case "$domain" in
-        rl | il | evaluation) image="$CPU_IMAGE" ;;
-        *) fatal "Unknown domain: $domain (expected rl, il, or evaluation)" ;;
+        rl | il | vla | evaluation) image="$CPU_IMAGE" ;;
+        *) fatal "Unknown domain: $domain (expected rl, il, vla, or evaluation)" ;;
     esac
 else
     case "$domain" in
@@ -72,9 +75,12 @@ else
             [[ -n "$image" ]] || fatal "Could not resolve LeRobot image from $LEROBOT_WORKFLOW"
             ;;
         evaluation)
-            fatal "evaluation has no runtime-image smoke; use --mode cpu"
+            image="$(grep -m1 -E '^[[:space:]]*image:[[:space:]]*pytorch/' \
+                "$REPO_ROOT/$EVALUATION_COMPONENT" | awk '{print $2}')"
+            [[ -n "$image" ]] || fatal "Could not resolve evaluation image from $EVALUATION_COMPONENT"
             ;;
-        *) fatal "Unknown domain: $domain (expected rl or il)" ;;
+        vla) fatal "vla has no runtime-image smoke; use --mode cpu" ;;
+        *) fatal "Unknown domain: $domain (expected rl, il, vla, or evaluation)" ;;
     esac
 fi
 

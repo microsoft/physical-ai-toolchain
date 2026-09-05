@@ -53,6 +53,8 @@ dependencies = [
     "lerobot[dataset,pi]==0.6.1",
     "torch==2.11.0",
     "torchvision==0.26.0",
+    # Torch 2.11 CPU wheels require this exact version during CPU smoke resolution.
+    "pygments==2.20.0",
     # Held below 5.6 because lerobot[pi]==0.6.1 requires transformers<5.6.
     # Pin scipy directly to prevent transitive resolution drift.
     "transformers==5.5.0",
