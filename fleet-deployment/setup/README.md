@@ -26,7 +26,7 @@ that blocks large baked-in models does not apply.
 | File                              | Purpose                                                                                  |
 |-----------------------------------|------------------------------------------------------------------------------------------|
 | `build-aml-model-image.sh`        | Download AML model, `docker buildx build --push`, sign image, self-verify                |
-| `attest-image.sh`                 | Attach SBOM + OpenVEX attestations to an already-built image                             |
+| `attest-image.sh`                 | Attach an SBOM and an optional OpenVEX attestation to an already-built image             |
 | `Dockerfile.inference`            | `scratch` carrier: `COPY model/` only — no runtime, mounted via OCI image volume         |
 | `defaults.conf`                   | Centralized defaults consumed by both scripts                                            |
 | `tests/test-model-image-pod.yaml` | Smoke-test pod that mounts a built model image via OCI image volume and lists `/policy/` |
@@ -41,7 +41,7 @@ fleet-deployment/setup/build-aml-model-image.sh \
 # Build prints the digest-pinned reference, e.g.
 #   Image (digest): acrfleetprod001.azurecr.io/lerobot-act-pickplace@sha256:abc...
 
-# 2. Attach SBOM + OpenVEX attestations
+# 2. Attach an SBOM; add --vex-file when an OpenVEX document exists
 fleet-deployment/setup/attest-image.sh \
   --image acrfleetprod001.azurecr.io/lerobot-act-pickplace@sha256:abc...
 ```
@@ -82,31 +82,36 @@ unsigned images.
 
 ## 📄 OpenVEX Workflow
 
-[`security/vex/inference-base.openvex.json`](../../security/vex/inference-base.openvex.json)
-is the committed VEX document for the pinned base image. Every CVE statement
-must carry one of:
+The `scratch` base has no VEX document because it has no packages or
+vulnerabilities to describe. For a runnable base, generate
+`security/vex/inference-base.openvex.json` and follow the governing
+[VEX standards](../../.github/instructions/vex-standards.instructions.md)
+when assigning one of these statuses:
 
-| `status`              | When to use                                                                                 |
-|-----------------------|---------------------------------------------------------------------------------------------|
-| `not_affected`        | CVE present in a package we ship, but our usage path is not reachable. Add `justification`. |
-| `affected`            | Exploitable. Add `action_statement` (e.g. "upgrade to 2.4").                                |
-| `fixed`               | Patched in this digest.                                                                     |
-| `under_investigation` | Triage pending. **Not accepted by strict Kyverno policies.**                                |
+| `status`              | When to use                                                                                                    |
+|-----------------------|----------------------------------------------------------------------------------------------------------------|
+| `under_investigation` | Product-specific reachability or the possibility of exploitation is not established. Retain this safe default. |
+| `not_affected`        | Product-specific analysis proves exploitation is impossible. Add `justification` and `status_notes`.           |
+| `affected`            | Product-specific analysis confirms vulnerability. Add an `action_statement` and `status_notes`.                |
+| `fixed`               | The exact product digest contains the verified remediation. Add `status_notes`.                                |
 
-Refresh the VEX whenever:
+Generate or refresh the VEX whenever:
 
 1. `DEFAULT_INFERENCE_BASE_IMAGE` in [`defaults.conf`](defaults.conf) is bumped
    to a new base digest, or
 2. Scanner feeds report new CVEs against the existing digest.
 
 ```bash
-# Regenerate stub from latest Trivy + Grype findings (writes .scan/* locally)
+# Create or merge the VEX document from Trivy + Grype findings (writes .scan/* locally)
 scripts/security/generate-vex.sh
 
-# Edit security/vex/inference-base.openvex.json: triage each statement.
+# Record product-specific evidence; retain under_investigation otherwise.
 
 # Re-attest against existing images that should pick up the new dispositions
-fleet-deployment/setup/attest-image.sh --image <digest-ref> --skip-sbom
+fleet-deployment/setup/attest-image.sh \
+  --image <digest-ref> \
+  --skip-sbom \
+  --vex-file <path/to/document.openvex.json>
 ```
 
 ## 🏗️ Base Image Pinning
@@ -114,9 +119,8 @@ fleet-deployment/setup/attest-image.sh --image <digest-ref> --skip-sbom
 `DEFAULT_INFERENCE_BASE_IMAGE` in [`defaults.conf`](defaults.conf) is `scratch`.
 The image is a passive model artifact carrier mounted into consumer pods via
 OCI image volumes (KEP-4639) and is never executed, so it has no OS, no
-packages, and no scannable CVE surface. The committed VEX at
-[`security/vex/inference-base.openvex.json`](../../security/vex/inference-base.openvex.json)
-reflects this with zero statements.
+packages, and no scannable CVE surface. OpenVEX requires vulnerability
+statements, so the default attestation flow skips VEX.
 
 If a future variant of the image needs to execute (e.g. an embedded runtime
 for on-node inference), bump the base intentionally:
@@ -124,8 +128,8 @@ for on-node inference), bump the base intentionally:
 1. Pick the new base digest (e.g. `crane digest mcr.microsoft.com/azureml/minimal-py312-inference:1.x`).
 2. Update `DEFAULT_INFERENCE_BASE_IMAGE` in `defaults.conf`.
 3. Run `scripts/security/generate-vex.sh --image <new-digest>`.
-4. Triage `security/vex/inference-base.openvex.json`.
-5. Commit all three changes together.
+4. Record product-specific evidence in `security/vex/inference-base.openvex.json`; retain `under_investigation` when evidence does not support another status.
+5. Set `DEFAULT_VEX_FILE` to the generated document and commit the base-image and VEX changes together.
 
 ## 🔧 Common Overrides
 
@@ -138,9 +142,13 @@ for on-node inference), bump the base intentionally:
 | `--acr-name`/`--acr-tenant`/`--acr-subscription` | Required in cross-tenant or no-Terraform mode          |
 | `INFERENCE_BASE_IMAGE=…` env var                 | One-off base override without editing `defaults.conf`  |
 | `--skip-sbom` / `--skip-vex`                     | Selective attestation refresh                          |
+| `--vex-file PATH`                                | Attach an explicit OpenVEX document                    |
 
-Per-value resolution order: **Terraform output → CLI flag → `DEFAULT_*` env var
-→ `defaults.conf` literal → fatal**.
+Build scripts resolve values in this order: **Terraform output → CLI flag →
+`DEFAULT_*` env var → `defaults.conf` literal → fatal**.
+
+`attest-image.sh` does not read Terraform outputs. It resolves values from CLI
+flags, `DEFAULT_*` values, and `defaults.conf`.
 
 ## 🧩 Enabling OCI Image Volumes on k3s
 
@@ -171,7 +179,7 @@ sudo k3s kubectl get --raw /metrics | grep kubernetes_feature_enabled | grep Ima
 | `Subscription '…' (tenant …) not in az session for …`   | Missing `az login --tenant <id>` for that tenant                                            |
 | `--akv-key-id (or DEFAULT_AKV_KEY_URI) is required …`   | `notation` mode without an AKV key URI                                                      |
 | `Unexpected digest shape from az acr repository show`   | ACR returned no manifest — usually a transient ACR Tasks failure                            |
-| `VEX file not present at '…' — skipping OpenVEX`        | Wrong `--vex-file` path or VEX not committed                                                |
+| `VEX file not found: …`                                 | An explicit `--vex-file` or `DEFAULT_VEX_FILE` path is incorrect                            |
 | `verify-image.sh not present (PR #592 not merged yet)`  | Expected until [PR #592](https://github.com/microsoft/physical-ai-toolchain/pull/592) lands |
 | Sigstore signing locally rejected by Kyverno on cluster | Signed with developer Entra identity; production builds must run in CI                      |
 
@@ -212,6 +220,6 @@ current model image.
 
 ## 📚 Related
 
-- [`scripts/security/generate-vex.sh`](../../scripts/security/generate-vex.sh) — scan + VEX stub generator
-- [`security/vex/inference-base.openvex.json`](../../security/vex/inference-base.openvex.json) — committed VEX
+- [`scripts/security/generate-vex.sh`](../../scripts/security/generate-vex.sh) — scan + OpenVEX merge generator
+- [VEX standards](../../.github/instructions/vex-standards.instructions.md) — authoring and mutation contract
 - [`fleet-deployment/specifications/fleet-deployment.specification.md`](../specifications/fleet-deployment.specification.md) — end-to-end pipeline contract
