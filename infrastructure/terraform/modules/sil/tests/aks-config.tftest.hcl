@@ -248,6 +248,16 @@ run "static_cluster_config" {
     condition     = azurerm_kubernetes_cluster.main.role_based_access_control_enabled == true
     error_message = "RBAC should be enabled"
   }
+
+  assert {
+    condition     = azurerm_kubernetes_cluster.main.node_provisioning_profile[0].mode == "Manual"
+    error_message = "AKS node provisioning mode should remain manual"
+  }
+
+  assert {
+    condition     = azurerm_kubernetes_cluster.main.node_provisioning_profile[0].default_node_pools == "Auto"
+    error_message = "AKS default node pools should remain provider-managed"
+  }
 }
 
 // ============================================================
