@@ -60,11 +60,11 @@ section "UV Package Manager Setup"
 
 if ! command -v uv &>/dev/null; then
   info "Installing uv package manager..."
-  UV_VERSION="0.11.21"
+  UV_VERSION="0.12.8"
   UV_ARCH=$(uname -m)
   case "${UV_ARCH}" in
-    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="8c88519b0ef0af9801fcdee419bbb12116bd9e6b18e162ae093c932d8b264050" ;;
-    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="88e800834007cc5efd4675f166eb2a51e7e3ad19876d85fa8805a6fb5c922397" ;;
+    x86_64)  UV_TRIPLE="x86_64-unknown-linux-gnu"; UV_SHA256="2e2b37e9811e17675a9e70bed5e1a58fc8c0388be63d751d72cc735188c149ff" ;;
+    aarch64) UV_TRIPLE="aarch64-unknown-linux-gnu"; UV_SHA256="ba8661f4fd207c8e94814191598e619b355ac10d5014e851e21eb800f9ef2b00" ;;
     *) error "Unsupported architecture for uv: ${UV_ARCH}"; exit 1 ;;
   esac
   curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_TRIPLE}.tar.gz" -o /tmp/uv.tar.gz
