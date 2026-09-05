@@ -47,9 +47,7 @@ def simulated_client() -> TestClient:
 
 
 class TestDisabledOperatorApi:
-    def test_capabilities_and_status_remain_available(
-        self, disabled_client: TestClient
-    ) -> None:
+    def test_capabilities_and_status_remain_available(self, disabled_client: TestClient) -> None:
         capabilities = disabled_client.get("/api/operator/capabilities")
         status = disabled_client.get("/api/operator/status")
 
@@ -97,9 +95,7 @@ class TestSimulatedOperatorApi:
         assert replay.status_code == 201
         assert replay.json() == first.json()
 
-    def test_session_commands_are_addressed_and_idempotent(
-        self, simulated_client: TestClient
-    ) -> None:
+    def test_session_commands_are_addressed_and_idempotent(self, simulated_client: TestClient) -> None:
         started_response = simulated_client.post(
             "/api/operator/sessions",
             json={"command_id": "api-start-record", "mode": "record"},
@@ -177,9 +173,7 @@ class TestOperatorSecurityBoundary:
 
         assert response.status_code == 403
 
-    def test_operator_role_allows_authorized_request(
-        self, secured_app: FastAPI
-    ) -> None:
+    def test_operator_role_allows_authorized_request(self, secured_app: FastAPI) -> None:
         secured_app.dependency_overrides[require_auth] = lambda: {"roles": ["Operator"]}
         token = generate_csrf_token()
         with TestClient(secured_app) as client:
@@ -195,9 +189,7 @@ class TestOperatorSecurityBoundary:
 
 
 class TestOperatorEvents:
-    def test_replays_current_snapshot_after_service_instance_mismatch(
-        self, simulated_client: TestClient
-    ) -> None:
+    def test_replays_current_snapshot_after_service_instance_mismatch(self, simulated_client: TestClient) -> None:
         response = simulated_client.get(
             "/api/operator/events?once=true",
             headers={"Last-Event-ID": "old-service:99"},
@@ -216,9 +208,7 @@ class TestOperatorEvents:
         await anext(first)
         await anext(second)
 
-        await service.start(
-            operator.StartSessionRequest(command_id="fanout-start", mode="teleoperate")
-        )
+        await service.start(operator.StartSessionRequest(command_id="fanout-start", mode="teleoperate"))
         first_event = await anext(first)
         second_event = await anext(second)
 
@@ -287,9 +277,7 @@ class TestOperatorCameraFrames:
             adapter_mode="lerobot",
             preflight_service=SimpleNamespace(profiles={"so101": profile}),
         )
-        service._camera_frames["wrist"] = OperatorCameraFrame(
-            jpeg=b"jpeg", captured_at_s=1.25
-        )
+        service._camera_frames["wrist"] = OperatorCameraFrame(jpeg=b"jpeg", captured_at_s=1.25)
         app.state.operator_service = service
 
         with TestClient(app) as client:
@@ -301,9 +289,7 @@ class TestOperatorCameraFrames:
         assert response.headers["cache-control"] == "no-store"
         assert response.headers["x-operator-captured-at"] == "1.25"
 
-    def test_unknown_and_empty_camera_frames_return_not_found(
-        self, app: FastAPI
-    ) -> None:
+    def test_unknown_and_empty_camera_frames_return_not_found(self, app: FastAPI) -> None:
         profile = SimpleNamespace(
             model_dump=lambda mode: {
                 "wrist_camera": {"fps": 30},

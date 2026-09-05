@@ -58,9 +58,7 @@ async def test_auth_disabled_hardware_requires_explicit_loopback_opt_in(
 ) -> None:
     monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
     monkeypatch.delenv("OPERATOR_ALLOW_UNAUTHENTICATED_LOOPBACK", raising=False)
-    request = make_asgi_request(
-        "POST", "/api/operator/preflights", headers={"host": "localhost:8000"}
-    )
+    request = make_asgi_request("POST", "/api/operator/preflights", headers={"host": "localhost:8000"})
 
     with pytest.raises(HTTPException) as error:
         await require_hardware_access(request, user=None)
@@ -98,9 +96,7 @@ async def test_api_key_requires_distinct_operator_key(
 
     await require_hardware_access(request, user=user)
 
-    request = make_asgi_request(
-        "POST", "/api/operator/preflights", headers={"X-API-Key": "general-secret"}
-    )
+    request = make_asgi_request("POST", "/api/operator/preflights", headers={"X-API-Key": "general-secret"})
     with pytest.raises(HTTPException) as error:
         await require_hardware_access(request, user=user)
     assert error.value.status_code == 403
@@ -211,9 +207,7 @@ def test_real_router_requires_general_and_operator_api_keys(
                 "X-Operator-API-Key": "operator-secret",
             },
         )
-        general_only = client.get(
-            "/api/operator/capabilities", headers={"X-API-Key": "general-secret"}
-        )
+        general_only = client.get("/api/operator/capabilities", headers={"X-API-Key": "general-secret"})
         operator_only = client.get(
             "/api/operator/capabilities",
             headers={"X-Operator-API-Key": "operator-secret"},

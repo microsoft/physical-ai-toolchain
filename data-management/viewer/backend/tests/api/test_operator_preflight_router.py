@@ -46,9 +46,7 @@ class _StubPreflightService:
         return self.result
 
     def cancel(self, _preflight_id: str, *, command_id: str):
-        return self.result.model_copy(
-            update={"lifecycle": PreflightLifecycle.CANCELLED, "start_eligible": False}
-        )
+        return self.result.model_copy(update={"lifecycle": PreflightLifecycle.CANCELLED, "start_eligible": False})
 
 
 def test_preflight_routes_and_lerobot_start_gate() -> None:
@@ -132,12 +130,8 @@ async def test_preflight_errors_map_to_http_statuses() -> None:
             raise OperatorPreflightNotFoundError(command_id)
 
     service = ErrorService()
-    conflict = PreflightRequest(
-        command_id="conflict", profile="so101", mode=OperatorMode.RECORD
-    )
-    missing = PreflightRequest(
-        command_id="missing", profile="missing", mode=OperatorMode.RECORD
-    )
+    conflict = PreflightRequest(command_id="conflict", profile="so101", mode=OperatorMode.RECORD)
+    missing = PreflightRequest(command_id="missing", profile="missing", mode=OperatorMode.RECORD)
 
     with pytest.raises(HTTPException) as conflict_error:
         await operator.create_preflight(conflict, None, None, service)  # type: ignore[arg-type]
@@ -161,9 +155,7 @@ async def test_preflight_errors_map_to_http_statuses() -> None:
         (NotImplementedError("not implemented"), 501),
     ],
 )
-async def test_start_errors_map_to_http_statuses(
-    error: Exception, status_code: int
-) -> None:
+async def test_start_errors_map_to_http_statuses(error: Exception, status_code: int) -> None:
     class ErrorService:
         async def start(self, _request: StartSessionRequest) -> None:
             raise error

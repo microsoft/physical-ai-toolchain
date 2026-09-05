@@ -16,10 +16,8 @@ def main() -> int:
         print(
             json.dumps(
                 {
-                    "cleanup_complete": os.environ.get("FAKE_RECOVERY", "true")
-                    == "true",
-                    "torque_verified_off": os.environ.get("FAKE_RECOVERY", "true")
-                    == "true",
+                    "cleanup_complete": os.environ.get("FAKE_RECOVERY", "true") == "true",
+                    "torque_verified_off": os.environ.get("FAKE_RECOVERY", "true") == "true",
                     "released": ["follower", "leader"],
                     "errors": [],
                 }
@@ -66,11 +64,7 @@ def main() -> int:
             "service_instance_id": initialize["service_instance_id"],
             "session_id": session_id,
             "sequence": 1,
-            "startup_nonce": (
-                "wrong-nonce"
-                if behavior == "bad_nonce"
-                else initialize["startup_nonce"]
-            ),
+            "startup_nonce": ("wrong-nonce" if behavior == "bad_nonce" else initialize["startup_nonce"]),
             "resources": {"follower": "acquired_torque_off"},
         }
     )
@@ -142,9 +136,7 @@ def main() -> int:
                     "sequence": worker_sequence,
                     "command_id": command["command_id"],
                     "action": command["action"],
-                    "dataset_id": initialize.get("settings", {}).get(
-                        "dataset_id", "demo"
-                    ),
+                    "dataset_id": initialize.get("settings", {}).get("dataset_id", "demo"),
                     "episode_index": episode_index,
                     "phase": (
                         "finalized"
