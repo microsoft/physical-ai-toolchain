@@ -197,9 +197,9 @@ Write-Info 'All required tools found'
 
 Write-Section 'UV Package Manager Setup'
 
-$UvVersion = '0.11.21'
-# SHA-256 for https://astral.sh/uv/0.11.21/install.ps1.
-$UvInstallerSha256 = '0ce635ed6670498d72930763357d9e44251887130d2eafd6aa9ba4f8299ec216'
+$UvVersion = '0.12.8'
+# SHA-256 for https://astral.sh/uv/0.12.8/install.ps1.
+$UvInstallerSha256 = 'c1c357b2945c4eb31f3380a6c0cb1c371f18b3c0d1856073f82d17cc52c892cb'
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Install-Uv `

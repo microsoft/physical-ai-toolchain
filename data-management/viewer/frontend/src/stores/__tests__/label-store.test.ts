@@ -21,6 +21,16 @@ describe('useLabelStore', () => {
       useLabelStore.getState().setAvailableLabels(['A', 'B'])
       expect(useLabelStore.getState().availableLabels).toEqual(['A', 'B'])
     })
+
+    it('removes active filters that are no longer available', () => {
+      const store = useLabelStore.getState()
+      store.setAvailableLabels(['SUCCESS', 'OBJECT: OLD'])
+      store.setFilterLabels(['OBJECT: OLD'])
+
+      store.setAvailableLabels(['SUCCESS', 'OBJECT: NEW'])
+
+      expect(useLabelStore.getState().filterLabels).toEqual([])
+    })
   })
 
   describe('addLabelOption', () => {
@@ -73,6 +83,48 @@ describe('useLabelStore', () => {
       expect(state.episodeLabels[5]).toEqual(['FAILURE', 'PARTIAL'])
       expect(state.savedEpisodeLabels[0]).toEqual(['SUCCESS'])
       expect(state.savedEpisodeLabels[5]).toEqual(['FAILURE', 'PARTIAL'])
+    })
+  })
+
+  describe('reconcileEpisodeLabels', () => {
+    it('updates clean episodes while preserving unsaved edits', () => {
+      const store = useLabelStore.getState()
+      store.setDatasetEpisodeLabels('ds-1', { '0': ['SUCCESS'], '1': ['FAILURE'] })
+      store.setEpisodeLabels(1, ['PARTIAL'])
+
+      store.reconcileEpisodeLabels('ds-1', {
+        '0': ['SUCCESS', 'OBJECT: CUBE'],
+        '1': ['FAILURE', 'OBJECT: BALL'],
+      })
+
+      const state = useLabelStore.getState()
+      expect(state.episodeLabels[0]).toEqual(['SUCCESS', 'OBJECT: CUBE'])
+      expect(state.episodeLabels[1]).toEqual(['OBJECT: BALL', 'PARTIAL'])
+      expect(state.savedEpisodeLabels[0]).toEqual(['SUCCESS', 'OBJECT: CUBE'])
+      expect(state.savedEpisodeLabels[1]).toEqual(['FAILURE', 'OBJECT: BALL'])
+    })
+
+    it('ignores reconciliation responses for a different dataset', () => {
+      const store = useLabelStore.getState()
+      store.setDatasetEpisodeLabels('ds-1', { '0': ['SUCCESS'] })
+      store.setEpisodeLabels(0, ['PARTIAL'])
+
+      store.reconcileEpisodeLabels('ds-2', { '0': ['FAILURE'] })
+
+      const state = useLabelStore.getState()
+      expect(state.datasetId).toBe('ds-1')
+      expect(state.episodeLabels[0]).toEqual(['PARTIAL'])
+      expect(state.savedEpisodeLabels[0]).toEqual(['SUCCESS'])
+    })
+
+    it('clears filters when hydrating a different dataset', () => {
+      const store = useLabelStore.getState()
+      store.setDatasetEpisodeLabels('ds-1', { '0': ['SUCCESS'] })
+      store.setFilterLabels(['SUCCESS'])
+
+      store.setDatasetEpisodeLabels('ds-2', { '0': ['FAILURE'] })
+
+      expect(useLabelStore.getState().filterLabels).toEqual([])
     })
   })
 

@@ -21,6 +21,7 @@ CI/CD automation scripts for linting, validation, security scanning, and shared 
 
 ```text
 scripts/
+├── ci/                       CI bootstrap and release automation
 ├── lib/                      Shared utility modules
 ├── linting/                  PowerShell linting and validation scripts
 ├── security/                 Security scanning and dependency pinning scripts
@@ -41,6 +42,19 @@ Shared utility modules used across scripts and workflows.
 | `lib/terraform-outputs.ps1`    | PowerShell Terraform output accessors                  |
 | `lib/Get-VerifiedDownload.ps1` | Download files with SHA verification                   |
 | `lib/Modules/CIHelpers.psm1`   | CI output formatting, annotations, step summaries      |
+
+## 🚀 CI Scripts
+
+CI bootstrap and release automation.
+
+| Script                                | Purpose                                                 |
+|---------------------------------------|---------------------------------------------------------|
+| `ci/Add-ReleaseVerificationNotes.ps1` | Add release verification notes                          |
+| `ci/Close-ReleaseMilestone.ps1`       | Close the milestone associated with a completed release |
+| `ci/Install-Gitsign.ps1`              | Install the pinned gitsign release                      |
+| `ci/New-SignedReleaseTag.ps1`         | Create a signed release tag                             |
+| `ci/New-SigningArtifacts.ps1`         | Generate release signing artifacts                      |
+| `ci/Update-ChangelogMsDate.ps1`       | Refresh changelog metadata dates                        |
 
 ## 🔍 Linting Scripts
 
@@ -80,7 +94,7 @@ The `Test-BinaryFreshness.ps1` script is invoked by the `check-binary-integrity.
 
 Findings are written to `binary-freshness-results.sarif` with per-rule `helpUri` values pointing at the appropriate remediation script.
 
-The `Test-HveCoreFreshness.ps1` script is invoked by the `check-hve-core-freshness.yml` workflow on a weekly schedule. Each derived file declares a baseline. `release` files compare the **upstream** blob SHA at the pinned `UPSTREAM_REF` against one resolved, immutable newest non-draft release revision. `source-header` files compare the revision recorded in their header against one resolved, immutable upstream `main` revision. This reports relevant upstream changes before they appear in a release.
+The `Test-HveCoreFreshness.ps1` script runs weekly through `check-hve-core-freshness.yml`. Each derived file declares a baseline. `release` files compare the **upstream** blob SHA at `HVE_CORE_DERIVED_FILES_REF` with the resolved newest non-draft release. `source-header` files compare the revision recorded in their header with a resolved upstream `main` revision. This reports relevant upstream changes before they appear in a release.
 
 Source-header files must include `Adapted from microsoft/hve-core <upstream-path> as of commit <40-hex SHA>`. Comparing upstream blobs avoids false drift from intentional local adaptations.
 

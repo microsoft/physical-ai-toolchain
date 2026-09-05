@@ -18,13 +18,13 @@
 // ============================================================
 
 resource "azurerm_log_analytics_workspace" "main" {
-  name                       = "log-${local.resource_name_suffix}"
-  location                   = var.resource_group.location
-  resource_group_name        = var.resource_group.name
-  sku                        = "PerGB2018"
-  retention_in_days          = 30
-  internet_ingestion_enabled = var.should_enable_public_network_access
-  internet_query_enabled     = var.should_enable_public_network_access
+  name                           = "log-${local.resource_name_suffix}"
+  location                       = var.resource_group.location
+  resource_group_name            = var.resource_group.name
+  sku                            = "PerGB2018"
+  retention_in_days              = 30
+  internet_ingestion_access_type = var.should_enable_public_network_access ? "Enabled" : "Disabled"
+  internet_query_access_type     = var.should_enable_public_network_access ? "Enabled" : "Disabled"
 }
 
 // ============================================================
