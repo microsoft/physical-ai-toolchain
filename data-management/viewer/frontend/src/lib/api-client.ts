@@ -28,7 +28,22 @@ let _csrfToken: string | null = null
 /** In-flight CSRF token fetch promise to prevent duplicate requests. */
 let _csrfTokenFetch: Promise<string> | null = null
 
+function csrfCookieToken(): string | null {
+  if (typeof document === 'undefined') return null
+  const cookie = document.cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('csrf_token='))
+  const value = cookie ? decodeURIComponent(cookie.slice('csrf_token='.length)) : ''
+  return value || null
+}
+
 async function getCsrfToken(): Promise<string> {
+  const cookieToken = csrfCookieToken()
+  if (cookieToken) {
+    _csrfToken = cookieToken
+    return cookieToken
+  }
   if (_csrfToken) return _csrfToken
   if (!_csrfTokenFetch) {
     _csrfTokenFetch = fetch(`${API_BASE}/csrf-token`)
@@ -39,7 +54,7 @@ async function getCsrfToken(): Promise<string> {
         return response.json()
       })
       .then((data) => {
-        _csrfToken = data.csrf_token as string
+        _csrfToken = csrfCookieToken() ?? (data.csrf_token as string)
         _csrfTokenFetch = null
         return _csrfToken
       })
@@ -99,6 +114,25 @@ export function transformKeys<T>(obj: unknown): T {
     ) as T
   }
   return obj as T
+}
+
+function camelToSnake(str: string): string {
+  return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+}
+
+function transformKeysToSnake(obj: unknown): unknown {
+  if (Array.isArray(obj)) {
+    return obj.map(transformKeysToSnake)
+  }
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj as Record<string, unknown>).map(([key, value]) => [
+        camelToSnake(key),
+        transformKeysToSnake(value),
+      ]),
+    )
+  }
+  return obj
 }
 
 /**
@@ -163,6 +197,29 @@ export class ApiClientError extends Error {
   }
 }
 
+function normalizeApiError(payload: unknown, response: Response): ApiError {
+  const fallbackMessage = response.statusText || 'An unknown error occurred'
+  if (!payload || typeof payload !== 'object') {
+    return { code: `HTTP_${response.status}`, message: fallbackMessage }
+  }
+
+  const body = payload as Record<string, unknown>
+  const message =
+    typeof body.message === 'string'
+      ? body.message
+      : typeof body.detail === 'string'
+        ? body.detail
+        : fallbackMessage
+  const code = typeof body.code === 'string' ? body.code : `HTTP_${response.status}`
+  const details =
+    body.details && typeof body.details === 'object'
+      ? (body.details as Record<string, unknown>)
+      : Array.isArray(body.detail)
+        ? { validation: body.detail }
+        : undefined
+  return { code, message, details }
+}
+
 /**
  * Handle API response, throwing on error.
  */
@@ -170,7 +227,7 @@ export async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let error: ApiError
     try {
-      error = await response.json()
+      error = normalizeApiError(await response.json(), response)
     } catch {
       error = {
         code: 'UNKNOWN_ERROR',
@@ -284,7 +341,8 @@ export async function fetchAnnotations(
     `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
     { headers: await requestHeaders() },
   )
-  return handleResponse<EpisodeAnnotationFile>(response)
+  const raw = await handleResponse<unknown>(response)
+  return transformKeys<EpisodeAnnotationFile>(raw)
 }
 
 /**
@@ -303,10 +361,11 @@ export async function saveAnnotation(
         'Content-Type': 'application/json',
         ...(await mutationHeaders()),
       },
-      body: JSON.stringify(annotation),
+      body: JSON.stringify(transformKeysToSnake(annotation)),
     },
   )
-  return handleResponse<EpisodeAnnotationFile>(response)
+  const raw = await handleResponse<unknown>(response)
+  return transformKeys<EpisodeAnnotationFile>(raw)
 }
 
 /**

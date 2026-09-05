@@ -43,7 +43,7 @@ _valid_dataset_ids = st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,50}"
 _valid_nested_dataset_id_parts = st.from_regex(
     re.compile(r"[a-zA-Z0-9](?:[a-zA-Z0-9._-]{0,19}[a-zA-Z0-9._])?"),
     fullmatch=True,
-)
+).filter(lambda part: "--" not in part)
 
 _valid_camera_names = st.from_regex(re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,30}"), fullmatch=True)
 

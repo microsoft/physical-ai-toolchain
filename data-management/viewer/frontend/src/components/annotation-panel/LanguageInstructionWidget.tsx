@@ -7,7 +7,7 @@
  */
 
 import { Loader2, Plus, Save, Trash2 } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -60,6 +60,16 @@ export function LanguageInstructionWidget() {
   const [paraphraseInput, setParaphraseInput] = useState('')
   const [subtaskInput, setSubtaskInput] = useState('')
 
+  useEffect(() => {
+    if (!currentAnnotation || !isDirty) return
+
+    const timeout = setTimeout(() => {
+      void saveAnnotation.save()
+    }, 300)
+
+    return () => clearTimeout(timeout)
+  }, [currentAnnotation, isDirty, saveAnnotation.save])
+
   const handleAddParaphrase = useCallback(() => {
     const trimmed = paraphraseInput.trim()
     if (!trimmed || !langInst) return
@@ -102,7 +112,7 @@ export function LanguageInstructionWidget() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Language Instruction</CardTitle>
+          <CardTitle className="text-sm">Task Instruction</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground text-sm">No episode selected</p>
@@ -115,44 +125,36 @@ export function LanguageInstructionWidget() {
     return (
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Language Instruction</CardTitle>
+          <CardTitle className="text-sm">Task Instruction</CardTitle>
         </CardHeader>
-        <CardContent>
-          {datasetTaskDescription ? (
-            <>
-              <p className="text-muted-foreground mb-2 text-xs">Dataset task description:</p>
-              <p className="mb-3 text-sm font-medium">{datasetTaskDescription}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() =>
-                  updateLanguageInstruction({
-                    instruction: datasetTaskDescription,
-                    source: 'template' as InstructionSource,
-                  })
-                }
-              >
-                <Plus className="mr-2 h-3 w-3" />
-                Use as Instruction
-              </Button>
-            </>
-          ) : (
-            <>
-              <p className="text-muted-foreground mb-3 text-xs">
-                Add a natural language task description for VLA training.
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => updateLanguageInstruction({ instruction: '' })}
-              >
-                <Plus className="mr-2 h-3 w-3" />
-                Add Instruction
-              </Button>
-            </>
-          )}
+        <CardContent className="space-y-3">
+          <Textarea
+            id="lang-instruction-new"
+            aria-label="Task Instruction"
+            value={datasetTaskDescription ?? ''}
+            onChange={(event) =>
+              updateLanguageInstruction({
+                instruction: event.target.value,
+                source: datasetTaskDescription ? 'template' : 'human',
+              })
+            }
+            placeholder="Describe the task, e.g. 'Hand the box from left arm to right arm'"
+            className="min-h-[72px] resize-y"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full text-xs"
+            onClick={saveAnnotation.save}
+            disabled={!isDirty || saveAnnotation.isPending}
+          >
+            {saveAnnotation.isPending ? (
+              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-3 w-3" />
+            )}
+            Save Annotation
+          </Button>
         </CardContent>
       </Card>
     )
@@ -164,7 +166,7 @@ export function LanguageInstructionWidget() {
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center justify-between text-sm">
-          Language Instruction
+          Task Instruction
           {hasInstruction && (
             <Badge variant="secondary" className="text-xs font-normal">
               {langInst.source}
@@ -173,15 +175,14 @@ export function LanguageInstructionWidget() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <FormSection label="Task Instruction" htmlFor="lang-instruction">
-          <Textarea
-            id="lang-instruction"
-            value={langInst.instruction}
-            onChange={(e) => updateLanguageInstruction({ instruction: e.target.value })}
-            placeholder="Describe the task, e.g. 'Hand the box from left arm to right arm'"
-            className="min-h-[60px] resize-none"
-          />
-        </FormSection>
+        <Textarea
+          id="lang-instruction"
+          aria-label="Task Instruction"
+          value={langInst.instruction}
+          onChange={(e) => updateLanguageInstruction({ instruction: e.target.value })}
+          placeholder="Describe the task, e.g. 'Hand the box from left arm to right arm'"
+          className="min-h-[60px] resize-none"
+        />
 
         <div className="grid grid-cols-2 gap-3">
           <FormSection label="Source" htmlFor="lang-source">

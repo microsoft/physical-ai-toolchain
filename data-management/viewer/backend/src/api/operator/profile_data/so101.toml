@@ -1,0 +1,53 @@
+version = 1
+name = "so101"
+embodiment = "SO-101"
+actuator_names = [
+	"shoulder_pan",
+	"shoulder_lift",
+	"elbow_flex",
+	"wrist_flex",
+	"wrist_roll",
+	"gripper",
+]
+minimum_free_bytes = 10737418240
+teleoperation_fps = 30
+
+[leader]
+port = "/dev/so101_leader"
+logical_id = "my_leader_arm"
+usb_vendor_id = "1a86"
+usb_product_id = "55d3"
+usb_serial = "5AE6083728"
+calibration_file = "~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/my_leader_arm.json"
+
+[follower]
+port = "/dev/so101_follower"
+logical_id = "my_follower_arm"
+usb_vendor_id = "1a86"
+usb_product_id = "55d3"
+usb_serial = "5AE6057231"
+calibration_file = "~/.cache/huggingface/lerobot/calibration/robots/so_follower/my_follower_arm.json"
+
+[wrist_camera]
+path = "/dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._USB2.0_CAM1_USB2.0_CAM1-video-index0"
+usb_vendor_id = "05a3"
+usb_product_id = "9230"
+width = 640
+height = 480
+fps = 30
+
+[front_camera]
+usb_vendor_id = "8086"
+usb_product_id = "0b5b"
+usb_serial = "218622278289"
+usb_descriptor_serial = "323743071153"
+product = "Intel RealSense D405"
+width = 640
+height = 480
+fps = 30
+
+[recording]
+fps = 30
+episode_time_s = 60
+reset_time_s = 30
+upload_default = false

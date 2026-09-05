@@ -36,6 +36,11 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch):
         "CORS_ORIGINS",
         "EPISODE_CACHE_CAPACITY",
         "EPISODE_CACHE_MAX_MB",
+        "OPERATOR_ADAPTER_MODE",
+        "OPERATOR_COMMAND_TIMEOUT_S",
+        "OPERATOR_HOST_LEASE_PATH",
+        "OPERATOR_ALLOW_UNAUTHENTICATED_LOOPBACK",
+        "DATAVIEWER_AUTH_DISABLED",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -50,6 +55,8 @@ class TestLoadConfig:
         assert cfg.backend_port == 8000
         assert cfg.episode_cache_capacity == 32
         assert cfg.episode_cache_max_mb == 100
+        assert cfg.operator_adapter_mode == "disabled"
+        assert cfg.operator_command_timeout_s == 5.0
         assert "http://localhost:5173" in cfg.cors_origins
 
     def test_storage_backend_lowercased(self, monkeypatch: pytest.MonkeyPatch):
@@ -82,6 +89,43 @@ class TestLoadConfig:
         assert cfg.azure_dataset_container == "datasets"
         assert cfg.azure_annotation_container == "ann"
         assert cfg.azure_sas_token == "sv=token"
+
+    def test_operator_simulated_mode(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("OPERATOR_ADAPTER_MODE", "SIMULATED")
+        monkeypatch.setenv("OPERATOR_COMMAND_TIMEOUT_S", "1.5")
+
+        cfg = load_config()
+
+        assert cfg.operator_adapter_mode == "simulated"
+        assert cfg.operator_command_timeout_s == 1.5
+
+    def test_invalid_operator_mode_raises(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("OPERATOR_ADAPTER_MODE", "shell")
+
+        with pytest.raises(ValueError, match="OPERATOR_ADAPTER_MODE"):
+            load_config()
+
+    def test_lerobot_mode_rejects_azure_storage(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("STORAGE_BACKEND", "azure")
+        monkeypatch.setenv("OPERATOR_ADAPTER_MODE", "lerobot")
+
+        with pytest.raises(ValueError, match="local storage"):
+            load_config()
+
+    def test_lerobot_requires_host_lease(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("OPERATOR_ADAPTER_MODE", "lerobot")
+
+        with pytest.raises(ValueError, match="OPERATOR_HOST_LEASE_PATH"):
+            load_config()
+
+    def test_unauthenticated_lerobot_requires_explicit_loopback(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("OPERATOR_ADAPTER_MODE", "lerobot")
+        monkeypatch.setenv("OPERATOR_HOST_LEASE_PATH", "/tmp/operator.lock")
+        monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "true")
+        monkeypatch.setenv("BACKEND_HOST", "0.0.0.0")
+
+        with pytest.raises(ValueError, match="loopback"):
+            load_config()
 
 
 class TestGetAppConfigSingleton:

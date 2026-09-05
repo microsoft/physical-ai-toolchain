@@ -17,10 +17,12 @@ describe('useAnnotationWorkspaceEpisodeActions', () => {
         savedLabelsForCurrentEpisode: ['keep', 'missing'],
         availableLabels: ['keep', 'other'],
         labelDataLoaded: true,
+        hasAnnotationChanges: false,
         hasEdits: true,
         onResetEdits: handleResetEdits,
         onSetEpisodeLabels: handleSetEpisodeLabels,
         onSaveEpisodeDraft: vi.fn(),
+        onSaveAnnotation: vi.fn(),
         onSaveEpisodeLabels: vi.fn(),
         onRecordEvent: vi.fn(),
         canGoNextEpisode: false,
@@ -40,6 +42,7 @@ describe('useAnnotationWorkspaceEpisodeActions', () => {
 
   it('saves labels and draft edits before advancing to the next episode', async () => {
     const handleSaveEpisodeLabels = vi.fn().mockResolvedValue(undefined)
+    const handleSaveAnnotation = vi.fn().mockResolvedValue(undefined)
     const handleSaveEpisodeDraft = vi.fn()
     const handleAdvance = vi.fn()
     const handleRecordEvent = vi.fn()
@@ -53,10 +56,12 @@ describe('useAnnotationWorkspaceEpisodeActions', () => {
         savedLabelsForCurrentEpisode: [],
         availableLabels: ['success'],
         labelDataLoaded: true,
+        hasAnnotationChanges: true,
         hasEdits: true,
         onResetEdits: vi.fn(),
         onSetEpisodeLabels: vi.fn(),
         onSaveEpisodeDraft: handleSaveEpisodeDraft,
+        onSaveAnnotation: handleSaveAnnotation,
         onSaveEpisodeLabels: handleSaveEpisodeLabels,
         onRecordEvent: handleRecordEvent,
         canGoNextEpisode: true,
@@ -69,6 +74,10 @@ describe('useAnnotationWorkspaceEpisodeActions', () => {
     })
 
     expect(handleSaveEpisodeLabels).toHaveBeenCalledWith({ episodeIdx: 4, labels: ['success'] })
+    expect(handleSaveAnnotation).toHaveBeenCalledOnce()
+    expect(handleSaveAnnotation.mock.invocationCallOrder[0]).toBeLessThan(
+      handleAdvance.mock.invocationCallOrder[0],
+    )
     expect(handleSaveEpisodeDraft).toHaveBeenCalledOnce()
     expect(handleAdvance).toHaveBeenCalledOnce()
     expect(handleRecordEvent).toHaveBeenCalledWith(

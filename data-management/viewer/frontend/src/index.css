@@ -67,6 +67,7 @@
   --color-chart-3: hsl(var(--chart-3));
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
+  --color-chart-6: hsl(var(--chart-6));
 
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
@@ -144,6 +145,61 @@
     --chart-3: 32 95% 44%;
     --chart-4: 271 81% 56%;
     --chart-5: 343 75% 55%;
+    --chart-6: 188 86% 40%;
+  }
+
+  .dark {
+    --background: 222 18% 10%;
+    --foreground: 210 20% 96%;
+    --card: 222 17% 13%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 17% 15%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 210 20% 96%;
+    --primary-foreground: 222 25% 12%;
+    --secondary: 217 15% 20%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 217 15% 18%;
+    --muted-foreground: 215 14% 67%;
+    --accent: 217 15% 22%;
+    --accent-foreground: 210 20% 96%;
+    --destructive: 0 63% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 217 15% 27%;
+    --input: 217 15% 27%;
+    --ring: 188 86% 53%;
+
+    --status-neutral: 215 14% 67%;
+    --status-neutral-foreground: 210 20% 96%;
+    --status-neutral-subtle: 217 15% 18%;
+    --status-neutral-border: 217 15% 30%;
+
+    --status-info: 199 89% 58%;
+    --status-info-foreground: 198 93% 82%;
+    --status-info-subtle: 202 60% 16%;
+    --status-info-border: 200 55% 32%;
+
+    --status-success: 142 69% 52%;
+    --status-success-foreground: 142 69% 78%;
+    --status-success-subtle: 145 45% 15%;
+    --status-success-border: 143 43% 30%;
+
+    --status-warning: 38 92% 56%;
+    --status-warning-foreground: 45 93% 78%;
+    --status-warning-subtle: 35 55% 15%;
+    --status-warning-border: 37 55% 31%;
+
+    --status-danger: 0 78% 62%;
+    --status-danger-foreground: 0 82% 82%;
+    --status-danger-subtle: 0 48% 16%;
+    --status-danger-border: 0 48% 32%;
+
+    --chart-1: 211 100% 66%;
+    --chart-2: 160 68% 52%;
+    --chart-3: 39 96% 58%;
+    --chart-4: 276 85% 70%;
+    --chart-5: 340 82% 67%;
+    --chart-6: 187 84% 53%;
   }
 }
 

@@ -1,0 +1,41 @@
+[project]
+name = "physical-ai-operator-worker"
+version = "0.1.0"
+description = "Isolated SO-101 teleoperation worker for the dataviewer"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "lerobot[dataset,feetech,intelrealsense]",
+    "pydantic==2.13.4",
+]
+
+[project.scripts]
+physical-ai-operator-worker = "operator_worker.main:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.15.21",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/operator_worker"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv]
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.uv.sources]
+lerobot = { git = "https://github.com/huggingface/lerobot.git", rev = "73dbb6f43a5088583706c91fb73c6957bca5f806" }

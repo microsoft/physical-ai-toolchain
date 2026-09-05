@@ -503,18 +503,30 @@ class TestGenerateVideoCv2:
 class TestGenerateVideoTopLevel:
     """Cover _generate_video ffmpeg + fallback dispatch."""
 
-    def test_no_ffmpeg_falls_back(self, tmp_path, monkeypatch):
+    def test_no_ffmpeg_falls_back_to_pyav(self, tmp_path, monkeypatch):
         monkeypatch.setattr("shutil.which", lambda _name: None)
         called = {}
 
-        def fake_cv2(images, output_path, fps=30.0):
+        def fake_pyav(images, output_path, fps=30.0):
             called["args"] = (len(images), Path(output_path), fps)
             return True
 
-        monkeypatch.setattr(hh, "_generate_video_cv2", fake_cv2)
+        monkeypatch.setattr(hh, "_generate_video_pyav", fake_pyav)
+        monkeypatch.setattr(hh, "_generate_video_cv2", lambda *_a, **_kw: False)
         images = np.zeros((3, 4, 4, 3), dtype=np.uint8)
         assert hh._generate_video(images, tmp_path / "v.mp4", fps=15.0) is True
         assert called["args"] == (3, tmp_path / "v.mp4", 15.0)
+
+    def test_pyav_writes_decodable_mp4(self, tmp_path):
+        import av
+
+        images = np.zeros((3, 16, 16, 3), dtype=np.uint8)
+        output_path = tmp_path / "pyav.mp4"
+
+        assert hh._generate_video_pyav(images, output_path, fps=15.0) is True
+
+        with av.open(str(output_path)) as container:
+            assert sum(1 for _frame in container.decode(video=0)) == 3
 
     def test_ffmpeg_exception_falls_back(self, tmp_path, monkeypatch):
         monkeypatch.setattr("shutil.which", lambda _name: "/fake/ffmpeg")
@@ -523,6 +535,7 @@ class TestGenerateVideoTopLevel:
             raise RuntimeError("popen failed")
 
         monkeypatch.setattr("subprocess.Popen", boom)
+        monkeypatch.setattr(hh, "_generate_video_pyav", lambda *_a, **_kw: False)
         monkeypatch.setattr(hh, "_generate_video_cv2", lambda *_a, **_kw: True)
         images = np.zeros((2, 4, 4, 3), dtype=np.uint8)
         assert hh._generate_video(images, tmp_path / "v.mp4", fps=10.0) is True

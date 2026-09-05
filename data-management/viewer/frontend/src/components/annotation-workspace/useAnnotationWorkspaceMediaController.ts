@@ -104,5 +104,6 @@ export function useAnnotationWorkspaceMediaController({
   return {
     ...mediaSources,
     ...videoSync,
+    datasetFps,
   }
 }

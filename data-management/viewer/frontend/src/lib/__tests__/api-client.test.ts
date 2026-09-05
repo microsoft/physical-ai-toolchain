@@ -20,6 +20,7 @@ import {
   fetchEpisode,
   fetchEpisodes,
   fetchVlmJudgeStatus,
+  handleResponse,
   mutationFetch,
   mutationHeaders,
   runVlmJudge,
@@ -31,6 +32,7 @@ import {
 beforeEach(() => {
   installFetchMock({ csrf: false })
   _resetCsrfToken()
+  document.cookie = 'csrf_token=; Max-Age=0; path=/'
 })
 
 afterEach(() => {
@@ -45,6 +47,16 @@ describe('ApiClientError', () => {
     expect(err.status).toBe(404)
     expect(err.details).toEqual({ id: '1' })
     expect(err.name).toBe('ApiClientError')
+  })
+
+  it('uses FastAPI detail strings as the visible error message', async () => {
+    const response = jsonResponse({ detail: 'Stale session ID' }, { status: 409 })
+
+    await expect(handleResponse(response)).rejects.toMatchObject({
+      message: 'Stale session ID',
+      code: 'HTTP_409',
+      status: 409,
+    })
   })
 })
 
@@ -219,12 +231,34 @@ describe('fetchEpisode', () => {
 })
 
 describe('fetchAnnotations', () => {
-  it('calls GET annotations endpoint', async () => {
-    const data = { schemaVersion: '1.0', annotations: [] }
+  it('calls GET annotations endpoint and camelCases saved annotations', async () => {
+    const data = {
+      schema_version: '1.0',
+      annotations: [
+        {
+          annotator_id: 'u1',
+          language_instruction: {
+            instruction: 'Pick the block',
+            subtask_instructions: ['Reach', 'Grasp'],
+          },
+        },
+      ],
+    }
     mockFetch.mockResolvedValueOnce(jsonResponse(data))
 
     const result = await fetchAnnotations('ds-1', 0)
-    expect(result).toEqual(data)
+    expect(result).toEqual({
+      schemaVersion: '1.0',
+      annotations: [
+        {
+          annotatorId: 'u1',
+          languageInstruction: {
+            instruction: 'Pick the block',
+            subtaskInstructions: ['Reach', 'Grasp'],
+          },
+        },
+      ],
+    })
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0/annotations', {
       headers: {},
     })
@@ -232,8 +266,26 @@ describe('fetchAnnotations', () => {
 })
 
 describe('saveAnnotation', () => {
-  it('calls PUT with annotation body', async () => {
-    const annotation = { annotatorId: 'u1' }
+  it('calls PUT with a recursively snake-cased annotation body', async () => {
+    const annotation = {
+      annotatorId: 'u1',
+      timestamp: '2026-07-23T00:00:00.000Z',
+      taskCompleteness: { rating: 'success', confidence: 4 },
+      trajectoryQuality: {
+        overallScore: 4,
+        metrics: { smoothness: 4, efficiency: 3, safety: 5, precision: 4 },
+        flags: [],
+      },
+      dataQuality: { overallQuality: 'good', issues: [] },
+      anomalies: { anomalies: [] },
+      languageInstruction: {
+        instruction: 'Pick the block',
+        source: 'human',
+        language: 'en',
+        paraphrases: [],
+        subtaskInstructions: ['Reach', 'Grasp'],
+      },
+    }
     mockMutationFetch(jsonResponse({ success: true }))
 
     await saveAnnotation('ds-1', 0, annotation as never)
@@ -242,7 +294,25 @@ describe('saveAnnotation', () => {
     expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
     expect(apiCall[1]).toMatchObject({
       method: 'PUT',
-      body: JSON.stringify(annotation),
+      body: JSON.stringify({
+        annotator_id: 'u1',
+        timestamp: '2026-07-23T00:00:00.000Z',
+        task_completeness: { rating: 'success', confidence: 4 },
+        trajectory_quality: {
+          overall_score: 4,
+          metrics: { smoothness: 4, efficiency: 3, safety: 5, precision: 4 },
+          flags: [],
+        },
+        data_quality: { overall_quality: 'good', issues: [] },
+        anomalies: { anomalies: [] },
+        language_instruction: {
+          instruction: 'Pick the block',
+          source: 'human',
+          language: 'en',
+          paraphrases: [],
+          subtask_instructions: ['Reach', 'Grasp'],
+        },
+      }),
     })
   })
 })
@@ -341,6 +411,20 @@ describe('CSRF token failures', () => {
     mockFetch.mockRejectedValueOnce(new Error('network down'))
 
     await expect(mutationHeaders()).rejects.toThrow(/network down/i)
+  })
+
+  it('uses the current shared cookie when another tab rotates the token', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ csrf_token: 'first-tab-token' }))
+    expect(await mutationHeaders()).toMatchObject({
+      'X-CSRF-Token': 'first-tab-token',
+    })
+
+    document.cookie = 'csrf_token=second-tab-token; path=/'
+
+    expect(await mutationHeaders()).toMatchObject({
+      'X-CSRF-Token': 'second-tab-token',
+    })
+    expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 })
 
