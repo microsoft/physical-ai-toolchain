@@ -20,7 +20,7 @@ requires-python = ">=3.12"
 # Keep override-dependencies and other shared pins in sync with IL when
 # bumping lerobot, azureml-mlflow, or any other co-versioned package.
 dependencies = [
-    "numpy==2.4.6",
+    "numpy==2.5.2",
     "azure-core==1.41.0",
     "azure-storage-blob==12.30.0",
     "azure-identity==1.25.3",
@@ -34,50 +34,51 @@ dependencies = [
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
-    "mlflow-skinny==3.14.0",
-    "packaging==26.2",
+    "mlflow-skinny==3.15.2",
+    "packaging==26.3",
     # Global prerelease resolution would otherwise select pydantic, sentry-sdk,
     # and hf-xet alpha/dev releases; pin stable versions unless a direct
     # dependency requires them.
     "pydantic==2.13.4",
-    "sentry-sdk==2.66.1",
-    "hf-xet==1.5.1",
+    "sentry-sdk==2.68.1",
+    "hf-xet==1.6.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
     "datasets==5.0.1",
-    "pyarrow==25.0.0",
-    "huggingface-hub==1.25.1",
+    "pyarrow==25.0.1",
+    "huggingface-hub==1.28.0",
     # lerobot[dataset,pi] supplies the dataset/video runtime plus dependencies
     # required by the pi0 / pi0_fast / pi05 policy implementations.
-    "lerobot[dataset,pi]==0.6.0",
-    # transformers and scipy pinned explicitly so they land in the lockfile
-    # at known-good versions instead of floating with lerobot's ranges.
-    # transformers 5.5.0 includes the latest security fixes while preserving
-    # the tokenizer and processor API used by lerobot 0.6.0.
+    "lerobot[dataset,pi]==0.6.1",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    # Torch 2.11 CPU wheels require this exact version during CPU smoke resolution.
+    "pygments==2.20.0",
+    # Held below 5.6 because lerobot[pi]==0.6.1 requires transformers<5.6.
+    # Pin scipy directly to prevent transitive resolution drift.
     "transformers==5.5.0",
-    "scipy==1.16.3",
-    # safetensors is pinned to a stable release. transformers==5.5.0 requires
-    # tokenizers<=0.23.0, whose compatible 0.23.x build is 0.23.0rc0.
+    "scipy==1.18.1",
+    # Pin the model serialization and tokenizer runtimes explicitly.
     "safetensors==0.8.0",
     "tokenizers==0.23.0rc0",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.14.0",
-    "torchcodec==0.15.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
+    "torchcodec==0.16.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to a release that addresses the current advisory set
     # (transitive via mlflow-skinny and wandb).
-    "gitpython==3.1.58",
+    "gitpython==3.1.60",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
     # Pin cryptography to the patched release. azureml-mlflow caps below
     # 49.0.0, so this pin is also overridden below.
-    "cryptography==50.0.0",
-    # Pin wrapt explicitly to 2.2.2. opentelemetry-instrumentation now accepts
+    "cryptography==50.0.1",
+    # Pin wrapt explicitly to 2.3.0. opentelemetry-instrumentation now accepts
     # wrapt>=1.0,<3.0, so the 2.x line is in range; the explicit pin prevents
     # the prerelease resolver from selecting a stray 2.x release candidate.
-    "wrapt==2.2.2",
+    "wrapt==2.3.0",
 ]
 
 [build-system]
@@ -85,9 +86,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# Constrain the universal lock to the AzureML deployment target so the
-# resolution yields a deterministic export for the Linux x86_64 container.
-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+# Resolve both the Azure ML/OSMO x86_64 target and local NVIDIA Thor systems.
+environments = ["sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]
 # Required for prerelease transitives that we intentionally accept in the
 # resolved tree. Audit the full set after regenerating the lock:
 #   uv export --frozen --no-hashes --no-emit-project | grep -E '[0-9][ab][0-9]+|rc[0-9]+'
@@ -97,31 +97,29 @@ prerelease = "allow"
 # appears in `dependencies` above, otherwise resolution drifts. Remove an
 # override only when the upstream constraint that required it is lifted.
 #
-# WARNING: the override list is tightly coupled to lerobot==0.6.0's published
+# WARNING: the override list is tightly coupled to lerobot==0.6.1's published
 # constraints. When bumping lerobot, audit every entry against the new
 # release's pyproject so we neither hide a legitimate upper bound nor leave a
 # stale override in place.
 override-dependencies = [
-    # diffusers: lerobot==0.6.0 pins a range that includes versions vulnerable
+    # diffusers: lerobot==0.6.1 pins a range that includes versions vulnerable
     # to GHSA-98h9-4798-4q5v; force the patched release.
     "diffusers==0.38.0",
-    # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps below 12.30.0; we
-    # need 12.30.0 for the AzureCliCredential fix shipped in that release.
+    # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps below 12.30.0;
+    # mirror the direct 12.30.0 pin.
     "azure-storage-blob==12.30.0",
     # cryptography: azureml-mlflow caps below 49.0.0; mirror the direct pin.
-    "cryptography==50.0.0",
+    "cryptography==50.0.1",
     # mlflow-skinny: azureml-mlflow caps below 3.14.0; mirror the direct pin.
-    "mlflow-skinny==3.14.0",
+    "mlflow-skinny==3.15.2",
     # packaging: azureml-mlflow caps below 26.x; mirror the direct pin.
-    "packaging==26.2",
-    # numpy: lerobot==0.6.0 caps below 2.3.0; we need 2.4.6 to align with torchcodec.
-    "numpy==2.4.6",
-    # torchcodec: lerobot==0.6.0 caps below 0.12; 0.15.0 ships the manylinux
-    # 2.28 wheel needed by the AzureML CUDA container.
-    "torchcodec==0.15.0",
-    # datasets: lerobot==0.6.0 caps below 5.0.0; use the patched 5.0.1 release
-    # while preserving compatibility with
-    # the Azure storage backend used by the AzureML run output mounts.
+    "packaging==26.3",
+    # numpy: lerobot==0.6.1 caps below 2.3.0; mirror the direct 2.5.2 pin.
+    "numpy==2.5.2",
+    # torchcodec: lerobot==0.6.1 caps below 0.12.0; 0.16.0 provides a CPython
+    # 3.12 manylinux_2_28 x86_64 wheel for the target platform.
+    "torchcodec==0.16.0",
+    # datasets: lerobot==0.6.1 caps below 5.0.0; 5.0.1 fixes CVE-2026-66007.
     "datasets==5.0.1",
 ]
 package = false
@@ -130,20 +128,27 @@ package = false
 # resolved tree. After regenerating uv.lock, audit the exported set with:
 #   uv export --frozen --no-hashes --no-emit-project | \
 #     grep -E '==[0-9]+\.[0-9]+(\.[0-9]+)?(a|b|rc)[0-9]+'
-# Expected (and only) prerelease pins after audit:
-#   - msal==1.38.0rc1 — no stable 1.38.x has shipped yet; the 1.38 line ships
-#     the AzureCliCredential / msal-extensions cache fix our azure-identity
-#   - tokenizers==0.23.0rc0 — transformers==5.5.0 requires <=0.23.0 and no
-#     stable 0.23.0 release exists
-#     dependency chain requires. Downgrading to msal 1.37.x reintroduces the
-#     stale-token bug we hit before.
-#   - opentelemetry-instrumentation-* `*b1` betas (e.g. 0.63b1) plus
-#     opentelemetry-semantic-conventions / opentelemetry-util-http — the
-#     OpenTelemetry Python contrib instrumentation packages remain on
-#     beta releases upstream; no stable builds are available.
-#   - azure-core-tracing-opentelemetry==1.0.0b13 and
-#     azure-monitor-opentelemetry-exporter==1.0.0b45 — both packages have
-#     never published a 1.0.0 GA release; the beta line is the only option.
-# Anything else that surfaces here (wrapt rc, safetensors rc, tokenizers rc,
-# pydantic alpha, etc.) is a regression — add a direct pin to dependencies
-# above to override it.
+# Accepted prerelease families are Azure Monitor and OpenTelemetry packages,
+# whose upstream releases remain beta, plus MSAL and tokenizers when their
+# required fixes or compatible releases have no stable equivalent. Anything
+# else is a regression; add a stable direct pin above where one is available.
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
+    { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
+    { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
+]

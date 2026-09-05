@@ -28,20 +28,14 @@ fi
 # subsequent `python3` and `lerobot-train` invocations resolve through the
 # venv's bin directory once it is on PATH.
 #
-# `--no-config` keeps root project constraints from overriding the selected
-# lockfile. `--no-deps` is required: the flat requirement set is exported at runtime
-# from the selected project's uv.lock, and pyproject.toml carries
-# `override-dependencies` entries (e.g., azure-storage-blob==12.30.0 above
-# azureml-mlflow's cap) that are honored only during locking. Re-resolving at
-# install time would fail with the same conflicts the overrides were added to
-# bypass.
+# Install directly from the frozen lock so per-package indexes and dependency
+# overrides remain identical to the committed resolution.
 LEROBOT_VENV="${LEROBOT_VENV:-/opt/lerobot-venv}"
 uv python install 3.12
 uv venv --python 3.12 "${LEROBOT_VENV}"
 # shellcheck disable=SC1091
 source "${LEROBOT_VENV}/bin/activate"
-uv export --frozen --no-hashes --no-emit-project --project "${LEROBOT_PROJECT}" \
-  | uv pip install --no-config --no-cache-dir --no-deps -r -
+uv sync --active --frozen --no-config --no-install-project --project "${LEROBOT_PROJECT}"
 
 # HuggingFace login: must run before any code path that pulls gated models or
 # datasets from the Hub. pi0 reaches the Hub during policy init to download the

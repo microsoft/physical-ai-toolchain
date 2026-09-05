@@ -44,8 +44,7 @@ PY
   uv venv --python 3.12 "${venv_path}"
   # shellcheck disable=SC1091
   source "${venv_path}/bin/activate"
-  uv export --frozen --no-hashes --no-emit-project --project "${lerobot_project}" \
-    | uv pip install --no-cache-dir --no-deps -r -
+  uv sync --active --frozen --no-config --no-install-project --project "${lerobot_project}"
 }
 
 # require_relative_dataset_repo_id

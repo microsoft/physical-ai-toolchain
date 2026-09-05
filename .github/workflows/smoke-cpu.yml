@@ -18,6 +18,11 @@ name: Smoke (GPU-free)
         required: false
         default: false
         type: boolean
+      evaluation:
+        description: 'Run the evaluation runtime-image smoke (evaluation changed)'
+        required: false
+        default: false
+        type: boolean
       dataviewer:
         description: 'Build the dataviewer compose stack (viewer images/compose changed)'
         required: false
@@ -42,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        domain: [rl, il, evaluation]
+        domain: [rl, il, vla, evaluation]
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -98,6 +103,27 @@ jobs:
 
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh il
+
+  image-smoke-evaluation:
+    name: Runtime-Image Smoke (evaluation)
+    if: inputs.evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be  # v1.3.1
+        with:
+          tool-cache: true
+
+      - name: Runtime-image smoke
+        run: shared/ci/smoke-image.sh evaluation
 
   # Docker compose smoke: build the dataviewer images on their pinned bases,
   # start the stack, and wait for both services to report healthy. Path-gated by

@@ -81,7 +81,8 @@ Maintainers remain the source of truth — the reviewer is advisory context, not
 Every Python subproject carries a committed `uv.lock` beside its `pyproject.toml`. The lock is the single resolution source of truth — runtime-flat `requirements.txt` files are not committed.
 
 * **Regenerate** a lock with `uv lock` (or `uv lock --upgrade`) after editing `pyproject.toml`. Never hand-edit `uv.lock` and never run `uv pip compile` to produce a committed flat file.
-* **Derive** runtime dependencies at build or submit time via `uv export --frozen --no-hashes --no-emit-project` piped into `uv pip install --no-deps`. `--frozen` reads the lock without regenerating it. The OSMO replay mirror ([training/utils/replay-azureml.sh](pathname://../../training/utils/replay-azureml.sh)) derives its requirements this way from `workflows/osmo/uv.lock`.
+* **Install** source-aware LeRobot runtimes with `uv sync --active --frozen --no-config --no-install-project` so `[tool.uv.sources]` package indexes remain part of the runtime contract.
+* **Derive** other runtime dependencies with `uv export --frozen --no-hashes --no-emit-project` piped into `uv pip install --no-deps`. Both forms read the lock without regenerating it. The OSMO replay mirror ([training/utils/replay-azureml.sh](pathname://../../training/utils/replay-azureml.sh)) uses the export form with `workflows/osmo/uv.lock`.
 * **Constrain** the universal lock to supported platforms with `[tool.uv] environments` (for example linux x86_64 for GPU and Isaac subprojects). Preserve these markers when regenerating.
 * Dependabot regenerates affected locks natively on dependency PRs. The read-only `uv lock --check` gate (see [CI Validation for Dependency PRs](#ci-validation-for-dependency-prs)) fails any PR whose lock drifts from its manifest, so no manual `uv lock` step is required on Dependabot PRs.
 

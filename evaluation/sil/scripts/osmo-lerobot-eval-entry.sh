@@ -43,8 +43,8 @@ echo "Installing UV package manager..."
 pip install --quiet --break-system-packages uv==0.7.12
 
 # LeRobot requires Python >= 3.12; the base image ships 3.11. Create a
-# dedicated 3.12 venv (uv downloads the interpreter) so `uv export` of the
-# lerobot lock resolves, matching the training workflow.
+# dedicated 3.12 venv (uv downloads the interpreter) for the frozen LeRobot
+# synchronization, matching the training workflow.
 echo "Creating Python 3.12 environment..."
 uv python install 3.12
 uv venv --python 3.12 /opt/lerobot-venv
@@ -54,8 +54,8 @@ source /opt/lerobot-venv/bin/activate
 # Unpack runtime payload delivered via the OSMO url: input. The code archive
 # arrives as a downloaded object under the input mount rather than an env var:
 # a single env string is capped at 128 KiB (MAX_ARG_STRLEN) and the archive
-# (which ships the lerobot uv.lock for `uv export`) exceeds that, failing the
-# container execve E2BIG.
+# (which ships the LeRobot project and lock for frozen synchronization) exceeds
+# that, failing execve with E2BIG.
 PAYLOAD_ROOT="${PAYLOAD_ROOT:-/workspace/lerobot_payload}"
 mkdir -p "${PAYLOAD_ROOT}"
 ARCHIVE_PATH="$(find "${OSMO_INPUT_0}" -maxdepth 2 -name '*.zip' | head -n1)"
@@ -70,7 +70,7 @@ echo "Runtime payload unpacked to ${PAYLOAD_ROOT} from ${ARCHIVE_PATH}"
 
 EVAL_SCRIPTS="${PAYLOAD_ROOT}/evaluation/sil/scripts"
 
-# Install runtime dependencies from a build-time export of the committed lock.
+# Install runtime dependencies directly from the committed frozen lock.
 # The lerobot lock already provides av, pyarrow, matplotlib, mlflow-skinny,
 # azureml-mlflow, and the azure SDKs the evaluation and its helpers need.
 LEROBOT_PROJECT="${PAYLOAD_ROOT}/training/il/lerobot"
@@ -78,8 +78,7 @@ if [[ ! -f "${LEROBOT_PROJECT}/uv.lock" ]]; then
   echo "ERROR: LeRobot lockfile not found at ${LEROBOT_PROJECT}/uv.lock" >&2
   exit 1
 fi
-uv export --frozen --no-hashes --no-emit-project --project "${LEROBOT_PROJECT}" \
-  | uv pip install --no-cache-dir --no-deps -r -
+uv sync --active --frozen --no-config --no-install-project --project "${LEROBOT_PROJECT}"
 
 # Download policy from the AzureML model registry if requested.
 if [[ -n "${AML_MODEL_NAME:-}" && "${AML_MODEL_NAME}" != "none" && -n "${AML_MODEL_VERSION:-}" && "${AML_MODEL_VERSION}" != "none" ]]; then

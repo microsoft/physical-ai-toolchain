@@ -119,10 +119,11 @@ Detailed template and structure in `.github/instructions/shell-scripts.instructi
 Every Python subproject carries a committed `uv.lock` next to its `pyproject.toml`. The lock is the single resolution source of truth — runtime-flat `requirements.txt` files are NOT committed; they are derived at build time.
 
 * Regenerate a lock with `uv lock` (or `uv lock --upgrade`) after editing `pyproject.toml` — never hand-edit `uv.lock`, and never run `uv pip compile` to produce a committed flat file.
-* Derive runtime dependencies at build/submit time via `uv export --frozen --no-hashes --no-emit-project` piped into `uv pip install --no-deps`. `--frozen` guarantees the lock is read, not regenerated.
+* Install source-aware LeRobot runtimes with `uv sync --active --frozen --no-config --no-install-project` so `[tool.uv.sources]` indexes remain part of the runtime contract. Other runtime paths derive dependencies via `uv export --frozen --no-hashes --no-emit-project` piped into `uv pip install --no-deps`. Both forms guarantee the lock is read, not regenerated.
 * Do not reintroduce committed flat requirements files (for example `requirements-aml-mirror.txt`); derive them from the lock instead.
 * Dependabot regenerates affected locks natively. The read-only `uv lock --check` CI gate (`uv-lock-consistency.yml`, run via `npm run lint:uvlock`) fails any PR whose lock drifts from its manifest, so no manual `uv lock` step is required on Dependabot PRs.
 * `[tool.uv] environments` constrains the universal lock to supported platforms (for example linux x86_64 for GPU/Isaac subprojects). Preserve these markers when regenerating.
+* GPU projects that resolve Torch from an official CUDA index declare an explicit `[[tool.uv.index]]` and scope only `torch` and `torchvision` through `[tool.uv.sources]`. Preserve source markers so unsupported platforms continue to resolve from PyPI where the project supports them.
 
 ### Import Ordering
 
