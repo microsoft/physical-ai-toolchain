@@ -96,6 +96,28 @@ class TestDownloadDataset:
         stubs.blob_service_cls.assert_called_once()
         stubs.service_client.get_container_client.assert_called_once_with("cont")
 
+    def test_skips_azure_directory_markers(self, monkeypatch, tmp_path):
+        blobs = [
+            SimpleNamespace(name="p/path/", metadata=None),
+            SimpleNamespace(name="p/other", metadata={"hdi_isfolder": "TRUE"}),
+            SimpleNamespace(name="p/data/file.parquet", metadata={}),
+        ]
+        stubs = _install_azure_stubs(monkeypatch, list_blobs_return=blobs, download_payload=b"data")
+
+        result = _MOD.download_dataset(
+            storage_account="acct",
+            storage_container="cont",
+            blob_prefix="p",
+            dataset_root=str(tmp_path),
+            dataset_repo_id="user/ds",
+        )
+
+        assert (result / "data" / "file.parquet").read_bytes() == b"data"
+        assert not (result / "path").exists()
+        assert not (result / "other").exists()
+        stubs.container_client.list_blobs.assert_called_once_with(name_starts_with="p/", include=["metadata"])
+        stubs.container_client.download_blob.assert_called_once()
+
 
 class TestDownloadDatasetTraversal:
     """Path-traversal hardening for download_dataset."""

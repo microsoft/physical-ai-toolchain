@@ -28,6 +28,14 @@ run "setup" {
 run "all_dns_zones" {
   command = plan
 
+  override_resource {
+    target          = azurerm_private_dns_zone.core["storage_blob"]
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
+    }
+  }
+
   variables {
     resource_prefix                = run.setup.resource_prefix
     environment                    = run.setup.environment
@@ -43,6 +51,11 @@ run "all_dns_zones" {
   assert {
     condition     = length(azurerm_private_dns_zone.core) == 11
     error_message = "Expected 11 DNS zones (6 base + 1 AKS + 4 monitor)"
+  }
+
+  assert {
+    condition     = azurerm_private_dns_zone_virtual_network_link.core["storage_blob"].private_dns_zone_id == azurerm_private_dns_zone.core["storage_blob"].id
+    error_message = "Core VNet link must reference its private DNS zone ID"
   }
 }
 

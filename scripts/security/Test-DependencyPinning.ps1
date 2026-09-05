@@ -9,9 +9,9 @@
 
 .DESCRIPTION
     Cross-platform PowerShell script that analyzes GitHub Actions workflows, package manifests,
-    workflow-YAML container image references, and other dependency declarations to verify compliance
-    with SHA pinning security practices. Identifies unpinned dependencies and provides remediation
-    guidance. Dockerfile base-image pinning is covered by OpenSSF Scorecard, not this scanner.
+    workflow-YAML container image and AzureML environment references, and other dependency declarations
+    to verify compliance with pinning security practices. Identifies unpinned dependencies and provides
+    remediation guidance. Dockerfile base-image pinning is covered by OpenSSF Scorecard, not this scanner.
 
 .PARAMETER Path
     Root path to scan for dependency files. Defaults to current directory.
@@ -36,7 +36,7 @@
 .PARAMETER IncludeTypes
     Comma-separated list of dependency types to check. Options include: github-actions, npm,
     pip, shell-downloads, shell-inline-pip, gh-extension, powershell-modules, docker,
-    workflow-npm-commands. Default is all types.
+    azureml-environments, workflow-npm-commands. Default is all types.
 
 .PARAMETER Threshold
     Minimum compliance score percentage required for passing grade (0-100).
@@ -121,7 +121,7 @@ param(
     [string]$ExcludePaths = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,workflow-npm-commands",
+    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,azureml-environments,workflow-npm-commands",
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 100)]
@@ -201,6 +201,12 @@ $DependencyPatterns = @{
             '**/infrastructure/setup/values/*.yaml', '**/infrastructure/setup/values/*.yml')
         ValidationFunc = 'Get-DockerImageViolations'
         Description    = 'Container image references in workflow YAML, Kubernetes manifests, and Helm values must be digest-pinned (@sha256)'
+    }
+
+    'azureml-environments' = @{
+        FilePatterns   = @('**/workflows/**/*.yaml', '**/workflows/**/*.yml')
+        ValidationFunc = 'Get-AzureMLEnvironmentViolations'
+        Description    = 'AzureML environment asset references in domain workflow YAML must use explicit immutable versions'
     }
 
     'workflow-npm-commands' = @{
@@ -907,6 +913,89 @@ function Get-PowerShellModuleViolations {
     return $violations
 }
 
+function Get-AzureMLEnvironmentViolations {
+    <#
+    .SYNOPSIS
+        Detects mutable AzureML environment asset references in workflow YAML.
+    .DESCRIPTION
+        AzureML environment labels and unversioned references are mutable. Explicit versions
+        are immutable, except that repository policy rejects the ambiguous version name
+        'latest'. An intentional mutable reference opts out with a '# pinning-ignore' comment
+        on the environment line or a dedicated comment line directly above it.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    $lines = @(Get-Content -Path $filePath)
+    $prevWasIgnoreComment = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
+        $exempt = $hasIgnore -or $prevWasIgnoreComment
+        $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
+
+        if ($line -notmatch '^\s*(?:-\s*)?["'']?environment["'']?\s*:\s*(.+?)\s*$') { continue }
+        $environmentRef = ($Matches[1] -replace '\s+#.*$', '').Trim()
+        if (($environmentRef.StartsWith('"') -and $environmentRef.EndsWith('"')) -or
+            ($environmentRef.StartsWith("'") -and $environmentRef.EndsWith("'"))) {
+            $environmentRef = $environmentRef.Substring(1, $environmentRef.Length - 2).Trim()
+        }
+        if ($environmentRef -notmatch '^azureml:' -or $exempt) { continue }
+
+        $name = $environmentRef
+        $version = '(none)'
+        $hasExplicitVersion = $false
+
+        if ($environmentRef -match '^azureml:(?<Name>[^:@\s]+):(?<Version>[^:@\s]+)$') {
+            $name = "azureml:$($Matches['Name'])"
+            $version = $Matches['Version']
+            $hasExplicitVersion = $true
+        }
+        elseif ($environmentRef -match '^azureml:.*/environments/[^/]+/versions/(?<Version>[^/\s]+)$') {
+            $name = $environmentRef -replace '/versions/[^/]+$', ''
+            $version = $Matches['Version']
+            $hasExplicitVersion = $true
+        }
+        elseif ($environmentRef -match '^azureml:(?<Name>[^:@\s]+)@(?<Version>[^:@\s]+)$') {
+            $name = "azureml:$($Matches['Name'])"
+            $version = $Matches['Version']
+        }
+        elseif ($environmentRef -match '^azureml:.*/environments/[^/]+/labels/(?<Version>[^/\s]+)$') {
+            $name = $environmentRef -replace '/labels/[^/]+$', ''
+            $version = $Matches['Version']
+        }
+
+        if ($hasExplicitVersion -and $version -ne 'latest') { continue }
+
+        $v = [DependencyViolation]::new()
+        $v.File = $relativePath
+        $v.Line = $i + 1
+        $v.Type = $type
+        $v.Name = $name
+        $v.Version = $version
+        $v.Severity = 'warning'
+        $v.Description = 'Unpinned AzureML environment (use an explicit version, not a label or :latest)'
+        $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
+        $violations += $v
+    }
+
+    return $violations
+}
+
 function Get-DockerImageViolations {
     <#
     .SYNOPSIS
@@ -921,8 +1010,8 @@ function Get-DockerImageViolations {
         digest. A value under 'init:'/'client:' is treated as an image only when it carries a
         registry/namespace path, so plain configuration scalars are left untouched.
         Submission-time templated ('{{ ... }}') and shell-variable ('$VAR' / '${VAR}')
-        references are injected at submit time and skipped, as are AzureML asset references
-        ('azureml:<name>:<version>'), which are versioned assets rather than OCI images.
+        references are injected at submit time and skipped. AzureML asset references are
+        versioned assets rather than OCI images and are validated separately.
         Dockerfile 'FROM' pinning is out of scope (covered by OpenSSF Scorecard). An
         intentional non-pin opts out with a '# pinning-ignore' comment on the image line or a
         dedicated comment line directly above it.

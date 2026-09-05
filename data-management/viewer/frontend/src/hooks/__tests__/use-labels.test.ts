@@ -5,6 +5,7 @@ import {
   useAddLabelOption,
   useCurrentEpisodeLabels,
   useDatasetLabels,
+  useImportAnalysisLabels,
   useRemoveLabelOption,
   useSaveEpisodeLabels,
 } from '@/hooks/use-labels'
@@ -79,6 +80,31 @@ describe('use-labels hooks', () => {
 
       await Promise.resolve()
       expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('clears the previous dataset labels while the next dataset loads', async () => {
+      mockFetch.mockImplementation(() => new Promise<JsonResponseLike>(() => undefined))
+      selectDataset('ds-1')
+      const store = useLabelStore.getState()
+      store.setDatasetEpisodeLabels('ds-1', { '0': ['SUCCESS'] })
+      store.setAllEpisodeAnalysis({ '0': { object: 'cube' } })
+      store.setAvailableLabels(['SUCCESS', 'OBJECT: CUBE'])
+      store.setFilterLabels(['OBJECT: CUBE'])
+      store.setLoaded(true)
+      renderHookWithProviders(() => useDatasetLabels())
+
+      act(() => {
+        selectDataset('ds-2')
+      })
+
+      await waitFor(() => expect(useLabelStore.getState().datasetId).toBe('ds-2'))
+      const next = useLabelStore.getState()
+      expect(next.availableLabels).toEqual(['SUCCESS', 'FAILURE', 'PARTIAL'])
+      expect(next.episodeLabels).toEqual({})
+      expect(next.savedEpisodeLabels).toEqual({})
+      expect(next.episodeAnalysis).toEqual({})
+      expect(next.filterLabels).toEqual([])
+      expect(next.isLoaded).toBe(false)
     })
   })
 
@@ -263,6 +289,102 @@ describe('use-labels hooks', () => {
 
       await waitFor(() => expect(result.current.isError).toBe(true))
       expect(result.current.error).toBeInstanceOf(Error)
+    })
+  })
+
+  describe('useImportAnalysisLabels', () => {
+    it('preserves unsaved episode edits while reconciling imported labels', async () => {
+      installFetchMock({ csrf: true })
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          dataset_id: 'ds-1',
+          available_labels: ['SUCCESS', 'FAILURE', 'OBJECT: CUBE', 'OBJECT: BALL'],
+          episodes: {
+            '0': ['SUCCESS', 'OBJECT: CUBE'],
+            '1': ['FAILURE', 'OBJECT: BALL'],
+          },
+          field: 'object',
+          prefix: 'OBJECT',
+          labels_added: ['OBJECT: CUBE', 'OBJECT: BALL'],
+          episodes_updated: 2,
+        }),
+      )
+      selectDataset('ds-1')
+      useLabelStore.getState().setDatasetEpisodeLabels('ds-1', {
+        '0': ['SUCCESS'],
+        '1': ['FAILURE'],
+      })
+      useLabelStore.getState().setEpisodeLabels(1, ['PARTIAL'])
+
+      const { result } = renderHookWithProviders(() => useImportAnalysisLabels())
+
+      await act(async () => {
+        await result.current.mutateAsync({ field: 'object', prefix: 'ITEM', overwrite: true })
+      })
+
+      const [, request] = mockFetch.mock.calls[1]
+      expect(JSON.parse(request.body)).toEqual({
+        field: 'object',
+        prefix: 'ITEM',
+        overwrite: true,
+      })
+      const store = useLabelStore.getState()
+      expect(store.episodeLabels[0]).toEqual(['SUCCESS', 'OBJECT: CUBE'])
+      expect(store.episodeLabels[1]).toEqual(['OBJECT: BALL', 'PARTIAL'])
+      expect(store.savedEpisodeLabels[1]).toEqual(['FAILURE', 'OBJECT: BALL'])
+    })
+
+    it('does not apply a completed import after the selected dataset changes', async () => {
+      installFetchMock({ csrf: true })
+      let resolveImport!: (response: JsonResponseLike) => void
+      mockFetch.mockReturnValueOnce(
+        new Promise<JsonResponseLike>((resolve) => {
+          resolveImport = resolve
+        }),
+      )
+      selectDataset('ds-1')
+      useLabelStore.getState().setDatasetEpisodeLabels('ds-1', { '0': ['SUCCESS'] })
+      const { result } = renderHookWithProviders(() => useImportAnalysisLabels())
+
+      let pending!: Promise<unknown>
+      act(() => {
+        pending = result.current.mutateAsync({ field: 'object' })
+      })
+      selectDataset('ds-2')
+      useLabelStore.getState().setDatasetEpisodeLabels('ds-2', { '0': ['PARTIAL'] })
+      resolveImport(
+        jsonResponse({
+          dataset_id: 'ds-1',
+          available_labels: ['SUCCESS', 'OBJECT: CUBE'],
+          episodes: { '0': ['SUCCESS', 'OBJECT: CUBE'] },
+          field: 'object',
+          prefix: 'OBJECT',
+          labels_added: ['OBJECT: CUBE'],
+          episodes_updated: 1,
+        }),
+      )
+
+      await pending
+
+      const store = useLabelStore.getState()
+      expect(store.datasetId).toBe('ds-2')
+      expect(store.episodeLabels[0]).toEqual(['PARTIAL'])
+      expect(store.availableLabels).toEqual(['SUCCESS', 'FAILURE', 'PARTIAL'])
+    })
+
+    it('exposes an error when analysis-label import fails', async () => {
+      installFetchMock({ csrf: true })
+      mockFetch.mockResolvedValueOnce(jsonResponse({ detail: 'import failed' }, 500))
+      selectDataset('ds-1')
+
+      const { result } = renderHookWithProviders(() => useImportAnalysisLabels())
+
+      act(() => {
+        result.current.mutate({ field: 'object' })
+      })
+
+      await waitFor(() => expect(result.current.isError).toBe(true))
+      expect(result.current.error).toEqual(new Error('Failed to import analysis labels'))
     })
   })
 
