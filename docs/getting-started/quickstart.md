@@ -3,7 +3,7 @@ sidebar_position: 2
 title: "Quickstart: Clone to First Training Job"
 description: Deploy infrastructure and submit your first robotics training job in 9 steps
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-10
+ms.date: 2026-08-31
 ms.topic: tutorial
 keywords:
   - quickstart
@@ -30,7 +30,8 @@ This guide is the **cloud path (T2 — Pilot)**: deploy the Azure + NVIDIA stack
 | NVIDIA NGC account      | Sign up at <https://ngc.nvidia.com/> for API key                                                    |
 | Development environment | Devcontainer (recommended) or local tools                                                           |
 
-See [Prerequisites](../contributing/prerequisites.md) for installation commands and version requirements.
+See [Prerequisites](../contributing/prerequisites.md) for installation commands and version requirements. NVIDIA
+ARM64 hosts in CSV mode also require the [dev container GPU runtime setup](../contributing/prerequisites.md#dev-container-gpu-runtime).
 
 ## Step 1: Clone and Set Up Environment
 

@@ -49,12 +49,40 @@ class EpisodeLabels(SanitizedModel):
     labels: list[str] = Field(default_factory=list)
 
 
+class EpisodeAnalysisRecord(SanitizedModel):
+    """Structured per-episode analysis: VLM-derived labels plus computed motion metrics.
+
+    Persisted beside the dataset in ``meta/episode_labels.json`` so it loads
+    automatically with the dataset. All fields are optional so partial records
+    (VLM-only or motion-only) round-trip cleanly.
+    """
+
+    pick_from: str | None = None
+    object: str | None = None
+    grasp_success: bool | None = None
+    place_success: bool | None = None
+    movement_quality: str | None = None
+    notes: str | None = None
+    instruction: str | None = None
+    duration_s: float | None = None
+    smoothness: float | None = None
+    normalized_smoothness: float | None = None
+    efficiency: float | None = None
+    jitter: float | None = None
+    hesitation_count: int | None = None
+    correction_count: int | None = None
+    motion_score: int | None = None
+    motion_flags: list[str] = Field(default_factory=list)
+    source: str | None = None
+
+
 class DatasetLabelsFile(SanitizedModel):
     """All episode labels and available options for a dataset."""
 
     dataset_id: str
     available_labels: list[str] = Field(default_factory=lambda: DEFAULT_LABELS.copy())
     episodes: dict[str, list[str]] = Field(default_factory=dict)
+    analysis: dict[str, EpisodeAnalysisRecord] = Field(default_factory=dict)
 
 
 class BulkLabelUpdate(SanitizedModel):
@@ -69,8 +97,60 @@ class AddLabelOption(SanitizedModel):
     label: str = Field(min_length=1, max_length=100)
 
 
+# Analysis fields that make sensible categorical labels, mapped to their default
+# label prefix. Free-text fields (movement_quality, notes, instruction) are
+# intentionally excluded because they produce unbounded, unfilterable labels.
+ANALYSIS_IMPORT_FIELDS: dict[str, str] = {
+    "object": "OBJECT",
+    "pick_from": "PICK",
+    "grasp_success": "GRASP",
+    "place_success": "PLACE",
+    "motion_score": "MOTION",
+    "motion_flags": "FLAG",
+    "source": "SOURCE",
+}
+
+
+class ImportAnalysisRequest(SanitizedModel):
+    """Request to promote an analysis field into filterable episode labels."""
+
+    field: str = Field(min_length=1, max_length=64)
+    prefix: str | None = Field(default=None, max_length=32)
+    overwrite: bool = False
+
+
+class ImportAnalysisResult(SanitizedModel):
+    """Outcome of importing an analysis field into episode labels."""
+
+    dataset_id: str
+    available_labels: list[str]
+    episodes: dict[str, list[str]]
+    field: str
+    prefix: str
+    labels_added: list[str]
+    episodes_updated: int
+
+
 def _normalize_label(label: str) -> str:
     return label.strip().upper()
+
+
+def _analysis_value_labels(prefix: str, value: object) -> list[str]:
+    """Turn an analysis field value into zero or more normalized labels.
+
+    Lists (e.g. motion_flags) yield one label per item; booleans render as
+    yes/no; everything else is stringified. Empty values yield nothing.
+    """
+    items = value if isinstance(value, list) else [value]
+    labels: list[str] = []
+    for item in items:
+        if item is None:
+            continue
+        text = ("yes" if item else "no") if isinstance(item, bool) else str(item).strip()
+        if not text:
+            continue
+        labels.append(_normalize_label(f"{prefix}: {text}"))
+    return labels
 
 
 # ============================================================================
@@ -333,3 +413,104 @@ async def save_all_labels(
     labels_file = await _load_labels(dataset_id)
     await _save_labels(dataset_id, labels_file)
     return labels_file
+
+
+@router.post(
+    "/{dataset_id}/labels/import-from-analysis",
+    dependencies=[Depends(require_csrf_token)],
+)
+async def import_analysis_labels(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    body: ImportAnalysisRequest = ...,
+    dataset_service: DatasetService = Depends(get_dataset_service),
+) -> ImportAnalysisResult:
+    """Promote a categorical analysis field into filterable/editable episode labels.
+
+    Each episode with a value for ``field`` gains a namespaced label such as
+    ``OBJECT: MARKER``. Labels merge into existing assignments and are added to
+    the available options, so the operation is idempotent. When ``overwrite`` is
+    set, labels sharing the prefix are cleared first so stale values drop out.
+    """
+    field = body.field.strip()
+    if field not in ANALYSIS_IMPORT_FIELDS:
+        allowed = ", ".join(sorted(ANALYSIS_IMPORT_FIELDS))
+        raise HTTPException(status_code=400, detail=f"Field '{field}' is not importable. Allowed: {allowed}")
+
+    prefix = _normalize_label(body.prefix) if body.prefix else ANALYSIS_IMPORT_FIELDS[field]
+    namespace = f"{prefix}:"
+    labels_file = await _load_labels(dataset_id)
+
+    generated_by_episode: dict[str, list[str]] = {}
+    generated_options: list[str] = []
+    for key, record in labels_file.analysis.items():
+        generated = _analysis_value_labels(prefix, getattr(record, field, None))
+        generated_by_episode[key] = generated
+        for label in generated:
+            if label not in generated_options:
+                generated_options.append(label)
+
+    original_options = labels_file.available_labels.copy()
+    if body.overwrite:
+        next_options = [label for label in original_options if not label.startswith(namespace)]
+    else:
+        next_options = original_options.copy()
+    for label in generated_options:
+        if label not in next_options:
+            next_options.append(label)
+    labels_file.available_labels = next_options
+    added_options = [label for label in generated_options if label not in original_options]
+
+    updated: set[str] = set()
+    episode_keys = set(labels_file.episodes) | set(generated_by_episode)
+    for key in episode_keys:
+        current = labels_file.episodes.get(key, [])
+        merged = [existing for existing in current if not (body.overwrite and existing.startswith(namespace))]
+        for label in generated_by_episode.get(key, []):
+            if label not in merged:
+                merged.append(label)
+
+        if merged != current:
+            labels_file.episodes[key] = merged
+            updated.add(key)
+
+    if updated or labels_file.available_labels != original_options:
+        await _save_labels(dataset_id, labels_file)
+        dataset_service.invalidate_episode_cache(dataset_id)
+
+    return ImportAnalysisResult(
+        dataset_id=dataset_id,
+        available_labels=labels_file.available_labels,
+        episodes=labels_file.episodes,
+        field=field,
+        prefix=prefix,
+        labels_added=added_options,
+        episodes_updated=len(updated),
+    )
+
+
+@router.get("/{dataset_id}/episodes/{episode_idx}/analysis")
+async def get_episode_analysis(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+) -> EpisodeAnalysisRecord | None:
+    """Get the structured analysis record for a specific episode, if any."""
+    labels_file = await _load_labels(dataset_id)
+    return labels_file.analysis.get(str(episode_idx))
+
+
+@router.put(
+    "/{dataset_id}/episodes/{episode_idx}/analysis",
+    dependencies=[Depends(require_csrf_token)],
+)
+async def set_episode_analysis(
+    dataset_id: str = Depends(path_string_param("dataset_id", pattern=SAFE_DATASET_ID_PATTERN, label="dataset_id")),
+    episode_idx: int = Depends(path_int_param("episode_idx", ge=0, description="Episode index")),
+    body: EpisodeAnalysisRecord = ...,
+    dataset_service: DatasetService = Depends(get_dataset_service),
+) -> EpisodeAnalysisRecord:
+    """Upsert the structured analysis record for a specific episode."""
+    labels_file = await _load_labels(dataset_id)
+    labels_file.analysis[str(episode_idx)] = body
+    await _save_labels(dataset_id, labels_file)
+    dataset_service.invalidate_episode_cache(dataset_id, episode_idx)
+    return body
