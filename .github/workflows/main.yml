@@ -452,8 +452,6 @@ jobs:
             data-pipeline/uv.lock
             evaluation/pyproject.toml
             evaluation/uv.lock
-            evaluation/sil/docker/pyproject.toml
-            evaluation/sil/docker/uv.lock
             training/rl/pyproject.toml
             training/rl/uv.lock
             training/il/lerobot/pyproject.toml

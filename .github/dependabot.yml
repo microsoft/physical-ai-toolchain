@@ -182,33 +182,6 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: uv
-  directory: /evaluation/sil/docker
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-    semver-major-days: 14
-  groups:
-    lerobot-eval-image-dependencies:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 5
-  ignore:
-  - dependency-name: "av"
-    versions:
-    - ">=16.0.0"
-  labels:
-  - dependencies
-  - python
-  - evaluation
-  commit-message:
-    prefix: chore
-    include: scope
-- package-ecosystem: uv
   directory: /workflows/azureml/scripts
   schedule:
     interval: weekly
@@ -510,27 +483,6 @@ updates:
     default-days: 7
   groups:
     dataviewer-frontend-docker-dependencies:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 5
-  labels:
-  - dependencies
-  - docker
-  commit-message:
-    prefix: chore
-    include: scope
-- package-ecosystem: docker
-  directory: /evaluation/sil/docker
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-  groups:
-    lerobot-eval-docker-dependencies:
       patterns:
       - "*"
       update-types:
