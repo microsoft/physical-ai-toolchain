@@ -465,7 +465,10 @@ terraform.rc
 venv/
 .hypothesis/
 **/out/*
+.agent/
 .copilot-tracking/
+.github/instructions/hve-core/copilot-tracking.instructions.md
+.github/skills/rpi-*/
 
 # Environment-specific deployment artifacts
 infrastructure/setup/generated/

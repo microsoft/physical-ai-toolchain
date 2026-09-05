@@ -2,6 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0' }
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
+# cspell:ignore feedface nonliteral octocat
 
 BeforeAll {
     . $PSScriptRoot/../../security/Test-BinaryFreshness.ps1
@@ -14,7 +15,7 @@ BeforeAll {
 #!/usr/bin/env bash
 NODESOURCE_GPG_SHA256="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 UV_VERSION="0.4.18"
-UV_INSTALLER_SHA256="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+UV_SHA256="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 MICROSOFT_GPG_SHA256="${MICROSOFT_GPG_OVERRIDE:-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}"
 NVIDIA_CTK_GPG_SHA256="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 '@ | Set-Content -Path $script:DevDepsPath -Encoding utf8
@@ -32,6 +33,12 @@ TL_SHA256="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
   "postCreateCommand": "TFLINT_VERSION=v0.58.0 TFLINT_SHA256=deadbeef OSMO_VERSION=0.5.0 OSMO_INSTALLER_SHA256=feedface NGC_CLI_VERSION=3.50.0 NGC_CLI_SHA256=cafebabe install.sh"
 }
 '@ | Set-Content -Path $script:DevcontainerPath -Encoding utf8
+
+    $script:SetupDevPath = Join-Path $script:FixturesRoot 'setup-dev.ps1'
+    @'
+$UvVersion = '0.11.21'
+$UvInstallerSha256 = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+'@ | Set-Content -Path $script:SetupDevPath -Encoding utf8
 }
 
 Describe 'Get-ShellVariable' -Tag 'Unit' {
@@ -62,6 +69,28 @@ Describe 'Get-JsonVariable' -Tag 'Unit' {
 
     It 'Returns null for missing tokens' {
         Get-JsonVariable -Path $script:DevcontainerPath -Name 'NOPE' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-PowerShellVariable' -Tag 'Unit' {
+    It 'Extracts literal PowerShell assignments' {
+        Get-PowerShellVariable -Path $script:SetupDevPath -Name 'UvVersion' | Should -Be '0.11.21'
+    }
+
+    It 'Returns null for missing or non-literal assignments' {
+        $path = Join-Path $TestDrive 'nonliteral.ps1'
+        '$Value = $env:VALUE' | Set-Content -Path $path
+
+        Get-PowerShellVariable -Path $script:SetupDevPath -Name 'Missing' | Should -BeNullOrEmpty
+        Get-PowerShellVariable -Path $path -Name 'Value' | Should -BeNullOrEmpty
+    }
+
+    It 'Throws for duplicate assignments' {
+        $path = Join-Path $TestDrive 'duplicate.ps1'
+        "`$Value = 'one'`n`$Value = 'two'" | Set-Content -Path $path
+
+        { Get-PowerShellVariable -Path $path -Name 'Value' } |
+            Should -Throw "Expected exactly one assignment for 'Value'*"
     }
 }
 
@@ -274,13 +303,13 @@ Describe 'Resolve-Repository' -Tag 'Unit' {
 }
 
 Describe 'Get-BinaryCheckDefinitions' -Tag 'Unit' {
-    It 'Returns exactly 8 check definitions' {
-        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath
-        $defs.Count | Should -Be 8
+    It 'Returns exactly 9 check definitions' {
+        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $script:SetupDevPath
+        $defs.Count | Should -Be 9
     }
 
     It 'Each definition has the required keys' {
-        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath
+        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $script:SetupDevPath
         foreach ($def in $defs) {
             $def.Keys | Should -Contain 'Name'
             $def.Keys | Should -Contain 'Url'
@@ -290,25 +319,73 @@ Describe 'Get-BinaryCheckDefinitions' -Tag 'Unit' {
     }
 
     It 'Resolves NodeSource GPG entry from dev-deps' {
-        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath
-        $defs[0].Name | Should -Be 'NodeSource GPG Key'
-        $defs[0].Expected | Should -Be 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-        $defs[0].File | Should -Be $script:DevDepsPath
+        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $script:SetupDevPath
+        $nodeSource = $defs | Where-Object Name -eq 'NodeSource GPG Key'
+        $nodeSource.Expected | Should -Be 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        $nodeSource.File | Should -Be $script:DevDepsPath
+    }
+
+    It 'Resolves the Linux uv archive pin' {
+        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $script:SetupDevPath
+        $uv = $defs | Where-Object Name -eq 'uv Linux Archive (v0.4.18)'
+        $uv.Url | Should -Be 'https://github.com/astral-sh/uv/releases/download/0.4.18/uv-x86_64-unknown-linux-gnu.tar.gz'
+        $uv.Expected | Should -Be ('b' * 64)
+        $uv.File | Should -Be $script:DevDepsPath
     }
 
     It 'Resolves ThinLinc entry from thinlinc script' {
-        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath
-        $defs[4].Name | Should -BeLike 'ThinLinc Server*'
-        $defs[4].Expected | Should -Be 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-        $defs[4].File | Should -Be $script:ThinlincPath
+        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $script:SetupDevPath
+        $thinLinc = $defs | Where-Object Name -like 'ThinLinc Server*'
+        $thinLinc.Expected | Should -Be 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+        $thinLinc.File | Should -Be $script:ThinlincPath
+    }
+
+    It 'Resolves the PowerShell uv installer pin' {
+        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $script:SetupDevPath
+        $uv = $defs | Where-Object Name -eq 'uv PowerShell Installer (v0.11.21)'
+        $uv.Url | Should -Be 'https://astral.sh/uv/0.11.21/install.ps1'
+        $uv.Expected | Should -Be ('f' * 64)
+        $uv.File | Should -Be $script:SetupDevPath
+    }
+
+    It 'Rejects missing PowerShell uv installer pins' {
+        $path = Join-Path $TestDrive 'missing-uv-pin.ps1'
+        '$UvVersion = ''0.11.21''' | Set-Content -Path $path
+
+        {
+            Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $path
+        } | Should -Throw 'UvInstallerSha256*missing or is not a string literal*'
+    }
+
+    It 'Rejects a non-literal PowerShell uv version' {
+        $path = Join-Path $TestDrive 'nonliteral-uv-version.ps1'
+        @'
+$UvVersion = $env:UV_VERSION
+$UvInstallerSha256 = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+'@ | Set-Content -Path $path
+
+        {
+            Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $path
+        } | Should -Throw 'UvVersion*missing or is not a string literal*'
+    }
+
+    It 'Rejects a malformed PowerShell uv installer hash' {
+        $path = Join-Path $TestDrive 'malformed-uv-hash.ps1'
+        @'
+$UvVersion = '0.11.21'
+$UvInstallerSha256 = 'deadbeef'
+'@ | Set-Content -Path $path
+
+        {
+            Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $path
+        } | Should -Throw 'UvInstallerSha256*is not a SHA-256 digest*'
     }
 
     It 'Resolves devcontainer entries with correct file reference' {
-        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath
-        $defs[5].Name | Should -BeLike 'TFLint*'
-        $defs[5].File | Should -Be $script:DevcontainerPath
-        $defs[6].Name | Should -BeLike 'OSMO Installer*'
-        $defs[7].Name | Should -BeLike 'NGC CLI*'
+        $defs = Get-BinaryCheckDefinitions -DevDeps $script:DevDepsPath -Thinlinc $script:ThinlincPath -Devcontainer $script:DevcontainerPath -SetupDev $script:SetupDevPath
+        ($defs | Where-Object Name -like 'TFLint*').File | Should -Be $script:DevcontainerPath
+        $defs.Name | Should -Contain 'OSMO Installer (0.5.0)'
+        $defs.Name | Should -Contain 'NGC CLI (3.50.0)'
     }
 }
 
