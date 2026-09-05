@@ -73,6 +73,8 @@
 		"yolov"
 	],
 	"ignorePaths": [
+		".agent/reviews/**",
+		".github/instructions/hve-core/copilot-tracking.instructions.md",
 		"**/.github/chatmodes/**",
 		"**/node_modules/**",
 		"**/vscode-extension/**",

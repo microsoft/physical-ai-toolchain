@@ -9,8 +9,8 @@
 
 .DESCRIPTION
     Compares each hve-core-derived file's upstream blob SHA at its reviewed source
-    revision against its current upstream target. Modules use the RPI bootstrap's
-    pinned UPSTREAM_REF and the latest release. Security linters use the source
+    revision against its current upstream target. Modules use the pinned
+    HVE_CORE_DERIVED_FILES_REF and the latest release. Security linters use the source
     revision recorded in their headers and upstream main, which also covers files
     not present in a release. Writes a JSON results file consumed by the tracking-
     issue steps and, under GitHub Actions, emits attention-count, drift-count, and
@@ -62,7 +62,7 @@ class HveCoreFileValidationException : System.Exception {
     HveCoreFileValidationException([string]$message) : base($message) {}
 }
 
-# Release entries use the RPI pin; source-header entries require the exact header
+# Release entries use the derived-files pin; source-header entries require the exact header
 # "Adapted from microsoft/hve-core <path> as of commit <40-hex SHA>" and track main.
 # Blob-to-blob comparisons avoid false drift from intentional local adaptations.
 $script:DerivedFiles = @(
@@ -83,10 +83,9 @@ $script:DerivedFiles = @(
 function Get-PinnedHveCoreRef {
     <#
     .SYNOPSIS
-        Extract the pinned hve-core UPSTREAM_REF SHA and release tag from the RPI
-        bootstrap workflow file - the last reviewed upstream ref used as the drift
-        baseline. Returns null when the file is absent; members are null when the
-        corresponding key is not present.
+        Extract the pinned hve-core derived-files baseline SHA and optional release
+        tag from the cloud-agent setup workflow. Returns null when the file is absent;
+        Sha is null when the key is absent and Tag is 'unknown' without a release marker.
     #>
     [CmdletBinding()]
     param(
@@ -98,13 +97,13 @@ function Get-PinnedHveCoreRef {
     }
 
     $content = Get-Content -Path $Path -Raw
-    $sha = if ($content -match '(?m)^\s*UPSTREAM_REF:\s*[''"]?([0-9a-fA-F]{40})[''"]?\s*(?:#.*)?$') {
+    $sha = if ($content -match '(?m)^\s*HVE_CORE_DERIVED_FILES_REF:\s*[''"]?([0-9a-fA-F]{40})[''"]?\s*(?:#.*)?$') {
         $Matches[1]
     }
     else {
         $null
     }
-    $tag = if ($content -match 'hve-core release:\s*([A-Za-z0-9._/+.-]{1,128})(?:\s|$)') { $Matches[1] } else { 'unknown' }
+    $tag = if ($content -match 'hve-core derived-files release:\s*([A-Za-z0-9._/+.-]{1,128})(?:\s|$)') { $Matches[1] } else { 'unknown' }
 
     return [ordered]@{ Tag = $tag; Sha = $sha }
 }
@@ -410,12 +409,12 @@ function Format-HveCoreIssueBody {
     $latestTagText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestTag
     $latestUrl = Get-HveCoreTrustedReleaseUrl -Value $Result.LatestUrl
     $latestLink = "[$latestTagText]($latestUrl)"
-    $pinnedTagText = ConvertTo-HveCoreMarkdownText -Value $pin.PinnedTag
+    $compareBase = Get-HveCoreCompareBase -Pin $pin
+    $pinnedTagText = ConvertTo-HveCoreMarkdownText -Value $compareBase
     $latestMainShaText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestMainSha
 
     $fileRows = ($files | ForEach-Object { Format-HveCoreDriftRow -File $_ }) -join "`n"
 
-    $compareBase = if ($pin.PinnedTag -ne 'unknown') { $pin.PinnedTag } else { $pin.PinnedSha }
     $compareBase = [uri]::EscapeDataString($compareBase)
     $latestTagUrl = [uri]::EscapeDataString($Result.LatestTag)
 
@@ -423,7 +422,7 @@ function Format-HveCoreIssueBody {
 ## hve-core Upstream Freshness Report
 
 Latest hve-core release: $latestLink
-Release-file baseline: ``$pinnedTagText`` (``UPSTREAM_REF`` in ``$($pin.File)``)
+Release-file baseline: ``$pinnedTagText`` (``HVE_CORE_DERIVED_FILES_REF`` in ``$($pin.File)``)
 Source-header target: ``$latestMainShaText``
 Action required: $($Result.DriftCount) drifted, $($Result.ErrorCount) check errors
 
@@ -459,9 +458,10 @@ function Format-HveCoreJobSummary {
 
     $pin = $Result.Pin
     $files = @($Result.Files)
-
     $latestTagText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestTag
-    $pinnedTagText = ConvertTo-HveCoreMarkdownText -Value $pin.PinnedTag
+    $latestTagText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestTag
+    $compareBase = Get-HveCoreCompareBase -Pin $pin
+    $pinnedTagText = ConvertTo-HveCoreMarkdownText -Value $compareBase
     $latestMainShaText = ConvertTo-HveCoreMarkdownText -Value $Result.LatestMainSha
     $fileRows = $files | ForEach-Object { Format-HveCoreDriftRow -File $_ }
 
@@ -477,6 +477,19 @@ Action required: $($Result.DriftCount) drifted, $($Result.ErrorCount) check erro
 |------|----------|---------------------|------------------------|----------------------|--------|
 $($fileRows -join "`n")
 "@
+}
+
+function Get-HveCoreCompareBase {
+    <#
+    .SYNOPSIS
+        Selects the release tag or SHA used as the freshness comparison baseline.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Pin
+    )
+
+    return $(if ($Pin.PinnedTag -ne 'unknown') { $Pin.PinnedTag } else { $Pin.PinnedSha })
 }
 
 function Get-HveCoreTrackingIssue {
@@ -604,7 +617,7 @@ function Invoke-HveCoreFreshnessCheck {
 
         $pinRef = Get-PinnedHveCoreRef -Path $script:SetupWorkflow
         if (-not $pinRef -or -not $pinRef.Sha) {
-            throw "Could not extract UPSTREAM_REF from $script:SetupWorkflow"
+            throw "Could not extract HVE_CORE_DERIVED_FILES_REF from $script:SetupWorkflow"
         }
 
         # Fail loudly if the pinned ref itself does not resolve upstream; otherwise every
