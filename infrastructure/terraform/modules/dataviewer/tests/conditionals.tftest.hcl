@@ -26,6 +26,14 @@ run "setup" {
 run "internal_mode_enabled" {
   command = plan
 
+  override_resource {
+    target          = azurerm_private_dns_zone.container_apps[0]
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/privateDnsZones/internal.test"
+    }
+  }
+
   variables {
     resource_prefix         = run.setup.resource_prefix
     environment             = run.setup.environment
@@ -58,6 +66,16 @@ run "internal_mode_enabled" {
   assert {
     condition     = length(azurerm_private_dns_a_record.container_apps_wildcard) == 1
     error_message = "Wildcard A record should be created in internal mode"
+  }
+
+  assert {
+    condition     = azurerm_private_dns_zone_virtual_network_link.container_apps[0].private_dns_zone_id == azurerm_private_dns_zone.container_apps[0].id
+    error_message = "VNet link must reference the Container Apps private DNS zone ID"
+  }
+
+  assert {
+    condition     = azurerm_private_dns_a_record.container_apps_wildcard[0].private_dns_zone_id == azurerm_private_dns_zone.container_apps[0].id
+    error_message = "Wildcard A record must reference the Container Apps private DNS zone ID"
   }
 }
 

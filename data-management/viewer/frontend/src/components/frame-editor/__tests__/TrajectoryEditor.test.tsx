@@ -375,6 +375,68 @@ describe('TrajectoryEditor', () => {
     expect((numberInputs[0] as HTMLInputElement).value).toBe('0.2500')
   })
 
+  it('loads frame-specific adjustments when the current frame changes', () => {
+    const adjustments = new Map<number, TrajectoryAdjustment>([
+      [1, { frameIndex: 1, rightArmDelta: [0.25, 0, 0] }],
+    ])
+    const { playbackState } = setup({ trajectory: { trajectoryAdjustments: adjustments } })
+    const { rerender } = render(<TrajectoryEditor />)
+
+    mockedPlaybackControls.mockReturnValue({ ...playbackState, currentFrame: 1 })
+    rerender(<TrajectoryEditor />)
+
+    const numberInputs = screen
+      .getAllByRole('spinbutton')
+      .filter((element) => (element as HTMLInputElement).step === '0.001')
+    expect((numberInputs[0] as HTMLInputElement).value).toBe('0.2500')
+  })
+
+  it('keeps pending edits when adjustments change for another frame', () => {
+    const { trajectoryState } = setup()
+    const { rerender } = render(<TrajectoryEditor />)
+
+    const deltaInput = () =>
+      screen
+        .getAllByRole('spinbutton')
+        .filter((element) => (element as HTMLInputElement).step === '0.001')[0] as HTMLInputElement
+    fireEvent.change(deltaInput(), { target: { value: '0.25' } })
+    expect(deltaInput().value).toBe('0.2500')
+
+    // A different frame gains an adjustment, replacing the Map identity.
+    mockedTrajectoryState.mockReturnValue({
+      ...trajectoryState,
+      trajectoryAdjustments: new Map<number, TrajectoryAdjustment>([
+        [5, { frameIndex: 5, rightArmDelta: [0.9, 0, 0] }],
+      ]),
+    })
+    rerender(<TrajectoryEditor />)
+
+    expect(deltaInput().value).toBe('0.2500')
+  })
+
+  it('clears the editor inputs when all adjustments are cleared', async () => {
+    const user = userEvent.setup()
+    const adjustments = new Map<number, TrajectoryAdjustment>([
+      [0, { frameIndex: 0, rightArmDelta: [0.25, 0, 0] }],
+    ])
+    const { trajectoryState } = setup({ trajectory: { trajectoryAdjustments: adjustments } })
+    const { rerender } = render(<TrajectoryEditor />)
+
+    const deltaInput = () =>
+      screen
+        .getAllByRole('spinbutton')
+        .filter((element) => (element as HTMLInputElement).step === '0.001')[0] as HTMLInputElement
+    expect(deltaInput().value).toBe('0.2500')
+
+    await user.click(screen.getByRole('button', { name: /Clear All Trajectory Adjustments/i }))
+    expect(trajectoryState.clearTrajectoryAdjustments).toHaveBeenCalled()
+
+    mockedTrajectoryState.mockReturnValue({ ...trajectoryState, trajectoryAdjustments: new Map() })
+    rerender(<TrajectoryEditor />)
+
+    expect(deltaInput().value).toBe('0.0000')
+  })
+
   it('ArmEditor per-arm reset button resets only the right arm delta', async () => {
     const user = userEvent.setup()
     setup()

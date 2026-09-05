@@ -120,6 +120,11 @@ vi.mock('@/components/vlm-judge', () => ({
   JudgePanel: () => <div>VLM Judge</div>,
 }))
 
+vi.mock('@/components/episode-analyzer', () => ({
+  MotionMetricsPanel: () => <div>Motion Metrics</div>,
+  EpisodeAnalysisCard: () => <div>Episode Analysis Card</div>,
+}))
+
 vi.mock('@/components/episode-viewer', () => ({
   CameraSelector: (props: Record<string, unknown>) => {
     const cameraProps = props as {
