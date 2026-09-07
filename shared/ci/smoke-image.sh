@@ -15,6 +15,8 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 LEROBOT_WORKFLOW="training/il/workflows/osmo/lerobot-train.yaml"
 # Source of truth for the Azure ML evaluation runtime image.
 EVALUATION_COMPONENT="evaluation/sil/workflows/azureml/components/evaluate.yaml"
+# Source of truth for the OSMO replay runtime image.
+OSMO_REPLAY_WORKFLOW="workflows/osmo/replay-azureml.yaml"
 # Lightweight linux/amd64 image with uv preinstalled, used for the CPU smoke.
 CPU_IMAGE="ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
 
@@ -30,6 +32,7 @@ DOMAIN:
     il            Imitation learning / LeRobot (training/il/lerobot)
     vla           Vision-language-action / LeRobot (training/vla/lerobot) -- --mode cpu only
     evaluation    Software-in-the-loop evaluation (evaluation)
+    osmo-replay   OSMO-to-AzureML replay mirror (workflows/osmo)
 
 OPTIONS:
     -m, --mode MODE    image (default) runs the domain's production container;
@@ -63,8 +66,8 @@ done
 
 if [[ "$mode" == "cpu" ]]; then
     case "$domain" in
-        rl | il | vla | evaluation) image="$CPU_IMAGE" ;;
-        *) fatal "Unknown domain: $domain (expected rl, il, vla, or evaluation)" ;;
+        rl | il | vla | evaluation | osmo-replay) image="$CPU_IMAGE" ;;
+        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, or osmo-replay)" ;;
     esac
 else
     case "$domain" in
@@ -79,8 +82,13 @@ else
                 "$REPO_ROOT/$EVALUATION_COMPONENT" | awk '{print $2}')"
             [[ -n "$image" ]] || fatal "Could not resolve evaluation image from $EVALUATION_COMPONENT"
             ;;
+        osmo-replay)
+            image="$(grep -m1 -E '^[[:space:]]*image:[[:space:]]*python:' \
+                "$REPO_ROOT/$OSMO_REPLAY_WORKFLOW" | awk '{print $2}')"
+            [[ -n "$image" ]] || fatal "Could not resolve OSMO replay image from $OSMO_REPLAY_WORKFLOW"
+            ;;
         vla) fatal "vla has no runtime-image smoke; use --mode cpu" ;;
-        *) fatal "Unknown domain: $domain (expected rl, il, vla, or evaluation)" ;;
+        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, or osmo-replay)" ;;
     esac
 fi
 
@@ -97,8 +105,20 @@ if [[ "$mode" == "cpu" ]]; then
     container_cmd="apt-get update -qq \
         && apt-get install -y -qq --no-install-recommends build-essential linux-libc-dev >/dev/null \
         && ${container_cmd}"
+elif [[ "$domain" == "osmo-replay" ]]; then
+    container_cmd="apt-get update -qq \
+        && apt-get install -y -qq --no-install-recommends ca-certificates curl >/dev/null \
+        && ${container_cmd}"
 fi
 
-docker run --rm --platform linux/amd64 --entrypoint bash \
+docker_args=(run --rm --platform linux/amd64 --entrypoint bash)
+package_index_url="${UV_INDEX_URL:-${UV_DEFAULT_INDEX:-}}"
+if [[ -n "$package_index_url" ]]; then
+    export UV_INDEX_URL="$package_index_url"
+    export PIP_INDEX_URL="$package_index_url"
+    docker_args+=(-e UV_INDEX_URL -e PIP_INDEX_URL)
+fi
+
+docker "${docker_args[@]}" \
     -v "${REPO_ROOT}:/workspace" -w /workspace \
     "$image" -c "$container_cmd"

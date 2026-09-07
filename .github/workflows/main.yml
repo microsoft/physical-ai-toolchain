@@ -277,6 +277,7 @@ jobs:
       rl: true
       il: true
       evaluation: true
+      osmo_replay: true
       dataviewer: true
     permissions:
       contents: read

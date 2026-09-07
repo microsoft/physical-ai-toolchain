@@ -37,6 +37,13 @@ sys.modules.setdefault("azure.ai.ml", _fake_ai_ml)
 sys.modules.setdefault("azure.identity", _fake_identity)
 
 _fake_mlflow = MagicMock(name="mlflow")
+_fake_registry_client = MagicMock(name="registry_client")
+
+
+class _FakeMlflowException(Exception):
+    def __init__(self, error_code: str) -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
 
 
 class _FakeRun:
@@ -51,7 +58,10 @@ class _FakeRun:
 
 
 _fake_mlflow.start_run.return_value = _FakeRun()
-_fake_mlflow.register_model.return_value = SimpleNamespace(name="model-x", version="3")
+_fake_mlflow.MlflowClient.return_value = _fake_registry_client
+_fake_mlflow.exceptions.MlflowException = _FakeMlflowException
+_fake_mlflow.get_artifact_uri.return_value = "azureml://artifacts/origin/container/model"
+_fake_registry_client.create_model_version.return_value = SimpleNamespace(name="model-x", version="3")
 sys.modules.setdefault("mlflow", _fake_mlflow)
 
 _MOD = load_training_module("training_utils_aml_mirror", "training/utils/aml_mirror.py")
@@ -60,8 +70,12 @@ _MOD = load_training_module("training_utils_aml_mirror", "training/utils/aml_mir
 @pytest.fixture(autouse=True)
 def _reset_mlflow() -> None:
     _fake_mlflow.reset_mock()
+    _fake_registry_client.reset_mock()
     _fake_mlflow.start_run.return_value = _FakeRun()
-    _fake_mlflow.register_model.return_value = SimpleNamespace(name="model-x", version="3")
+    _fake_mlflow.MlflowClient.return_value = _fake_registry_client
+    _fake_mlflow.get_artifact_uri.return_value = "azureml://artifacts/origin/container/model"
+    _fake_registry_client.create_registered_model.side_effect = None
+    _fake_registry_client.create_model_version.return_value = SimpleNamespace(name="model-x", version="3")
 
 
 @pytest.fixture()
@@ -170,7 +184,12 @@ class TestMain:
         assert result == 0
         _fake_mlflow.set_tracking_uri.assert_called_once()
         _fake_mlflow.set_experiment.assert_called_once_with("my-model")
-        _fake_mlflow.register_model.assert_called_once()
+        _fake_registry_client.create_registered_model.assert_called_once_with("my-model")
+        _fake_registry_client.create_model_version.assert_called_once_with(
+            name="my-model",
+            source="azureml://artifacts/origin/container/model",
+            run_id="run-abc",
+        )
 
     def test_skip_files_excluded(self, _env_vars: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         ckpt = _env_vars / "checkpoint-50"
@@ -202,6 +221,20 @@ class TestMain:
         tag_calls = {c.args[0]: c.args[1] for c in _fake_mlflow.set_tag.call_args_list}
         assert tag_calls["osmo.replay"] == "true"
         assert tag_calls["osmo.replay_source"] == "original-run-99"
+
+    def test_existing_registered_model_creates_new_version(
+        self, _env_vars: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ckpt = _env_vars / "checkpoint-1"
+        ckpt.mkdir()
+        (ckpt / "model.bin").write_bytes(b"x")
+        _fake_registry_client.create_registered_model.side_effect = _FakeMlflowException(
+            "RESOURCE_ALREADY_EXISTS"
+        )
+        monkeypatch.setattr(_MOD, "mlflow", _fake_mlflow)
+
+        assert _MOD.main() == 0
+        _fake_registry_client.create_model_version.assert_called_once()
 
     def test_tensorboard_dir_logged(self, _env_vars: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         tb_dir = _env_vars / "runs"
@@ -241,5 +274,5 @@ class TestMain:
 
         _MOD.main()
 
-        register_call = _fake_mlflow.register_model.call_args
+        register_call = _fake_registry_client.create_model_version.call_args
         assert register_call is not None
