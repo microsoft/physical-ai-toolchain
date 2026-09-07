@@ -40,6 +40,7 @@ class BackendConfig:
 
     model_id: str = "Qwen/Qwen3-VL-4B-Instruct"
     revision: str | None = None
+    """Immutable HF commit SHA pinning the qwen3-vl download; None uses the default branch."""
     base_url: str | None = None
     api_key: str | None = None
     device_map: str = "auto"

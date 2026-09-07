@@ -5,13 +5,19 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 
+import type { EpisodeAnalysisRecord } from '@/types/api'
+
 interface LabelState {
+  /** Dataset whose labels currently hydrate this store */
+  datasetId: string | null
   /** Available label options for the current dataset */
   availableLabels: string[]
   /** Labels per episode: episode index -> label list */
   episodeLabels: Record<number, string[]>
   /** Saved labels per episode from the last persisted dataset state */
   savedEpisodeLabels: Record<number, string[]>
+  /** Structured analysis record per episode (VLM labels + motion metrics) */
+  episodeAnalysis: Record<number, EpisodeAnalysisRecord>
   /** Whether the label data has been loaded */
   isLoaded: boolean
   /** Label filter: only show episodes with these labels (empty = show all) */
@@ -19,6 +25,8 @@ interface LabelState {
 }
 
 interface LabelActions {
+  /** Reset dataset-scoped state when the selected dataset changes */
+  prepareDatasetLabels: (datasetId: string | null) => void
   /** Set available label options */
   setAvailableLabels: (labels: string[]) => void
   /** Add a new label option */
@@ -27,6 +35,12 @@ interface LabelActions {
   removeLabelOption: (label: string) => void
   /** Set all episode labels at once (bulk load) */
   setAllEpisodeLabels: (episodes: Record<string, string[]>) => void
+  /** Replace labels when loading a selected dataset */
+  setDatasetEpisodeLabels: (datasetId: string, episodes: Record<string, string[]>) => void
+  /** Reconcile server labels while preserving unsaved local edits */
+  reconcileEpisodeLabels: (datasetId: string, episodes: Record<string, string[]>) => void
+  /** Set all episode analysis records at once (bulk load) */
+  setAllEpisodeAnalysis: (analysis: Record<string, EpisodeAnalysisRecord>) => void
   /** Set labels for a specific episode */
   setEpisodeLabels: (episodeIndex: number, labels: string[]) => void
   /** Commit the saved baseline for a specific episode */
@@ -48,9 +62,11 @@ type LabelStore = LabelState & LabelActions
 export const DEFAULT_LABELS: string[] = ['SUCCESS', 'FAILURE', 'PARTIAL']
 
 const initialState: LabelState = {
+  datasetId: null,
   availableLabels: DEFAULT_LABELS,
   episodeLabels: {},
   savedEpisodeLabels: {},
+  episodeAnalysis: {},
   isLoaded: false,
   filterLabels: [],
 }
@@ -60,8 +76,33 @@ export const useLabelStore = create<LabelStore>()(
     (set, get) => ({
       ...initialState,
 
+      prepareDatasetLabels: (datasetId) => {
+        if (get().datasetId === datasetId) return
+        set(
+          {
+            datasetId,
+            availableLabels: DEFAULT_LABELS,
+            episodeLabels: {},
+            savedEpisodeLabels: {},
+            episodeAnalysis: {},
+            isLoaded: false,
+            filterLabels: [],
+          },
+          false,
+          'prepareDatasetLabels',
+        )
+      },
+
       setAvailableLabels: (labels) => {
-        set({ availableLabels: labels }, false, 'setAvailableLabels')
+        const allowed = new Set(labels)
+        set(
+          (state) => ({
+            availableLabels: labels,
+            filterLabels: state.filterLabels.filter((label) => allowed.has(label)),
+          }),
+          false,
+          'setAvailableLabels',
+        )
       },
 
       addLabelOption: (label) => {
@@ -109,6 +150,63 @@ export const useLabelStore = create<LabelStore>()(
           parsed[Number(key)] = labels
         }
         set({ episodeLabels: parsed, savedEpisodeLabels: parsed }, false, 'setAllEpisodeLabels')
+      },
+
+      setDatasetEpisodeLabels: (datasetId, episodes) => {
+        const parsed: Record<number, string[]> = {}
+        for (const [key, labels] of Object.entries(episodes)) {
+          parsed[Number(key)] = labels
+        }
+        set(
+          {
+            datasetId,
+            episodeLabels: parsed,
+            savedEpisodeLabels: parsed,
+            filterLabels: get().datasetId === datasetId ? get().filterLabels : [],
+          },
+          false,
+          'setDatasetEpisodeLabels',
+        )
+      },
+
+      reconcileEpisodeLabels: (datasetId, episodes) => {
+        const { datasetId: currentDatasetId, episodeLabels, savedEpisodeLabels } = get()
+        if (currentDatasetId !== datasetId) return
+
+        const parsed: Record<number, string[]> = {}
+        for (const [key, labels] of Object.entries(episodes)) {
+          parsed[Number(key)] = labels
+        }
+
+        const reconciled = { ...parsed }
+        for (const [key, localLabels] of Object.entries(episodeLabels)) {
+          const episodeIndex = Number(key)
+          const previousLabels = savedEpisodeLabels[episodeIndex] ?? []
+          const incomingLabels = parsed[episodeIndex] ?? []
+          const localSet = new Set(localLabels)
+          const previousSet = new Set(previousLabels)
+          const removedLocally = new Set(previousLabels.filter((label) => !localSet.has(label)))
+          const addedLocally = localLabels.filter((label) => !previousSet.has(label))
+
+          reconciled[episodeIndex] = [
+            ...incomingLabels.filter((label) => !removedLocally.has(label)),
+            ...addedLocally.filter((label) => !incomingLabels.includes(label)),
+          ]
+        }
+
+        set(
+          { episodeLabels: reconciled, savedEpisodeLabels: parsed },
+          false,
+          'reconcileEpisodeLabels',
+        )
+      },
+
+      setAllEpisodeAnalysis: (analysis) => {
+        const parsed: Record<number, EpisodeAnalysisRecord> = {}
+        for (const [key, record] of Object.entries(analysis)) {
+          parsed[Number(key)] = record
+        }
+        set({ episodeAnalysis: parsed }, false, 'setAllEpisodeAnalysis')
       },
 
       setEpisodeLabels: (episodeIndex, labels) => {

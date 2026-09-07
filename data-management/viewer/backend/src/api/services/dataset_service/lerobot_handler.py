@@ -475,8 +475,9 @@ class LeRobotFormatHandler:
             if clip_path is None:
                 return str(video_path)
 
-            if clip_path.exists():
+            if clip_path.exists() and self._is_valid_video_file(clip_path):
                 return str(clip_path)
+            clip_path.unlink(missing_ok=True)
 
             if self._generate_episode_video_clip(video_path, window, clip_path):
                 return str(clip_path)
@@ -494,6 +495,35 @@ class LeRobotFormatHandler:
 
         safe_camera = camera.replace("/", "_").replace("\\", "_")
         return loader.base_path / "meta" / "videos" / safe_camera / f"episode_{episode_idx:06d}.mp4"
+
+    @staticmethod
+    def _is_valid_video_file(video_path: Path) -> bool:
+        ffmpeg = LeRobotFormatHandler._resolve_ffmpeg()
+        if ffmpeg is None:
+            return video_path.stat().st_size > 0
+
+        try:
+            proc = subprocess.run(
+                [
+                    ffmpeg,
+                    "-v",
+                    "error",
+                    "-i",
+                    str(video_path),
+                    "-map",
+                    "0:v:0",
+                    "-frames:v",
+                    "1",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            return proc.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
 
     @staticmethod
     def _generate_episode_video_clip(source_path: Path, window: tuple[float, float], clip_path: Path) -> bool:

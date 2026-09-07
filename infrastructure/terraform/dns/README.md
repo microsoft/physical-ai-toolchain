@@ -2,7 +2,7 @@
 title: Private DNS for OSMO UI
 description: Private DNS zone for OSMO UI hostname resolution on the internal load balancer
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - dns

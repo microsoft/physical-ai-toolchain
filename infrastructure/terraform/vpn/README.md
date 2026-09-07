@@ -2,7 +2,7 @@
 title: VPN Gateway
 description: Point-to-site VPN connectivity for secure access to the private AKS cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - vpn

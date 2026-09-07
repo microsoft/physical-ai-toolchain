@@ -1,6 +1,7 @@
 #!/usr/bin/env pwsh
 # Copyright (c) Microsoft Corporation.
 # SPDX-License-Identifier: MIT
+# cspell:ignore ngccli
 #Requires -Version 7.0
 
 <#
@@ -44,6 +45,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'Modules/PinnedToolVersions.psm1') -Force
 
 # ============================================================
 #Constants
@@ -125,6 +127,40 @@ function Get-JsonVariable {
     $pattern = "(?<=$([regex]::Escape($Name))=)[^ \`"\\]+"
     $m = [regex]::Match($content, $pattern)
     if ($m.Success) { return $m.Value }
+    return $null
+}
+
+function Get-PowerShellVariable {
+    <#
+    .SYNOPSIS
+        Extract a literal PowerShell variable assignment from a file.
+    .DESCRIPTION
+        Returns null when the file or assignment is missing or the assignment
+        is not a string literal. Throws when multiple plain assignments exist.
+    .OUTPUTS
+        System.String
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $null
+    }
+
+    $content = Get-Content -LiteralPath $Path -Raw
+    $assignments = @(Get-PowerShellAssignments -Content $content -VariableName $Name -File $Path)
+    if ($assignments.Count -eq 0) {
+        return $null
+    }
+    if ($assignments.Count -ne 1) {
+        throw "Expected exactly one assignment for '$Name' in '$Path', found $($assignments.Count)"
+    }
+    if ($assignments[0].IsLiteral) {
+        return $assignments[0].Value
+    }
     return $null
 }
 
@@ -328,8 +364,22 @@ function Get-BinaryCheckDefinitions {
     param(
         [Parameter(Mandatory)][string]$DevDeps,
         [Parameter(Mandatory)][string]$Thinlinc,
-        [Parameter(Mandatory)][string]$Devcontainer
+        [Parameter(Mandatory)][string]$Devcontainer,
+        [Parameter(Mandatory)][string]$SetupDev
     )
+
+    $powerShellUvVersion = Get-PowerShellVariable -Path $SetupDev -Name 'UvVersion'
+    $uvInstallerHash = Get-PowerShellVariable -Path $SetupDev -Name 'UvInstallerSha256'
+    $linuxUvVersion = Get-ShellVariable -Path $DevDeps -Name 'UV_VERSION'
+    if ([string]::IsNullOrWhiteSpace($powerShellUvVersion)) {
+        throw "UvVersion in '$SetupDev' is missing or is not a string literal"
+    }
+    if ([string]::IsNullOrWhiteSpace($uvInstallerHash)) {
+        throw "UvInstallerSha256 in '$SetupDev' is missing or is not a string literal"
+    }
+    if ($uvInstallerHash -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "UvInstallerSha256 in '$SetupDev' is not a SHA-256 digest"
+    }
 
     return @(
         @{
@@ -339,10 +389,16 @@ function Get-BinaryCheckDefinitions {
             File     = $DevDeps
         }
         @{
-            Name     = "uv Installer (v$(Get-ShellVariable -Path $DevDeps -Name 'UV_VERSION'))"
-            Url      = "https://astral.sh/uv/$(Get-ShellVariable -Path $DevDeps -Name 'UV_VERSION')/install.sh"
-            Expected = (Get-ShellVariable -Path $DevDeps -Name 'UV_INSTALLER_SHA256')
+            Name     = "uv Linux Archive (v$linuxUvVersion)"
+            Url      = "https://github.com/astral-sh/uv/releases/download/$linuxUvVersion/uv-x86_64-unknown-linux-gnu.tar.gz"
+            Expected = (Get-ShellVariable -Path $DevDeps -Name 'UV_SHA256')
             File     = $DevDeps
+        }
+        @{
+            Name     = "uv PowerShell Installer (v$powerShellUvVersion)"
+            Url      = "https://astral.sh/uv/$powerShellUvVersion/install.ps1"
+            Expected = $uvInstallerHash
+            File     = $SetupDev
         }
         @{
             Name     = 'Microsoft GPG Key'
@@ -449,7 +505,12 @@ function Invoke-BinaryFreshnessCheck {
         Write-Host ''
         Write-Host '=== Binary Hash Freshness Check ==='
 
-        $binaryChecks = Get-BinaryCheckDefinitions -DevDeps $devDeps -Thinlinc $thinlinc -Devcontainer $devcontainer
+        $setupDev = 'setup-dev.ps1'
+        $binaryChecks = Get-BinaryCheckDefinitions `
+            -DevDeps $devDeps `
+            -Thinlinc $thinlinc `
+            -Devcontainer $devcontainer `
+            -SetupDev $setupDev
 
         foreach ($check in $binaryChecks) {
             Write-Host "Checking $($check.Name)..."

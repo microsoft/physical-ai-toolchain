@@ -26,6 +26,7 @@
 		"headlessly",
 		"hfpins",
 		"imwrite",
+		"isfolder",
 		"leisaac",
 		"minimise",
 		"misattributed",
@@ -34,6 +35,7 @@
 		"mycontainer",
 		"noout",
 		"noseparator",
+		"nvmap",
 		"pixelformat",
 		"plottable",
 		"pollable",
@@ -53,6 +55,7 @@
 		"serialised",
 		"serialises",
 		"sparkline",
+		"tegra",
 		"trackio",
 		"unbuilt",
 		"unimportable",
@@ -71,6 +74,8 @@
 		"yolov"
 	],
 	"ignorePaths": [
+		".agent/reviews/**",
+		".github/instructions/hve-core/copilot-tracking.instructions.md",
 		"**/.github/chatmodes/**",
 		"**/node_modules/**",
 		"**/vscode-extension/**",

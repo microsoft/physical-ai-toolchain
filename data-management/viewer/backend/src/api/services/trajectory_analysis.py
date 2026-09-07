@@ -5,9 +5,14 @@ Computes automatic quality metrics from trajectory data using NumPy and SciPy.
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
+
+SmoothnessMode = Literal["log-scaled", "radian-based"]
+SMOOTHNESS_MODES: tuple[SmoothnessMode, ...] = ("log-scaled", "radian-based")
+DEFAULT_SMOOTHNESS_MODE: SmoothnessMode = "log-scaled"
 
 
 @dataclass
@@ -16,6 +21,10 @@ class TrajectoryMetrics:
 
     smoothness: float
     """Jerk minimization score (0-1, higher is smoother)."""
+
+    normalized_smoothness: float
+    """Rescaled smoothness (0-1) that discriminates across degree-scale
+    trajectories where raw ``smoothness`` saturates near zero."""
 
     efficiency: float
     """Path length ratio vs direct path (0-1, higher is more efficient)."""
@@ -56,6 +65,7 @@ class TrajectoryAnalyzer:
         velocity_threshold: float = 0.01,
         hesitation_min_frames: int = 5,
         jitter_frequency_threshold: float = 10.0,
+        smoothness_mode: SmoothnessMode = DEFAULT_SMOOTHNESS_MODE,
     ) -> None:
         """
         Initialize the analyzer.
@@ -64,10 +74,15 @@ class TrajectoryAnalyzer:
             velocity_threshold: Velocity below this is considered stopped.
             hesitation_min_frames: Minimum frames to count as hesitation.
             jitter_frequency_threshold: Frequency above this indicates jitter.
+            smoothness_mode: Normalization for ``normalized_smoothness`` —
+                ``log-scaled`` (default) or ``radian-based``.
         """
+        if smoothness_mode not in SMOOTHNESS_MODES:
+            raise ValueError(f"smoothness_mode must be one of {SMOOTHNESS_MODES}, got {smoothness_mode!r}")
         self.velocity_threshold = velocity_threshold
         self.hesitation_min_frames = hesitation_min_frames
         self.jitter_frequency_threshold = jitter_frequency_threshold
+        self.smoothness_mode = smoothness_mode
 
     def analyze(
         self,
@@ -89,6 +104,7 @@ class TrajectoryAnalyzer:
         if len(positions) < 3:
             return TrajectoryMetrics(
                 smoothness=1.0,
+                normalized_smoothness=1.0,
                 efficiency=1.0,
                 jitter=0.0,
                 hesitation_count=0,
@@ -108,6 +124,7 @@ class TrajectoryAnalyzer:
 
         # Compute metrics
         smoothness = self._compute_smoothness(jerk)
+        normalized_smoothness = self._compute_normalized_smoothness(jerk)
         efficiency = self._compute_efficiency(positions)
         jitter = self._compute_jitter(velocity, timestamps)
         hesitation_count = self._count_hesitations(velocity)
@@ -121,6 +138,7 @@ class TrajectoryAnalyzer:
 
         return TrajectoryMetrics(
             smoothness=smoothness,
+            normalized_smoothness=normalized_smoothness,
             efficiency=efficiency,
             jitter=jitter,
             hesitation_count=hesitation_count,
@@ -145,6 +163,31 @@ class TrajectoryAnalyzer:
         # Using sigmoid-like transformation
         smoothness = 1.0 / (1.0 + rms_jerk)
         return float(np.clip(smoothness, 0.0, 1.0))
+
+    def _compute_normalized_smoothness(self, jerk: NDArray[np.float64]) -> float:
+        """
+        Compute a rescaled smoothness that discriminates across episodes.
+
+        Raw ``smoothness`` (``1 / (1 + rms_jerk)``) saturates near zero for real
+        degree-scale joint trajectories because jerk divides by ``dt**3``. Two
+        normalization methods are offered via ``smoothness_mode``:
+
+        * ``log-scaled`` (default): ``1 / (1 + log10(1 + rms_jerk))`` compresses
+          the wide jerk dynamic range so scores spread across (0, 1].
+        * ``radian-based``: assumes input positions are in degrees (as robot
+          joint encoders report) and converts jerk to physical radian units
+          before the reciprocal ``1 / (1 + rms_jerk_rad)``.
+        """
+        if len(jerk) == 0:
+            return 1.0
+
+        rms_jerk = float(np.sqrt(np.mean(jerk**2)))
+        if self.smoothness_mode == "radian-based":
+            rms_jerk_rad = rms_jerk * (np.pi / 180.0)
+            normalized = 1.0 / (1.0 + rms_jerk_rad)
+        else:  # log-scaled
+            normalized = 1.0 / (1.0 + np.log10(1.0 + rms_jerk))
+        return float(np.clip(normalized, 0.0, 1.0))
 
     def _compute_efficiency(self, positions: NDArray[np.float64]) -> float:
         """

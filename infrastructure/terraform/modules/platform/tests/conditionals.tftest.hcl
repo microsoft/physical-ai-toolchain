@@ -378,6 +378,14 @@ run "ampls_dce_pe_missing_dce" {
 run "postgresql_enabled" {
   command = plan
 
+  override_resource {
+    target          = azurerm_private_dns_zone.postgresql[0]
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/privateDnsZones/privatelink.postgres.database.azure.com"
+    }
+  }
+
   variables {
     resource_prefix          = run.setup.resource_prefix
     environment              = run.setup.environment
@@ -396,6 +404,11 @@ run "postgresql_enabled" {
   assert {
     condition     = length(random_password.postgresql) == 1
     error_message = "PostgreSQL random password should be created when PostgreSQL is enabled"
+  }
+
+  assert {
+    condition     = azurerm_private_dns_zone_virtual_network_link.postgresql[0].private_dns_zone_id == azurerm_private_dns_zone.postgresql[0].id
+    error_message = "PostgreSQL VNet link must reference its private DNS zone ID"
   }
 }
 
@@ -503,6 +516,14 @@ run "redis_disabled" {
 run "redis_pe_dns" {
   command = plan
 
+  override_resource {
+    target          = azurerm_private_dns_zone.redis[0]
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/privateDnsZones/privatelink.redis.azure.net"
+    }
+  }
+
   variables {
     resource_prefix                = run.setup.resource_prefix
     environment                    = run.setup.environment
@@ -522,6 +543,11 @@ run "redis_pe_dns" {
   assert {
     condition     = length(azurerm_private_endpoint.redis) == 1
     error_message = "Redis PE should be created when Redis and PE are enabled"
+  }
+
+  assert {
+    condition     = azurerm_private_dns_zone_virtual_network_link.redis[0].private_dns_zone_id == azurerm_private_dns_zone.redis[0].id
+    error_message = "Redis VNet link must reference its private DNS zone ID"
   }
 }
 

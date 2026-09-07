@@ -26,6 +26,8 @@ from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
+_TASK_DESCRIPTION_COLUMNS = ("task", "__index_level_0__", "task_description")
+
 
 def _column_to_numpy(table: pa.Table, name: str) -> NDArray:
     """Extract a pyarrow column as a numpy array, stacking list elements."""
@@ -409,6 +411,10 @@ class LeRobotLoader:
                 logger.warning("Failed to read %s: %s", meta_episodes_jsonl, e)
 
         if not result and meta_episodes_dir.exists():
+            # v3 episode metadata stores per-episode task strings in a ``tasks``
+            # list rather than a numeric ``task_index`` column; resolve indices
+            # via the reverse task map.
+            task_to_index = {desc: idx for idx, desc in self.get_tasks().items()}
             for chunk_dir in sorted(meta_episodes_dir.iterdir()):
                 if not chunk_dir.is_dir() or not chunk_dir.name.startswith("chunk-"):
                     continue
@@ -432,7 +438,19 @@ class LeRobotLoader:
                         for i in range(table.num_rows):
                             idx = int(table.column("episode_index")[i].as_py()) if "episode_index" in col_names else i
                             length = int(table.column("length")[i].as_py()) if "length" in col_names else 0
-                            task_idx = int(table.column("task_index")[i].as_py()) if "task_index" in col_names else 0
+                            if "task_index" in col_names:
+                                task_idx = int(table.column("task_index")[i].as_py())
+                            elif "tasks" in col_names:
+                                ep_tasks = table.column("tasks")[i].as_py()
+                                if isinstance(ep_tasks, list):
+                                    task_str = ep_tasks[0] if ep_tasks else None
+                                elif isinstance(ep_tasks, str):
+                                    task_str = ep_tasks
+                                else:
+                                    task_str = None
+                                task_idx = task_to_index.get(task_str, 0) if isinstance(task_str, str) else 0
+                            else:
+                                task_idx = 0
                             result[idx] = {
                                 "length": length,
                                 "task_index": task_idx,
@@ -875,11 +893,12 @@ class LeRobotLoader:
             try:
                 table = pq.read_table(tasks_parquet)
                 cols = table.column_names
-                if "task_index" in cols and "task" in cols:
-                    return {
-                        int(table.column("task_index")[i].as_py()): str(table.column("task")[i].as_py())
-                        for i in range(table.num_rows)
-                    }
+                if "task_index" in cols:
+                    task_col = next((column for column in _TASK_DESCRIPTION_COLUMNS if column in cols), None)
+                    if task_col is not None:
+                        indices = table.column("task_index").to_pylist()
+                        strings = table.column(task_col).to_pylist()
+                        return {int(idx): str(s) for idx, s in zip(indices, strings)}
             except (OSError, pa.ArrowException) as e:
                 logger.warning("Failed to read %s: %s", tasks_parquet, e)
 

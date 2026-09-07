@@ -94,6 +94,16 @@ run "kv_public_access_disabled" {
     condition     = azurerm_key_vault.main.network_acls[0].default_action == "Deny"
     error_message = "Key Vault network ACL should deny when public access is disabled"
   }
+
+  assert {
+    condition     = azurerm_log_analytics_workspace.main.internet_ingestion_access_type == "Disabled"
+    error_message = "Log Analytics ingestion access should be disabled when public access is disabled"
+  }
+
+  assert {
+    condition     = azurerm_log_analytics_workspace.main.internet_query_access_type == "Disabled"
+    error_message = "Log Analytics query access should be disabled when public access is disabled"
+  }
 }
 
 run "kv_public_access_enabled" {
@@ -117,6 +127,16 @@ run "kv_public_access_enabled" {
   assert {
     condition     = azurerm_key_vault.main.network_acls[0].default_action == "Allow"
     error_message = "Key Vault network ACL should allow when public access is enabled"
+  }
+
+  assert {
+    condition     = azurerm_log_analytics_workspace.main.internet_ingestion_access_type == "Enabled"
+    error_message = "Log Analytics ingestion access should be enabled when public access is enabled"
+  }
+
+  assert {
+    condition     = azurerm_log_analytics_workspace.main.internet_query_access_type == "Enabled"
+    error_message = "Log Analytics query access should be enabled when public access is enabled"
   }
 }
 

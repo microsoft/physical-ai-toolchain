@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Prerequisites and Build Validation
 description: Required tools, Azure access, NGC credentials, and build validation commands for contributing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-25
+ms.date: 2026-08-27
 ms.topic: how-to
 keywords:
   - prerequisites
@@ -43,6 +43,91 @@ Install these tools before contributing:
 
 > [!NOTE]
 > GitHub Copilot Coding Agent runs in a separate cloud GitHub Actions environment provisioned by [.github/workflows/copilot-setup-steps.yml](../../.github/workflows/copilot-setup-steps.yml). When you bump a language runtime or test runner version locally (devcontainer or this list), update the matching pin in that workflow so cloud-agent sessions stay aligned.
+
+## Dev Container GPU Runtime
+
+The dev container requests a GPU only when Dev Containers detects one. Configure the host according to its platform:
+
+| Host                          | Docker runtime configuration                                                                  |
+|-------------------------------|-----------------------------------------------------------------------------------------------|
+| x86_64 with an NVIDIA GPU     | Install NVIDIA Container Toolkit; automatic `--gpus all` handling normally requires no change |
+| NVIDIA ARM64 host in CSV mode | Set `nvidia` as Docker's default runtime                                                      |
+| Host without an NVIDIA GPU    | Retain the default `runc` runtime; the dev container starts without GPU devices               |
+
+On NVIDIA ARM64 hosts, the NVIDIA Container Runtime can auto-detect CSV mode and reject the
+`--gpus all` request unless Docker invokes the `nvidia` runtime. Confirm that Docker has registered the runtime:
+
+```bash
+docker info --format '{{json .Runtimes}}'
+```
+
+The output must include `nvidia`. Configure it as the default runtime, then reload Docker without stopping running
+containers:
+
+```bash
+sudo nvidia-ctk runtime configure --runtime=docker --set-as-default
+sudo systemctl reload docker
+```
+
+If the reload does not apply the change, restart Docker. A restart interrupts running containers:
+
+```bash
+sudo systemctl restart docker
+```
+
+Verify the default runtime and GPU attachment:
+
+```bash
+docker info --format 'Default runtime: {{.DefaultRuntime}}'
+docker run --rm --runtime=nvidia --gpus all ubuntu:24.04 \
+  sh -c 'test -e /dev/nvidia0 && echo "GPU attached"'
+```
+
+The first command must report `nvidia`, and the second must print `GPU attached`. Rebuild and reopen the dev
+container after configuring the host.
+
+This configuration resolves the following container startup error:
+
+```text
+invoking the NVIDIA Container Runtime Hook directly (e.g. specifying the docker --gpus flag) is not supported.
+Please use the NVIDIA Container Runtime (e.g. specify the --runtime=nvidia flag) instead
+```
+
+### GPU Device Group Access
+
+Attaching the GPU is not sufficient. CUDA also requires the container user to hold the host groups that own the GPU
+device nodes. [.devcontainer/devcontainer.json](../../.devcontainer/devcontainer.json) grants them through `runArgs`:
+
+| Device node         | Host group | Required for                               |
+|---------------------|------------|--------------------------------------------|
+| `/dev/nvmap`        | `video`    | Tegra memory manager on NVIDIA ARM64 hosts |
+| `/dev/dri/renderD*` | `render`   | DRM render node that CUDA opens            |
+
+The committed configuration assumes the host `render` group is GID `993`. Confirm the value on the host:
+
+```bash
+stat -c '%g %G' /dev/dri/renderD128
+```
+
+If the GID differs, update the matching `--group-add` entry and rebuild the dev container. Group names do not
+transfer across the container boundary, so the numeric GID is required; inside the container it resolves to whichever
+name holds that GID, commonly `systemd-resolve`.
+
+Missing membership produces a misleading failure. `nvidia-smi` lists the GPU and `torch.cuda.device_count()` returns
+`1`, but `torch.cuda.is_available()` returns `False`:
+
+```text
+CUDA initialization: Unexpected error from cudaGetDeviceCount(). Error 801: operation not supported
+```
+
+Verify device access and CUDA inside the dev container:
+
+```bash
+test -r /dev/nvmap && test -r /dev/dri/renderD128 && echo "device access OK"
+python -c "import torch; print('cuda:', torch.cuda.is_available())"
+```
+
+Both commands must succeed, and the second must print `cuda: True`.
 
 ## Azure Access Requirements
 

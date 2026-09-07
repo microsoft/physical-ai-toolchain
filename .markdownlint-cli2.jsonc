@@ -1,7 +1,10 @@
 {
   "ignores": [
     "**/node_modules/**",
+    ".agent/reviews/**",
     ".copilot-tracking/**",
+    ".github/instructions/hve-core/copilot-tracking.instructions.md",
+    ".github/skills/rpi-*/**",
     "venv/**",
     ".venv/**",
     "**/.venv/**",

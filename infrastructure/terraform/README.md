@@ -2,7 +2,7 @@
 title: Infrastructure as Code
 description: Terraform configuration for Azure resources including AKS, Azure ML, storage, and OSMO backend services
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-29
+ms.date: 2026-08-31
 ms.topic: how-to
 keywords:
   - terraform

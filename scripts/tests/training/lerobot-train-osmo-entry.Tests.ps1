@@ -68,15 +68,22 @@ exit 0
 exit 0
 '@
             'uv' = @'
-if [[ "$1" == "export" ]]; then
-  printf 'lerobot==0.0.0\n'
+if [[ "$1" == "python" && "$2" == "install" ]]; then
   exit 0
 fi
-if [[ "$1" == "pip" ]]; then
-  cat >/dev/null
+if [[ "$1" == "venv" ]]; then
   exit 0
 fi
-exit 0
+if [[ "$1" == "sync" ]]; then
+  [[ " $* " == *" --active "* ]] || exit 91
+  [[ " $* " == *" --frozen "* ]] || exit 92
+  [[ " $* " == *" --no-config "* ]] || exit 93
+  [[ " $* " == *" --no-install-project "* ]] || exit 94
+  [[ " $* " == *" --project "*"training/il/lerobot"* ]] || exit 95
+  exit 0
+fi
+echo "unexpected uv invocation: $*" >&2
+exit 1
 '@
             'python' = @'
 if [[ "$1" == "-c" && "$2" == *"has_blob_urls"* ]]; then

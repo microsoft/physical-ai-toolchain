@@ -21,6 +21,12 @@ interface ViewerSettingsState {
   autoPlay: boolean
   /** Loop playback when reaching the end */
   autoLoop: boolean
+  /**
+   * Open/collapsed state for foldable annotation sections, keyed by section id.
+   * A missing key falls back to the section's own default. Persists across
+   * episode switches so folds are not reset when panels remount.
+   */
+  sectionOpen: Record<string, boolean>
 }
 
 interface ViewerSettingsActions {
@@ -32,6 +38,8 @@ interface ViewerSettingsActions {
   setAutoPlay: (enabled: boolean) => void
   /** Set auto-loop preference */
   setAutoLoop: (enabled: boolean) => void
+  /** Set the open/collapsed state for a foldable section. */
+  setSectionOpen: (id: string, open: boolean) => void
 }
 
 type ViewerSettingsStore = ViewerSettingsState & ViewerSettingsActions
@@ -61,6 +69,7 @@ export const useViewerSettingsStore = create<ViewerSettingsStore>()(
       isActive: false,
       autoPlay: true,
       autoLoop: true,
+      sectionOpen: {},
 
       setAdjustment: (key, value) =>
         set((state) => {
@@ -72,6 +81,9 @@ export const useViewerSettingsStore = create<ViewerSettingsStore>()(
 
       setAutoPlay: (enabled) => set({ autoPlay: enabled }),
       setAutoLoop: (enabled) => set({ autoLoop: enabled }),
+
+      setSectionOpen: (id, open) =>
+        set((state) => ({ sectionOpen: { ...state.sectionOpen, [id]: open } })),
     }),
     { name: 'viewer-settings' },
   ),
@@ -99,4 +111,14 @@ export function usePlaybackSettings() {
       setAutoLoop: s.setAutoLoop,
     })),
   )
+}
+
+/**
+ * Hook returning the open state and a toggle for a foldable section. The state
+ * lives in the module-level store so it survives episode switches.
+ */
+export function useSectionOpen(id: string, defaultOpen: boolean) {
+  const open = useViewerSettingsStore((s) => s.sectionOpen[id] ?? defaultOpen)
+  const setSectionOpen = useViewerSettingsStore((s) => s.setSectionOpen)
+  return { open, toggle: () => setSectionOpen(id, !open) }
 }

@@ -21,7 +21,7 @@ from tests.e2e._common import (
     wait_for_status,
 )
 
-AML_STARTED_STATES = {"Queued", "Preparing", "Starting", "Running", "Finalizing", "Completed"}
+AML_STARTED_STATES = {"Running", "Finalizing", "Completed"}
 AML_FAILURE_STATES = {"Canceled", "Cancelled", "Failed", "NotResponding"}
 
 
@@ -476,13 +476,17 @@ def submit_aml_lerobot_pipeline(
     save_freq: int,
     batch_size: int,
     eval_episodes: int,
+    register_model_name: str | None = None,
 ) -> AzureMLJob:
     experiment_name = e2e_name("il-pipeline-e2e-aml")
+    register_args = (
+        ["--with-register", "--register-model-name", register_model_name] if register_model_name is not None else []
+    )
     log_e2e(
         "Submitting AzureML LeRobot pipeline job "
         f"for dataset_asset={dataset_asset}, dataset_repo_id={dataset_repo_id}, policy={policy_type}, "
         f"training_steps={training_steps}, save_freq={save_freq}, batch_size={batch_size}, "
-        f"eval_episodes={eval_episodes}, experiment={experiment_name}"
+        f"eval_episodes={eval_episodes}, register_model_name={register_model_name}, experiment={experiment_name}"
     )
     result = run_command(
         [
@@ -503,6 +507,7 @@ def submit_aml_lerobot_pipeline(
             str(eval_episodes),
             "--experiment-name",
             experiment_name,
+            *register_args,
             *_submit_workspace_args(aml_workspace),
         ],
         cwd=repo_root,

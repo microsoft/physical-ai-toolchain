@@ -53,6 +53,7 @@ describe('analyzeTrajectory', () => {
     }
     const metrics: TrajectoryMetrics = {
       smoothness: 0.9,
+      normalized_smoothness: 0.6,
       efficiency: 0.8,
       jitter: 0.1,
       hesitation_count: 0,

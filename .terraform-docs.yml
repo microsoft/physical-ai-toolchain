@@ -14,7 +14,7 @@ content: |-
   {{- end -}}
   ---
   title: {{ $title }}
-  description: {{ $desc }}
+  description: {{ $desc | quote }}
   author: Microsoft Robotics-AI Team
   ms.date: {{ now | date "2006-01-02" }}
   ms.topic: reference

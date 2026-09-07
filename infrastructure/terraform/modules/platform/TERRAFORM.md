@@ -1,8 +1,8 @@
 ---
 title: Platform Module
-description: Deploys shared Azure infrastructure services for robotics ML workloads. Resources include: networking, DNS zones, security, observability, ACR, storage, ML workspace. Optional: PostgreSQL and Redis for OSMO workloads.
+description: "Deploys shared Azure infrastructure services for robotics ML workloads. Resources include: networking, DNS zones, security, observability, ACR, storage, ML workspace. Optional: PostgreSQL and Redis for OSMO workloads."
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-03
+ms.date: 2026-08-31
 ms.topic: reference
 ---
 
@@ -13,21 +13,21 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 
 ## Requirements
 
-| Name      | Version            |
-|-----------|--------------------|
-| terraform | >= 1.9.8, < 2.0    |
-| azapi     | >= 2.3.0           |
-| azuread   | >= 3.0.2           |
-| azurerm   | >= 4.51.0, < 5.0.0 |
-| random    | >= 3.6.0           |
+| Name      | Version           |
+|-----------|-------------------|
+| terraform | >= 1.9.8, < 2.0   |
+| azapi     | >= 2.3.0          |
+| azuread   | >= 3.0.2          |
+| azurerm   | >= 5.1.0, < 5.4.0 |
+| random    | >= 3.6.0          |
 
 ## Providers
 
-| Name    | Version            |
-|---------|--------------------|
-| azapi   | >= 2.3.0           |
-| azurerm | >= 4.51.0, < 5.0.0 |
-| random  | >= 3.6.0           |
+| Name    | Version           |
+|---------|-------------------|
+| azapi   | >= 2.3.0          |
+| azurerm | >= 5.1.0, < 5.4.0 |
+| random  | >= 3.6.0          |
 
 ## Resources
 

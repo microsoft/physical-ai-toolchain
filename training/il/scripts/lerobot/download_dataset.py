@@ -95,7 +95,11 @@ def download_dataset(
 
     downloaded = 0
     dest_dir_resolved = dest_dir.resolve()
-    for blob in container_client.list_blobs(name_starts_with=prefix):
+    for blob in container_client.list_blobs(name_starts_with=prefix, include=["metadata"]):
+        metadata = getattr(blob, "metadata", None) or {}
+        if blob.name.endswith("/") or metadata.get("hdi_isfolder", "").lower() == "true":
+            continue
+
         rel = blob.name[len(prefix) :]
         if _is_excluded_dataset_file(rel):
             continue

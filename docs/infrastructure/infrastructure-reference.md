@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-29
+ms.date: 2026-08-31
 ms.topic: reference
 keywords:
   - architecture

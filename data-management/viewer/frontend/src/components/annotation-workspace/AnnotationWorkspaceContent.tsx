@@ -3,12 +3,14 @@ import {
   LanguageInstructionWidget,
   ObjectDetectionWidget,
 } from '@/components/annotation-panel'
+import { AnnotationWorkspaceAnalyzerTab } from '@/components/annotation-workspace/AnnotationWorkspaceAnalyzerTab'
 import { AnnotationWorkspaceDiagnosticsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceDiagnosticsPanel'
 import { AnnotationWorkspaceEditToolsPanel } from '@/components/annotation-workspace/AnnotationWorkspaceEditToolsPanel'
 import { AnnotationWorkspacePlaybackCard } from '@/components/annotation-workspace/AnnotationWorkspacePlaybackCard'
 import { AnnotationWorkspaceSubtaskListCard } from '@/components/annotation-workspace/AnnotationWorkspaceSubtaskListCard'
 import { AnnotationWorkspaceTopBar } from '@/components/annotation-workspace/AnnotationWorkspaceTopBar'
 import { AnnotationWorkspaceTrajectoryTab } from '@/components/annotation-workspace/AnnotationWorkspaceTrajectoryTab'
+import { EpisodeAnalysisCard, MotionMetricsPanel } from '@/components/episode-analyzer'
 import { ExportDialog } from '@/components/export'
 import { Tabs } from '@/components/ui/tabs'
 import { JudgePanel } from '@/components/vlm-judge'
@@ -100,6 +102,18 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
     />
   )
 
+  const analyzerMotionMetricsPanel = (
+    <MotionMetricsPanel
+      datasetId={currentDataset.id}
+      episodeId={String(currentEpisode.meta.index)}
+      positions={currentEpisode.trajectoryData?.map((point) => point.jointPositions)}
+      timestamps={currentEpisode.trajectoryData?.map((point) => point.timestamp)}
+      gripperStates={currentEpisode.trajectoryData?.map((point) => point.gripperState)}
+    />
+  )
+
+  const episodeAnalysisCard = <EpisodeAnalysisCard episodeIndex={currentEpisode.meta.index} />
+
   return (
     <div className="flex h-full flex-col gap-2.5 overflow-y-auto px-3 py-2">
       <Tabs
@@ -127,6 +141,7 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           subtaskListCard={trajectorySubtaskListCard}
           labelPanel={trajectoryLabelPanel}
           judgePanel={trajectoryJudgePanel}
+          analysisCard={episodeAnalysisCard}
           languageInstructionPanel={trajectoryLanguageInstructionPanel}
           objectDetectionPanel={trajectoryObjectDetectionPanel}
           editToolsPanel={trajectoryEditToolsPanel}
@@ -140,6 +155,14 @@ export function AnnotationWorkspaceContent({ shell }: AnnotationWorkspaceContent
           onSelectionComplete={shell.playback.handleSelectionComplete}
           totalFrames={shell.totalFrames}
           onSubtaskSelectionChange={shell.playback.handleSubtaskSelectionChange}
+        />
+
+        <AnnotationWorkspaceAnalyzerTab
+          motionMetricsPanel={analyzerMotionMetricsPanel}
+          judgePanel={trajectoryJudgePanel}
+          analysisCard={episodeAnalysisCard}
+          labelPanel={trajectoryLabelPanel}
+          languageInstructionPanel={trajectoryLanguageInstructionPanel}
         />
       </Tabs>
 

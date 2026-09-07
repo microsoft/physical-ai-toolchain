@@ -5,6 +5,8 @@ Tests handler discovery, episode listing, episode loading,
 trajectory extraction, camera discovery, and video path resolution.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from src.api.services.dataset_service.lerobot_handler import LeRobotFormatHandler
@@ -146,12 +148,100 @@ class TestCamerasAndVideo:
         path = handler.get_video_path(DATASET_ID, 0, "fake_camera")
         assert path is None
 
+    def test_get_video_path_regenerates_invalid_cached_clip(self, monkeypatch, tmp_path):
+        source_path = tmp_path / "source.mp4"
+        source_path.write_bytes(b"source")
+        loader = FakeLoader()
+        loader.base_path = tmp_path
+        loader.get_video_path = lambda idx, camera: source_path
+        loader.get_video_time_window = lambda idx, camera: (0.0, 1.0)
+        handler = LeRobotFormatHandler()
+        handler._loaders["ds"] = loader
+        cache_path = handler._video_cache_path("ds", 0, "observation.images.cam0")
+        assert cache_path is not None
+        cache_path.parent.mkdir(parents=True)
+        cache_path.write_bytes(b"corrupt")
+
+        monkeypatch.setattr(handler, "_is_valid_video_file", lambda path: path != cache_path)
+
+        def regenerate(source, window, target):
+            target.write_bytes(b"valid")
+            return True
+
+        monkeypatch.setattr(handler, "_generate_episode_video_clip", regenerate)
+
+        assert handler.get_video_path("ds", 0, "observation.images.cam0") == str(cache_path)
+        assert cache_path.read_bytes() == b"valid"
+
+    def test_get_video_path_retains_valid_cached_clip(self, monkeypatch, tmp_path):
+        loader = FakeLoader()
+        loader.base_path = tmp_path
+        loader.get_video_time_window = lambda idx, camera: (0.0, 1.0)
+        handler = LeRobotFormatHandler()
+        handler._loaders["ds"] = loader
+        cache_path = handler._video_cache_path("ds", 0, "observation.images.cam0")
+        assert cache_path is not None
+        cache_path.parent.mkdir(parents=True)
+        cache_path.write_bytes(b"valid")
+        monkeypatch.setattr(handler, "_is_valid_video_file", lambda path: path == cache_path)
+        generate = MagicMock(side_effect=AssertionError("valid cached clip must not be regenerated"))
+        monkeypatch.setattr(handler, "_generate_episode_video_clip", generate)
+
+        assert handler.get_video_path("ds", 0, "observation.images.cam0") == str(cache_path)
+        assert cache_path.read_bytes() == b"valid"
+        generate.assert_not_called()
+
 
 class TestFfmpegExtraction:
     """Test ffmpeg-based frame extraction."""
 
     FAKE_JPEG = b"\xff\xd8\xff\xe0fake-jpeg-data"
     FFMPEG_PATH = "/usr/bin/ffmpeg"
+
+    def test_valid_video_file_when_ffmpeg_decodes_frame(self, monkeypatch, tmp_path):
+        import subprocess as sp
+
+        video_path = tmp_path / "valid.mp4"
+        video_path.write_bytes(b"video")
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
+        monkeypatch.setattr(
+            sp,
+            "run",
+            lambda *args, **kwargs: sp.CompletedProcess(args[0], returncode=0, stdout=b"", stderr=b""),
+        )
+
+        assert LeRobotFormatHandler._is_valid_video_file(video_path) is True
+
+    @pytest.mark.parametrize("failure", ["exit", "timeout"])
+    def test_invalid_video_file_when_ffmpeg_fails(self, monkeypatch, tmp_path, failure):
+        import subprocess as sp
+
+        video_path = tmp_path / "invalid.mp4"
+        video_path.write_bytes(b"video")
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: self.FFMPEG_PATH))
+
+        if failure == "exit":
+            monkeypatch.setattr(
+                sp,
+                "run",
+                lambda *args, **kwargs: sp.CompletedProcess(args[0], returncode=1, stdout=b"", stderr=b"error"),
+            )
+        else:
+
+            def timeout(*args, **kwargs):
+                raise sp.TimeoutExpired(cmd=args[0], timeout=10)
+
+            monkeypatch.setattr(sp, "run", timeout)
+
+        assert LeRobotFormatHandler._is_valid_video_file(video_path) is False
+
+    @pytest.mark.parametrize(("contents", "expected"), [(b"video", True), (b"", False)])
+    def test_video_file_without_ffmpeg_uses_nonempty_fallback(self, monkeypatch, tmp_path, contents, expected):
+        video_path = tmp_path / "cached.mp4"
+        video_path.write_bytes(contents)
+        monkeypatch.setattr(LeRobotFormatHandler, "_resolve_ffmpeg", staticmethod(lambda: None))
+
+        assert LeRobotFormatHandler._is_valid_video_file(video_path) is expected
 
     def test_successful_extraction(self, monkeypatch):
         """Verify _extract_frame_ffmpeg returns stdout bytes on success."""

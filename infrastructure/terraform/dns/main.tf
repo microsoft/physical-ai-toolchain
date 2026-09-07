@@ -20,17 +20,15 @@ resource "azurerm_private_dns_zone" "osmo" {
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "osmo" {
-  name                  = "vnet-pzl-osmo-${var.resource_prefix}-${var.environment}-${var.instance}"
-  resource_group_name   = local.resource_group_name
-  private_dns_zone_name = azurerm_private_dns_zone.osmo.name
-  virtual_network_id    = data.azurerm_virtual_network.this.id
-  registration_enabled  = false
+  name                 = "vnet-pzl-osmo-${var.resource_prefix}-${var.environment}-${var.instance}"
+  private_dns_zone_id  = azurerm_private_dns_zone.osmo.id
+  virtual_network_id   = data.azurerm_virtual_network.this.id
+  registration_enabled = false
 }
 
 resource "azurerm_private_dns_a_record" "osmo" {
   name                = var.osmo_hostname
-  zone_name           = azurerm_private_dns_zone.osmo.name
-  resource_group_name = local.resource_group_name
+  private_dns_zone_id = azurerm_private_dns_zone.osmo.id
   ttl                 = 300
   records             = [var.osmo_loadbalancer_ip]
 }

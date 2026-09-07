@@ -606,7 +606,13 @@ class BlobDatasetProvider:
             prefix = f"{self.get_blob_prefix(dataset_id)}/"
             synced_count = 0
 
-            async for blob in container.list_blobs(name_starts_with=prefix):
+            async for blob in container.list_blobs(name_starts_with=prefix, include=["metadata"]):
+                if self._is_directory_blob(blob):
+                    continue
+
+                relative = blob.name[len(prefix) :]
+                if relative == ".cache" or relative.startswith(".cache/"):
+                    continue
                 # Skip video files — they are streamed on demand
                 if "/videos/" in blob.name:
                     continue
@@ -614,7 +620,6 @@ class BlobDatasetProvider:
                 if blob.name.endswith(".hdf5"):
                     continue
 
-                relative = blob.name[len(prefix) :]
                 local_path = local_dir / relative
                 local_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -642,6 +647,12 @@ class BlobDatasetProvider:
             )
             return False
 
+    @staticmethod
+    def _is_directory_blob(blob: object) -> bool:
+        """Return whether a listed blob is an ADLS Gen2 directory resource."""
+        metadata = getattr(blob, "metadata", None)
+        return isinstance(metadata, dict) and str(metadata.get("hdi_isfolder", "")).lower() == "true"
+
     async def sync_meta_only_to_local(self, dataset_id: str, local_dir: Path) -> bool:
         """
         Download only meta/ files for a dataset to a local directory.
@@ -665,7 +676,10 @@ class BlobDatasetProvider:
             prefix = self.get_blob_prefix(dataset_id)
             meta_prefix = f"{prefix}/meta/"
 
-            async for blob in container.list_blobs(name_starts_with=meta_prefix):
+            async for blob in container.list_blobs(name_starts_with=meta_prefix, include=["metadata"]):
+                if self._is_directory_blob(blob):
+                    continue
+
                 relative = blob.name[len(f"{prefix}/") :]
                 if relative not in _SYNC_META_BLOBS and not relative.startswith("meta/episodes/"):
                     continue

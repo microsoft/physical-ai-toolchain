@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import torch
 
@@ -69,7 +70,43 @@ def resolve_device(requested: str) -> str:
     return "cpu"
 
 
-def find_data_file(dataset_dir: str, ep_idx: int, info: dict) -> str | None:
+def load_episode_metadata(dataset_dir: str) -> dict[int, dict]:
+    episodes_dir = Path(dataset_dir) / "meta" / "episodes"
+    metadata: dict[int, dict] = {}
+    for metadata_file in sorted(episodes_dir.rglob("*.parquet")):
+        table = pq.read_table(metadata_file)
+        for row in table.to_pylist():
+            metadata[int(row["episode_index"])] = row
+    return metadata
+
+
+def _resolve_dataset_file(dataset_dir: str, relative_path: str) -> Path | None:
+    dataset_root = Path(dataset_dir).resolve()
+    candidate_path = Path(relative_path)
+    if candidate_path.is_absolute():
+        return None
+
+    candidate = (dataset_root / candidate_path).resolve()
+    if not candidate.is_relative_to(dataset_root):
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def find_data_file(dataset_dir: str, ep_idx: int, info: dict, episode_meta: dict | None = None) -> str | None:
+    chunk_index = (episode_meta or {}).get("data/chunk_index")
+    file_index = (episode_meta or {}).get("data/file_index")
+    if chunk_index is not None and file_index is not None and info.get("data_path"):
+        candidate = _resolve_dataset_file(
+            dataset_dir,
+            info["data_path"].format(
+                chunk_index=int(chunk_index),
+                file_index=int(file_index),
+                episode_index=ep_idx,
+            ),
+        )
+        if candidate is not None:
+            return str(candidate)
+
     chunks_size = info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
@@ -82,25 +119,61 @@ def find_data_file(dataset_dir: str, ep_idx: int, info: dict) -> str | None:
     return None
 
 
-def find_video_file(dataset_dir: str, video_key: str, ep_idx: int, info: dict) -> str | None:
+def find_video_file(
+    dataset_dir: str,
+    video_key: str,
+    ep_idx: int,
+    info: dict,
+    episode_meta: dict | None = None,
+) -> str | None:
+    chunk_index = (episode_meta or {}).get(f"videos/{video_key}/chunk_index")
+    file_index = (episode_meta or {}).get(f"videos/{video_key}/file_index")
+    if chunk_index is not None and file_index is not None and info.get("video_path"):
+        candidate = _resolve_dataset_file(
+            dataset_dir,
+            info["video_path"].format(
+                video_key=video_key,
+                chunk_index=int(chunk_index),
+                file_index=int(file_index),
+                episode_index=ep_idx,
+            ),
+        )
+        if candidate is not None:
+            return str(candidate)
+
     chunks_size = info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
-        os.path.join(dataset_dir, "videos", video_key, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
-        os.path.join(dataset_dir, "videos", video_key, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
+        os.path.join("videos", video_key, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
+        os.path.join("videos", video_key, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
     ]
     for c in candidates:
-        if os.path.exists(c):
-            return c
+        candidate = _resolve_dataset_file(dataset_dir, c)
+        if candidate is not None:
+            return str(candidate)
     return None
 
 
-def load_video_frames(video_path: str) -> list[np.ndarray]:
+def load_video_frames(
+    video_path: str,
+    from_timestamp: float | None = None,
+    to_timestamp: float | None = None,
+) -> list[np.ndarray]:
     import av
 
     container = av.open(video_path)
     stream = container.streams.video[0]
-    frames = [f.to_ndarray(format="rgb24") for f in container.decode(stream)]
+    if from_timestamp is not None and from_timestamp > 0 and stream.time_base is not None:
+        container.seek(int(from_timestamp / float(stream.time_base)), stream=stream, backward=True)
+
+    frames = []
+    for frame in container.decode(stream):
+        timestamp = float(frame.time) if frame.time is not None else None
+        if from_timestamp is not None and timestamp is not None and timestamp < from_timestamp:
+            continue
+        if to_timestamp is not None and timestamp is not None and timestamp >= to_timestamp:
+            break
+        frames.append(frame.to_ndarray(format="rgb24"))
     container.close()
     return frames
 
@@ -246,6 +319,7 @@ def run_evaluation(args: argparse.Namespace) -> None:
         (k for k in video_keys if k.startswith("observation.images.")),
         video_keys[0] if video_keys else "observation.images.color",
     )
+    episode_metadata = load_episode_metadata(args.dataset_dir)
 
     action_dim = features.get("action", {}).get("shape", [0])[0]
     state_dim = features.get("observation.state", {}).get("shape", [0])[0]
@@ -253,7 +327,9 @@ def run_evaluation(args: argparse.Namespace) -> None:
 
     # Determine episodes
     episodes_meta = os.path.join(args.dataset_dir, "meta", "episodes.jsonl")
-    if os.path.exists(episodes_meta):
+    if episode_metadata:
+        total_episodes = len(episode_metadata)
+    elif os.path.exists(episodes_meta):
         with open(episodes_meta) as f:
             total_episodes = sum(1 for _ in f)
     else:
@@ -272,21 +348,29 @@ def run_evaluation(args: argparse.Namespace) -> None:
         print(f"Episode {ep}")
         print(f"{'=' * 60}")
 
-        data_file = find_data_file(args.dataset_dir, ep, info)
+        episode_meta = episode_metadata.get(ep)
+        data_file = find_data_file(args.dataset_dir, ep, info, episode_meta)
         if not data_file:
             print(f"  [SKIP] No data file for episode {ep}")
             continue
 
         table = pq.read_table(data_file)
+        if "episode_index" in table.column_names:
+            table = table.filter(pc.equal(table["episode_index"], ep))
+        if table.num_rows == 0:
+            print(f"  [SKIP] No data rows for episode {ep}")
+            continue
         data = {col: table[col].to_pylist() for col in table.column_names}
         n_frames = len(data["timestamp"])
 
-        video_file = find_video_file(args.dataset_dir, image_key, ep, info)
+        video_file = find_video_file(args.dataset_dir, image_key, ep, info, episode_meta)
         if not video_file:
             print(f"  [SKIP] No video for episode {ep} ({image_key})")
             continue
 
-        frames = load_video_frames(video_file)
+        from_timestamp = episode_meta.get(f"videos/{image_key}/from_timestamp") if episode_meta else None
+        to_timestamp = episode_meta.get(f"videos/{image_key}/to_timestamp") if episode_meta else None
+        frames = load_video_frames(video_file, from_timestamp, to_timestamp)
 
         policy.reset()
         actions_predicted = []
