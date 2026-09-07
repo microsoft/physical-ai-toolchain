@@ -35,14 +35,6 @@ reason = "Static test-fixture transitive; never installed. Re-evaluate by 2026-0
 
 # === Vulnerability suppressions ===
 
-# torch 2.10.0 — no published fix at scan time. Sibling PR #783 bumps
-# training/il and evaluation to torch 2.11.0; data-management/viewer{,/backend}
-# uv.locks remain on 2.10.0 pending a follow-up bump.
-[[IgnoredVulns]]
-id = "PYSEC-2026-139"
-ignoreUntil = 2026-06-30
-reason = "torch 2.10.0; PR #783 covers training/eval stack. Viewer uv.locks scheduled for follow-up bump."
-
 # docusaurus npm transitives — addressed by sibling PR #782 lockfile refresh.
 [[IgnoredVulns]]
 id = "GHSA-q8mj-m7cp-5q26"

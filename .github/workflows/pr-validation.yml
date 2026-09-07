@@ -23,6 +23,7 @@ jobs:
       training: ${{ steps.filter.outputs.training }}
       rl: ${{ steps.filter.outputs.rl }}
       il: ${{ steps.filter.outputs.il }}
+      evaluation: ${{ steps.filter.outputs.evaluation }}
       dm_tools: ${{ steps.filter.outputs.dm_tools }}
       data_pipeline: ${{ steps.filter.outputs.data_pipeline }}
       inference: ${{ steps.filter.outputs.inference }}
@@ -60,6 +61,7 @@ jobs:
             echo "training=$(match '^training/')"
             echo "rl=$(match '^(training/rl/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
             echo "il=$(match '^(training/il/|shared/ci/|\.github/workflows/smoke-cpu\.yml)')"
+            echo "evaluation=$(match '^(evaluation/|training/il/lerobot/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
             echo "dm_tools=$(match '^data-management/tools/')"
             echo "data_pipeline=$(match '^data-pipeline/capture/')"
             echo "inference=$(match '^fleet-deployment/inference/')"
@@ -82,6 +84,7 @@ jobs:
     with:
       rl: ${{ needs.changes.outputs.rl == 'true' }}
       il: ${{ needs.changes.outputs.il == 'true' }}
+      evaluation: ${{ needs.changes.outputs.evaluation == 'true' }}
       dataviewer: ${{ needs.changes.outputs.dv_backend == 'true' || needs.changes.outputs.dv_frontend == 'true' }}
     permissions:
       contents: read

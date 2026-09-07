@@ -29,6 +29,7 @@ Install a domain's locked dependencies and import it, GPU-free.
 DOMAIN:
     rl            Reinforcement learning (training/rl), Python 3.11
     il            Imitation learning / LeRobot (training/il/lerobot), Python 3.12
+    vla           Vision-language-action / LeRobot (training/vla/lerobot), Python 3.12
     evaluation    Software-in-the-loop evaluation (evaluation), Python 3.12
 
 OPTIONS:
@@ -88,12 +89,17 @@ case "$domain" in
         # auth), so import the module without executing it.
         probe=(-c "import torch, lerobot; import training.il.scripts.lerobot.train")
         ;;
+    vla)
+        project="training/vla/lerobot"
+        py_version="3.12"
+        probe=(-c "import torch, transformers; import lerobot.policies.pi0.configuration_pi0")
+        ;;
     evaluation)
         project="evaluation"
         py_version="3.12"
         probe=(-c "import numpy, torch; import evaluation.sil.policy_evaluation")
         ;;
-    *) fatal "Unknown domain: $domain (expected rl, il, or evaluation)" ;;
+    *) fatal "Unknown domain: $domain (expected rl, il, vla, or evaluation)" ;;
 esac
 
 ensure_uv() {
@@ -122,12 +128,11 @@ smoke_cpu() {
     export VIRTUAL_ENV="$venv"
     export PATH="${venv}/bin:${PATH}"
 
-    # Install the exact committed lock with --no-deps -- re-resolving would
-    # discard the pyproject override-dependencies the lock encodes and fail.
-    # Strip the CUDA runtime wheels (CPU torch needs none); --torch-backend cpu
-    # redirects torch to CPU wheels. pipefail fails the step on a bad export.
+    # Install the committed dependency versions without CUDA runtime packages.
+    # Remove the CUDA local-version suffix so --torch-backend selects CPU wheels.
     uv export --frozen --no-hashes --no-emit-project --project "$project" \
         | grep -vE '^(nvidia-|cuda-)' \
+        | sed -E '/^(torch|torchvision)==/ s/\+cu[0-9]+//' \
         | uv pip install --torch-backend cpu --no-cache-dir --no-deps --requirement -
 
     run_probe "${venv}/bin/python"
@@ -139,30 +144,31 @@ smoke_cpu() {
 smoke_image() {
     section "Runtime-image import smoke: ${domain}"
 
-    local python_exec
-    local -a install_args
-    if [[ "$domain" == "il" ]]; then
+    local python_exec runtime_project="$project"
+    if [[ "$domain" == "il" || "$domain" == "evaluation" ]]; then
         # Published PyTorch images ship Python 3.11; LeRobot needs >= 3.12.
-        # Provision 3.12 in a venv, exactly as the production entry script does.
-        local venv="/tmp/smoke-venv-il"
+        # Provision 3.12 in a venv, exactly as the production entry scripts do.
+        local venv="/tmp/smoke-venv-${domain}"
+        if [[ "$domain" == "evaluation" ]]; then
+            runtime_project="training/il/lerobot"
+        fi
         uv python install "$py_version"
         uv venv --clear --python "$py_version" "$venv"
         export VIRTUAL_ENV="$venv"
         export PATH="${venv}/bin:${PATH}"
         python_exec="${venv}/bin/python"
-        install_args=(--no-cache-dir --no-deps --requirement -)
+        # LeRobot runtime entrypoints install directly from the source-aware lock.
+        uv sync --active --frozen --no-config --no-install-project --project "$runtime_project"
     else
-        # RL / evaluation: the Isaac Lab kit interpreter is the production runtime.
+        # RL: the Isaac Lab kit interpreter is the production runtime.
         python_exec="/isaac-sim/kit/python/bin/python3"
         [[ -x "$python_exec" ]] || python_exec="python3"
         export UV_PYTHON="$python_exec"
-        install_args=(--no-cache-dir --no-deps --system --requirement -)
+        # Mirror production (training/rl/scripts/train.sh): install the committed
+        # lock with --no-deps onto the real interpreter.
+        uv export --frozen --no-hashes --no-emit-project --project "$project" \
+            | uv pip install --no-cache-dir --no-deps --system --requirement -
     fi
-
-    # Mirror production (training/rl/scripts/train.sh): install the committed lock
-    # with --no-deps onto the real interpreter; pipefail fails on a bad export.
-    uv export --frozen --no-hashes --no-emit-project --project "$project" \
-        | uv pip install "${install_args[@]}"
 
     run_probe "$python_exec"
 }

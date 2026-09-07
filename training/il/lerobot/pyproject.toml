@@ -3,14 +3,13 @@ name = "robotics-training-il"
 version = "0.1.0"
 description = "LeRobot workflow runtime dependencies"
 requires-python = ">=3.12"
-# Direct dependencies for the AzureML LeRobot training entrypoint. All versions
-# are pinned exactly because runtime consumers install with `uv pip install
-# --no-deps` from a build-time export of uv.lock; pip's resolver does NOT run in
-# the container. Regenerate the lock after any change here:
+# Direct dependencies for the Azure ML and OSMO LeRobot runtime entrypoints.
+# Consumers install directly from the frozen lock, preserving this resolution
+# and its per-package indexes. Regenerate the lock after any change here:
 #   cd training/il/lerobot
 #   uv lock
 dependencies = [
-    "numpy==2.4.6",
+    "numpy==2.5.2",
     "azure-core==1.41.0",
     "azure-storage-blob==12.30.0",
     "azure-identity==1.25.3",
@@ -24,19 +23,20 @@ dependencies = [
     # marshmallow 4.x removed (e.g. marshmallow.utils.EXCLUDE was relocated).
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
-    "mlflow-skinny==3.14.0",
-    "packaging==26.2",
+    "mlflow-skinny==3.15.2",
+    "packaging==26.3",
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
     "pydantic==2.13.4",
-    "sentry-sdk==2.66.1",
+    "sentry-sdk==2.68.1",
+    "hf-xet==1.6.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
     "pyperclip==1.11.0",
-    "datasets==5.0.0",
-    "pyarrow==25.0.0",
+    "datasets==5.0.1",
+    "pyarrow==25.0.1",
     "matplotlib==3.11.1",
-    "huggingface-hub==1.25.1",
+    "huggingface-hub==1.28.0",
     # `av-dep` rather than `dataset`: the dataset extra requires TorchCodec, which
     # publishes no SBSA CUDA 13 wheel. PyAV also keeps the decoder identical on
     # every target — lerobot.utils.import_utils.get_safe_default_video_backend()
@@ -48,25 +48,25 @@ dependencies = [
     # they must be declared here to enter the lock and the build-time export.
     "pandas==2.3.3",
     "jsonlines==4.0.0",
-    "torch==2.10.0; platform_machine == 'aarch64' or platform_machine == 'arm64'",
-    "torchvision==0.25.0; platform_machine == 'aarch64' or platform_machine == 'arm64'",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.14.0",
-    # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny).
-    "gitpython==3.1.57",
+    # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
+    "gitpython==3.1.60",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
-    # Pin cryptography to 50.0.0, the current release (Dependabot-tracked in the
-    # lerobot-dependencies group). 48.0.1 is the security floor: wheels below it
-    # bundle a vulnerable OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive
-    # via azure-identity, msal, pyjwt, google-auth, and the azure-storage clients.
-    # azureml-mlflow caps cryptography < 49.0.0, so 50.0.0 is also overridden below.
-    "cryptography==50.0.0",
+    # Pin cryptography to 50.0.1 (Dependabot-tracked in the lerobot-dependencies
+    # group). 48.0.1 is the security floor: wheels below it bundle a vulnerable
+    # OpenSSL (GHSA-537c-gmf6-5ccf, high severity). Transitive via azure-identity,
+    # msal, pyjwt, google-auth, and the azure-storage clients. azureml-mlflow caps
+    # cryptography < 49.0.0, so the 50.0.1 pin is also overridden below.
+    "cryptography==50.0.1",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
-    "wrapt==2.2.2",
+    "wrapt==2.3.0",
 ]
 
 [build-system]
@@ -74,7 +74,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# Resolve both the AzureML/OSMO x86_64 target and local NVIDIA Thor systems.
+# Resolve both the Azure ML/OSMO x86_64 target and local NVIDIA Thor systems.
 environments = ["sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]
 # Required for prerelease transitives pulled by the resolved tree, including
 # Azure/OpenTelemetry instrumentation betas, wrapt release candidates, and
@@ -93,32 +93,41 @@ prerelease = "allow"
 # audit every entry against the new release's pyproject so we neither hide a
 # legitimate upper bound nor leave a stale override in place.
 override-dependencies = [
-    # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; we
-    # need 12.30.0 for the AzureCliCredential fix shipped in that release.
+    # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; mirror
+    # the direct 12.30.0 pin.
     "azure-storage-blob==12.30.0",
-    # cryptography: the direct pin (50.0.0) exceeds azureml-mlflow==1.62.0.post5's
-    # cryptography<49.0.0 cap, so resolution fails without this override. Force the
-    # direct pin to win; cryptography keeps a stable API across these releases.
-    "cryptography==50.0.0",
+    # cryptography: the direct 50.0.1 pin exceeds
+    # azureml-mlflow==1.62.0.post5's cryptography<49.0.0 cap; mirror it here.
+    "cryptography==50.0.1",
     # mlflow-skinny: azureml-mlflow==1.62.0.post5 caps at <=3.13.0; mirror the
-    # direct pin to take 3.14.0.
-    "mlflow-skinny==3.14.0",
+    # direct pin to take 3.15.2.
+    "mlflow-skinny==3.15.2",
     # packaging: lerobot==0.6.1 caps below 26.0 and azureml-mlflow caps below
     # 26.x; mirror the direct pin.
-    "packaging==26.2",
-    # numpy: lerobot==0.6.1 caps below 2.3.0; retain 2.4.6 for the broader runtime stack.
-    "numpy==2.4.6",
-    # datasets: lerobot==0.6.1 caps below 5.0.0; 5.0.0 is needed for Parquet
-    # performance improvements and compatibility with newer pyarrow.
-    "datasets==5.0.0",
+    "packaging==26.3",
+    # numpy: lerobot==0.6.1 caps below 2.3.0; mirror the direct 2.5.2 pin.
+    "numpy==2.5.2",
+    # datasets: lerobot==0.6.1 caps below 5.0.0; 5.0.1 fixes CVE-2026-66007.
+    "datasets==5.0.1",
 ]
 package = false
 
 [[tool.uv.index]]
-name = "jetson-ai-lab-cu130"
-url = "https://pypi.jetson-ai-lab.io/sbsa/cu130"
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
-torch = [{ index = "jetson-ai-lab-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" }]
-torchvision = [{ index = "jetson-ai-lab-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" }]
+torch = [
+    { index = "pytorch-cu128", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
+    { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
+]
+torchvision = [
+    { index = "pytorch-cu128", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
+    { index = "pytorch-cu130", marker = "platform_machine == 'aarch64' or platform_machine == 'arm64'" },
+]
