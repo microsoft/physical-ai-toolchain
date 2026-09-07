@@ -9,55 +9,33 @@
  */
 
 // ============================================================
-// Azure Machine Learning Workspace (via azapi)
+// Azure Machine Learning Workspace
 // ============================================================
-// Using azapi_resource because azurerm does not expose systemDatastoresAuthMode.
-// This property is required when storage account has shared_access_key_enabled = false.
 
-resource "azapi_resource" "ml_workspace" {
-  type      = "Microsoft.MachineLearningServices/workspaces@2024-04-01"
-  name      = "mlw-${local.resource_name_suffix}${var.workspace_name_suffix}"
-  location  = var.resource_group.location
-  parent_id = var.resource_group.id
-
-  // Disable schema validation because azapi provider schema doesn't include
-  // systemDatastoresAuthMode property, but it's valid per Microsoft ARM docs.
-  schema_validation_enabled = false
+resource "azurerm_machine_learning_workspace" "main" {
+  # checkov:skip=CKV_AZURE_144:Public access is configurable for dev/test and disabled by default.
+  # checkov:skip=CKV2_AZURE_49:Public access is configurable for dev/test and disabled by default.
+  # checkov:skip=CKV2_AZURE_50:Linked storage public access is configurable and disabled by default.
+  name                          = "mlw-${local.resource_name_suffix}${var.workspace_name_suffix}"
+  location                      = var.resource_group.location
+  resource_group_name           = var.resource_group.name
+  application_insights_id       = azurerm_application_insights.main.id
+  key_vault_id                  = azurerm_key_vault.main.id
+  storage_account_id            = azurerm_storage_account.main.id
+  container_registry_id         = azurerm_container_registry.main.id
+  public_network_access_enabled = var.should_enable_public_network_access
+  v1_legacy_mode_enabled        = false
+  storage_account_access_type   = var.should_enable_storage_shared_access_key ? "AccessKey" : "Identity"
+  sku_name                      = "Basic"
+  kind                          = "Default"
+  friendly_name                 = "mlw-${local.resource_name_suffix}"
 
   identity {
     type = "SystemAssigned"
   }
 
-  body = {
-    sku = {
-      name = "Basic"
-      tier = "Basic"
-    }
-    kind = "Default"
-    properties = {
-      friendlyName             = "mlw-${local.resource_name_suffix}"
-      keyVault                 = azurerm_key_vault.main.id
-      storageAccount           = azurerm_storage_account.main.id
-      containerRegistry        = azurerm_container_registry.main.id
-      applicationInsights      = azurerm_application_insights.main.id
-      publicNetworkAccess      = var.should_enable_public_network_access ? "Enabled" : "Disabled"
-      v1LegacyMode             = false
-      systemDatastoresAuthMode = var.should_enable_storage_shared_access_key ? "accessKey" : "identity"
-      managedNetwork = {
-        isolationMode = var.aml_managed_network_isolation_mode
-      }
-    }
-  }
-
-  response_export_values = ["properties.workspaceId", "identity.principalId"]
-
-  lifecycle {
-    ignore_changes = [
-      // ARM API returns resource provider segments with varying casing
-      // (e.g. Microsoft.insights vs Microsoft.Insights) causing perpetual drift
-      body.properties.applicationInsights,
-      body.properties.keyVault,
-    ]
+  managed_network {
+    isolation_mode = var.aml_managed_network_isolation_mode
   }
 }
 
@@ -75,7 +53,7 @@ resource "azurerm_private_endpoint" "azureml_api" {
 
   private_service_connection {
     name                           = "psc-ml-api-${local.resource_name_suffix}"
-    private_connection_resource_id = azapi_resource.ml_workspace.id
+    private_connection_resource_id = azurerm_machine_learning_workspace.main.id
     subresource_names              = ["amlworkspace"]
     is_manual_connection           = false
   }
@@ -93,7 +71,7 @@ resource "azurerm_monitor_diagnostic_setting" "ml_workspace_logs" {
   count = var.should_enable_aml_diagnostic_logs ? 1 : 0
 
   name                       = "diag-mlw-${local.resource_name_suffix}"
-  target_resource_id         = azapi_resource.ml_workspace.id
+  target_resource_id         = azurerm_machine_learning_workspace.main.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
 
   enabled_log {
@@ -133,7 +111,7 @@ resource "azurerm_machine_learning_compute_cluster" "gpu" {
   for_each = local.aml_compute_clusters_normalized
 
   name                          = each.key
-  machine_learning_workspace_id = azapi_resource.ml_workspace.id
+  machine_learning_workspace_id = azurerm_machine_learning_workspace.main.id
   location                      = each.value.location
   vm_size                       = each.value.vm_size
   vm_priority                   = each.value.vm_priority
