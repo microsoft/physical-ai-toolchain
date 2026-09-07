@@ -11,7 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy==2.5.2",
     "azure-core==1.41.0",
-    "azure-storage-blob==12.30.0",
+    "azure-storage-blob==12.30.1",
     "azure-identity==1.25.3",
     "azure-ai-ml==1.34.1",
     "azureml-mlflow==1.62.0.post5",
@@ -27,7 +27,7 @@ dependencies = [
     "packaging==26.3",
     # Global prerelease resolution would otherwise select pydantic and sentry-sdk
     # alpha releases; pin stable versions unless a direct dependency requires them.
-    "pydantic==2.13.4",
+    "pydantic==2.13.5",
     "sentry-sdk==2.68.1",
     "hf-xet==1.6.0",
     "psutil==7.2.2",
@@ -36,7 +36,7 @@ dependencies = [
     "datasets==5.0.1",
     "pyarrow==25.0.1",
     "matplotlib==3.11.1",
-    "huggingface-hub==1.28.0",
+    "huggingface-hub==1.29.0",
     # `av-dep` rather than `dataset`: the dataset extra requires TorchCodec, which
     # publishes no SBSA CUDA 13 wheel. PyAV also keeps the decoder identical on
     # every target — lerobot.utils.import_utils.get_safe_default_video_backend()
@@ -55,7 +55,7 @@ dependencies = [
     # would track lerobot's transitive range and could drift on dependency bumps.
     "accelerate==1.14.0",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via mlflow-skinny and wandb).
-    "gitpython==3.1.60",
+    "gitpython==3.1.61",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
     "urllib3==2.7.0",
     # Pin cryptography to 50.0.1 (Dependabot-tracked in the lerobot-dependencies
@@ -66,7 +66,7 @@ dependencies = [
     "cryptography==50.0.1",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
-    "wrapt==2.3.0",
+    "wrapt==2.4.0",
 ]
 
 [build-system]
@@ -95,7 +95,7 @@ prerelease = "allow"
 override-dependencies = [
     # azure-storage-blob: azureml-mlflow==1.62.0.post5 caps at <=12.27.1; mirror
     # the direct 12.30.0 pin.
-    "azure-storage-blob==12.30.0",
+    "azure-storage-blob==12.30.1",
     # cryptography: the direct 50.0.1 pin exceeds
     # azureml-mlflow==1.62.0.post5's cryptography<49.0.0 cap; mirror it here.
     "cryptography==50.0.1",
