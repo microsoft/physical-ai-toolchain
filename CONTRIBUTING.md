@@ -145,6 +145,7 @@ Run these commands to validate changes before submitting a PR:
 ```bash
 npm run lint:md        # Markdownlint
 npm run lint:links     # Markdown link validation
+npm run lint:toml      # Taplo format check
 npm run lint:vuln      # OSV-Scanner v2.3.8 dependency vulnerability scan
 npm run spell-check    # cspell
 npm run test:tf        # Terraform module tests (no Azure credentials required)
@@ -165,6 +166,7 @@ All CI linters enforce warnings-as-errors. PRs that introduce new warnings will 
 | Go (lint:go)          | Errors block      | .golangci.yml                                     |
 | ShellCheck (lint:sh)  | Warnings + errors | .shellcheckrc                                     |
 | Python (lint:py)      | Errors block      | pyproject.toml [tool.ruff]                        |
+| TOML (lint:toml)      | Formatting blocks | taplo.toml                                        |
 | uv lock (lint:uvlock) | Drift blocks      | scripts/linting/Invoke-UvLockConsistencyCheck.ps1 |
 | Vulns (lint:vuln)     | Errors block      | osv-scanner.toml                                  |
 | Link check            | Errors block      | .markdownlint-cli2.jsonc                          |
