@@ -228,9 +228,7 @@ class TestMain:
         ckpt = _env_vars / "checkpoint-1"
         ckpt.mkdir()
         (ckpt / "model.bin").write_bytes(b"x")
-        _fake_registry_client.create_registered_model.side_effect = _FakeMlflowException(
-            "RESOURCE_ALREADY_EXISTS"
-        )
+        _fake_registry_client.create_registered_model.side_effect = _FakeMlflowException("RESOURCE_ALREADY_EXISTS")
         monkeypatch.setattr(_MOD, "mlflow", _fake_mlflow)
 
         assert _MOD.main() == 0

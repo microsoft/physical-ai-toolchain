@@ -163,8 +163,7 @@ def assert_registered_model_has_artifacts(
         )
         if result.returncode != 0:
             raise AssertionError(
-                f"Failed to download AzureML model {model.name!r}:{model.version}\n\n"
-                f"{format_command_failure(result)}"
+                f"Failed to download AzureML model {model.name!r}:{model.version}\n\n{format_command_failure(result)}"
             )
         artifact_files = [path for path in Path(download_root).rglob("*") if path.is_file()]
         if not artifact_files:

@@ -85,6 +85,7 @@ def test_submit_osmo_replay_output_fixture_forwards_safe_values(
     tmp_path: Path,
 ) -> None:
     captured_args: list[str] = []
+
     def fake_run_command(
         args: list[str], *, cwd: Path, input_text: str | None = None
     ) -> subprocess.CompletedProcess[str]:
