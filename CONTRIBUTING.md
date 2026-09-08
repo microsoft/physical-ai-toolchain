@@ -2,7 +2,7 @@
 title: Contributing
 description: How to contribute to the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-01
+ms.date: 2026-09-08
 ms.topic: how-to
 keywords:
   - contributing
