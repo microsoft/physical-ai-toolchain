@@ -38,9 +38,9 @@
   },
   "devDependencies": {
     "@taplo/cli": "0.7.0",
-    "cspell": "10.1.0",
+    "cspell": "10.2.0",
     "husky": "9.1.7",
-    "lint-staged": "17.3.0",
+    "lint-staged": "17.4.1",
     "markdown-link-check": "3.15.0",
     "markdown-table-formatter": "1.7.0",
     "markdownlint-cli2": "0.23.2"
