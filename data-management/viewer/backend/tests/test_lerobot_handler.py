@@ -694,6 +694,14 @@ class TestResolveFfmpeg:
     IMAGEIO_BINARY = "/opt/imageio_ffmpeg/ffmpeg"
     SYSTEM_BINARY = "/usr/bin/ffmpeg"
 
+    def test_declared_imageio_ffmpeg_binary_is_available(self):
+        import imageio_ffmpeg
+
+        binary = Path(imageio_ffmpeg.get_ffmpeg_exe())
+
+        assert binary.is_file()
+        assert LeRobotFormatHandler._resolve_ffmpeg() == str(binary)
+
     def test_prefers_imageio_ffmpeg(self, monkeypatch):
         """When imageio-ffmpeg is importable, its binary path wins."""
         import sys

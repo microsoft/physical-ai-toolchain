@@ -15,6 +15,7 @@ dependencies = [
     "pyarrow==25.0.0",
     "Pillow==12.2.0",
     "av==18.0.0",
+    "imageio-ffmpeg==0.6.0",
 ]
 
 [project.optional-dependencies]
