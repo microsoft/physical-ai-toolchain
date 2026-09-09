@@ -14,16 +14,16 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.165.10",
+    "hypothesis==6.167.1",
     "numpy==2.5.2",
-    "ruff==0.16.4",
+    "ruff==0.16.5",
     "pyarrow==25.0.1",
     "imageio==2.37.4",
     "imageio-ffmpeg==0.6.0",
     "pytest==9.1.1",
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
-    "pydantic==2.13.4",
+    "pydantic==2.13.5",
     "ipykernel==7.3.0",
     "ipywidgets==8.1.9",
     "tqdm==4.70.0",
@@ -35,15 +35,15 @@ dev = [
 fuzz = ["atheris==3.1.0"]
 
 [tool.uv]
-package = false
 constraint-dependencies = [
-    "pygments==2.20.0",
+    "pygments==2.21.0",
 ]
 override-dependencies = [
     # cryptography: azureml-mlflow==1.62.0.post5 caps cryptography<49.0.0;
-    # override to the 48.0.1 release that patches GHSA-537c-gmf6-5ccf.
-    "cryptography==48.0.1",
+    # 50.0.1 remains above the 48.0.1 security floor for GHSA-537c-gmf6-5ccf.
+    "cryptography==50.0.1",
 ]
+package = false
 
 [tool.pytest.ini_options]
 testpaths = [

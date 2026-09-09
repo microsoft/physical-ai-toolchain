@@ -30,8 +30,9 @@ mounted at /workspace. Requires Docker.
 DOMAIN:
     rl            Reinforcement learning (training/rl)
     il            Imitation learning / LeRobot (training/il/lerobot)
-    vla           Vision-language-action / LeRobot (training/vla/lerobot) -- --mode cpu only
+    vla           Vision-language-action / LeRobot (training/vla/lerobot)
     evaluation    Software-in-the-loop evaluation (evaluation)
+    vlm-judge     VLM-as-judge optional runtime (evaluation/vlm_judge) -- --mode cpu only
     osmo-replay   OSMO-to-AzureML replay mirror (workflows/osmo)
 
 OPTIONS:
@@ -66,8 +67,8 @@ done
 
 if [[ "$mode" == "cpu" ]]; then
     case "$domain" in
-        rl | il | vla | evaluation | osmo-replay) image="$CPU_IMAGE" ;;
-        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, or osmo-replay)" ;;
+        rl | il | vla | evaluation | vlm-judge | osmo-replay) image="$CPU_IMAGE" ;;
+        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, or osmo-replay)" ;;
     esac
 else
     case "$domain" in
@@ -87,8 +88,9 @@ else
                 "$REPO_ROOT/$OSMO_REPLAY_WORKFLOW" | awk '{print $2}')"
             [[ -n "$image" ]] || fatal "Could not resolve OSMO replay image from $OSMO_REPLAY_WORKFLOW"
             ;;
-        vla) fatal "vla has no runtime-image smoke; use --mode cpu" ;;
-        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, or osmo-replay)" ;;
+        vla) image="$DEFAULT_LEROBOT_TRAIN_IMAGE" ;;
+        vlm-judge) fatal "vlm-judge has no runtime-image smoke; use --mode cpu" ;;
+        *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, or osmo-replay)" ;;
     esac
 fi
 

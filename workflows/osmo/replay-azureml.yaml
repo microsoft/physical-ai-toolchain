@@ -32,7 +32,7 @@ default-values:
   cpu: 4
   memory: 8Gi
   # Pinned by @sha256 digest for reproducibility; refresh via scripts/update-image-digests.sh.
-  image: python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6
+  image: python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
   aml_mirror_b64: ""
   aml_mirror_requirements_b64: ""
   training_framework: "lerobot"

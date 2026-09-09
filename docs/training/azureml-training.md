@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Azure ML Training Workflows
 description: Submit Isaac Lab and LeRobot training jobs to Azure Machine Learning
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-02
+ms.date: 2026-09-07
 ms.topic: how-to
 keywords:
   - azure ml
@@ -48,7 +48,7 @@ Submit Isaac Lab reinforcement learning and LeRobot behavioral cloning training 
 | `dataset_repo_id` | (required)                                       | HuggingFace dataset repository            |
 | `policy_type`     | `act`                                            | Policy architecture: `act`, `diffusion`   |
 | `job_name`        | `lerobot-act-training`                           | Unique job identifier                     |
-| `image`           | `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime` | Container image                           |
+| `image`           | `pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime` | Container image                           |
 | `save_freq`       | `5000`                                           | Checkpoint save frequency                 |
 | `instance_type`   | `gpuspot`                                        | Pod size (AzureML-on-Kubernetes only)     |
 | `mixed_precision` | `no`                                             | Accelerate mixed precision (no/fp16/bf16) |

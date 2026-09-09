@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import tempfile
 import time
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.e2e._aml import AzureMLJob, AzureMLWorkspace
@@ -243,7 +245,9 @@ def assert_osmo_replay_has_mlflow_run(
     model_name: str,
     aml_workspace: AzureMLWorkspace,
 ) -> None:
-    """Assert that replay created the expected tagged MLflow run."""
+    """Assert that replay created a tagged MLflow run with uploaded model artifacts."""
+    import mlflow
+
     client = _mlflow_client(aml_workspace)
     escaped_source_run_id = source_run_id.replace("'", "\\'")
     runs = _search_experiment_runs_with_retry(
@@ -262,7 +266,21 @@ def assert_osmo_replay_has_mlflow_run(
     if run.data.tags.get("osmo.replay") != "true":
         raise AssertionError(f"MLflow replay run {run.info.run_id!r} did not include osmo.replay=true")
 
-    log_e2e(f"OSMO replay MLflow run passed: run_id={run.info.run_id}, source_run_id={source_run_id}")
+    with tempfile.TemporaryDirectory(prefix="e2e-replay-artifacts-") as download_root:
+        downloaded_path = Path(
+            mlflow.artifacts.download_artifacts(
+                artifact_uri=f"{run.info.artifact_uri.rstrip('/')}/model",
+                dst_path=download_root,
+            )
+        )
+        artifact_files = [path for path in downloaded_path.rglob("*") if path.is_file()]
+        if not artifact_files:
+            raise AssertionError(f"MLflow replay run {run.info.run_id!r} contained no model artifacts")
+
+    log_e2e(
+        f"OSMO replay MLflow artifacts passed: run_id={run.info.run_id}, "
+        f"source_run_id={source_run_id}, artifacts={len(artifact_files)}"
+    )
 
 
 _LEROBOT_EVAL_REQUIRED_METRICS = (

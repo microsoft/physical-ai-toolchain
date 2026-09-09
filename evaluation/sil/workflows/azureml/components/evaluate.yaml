@@ -58,7 +58,7 @@ environment:
   # scripts/lib/common.sh (both refreshed by scripts/update-image-digests.sh).
   # An inline image yields an anonymous, content-hashed environment, so a base
   # image change never collides with an immutable registered environment version.
-  image: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be
+  image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
 
 # Bridge pipeline-mounted inputs/output into the env-var ABI run_evaluation.py
 # expects:
