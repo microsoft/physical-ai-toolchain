@@ -40,7 +40,7 @@ jobs:
           fi
           # Exit 2 means drift was reported through SARIF and remains non-gating.
           if [[ "$status" -eq 2 ]]; then
-            echo "::warning::Container image digest drift detected; review the uploaded SARIF findings."
+            echo "::warning::Image digest or AzureML environment drift detected; review the uploaded SARIF findings."
           fi
 
       - name: Upload SARIF to Security tab

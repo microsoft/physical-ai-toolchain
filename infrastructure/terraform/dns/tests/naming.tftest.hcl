@@ -38,6 +38,14 @@ run "vnet_link_name" {
 run "dns_zone_and_record_names" {
   command = plan
 
+  override_resource {
+    target          = azurerm_private_dns_zone.osmo
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/privateDnsZones/osmo.local"
+    }
+  }
+
   variables {
     resource_prefix      = "test"
     environment          = "dev"
@@ -53,6 +61,16 @@ run "dns_zone_and_record_names" {
   assert {
     condition     = azurerm_private_dns_a_record.osmo.name == "dev"
     error_message = "A record name must match osmo_hostname default"
+  }
+
+  assert {
+    condition     = azurerm_private_dns_zone_virtual_network_link.osmo.private_dns_zone_id == azurerm_private_dns_zone.osmo.id
+    error_message = "VNet link must reference the OSMO private DNS zone ID"
+  }
+
+  assert {
+    condition     = azurerm_private_dns_a_record.osmo.private_dns_zone_id == azurerm_private_dns_zone.osmo.id
+    error_message = "A record must reference the OSMO private DNS zone ID"
   }
 
   assert {

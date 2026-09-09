@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import tempfile
 import time
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tests.e2e._aml import AzureMLJob, AzureMLWorkspace
@@ -60,15 +62,17 @@ def _tracking_uri(subscription_id: str, resource_group: str, workspace_name: str
 
 
 def _mlflow_client(aml_workspace: AzureMLWorkspace) -> MlflowClient:
+    import mlflow
     from mlflow.tracking import MlflowClient
 
-    return MlflowClient(
-        tracking_uri=_tracking_uri(
-            aml_workspace.subscription_id,
-            aml_workspace.resource_group,
-            aml_workspace.workspace_name,
-        )
+    tracking_uri = _tracking_uri(
+        aml_workspace.subscription_id,
+        aml_workspace.resource_group,
+        aml_workspace.workspace_name,
     )
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_registry_uri(tracking_uri)
+    return MlflowClient(tracking_uri=tracking_uri, registry_uri=tracking_uri)
 
 
 _MLFLOW_SEARCH_TIMEOUT_SECONDS = 300
@@ -232,6 +236,51 @@ def assert_osmo_workflow_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspa
     log_e2e(
         f"OSMO MLflow tracking passed: run_id={run_id} metrics=[{rendered_metrics}] "
         f"params=[{rendered_params}] tags=[{rendered_tags}]"
+    )
+
+
+def assert_osmo_replay_has_mlflow_run(
+    *,
+    source_run_id: str,
+    model_name: str,
+    aml_workspace: AzureMLWorkspace,
+) -> None:
+    """Assert that replay created a tagged MLflow run with uploaded model artifacts."""
+    import mlflow
+
+    client = _mlflow_client(aml_workspace)
+    escaped_source_run_id = source_run_id.replace("'", "\\'")
+    runs = _search_experiment_runs_with_retry(
+        client,
+        model_name,
+        filter_string=f"tags.osmo.replay_source = '{escaped_source_run_id}'",
+        max_results=2,
+        criteria=f"replay source {source_run_id!r}",
+    )
+    if len(runs) > 1:
+        raise AssertionError(
+            f"Multiple MLflow runs were found in experiment {model_name!r} for replay source {source_run_id!r}"
+        )
+
+    run = runs[0]
+    if run.data.tags.get("osmo.replay") != "true":
+        raise AssertionError(f"MLflow replay run {run.info.run_id!r} did not include osmo.replay=true")
+
+    with tempfile.TemporaryDirectory(prefix="e2e-replay-artifacts-") as download_root:
+        run = client.get_run(run.info.run_id)
+        downloaded_path = Path(
+            mlflow.artifacts.download_artifacts(
+                artifact_uri=f"{run.info.artifact_uri.rstrip('/')}/model",
+                dst_path=download_root,
+            )
+        )
+        artifact_files = [path for path in downloaded_path.rglob("*") if path.is_file()]
+        if not artifact_files:
+            raise AssertionError(f"MLflow replay run {run.info.run_id!r} contained no model artifacts")
+
+    log_e2e(
+        f"OSMO replay MLflow artifacts passed: run_id={run.info.run_id}, "
+        f"source_run_id={source_run_id}, artifacts={len(artifact_files)}"
     )
 
 

@@ -30,26 +30,5 @@ name = "idna"
 version = "3.9.0"
 ecosystem = "PyPI"
 vulnerability.ignore = true
-effectiveUntil = 2026-06-30
-reason = "Static test-fixture transitive; never installed. Re-evaluate by 2026-06-30 or refresh fixtures."
-
-# === Vulnerability suppressions ===
-
-# torch 2.10.0 — no published fix at scan time. Sibling PR #783 bumps
-# training/il and evaluation to torch 2.11.0; data-management/viewer{,/backend}
-# uv.locks remain on 2.10.0 pending a follow-up bump.
-[[IgnoredVulns]]
-id = "PYSEC-2026-139"
-ignoreUntil = 2026-06-30
-reason = "torch 2.10.0; PR #783 covers training/eval stack. Viewer uv.locks scheduled for follow-up bump."
-
-# docusaurus npm transitives — addressed by sibling PR #782 lockfile refresh.
-[[IgnoredVulns]]
-id = "GHSA-q8mj-m7cp-5q26"
-ignoreUntil = 2026-06-30
-reason = "qs < 6.15.2 transitive in docs/docusaurus/package-lock.json; refresh tracked in PR #782."
-
-[[IgnoredVulns]]
-id = "GHSA-w5hq-g745-h8pq"
-ignoreUntil = 2026-06-30
-reason = "uuid < 11.1.1 transitive in docs/docusaurus/package-lock.json; refresh tracked in PR #782."
+effectiveUntil = 2026-12-31
+reason = "Static test-fixture transitive; never installed. Re-evaluate by 2026-12-31 or refresh fixtures."

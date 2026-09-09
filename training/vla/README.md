@@ -15,7 +15,7 @@ vla/
 │           └── README.md                       # How to adapt for a custom embodiment
 ├── lerobot/
 │   ├── pyproject.toml                           # lerobot[dataset,pi] dependencies and overrides
-│   └── uv.lock                                  # Reproducible Linux x86_64 dependency lock
+│   └── uv.lock                                  # Reproducible Linux x86_64 and ARM64 dependency lock
 ├── scripts/
 │   ├── groot/
 │   │   ├── osmo-train-entry.sh                  # Container entry: env setup + fine-tune

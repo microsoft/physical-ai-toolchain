@@ -13,6 +13,14 @@ override_data {
   }
 }
 
+override_resource {
+  target          = azurerm_machine_learning_workspace.main
+  override_during = plan
+  values = {
+    id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.MachineLearningServices/workspaces/mlw-test-dev-001"
+  }
+}
+
 variables {
   current_user_oid                   = "00000000-0000-0000-0000-000000000001"
   aml_managed_network_isolation_mode = "Disabled"
@@ -126,6 +134,11 @@ run "private_endpoints_enabled" {
   assert {
     condition     = length(azurerm_private_endpoint.azureml_api) == 1
     error_message = "ML API PE should be created when PE is enabled"
+  }
+
+  assert {
+    condition     = one(azurerm_private_endpoint.azureml_api[0].private_service_connection).private_connection_resource_id == azurerm_machine_learning_workspace.main.id
+    error_message = "ML API PE should target the AzureML workspace"
   }
 }
 
@@ -378,6 +391,14 @@ run "ampls_dce_pe_missing_dce" {
 run "postgresql_enabled" {
   command = plan
 
+  override_resource {
+    target          = azurerm_private_dns_zone.postgresql[0]
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/privateDnsZones/privatelink.postgres.database.azure.com"
+    }
+  }
+
   variables {
     resource_prefix          = run.setup.resource_prefix
     environment              = run.setup.environment
@@ -396,6 +417,11 @@ run "postgresql_enabled" {
   assert {
     condition     = length(random_password.postgresql) == 1
     error_message = "PostgreSQL random password should be created when PostgreSQL is enabled"
+  }
+
+  assert {
+    condition     = azurerm_private_dns_zone_virtual_network_link.postgresql[0].private_dns_zone_id == azurerm_private_dns_zone.postgresql[0].id
+    error_message = "PostgreSQL VNet link must reference its private DNS zone ID"
   }
 }
 
@@ -503,6 +529,14 @@ run "redis_disabled" {
 run "redis_pe_dns" {
   command = plan
 
+  override_resource {
+    target          = azurerm_private_dns_zone.redis[0]
+    override_during = plan
+    values = {
+      id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.Network/privateDnsZones/privatelink.redis.azure.net"
+    }
+  }
+
   variables {
     resource_prefix                = run.setup.resource_prefix
     environment                    = run.setup.environment
@@ -522,6 +556,11 @@ run "redis_pe_dns" {
   assert {
     condition     = length(azurerm_private_endpoint.redis) == 1
     error_message = "Redis PE should be created when Redis and PE are enabled"
+  }
+
+  assert {
+    condition     = azurerm_private_dns_zone_virtual_network_link.redis[0].private_dns_zone_id == azurerm_private_dns_zone.redis[0].id
+    error_message = "Redis VNet link must reference its private DNS zone ID"
   }
 }
 
@@ -581,6 +620,11 @@ run "osmo_identity_enabled" {
     condition     = length(azurerm_role_assignment.osmo_kv_secrets_user) == 1
     error_message = "OSMO KV secrets user role assignment should be created when OSMO identity is enabled"
   }
+
+  assert {
+    condition     = azurerm_role_assignment.osmo_ml_data_scientist[0].scope == azurerm_machine_learning_workspace.main.id
+    error_message = "OSMO AzureML role assignment should target the AzureML workspace"
+  }
 }
 
 run "osmo_identity_disabled" {
@@ -632,6 +676,11 @@ run "aml_diagnostic_logs_enabled" {
   assert {
     condition     = one(azurerm_monitor_diagnostic_setting.ml_workspace_logs[0].enabled_log).category_group == "allLogs"
     error_message = "AML diagnostic setting should enable all AML log categories"
+  }
+
+  assert {
+    condition     = azurerm_monitor_diagnostic_setting.ml_workspace_logs[0].target_resource_id == azurerm_machine_learning_workspace.main.id
+    error_message = "AML diagnostic setting should target the AzureML workspace"
   }
 }
 
@@ -722,6 +771,11 @@ run "aml_compute_one_cluster" {
   assert {
     condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].location == run.setup.location
     error_message = "AML compute cluster should inherit the workspace location when cluster location is omitted"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_compute_cluster.gpu["gpu-cluster"].machine_learning_workspace_id == azurerm_machine_learning_workspace.main.id
+    error_message = "AML compute cluster should target the AzureML workspace"
   }
 }
 
@@ -897,7 +951,7 @@ run "aml_compute_disabled_managed_network_uses_custom_subnet" {
   }
 
   assert {
-    condition     = azapi_resource.ml_workspace.body.properties.managedNetwork.isolationMode == "Disabled"
+    condition     = one(azurerm_machine_learning_workspace.main.managed_network).isolation_mode == "Disabled"
     error_message = "AML workspace managed network isolation mode should be disabled"
   }
 
@@ -936,7 +990,7 @@ run "aml_compute_managed_network_without_custom_subnet" {
   }
 
   assert {
-    condition     = azapi_resource.ml_workspace.body.properties.managedNetwork.isolationMode == "AllowOnlyApprovedOutbound"
+    condition     = one(azurerm_machine_learning_workspace.main.managed_network).isolation_mode == "AllowOnlyApprovedOutbound"
     error_message = "AML workspace should use the configured managed network isolation mode"
   }
 
@@ -948,6 +1002,25 @@ run "aml_compute_managed_network_without_custom_subnet" {
   assert {
     condition     = local.should_attach_aml_compute_to_customer_subnet == false
     error_message = "AML compute should not attach to a customer subnet when managed network isolation is enabled"
+  }
+}
+
+run "aml_workspace_allow_internet_outbound" {
+  command = plan
+
+  variables {
+    resource_prefix                    = run.setup.resource_prefix
+    environment                        = run.setup.environment
+    instance                           = run.setup.instance
+    location                           = run.setup.location
+    resource_group                     = run.setup.resource_group
+    current_user_oid                   = run.setup.current_user_oid
+    aml_managed_network_isolation_mode = "AllowInternetOutbound"
+  }
+
+  assert {
+    condition     = one(azurerm_machine_learning_workspace.main.managed_network).isolation_mode == "AllowInternetOutbound"
+    error_message = "AML workspace should use internet outbound managed network isolation when configured"
   }
 }
 

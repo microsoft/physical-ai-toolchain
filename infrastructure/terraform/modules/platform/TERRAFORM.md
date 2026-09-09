@@ -1,8 +1,8 @@
 ---
 title: Platform Module
-description: Deploys shared Azure infrastructure services for robotics ML workloads. Resources include: networking, DNS zones, security, observability, ACR, storage, ML workspace. Optional: PostgreSQL and Redis for OSMO workloads.
+description: "Deploys shared Azure infrastructure services for robotics ML workloads. Resources include: networking, DNS zones, security, observability, ACR, storage, ML workspace. Optional: PostgreSQL and Redis for OSMO workloads."
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-03
+ms.date: 2026-09-07
 ms.topic: reference
 ---
 
@@ -13,27 +13,26 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 
 ## Requirements
 
-| Name      | Version            |
-|-----------|--------------------|
-| terraform | >= 1.9.8, < 2.0    |
-| azapi     | >= 2.3.0           |
-| azuread   | >= 3.0.2           |
-| azurerm   | >= 4.51.0, < 5.0.0 |
-| random    | >= 3.6.0           |
+| Name      | Version           |
+|-----------|-------------------|
+| terraform | >= 1.9.8, < 2.0   |
+| azapi     | >= 2.3.0          |
+| azuread   | >= 3.0.2          |
+| azurerm   | >= 5.1.0, < 5.4.0 |
+| random    | >= 3.6.0          |
 
 ## Providers
 
-| Name    | Version            |
-|---------|--------------------|
-| azapi   | >= 2.3.0           |
-| azurerm | >= 4.51.0, < 5.0.0 |
-| random  | >= 3.6.0           |
+| Name    | Version           |
+|---------|-------------------|
+| azapi   | >= 2.3.0          |
+| azurerm | >= 5.1.0, < 5.4.0 |
+| random  | >= 3.6.0          |
 
 ## Resources
 
 | Name                                                                                                                                                                                              | Type        |
 |---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|
-| [azapi_resource.ml_workspace](https://registry.terraform.io/providers/Azure/azapi/latest/docs/resources/resource)                                                                                 | resource    |
 | [azapi_resource.osmo_admin_password](https://registry.terraform.io/providers/Azure/azapi/latest/docs/resources/resource)                                                                          | resource    |
 | [azapi_resource.postgresql_password](https://registry.terraform.io/providers/Azure/azapi/latest/docs/resources/resource)                                                                          | resource    |
 | [azurerm_application_insights.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/application_insights)                                                         | resource    |
@@ -43,6 +42,7 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 | [azurerm_key_vault_secret.redis_primary_key](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault_secret)                                                    | resource    |
 | [azurerm_log_analytics_workspace.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/log_analytics_workspace)                                                   | resource    |
 | [azurerm_machine_learning_compute_cluster.gpu](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/machine_learning_compute_cluster)                                  | resource    |
+| [azurerm_machine_learning_workspace.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/machine_learning_workspace)                                             | resource    |
 | [azurerm_managed_redis.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/managed_redis)                                                                       | resource    |
 | [azurerm_monitor_data_collection_endpoint.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/monitor_data_collection_endpoint)                                 | resource    |
 | [azurerm_monitor_diagnostic_setting.ml_workspace_logs](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/monitor_diagnostic_setting)                                | resource    |

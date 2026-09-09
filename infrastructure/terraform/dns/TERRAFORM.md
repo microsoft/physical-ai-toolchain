@@ -1,8 +1,8 @@
 ---
 title: Private DNS Zone for OSMO UI Service
-description: Creates a private DNS zone for internal resolution of the OSMO UI service running on an internal LoadBalancer within the AKS cluster.
+description: "Creates a private DNS zone for internal resolution of the OSMO UI service running on an internal LoadBalancer within the AKS cluster."
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-03
+ms.date: 2026-08-31
 ms.topic: reference
 ---
 
@@ -12,16 +12,16 @@ running on an internal LoadBalancer within the AKS cluster.
 
 ## Requirements
 
-| Name      | Version            |
-|-----------|--------------------|
-| terraform | >= 1.9.8, < 2.0    |
-| azurerm   | >= 4.51.0, < 5.0.0 |
+| Name      | Version           |
+|-----------|-------------------|
+| terraform | >= 1.9.8, < 2.0   |
+| azurerm   | >= 5.1.0, < 5.4.0 |
 
 ## Providers
 
-| Name    | Version            |
-|---------|--------------------|
-| azurerm | >= 4.51.0, < 5.0.0 |
+| Name    | Version           |
+|---------|-------------------|
+| azurerm | >= 5.1.0, < 5.4.0 |
 
 ## Resources
 

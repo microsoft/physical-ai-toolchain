@@ -16,9 +16,9 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../..
 # shellcheck source=../../scripts/lib/common.sh
 source "$REPO_ROOT/scripts/lib/common.sh"
 
-# Pinned uv for in-container bootstrap, mirroring training/rl/scripts/train.sh.
-UV_VERSION="0.10.9"
-UV_SHA256="20d79708222611fa540b5c9ed84f352bcd3937740e51aacc0f8b15b271c57594"
+# Pinned uv for in-container bootstrap, mirroring training/rl/scripts/setup_isaac_runtime.sh.
+UV_VERSION="0.12.8"
+UV_SHA256="2e2b37e9811e17675a9e70bed5e1a58fc8c0388be63d751d72cc735188c149ff"
 
 show_help() {
     cat << EOF
@@ -29,7 +29,10 @@ Install a domain's locked dependencies and import it, GPU-free.
 DOMAIN:
     rl            Reinforcement learning (training/rl), Python 3.11
     il            Imitation learning / LeRobot (training/il/lerobot), Python 3.12
+    vla           Vision-language-action / LeRobot (training/vla/lerobot), Python 3.12
     evaluation    Software-in-the-loop evaluation (evaluation), Python 3.12
+    vlm-judge     VLM-as-judge optional runtime (evaluation/vlm_judge), Python 3.12
+    osmo-replay   OSMO-to-AzureML replay mirror (workflows/osmo), Python 3.11
 
 OPTIONS:
     -m, --mode MODE    cpu (default) or image
@@ -69,7 +72,7 @@ done
 # probe      Import probe run AFTER install; non-zero exit fails the smoke.
 
 declare project py_version
-declare -a probe
+declare -a export_args probe
 
 case "$domain" in
     rl)
@@ -88,13 +91,39 @@ case "$domain" in
         # auth), so import the module without executing it.
         probe=(-c "import torch, lerobot; import training.il.scripts.lerobot.train")
         ;;
+    vla)
+        project="training/vla/lerobot"
+        py_version="3.12"
+        if [[ "$mode" == "image" ]]; then
+            probe=(-c "import torch, torchcodec, transformers; from torchcodec.decoders import VideoDecoder; import lerobot.policies.pi0.configuration_pi0")
+        else
+            probe=(-c "import torch, transformers; import lerobot.policies.pi0.configuration_pi0")
+        fi
+        ;;
     evaluation)
         project="evaluation"
         py_version="3.12"
-        probe=(-c "import numpy, torch; import evaluation.sil.policy_evaluation")
+        if [[ "$mode" == "image" ]]; then
+            probe=(-c "import av, numpy, torch, torchvision; import evaluation.sil.policy_evaluation")
+        else
+            probe=(-c "import numpy, torch, torchvision; import evaluation.sil.policy_evaluation")
+        fi
         ;;
-    *) fatal "Unknown domain: $domain (expected rl, il, or evaluation)" ;;
+    osmo-replay)
+        project="workflows/osmo"
+        py_version="3.11"
+        probe=(-c "import azure.ai.ml, azure.identity, azureml.mlflow, mlflow, tbparse; import training.utils.aml_mirror")
+        ;;
+    vlm-judge)
+        project="evaluation/vlm_judge"
+        py_version="3.12"
+        probe=(-c "import torch, torchvision, transformers; from transformers import AutoProcessor")
+        ;;
+    *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, vlm-judge, or osmo-replay)" ;;
 esac
+
+export_args=(--frozen --no-hashes --no-emit-project --project "$project")
+[[ "$domain" == "vlm-judge" ]] && export_args+=(--extra qwen3-vl)
 
 ensure_uv() {
     # Bootstrap a pinned uv inside a container that lacks it (image mode).
@@ -122,12 +151,12 @@ smoke_cpu() {
     export VIRTUAL_ENV="$venv"
     export PATH="${venv}/bin:${PATH}"
 
-    # Install the exact committed lock with --no-deps -- re-resolving would
-    # discard the pyproject override-dependencies the lock encodes and fail.
-    # Strip the CUDA runtime wheels (CPU torch needs none); --torch-backend cpu
-    # redirects torch to CPU wheels. pipefail fails the step on a bad export.
-    uv export --frozen --no-hashes --no-emit-project --project "$project" \
-        | grep -vE '^(nvidia-|cuda-)' \
+    # Install the committed dependency versions without CUDA runtime packages.
+    # Remove the CUDA local-version suffix so --torch-backend selects CPU wheels.
+    local requirements="/tmp/smoke-requirements-${domain}.txt"
+    uv export "${export_args[@]}" > "$requirements"
+    grep -vE '^(nvidia-|cuda-|torchcodec==)' "$requirements" \
+        | sed -E '/^(torch|torchvision)==/ s/\+cu[0-9]+//' \
         | uv pip install --torch-backend cpu --no-cache-dir --no-deps --requirement -
 
     run_probe "${venv}/bin/python"
@@ -139,30 +168,36 @@ smoke_cpu() {
 smoke_image() {
     section "Runtime-image import smoke: ${domain}"
 
-    local python_exec
-    local -a install_args
-    if [[ "$domain" == "il" ]]; then
+    local python_exec runtime_project="$project"
+    if [[ "$domain" == "il" || "$domain" == "vla" || "$domain" == "evaluation" ]]; then
         # Published PyTorch images ship Python 3.11; LeRobot needs >= 3.12.
-        # Provision 3.12 in a venv, exactly as the production entry script does.
-        local venv="/tmp/smoke-venv-il"
+        # Provision 3.12 in a venv, exactly as the production entry scripts do.
+        local venv="/tmp/smoke-venv-${domain}"
+        if [[ "$domain" == "evaluation" ]]; then
+            runtime_project="training/il/lerobot"
+        fi
         uv python install "$py_version"
         uv venv --clear --python "$py_version" "$venv"
         export VIRTUAL_ENV="$venv"
         export PATH="${venv}/bin:${PATH}"
         python_exec="${venv}/bin/python"
-        install_args=(--no-cache-dir --no-deps --requirement -)
+        # LeRobot runtime entrypoints install directly from the source-aware lock.
+        uv sync --active --frozen --no-config --no-install-project --project "$runtime_project"
+    elif [[ "$domain" == "osmo-replay" ]]; then
+        python_exec="python3"
+        local requirements="/tmp/smoke-requirements-${domain}.txt"
+        uv export --frozen --no-hashes --no-emit-project --project "$project" > "$requirements"
+        "$python_exec" -m pip install --no-cache-dir --no-deps --requirement "$requirements"
     else
-        # RL / evaluation: the Isaac Lab kit interpreter is the production runtime.
+        # RL: the Isaac Lab kit interpreter is the production runtime.
         python_exec="/isaac-sim/kit/python/bin/python3"
         [[ -x "$python_exec" ]] || python_exec="python3"
         export UV_PYTHON="$python_exec"
-        install_args=(--no-cache-dir --no-deps --system --requirement -)
+        # Mirror production (training/rl/scripts/train.sh): install the committed
+        # lock with --no-deps onto the real interpreter.
+        uv export --frozen --no-hashes --no-emit-project --project "$project" \
+            | uv pip install --no-cache-dir --no-deps --system --requirement -
     fi
-
-    # Mirror production (training/rl/scripts/train.sh): install the committed lock
-    # with --no-deps onto the real interpreter; pipefail fails on a bad export.
-    uv export --frozen --no-hashes --no-emit-project --project "$project" \
-        | uv pip install "${install_args[@]}"
 
     run_probe "$python_exec"
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +22,7 @@ from tests.e2e._common import (
     wait_for_status,
 )
 
-AML_STARTED_STATES = {"Queued", "Preparing", "Starting", "Running", "Finalizing", "Completed"}
+AML_STARTED_STATES = {"Running", "Finalizing", "Completed"}
 AML_FAILURE_STATES = {"Canceled", "Cancelled", "Failed", "NotResponding"}
 
 
@@ -133,6 +134,42 @@ def resolve_registered_model(
     version = str(max(versions))
     log_e2e(f"Resolved AzureML model {model_name} to concrete version {version}")
     return AmlModelRef(name=model_name, version=version)
+
+
+def assert_registered_model_has_artifacts(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    model: AmlModelRef,
+) -> None:
+    """Download a registered model version and assert that it contains files."""
+    with tempfile.TemporaryDirectory(prefix="e2e-model-artifacts-") as download_root:
+        result = run_command(
+            [
+                "az",
+                "ml",
+                "model",
+                "download",
+                "--name",
+                model.name,
+                "--version",
+                model.version,
+                "--download-path",
+                download_root,
+                *aml_workspace_args(aml_workspace),
+                "--output",
+                "none",
+            ],
+            cwd=repo_root,
+        )
+        if result.returncode != 0:
+            raise AssertionError(
+                f"Failed to download AzureML model {model.name!r}:{model.version}\n\n{format_command_failure(result)}"
+            )
+        artifact_files = [path for path in Path(download_root).rglob("*") if path.is_file()]
+        if not artifact_files:
+            raise AssertionError(f"AzureML model {model.name!r}:{model.version} contained no artifact files")
+
+    log_e2e(f"AzureML model artifacts passed: model={model.name}:{model.version}, artifacts={len(artifact_files)}")
 
 
 def archive_all_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace, model_name: str) -> None:
@@ -476,13 +513,17 @@ def submit_aml_lerobot_pipeline(
     save_freq: int,
     batch_size: int,
     eval_episodes: int,
+    register_model_name: str | None = None,
 ) -> AzureMLJob:
     experiment_name = e2e_name("il-pipeline-e2e-aml")
+    register_args = (
+        ["--with-register", "--register-model-name", register_model_name] if register_model_name is not None else []
+    )
     log_e2e(
         "Submitting AzureML LeRobot pipeline job "
         f"for dataset_asset={dataset_asset}, dataset_repo_id={dataset_repo_id}, policy={policy_type}, "
         f"training_steps={training_steps}, save_freq={save_freq}, batch_size={batch_size}, "
-        f"eval_episodes={eval_episodes}, experiment={experiment_name}"
+        f"eval_episodes={eval_episodes}, register_model_name={register_model_name}, experiment={experiment_name}"
     )
     result = run_command(
         [
@@ -503,6 +544,7 @@ def submit_aml_lerobot_pipeline(
             str(eval_episodes),
             "--experiment-name",
             experiment_name,
+            *register_args,
             *_submit_workspace_args(aml_workspace),
         ],
         cwd=repo_root,

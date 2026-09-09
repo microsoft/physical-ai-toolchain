@@ -3,7 +3,7 @@ sidebar_position: 2
 title: "Quickstart: Clone to First Training Job"
 description: Deploy infrastructure and submit your first robotics training job in 9 steps
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-27
+ms.date: 2026-08-31
 ms.topic: tutorial
 keywords:
   - quickstart

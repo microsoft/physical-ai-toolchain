@@ -1,0 +1,36 @@
+name: TOML Format
+
+on:
+  workflow_call:
+    inputs:
+      soft-fail:
+        description: 'Whether to continue on TOML formatting violations'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  toml-format:
+    name: TOML Format
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js and install dependencies
+        uses: ./.github/actions/setup-node-deps
+
+      - name: Check TOML formatting
+        run: npm run lint:toml
+        continue-on-error: ${{ inputs.soft-fail }}

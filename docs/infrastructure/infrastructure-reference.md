@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-29
+ms.date: 2026-09-07
 ms.topic: reference
 keywords:
   - architecture
@@ -108,6 +108,27 @@ Use `aml_managed_network_isolation_mode` to control the AzureML workspace manage
 | `AllowOnlyApprovedOutbound` | AzureML managed network is on and outbound access is restricted      |
 
 Treat changes to `aml_managed_network_isolation_mode` as AzureML redeploy operations. AzureML does not support disabling managed network isolation after it is enabled, or switching between `AllowInternetOutbound` and `AllowOnlyApprovedOutbound` in place. Delete and recreate managed compute resources when enabling managed networking on an existing workspace; recreate the workspace for unsupported mode transitions.
+
+### AzureML workspace provider migration
+
+> [!CAUTION]
+> Existing deployments require a one-time Terraform state migration from the AzAPI resource address to the AzureRM resource address. Without this migration, Terraform attempts to create a workspace with the existing name and then destroy the workspace tracked by the old address.
+
+Back up the current state, remove the old state entry without deleting the Azure resource, then import the existing workspace at the new address:
+
+```bash
+terraform state pull > terraform.tfstate.pre-aml-workspace-migration.backup
+
+terraform state rm 'module.platform.azapi_resource.ml_workspace'
+
+terraform import -var-file=terraform.tfvars \
+  'module.platform.azurerm_machine_learning_workspace.main' \
+  '/subscriptions/<sub-id>/resourceGroups/<rg-name>/providers/Microsoft.MachineLearningServices/workspaces/<workspace-name>'
+
+terraform plan -var-file=terraform.tfvars
+```
+
+Confirm that the plan does not replace the workspace before applying.
 
 ### AzureML compute cluster migration
 

@@ -138,7 +138,7 @@ NODESOURCE_GPG_SHA256="b42e0321dabdc24e892115da705cf061167eac12a317f23d329862d0a
 sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsSL -o /tmp/nodesource-repo.gpg.key https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
 echo "${NODESOURCE_GPG_SHA256}  /tmp/nodesource-repo.gpg.key" | sha256sum -c --quiet -
-sudo gpg --dearmor --batch --yes -o /etc/apt/keyrings/nodesource.gpg < /tmp/nodesource-repo.gpg.key
+sudo gpg --dearmor --batch --yes -o /etc/apt/keyrings/nodesource.gpg /tmp/nodesource-repo.gpg.key
 rm -f /tmp/nodesource-repo.gpg.key
 sudo chmod go+r /etc/apt/keyrings/nodesource.gpg
 sudo tee /etc/apt/sources.list.d/nodesource.sources >/dev/null <<'EOF'
@@ -152,8 +152,8 @@ EOF
 apt_get update
 apt_get install -y --no-install-recommends nodejs
 
-UV_VERSION="0.11.21"
-UV_SHA256="8c88519b0ef0af9801fcdee419bbb12116bd9e6b18e162ae093c932d8b264050"
+UV_VERSION="0.12.8"
+UV_SHA256="2e2b37e9811e17675a9e70bed5e1a58fc8c0388be63d751d72cc735188c149ff"
 curl -LsSf "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/uv.tar.gz
 echo "${UV_SHA256}  /tmp/uv.tar.gz" | sha256sum -c --quiet -
 tar -xzf /tmp/uv.tar.gz -C /tmp
@@ -168,7 +168,7 @@ MICROSOFT_GPG_SHA256="2fa9c05d591a1582a9aba276272478c262e95ad00acf60eaee1644d939
 sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsSL -o /tmp/microsoft.asc https://packages.microsoft.com/keys/microsoft.asc
 echo "${MICROSOFT_GPG_SHA256}  /tmp/microsoft.asc" | sha256sum -c --quiet -
-sudo gpg --dearmor --batch --yes -o /etc/apt/keyrings/microsoft.gpg < /tmp/microsoft.asc
+sudo gpg --dearmor --batch --yes -o /etc/apt/keyrings/microsoft.gpg /tmp/microsoft.asc
 rm -f /tmp/microsoft.asc
 sudo chmod go+r /etc/apt/keyrings/microsoft.gpg
 sudo tee /etc/apt/sources.list.d/azure-cli.sources >/dev/null <<EOF
@@ -208,7 +208,7 @@ sudo usermod -aG docker "$ADMIN_USER"
 NVIDIA_CTK_GPG_SHA256="c880576d6cf75a48e5027a871bac70fd0421ab07d2b55f30877b21f1c87959c9"
 curl -fsSL -o /tmp/nvidia-ctk.gpg.key https://nvidia.github.io/libnvidia-container/gpgkey
 echo "${NVIDIA_CTK_GPG_SHA256}  /tmp/nvidia-ctk.gpg.key" | sha256sum -c --quiet -
-sudo gpg --dearmor --batch --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg < /tmp/nvidia-ctk.gpg.key
+sudo gpg --dearmor --batch --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg /tmp/nvidia-ctk.gpg.key
 rm -f /tmp/nvidia-ctk.gpg.key
 # pinning-ignore: upstream apt source list (repo URLs only, no payload to digest); the keyring above is checksum-verified and packages install GPG-verified.
 curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list

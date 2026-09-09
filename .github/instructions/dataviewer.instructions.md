@@ -54,9 +54,9 @@ CodeQL workaround for logging:
 
 This can be done with `Depends()` on parameters.
 
-## RPI Agent High Priority Instructions
+## RPI Skill High Priority Instructions
 
-These instructions take priority over instructions from RPI Agent (rpi-agent.agent.md):
+These instructions take priority over the runtime-provisioned `rpi-*` skills:
 
 * Use the browser tools during research, planning, implementation, review, and discovery as they will provide details about the running application while working and planning.
 * Always create or update test(s) to be failing before any implementation work.

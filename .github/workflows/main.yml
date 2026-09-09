@@ -27,6 +27,13 @@ jobs:
     permissions:
       contents: read
 
+  # TOML formatting using Taplo
+  toml-format:
+    name: TOML Format
+    uses: ./.github/workflows/toml-format.yml
+    permissions:
+      contents: read
+
   # Markdown table formatting check
   table-format:
     name: Table Format
@@ -276,6 +283,8 @@ jobs:
     with:
       rl: true
       il: true
+      evaluation: true
+      osmo_replay: true
       dataviewer: true
     permissions:
       contents: read
@@ -285,6 +294,7 @@ jobs:
     needs:
       - spell-check
       - markdown-lint
+      - toml-format
       - table-format
       - frontmatter-validation
       - psscriptanalyzer
@@ -452,8 +462,6 @@ jobs:
             data-pipeline/uv.lock
             evaluation/pyproject.toml
             evaluation/uv.lock
-            evaluation/sil/docker/pyproject.toml
-            evaluation/sil/docker/uv.lock
             training/rl/pyproject.toml
             training/rl/uv.lock
             training/il/lerobot/pyproject.toml

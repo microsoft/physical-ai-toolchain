@@ -25,9 +25,12 @@ experiment_name: lerobot-training
 identity:
   type: managed_identity
 
-# All values below are placeholders and will be overridden by submit-azureml-lerobot-training.sh
+# Runtime values below are overridden by submit-azureml-lerobot-training.sh.
 code: .
-environment: azureml:lerobot-training-env:latest
+# Direct submission requires this environment version to be registered first.
+# The submit script registers the asset and verifies its image.
+# scripts/update-image-digests.sh keeps it aligned with DEFAULT_LEROBOT_TRAIN_IMAGE.
+environment: azureml:lerobot-training-env:2.13.0-cuda13.0-cudnn9-runtime-sha256-db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
 compute: azureml:cpu-cluster
 
 inputs:

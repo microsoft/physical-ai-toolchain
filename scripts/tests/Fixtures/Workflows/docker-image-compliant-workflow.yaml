@@ -9,6 +9,6 @@ tasks:
   - name: variable
     image: ${CONTAINER_IMAGE}
   - name: azureml-env
-    environment: azureml:lerobot-training-env:latest
+    environment: azureml:lerobot-training-env:2.4.1-sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   - name: deliberate
     image: busybox:latest  # pinning-ignore

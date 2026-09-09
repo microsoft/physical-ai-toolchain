@@ -57,19 +57,17 @@ resource "azurerm_private_dns_zone" "container_apps" {
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "container_apps" {
-  count                 = var.should_enable_internal ? 1 : 0
-  name                  = "vnet-link-cae"
-  resource_group_name   = var.resource_group.name
-  private_dns_zone_name = azurerm_private_dns_zone.container_apps[0].name
-  virtual_network_id    = var.virtual_network.id
-  registration_enabled  = false
+  count                = var.should_enable_internal ? 1 : 0
+  name                 = "vnet-link-cae"
+  private_dns_zone_id  = azurerm_private_dns_zone.container_apps[0].id
+  virtual_network_id   = var.virtual_network.id
+  registration_enabled = false
 }
 
 resource "azurerm_private_dns_a_record" "container_apps_wildcard" {
   count               = var.should_enable_internal ? 1 : 0
   name                = "*"
-  zone_name           = azurerm_private_dns_zone.container_apps[0].name
-  resource_group_name = var.resource_group.name
+  private_dns_zone_id = azurerm_private_dns_zone.container_apps[0].id
   ttl                 = 300
   records             = [azurerm_container_app_environment.main.static_ip_address]
 }
