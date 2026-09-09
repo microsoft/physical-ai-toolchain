@@ -24,8 +24,8 @@ dependencies = [
     "onnxruntime-gpu==1.29.0",
     "toml==0.10.2",
     "gymnasium==1.3.0",
-    "torch==2.13.0",
-    "torchvision==0.28.0",
+    "torch==2.14.0",
+    "torchvision==0.29.0",
     "transformers==5.16.1",
     "tensordict==0.14.0",
     # The SIL evaluation reads LeRobot dataset videos/parquet (av, pyarrow)
@@ -48,9 +48,9 @@ environments = [
 override-dependencies = [
     # lerobot==0.6.1 caps torch below 2.12.0; use the first patched release for
     # GHSA-rrmf-rvhw-rf47.
-    "torch==2.13.0",
+    "torch==2.14.0",
     # lerobot==0.6.1 caps torchvision below 0.27.0; Torch 2.13 requires 0.28.0.
-    "torchvision==0.28.0",
+    "torchvision==0.29.0",
     # lerobot==0.6.1 caps torchcodec below 0.12.0; 0.16.0 supports Torch 2.13.
     "torchcodec==0.16.0",
 ]
@@ -86,7 +86,7 @@ dev = [
     "pygments==2.21.0",
     "matplotlib==3.11.1",
     "numpy==2.2.6",
-    "torch==2.13.0",
+    "torch==2.14.0",
     "pyarrow==25.0.1",
 ]
 
