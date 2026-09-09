@@ -51,8 +51,8 @@ dependencies = [
     # lerobot[dataset,pi] supplies the dataset/video runtime plus dependencies
     # required by the pi0 / pi0_fast / pi05 policy implementations.
     "lerobot[dataset,pi]==0.6.1",
-    "torch==2.13.0",
-    "torchvision==0.28.0",
+    "torch==2.14.0",
+    "torchvision==0.29.0",
     # Keep aligned with the root constraint used by CPU smoke resolution.
     "pygments==2.21.0",
     # Held below 5.6 because lerobot[pi]==0.6.1 requires transformers<5.6.
@@ -128,9 +128,9 @@ override-dependencies = [
     "datasets==5.0.1",
     # torch: lerobot==0.6.1 caps below 2.12.0; use the first patched release for
     # GHSA-rrmf-rvhw-rf47.
-    "torch==2.13.0",
+    "torch==2.14.0",
     # torchvision: lerobot==0.6.1 caps below 0.27.0; Torch 2.13 requires 0.28.0.
-    "torchvision==0.28.0",
+    "torchvision==0.29.0",
 ]
 package = false
 
