@@ -2,12 +2,12 @@ version = 1
 name = "so101"
 embodiment = "SO-101"
 actuator_names = [
-	"shoulder_pan",
-	"shoulder_lift",
-	"elbow_flex",
-	"wrist_flex",
-	"wrist_roll",
-	"gripper",
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+    "gripper",
 ]
 minimum_free_bytes = 10737418240
 teleoperation_fps = 30
