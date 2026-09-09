@@ -23,8 +23,8 @@ unset _common_sh_dir _env_local
 # versions from the checked-in Isaac Lab and LeRobot defaults. update-image-digests.sh
 # keeps the direct-submit workflow pins synchronized with those defaults.
 DEFAULT_ISAAC_LAB_IMAGE="${DEFAULT_ISAAC_LAB_IMAGE:-nvcr.io/nvidia/isaac-lab:2.3.2@sha256:388dbc806f48359a964cb9f807feb226da95d0a107f470fdcad9780ea10fe6f2}"
-DEFAULT_LEROBOT_TRAIN_IMAGE="${DEFAULT_LEROBOT_TRAIN_IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be}"
-DEFAULT_LEROBOT_EVAL_IMAGE="${DEFAULT_LEROBOT_EVAL_IMAGE:-pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be}"
+DEFAULT_LEROBOT_TRAIN_IMAGE="${DEFAULT_LEROBOT_TRAIN_IMAGE:-pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407}"
+DEFAULT_LEROBOT_EVAL_IMAGE="${DEFAULT_LEROBOT_EVAL_IMAGE:-pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407}"
 DEFAULT_GROOT_IMAGE="${DEFAULT_GROOT_IMAGE:-pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel@sha256:0cf3402e946b7c384ba943ee05c90b4c5a4a05227923921f2b0918c011cfaf56}"
 # isaac-lab tag, available to callers that need the tag without the digest.
 _isaac_ref="${DEFAULT_ISAAC_LAB_IMAGE%@*}"

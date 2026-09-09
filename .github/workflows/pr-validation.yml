@@ -23,6 +23,7 @@ jobs:
       training: ${{ steps.filter.outputs.training }}
       rl: ${{ steps.filter.outputs.rl }}
       il: ${{ steps.filter.outputs.il }}
+      vla: ${{ steps.filter.outputs.vla }}
       evaluation: ${{ steps.filter.outputs.evaluation }}
       osmo_replay: ${{ steps.filter.outputs.osmo_replay }}
       dm_tools: ${{ steps.filter.outputs.dm_tools }}
@@ -61,7 +62,8 @@ jobs:
           {
             echo "training=$(match '^training/')"
             echo "rl=$(match '^(training/rl/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
-            echo "il=$(match '^(training/il/|shared/ci/|\.github/workflows/smoke-cpu\.yml)')"
+            echo "il=$(match '^(training/il/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
+            echo "vla=$(match '^(training/vla/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
             echo "evaluation=$(match '^(evaluation/|training/il/lerobot/|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
             echo "osmo_replay=$(match '^(workflows/osmo/|training/utils/aml_mirror\.py|training/utils/replay-azureml\.sh|shared/ci/|scripts/lib/common\.sh|\.github/workflows/smoke-cpu\.yml)')"
             echo "dm_tools=$(match '^data-management/tools/')"
@@ -86,6 +88,7 @@ jobs:
     with:
       rl: ${{ needs.changes.outputs.rl == 'true' }}
       il: ${{ needs.changes.outputs.il == 'true' }}
+      vla: ${{ needs.changes.outputs.vla == 'true' }}
       evaluation: ${{ needs.changes.outputs.evaluation == 'true' }}
       osmo_replay: ${{ needs.changes.outputs.osmo_replay == 'true' }}
       dataviewer: ${{ needs.changes.outputs.dv_backend == 'true' || needs.changes.outputs.dv_frontend == 'true' }}
