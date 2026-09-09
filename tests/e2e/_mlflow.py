@@ -267,6 +267,7 @@ def assert_osmo_replay_has_mlflow_run(
         raise AssertionError(f"MLflow replay run {run.info.run_id!r} did not include osmo.replay=true")
 
     with tempfile.TemporaryDirectory(prefix="e2e-replay-artifacts-") as download_root:
+        run = client.get_run(run.info.run_id)
         downloaded_path = Path(
             mlflow.artifacts.download_artifacts(
                 artifact_uri=f"{run.info.artifact_uri.rstrip('/')}/model",
