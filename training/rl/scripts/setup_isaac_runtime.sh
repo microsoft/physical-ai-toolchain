@@ -57,10 +57,13 @@ if command -v uv &>/dev/null; then
   uv export --frozen --no-hashes --no-emit-project --project "${ISAAC_PROJECT_DIR}" \
     | grep -Ev "${isaac_provided_re}" >"${reqs_file}"
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    uv pip install --no-cache-dir --no-deps --requirement "${reqs_file}"
+    uv pip install --no-cache-dir --no-deps --reinstall --requirement "${reqs_file}"
   else
-    uv pip install --no-cache-dir --no-deps --system --requirement "${reqs_file}"
+    uv pip install --no-cache-dir --no-deps --reinstall --system --requirement "${reqs_file}"
   fi
+
+  "${python_cmd[@]}" "$(dirname "${BASH_SOURCE[0]}")/runtime_provenance.py" \
+    "${ISAAC_PROJECT_DIR}" "${reqs_file}"
   rm -f "${reqs_file}"
 else
   echo "Error: uv is required to install workflow manifest dependencies" >&2

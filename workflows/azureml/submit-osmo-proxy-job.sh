@@ -27,12 +27,17 @@ OPTIONS:
     -h, --help                   Show this help message
     --workflow-yaml PATH         OSMO workflow YAML path relative to repo root
                                  (default: workflows/osmo/smoke-test-proxy-e2e.yaml)
+    --job-name NAME              Azure ML job name
+    --experiment-name NAME       Azure ML experiment name (default: osmo-proxy)
+    --output-url URL             Durable azure:// workflow output URL
     --config-preview             Print configuration and exit
 
 ENVIRONMENT VARIABLES:
     AZURE_SUBSCRIPTION_ID        Override subscription ID (default: from az account)
     AZURE_RESOURCE_GROUP         Override resource group (default: from Terraform)
     AZUREML_WORKSPACE_NAME       Override AML workspace name (default: from Terraform)
+    AZUREML_COMPUTE_NAME         Override AKS-attached AML compute name
+    AKS_CLUSTER_NAME             Derive AKS-attached compute name when Terraform output is unavailable
 
 EXAMPLES:
     $(basename "$0")
@@ -46,6 +51,9 @@ EOF
 #------------------------------------------------------------------------------
 
 workflow_yaml="workflows/osmo/smoke-test-proxy-e2e.yaml"
+job_name=""
+experiment_name="osmo-proxy"
+output_url=""
 config_preview=false
 
 #------------------------------------------------------------------------------
@@ -56,6 +64,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)         show_help; exit 0 ;;
     --workflow-yaml)   workflow_yaml="$2"; shift 2 ;;
+    --job-name)        job_name="$2"; shift 2 ;;
+    --experiment-name) experiment_name="$2"; shift 2 ;;
+    --output-url)      output_url="$2"; shift 2 ;;
     --config-preview)  config_preview=true; shift ;;
     *)                 fatal "Unknown option: $1" ;;
   esac
@@ -71,15 +82,23 @@ subscription_id="${AZURE_SUBSCRIPTION_ID:-$(get_subscription_id)}"
 resource_group="${AZURE_RESOURCE_GROUP:-$(get_resource_group)}"
 workspace_name="${AZUREML_WORKSPACE_NAME:-$(get_azureml_workspace)}"
 storage_account="$(get_storage_account)"
-compute_name="${AZUREML_COMPUTE_NAME:-$(get_compute_target 2>/dev/null || echo "k8s-compute")}"
+compute_name="${AZUREML_COMPUTE_NAME:-}"
+if [[ -z "$compute_name" && -n "${AKS_CLUSTER_NAME:-}" ]]; then
+  compute_name="k8s-${AKS_CLUSTER_NAME#aks-}"
+  compute_name="${compute_name:0:16}"
+  compute_name="${compute_name%-}"
+fi
+compute_name="${compute_name:-$(get_compute_target 2>/dev/null || echo "k8s-compute")}"
 azure_client_id="$(get_output '.ml_workload_identity.value.client_id' 2>/dev/null || echo "")"
 
-output_url="azure://${storage_account}/proxy-smoke-test/"
+output_url="${output_url:-azure://${storage_account}/osmo/proxy-smoke-test/}"
 set_variables="[{\"name\":\"output_url\",\"value\":\"${output_url}\"}]"
 
 if [[ "$config_preview" == "true" ]]; then
   section "Configuration Preview"
   print_kv "Workflow YAML"    "$workflow_yaml"
+  print_kv "Job Name"         "${job_name:-<generated>}"
+  print_kv "Experiment Name"  "$experiment_name"
   print_kv "AML Workspace"    "${workspace_name:-<not set>}"
   print_kv "Resource Group"   "${resource_group:-<not set>}"
   print_kv "Subscription"     "${subscription_id:-<not set>}"
@@ -116,13 +135,16 @@ az_args=(
   --subscription "$subscription_id"
   --set "compute=azureml:${compute_name}"
   --set "resources.instance_type=defaultinstancetype"
+  --set "experiment_name=${experiment_name}"
   --set "environment_variables.WORKFLOW_YAML=${workflow_yaml}"
+  --set "environment_variables.OSMO_OUTPUT_URLS=${output_url}"
   --set "environment_variables.AML_SUBSCRIPTION_ID=${subscription_id}"
   --set "environment_variables.AML_RESOURCE_GROUP=${resource_group}"
   --set "environment_variables.AML_WORKSPACE_NAME=${workspace_name}"
   --set "environment_variables.OSMO_SET_VARIABLES=${set_variables}"
 )
 
+[[ -n "$job_name" ]] && az_args+=(--name "$job_name")
 # shellcheck disable=SC2206
 [[ -n "$azure_client_id" ]] && az_args+=(--set "environment_variables.AZURE_CLIENT_ID=${azure_client_id}")
 
@@ -134,6 +156,8 @@ az_args=(
 
 section "Deployment Summary"
 print_kv "Workflow YAML"   "$workflow_yaml"
+print_kv "Job Name"        "${job_name:-<generated>}"
+print_kv "Experiment Name" "$experiment_name"
 print_kv "AML Workspace"   "$workspace_name"
 print_kv "Resource Group"  "$resource_group"
 print_kv "Output URL"      "$output_url"
