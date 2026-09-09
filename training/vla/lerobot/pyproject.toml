@@ -67,7 +67,7 @@ dependencies = [
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
-    "accelerate==1.14.0",
+    "accelerate==1.15.0",
     "torchcodec==0.16.0; platform_machine == 'x86_64' or platform_machine == 'AMD64'",
     # Pin gitpython to address GHSA-mv93-w799-cj2w (transitive via
     # mlflow-skinny and wandb).
