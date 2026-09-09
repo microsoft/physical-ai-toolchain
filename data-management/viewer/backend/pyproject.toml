@@ -50,11 +50,11 @@ export = [
     "h5py==3.16.0",
 ]
 yolo = [
-    "ultralytics==8.4.135",
+    "ultralytics==8.4.138",
 ]
 vlm-judge = [
     "accelerate==1.14.0",
-    "torch==2.13.0",
+    "torch==2.14.0",
     "transformers==5.16.1",
 ]
 
