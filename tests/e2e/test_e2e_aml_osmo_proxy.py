@@ -139,9 +139,7 @@ def test_aml_osmo_proxy_e2e(
 
     asset_name = f"osmo-{workflow_id}-output-0"
     request.addfinalizer(lambda: archive_aml_data_asset(repo_root, aml_workspace, asset_name))
-    expected_asset_path = (
-        f"abfss://{_CONTAINER}@{storage_account}.dfs.core.windows.net/{prefix}/"
-    )
+    expected_asset_path = f"abfss://{_CONTAINER}@{storage_account}.dfs.core.windows.net/{prefix}/"
     assert_aml_data_asset_exists(
         repo_root,
         aml_workspace,

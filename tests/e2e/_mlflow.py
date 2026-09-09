@@ -272,9 +272,7 @@ def assert_aml_osmo_proxy_has_mlflow_tracking(
     }
     for name, expected in expected_metrics.items():
         if tracking.metrics[name] != expected:
-            raise AssertionError(
-                f"MLflow run {run_id!r} had {name}={tracking.metrics[name]!r}, expected {expected!r}"
-            )
+            raise AssertionError(f"MLflow run {run_id!r} had {name}={tracking.metrics[name]!r}, expected {expected!r}")
     if tracking.metrics["osmo.duration_seconds"] < 0:
         raise AssertionError(
             f"MLflow run {run_id!r} had negative duration {tracking.metrics['osmo.duration_seconds']!r}"
@@ -306,9 +304,7 @@ def assert_osmo_vla_has_mlflow_tracking(
         )
     run = runs[0]
     if run.data.tags.get("framework") != "groot" or run.data.tags.get("source") != "osmo-train":
-        raise AssertionError(
-            f"MLflow run {run.info.run_id!r} had unexpected framework/source tags: {run.data.tags}"
-        )
+        raise AssertionError(f"MLflow run {run.info.run_id!r} had unexpected framework/source tags: {run.data.tags}")
     required_params = ("BASE_MODEL", "BASE_MODEL_REVISION", "ISAAC_GROOT_REF")
     missing_params = [name for name in required_params if not run.data.params.get(name)]
     if missing_params:

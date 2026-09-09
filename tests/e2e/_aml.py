@@ -218,9 +218,7 @@ def assert_aml_data_asset_exists(
         raise AssertionError(f"AzureML data asset {asset_name!r} payload was not a JSON object")
     actual_path = payload.get("path")
     if actual_path != expected_path:
-        raise AssertionError(
-            f"AzureML data asset {asset_name!r} had path {actual_path!r}, expected {expected_path!r}"
-        )
+        raise AssertionError(f"AzureML data asset {asset_name!r} had path {actual_path!r}, expected {expected_path!r}")
     log_e2e(f"AzureML data asset passed: name={asset_name}, path={actual_path}")
 
 

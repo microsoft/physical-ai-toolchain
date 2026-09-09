@@ -711,8 +711,7 @@ def _register_aml_data_assets(
 
     if not all([subscription, resource_group, workspace]):
         raise RuntimeError(
-            "AML_SUBSCRIPTION_ID, AML_RESOURCE_GROUP, and AML_WORKSPACE_NAME are required "
-            "for data asset registration"
+            "AML_SUBSCRIPTION_ID, AML_RESOURCE_GROUP, and AML_WORKSPACE_NAME are required for data asset registration"
         )
 
     from azure.ai.ml import MLClient

@@ -28,9 +28,7 @@ def _installed_versions(expected: dict[str, str]) -> tuple[dict[str, str], list[
     actual = {}
     missing = []
     install_roots = {
-        Path(path).resolve()
-        for name in ("purelib", "platlib")
-        if (path := sysconfig.get_path(name)) is not None
+        Path(path).resolve() for name in ("purelib", "platlib") if (path := sysconfig.get_path(name)) is not None
     }
     for name in expected:
         distributions = list(importlib.metadata.distributions(name=name))
