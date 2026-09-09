@@ -49,8 +49,8 @@ dependencies = [
     # Held below 3 because lerobot==0.6.1 requires pandas<3.0.0.
     "pandas==2.3.3",
     "jsonlines==4.0.0",
-    "torch==2.13.0",
-    "torchvision==0.28.0",
+    "torch==2.14.0",
+    "torchvision==0.29.0",
     # Direct dep: the multi-GPU code path invokes `accelerate launch` (see
     # training/il/scripts/lerobot/train.py). Without an explicit pin the version
     # would track lerobot's transitive range and could drift on dependency bumps.
@@ -112,9 +112,9 @@ override-dependencies = [
     "datasets==5.0.1",
     # torch: lerobot==0.6.1 caps below 2.12.0; use the first patched release for
     # GHSA-rrmf-rvhw-rf47.
-    "torch==2.13.0",
+    "torch==2.14.0",
     # torchvision: lerobot==0.6.1 caps below 0.27.0; Torch 2.13 requires 0.28.0.
-    "torchvision==0.28.0",
+    "torchvision==0.29.0",
 ]
 package = false
 
