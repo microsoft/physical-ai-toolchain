@@ -2,7 +2,7 @@
 title: Platform Module
 description: "Deploys shared Azure infrastructure services for robotics ML workloads. Resources include: networking, DNS zones, security, observability, ACR, storage, ML workspace. Optional: PostgreSQL and Redis for OSMO workloads."
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-09-07
 ms.topic: reference
 ---
 
@@ -33,7 +33,6 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 
 | Name                                                                                                                                                                                              | Type        |
 |---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|
-| [azapi_resource.ml_workspace](https://registry.terraform.io/providers/Azure/azapi/latest/docs/resources/resource)                                                                                 | resource    |
 | [azapi_resource.osmo_admin_password](https://registry.terraform.io/providers/Azure/azapi/latest/docs/resources/resource)                                                                          | resource    |
 | [azapi_resource.postgresql_password](https://registry.terraform.io/providers/Azure/azapi/latest/docs/resources/resource)                                                                          | resource    |
 | [azurerm_application_insights.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/application_insights)                                                         | resource    |
@@ -43,6 +42,7 @@ Optional: PostgreSQL and Redis for OSMO workloads.
 | [azurerm_key_vault_secret.redis_primary_key](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault_secret)                                                    | resource    |
 | [azurerm_log_analytics_workspace.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/log_analytics_workspace)                                                   | resource    |
 | [azurerm_machine_learning_compute_cluster.gpu](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/machine_learning_compute_cluster)                                  | resource    |
+| [azurerm_machine_learning_workspace.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/machine_learning_workspace)                                             | resource    |
 | [azurerm_managed_redis.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/managed_redis)                                                                       | resource    |
 | [azurerm_monitor_data_collection_endpoint.main](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/monitor_data_collection_endpoint)                                 | resource    |
 | [azurerm_monitor_diagnostic_setting.ml_workspace_logs](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/monitor_diagnostic_setting)                                | resource    |
