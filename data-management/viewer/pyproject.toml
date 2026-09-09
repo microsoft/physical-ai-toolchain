@@ -43,7 +43,7 @@ export = [
     "Pillow==12.3.0",
 ]
 yolo = [
-    "ultralytics==8.4.135",
+    "ultralytics==8.4.138",
     "numpy==2.5.2",
     "Pillow==12.3.0",
 ]
