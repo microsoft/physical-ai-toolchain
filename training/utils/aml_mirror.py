@@ -159,9 +159,17 @@ def main() -> int:
         finally:
             shutil.rmtree(staged, ignore_errors=True)
 
-        registered = mlflow.register_model(
-            model_uri=f"runs:/{run.info.run_id}/model",
-            name=os.environ["AZUREML_MODEL_NAME"],
+        registry_client = mlflow.MlflowClient()
+        model_name = os.environ["AZUREML_MODEL_NAME"]
+        try:
+            registry_client.create_registered_model(model_name)
+        except mlflow.exceptions.MlflowException as error:
+            if error.error_code != "RESOURCE_ALREADY_EXISTS":
+                raise
+        registered = registry_client.create_model_version(
+            name=model_name,
+            source=mlflow.get_artifact_uri("model"),
+            run_id=run.info.run_id,
         )
         print(
             json.dumps(

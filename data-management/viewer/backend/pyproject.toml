@@ -70,9 +70,9 @@ extend = "../../../pyproject.toml"
 
 [tool.ruff.lint]
 ignore = [
-    "B008",   # Depends() in function defaults is a FastAPI pattern
-    "B905",   # zip() without strict= is acceptable
-    "B904",   # Exception cause via constructor, not raise-from
+    "B008", # Depends() in function defaults is a FastAPI pattern
+    "B905", # zip() without strict= is acceptable
+    "B904", # Exception cause via constructor, not raise-from
 ]
 
 [tool.ruff.lint.isort]

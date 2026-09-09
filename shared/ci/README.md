@@ -27,9 +27,11 @@ shared/ci/smoke-image.sh rl --mode cpu           # CPU import smoke, lightweight
 shared/ci/smoke-image.sh il --mode cpu
 shared/ci/smoke-image.sh vla --mode cpu
 shared/ci/smoke-image.sh evaluation --mode cpu
+shared/ci/smoke-image.sh osmo-replay --mode cpu
 shared/ci/smoke-image.sh rl                       # runtime-image smoke (Isaac Lab)
 shared/ci/smoke-image.sh il                       # runtime-image smoke (PyTorch)
 shared/ci/smoke-image.sh evaluation               # runtime-image smoke (PyTorch)
+shared/ci/smoke-image.sh osmo-replay               # runtime-image smoke (Python slim)
 
 # linux/x86_64 host or CI — run the inner probe directly, no Docker
 shared/ci/smoke-import.sh rl --mode cpu
@@ -49,14 +51,15 @@ shared/ci/smoke-import.sh rl --mode cpu
 
 ## 🧪 Domains
 
-| Domain       | Python | Runtime image                          | CPU smoke | Runtime-image smoke |
-|--------------|--------|----------------------------------------|-----------|---------------------|
-| `rl`         | 3.11   | Isaac Lab (`DEFAULT_ISAAC_LAB_IMAGE`)  | yes       | yes                 |
-| `il`         | 3.12   | PyTorch (`lerobot-train.yaml` default) | yes       | yes                 |
-| `vla`        | 3.12   | none                                   | yes       | no                  |
-| `evaluation` | 3.12   | PyTorch (`evaluate.yaml`)              | yes       | yes                 |
+| Domain        | Python | Runtime image                          | CPU smoke | Runtime-image smoke |
+|---------------|--------|----------------------------------------|-----------|---------------------|
+| `rl`          | 3.11   | Isaac Lab (`DEFAULT_ISAAC_LAB_IMAGE`)  | yes       | yes                 |
+| `il`          | 3.12   | PyTorch (`lerobot-train.yaml` default) | yes       | yes                 |
+| `vla`         | 3.12   | none                                   | yes       | no                  |
+| `evaluation`  | 3.12   | PyTorch (`evaluate.yaml`)              | yes       | yes                 |
+| `osmo-replay` | 3.11   | Python (`replay-azureml.yaml`)         | yes       | yes                 |
 
-Image references come from their source of truth: `scripts/lib/common.sh` for `rl`, `training/il/workflows/osmo/lerobot-train.yaml` for `il`, and `evaluation/sil/workflows/azureml/components/evaluate.yaml` for `evaluation`.
+Image references come from their source of truth: `scripts/lib/common.sh` for `rl`, `training/il/workflows/osmo/lerobot-train.yaml` for `il`, `evaluation/sil/workflows/azureml/components/evaluate.yaml` for `evaluation`, and `workflows/osmo/replay-azureml.yaml` for `osmo-replay`.
 
 ## 🔍 What each depth catches
 
@@ -87,13 +90,13 @@ The CPU depth is also the cheap baseline that runs on every PR, while the runtim
 
 ### Install preserves the committed resolution
 
-The domain locks encode pyproject `override-dependencies` and package sources. The IL and evaluation runtime-image smokes use frozen `uv sync`, matching their production entrypoints and preserving the explicit PyTorch CUDA index. The RL runtime-image smoke exports the lock and installs it with `--no-deps`, matching `training/rl/scripts/train.sh`. Both paths install the committed resolution rather than resolving dependencies again.
+The domain locks encode pyproject `override-dependencies` and package sources. The IL and evaluation runtime-image smokes use frozen `uv sync`, matching their production entrypoints and preserving the explicit PyTorch CUDA index. The RL and OSMO replay runtime-image smokes export their locks and install with `--no-deps`, matching their production entrypoints. Both paths install the committed resolution rather than resolving dependencies again.
 
 The import step is load-bearing: dependency or ABI skew can install cleanly and fail only when imported. For the CPU depth, the export removes the CUDA local-version suffix before `--torch-backend cpu` selects CPU wheels, and strips standalone `nvidia-*` and `cuda-*` packages.
 
 ### Per-domain runtime images and interpreters
 
-Each domain runs in its own production runtime; there is no single image. Image references are read from their source of truth: `DEFAULT_ISAAC_LAB_IMAGE` in `scripts/lib/common.sh` for `rl`, the `lerobot-train.yaml` default for `il`, and the Azure ML `evaluate.yaml` component for `evaluation`.
+Each domain runs in its own production runtime; there is no single image. Image references are read from their source of truth: `DEFAULT_ISAAC_LAB_IMAGE` in `scripts/lib/common.sh` for `rl`, the `lerobot-train.yaml` default for `il`, the Azure ML `evaluate.yaml` component for `evaluation`, and the `replay-azureml.yaml` default for `osmo-replay`.
 
 The LeRobot lock requires Python 3.12 while its PyTorch image ships 3.11, so the `il` and `evaluation` runtime-image smokes provision 3.12 in a venv, mirroring their production entry scripts; `rl` uses the Isaac Lab kit interpreter.
 

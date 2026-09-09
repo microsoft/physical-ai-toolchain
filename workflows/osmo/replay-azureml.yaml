@@ -1,15 +1,17 @@
 workflow:
   name: "{{workflow_name}}"
   resources:
-    default: { cpu: 4, memory: 8Gi, storage: 4Gi, gpu: 0 }
+    default: { cpu: {{cpu}}, memory: {{memory}}, storage: 4Gi, gpu: 0 }
   timeout: { exec_timeout: 6h, queue_timeout: 1h }
   tasks:
     - name: mirror
       image: "{{image}}"
+      inputs:
+        - url: "{{output_uri}}"
       command: ["bash"]
-      args: ["-lc", "set -euo pipefail; echo \"$AML_MIRROR_B64\" | base64 -d > /tmp/aml_mirror.py; echo \"$AML_MIRROR_REQUIREMENTS_B64\" | base64 -d > /tmp/requirements-aml-mirror.txt; pip install --quiet -r /tmp/requirements-aml-mirror.txt && python /tmp/aml_mirror.py"]
+      args: ["-lc", "set -euo pipefail; echo \"$AML_MIRROR_B64\" | base64 -d > /tmp/aml_mirror.py; echo \"$AML_MIRROR_REQUIREMENTS_B64\" | base64 -d > /tmp/requirements-aml-mirror.txt; pip install --quiet --no-deps -r /tmp/requirements-aml-mirror.txt && python /tmp/aml_mirror.py"]
       environment:
-        OUTPUT_DIR: "{{output_base}}/{{run_id}}"
+        OUTPUT_DIR: "{{input:0}}/{{output_subpath}}"
         RUN_ID: "{{run_id}}-replay"
         REPLAY_RUN_ID: "{{run_id}}"
         AZUREML_MODEL_NAME: "{{model_name}}"
@@ -25,7 +27,10 @@ default-values:
   workflow_name: replay-azureml
   run_id: ""
   model_name: ""
-  output_base: /outputs
+  output_uri: ""
+  output_subpath: "."
+  cpu: 4
+  memory: 8Gi
   # Pinned by @sha256 digest for reproducibility; refresh via scripts/update-image-digests.sh.
   image: python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6
   aml_mirror_b64: ""

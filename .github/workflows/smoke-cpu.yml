@@ -23,6 +23,11 @@ name: Smoke (GPU-free)
         required: false
         default: false
         type: boolean
+      osmo_replay:
+        description: 'Run the OSMO replay runtime-image smoke (workflows/osmo changed)'
+        required: false
+        default: false
+        type: boolean
       dataviewer:
         description: 'Build the dataviewer compose stack (viewer images/compose changed)'
         required: false
@@ -47,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        domain: [rl, il, vla, evaluation]
+        domain: [rl, il, vla, evaluation, osmo-replay]
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -124,6 +129,22 @@ jobs:
 
       - name: Runtime-image smoke
         run: shared/ci/smoke-image.sh evaluation
+
+  image-smoke-osmo-replay:
+    name: Runtime-Image Smoke (osmo-replay)
+    if: inputs.osmo_replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Runtime-image smoke
+        run: shared/ci/smoke-image.sh osmo-replay
 
   # Docker compose smoke: build the dataviewer images on their pinned bases,
   # start the stack, and wait for both services to report healthy. Path-gated by

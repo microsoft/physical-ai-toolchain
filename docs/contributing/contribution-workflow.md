@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Contribution Workflow
 description: How to contribute including legal requirements, bug reports, enhancement suggestions, and documentation improvements
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-01
+ms.date: 2026-09-07
 ms.topic: how-to
 keywords:
   - contributing
@@ -171,7 +171,7 @@ This reference architecture validates through deployment rather than automated t
 | Training scripts            | AzureML job submission in test workspace with logs                                                                 |
 | Workflow templates          | Workflow execution validation with job outputs                                                                     |
 | Go modules                  | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`, requires `terraform-docs`)                        |
-| Configuration manifests     | Syntax validation, test deployment in non-production cluster                                                       |
+| Configuration manifests     | `npm run lint:toml`, syntax validation, test deployment in non-production cluster                                  |
 
 ### Testing Documentation
 

@@ -60,15 +60,17 @@ def _tracking_uri(subscription_id: str, resource_group: str, workspace_name: str
 
 
 def _mlflow_client(aml_workspace: AzureMLWorkspace) -> MlflowClient:
+    import mlflow
     from mlflow.tracking import MlflowClient
 
-    return MlflowClient(
-        tracking_uri=_tracking_uri(
-            aml_workspace.subscription_id,
-            aml_workspace.resource_group,
-            aml_workspace.workspace_name,
-        )
+    tracking_uri = _tracking_uri(
+        aml_workspace.subscription_id,
+        aml_workspace.resource_group,
+        aml_workspace.workspace_name,
     )
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_registry_uri(tracking_uri)
+    return MlflowClient(tracking_uri=tracking_uri, registry_uri=tracking_uri)
 
 
 _MLFLOW_SEARCH_TIMEOUT_SECONDS = 300
@@ -233,6 +235,34 @@ def assert_osmo_workflow_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspa
         f"OSMO MLflow tracking passed: run_id={run_id} metrics=[{rendered_metrics}] "
         f"params=[{rendered_params}] tags=[{rendered_tags}]"
     )
+
+
+def assert_osmo_replay_has_mlflow_run(
+    *,
+    source_run_id: str,
+    model_name: str,
+    aml_workspace: AzureMLWorkspace,
+) -> None:
+    """Assert that replay created the expected tagged MLflow run."""
+    client = _mlflow_client(aml_workspace)
+    escaped_source_run_id = source_run_id.replace("'", "\\'")
+    runs = _search_experiment_runs_with_retry(
+        client,
+        model_name,
+        filter_string=f"tags.osmo.replay_source = '{escaped_source_run_id}'",
+        max_results=2,
+        criteria=f"replay source {source_run_id!r}",
+    )
+    if len(runs) > 1:
+        raise AssertionError(
+            f"Multiple MLflow runs were found in experiment {model_name!r} for replay source {source_run_id!r}"
+        )
+
+    run = runs[0]
+    if run.data.tags.get("osmo.replay") != "true":
+        raise AssertionError(f"MLflow replay run {run.info.run_id!r} did not include osmo.replay=true")
+
+    log_e2e(f"OSMO replay MLflow run passed: run_id={run.info.run_id}, source_run_id={source_run_id}")
 
 
 _LEROBOT_EVAL_REQUIRED_METRICS = (

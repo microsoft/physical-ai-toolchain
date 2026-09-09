@@ -31,6 +31,7 @@ DOMAIN:
     il            Imitation learning / LeRobot (training/il/lerobot), Python 3.12
     vla           Vision-language-action / LeRobot (training/vla/lerobot), Python 3.12
     evaluation    Software-in-the-loop evaluation (evaluation), Python 3.12
+    osmo-replay   OSMO-to-AzureML replay mirror (workflows/osmo), Python 3.11
 
 OPTIONS:
     -m, --mode MODE    cpu (default) or image
@@ -99,7 +100,12 @@ case "$domain" in
         py_version="3.12"
         probe=(-c "import numpy, torch; import evaluation.sil.policy_evaluation")
         ;;
-    *) fatal "Unknown domain: $domain (expected rl, il, vla, or evaluation)" ;;
+    osmo-replay)
+        project="workflows/osmo"
+        py_version="3.11"
+        probe=(-c "import azure.ai.ml, azure.identity, azureml.mlflow, mlflow, tbparse; import training.utils.aml_mirror")
+        ;;
+    *) fatal "Unknown domain: $domain (expected rl, il, vla, evaluation, or osmo-replay)" ;;
 esac
 
 ensure_uv() {
@@ -159,6 +165,11 @@ smoke_image() {
         python_exec="${venv}/bin/python"
         # LeRobot runtime entrypoints install directly from the source-aware lock.
         uv sync --active --frozen --no-config --no-install-project --project "$runtime_project"
+    elif [[ "$domain" == "osmo-replay" ]]; then
+        python_exec="python3"
+        local requirements="/tmp/smoke-requirements-${domain}.txt"
+        uv export --frozen --no-hashes --no-emit-project --project "$project" > "$requirements"
+        "$python_exec" -m pip install --no-cache-dir --no-deps --requirement "$requirements"
     else
         # RL: the Isaac Lab kit interpreter is the production runtime.
         python_exec="/isaac-sim/kit/python/bin/python3"
