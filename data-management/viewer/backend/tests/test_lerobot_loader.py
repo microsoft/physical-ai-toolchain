@@ -60,6 +60,22 @@ class TestIsLerobotDataset:
         (meta / "info.json").write_text("{}")
         assert is_lerobot_dataset(tmp_path) is False
 
+    def test_empty_info_json_is_incomplete(self, tmp_path):
+        meta = tmp_path / "meta"
+        meta.mkdir()
+        (meta / "info.json").touch()
+        (tmp_path / "data").mkdir()
+
+        assert is_lerobot_dataset(tmp_path) is False
+
+    def test_nonempty_malformed_info_json_is_detected(self, tmp_path):
+        meta = tmp_path / "meta"
+        meta.mkdir()
+        (meta / "info.json").write_text("{not json")
+        (tmp_path / "data").mkdir()
+
+        assert is_lerobot_dataset(tmp_path) is True
+
 
 class TestDatasetInfo:
     """Test metadata loading from info.json."""
