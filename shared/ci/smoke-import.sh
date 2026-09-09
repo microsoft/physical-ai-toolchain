@@ -104,7 +104,7 @@ case "$domain" in
         project="evaluation"
         py_version="3.12"
         if [[ "$mode" == "image" ]]; then
-            probe=(-c "import numpy, torch, torchcodec, torchvision; from torchcodec.decoders import VideoDecoder; import evaluation.sil.policy_evaluation")
+            probe=(-c "import av, numpy, torch, torchvision; import evaluation.sil.policy_evaluation")
         else
             probe=(-c "import numpy, torch, torchvision; import evaluation.sil.policy_evaluation")
         fi
