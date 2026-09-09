@@ -20,7 +20,7 @@ openai = [
     "openai==3.6.0",
 ]
 qwen3-vl = [
-    "accelerate==1.14.0",
+    "accelerate==1.15.0",
     # Prevent prerelease resolution from selecting hf-xet 1.6.1a0.
     "hf-xet==1.6.0",
     "torch==2.13.0",
