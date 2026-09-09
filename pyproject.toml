@@ -46,7 +46,13 @@ override-dependencies = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "training/tests", "data-management/tools/tests", "fleet-deployment/inference/tests", "shared/ci/tests"]
+testpaths = [
+    "tests",
+    "training/tests",
+    "data-management/tools/tests",
+    "fleet-deployment/inference/tests",
+    "shared/ci/tests",
+]
 pythonpath = [".", "data-management/tools"]
 python_files = ["test_*.py", "fuzz_harness.py"]
 addopts = [
@@ -85,14 +91,14 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-    "E",    # pycodestyle errors
-    "W",    # pycodestyle warnings
-    "F",    # pyflakes
-    "I",    # isort
-    "UP",   # pyupgrade
-    "B",    # flake8-bugbear
-    "SIM",  # flake8-simplify
-    "RUF",  # ruff-specific rules
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific rules
 ]
 
 [tool.ruff.lint.per-file-ignores]

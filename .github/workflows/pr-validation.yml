@@ -113,6 +113,13 @@ jobs:
     permissions:
       contents: read
 
+  # TOML formatting using Taplo
+  toml-format:
+    name: TOML Format
+    uses: ./.github/workflows/toml-format.yml
+    permissions:
+      contents: read
+
   # Markdown table formatting check
   table-format:
     name: Table Format
@@ -488,6 +495,7 @@ jobs:
       - workflow-refs-check
       - spell-check
       - markdown-lint
+      - toml-format
       - table-format
       - frontmatter-validation
       - msdate-freshness
