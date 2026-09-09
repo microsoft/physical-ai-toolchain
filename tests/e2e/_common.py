@@ -6,12 +6,29 @@ import subprocess
 import time
 import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 _MAX_CONSECUTIVE_STATUS_ERRORS = 5
 _STATUS_HEARTBEAT_INTERVAL_SECONDS = 300
+
+
+@dataclass
+class E2EHandle:
+    submission_commands: list[tuple[str, ...]] = field(default_factory=list)
+    resource_identifiers: dict[str, str] = field(default_factory=dict)
+    attempts: list[str] = field(default_factory=lambda: ["initial"])
+    logs: dict[str, str] = field(default_factory=dict)
+    retry_classification: str | None = None
+    terminal_state: str | None = None
+
+
+def command_tuple(args: Any) -> tuple[str, ...]:
+    if isinstance(args, (list, tuple)):
+        return tuple(str(arg) for arg in args)
+    return (str(args),)
 
 
 def e2e_name(prefix: str) -> str:

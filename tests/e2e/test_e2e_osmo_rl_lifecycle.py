@@ -16,6 +16,9 @@ uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_rl_lifecycle.py
 
 from __future__ import annotations
 
+import hashlib
+import json
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -26,6 +29,7 @@ from tests.e2e._mlflow import assert_osmo_workflow_has_mlflow_tracking
 from tests.e2e._osmo import (
     _OSMO_ISAAC_EVAL_CHECKPOINT_URI_ENV,
     assert_workflow_task_succeeded,
+    fetch_workflow_task_logs,
     monitor_osmo_workflow,
     resolve_osmo_isaac_eval_checkpoint_override,
     submit_osmo_isaaclab_eval,
@@ -35,6 +39,25 @@ from tests.e2e._osmo import (
 _TASK = "Isaac-Velocity-Rough-Anymal-C-v0"
 _ISAAC_TRAINING_TASK_NAME = "isaac-training"
 _ISAAC_INFERENCE_TASK_NAME = "isaac-inference"
+
+
+def _runtime_provenance(logs: str, marker: str) -> dict[str, object]:
+    for line in logs.splitlines():
+        if marker in line:
+            payload = json.loads(line.partition(marker)[2])
+            if isinstance(payload, dict):
+                return payload
+    raise AssertionError(f"Task logs did not contain {marker}")
+
+
+def _declared_runtime_versions(repo_root: Path) -> dict[str, str]:
+    payload = tomllib.loads((repo_root / "training/rl/pyproject.toml").read_text(encoding="utf-8"))
+    versions = {}
+    for requirement in payload["project"]["dependencies"]:
+        name, separator, version = requirement.partition("==")
+        if separator:
+            versions[name.lower().replace("_", "-")] = version
+    return versions
 
 
 def test_resolve_osmo_isaac_eval_checkpoint_override_set(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,6 +99,19 @@ def test_osmo_rl_lifecycle_e2e(
         assert_osmo_workflow_has_mlflow_tracking(workflow, aml_workspace)
         log_e2e("Validating OSMO training workflow task success")
         assert_workflow_task_succeeded(workflow, repo_root, _ISAAC_TRAINING_TASK_NAME)
+        provenance = _runtime_provenance(
+            fetch_workflow_task_logs(workflow, repo_root, _ISAAC_TRAINING_TASK_NAME),
+            "RUNTIME_PROVENANCE=",
+        )
+        assert provenance["install_mode"] == "reinstall_from_frozen_lock"
+        assert provenance["missing"] == []
+        assert provenance["actual"] == provenance["expected"]
+        expected_lock_sha256 = hashlib.sha256((repo_root / "training/rl/uv.lock").read_bytes()).hexdigest()
+        assert provenance["lock_sha256"] == expected_lock_sha256
+        expected_versions = provenance["expected"]
+        assert isinstance(expected_versions, dict)
+        for name, version in _declared_runtime_versions(repo_root).items():
+            assert expected_versions[name] == version
         model = resolve_registered_model(repo_root, aml_workspace, model_name=register_model_name)
         checkpoint_uri = f"models:/{model.name}/{model.version}"
     else:
