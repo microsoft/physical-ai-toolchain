@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -90,29 +90,38 @@ describe('LanguageInstructionWidget', () => {
     expect(screen.getByText('No episode selected')).toBeInTheDocument()
   })
 
-  it('seeds the instruction from the dataset task description on Use as Instruction', async () => {
+  it('shows the dataset task description in the editable instruction field', () => {
+    render(<LanguageInstructionWidget />)
+
+    expect(screen.getByRole('heading', { name: 'Task Instruction' })).toBeInTheDocument()
+    expect(screen.getAllByText('Task Instruction')).toHaveLength(1)
+    expect(screen.getByLabelText('Task Instruction')).toHaveValue('pick the block')
+    expect(screen.getByRole('button', { name: /save annotation/i })).toBeDisabled()
+  })
+
+  it('saves the dataset instruction automatically after it is edited', async () => {
     const user = userEvent.setup()
     render(<LanguageInstructionWidget />)
 
-    expect(screen.getByText('pick the block')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /use as instruction/i }))
+    const instruction = screen.getByLabelText('Task Instruction')
+    expect(instruction).toHaveValue('pick the block')
 
-    const langInst = useAnnotationStore.getState().currentAnnotation?.languageInstruction
-    expect(langInst?.instruction).toBe('pick the block')
-    expect(langInst?.source).toBe('template')
+    await user.clear(instruction)
+    await user.type(instruction, 'pick up every block')
+
+    expect(useAnnotationStore.getState().currentAnnotation?.languageInstruction?.instruction).toBe(
+      'pick up every block',
+    )
+    await waitFor(() => expect(mocks.saveCurrentAnnotation).toHaveBeenCalled())
   })
 
-  it('falls back to a blank instruction when no dataset task description exists', async () => {
-    const user = userEvent.setup()
+  it('shows a blank editable instruction when no dataset task exists', () => {
     seedStores({ withDatasetTask: false })
 
     render(<LanguageInstructionWidget />)
 
-    await user.click(screen.getByRole('button', { name: /add instruction/i }))
-
-    const langInst = useAnnotationStore.getState().currentAnnotation?.languageInstruction
-    expect(langInst?.instruction).toBe('')
-    expect(langInst?.source).toBe('human')
+    expect(screen.getByLabelText('Task Instruction')).toHaveValue('')
+    expect(screen.getByRole('button', { name: /save annotation/i })).toBeDisabled()
   })
 
   it('adds a paraphrase when Enter is pressed and clears the input', async () => {

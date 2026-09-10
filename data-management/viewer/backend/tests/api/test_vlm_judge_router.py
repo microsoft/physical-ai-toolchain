@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 import av
+import h5py
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -61,6 +62,26 @@ def _build_dataset(root: Path, *, instruction: str | None, n_frames: int = 12) -
     episode: dict[str, object] = {"episode_index": 0, "length": n_frames}
     episode["tasks"] = [instruction] if instruction else []
     (root / "meta" / "episodes.jsonl").write_text(json.dumps(episode) + "\n")
+
+
+def _build_hdf5_dataset(root: Path, *, instruction: str, n_frames: int = 12) -> None:
+    """Materialize one HDF5 episode with embedded camera frames and task metadata."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "meta").mkdir()
+    (root / "meta" / "dataset.json").write_text(json.dumps({"task": instruction}))
+    frames = np.stack(
+        [np.full((48, 64, 3), (index * 17) % 256, dtype=np.uint8) for index in range(n_frames)],
+    )
+    with h5py.File(root / "episode_000000.hdf5", "w") as episode:
+        episode.create_dataset("data/qpos", data=np.zeros((n_frames, 6), dtype=np.float32))
+        episode.create_dataset("data/qvel", data=np.zeros((n_frames, 6), dtype=np.float32))
+        episode.create_dataset("data/ee_pose", data=np.zeros((n_frames, 6), dtype=np.float32))
+        episode.create_dataset("data/gripper", data=np.zeros(n_frames, dtype=np.float32))
+        episode.create_dataset("data/action", data=np.zeros((n_frames, 6), dtype=np.float32))
+        episode.create_dataset("data/timestamps", data=np.arange(n_frames) / 30)
+        episode.create_dataset("observations/images/wrist", data=frames)
+        episode.attrs["fps"] = 30.0
+        episode.attrs["task_index"] = 0
 
 
 def _reload_app(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> TestClient:
@@ -155,6 +176,33 @@ def test_post_runs_judge_and_warms_cache(vlm_client: TestClient) -> None:
     status = rsp2.json()
     assert status["cached"] is True
     assert status["result"]["episode_id"] == body["episode_id"]
+
+
+def test_post_runs_judge_for_hdf5_episode_and_warms_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset_id = "hdf5-eval"
+    instruction = "Move the gear into the bin"
+    dataset_root = tmp_path / dataset_id
+    _build_hdf5_dataset(dataset_root, instruction=instruction)
+    client = _reload_app(monkeypatch, tmp_path)
+    path = f"/api/datasets/{dataset_id}/episodes/0/judge"
+
+    response = client.post(path, json={"force": True})
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["episode_id"] == f"{dataset_id}/episode_000000"
+    assert result["instruction"] == instruction
+    assert result["outcome_success"] is True
+    assert len(result["progress_per_frame"]) == 6
+    assert (dataset_root / "meta" / "videos" / "wrist" / "episode_000000.mp4").is_file()
+
+    cached = client.get(path)
+    assert cached.status_code == 200
+    assert cached.json()["cached"] is True
+    assert cached.json()["result"]["episode_id"] == result["episode_id"]
 
 
 def test_post_instruction_override_is_used(vlm_client: TestClient) -> None:

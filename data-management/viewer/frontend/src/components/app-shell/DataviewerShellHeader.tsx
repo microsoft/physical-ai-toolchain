@@ -1,6 +1,7 @@
-import { Activity, Check, ChevronsUpDown, Loader2 } from 'lucide-react'
+import { Activity, Check, ChevronsUpDown, Loader2, Moon, Square, Sun } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import type { OperatorStatus } from '@/api/operator'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,6 +13,7 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { DatasetInfo } from '@/types'
 
 function DatasetSelector({
@@ -148,66 +150,117 @@ function DatasetSelector({
 }
 
 interface DataviewerShellHeaderProps {
+  activeMode: 'analyze' | 'operate'
   datasetId: string
   datasets: DatasetInfo[]
   diagnosticsVisible: boolean
   onSelectDataset: (datasetId: string) => void
+  onModeChange: (mode: 'analyze' | 'operate') => void
+  onStopSession: () => void
+  onToggleTheme: () => void
   onToggleDiagnostics: () => void
+  operatorStatus?: OperatorStatus
   capabilities?: {
     isLerobotDataset?: boolean
     hasHdf5Files?: boolean
   }
   isWarmingCache?: boolean
+  theme: 'light' | 'dark'
 }
 
 export function DataviewerShellHeader({
+  activeMode,
   datasetId,
   datasets,
   diagnosticsVisible,
   onSelectDataset,
+  onModeChange,
+  onStopSession,
+  onToggleTheme,
   onToggleDiagnostics,
+  operatorStatus,
   capabilities,
   isWarmingCache,
+  theme,
 }: DataviewerShellHeaderProps) {
   return (
     <header className="bg-card border-b px-4 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-baseline gap-2">
-          <h1 className="truncate text-xl leading-none font-semibold">
-            Robotic Training Data Analysis
-          </h1>
+          <h1 className="truncate text-xl leading-none font-semibold">Physical AI Training Data</h1>
           <p className="text-muted-foreground hidden text-sm lg:block">
             Episode annotation system for robot demonstration datasets
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <label htmlFor="dataset-selector" className="text-sm">
-            Dataset:
-          </label>
-          <DatasetSelector
-            datasetId={datasetId}
-            datasets={datasets}
-            onSelectDataset={onSelectDataset}
-          />
-          <Button
-            variant={diagnosticsVisible ? 'default' : 'outline'}
-            size="sm"
-            onClick={onToggleDiagnostics}
-            aria-label="Toggle Diagnostics"
-            title={
-              diagnosticsVisible
-                ? 'Diagnostics on (click to hide)'
-                : 'Diagnostics off (click to show)'
-            }
+          <Tabs
+            value={activeMode}
+            onValueChange={(value) => onModeChange(value as typeof activeMode)}
           >
-            <Activity className="mr-1.5 h-3.5 w-3.5" />
-            Diagnostics
-          </Button>
-          {capabilities?.isLerobotDataset && <Badge variant="secondary">LeRobot</Badge>}
-          {capabilities?.hasHdf5Files && !capabilities?.isLerobotDataset && (
-            <Badge variant="outline">HDF5</Badge>
+            <TabsList className="h-8">
+              <TabsTrigger value="analyze" className="h-6 px-2.5 text-xs">
+                Analyze
+              </TabsTrigger>
+              <TabsTrigger value="operate" className="h-6 px-2.5 text-xs">
+                Operate
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {activeMode === 'analyze' && (
+            <>
+              <label htmlFor="dataset-selector" className="text-sm">
+                Dataset:
+              </label>
+              <DatasetSelector
+                datasetId={datasetId}
+                datasets={datasets}
+                onSelectDataset={onSelectDataset}
+              />
+              <Button
+                variant={diagnosticsVisible ? 'default' : 'outline'}
+                size="sm"
+                onClick={onToggleDiagnostics}
+                aria-label="Toggle Diagnostics"
+                title={
+                  diagnosticsVisible
+                    ? 'Diagnostics on (click to hide)'
+                    : 'Diagnostics off (click to show)'
+                }
+              >
+                <Activity className="mr-1.5 h-3.5 w-3.5" />
+                Diagnostics
+              </Button>
+              {capabilities?.isLerobotDataset && <Badge variant="secondary">LeRobot</Badge>}
+              {capabilities?.hasHdf5Files && !capabilities?.isLerobotDataset && (
+                <Badge variant="outline">HDF5</Badge>
+              )}
+            </>
           )}
-          {isWarmingCache && (
+          {operatorStatus && ['starting', 'running', 'stopping'].includes(operatorStatus.state) && (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              title="Stop session (Down Arrow)"
+              onClick={onStopSession}
+              disabled={operatorStatus.state === 'stopping'}
+            >
+              <Square className="mr-1.5 h-3.5 w-3.5" />
+              Stop Session
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label={theme === 'light' ? 'Use dark theme' : 'Use light theme'}
+            title={theme === 'light' ? 'Use dark theme' : 'Use light theme'}
+            onClick={onToggleTheme}
+          >
+            {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          </Button>
+          {activeMode === 'analyze' && isWarmingCache && (
             <span
               className="text-muted-foreground flex items-center gap-1 text-xs"
               title="Pre-loading episodes into cache"

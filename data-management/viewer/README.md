@@ -2,16 +2,19 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-08-27
+ms.date: 2026-09-04
 ms.topic: overview
 ---
 
-A full-stack application for analyzing and annotating robotic training data from episode-based datasets. Features include episode browsing, frame annotation, and export capabilities.
+A full-stack application for operating SO-101 robots and analyzing episode-based robotics datasets. Features include live teleoperation, LeRobot recording, multi-camera playback, 3D end-effector trajectories, annotation, VLM judging, and export.
 
 ## 🏗️ Architecture
 
-- **Backend**: FastAPI (Python) - serves REST API on port 8000
-- **Frontend**: React + Vite + TypeScript - runs on port 5173 with API proxy
+| Component       | Runtime                                                     |
+|-----------------|-------------------------------------------------------------|
+| Backend         | FastAPI API on port 8000                                    |
+| Frontend        | React, Vite, and TypeScript on port 5173                    |
+| Operator worker | Isolated Python 3.12 process for LeRobot hardware ownership |
 
 ## 📋 Prerequisites
 
@@ -94,9 +97,7 @@ Expected blob structure:
 
 ### VLM-as-Judge (experimental)
 
-The viewer can score episodes with a vision-language-model (VLM) judge, reusing the
-`evaluation.vlm_judge` harness. The router mounts only when `VLM_JUDGE_ENABLED=true`;
-the frontend's JudgePanel auto-hides when the backend reports the judge is disabled.
+The viewer can score LeRobot and image-backed HDF5 episodes with a vision-language-model (VLM) judge, reusing the `evaluation.vlm_judge` harness. The router mounts only when `VLM_JUDGE_ENABLED=true`; the frontend's JudgePanel auto-hides when the backend reports the judge is disabled. HDF5 camera arrays are materialized as cached H.264 videos before judging.
 
 #### What it does
 
@@ -208,15 +209,14 @@ back to dataset metadata when needed.
 
 #### Settings
 
-Enable the judge via `start.sh`, or install the backend `vlm-judge` extra before
-launching the backend manually. Install `vlm-judge-local` when using the
-in-process `qwen3-vl` backend without `start.sh`.
+Enable the judge via `start.sh`, or install the backend `vlm-judge` extra before launching the backend manually. Include the `qwen3-vl` extra from `evaluation/vlm_judge` when using the in-process local backend without `start.sh`.
 
 | Variable                   | Default                     | Description                                                                           |
 |----------------------------|-----------------------------|---------------------------------------------------------------------------------------|
 | `VLM_JUDGE_ENABLED`        | `false`                     | Mount the `/judge` router                                                             |
 | `VLM_JUDGE_BACKEND`        | `echo`                      | `qwen3-vl` (local HF), `openai-compat` (vLLM, NIM, Azure OpenAI), or `echo`           |
 | `VLM_JUDGE_MODEL_ID`       | `Qwen/Qwen3-VL-4B-Instruct` | HF model id or remote model name                                                      |
+| `VLM_JUDGE_MODEL_REVISION` | —                           | Immutable Hugging Face commit SHA for local model loading                             |
 | `VLM_JUDGE_BASE_URL`       | —                           | OpenAI-compatible server URL (`openai-compat` only)                                   |
 | `VLM_JUDGE_API_KEY`        | —                           | Bearer token for the remote backend                                                   |
 | `VLM_JUDGE_N_FRAMES`       | `12`                        | Frames sampled per episode                                                            |
@@ -287,6 +287,22 @@ The shim reads these variables ([`evaluation/vlm_judge/openai_shim.py`](../../ev
 >   host allowlist, so only enable it on a network you fully control.
 > - When remote images are enabled, keep `VLM_SHIM_REMOTE_IMAGE_TIMEOUT_S` low to
 >   bound request hangs.
+
+## 🤖 SO-101 Operator View
+
+The **Operate** workspace supports simulated session testing, SO-101 leader/follower teleoperation, transactional LeRobot recording, and bounded GR00T policy rollout. Hardware mode is local-only, disabled by default, and requires a current read-only preflight before motion starts.
+
+Build and validate the isolated worker before enabling hardware:
+
+```bash
+cd data-management/viewer
+npm run build:worker
+npm run validate
+```
+
+The operator view adds live camera previews, six-joint telemetry, control-loop diagnostics, and a shared 3D end-effector renderer. Finished recordings carry their task instruction into Analyze mode for playback, annotation, and VLM judging.
+
+See [SO-101 Operator View](../../docs/operator-view.md) for hardware setup, authorization, profile overrides, preflight checks, recording controls, policy bounds, API routes, failure recovery, and supervised smoke validation.
 
 ## 🔒 Authentication with Entra ID
 
@@ -412,6 +428,10 @@ Datasets that record multiple camera streams (e.g. `observation.images.front`, `
 | Override          | User selection persists for the current episode                                                 |
 | Stale fallback    | When the selected camera is missing on episode change, selection resets to the new `cameras[0]` |
 | Frame extraction  | The chosen camera drives both video playback and `/frames/{idx}` thumbnail requests             |
+
+### End-effector trajectory viewing
+
+Select **End effector 3D** from the camera menu to add a synchronized spatial view beside episode video. The viewer prefers recorded Cartesian poses, then per-frame HDF5 end-effector poses, and uses SO-101 forward kinematics only when the six-joint schema is recognized. Unknown joint schemas do not receive a fabricated trajectory.
 
 ### Language instruction (VLA annotation)
 

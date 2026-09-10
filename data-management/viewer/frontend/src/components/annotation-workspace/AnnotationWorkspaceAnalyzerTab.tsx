@@ -50,7 +50,7 @@ export function AnnotationWorkspaceAnalyzerTab({
               <CollapsibleSection title="Episode Labels" className="border-t pt-6">
                 {labelPanel}
               </CollapsibleSection>
-              <CollapsibleSection title="Language Instructions" className="border-t pt-6">
+              <CollapsibleSection title="Task Instruction" className="border-t pt-6">
                 {languageInstructionPanel}
               </CollapsibleSection>
             </div>

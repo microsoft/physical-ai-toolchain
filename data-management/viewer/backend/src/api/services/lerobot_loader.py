@@ -918,7 +918,10 @@ def is_lerobot_dataset(path: str | Path) -> bool:
     path = Path(path)
     info_path = path / "meta" / "info.json"
     data_dir = path / "data"
-    return info_path.exists() and data_dir.exists()
+    try:
+        return info_path.is_file() and info_path.stat().st_size > 0 and data_dir.is_dir()
+    except OSError:
+        return False
 
 
 def get_lerobot_loader(base_path: str | Path) -> LeRobotLoader:

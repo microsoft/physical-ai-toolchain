@@ -3,7 +3,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 
 import {
   deleteAnnotations,
@@ -144,18 +144,19 @@ export function useSaveCurrentAnnotation() {
   const currentIndex = useEpisodeStore((state) => state.currentIndex)
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
   const mutation = useSaveAnnotation()
+  const mutateAsync = mutation.mutateAsync
 
-  const save = () => {
+  const save = useCallback(async () => {
     if (!currentDataset || currentIndex < 0 || !currentAnnotation) {
       return
     }
 
-    mutation.mutate({
+    await mutateAsync({
       datasetId: currentDataset.id,
       episodeIndex: currentIndex,
       annotation: currentAnnotation,
     })
-  }
+  }, [currentAnnotation, currentDataset, currentIndex, mutateAsync])
 
   return {
     save,

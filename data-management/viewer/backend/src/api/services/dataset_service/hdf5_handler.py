@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 import logging
+from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -45,7 +46,9 @@ def _generate_video(images, output_path: Path, fps: float = 30.0) -> bool:
     import subprocess
 
     if shutil.which("ffmpeg") is None:
-        logger.warning("ffmpeg not found, falling back to cv2 video encoding")
+        logger.info("ffmpeg not found, falling back to PyAV video encoding")
+        if _generate_video_pyav(images, output_path, fps):
+            return True
         return _generate_video_cv2(images, output_path, fps)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,10 +88,43 @@ def _generate_video(images, output_path: Path, fps: float = 30.0) -> bool:
             proc.stdin.write(images[i].tobytes())
         proc.stdin.close()
         proc.wait()
-        return output_path.exists() and output_path.stat().st_size > 0
+        if output_path.exists() and output_path.stat().st_size > 0:
+            return True
     except Exception as e:
         logger.warning("ffmpeg video generation failed: %s", e)
-        return _generate_video_cv2(images, output_path, fps)
+    if _generate_video_pyav(images, output_path, fps):
+        return True
+    return _generate_video_cv2(images, output_path, fps)
+
+
+def _generate_video_pyav(images, output_path: Path, fps: float = 30.0) -> bool:
+    """Encode a browser-compatible H.264 MP4 using the required PyAV dependency."""
+    import av
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    container = None
+    try:
+        container = av.open(str(output_path), mode="w")
+        stream = container.add_stream("libx264", rate=Fraction(str(fps)).limit_denominator(1000))
+        stream.width = images.shape[2]
+        stream.height = images.shape[1]
+        stream.pix_fmt = "yuv420p"
+        for image in images:
+            frame = av.VideoFrame.from_ndarray(image, format="rgb24")
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode():
+            container.mux(packet)
+        container.close()
+        container = None
+        return output_path.exists() and output_path.stat().st_size > 0
+    except Exception as e:
+        logger.warning("PyAV video generation failed: %s", e)
+        output_path.unlink(missing_ok=True)
+        return False
+    finally:
+        if container is not None:
+            container.close()
 
 
 def _generate_video_cv2(images, output_path: Path, fps: float = 30.0) -> bool:

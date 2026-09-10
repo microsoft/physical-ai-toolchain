@@ -279,7 +279,7 @@ export function ObjectDetectionWidget() {
               No cameras reported for this episode.
             </p>
           ) : (
-            <Select value={camera ?? undefined} onValueChange={(value) => setCamera(value)}>
+            <Select value={camera ?? ''} onValueChange={(value) => setCamera(value)}>
               <SelectTrigger id="object-detection-camera" className="h-8">
                 <SelectValue placeholder="Select camera" />
               </SelectTrigger>

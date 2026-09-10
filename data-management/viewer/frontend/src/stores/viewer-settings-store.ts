@@ -21,6 +21,8 @@ interface ViewerSettingsState {
   autoPlay: boolean
   /** Loop playback when reaching the end */
   autoLoop: boolean
+  /** Camera views selected for side-by-side episode playback */
+  selectedCameras: string[]
   /**
    * Open/collapsed state for foldable annotation sections, keyed by section id.
    * A missing key falls back to the section's own default. Persists across
@@ -38,6 +40,8 @@ interface ViewerSettingsActions {
   setAutoPlay: (enabled: boolean) => void
   /** Set auto-loop preference */
   setAutoLoop: (enabled: boolean) => void
+  /** Set camera views displayed together */
+  setSelectedCameras: (cameras: string[]) => void
   /** Set the open/collapsed state for a foldable section. */
   setSectionOpen: (id: string, open: boolean) => void
 }
@@ -69,6 +73,7 @@ export const useViewerSettingsStore = create<ViewerSettingsStore>()(
       isActive: false,
       autoPlay: true,
       autoLoop: true,
+      selectedCameras: [],
       sectionOpen: {},
 
       setAdjustment: (key, value) =>
@@ -81,6 +86,7 @@ export const useViewerSettingsStore = create<ViewerSettingsStore>()(
 
       setAutoPlay: (enabled) => set({ autoPlay: enabled }),
       setAutoLoop: (enabled) => set({ autoLoop: enabled }),
+      setSelectedCameras: (cameras) => set({ selectedCameras: cameras }),
 
       setSectionOpen: (id, open) =>
         set((state) => ({ sectionOpen: { ...state.sectionOpen, [id]: open } })),

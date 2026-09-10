@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { useSaveCurrentAnnotation } from '@/hooks/use-annotations'
 import { useSaveEpisodeLabels } from '@/hooks/use-labels'
 import { isDiagnosticsEnabled, recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import {
+  useAnnotationStore,
   useDatasetStore,
   useEditDirtyState,
   useEditStore,
@@ -50,6 +52,7 @@ export function useAnnotationWorkspaceShell({
   const currentDataset = useDatasetStore((state) => state.currentDataset)
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
   const labelDataLoaded = useLabelStore((state) => state.isLoaded)
+  const hasAnnotationChanges = useAnnotationStore((state) => state.isDirty)
   const availableLabels = useLabelStore((state) => state.availableLabels)
   const episodeLabels = useLabelStore((state) => state.episodeLabels)
   const savedEpisodeLabels = useLabelStore((state) => state.savedEpisodeLabels)
@@ -76,6 +79,7 @@ export function useAnnotationWorkspaceShell({
   const { displayAdjustment, isActive: displayActive } = useViewerDisplay()
   const { autoPlay, autoLoop, setAutoPlay, setAutoLoop } = usePlaybackSettings()
   const saveEpisodeLabels = useSaveEpisodeLabels()
+  const saveCurrentAnnotation = useSaveCurrentAnnotation()
 
   const currentEpisodeLabels = useMemo(() => {
     if (!currentEpisode) {
@@ -104,10 +108,12 @@ export function useAnnotationWorkspaceShell({
       savedLabelsForCurrentEpisode,
       availableLabels,
       labelDataLoaded,
+      hasAnnotationChanges,
       hasEdits,
       onResetEdits: resetEdits,
       onSetEpisodeLabels: setEpisodeLabelsInStore,
       onSaveEpisodeDraft: saveEpisodeDraft,
+      onSaveAnnotation: saveCurrentAnnotation.save,
       onSaveEpisodeLabels: saveEpisodeLabels.mutateAsync,
       onRecordEvent: recordDiagnosticEvent,
       canGoNextEpisode,
@@ -306,6 +312,10 @@ export function useAnnotationWorkspaceShell({
     canvasRef: media.canvasRef,
     cameras: media.cameras,
     cameraName: media.cameraName,
+    cameraNames: media.cameraNames,
     setCameraName: media.setCameraName,
+    setCameraNames: media.setCameraNames,
+    videoWindows: media.videoWindows,
+    datasetFps: media.datasetFps,
   }
 }

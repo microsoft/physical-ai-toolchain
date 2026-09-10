@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppContent } from '@/App'
+import type { OperatorController } from '@/hooks/use-operator'
 import { useDatasetStore, useEpisodeStore } from '@/stores'
 import { useLabelStore } from '@/stores/label-store'
 import type { DatasetInfo } from '@/types'
@@ -14,6 +15,50 @@ const { mockIsDiagnosticsEnabled, mockEnableDiagnostics, mockDisableDiagnostics 
     mockDisableDiagnostics: vi.fn(),
   }),
 )
+
+const { mockOperator, mockStopSession } = vi.hoisted(() => {
+  const stopSession = vi.fn()
+  const operator: OperatorController = {
+    capabilities: {
+      enabled: true,
+      adapterMode: 'simulated',
+      adapterVersion: 1,
+      protocolVersion: 1,
+      modes: ['teleoperate', 'record'],
+      profiles: [],
+      reason: null,
+    },
+    status: {
+      serviceInstanceId: 'service-1',
+      revision: 0,
+      state: 'idle',
+      sessionId: '',
+      mode: null,
+      workerPid: null,
+      lastCommand: null,
+      cleanupUnconfirmed: false,
+      error: null,
+    },
+    isLoading: false,
+    isPending: false,
+    error: null,
+    connectionState: 'connected',
+    telemetry: [],
+    preflight: undefined,
+    calibration: undefined,
+    isCalibrationPending: false,
+    calibrationError: null,
+    checkCalibration: vi.fn(),
+    runPreflight: vi.fn(),
+    startSession: vi.fn(),
+    sendCommand: vi.fn(),
+    stopSession,
+  }
+  return {
+    mockStopSession: stopSession,
+    mockOperator: operator,
+  }
+})
 
 let mockDatasets: DatasetInfo[] = []
 
@@ -47,6 +92,10 @@ vi.mock('@/hooks/use-joint-config', () => ({
 
 vi.mock('@/hooks/use-labels', () => ({
   useDatasetLabels: () => undefined,
+}))
+
+vi.mock('@/hooks/use-operator', () => ({
+  useOperator: () => mockOperator,
 }))
 
 vi.mock('@/lib/playback-diagnostics', () => ({
@@ -94,6 +143,8 @@ vi.mock('@/components/annotation-workspace/AnnotationWorkspace', () => ({
 
 describe('AppContent', () => {
   beforeEach(() => {
+    localStorage.clear()
+    document.documentElement.classList.remove('dark')
     mockDatasets = [
       {
         id: 'houston_lerobot_fixed',
@@ -105,7 +156,7 @@ describe('AppContent', () => {
       },
       {
         id: 'customer_lerobot',
-        name: 'customer_lerobot (hexagarm)',
+        name: 'customer_lerobot (hexagon arm)',
         totalEpisodes: 64,
         fps: 30,
         features: {},
@@ -123,6 +174,18 @@ describe('AppContent', () => {
     mockIsDiagnosticsEnabled.mockReturnValue(false)
     mockEnableDiagnostics.mockClear()
     mockDisableDiagnostics.mockClear()
+    mockOperator.status = {
+      serviceInstanceId: 'service-1',
+      revision: 0,
+      state: 'idle',
+      sessionId: '',
+      mode: null,
+      workerPid: null,
+      lastCommand: null,
+      cleanupUnconfirmed: false,
+      error: null,
+    }
+    mockStopSession.mockClear()
   })
 
   it('switches away from a removed selected dataset when the dataset list refreshes', async () => {
@@ -137,7 +200,7 @@ describe('AppContent', () => {
     mockDatasets = [
       {
         id: 'customer_lerobot',
-        name: 'customer_lerobot (hexagarm)',
+        name: 'customer_lerobot (hexagon arm)',
         totalEpisodes: 64,
         fps: 30,
         features: {},
@@ -204,6 +267,7 @@ describe('AppContent', () => {
 
     const banner = await screen.findByRole('banner')
 
+    expect(screen.getByRole('heading', { name: 'Physical AI Training Data' })).toBeInTheDocument()
     expect(banner.className).toContain('py-2.5')
     expect(banner.className).toContain('px-4')
     expect(banner.className).not.toContain('py-4')
@@ -275,5 +339,52 @@ describe('AppContent', () => {
     expect(sidebarToolbar).toHaveTextContent('3 Episodes')
     expect(sidebarToolbar.className).toContain('border-b')
     expect(sidebarToolbar.className).toContain('py-1.5')
+  })
+
+  it('switches between Analyze and Operate without requiring a dataset', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+
+    expect(screen.getByRole('tab', { name: 'Analyze' })).toHaveAttribute('data-state', 'active')
+    expect(screen.getByRole('combobox', { name: 'Dataset' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Operate' }))
+
+    expect(screen.getByRole('heading', { name: 'Operator' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Dataset' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Annotation Workspace')).not.toBeInTheDocument()
+  })
+
+  it('switches the shared analyzer and operator theme and persists the choice', async () => {
+    const user = userEvent.setup()
+    render(<AppContent />)
+
+    const themeButton = screen.getByRole('button', { name: 'Use dark theme' })
+    await user.click(themeButton)
+
+    expect(document.documentElement).toHaveClass('dark')
+    expect(localStorage.getItem('dataviewer-theme')).toBe('dark')
+    expect(screen.getByRole('button', { name: 'Use light theme' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Operate' }))
+    expect(document.documentElement).toHaveClass('dark')
+    expect(screen.getByRole('heading', { name: 'Operator' })).toBeInTheDocument()
+  })
+
+  it('keeps Stop Session available in Analyze while a worker is active', async () => {
+    mockOperator.status = {
+      ...mockOperator.status!,
+      state: 'running',
+      sessionId: 'session-active',
+      mode: 'teleoperate',
+      workerPid: 4242,
+    }
+    const user = userEvent.setup()
+
+    render(<AppContent />)
+    await user.click(screen.getByRole('button', { name: 'Stop Session' }))
+
+    expect(mockStopSession).toHaveBeenCalledOnce()
+    expect(screen.getByRole('combobox', { name: 'Dataset' })).toBeInTheDocument()
   })
 })

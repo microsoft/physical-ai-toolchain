@@ -7,6 +7,7 @@ import { AnnotationWorkspace } from '@/components/annotation-workspace/Annotatio
 
 import {
   mockResetEdits,
+  mockSaveCurrentAnnotation,
   mockSaveEpisodeLabels,
   setupAnnotationWorkspaceTestCase,
   teardownAnnotationWorkspaceTestCase,
@@ -193,6 +194,23 @@ describe('AnnotationWorkspace status and header actions', () => {
 
     expect(mockSaveEpisodeLabels).toHaveBeenCalledWith({ episodeIdx: 0, labels: ['FAILURE'] })
     expect(handleSaveAndNextEpisode).toHaveBeenCalledTimes(1)
+  })
+
+  it('saves the task instruction before Save & Next Episode advances', async () => {
+    testState.annotationDirty = true
+    const handleSaveAndNextEpisode = vi.fn()
+
+    render(<AnnotationWorkspace canGoNextEpisode onSaveAndNextEpisode={handleSaveAndNextEpisode} />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save\s*&\s*next episode/i }))
+      await Promise.resolve()
+    })
+
+    expect(mockSaveCurrentAnnotation).toHaveBeenCalledTimes(1)
+    expect(mockSaveCurrentAnnotation.mock.invocationCallOrder[0]).toBeLessThan(
+      handleSaveAndNextEpisode.mock.invocationCallOrder[0],
+    )
   })
 
   it('resets labels back to the original episode labels without saving when Reset All is clicked', async () => {

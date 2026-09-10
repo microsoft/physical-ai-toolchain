@@ -1,7 +1,8 @@
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useAnnotationWorkspaceMediaSources } from '@/components/annotation-workspace/useAnnotationWorkspaceMediaSources'
+import { useViewerSettingsStore } from '@/stores/viewer-settings-store'
 import type { DatasetInfo, EpisodeData } from '@/types'
 
 const dataset: DatasetInfo = {
@@ -36,6 +37,10 @@ function defaultOptions(episode: EpisodeData) {
     removedFrames: new Set<number>(),
   }
 }
+
+beforeEach(() => {
+  useViewerSettingsStore.getState().setSelectedCameras([])
+})
 
 describe('useAnnotationWorkspaceMediaSources camera override', () => {
   it('returns cameras[0] synchronously on first render', () => {
@@ -78,6 +83,26 @@ describe('useAnnotationWorkspaceMediaSources camera override', () => {
 
     expect(result.current.cameraName).toBe('front')
     expect(result.current.videoSrc).toBe('/videos/front.mp4')
+  })
+
+  it('preserves a multi-camera selection across the loading gap between episodes', () => {
+    const episode = buildEpisode(['wrist', 'overhead'])
+    const loadingEpisode = buildEpisode([])
+
+    const { result, rerender } = renderHook(
+      (props: ReturnType<typeof defaultOptions>) => useAnnotationWorkspaceMediaSources(props),
+      { initialProps: defaultOptions(episode) },
+    )
+
+    act(() => {
+      result.current.setCameraNames(['wrist', 'overhead'])
+    })
+    expect(result.current.cameraNames).toEqual(['wrist', 'overhead'])
+
+    rerender(defaultOptions(loadingEpisode))
+    rerender(defaultOptions(episode))
+
+    expect(result.current.cameraNames).toEqual(['wrist', 'overhead'])
   })
 
   it('returns null cameraName and videoSrc when the episode has no cameras', () => {
