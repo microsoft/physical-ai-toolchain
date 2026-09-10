@@ -45,6 +45,10 @@ const { mockOperator, mockStopSession } = vi.hoisted(() => {
     connectionState: 'connected',
     telemetry: [],
     preflight: undefined,
+    calibration: undefined,
+    isCalibrationPending: false,
+    calibrationError: null,
+    checkCalibration: vi.fn(),
     runPreflight: vi.fn(),
     startSession: vi.fn(),
     sendCommand: vi.fn(),
@@ -152,7 +156,7 @@ describe('AppContent', () => {
       },
       {
         id: 'customer_lerobot',
-        name: 'customer_lerobot (hexagarm)',
+        name: 'customer_lerobot (hexagon arm)',
         totalEpisodes: 64,
         fps: 30,
         features: {},
@@ -196,7 +200,7 @@ describe('AppContent', () => {
     mockDatasets = [
       {
         id: 'customer_lerobot',
-        name: 'customer_lerobot (hexagarm)',
+        name: 'customer_lerobot (hexagon arm)',
         totalEpisodes: 64,
         fps: 30,
         features: {},

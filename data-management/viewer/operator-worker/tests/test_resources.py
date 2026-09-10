@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from operator_worker.calibration import CalibrationError, validate_calibration_file
 from operator_worker.resources import ArmResource, CameraResource, ResourceSafetyError
 
 
@@ -138,6 +139,48 @@ def test_arm_not_acquired_is_already_torque_safe(tmp_path: Path) -> None:
 
     resource.acquire()
 
+    assert resource.torque_verified_off is True
+
+
+def test_invalid_saved_calibration_never_opens_the_bus(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.json"
+    path.write_text("{}", encoding="utf-8")
+    arm = FakeArm()
+    resource = ArmResource(
+        "follower",
+        arm,
+        calibration_file=path,
+        validate_calibration=validate_calibration_file,
+        set_exclusive=lambda _fd: None,
+        motion_capable=True,
+        configure_torque_off=lambda bus: bus.events.append("configure_torque_off"),
+    )
+
+    with pytest.raises(CalibrationError):
+        resource.acquire()
+
+    resource.release()
+    assert arm.bus.events == []
+
+
+def test_motor_calibration_mismatch_prevents_configuration_and_motion(tmp_path: Path) -> None:
+    arm = FakeArm(calibrated=False)
+    resource = ArmResource(
+        "follower",
+        arm,
+        calibration_file=tmp_path / "unused.json",
+        validate_calibration=lambda _path: None,
+        set_exclusive=lambda _fd: None,
+        motion_capable=True,
+        configure_torque_off=lambda bus: bus.events.append("configure_torque_off"),
+    )
+
+    with pytest.raises(ResourceSafetyError, match="calibration"):
+        resource.acquire()
+
+    assert arm.bus.events == ["connect", "disable_torque"]
+    resource.release()
+    assert arm.bus.events[-1] == "disconnect:False"
     assert resource.torque_verified_off is True
 
 

@@ -19,31 +19,48 @@ JOINTS = (
     "gripper",
 )
 _FIELDS = ("id", "drive_mode", "homing_offset", "range_min", "range_max")
+_MAX_FILE_BYTES = 65_536
+
+
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise CalibrationError("Calibration JSON contains duplicate keys")
+        result[key] = value
+    return result
 
 
 def validate_calibration_file(path: Path) -> dict[str, dict[str, int]]:
     """Load and validate an exact six-joint SO-101 calibration."""
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise CalibrationError(f"Calibration file is unavailable or malformed: {path}") from error
-    if not isinstance(payload, dict) or tuple(payload) != JOINTS:
-        raise CalibrationError("Calibration must contain the ordered SO-101 joint set")
-    ids: set[int] = set()
-    for joint in JOINTS:
+        if not path.is_file():
+            raise CalibrationError("Calibration file is missing or is not a regular file")
+        with path.open("rb") as file:
+            content = file.read(_MAX_FILE_BYTES + 1)
+        if len(content) > _MAX_FILE_BYTES:
+            raise CalibrationError("Calibration file exceeds the 64 KiB size limit")
+        payload = json.loads(content, object_pairs_hook=_unique_object)
+    except CalibrationError:
+        raise
+    except (OSError, ValueError, RecursionError) as error:
+        raise CalibrationError("Calibration file is unavailable or malformed") from error
+    if not isinstance(payload, dict) or set(payload) != set(JOINTS):
+        raise CalibrationError("Calibration must contain exactly the six SO-101 joint names")
+    for motor_id, joint in enumerate(JOINTS, start=1):
         values = payload[joint]
-        if not isinstance(values, dict) or any(
-            field not in values or type(values[field]) is not int for field in _FIELDS
+        if (
+            not isinstance(values, dict)
+            or set(values) != set(_FIELDS)
+            or any(type(values[field]) is not int for field in _FIELDS)
         ):
             raise CalibrationError(f"Calibration entry is invalid: {joint}")
-        motor_id = values["id"]
-        if motor_id in ids or motor_id not in range(1, 7):
-            raise CalibrationError("Calibration motor IDs must be unique values 1 through 6")
-        ids.add(motor_id)
+        if values["id"] != motor_id:
+            raise CalibrationError(f"Calibration motor ID for {joint} must be {motor_id}")
         if values["drive_mode"] not in (0, 1):
             raise CalibrationError("Calibration drive mode must be 0 or 1")
         if not (0 <= values["range_min"] < values["range_max"] <= 4095):
             raise CalibrationError("Calibration ranges must be ordered within 0 through 4095")
-        if not (-4095 <= values["homing_offset"] <= 4095):
-            raise CalibrationError("Calibration homing offset is outside the supported range")
-    return payload
+        if not (-2047 <= values["homing_offset"] <= 2047):
+            raise CalibrationError("Calibration homing offset must be within -2047 through 2047")
+    return {joint: payload[joint] for joint in JOINTS}

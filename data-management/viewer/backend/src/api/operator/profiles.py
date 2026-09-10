@@ -87,9 +87,10 @@ _OVERRIDES = {
     "OPERATOR_SO101_WRIST_CAMERA_PATH": ("wrist_camera", "path"),
     "OPERATOR_SO101_FRONT_CAMERA_SERIAL": ("front_camera", "usb_serial"),
 }
+_DEFAULT_PROFILE_PATH = Path(__file__).parent / "profile_data/so101.toml"
 
 
-def load_operator_profile(path: Path, *, environ: Mapping[str, str]) -> OperatorProfile:
+def load_operator_profile(path: Path = _DEFAULT_PROFILE_PATH, *, environ: Mapping[str, str]) -> OperatorProfile:
     """Load a strict profile and apply only documented environment overrides."""
     unknown = sorted(key for key in environ if key.startswith("OPERATOR_SO101_") and key not in _OVERRIDES)
     if unknown:

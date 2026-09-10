@@ -220,3 +220,35 @@ class PreflightResult(BaseModel):
     checks: list[PreflightCheck]
     ownership_complete: bool
     start_eligible: bool
+
+
+class CalibrationJoint(BaseModel):
+    """Saved encoder calibration for one named SO-101 motor."""
+
+    name: str
+    id: int
+    drive_mode: int
+    homing_offset: int
+    range_min: int
+    range_max: int
+
+
+class CalibrationFileCheck(BaseModel):
+    """File-only evidence; it does not attest to motor or physical calibration."""
+
+    role: Literal["leader", "follower"]
+    file_name: str
+    valid: bool
+    sha256: str | None = None
+    joints: list[CalibrationJoint] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+
+
+class OperatorCalibrationReport(BaseModel):
+    """A read-only snapshot that cannot authorize an operator session."""
+
+    profile: str
+    checked_at: datetime
+    valid: bool
+    hardware_verified: Literal[False] = False
+    arms: list[CalibrationFileCheck]

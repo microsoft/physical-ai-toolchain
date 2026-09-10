@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { OperatorStatus, PreflightResult } from '@/api/operator'
 import {
+  fetchOperatorCalibration,
   fetchOperatorCameraFrame,
   parseOperatorEventBlock,
   sendOperatorCommand,
@@ -79,6 +80,17 @@ describe('fetchOperatorCameraFrame', () => {
     expect(mockFetch).toHaveBeenCalledWith('/api/operator/cameras/wrist/frame', {
       headers: { Authorization: 'Bearer token' },
       signal: abortController.signal,
+      cache: 'no-store',
+    })
+  })
+})
+
+describe('fetchOperatorCalibration', () => {
+  it('requests authenticated file-only evidence without mutation or caching', async () => {
+    await fetchOperatorCalibration()
+
+    expect(mockFetch).toHaveBeenCalledWith('/api/operator/calibration', {
+      headers: { Authorization: 'Bearer token' },
       cache: 'no-store',
     })
   })

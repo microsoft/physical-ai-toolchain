@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
 
@@ -11,7 +13,9 @@ from ..operator.authorization import (
     require_operator_access,
     require_operator_csrf,
 )
+from ..operator.calibration import inspect_operator_calibration
 from ..operator.models import (
+    OperatorCalibrationReport,
     OperatorCapabilities,
     OperatorCommand,
     OperatorStatus,
@@ -19,6 +23,7 @@ from ..operator.models import (
     PreflightResult,
     StartSessionRequest,
 )
+from ..operator.profiles import OperatorProfile, OperatorProfileError, load_operator_profile
 from ..services.operator_preflight_service import (
     OperatorPreflightConflictError,
     OperatorPreflightNotFoundError,
@@ -50,6 +55,30 @@ def get_preflight_service(request: Request) -> OperatorPreflightService:
     if service is None:
         raise HTTPException(status_code=503, detail="Operator preflight service is unavailable")
     return service
+
+
+def get_calibration_profile(request: Request) -> OperatorProfile:
+    """Use the active profile snapshot, or inspect the default while motion is disabled."""
+    service = getattr(request.app.state, "operator_preflight_service", None)
+    if service is not None:
+        profile = service.profiles.get("so101")
+        if profile is None:
+            raise HTTPException(status_code=404, detail="SO-101 profile is unavailable")
+        return profile
+    try:
+        return load_operator_profile(environ=os.environ)
+    except OperatorProfileError as error:
+        raise HTTPException(status_code=409, detail="SO-101 profile is invalid; review its configuration") from error
+
+
+@router.get("/calibration", response_model=OperatorCalibrationReport)
+def get_calibration(
+    response: Response,
+    profile: OperatorProfile = Depends(get_calibration_profile),
+) -> OperatorCalibrationReport:
+    """Read saved calibration only; never connect, recalibrate, or authorize motion."""
+    response.headers["Cache-Control"] = "no-store"
+    return inspect_operator_calibration(profile)
 
 
 @router.get("/capabilities", response_model=OperatorCapabilities)

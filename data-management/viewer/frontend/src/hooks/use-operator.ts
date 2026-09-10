@@ -3,9 +3,11 @@ import { useEffect, useRef, useState } from 'react'
 
 import {
   createOperatorPreflight,
+  fetchOperatorCalibration,
   fetchOperatorCapabilities,
   fetchOperatorStatus,
   type OperatorAction,
+  type OperatorCalibrationReport,
   type OperatorCapabilities,
   type OperatorMode,
   type OperatorSessionSettings,
@@ -33,6 +35,10 @@ export interface OperatorController {
   error: string | null
   connectionState: 'disabled' | 'connecting' | 'connected' | 'retrying'
   preflight: PreflightResult | undefined
+  calibration: OperatorCalibrationReport | undefined
+  isCalibrationPending: boolean
+  calibrationError: string | null
+  checkCalibration: () => void
   telemetry: OperatorTelemetry[]
   runPreflight: (mode: OperatorMode, uploadRequested?: boolean) => void
   startSession: (mode: OperatorMode, settings?: OperatorSessionSettings) => void
@@ -144,6 +150,21 @@ export function useOperator(): OperatorController {
       startCommandRef.current = null
     },
   })
+  const calibrationMutation = useMutation({
+    mutationFn: fetchOperatorCalibration,
+    retry: false,
+    onSuccess: (report) => {
+      recordDiagnosticEvent('operator', 'calibration-check', {
+        valid: report.valid,
+        hardwareVerified: report.hardwareVerified,
+      })
+    },
+    onError: (error) => {
+      recordDiagnosticEvent('operator', 'calibration-check-error', {
+        message: errorMessage(error),
+      })
+    },
+  })
 
   useEffect(() => {
     if (!capabilitiesQuery.data?.enabled) return
@@ -246,6 +267,10 @@ export function useOperator(): OperatorController {
     error,
     connectionState: effectiveConnectionState,
     preflight: preflightMutation.data,
+    calibration: calibrationMutation.data,
+    isCalibrationPending: calibrationMutation.isPending,
+    calibrationError: errorMessage(calibrationMutation.error),
+    checkCalibration: () => calibrationMutation.mutate(),
     telemetry,
     runPreflight,
     startSession,

@@ -8,7 +8,9 @@ import os
 import stat
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Literal
 
+from .calibration import inspect_calibration_file
 from .models import OperatorMode, PreflightCheck, PreflightCheckOutcome
 from .profiles import ArmProfile, OperatorProfile
 
@@ -130,31 +132,17 @@ class OperatorPreflightRunner:
             detail="Stable USB identity verified",
         )
 
-    def _calibration_check(self, role: str, arm: ArmProfile, evidence: dict[str, object]) -> PreflightCheck:
-        try:
-            content = arm.calibration_file.read_bytes()
-            payload = json.loads(content)
-        except (OSError, json.JSONDecodeError):
-            return self._blocking(f"{role}_calibration", "Calibration file is missing or malformed")
-        expected = {
-            "shoulder_pan",
-            "shoulder_lift",
-            "elbow_flex",
-            "wrist_flex",
-            "wrist_roll",
-            "gripper",
-        }
-        if set(payload) != expected:
-            return self._blocking(
-                f"{role}_calibration",
-                "Calibration must contain the expected six joints",
-            )
-        digest = hashlib.sha256(content).hexdigest()
-        evidence[f"{role}_calibration"] = digest
+    def _calibration_check(
+        self, role: Literal["leader", "follower"], arm: ArmProfile, evidence: dict[str, object]
+    ) -> PreflightCheck:
+        result = inspect_calibration_file(arm.calibration_file, role)
+        if not result.valid:
+            return self._blocking(f"{role}_calibration", "; ".join(result.issues))
+        evidence[f"{role}_calibration"] = result.sha256
         return PreflightCheck(
             name=f"{role}_calibration",
             outcome=PreflightCheckOutcome.PASSED,
-            detail="Six-joint calibration verified",
+            detail="Saved joint IDs, ranges, and offsets verified; hardware not checked",
         )
 
     def _wrist_check(self, profile: OperatorProfile, evidence: dict[str, object]) -> PreflightCheck:

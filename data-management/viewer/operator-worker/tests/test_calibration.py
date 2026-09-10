@@ -55,3 +55,31 @@ def test_invalid_calibration_fails_without_prompt(tmp_path: Path, mutation: str)
 
     with pytest.raises(CalibrationError):
         validate_calibration_file(path)
+
+
+@pytest.mark.parametrize("offset", [-2048, 2048, -4095, 4095])
+def test_homing_offsets_fit_the_sts3215_signed_register(tmp_path: Path, offset: int) -> None:
+    payload = _calibration()
+    payload["gripper"]["homing_offset"] = offset
+    path = tmp_path / "arm.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(CalibrationError, match="offset"):
+        validate_calibration_file(path)
+
+
+def test_swapped_motor_ids_do_not_change_the_so101_joint_mapping(tmp_path: Path) -> None:
+    payload = _calibration()
+    payload["shoulder_pan"]["id"], payload["gripper"]["id"] = 6, 1
+    path = tmp_path / "arm.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(CalibrationError, match="ID"):
+        validate_calibration_file(path)
+
+
+def test_reordered_json_is_valid_and_returns_canonical_joint_order(tmp_path: Path) -> None:
+    path = tmp_path / "arm.json"
+    path.write_text(json.dumps(dict(reversed(list(_calibration().items())))), encoding="utf-8")
+
+    assert tuple(validate_calibration_file(path)) == JOINTS

@@ -34,6 +34,32 @@ export interface OperatorCamera {
   defaultFps: number
 }
 
+export interface CalibrationJoint {
+  name: string
+  id: number
+  driveMode: number
+  homingOffset: number
+  rangeMin: number
+  rangeMax: number
+}
+
+export interface CalibrationFileCheck {
+  role: 'leader' | 'follower'
+  fileName: string
+  valid: boolean
+  sha256: string | null
+  joints: CalibrationJoint[]
+  issues: string[]
+}
+
+export interface OperatorCalibrationReport {
+  profile: string
+  checkedAt: string
+  valid: boolean
+  hardwareVerified: false
+  arms: CalibrationFileCheck[]
+}
+
 export interface OperatorSessionSettings {
   controlFps: number
   cameraFps: Record<string, number>
@@ -113,6 +139,14 @@ export async function fetchOperatorStatus(): Promise<OperatorStatus> {
     headers: await requestHeaders(),
   })
   return transformKeys<OperatorStatus>(await handleResponse<unknown>(response))
+}
+
+export async function fetchOperatorCalibration(): Promise<OperatorCalibrationReport> {
+  const response = await fetch(`${API_BASE}/calibration`, {
+    headers: await requestHeaders(),
+    cache: 'no-store',
+  })
+  return transformKeys<OperatorCalibrationReport>(await handleResponse<unknown>(response))
 }
 
 export async function fetchOperatorCameraFrame(camera: string, signal: AbortSignal): Promise<Blob> {

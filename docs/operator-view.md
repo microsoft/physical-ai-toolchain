@@ -2,7 +2,7 @@
 title: SO-101 Operator View
 description: Configure and use the dataviewer for SO-101 teleoperation, recording, policy rollout, trajectory review, and VLM evaluation
 author: Physical AI Toolchain contributors
-ms.date: 2026-09-04
+ms.date: 2026-09-10
 ms.topic: how-to
 ---
 
@@ -113,6 +113,26 @@ cd data-management/viewer
 npm start
 ```
 
+## Check saved calibration
+
+Select **Operate** and **Check calibration** to inspect the saved leader and follower calibration files. This check also works when operator motion is disabled. It does not open serial or camera devices, enable or disable torque, rewrite calibration, or grant permission to start a session.
+
+The report shows each file name, SHA-256 fingerprint, check time, joint values, and any blocking issues. Expand **Joint values (encoder ticks)** to inspect the saved values.
+
+| Field          | Validation                                                                               |
+|----------------|------------------------------------------------------------------------------------------|
+| Joint names    | Exactly the six SO-101 joints; JSON key order is ignored                                 |
+| Motor IDs      | Shoulder pan through gripper map to IDs 1 through 6 respectively                         |
+| Numeric fields | Integers only; booleans and numeric strings are rejected                                 |
+| Drive mode     | 0 or 1                                                                                   |
+| Homing offset  | -2047 through 2047, matching the STS3215 signed register                                 |
+| Encoder range  | `0 <= range_min < range_max <= 4095`                                                     |
+| File           | A readable regular JSON file of at most 64 KiB, with no duplicate keys or unknown fields |
+
+**Saved calibration valid** means the file values satisfy these rules, not that the physical arm is calibrated correctly. The report always states **Hardware not checked**. Before motion, the worker rechecks resource fingerprints and compares saved calibration with motor registers while torque is disabled. These checks do not replace supervised confirmation of physical joint alignment and motion.
+
+For missing or invalid calibration, restore a known calibration for the configured arm or use the official LeRobot calibration tools under supervision. The viewer never recalibrates automatically. After any change, run **Check calibration** again, then run full preflight.
+
 ## Run preflight
 
 Select **Operate**, choose Teleoperate, Record, or Policy, and run **SO-101 Preflight**. Preflight reads sysfs, procfs, calibration files, credentials, and storage metadata without opening a device node or enabling torque.
@@ -120,7 +140,7 @@ Select **Operate**, choose Teleoperate, Record, or Policy, and run **SO-101 Pref
 | Check               | Blocking conditions                                                                     |
 |---------------------|-----------------------------------------------------------------------------------------|
 | Leader and follower | Missing stable link, inaccessible character device, USB mismatch, or duplicate identity |
-| Calibration         | Missing, malformed, or non-six-joint calibration JSON                                   |
+| Calibration         | Invalid saved calibration under the same field checks used by **Check calibration**     |
 | Wrist camera        | Missing stable path, inaccessible device, or USB mismatch                               |
 | Front camera        | Expected D405 USB descriptor identity not found exactly once                            |
 | Dataset storage     | Missing directory, insufficient permissions, or less than the profile free-space floor  |
@@ -216,18 +236,19 @@ Results are cached under `<dataset>/annotations/vlm_judge/`. Re-evaluating the s
 
 ## API reference
 
-| Method   | Endpoint                                       | Purpose                                                          |
-|----------|------------------------------------------------|------------------------------------------------------------------|
-| `GET`    | `/api/operator/capabilities`                   | Adapter, mode, profile, robot, camera, and protocol capabilities |
-| `GET`    | `/api/operator/status`                         | Current authoritative session state                              |
-| `POST`   | `/api/operator/preflights`                     | Run read-only readiness checks                                   |
-| `GET`    | `/api/operator/preflights/{preflight_id}`      | Read current preflight evidence                                  |
-| `DELETE` | `/api/operator/preflights/{preflight_id}`      | Cancel a preflight resource                                      |
-| `POST`   | `/api/operator/sessions`                       | Start one session with idempotent `command_id`                   |
-| `POST`   | `/api/operator/sessions/{session_id}/commands` | Save, discard, pause, resume, or finish recording                |
-| `DELETE` | `/api/operator/sessions/{session_id}`          | Cancel the named session                                         |
-| `GET`    | `/api/operator/events`                         | Stream status revisions with replay and heartbeats               |
-| `GET`    | `/api/operator/cameras/{camera}/frame`         | Read the latest worker-owned JPEG preview                        |
+| Method   | Endpoint                                       | Purpose                                                                      |
+|----------|------------------------------------------------|------------------------------------------------------------------------------|
+| `GET`    | `/api/operator/capabilities`                   | Adapter, mode, profile, robot, camera, and protocol capabilities             |
+| `GET`    | `/api/operator/status`                         | Current authoritative session state                                          |
+| `GET`    | `/api/operator/calibration`                    | Read-only saved-calibration report; never opens hardware or authorizes start |
+| `POST`   | `/api/operator/preflights`                     | Run read-only readiness checks                                               |
+| `GET`    | `/api/operator/preflights/{preflight_id}`      | Read current preflight evidence                                              |
+| `DELETE` | `/api/operator/preflights/{preflight_id}`      | Cancel a preflight resource                                                  |
+| `POST`   | `/api/operator/sessions`                       | Start one session with idempotent `command_id`                               |
+| `POST`   | `/api/operator/sessions/{session_id}/commands` | Save, discard, pause, resume, or finish recording                            |
+| `DELETE` | `/api/operator/sessions/{session_id}`          | Cancel the named session                                                     |
+| `GET`    | `/api/operator/events`                         | Stream status revisions with replay and heartbeats                           |
+| `GET`    | `/api/operator/cameras/{camera}/frame`         | Read the latest worker-owned JPEG preview                                    |
 
 Hardware mutations require operator authorization, double-submit CSRF, and a current session ID. API-key deployments require `DATAVIEWER_OPERATOR_API_KEY` through `X-Operator-API-Key`; keep it distinct from `DATAVIEWER_API_KEY`. Role-based deployments require the `Operator` role. Easy Auth is rejected for hardware access unless `OPERATOR_TRUST_EASY_AUTH=true`.
 

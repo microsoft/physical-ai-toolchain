@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   sendCommand: vi.fn(),
   stopSession: vi.fn(),
   createPreflight: vi.fn(),
+  fetchCalibration: vi.fn(),
 }))
 
 vi.mock('@/api/operator', async (importOriginal) => {
@@ -25,6 +26,7 @@ vi.mock('@/api/operator', async (importOriginal) => {
     sendOperatorCommand: mocks.sendCommand,
     stopOperatorSession: mocks.stopSession,
     createOperatorPreflight: mocks.createPreflight,
+    fetchOperatorCalibration: mocks.fetchCalibration,
   }
 })
 
@@ -33,6 +35,13 @@ vi.mock('@/lib/playback-diagnostics', () => ({
 }))
 
 beforeEach(() => {
+  mocks.fetchCalibration.mockReset().mockResolvedValue({
+    profile: 'so101',
+    checkedAt: '2026-09-10T12:00:00Z',
+    valid: true,
+    hardwareVerified: false,
+    arms: [],
+  })
   mocks.fetchCapabilities.mockReset().mockResolvedValue({
     enabled: true,
     adapterMode: 'simulated',
@@ -103,6 +112,33 @@ beforeEach(() => {
 })
 
 describe('useOperator event recovery', () => {
+  it('checks calibration only on request without creating preflight or starting hardware', async () => {
+    const { result } = renderHookWithProviders(() => useOperator())
+    await waitFor(() => expect(result.current.status?.state).toBe('idle'))
+    expect(mocks.fetchCalibration).not.toHaveBeenCalled()
+
+    act(() => result.current.checkCalibration())
+
+    await waitFor(() => expect(result.current.calibration?.valid).toBe(true))
+    expect(result.current.calibration?.hardwareVerified).toBe(false)
+    expect(mocks.createPreflight).not.toHaveBeenCalled()
+    expect(mocks.startSession).not.toHaveBeenCalled()
+  })
+
+  it('reports calibration API errors without retrying or changing session state', async () => {
+    mocks.fetchCalibration.mockRejectedValue(new Error('Calibration check unavailable'))
+    const { result } = renderHookWithProviders(() => useOperator())
+    await waitFor(() => expect(result.current.status?.state).toBe('idle'))
+
+    act(() => result.current.checkCalibration())
+
+    await waitFor(() =>
+      expect(result.current.calibrationError).toBe('Calibration check unavailable'),
+    )
+    expect(mocks.fetchCalibration).toHaveBeenCalledOnce()
+    expect(result.current.status?.state).toBe('idle')
+  })
+
   it('exposes retrying state and refreshes the status snapshot after disconnect', async () => {
     const { result } = renderHookWithProviders(() => useOperator())
 

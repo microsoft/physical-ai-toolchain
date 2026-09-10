@@ -548,8 +548,10 @@ def test_stop_during_cancelled_acquisition_correlates_cleanup(monkeypatch) -> No
     assert json.loads(output.getvalue().splitlines()[-1])["command_id"] == "cancel-acquisition"
 
 
-def test_profile_fingerprint_mismatch_fails_before_acquisition(monkeypatch) -> None:
+@pytest.mark.parametrize("field", ["profile_fingerprint", "resource_fingerprint"])
+def test_fingerprint_mismatch_fails_before_runtime_construction(monkeypatch: pytest.MonkeyPatch, field: str) -> None:
     runtime = FakeRuntime()
+    constructed_profiles = []
     command = {
         "protocol_version": 2,
         "type": "initialize",
@@ -558,16 +560,17 @@ def test_profile_fingerprint_mismatch_fails_before_acquisition(monkeypatch) -> N
         "sequence": 1,
         "startup_nonce": "0123456789abcdef",
         "profile": _profile(),
-        "profile_fingerprint": "different",
+        "profile_fingerprint": _profile()["fingerprint"],
         "resource_fingerprint": "resource",
         "settings": _settings(),
     }
+    command[field] = "different"
     monkeypatch.setattr("operator_worker.app.importlib.metadata.version", lambda _name: "0.6.1")
     app = WorkerApplication(
         session_id="session-1",
         input_stream=io.StringIO(json.dumps(command) + "\n"),
         output_stream=io.StringIO(),
-        runtime_factory=lambda _profile, _settings: runtime,
+        runtime_factory=lambda profile, _settings: constructed_profiles.append(profile) or runtime,
         resource_fingerprint=lambda _profile, _mode: "resource",
     )
 
@@ -575,6 +578,7 @@ def test_profile_fingerprint_mismatch_fails_before_acquisition(monkeypatch) -> N
         app.run()
 
     assert runtime.events == []
+    assert constructed_profiles == []
 
 
 def test_teleoperation_failure_preserves_first_cleanup_failure(monkeypatch) -> None:

@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from 'react'
 
 import type { OperatorMode, OperatorSessionSettings } from '@/api/operator'
+import { OperatorCalibrationPanel } from '@/components/operator/OperatorCalibrationPanel'
 import { OperatorCameraPreview } from '@/components/operator/OperatorCameraPreview'
 import { OperatorSessionConfig } from '@/components/operator/OperatorSessionConfig'
 import { OperatorTelemetryPlot } from '@/components/operator/OperatorTelemetryPlot'
@@ -176,6 +177,18 @@ export function OperatorWorkspace({ operator }: OperatorWorkspaceProps) {
         </section>
 
         <aside className="bg-card order-first border-t p-5 lg:order-none lg:border-t-0 lg:border-l">
+          {capabilities && capabilities.adapterMode !== 'simulated' && (
+            <OperatorCalibrationPanel
+              report={operator.calibration}
+              isPending={operator.isCalibrationPending}
+              error={operator.calibrationError}
+              disabled={
+                operator.isPending ||
+                ['starting', 'running', 'stopping'].includes(status?.state ?? '')
+              }
+              onCheck={operator.checkCalibration}
+            />
+          )}
           <div className="mb-4 space-y-2" aria-live="polite">
             {cleanupBlocked && (
               <p className="text-destructive text-sm">

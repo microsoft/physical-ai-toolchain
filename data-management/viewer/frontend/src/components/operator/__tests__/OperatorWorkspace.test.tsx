@@ -5,6 +5,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { OperatorWorkspace } from '@/components/operator/OperatorWorkspace'
 import type { OperatorController } from '@/hooks/use-operator'
 
+vi.mock('@/api/operator', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/operator')>()),
+  fetchOperatorCameraFrame: vi.fn().mockRejectedValue(new Error('No camera in component tests')),
+}))
+
 function createOperator(overrides: Partial<OperatorController> = {}): OperatorController {
   return {
     capabilities: {
@@ -33,6 +38,10 @@ function createOperator(overrides: Partial<OperatorController> = {}): OperatorCo
     connectionState: 'connected',
     telemetry: [],
     preflight: undefined,
+    calibration: undefined,
+    isCalibrationPending: false,
+    calibrationError: null,
+    checkCalibration: vi.fn(),
     runPreflight: vi.fn(),
     startSession: vi.fn(),
     sendCommand: vi.fn(),
@@ -42,6 +51,98 @@ function createOperator(overrides: Partial<OperatorController> = {}): OperatorCo
 }
 
 describe('OperatorWorkspace', () => {
+  it('checks saved calibration while motion is disabled without starting a session', async () => {
+    const operator = createOperator({
+      capabilities: {
+        ...createOperator().capabilities!,
+        enabled: false,
+        adapterMode: 'disabled',
+        modes: [],
+        reason: 'Operator mode is disabled',
+      },
+      status: { ...createOperator().status!, state: 'disabled' },
+    })
+    const user = userEvent.setup()
+    const { rerender } = render(<OperatorWorkspace operator={operator} />)
+
+    await user.click(screen.getByRole('button', { name: 'Check calibration' }))
+
+    expect(operator.checkCalibration).toHaveBeenCalledOnce()
+    expect(operator.startSession).not.toHaveBeenCalled()
+    operator.calibration = {
+      profile: 'so101',
+      checkedAt: '2026-09-10T12:00:00Z',
+      valid: true,
+      hardwareVerified: false,
+      arms: ['leader', 'follower'].map((role) => ({
+        role: role as 'leader' | 'follower',
+        fileName: `${role}.json`,
+        valid: true,
+        sha256: 'a'.repeat(64),
+        issues: [],
+        joints: [
+          { name: 'gripper', id: 6, driveMode: 0, homingOffset: 0, rangeMin: 100, rangeMax: 4000 },
+        ],
+      })),
+    }
+    rerender(<OperatorWorkspace operator={operator} />)
+
+    expect(screen.getByText('Saved calibration valid')).toBeInTheDocument()
+    expect(screen.getByText(/hardware not checked/i)).toBeInTheDocument()
+    expect(screen.getByText('leader.json')).toBeInTheDocument()
+    expect(screen.getByText('follower.json')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start/i })).not.toBeInTheDocument()
+  })
+
+  it('shows calibration problems instead of treating a report as preflight evidence', () => {
+    const operator = createOperator({
+      capabilities: {
+        ...createOperator().capabilities!,
+        adapterMode: 'lerobot',
+        preflightEnabled: true,
+      },
+      calibration: {
+        profile: 'so101',
+        checkedAt: '2026-09-10T12:00:00Z',
+        valid: false,
+        hardwareVerified: false,
+        arms: [
+          {
+            role: 'follower',
+            fileName: 'follower.json',
+            valid: false,
+            sha256: null,
+            joints: [],
+            issues: ['gripper: motor ID must be 6'],
+          },
+        ],
+      },
+    })
+    render(<OperatorWorkspace operator={operator} />)
+
+    expect(screen.getByText('Calibration needs attention')).toBeInTheDocument()
+    expect(screen.getByText('gripper: motor ID must be 6')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Start Teleoperation' })).not.toBeInTheDocument()
+  })
+
+  it('keeps calibration errors visible and disables checks during active sessions', () => {
+    const operator = createOperator({
+      capabilities: { ...createOperator().capabilities!, adapterMode: 'lerobot' },
+      calibrationError: 'Calibration check unavailable',
+      status: {
+        ...createOperator().status!,
+        state: 'running',
+        sessionId: 'session-1',
+        mode: 'teleoperate',
+      },
+    })
+    render(<OperatorWorkspace operator={operator} />)
+
+    expect(screen.getByText('Calibration check unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check calibration' })).toBeDisabled()
+    expect(operator.stopSession).not.toHaveBeenCalled()
+  })
+
   it('explains when operator mode is disabled', () => {
     render(
       <OperatorWorkspace

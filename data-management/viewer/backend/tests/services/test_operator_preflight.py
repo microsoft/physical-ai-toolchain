@@ -36,7 +36,12 @@ _JOINTS = (
 def _write_calibration(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({name: {"id": index} for index, name in enumerate(_JOINTS, start=1)}),
+        json.dumps(
+            {
+                name: {"id": index, "drive_mode": 0, "homing_offset": 0, "range_min": 100, "range_max": 4000}
+                for index, name in enumerate(_JOINTS, start=1)
+            }
+        ),
         encoding="utf-8",
     )
 
