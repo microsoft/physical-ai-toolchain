@@ -10,7 +10,7 @@ dependencies = [
     "python-multipart==0.0.32",
     "python-dotenv==1.2.3",
     "aiofiles==25.1.0",
-    "numpy==2.5.2",
+    "numpy==2.5.3",
     "scipy==1.18.1",
     "scikit-learn==1.9.0",
     "pandas==3.0.5",
@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.16.5",
+    "ruff==0.16.6",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "httpx==0.28.1",
@@ -32,19 +32,19 @@ azure = [
     "azure-identity==1.25.3",
 ]
 huggingface = [
-    "huggingface-hub==1.29.0",
+    "huggingface-hub==1.30.0",
 ]
 hdf5 = [
     "h5py==3.16.0",
 ]
 export = [
     "h5py==3.16.0",
-    "numpy==2.5.2",
+    "numpy==2.5.3",
     "Pillow==12.3.0",
 ]
 yolo = [
-    "ultralytics==8.4.135",
-    "numpy==2.5.2",
+    "ultralytics==8.4.142",
+    "numpy==2.5.3",
     "Pillow==12.3.0",
 ]
 all = [
