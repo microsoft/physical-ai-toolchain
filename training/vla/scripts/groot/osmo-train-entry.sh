@@ -80,6 +80,7 @@ echo "   data config: ${DATA_CONFIG}"
 echo "   batch_size:  ${BATCH_SIZE}"
 echo "   max_steps:   ${MAX_STEPS}"
 echo "========================================================"
+BASE_MODEL_SOURCE="${BASE_MODEL}"
 
 nvidia-smi
 df -h /dev/shm /outputs || true
@@ -114,6 +115,8 @@ if ! git checkout "${ISAAC_GROOT_REF}"; then
   git fetch origin "${ISAAC_GROOT_REF}" --depth 1 || true
   git checkout "${ISAAC_GROOT_REF}"
 fi
+RESOLVED_GROOT_REF="$(git rev-parse HEAD)"
+export RESOLVED_GROOT_REF
 
 # GR00T N1.7+ pins python==3.10.*; the default pytorch image ships
 # python 3.11. Create a conda env when the active interpreter is
@@ -164,6 +167,7 @@ else
 fi
 
 # Keep flash-attn builds bounded when a wheel is unavailable.
+export TORCH_VER TV_VER TA_VER FLASH_ATTN_VER BASE_MODEL_SOURCE
 export MAX_JOBS="${MAX_JOBS:-2}"
 export NVCC_THREADS="${NVCC_THREADS:-1}"
 
@@ -236,6 +240,34 @@ elif [ -z "${BASE_MODEL_REVISION:-}" ] && [ ! -d "${BASE_MODEL}" ]; then
   exit 1
 fi
 
+python - "${OUTPUT_DIR}/runtime-provenance.json" <<'PY'
+import importlib.metadata
+import json
+import os
+import pathlib
+import sys
+
+packages = ("accelerate", "flash-attn", "numpy", "opencv-python", "torch", "torchaudio", "torchvision")
+payload = {
+    "base_model": os.environ["BASE_MODEL_SOURCE"],
+    "base_model_revision": os.environ.get("BASE_MODEL_REVISION", ""),
+    "expected_runtime_versions": {
+        "accelerate": "1.14.0",
+        "flash-attn": os.environ["FLASH_ATTN_VER"],
+        "numpy": "1.26.4",
+        "opencv-python": "4.8.0.74",
+        "torch": os.environ["TORCH_VER"],
+        "torchaudio": os.environ["TA_VER"],
+        "torchvision": os.environ["TV_VER"],
+    },
+    "isaac_groot_ref": os.environ["RESOLVED_GROOT_REF"],
+    "runtime_versions": {name: importlib.metadata.version(name) for name in packages},
+}
+path = pathlib.Path(sys.argv[1])
+path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+print("VLA_RUNTIME_PROVENANCE=" + json.dumps(payload, sort_keys=True))
+PY
+
 echo "--- starting training ---"
 if [ -f "scripts/gr00t_finetune.py" ]; then
   echo "  N1.5/N1.6 branch: using scripts/gr00t_finetune.py"
@@ -300,8 +332,9 @@ if [ "${AZURE_UPLOAD:-false}" = "true" ]; then
       'azure-ai-ml==1.34.0'
     RUN_ID="${RUN_ID}" OUTPUT_DIR="${OUTPUT_DIR}" \
     TRAINING_FRAMEWORK=groot AML_SOURCE=osmo-train \
-      python /tmp/aml_mirror.py || \
-      echo "WARN: Azure ML mirror failed; local run at ${OUTPUT_DIR} is unaffected." >&2
+      BASE_MODEL="${BASE_MODEL_SOURCE}" \
+      BASE_MODEL_REVISION="${BASE_MODEL_REVISION:-}" \
+      python /tmp/aml_mirror.py
   fi
 fi
 

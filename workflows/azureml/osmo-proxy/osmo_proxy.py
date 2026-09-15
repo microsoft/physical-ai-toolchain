@@ -532,18 +532,11 @@ def _setup_mlflow() -> None:
     Without this import, metrics are silently dropped when MLFLOW_TRACKING_URI
     uses the azureml:// scheme. Starts a run if one is not already active.
     """
-    try:
-        import mlflow
+    import azureml.mlflow  # noqa: F401
+    import mlflow
 
-        try:
-            import azureml.mlflow  # noqa: F401
-        except ImportError:
-            _LOGGER.debug("azureml.mlflow not installed — azureml:// tracking store unavailable")
-
-        if mlflow.active_run() is None:
-            mlflow.start_run()
-    except ImportError:
-        _LOGGER.info("mlflow not installed — MLflow tracking disabled")
+    if mlflow.active_run() is None:
+        mlflow.start_run()
 
 
 def _log_to_mlflow(
@@ -568,130 +561,112 @@ def _log_to_mlflow(
     Tier 2 (optional, requires OSMO_METRICS_SPEC and AZURE_CLIENT_ID):
       osmo.workflow.<name> metrics from spec-driven blob extraction.
     """
-    try:
-        import mlflow
+    import mlflow
 
-        groups = query.get("groups", [])
-        all_tasks = [t for g in groups for t in g.get("tasks", [])]
-        task_count = len(all_tasks)
-        completed_tasks = sum(1 for t in all_tasks if str(t.get("status", "")) == "COMPLETED")
-        failed_tasks = sum(1 for t in all_tasks if str(t.get("status", "")).startswith("FAILED"))
-        success_rate = completed_tasks / task_count if task_count else 0.0
-        duration = query.get("duration")
+    groups = query.get("groups", [])
+    all_tasks = [t for g in groups for t in g.get("tasks", [])]
+    task_count = len(all_tasks)
+    completed_tasks = sum(1 for t in all_tasks if str(t.get("status", "")) == "COMPLETED")
+    failed_tasks = sum(1 for t in all_tasks if str(t.get("status", "")).startswith("FAILED"))
+    success_rate = completed_tasks / task_count if task_count else 0.0
+    duration = query.get("duration")
 
-        # --- Tier 1 tags ---
-        mlflow.set_tag("osmo.workflow_id", workflow_id)
-        mlflow.set_tag("osmo.status", status)
-        mlflow.set_tag("osmo.pool", query.get("pool", ""))
+    mlflow.set_tag("osmo.workflow_id", workflow_id)
+    mlflow.set_tag("osmo.status", status)
+    mlflow.set_tag("osmo.pool", query.get("pool", ""))
 
-        first_failed = next(
-            (t for t in all_tasks if str(t.get("status", "")).startswith("FAILED")),
-            None,
+    first_failed = next(
+        (t for t in all_tasks if str(t.get("status", "")).startswith("FAILED")),
+        None,
+    )
+    if first_failed:
+        error_msg = first_failed.get("error") or first_failed.get("message") or first_failed.get("status", "")
+        mlflow.set_tag("osmo.first_error", str(error_msg)[:500])
+
+    mlflow.log_metric("osmo.task_count", task_count)
+    mlflow.log_metric("osmo.task_completed", completed_tasks)
+    mlflow.log_metric("osmo.failed_tasks", failed_tasks)
+    mlflow.log_metric("osmo.task_success_rate", success_rate)
+    if duration is not None:
+        mlflow.log_metric("osmo.duration_seconds", float(duration))
+
+    for i, group in enumerate(groups):
+        g_tasks = group.get("tasks", [])
+        g_name = group.get("name") or str(i)
+        g_completed = sum(1 for t in g_tasks if str(t.get("status", "")) == "COMPLETED")
+        g_failed = sum(1 for t in g_tasks if str(t.get("status", "")).startswith("FAILED"))
+        mlflow.log_metric(f"osmo.group.{g_name}.task_count", len(g_tasks))
+        mlflow.log_metric(f"osmo.group.{g_name}.completed", g_completed)
+        mlflow.log_metric(f"osmo.group.{g_name}.failed", g_failed)
+
+    if all_tasks:
+        _LOGGER.debug(
+            "OSMO task object keys (first task): %s",
+            sorted(all_tasks[0].keys()),
         )
-        if first_failed:
-            error_msg = first_failed.get("error") or first_failed.get("message") or first_failed.get("status", "")
-            mlflow.set_tag("osmo.first_error", str(error_msg)[:500])
 
-        # --- Tier 1 metrics ---
-        mlflow.log_metric("osmo.task_count", task_count)
-        mlflow.log_metric("osmo.task_completed", completed_tasks)
-        mlflow.log_metric("osmo.failed_tasks", failed_tasks)
-        mlflow.log_metric("osmo.task_success_rate", success_rate)
-        if duration is not None:
-            mlflow.log_metric("osmo.duration_seconds", float(duration))
+    def _parse_ts(s: str) -> datetime:
+        """Parse an ISO 8601 timestamp string, with or without timezone info."""
+        s = str(s).replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(s)
+        except ValueError:
+            return datetime.strptime(str(s).rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=UTC)
 
-        # --- Per-group breakdown ---
-        for i, group in enumerate(groups):
-            g_tasks = group.get("tasks", [])
-            g_name = group.get("name") or str(i)
-            g_completed = sum(1 for t in g_tasks if str(t.get("status", "")) == "COMPLETED")
-            g_failed = sum(1 for t in g_tasks if str(t.get("status", "")).startswith("FAILED"))
-            mlflow.log_metric(f"osmo.group.{g_name}.task_count", len(g_tasks))
-            mlflow.log_metric(f"osmo.group.{g_name}.completed", g_completed)
-            mlflow.log_metric(f"osmo.group.{g_name}.failed", g_failed)
+    def _task_duration_s(task: dict[str, Any]) -> float | None:
+        """Return task elapsed seconds or None if timing data unavailable."""
+        if task.get("duration") is not None:
+            return float(task["duration"])
+        for start_key, end_key in (
+            ("startedAt", "finishedAt"),
+            ("startTime", "endTime"),
+            ("start_time", "end_time"),
+            ("started_at", "finished_at"),
+        ):
+            start_raw = task.get(start_key)
+            end_raw = task.get(end_key)
+            if start_raw and end_raw:
+                try:
+                    delta = _parse_ts(str(end_raw)) - _parse_ts(str(start_raw))
+                    return max(0.0, delta.total_seconds())
+                except (TypeError, ValueError):
+                    continue
+        return None
 
-        # --- Task duration statistics ---
-        # OSMO WorkflowQueryResponse does not include a pre-computed per-task
-        # duration field. Derive elapsed seconds from ISO-8601 timestamps instead,
-        # trying common OSMO field name variants in priority order.
-        if all_tasks:
-            _LOGGER.debug(
-                "OSMO task object keys (first task): %s",
-                sorted(all_tasks[0].keys()),
+    durations = [d for d in (_task_duration_s(t) for t in all_tasks) if d is not None]
+    if durations:
+        mlflow.log_metric("osmo.task_duration_mean_s", sum(durations) / len(durations))
+        mlflow.log_metric("osmo.task_duration_max_s", max(durations))
+        sorted_d = sorted(durations)
+        p95_idx = max(0, int(len(sorted_d) * 0.95) - 1)
+        mlflow.log_metric("osmo.task_duration_p95_s", sorted_d[p95_idx])
+
+    if metrics_spec and output_urls and azure_client_id:
+        workflow_metrics = _extract_tier2_metrics(metrics_spec, output_urls, azure_client_id)
+        for key, value in workflow_metrics.items():
+            mlflow.log_metric(f"osmo.workflow.{key}", value)
+        if workflow_metrics:
+            _LOGGER.info(
+                "Logged %d spec-driven workflow metric(s): %s",
+                len(workflow_metrics),
+                ", ".join(workflow_metrics),
             )
+    elif metrics_spec and not azure_client_id:
+        _LOGGER.debug("AZURE_CLIENT_ID not set — skipping spec-driven metrics extraction")
 
-        def _parse_ts(s: str) -> datetime:
-            """Parse an ISO 8601 timestamp string, with or without timezone info."""
-            s = str(s).replace("Z", "+00:00")
-            try:
-                return datetime.fromisoformat(s)
-            except ValueError:
-                return datetime.strptime(str(s).rstrip("Z"), "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=UTC)
-
-        def _task_duration_s(task: dict[str, Any]) -> float | None:
-            """Return task elapsed seconds or None if timing data unavailable."""
-            if task.get("duration") is not None:
-                return float(task["duration"])
-            for start_key, end_key in (
-                ("startedAt", "finishedAt"),
-                ("startTime", "endTime"),
-                ("start_time", "end_time"),
-                ("started_at", "finished_at"),
-            ):
-                start_raw = task.get(start_key)
-                end_raw = task.get(end_key)
-                if start_raw and end_raw:
-                    try:
-                        delta = _parse_ts(str(end_raw)) - _parse_ts(str(start_raw))
-                        return max(0.0, delta.total_seconds())
-                    except Exception:
-                        continue
-            return None
-
-        durations = [d for d in (_task_duration_s(t) for t in all_tasks) if d is not None]
-        if durations:
-            mlflow.log_metric("osmo.task_duration_mean_s", sum(durations) / len(durations))
-            mlflow.log_metric("osmo.task_duration_max_s", max(durations))
-            sorted_d = sorted(durations)
-            p95_idx = max(0, int(len(sorted_d) * 0.95) - 1)
-            mlflow.log_metric("osmo.task_duration_p95_s", sorted_d[p95_idx])
-
-        # --- Tier 2 spec-driven workflow metrics ---
-        if metrics_spec and output_urls and azure_client_id:
-            workflow_metrics = _extract_tier2_metrics(metrics_spec, output_urls, azure_client_id)
-            for key, value in workflow_metrics.items():
-                mlflow.log_metric(f"osmo.workflow.{key}", value)
-            if workflow_metrics:
-                _LOGGER.info(
-                    "Logged %d spec-driven workflow metric(s): %s",
-                    len(workflow_metrics),
-                    ", ".join(workflow_metrics),
-                )
-        elif metrics_spec and not azure_client_id:
-            _LOGGER.debug("AZURE_CLIENT_ID not set — skipping spec-driven metrics extraction")
-
-        duration_str = f"{duration:.1f}" if duration is not None else "n/a"
-        _LOGGER.info(
-            "Logged MLflow metrics — workflow: %s, status: %s, "
-            "tasks: %d (completed: %d failed: %d rate: %.2f), groups: %d, duration: %ss",
-            workflow_id,
-            status,
-            task_count,
-            completed_tasks,
-            failed_tasks,
-            success_rate,
-            len(groups),
-            duration_str,
-        )
-    except ImportError:
-        _LOGGER.info("mlflow not installed — skipping MLflow logging")
-    except Exception as exc:
-        tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "<not set>")
-        _LOGGER.warning(
-            "MLflow logging failed (non-fatal): %s  [MLFLOW_TRACKING_URI=%s — ensure azureml-mlflow is in conda deps]",
-            exc,
-            tracking_uri,
-        )
+    duration_str = f"{duration:.1f}" if duration is not None else "n/a"
+    _LOGGER.info(
+        "Logged MLflow metrics — workflow: %s, status: %s, "
+        "tasks: %d (completed: %d failed: %d rate: %.2f), groups: %d, duration: %ss",
+        workflow_id,
+        status,
+        task_count,
+        completed_tasks,
+        failed_tasks,
+        success_rate,
+        len(groups),
+        duration_str,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -735,46 +710,37 @@ def _register_aml_data_assets(
     workspace = os.environ.get("AML_WORKSPACE_NAME", "")
 
     if not all([subscription, resource_group, workspace]):
+        raise RuntimeError(
+            "AML_SUBSCRIPTION_ID, AML_RESOURCE_GROUP, and AML_WORKSPACE_NAME are required for data asset registration"
+        )
+
+    from azure.ai.ml import MLClient
+    from azure.ai.ml.constants import AssetTypes
+    from azure.ai.ml.entities import Data
+    from azure.identity import DefaultAzureCredential
+
+    client = MLClient(
+        DefaultAzureCredential(),
+        subscription_id=subscription,
+        resource_group_name=resource_group,
+        workspace_name=workspace,
+    )
+    for idx, url in enumerate(output_urls):
+        asset_name = f"osmo-{workflow_id}-output-{idx}"
+        aml_url = _to_aml_url(url)
+        data_asset = Data(
+            name=asset_name,
+            path=aml_url,
+            type=AssetTypes.URI_FOLDER,
+            description=f"OSMO workflow {workflow_id} output {idx} (source: {url})",
+        )
+        created = client.data.create_or_update(data_asset)
         _LOGGER.info(
-            "AML_SUBSCRIPTION_ID / AML_RESOURCE_GROUP / AML_WORKSPACE_NAME "
-            "not all set — skipping data asset registration"
+            "Registered AML data asset: %s v%s → %s",
+            created.name,
+            created.version,
+            aml_url,
         )
-        return
-
-    try:
-        from azure.ai.ml import MLClient
-        from azure.ai.ml.constants import AssetTypes
-        from azure.ai.ml.entities import Data
-        from azure.identity import DefaultAzureCredential
-    except ImportError:
-        _LOGGER.info("azure-ai-ml not installed — skipping data asset registration")
-        return
-
-    try:
-        client = MLClient(
-            DefaultAzureCredential(),
-            subscription_id=subscription,
-            resource_group_name=resource_group,
-            workspace_name=workspace,
-        )
-        for idx, url in enumerate(output_urls):
-            asset_name = f"osmo-{workflow_id}-output-{idx}"
-            aml_url = _to_aml_url(url)
-            data_asset = Data(
-                name=asset_name,
-                path=aml_url,
-                type=AssetTypes.URI_FOLDER,
-                description=f"OSMO workflow {workflow_id} output {idx} (source: {url})",
-            )
-            created = client.data.create_or_update(data_asset)
-            _LOGGER.info(
-                "Registered AML data asset: %s v%s → %s",
-                created.name,
-                created.version,
-                aml_url,
-            )
-    except Exception as exc:
-        _LOGGER.warning("AML data asset registration failed (non-fatal): %s", exc)
 
 
 # ---------------------------------------------------------------------------
