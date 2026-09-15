@@ -1,0 +1,44 @@
+image:
+  repository: lerobot-so101
+  tag: "0.6.1"
+  pullPolicy: Never
+
+runtimeClass:
+  name: nvidia
+
+job:
+  suspend: true
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+
+rollout:
+  robotType: so101_follower
+  robotPort: /dev/ttyACM0
+  robotId: follower_left
+  robotCameras: >-
+    {wrist: {type: opencv, index_or_path: /dev/video0, width: 640, height: 480, fps: 30, fourcc: MJPG},
+    top: {type: opencv, index_or_path: /dev/video2, width: 640, height: 480, fps: 30, fourcc: MJPG}}
+  policyPath: /policies/act_so101
+  calibrationMountPath: /home/lerobot/.cache/huggingface/lerobot/calibration
+  task: Pick up an object and place it in the target area
+  duration: "60"
+  fps: "30"
+  inference: sync
+
+validation:
+  enabled: false
+
+hostPaths:
+  policy: /path/to/act_so101
+  calibration: /path/to/lerobot/calibration
+
+devices:
+  - name: robot
+    path: /dev/ttyACM0
+  - name: wrist-camera
+    path: /dev/video0
+  - name: top-camera
+    path: /dev/video2
+
+offload:
+  enabled: true

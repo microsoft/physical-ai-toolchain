@@ -1,0 +1,3 @@
+[submodule "gpu-offload/examples/so101-real-hardware/upstream"]
+	path = gpu-offload/examples/so101-real-hardware/upstream
+	url = https://github.com/huggingface/lerobot.git

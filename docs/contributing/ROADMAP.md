@@ -3,7 +3,7 @@ sidebar_position: 3
 title: "Physical AI Toolchain Roadmap"
 description: "Project roadmap covering documentation, testing, CI/CD, governance, security, and OpenSSF compliance through Q1 2027."
 author: wberry
-ms.date: 2026-06-01
+ms.date: 2026-08-12
 ms.topic: reference
 keywords:
   - roadmap
@@ -173,7 +173,7 @@ Tiers roll out in three phases based on dependency order and infrastructure read
 | 2     | Q2 2026  | T3 Production            | up to the multi-site boundary       |
 | 3     | Q3 2026  | T4 Scale, T5 Operate     | multi-site + intelligence (roadmap) |
 
-Phase 1 surfaces the already-working local floor (`T0`), then layers the storage-only lab tier (`T1`) and the recommended cloud-training pilot tier (`T2`). All of these satisfy Goal: Full Training Lifecycle with manual deployment and no Kubernetes.
+Phase 1 surfaces the already-working local floor (`T0`), then layers the storage-only lab tier (`T1`) and the recommended cloud-training pilot tier (`T2`). All of these satisfy Goal: Full Training Lifecycle with manual deployment and no required Kubernetes.
 Phase 2 adds single-site declarative deployment (`T3`: local k3s + FluxCD, **no Arc**), proving GitOps does not require a cloud fleet control plane.
 Phase 3 crosses the multi-site boundary into **fleet delivery** (`T4`: Arc + AKS/Flux + gating) and names the **fleet intelligence** roadmap (`T5`).
 
@@ -182,7 +182,7 @@ Phase 3 crosses the multi-site boundary into **fleet delivery** (`T4`: Arc + AKS
 * ~~Migrate existing Terraform IaC from `deploy/001-iac/` into `infrastructure/terraform/`~~ (complete)
 * ~~Migrate existing setup scripts from `deploy/002-setup/` into `infrastructure/setup/`~~ (complete)
 * ~~Reorganize `src/training/` and `src/inference/` into `training/rl/`, `training/il/`, and `training/vla/`~~ (complete)
-* **T0 Dev:** document the zero-cloud, zero-Kubernetes local loop as the sanctioned default starting path
+* **T0 Dev:** document the zero-cloud local loop, with optional local Kubernetes, as the sanctioned default starting path
 * **T0–T2:** establish `evaluation/sil/` and `evaluation/hil/` with Isaac Sim-based evaluation pipelines
 * **T0–T1:** create `data-pipeline/` with ROS 2 episodic capture (local at T0, Blob upload at T1)
 * **T0–T2:** create `data-management/` with LeRobot-based episodic data viewer and curation tooling
@@ -207,12 +207,12 @@ Fleet intelligence (`T5`) is not a single leap. It decomposes into four ordered 
 > [!IMPORTANT]
 > Autonomy (`T5.0`–`T5.3`) is a **different axis** from infrastructure reach (`T0`–`T4`). `T0`–`T4` scale on *infrastructure reach* (sites, GPU, collaboration); `T5.0`–`T5.3` scale on *decision authority / loop closure*. They are orthogonal: a single-site `T3` operator can sit at `T5.0`, and a multi-site `T4` operator can remain fully manual. The autonomy stages are how much of the retraining decision a human delegates, not more infrastructure to buy.
 
-| Rung | Decision authority                                                                     | Human role                            | Status       |
-|------|----------------------------------------------------------------------------------------|---------------------------------------|--------------|
-| T5.0 | Gated retraining: the system surfaces signals only; humans trigger retraining.          | Human triggers every retraining cycle | Not built    |
-| T5.1 | Human-in-the-loop / active learning: the system proposes what to retrain on and when.   | Human approves each cycle             | Ad-hoc (Hex) |
-| T5.2 | Continual learning: the system retrains on a schedule or trigger.                       | Human reviews before deployment       | Not built    |
-| T5.3 | Autonomous closed-loop: the system detects drift, retrains, gates, and deploys.         | None (fully autonomous)               | Not built    |
+| Rung | Decision authority                                                                    | Human role                            | Status       |
+|------|---------------------------------------------------------------------------------------|---------------------------------------|--------------|
+| T5.0 | Gated retraining: the system surfaces signals only; humans trigger retraining.        | Human triggers every retraining cycle | Not built    |
+| T5.1 | Human-in-the-loop / active learning: the system proposes what to retrain on and when. | Human approves each cycle             | Ad-hoc (Hex) |
+| T5.2 | Continual learning: the system retrains on a schedule or trigger.                     | Human reviews before deployment       | Not built    |
+| T5.3 | Autonomous closed-loop: the system detects drift, retrains, gates, and deploys.       | None (fully autonomous)               | Not built    |
 
 > [!WARNING]
 > Fully autonomous retraining on production data is a foot-gun: a legitimate distribution change can cause the loop to bake current degraded behavior into the next dataset, and drift detection needs statistical power that only exists at fleet scale. `T5` should default to human-supervised (`T5.0`–`T5.1`), not closed-loop (`T5.3`). `T5.3` stays a roadmap direction, not a near-term target.
@@ -251,7 +251,7 @@ Q2 2026 (Apr-Jun): Quality, Governance, Security, and Tier Rollout Phases 1-2
 ├── Governance: Governance model, roles, DCO/CLA, OpenSSF N/A documentation (v0.6.0, due May 31)
 ├── Security: OpenSSF Scorecard, release signing, threat model, hardening guidance (v0.7.0, due Jun 14)
 ├── Dependencies: Dependency update automation (v0.8.0, due Jun 30)
-├── T0 Dev: Surface the zero-cloud, zero-Kubernetes local loop as the sanctioned default
+├── T0 Dev: Surface the zero-cloud local loop with optional local Kubernetes as the sanctioned default
 ├── T1 Lab: Blob storage-backed capture and cloud-mode dataviewer; optional AzureML/MLflow
 ├── T2 Pilot: Cloud training default (AzureML/OSMO), model registry, hosted viewer, SiL/HiL eval
 ├── T3 Production: Single-site declarative deployment with local k3s + FluxCD (no Arc)

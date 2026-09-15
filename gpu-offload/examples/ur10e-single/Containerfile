@@ -1,0 +1,94 @@
+# Workload image for the ur10e-single Pi0.5 deployment.
+#
+# Built with the layering pattern from the xavier tutorial's Dockerfile.pyremote2:
+# the remoter SDK is copied out of a payload image, installed into the workload's
+# own interpreter, and its sitecustomize hook is placed on PYTHONPATH. Python then
+# starts the offload runtime before any application code imports, which is what
+# lets an existing workload offload without being rewritten around the SDK.
+#
+# The tutorial builds this on top of a separately published base image. There is no
+# separate base here: the workload environment and the SDK layer are stages of one
+# build, so a single `podman build` produces the deployable image.
+#
+# One image serves the control container and the GPU server stage. The stage needs
+# lerobot and torch to run the policy; the control container needs the same lerobot
+# import surface plus the UR10e and RealSense drivers for robot I/O.
+#
+# Based on python:3.11-slim rather than an nvidia/cuda image: the CUDA base images
+# set NVIDIA_VISIBLE_DEVICES=all, which would hand the control container a GPU it
+# must not have. The torch wheels bundle the CUDA runtime, so only the host driver
+# is needed on the GPU node.
+ARG REMOTER_IMAGE=localhost/pyremote:local
+
+# The remoter payload image is FROM scratch and holds the runtime/ source tree.
+FROM ${REMOTER_IMAGE} AS remoter
+
+FROM docker.io/library/python:3.11-slim
+
+COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 /uv /uvx /bin/
+
+ARG UV_INDEX_URL
+
+ENV PATH="/workspace/.venv/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1
+ENV UV_VENV_SEED=1
+# The build task bind-mounts the host uv cache here so the multi-gigabyte torch
+# wheels download once per machine instead of once per build. Copy instead of
+# hardlink: the cache and the venv live on different mounts during the build.
+ENV UV_CACHE_DIR=/root/.cache/uv
+ENV UV_LINK_MODE=copy
+# The checkpoint and the tokenizer cache are mounted read-only; never reach out.
+ENV HF_HUB_OFFLINE=1
+
+# opencv links against libGL and glib; lsof backs the remoter port checks; git is
+# needed because the lock resolves lerobot from a git revision. librealsense binds
+# the RealSense cameras over raw USB, so it needs libusb and libudev at run time.
+RUN apt-get update && \
+	apt-get install --yes --no-install-recommends \
+	git libgl1 libglib2.0-0 libudev1 libusb-1.0-0 lsof && \
+	rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# The ur10e-single deployment is an external workspace; the build script stages it
+# under .ur10e-src so the build context stays inside gpu-offload.
+COPY examples/ur10e-single/.ur10e-src/pyproject.toml examples/ur10e-single/.ur10e-src/uv.lock /workspace/
+COPY examples/ur10e-single/.ur10e-src/lerobot_robot_ur10e /workspace/lerobot_robot_ur10e
+
+RUN uv sync --frozen --no-install-project
+
+# --no-install-project also skips workspace members, and the UR10e driver is one.
+# The lock already resolved its dependencies, so only the package itself is added.
+RUN uv pip install --python /workspace/.venv/bin/python --no-deps ./lerobot_robot_ur10e
+
+# Robot and camera configuration travels with the image.
+COPY examples/ur10e-single/.ur10e-src/script /workspace/script
+
+# ==============================================================================
+# Remoter SDK layer
+# ==============================================================================
+
+COPY --from=remoter / /pyremote/
+
+# The SDK declares Python >= 3.12; the ur10e-single deployment pins < 3.12 for the
+# UR10e driver stack. The runtime itself is 3.11 compatible, so the floor is
+# lowered rather than splitting the interpreter across the two containers.
+RUN sed -i 's/requires-python = ">=3.12"/requires-python = ">=3.11"/' /pyremote/pyproject.toml && \
+	uv pip install --python /workspace/.venv/bin/python /pyremote
+
+# sitecustomize is imported by the interpreter at startup, before the application.
+# On the control container it calls autoremote.start(), which reads the remote.yaml
+# the controller mounts at /xavierconfig and rewrites the declared classes and
+# functions into remote calls. On the server stage SERVER=true suppresses it,
+# because the controller starts the runtime through `python3 -m remoter.autoremote`.
+RUN mkdir -p /pyremotesitecustomize && \
+	cp /pyremote/remoter/sitecustomizer.py /pyremotesitecustomize/sitecustomize.py
+
+# /workspace/app carries the offload seam. It must resolve on both sides: the
+# control container imports it to install the decorators, and the server stage
+# imports it by the module name in remote.yaml.
+ENV PYTHONPATH=/pyremotesitecustomize:/workspace/app
+
+COPY examples/ur10e-single/ur10e_offload.py examples/ur10e-single/run_ur10e.py /workspace/app/
+
+CMD ["python3", "/workspace/app/run_ur10e.py"]

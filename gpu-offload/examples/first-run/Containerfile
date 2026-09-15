@@ -1,0 +1,85 @@
+# Workload image for the first-run offload check.
+#
+# Uses the same layering pattern as examples/ur10e-single: the remoter SDK is
+# copied out of a payload image, installed into the workload's own interpreter,
+# and its sitecustomize hook is placed on PYTHONPATH. Python then starts the
+# offload runtime before any application code imports, so client.py, demo_model
+# and gpu_model never reference the SDK. That is the property being checked: an
+# unmodified workload offloads because of how the image is built, not because it
+# was rewritten around the SDK.
+#
+# Two stages are published from this file, and the build target is not optional:
+#
+#   client  the control container. No torch, no GPU. Its emptiness is the
+#           negative control for the GPU check.
+#   gpu     the server stage for GPU platforms. Adds torch on top of client.
+#
+# On CPU platforms there is no second image: the chart reuses the client image
+# for the server stage, and only demo_model.predict is remoted.
+#
+# Based on python:3.12-slim rather than an nvidia/cuda image on purpose. The CUDA
+# base images set NVIDIA_VISIBLE_DEVICES=all, which makes every container see the
+# GPU once the NVIDIA runtime is the containerd default and would invalidate the
+# client-sees-no-GPU control. The torch wheels bundle the CUDA runtime libraries,
+# so only the host driver is needed on the node.
+ARG REMOTER_IMAGE=localhost/pyremote:local
+
+# The remoter payload image is FROM scratch and holds the runtime/ source tree.
+FROM ${REMOTER_IMAGE} AS remoter
+
+FROM docker.io/library/python:3.12-slim AS client
+
+COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 /uv /uvx /bin/
+
+# Set on hosts that build through an internal package proxy; see .env.example.
+# A build argument is recorded in the image history, so an index URL carrying
+# credentials does not belong here.
+ARG UV_INDEX_URL
+
+ENV PATH="/opt/venv/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1
+# The build script bind-mounts the host uv cache here so the multi-gigabyte torch
+# wheels download once per machine instead of once per build. Copy instead of
+# hardlink: the cache and the venv live on different mounts during the build.
+ENV UV_CACHE_DIR=/root/.cache/uv
+ENV UV_LINK_MODE=copy
+
+WORKDIR /app
+
+RUN uv venv --seed /opt/venv
+
+# ==============================================================================
+# Remoter SDK layer
+# ==============================================================================
+
+COPY --from=remoter / /pyremote/
+
+RUN uv pip install --python /opt/venv/bin/python /pyremote
+
+# sitecustomize is imported by the interpreter at startup, before the application.
+# On the control container it calls autoremote.start(), which reads the remote.yaml
+# the controller mounts at /xavierconfig and rewrites the declared functions into
+# remote calls. On the server stage SERVER=true suppresses it, because the
+# controller starts the runtime through `python3 -m remoter.autoremote`.
+RUN mkdir -p /pyremotesitecustomize && \
+	cp /pyremote/remoter/sitecustomizer.py /pyremotesitecustomize/sitecustomize.py
+
+# /app carries the offload seam. It must resolve on both sides: the control
+# container imports the modules to install the decorators, and the server stage
+# imports them by the module names in remote.yaml.
+ENV PYTHONPATH=/pyremotesitecustomize:/app
+
+COPY examples/first-run/client.py examples/first-run/demo_model.py examples/first-run/gpu_model.py /app/
+
+CMD ["python3", "/app/client.py"]
+
+# ==============================================================================
+# GPU server stage
+# ==============================================================================
+
+FROM client AS gpu
+
+ARG UV_INDEX_URL
+ARG TORCH_VERSION=2.13.0
+
+RUN uv pip install --python /opt/venv/bin/python "torch==${TORCH_VERSION}"

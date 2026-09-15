@@ -1,0 +1,75 @@
+image:
+  repository: lerobot-so101
+  tag: "0.6.1"
+  pullPolicy: IfNotPresent
+
+runtimeClass:
+  name: nvidia
+  create: false
+  handler: nvidia
+
+job:
+  suspend: true
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+
+nodeSelector: {}
+
+rollout:
+  robotType: so101_follower
+  robotPort: /dev/ttyACM0
+  robotId: so101_follower
+  robotCameras: "{front: {type: opencv, index_or_path: /dev/video0, width: 640, height: 480, fps: 30}}"
+  policyPath: /policies/act_so101
+  calibrationMountPath: /home/lerobot/.cache/huggingface/lerobot/calibration
+  task: Pick up an object and place it in the target area
+  duration: "60"
+  fps: "30"
+  inference: sync
+  extraArgs: []
+  timing:
+    enabled: false
+    reportEvery: 100
+
+validation:
+  enabled: false
+
+hostPaths:
+  policy: /opt/lerobot/policies/act_so101
+  calibration: /opt/lerobot/calibration
+
+devices:
+  - name: robot
+    path: /dev/ttyACM0
+  - name: front-camera
+    path: /dev/video0
+
+securityContext:
+  privileged: true
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 4Gi
+  limits:
+    memory: 16Gi
+
+podAnnotations: {}
+
+offload:
+  enabled: false
+  configMapName: ""
+  serviceAccountName: ""
+  port: "30001"
+  logLevel: INFO
+  printLogLevel: INFO
+  stageName: gpu
+  rawObservation:
+    enabled: false
+    remoteClass: raw_observation_inference/RawObservationSyncInferenceEngine
+  server:
+    replicas: 1
+    nodeSelector: {}
+    resources: {}
+  remoteClass: lerobot.policies.act.modeling_act/ACTPolicy
+  loadFunction: lerobot.rollout.context//_load_pretrained_policy

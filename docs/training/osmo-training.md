@@ -25,23 +25,23 @@ Submit distributed Isaac Lab training jobs through NVIDIA OSMO workflow orchestr
 
 ## 📦 Available Templates
 
-| Template             | Purpose                             | Submission Script                                                     |
-|----------------------|-------------------------------------|-----------------------------------------------------------------------|
-| `train.yaml`         | Isaac Lab RL training               | `training/rl/scripts/submit-osmo-training.sh`                         |
-| `train-dataset.yaml` | Isaac Lab training (dataset upload) | `training/rl/scripts/submit-osmo-dataset-training.sh`                 |
-| `lerobot-train.yaml` | LeRobot behavioral cloning          | `training/il/scripts/submit-osmo-lerobot-training.sh`                 |
-| `groot-train.yaml`   | GR00T-N1.5 / N1.7 fine-tuning (VLA) | `vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh` |
-| `lerobot-eval.yaml`  | LeRobot inference/evaluation        | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`                  |
+| Template             | Purpose                             | Submission Script                                     |
+|----------------------|-------------------------------------|-------------------------------------------------------|
+| `train.yaml`         | Isaac Lab RL training               | `training/rl/scripts/submit-osmo-training.sh`         |
+| `train-dataset.yaml` | Isaac Lab training (dataset upload) | `training/rl/scripts/submit-osmo-dataset-training.sh` |
+| `lerobot-train.yaml` | LeRobot behavioral cloning          | `training/il/scripts/submit-osmo-lerobot-training.sh` |
+| `groot-train.yaml`   | GR00T-N1.5 / N1.7 fine-tuning (VLA) | `vla/scripts/submit-osmo-lerobot-vla-fine-tuning.sh`  |
+| `lerobot-eval.yaml`  | LeRobot inference/evaluation        | `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh`  |
 
 ## ⚙️ Workflow Comparison
 
-| Aspect      | train.yaml                 | train-dataset.yaml    |
-|-------------|----------------------------|-----------------------|
-| Payload     | Object-storage archive     | Dataset folder upload |
-| Size limit  | Unlimited                  | Unlimited             |
-| Versioning  | Content-hash per submit     | Automatic             |
-| Reusability | Per-run                    | Across runs           |
-| Setup       | Storage account            | Bucket configured     |
+| Aspect      | train.yaml              | train-dataset.yaml    |
+|-------------|-------------------------|-----------------------|
+| Payload     | Object-storage archive  | Dataset folder upload |
+| Size limit  | Unlimited               | Unlimited             |
+| Versioning  | Content-hash per submit | Automatic             |
+| Reusability | Per-run                 | Across runs           |
+| Setup       | Storage account         | Bucket configured     |
 
 ## 🏋️ Isaac Lab Training
 

@@ -491,3 +491,6 @@ AGENTS.md
 envs/
 
 datasets/
+
+# Sources staged into the gpu-offload build context by examples/ur10e-single
+gpu-offload/examples/ur10e-single/.ur10e-src/

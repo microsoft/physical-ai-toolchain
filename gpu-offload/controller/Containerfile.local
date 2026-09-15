@@ -1,0 +1,18 @@
+# EXAMPLE FOR USING AN ALTERNATIVE PYTHON FEED WITH ASTRAL UV
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN --mount=type=secret,id=PIP_INDEX_URL,env=PIP_INDEX_URL \
+	pip install --no-cache-dir kubernetes==34.1.0 PyYAML==6.0.2
+
+COPY . /app
+
+RUN adduser --disabled-password --gecos "" appuser || true
+USER appuser
+
+EXPOSE 8443
+
+CMD ["python3", "/app/mutate.py", "--host", "0.0.0.0", "--port", "8443"]

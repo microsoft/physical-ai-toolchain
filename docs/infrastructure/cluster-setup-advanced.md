@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Cluster Operations and Troubleshooting
 description: Accessing OSMO, troubleshooting common issues, and optional deployment scripts
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-15
 ms.topic: reference
 keywords:
   - troubleshooting
@@ -61,10 +61,10 @@ osmo backend list
 
 If `should_enable_private_aks_cluster = false` and you are not using VPN, use `kubectl port-forward`:
 
-| Service      | Command                                                               | Local URL               |
-|--------------|-----------------------------------------------------------------------|-------------------------|
-| API Service  | `kubectl port-forward svc/osmo-service 9000:80 -n osmo-control-plane` | `http://localhost:9000` |
-| Gateway      | `kubectl port-forward svc/osmo-gateway 8080:80 -n osmo-control-plane` | `http://localhost:8080` |
+| Service     | Command                                                               | Local URL               |
+|-------------|-----------------------------------------------------------------------|-------------------------|
+| API Service | `kubectl port-forward svc/osmo-service 9000:80 -n osmo-control-plane` | `http://localhost:9000` |
+| Gateway     | `kubectl port-forward svc/osmo-gateway 8080:80 -n osmo-control-plane` | `http://localhost:8080` |
 
 ```bash
 # Terminal 1: Start port-forward for API service

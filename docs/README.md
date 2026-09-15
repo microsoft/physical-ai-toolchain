@@ -4,7 +4,7 @@ slug: /documentation
 title: Documentation
 description: Index of all documentation for the Physical AI Toolchain
 author: Edge AI Team
-ms.date: 2026-04-15
+ms.date: 2026-08-12
 ms.topic: overview
 keywords:
   - documentation
@@ -28,11 +28,11 @@ Documentation spans the full lifecycle, from provisioning Azure infrastructure w
 
 ## 🪜 Tier Guide
 
-Adoption is modeled as six graduated tiers (T0-T5), each a legitimate stopping point. **T0 — Dev** is the default starting path (one laptop, one robot, zero cloud, zero Kubernetes). **T2 — Pilot** is the recommended production path. **T3-T5** are advanced and opt-in. Pick the tier that matches your reach, then follow its quick-start and read its infrastructure boundaries. See the canonical [Tier Model](design/tier-model.md) for the authoritative tier table and vocabulary.
+Adoption is modeled as six graduated tiers (T0-T5), each a legitimate stopping point. **T0 — Dev** is the default starting path (one laptop, one robot, zero cloud, no required Kubernetes). **T2 — Pilot** is the recommended production path. **T3-T5** are advanced and opt-in. Pick the tier that matches your reach, then follow its quick-start and read its infrastructure boundaries. See the canonical [Tier Model](design/tier-model.md) for the authoritative tier table and vocabulary.
 
 | Tier                | Scope                                                     | Quick start                                                | Architecture                                                   |
 |---------------------|-----------------------------------------------------------|------------------------------------------------------------|----------------------------------------------------------------|
-| **T0 — Dev** ⭐      | Laptop + 1 robot, zero cloud, zero Kubernetes            | [Tier 0 — Dev](recipes/tier-0-dev/README.md)               | [T0 — Dev](contributing/architecture.md#t0--dev)               |
+| **T0 — Dev** ⭐      | Laptop + 1 robot, zero cloud, optional local Kubernetes   | [Tier 0 — Dev](recipes/tier-0-dev/README.md)               | [T0 — Dev](contributing/architecture.md#t0--dev)               |
 | **T1 — Lab**        | One site, a few robots, shared GPU; first cloud storage   | [Tier 1 — Lab](recipes/tier-1-lab/README.md)               | [T1 — Lab](contributing/architecture.md#t1--lab)               |
 | **T2 — Pilot** ✅    | One site at scale; cloud training default                 | [Tier 2 — Pilot](recipes/tier-2-pilot/README.md)           | [T2 — Pilot](contributing/architecture.md#t2--pilot)           |
 | **T3 — Production** | Single-site declarative deploy (local k3s + Flux, no Arc) | [Tier 3 — Production](recipes/tier-3-production/README.md) | [T3 — Production](contributing/architecture.md#t3--production) |

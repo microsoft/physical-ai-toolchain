@@ -113,6 +113,51 @@ select = [
 # GR00T data_config.py fragments are appended onto gr00t/experiment/data_config.py
 # at runtime; So100DataConfig and DATA_CONFIG_MAP are injected by the parent module.
 "training/vla/configs/groot/examples/data_config.py" = ["F821", "RUF012"]
+# gpu-offload SO101 ROS2 bridge modules are faithfully vendored upstream LeRobot
+# reference code carried as lint-only, not-runtime-verified reference (Path D). The
+# remaining findings are upstream style choices we do not refactor; formatting-level
+# issues are already resolved. The authored control loop (run_vla.py) is excluded and
+# stays under the full rule set.
+"gpu-offload/examples/so101-real-hardware/ros2_bridge/robot_ros2.py" = [
+    "B904",
+    "E501",
+    "F401",
+    "F841",
+    "RUF012",
+    "SIM105",
+    "SIM108",
+    "UP040",
+]
+"gpu-offload/examples/so101-real-hardware/ros2_bridge/ros_bridge/*.py" = [
+    "B904",
+    "E501",
+    "F401",
+    "F841",
+    "RUF012",
+    "SIM105",
+    "SIM108",
+    "UP040",
+]
+"gpu-offload/examples/so101-real-hardware/ros2_bridge/so_follower/*.py" = [
+    "B904",
+    "E501",
+    "F401",
+    "F841",
+    "RUF012",
+    "SIM105",
+    "SIM108",
+    "UP040",
+]
+"gpu-offload/examples/so101-real-hardware/ros2_bridge/examples/so101_ros/utils.py" = [
+    "B904",
+    "E501",
+    "F401",
+    "F841",
+    "RUF012",
+    "SIM105",
+    "SIM108",
+    "UP040",
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["training"]
