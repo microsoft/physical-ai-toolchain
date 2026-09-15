@@ -65,6 +65,14 @@ train_args=(
   --wandb.enable=false
 )
 
+# PI policies normalize images in their policy processor and use VISUAL=IDENTITY.
+# Enabling LeRobot's ImageNet override also requires every camera key to exist
+# in meta/stats.json, which is not guaranteed for valid LeRobot v3 datasets.
+use_imagenet_stats=true
+case "${POLICY_TYPE:-act}" in
+  pi0|pi0_fast|pi05) use_imagenet_stats=false ;;
+esac
+
 # Warm-start from a previously registered policy model: load weights only;
 # optimizer, scheduler, and step counter all start fresh. Setting --policy.path
 # makes lerobot-train reconstruct the policy from the loaded config.json, so
@@ -178,16 +186,13 @@ if [[ ${total_sources} -eq 0 ]]; then
   train_args+=(--dataset.video_backend=pyav)
 elif [[ ${total_sources} -eq 1 ]]; then
   # Single source — use directly, no merge needed.
-  # use_imagenet_stats=true so lerobot normalizes images with ImageNet (3,1,1)
-  # per-channel mean/std instead of trying to use the v3.0 dataset's image stats,
-  # whose shape does not match lerobot 0.4.x's normalize_processor.
   # video_backend=pyav is the most reliable decoder for the AzureML container.
   # tolerance_s=0.04 (~1 frame at 30fps) accommodates real-world recording jitter;
   # the lerobot default 1e-4s is unrealistically tight and rejects most non-synthetic
   # videos. The flag is top-level (--tolerance_s), not under --dataset.
   train_args+=(
     --dataset.root="${all_sources[0]}"
-    --dataset.use_imagenet_stats=true
+    --dataset.use_imagenet_stats="${use_imagenet_stats}"
     --dataset.video_backend=pyav
     --tolerance_s=0.04
   )
@@ -251,7 +256,7 @@ EOF
   # Same lerobot flags as the single-source path; see comment above for rationale.
   train_args+=(
     --dataset.root="${MERGE_DEST}"
-    --dataset.use_imagenet_stats=true
+    --dataset.use_imagenet_stats="${use_imagenet_stats}"
     --dataset.video_backend=pyav
     --tolerance_s=0.04
   )
