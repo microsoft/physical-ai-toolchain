@@ -1,7 +1,7 @@
 ---
 description: Configuration reference for topic recording, episode triggers, disk monitoring, and gap detection
 author: Microsoft
-ms.date: 2026-06-01
+ms.date: 2026-09-10
 ms.topic: reference
 ---
 
@@ -11,11 +11,12 @@ Configuration schema for ROS 2 edge recording system controlling topic selection
 
 ## 📋 Configuration Files
 
-| File                                                                 | Purpose                                           |
-|----------------------------------------------------------------------|---------------------------------------------------|
-| [recording_config.yaml](recording_config.yaml)                       | Default configuration for UR10E 6-DOF robotic arm |
-| [recording_config.schema.json](recording_config.schema.json)         | JSON Schema for IDE autocomplete and validation   |
-| [examples/mobile-manipulator.yaml](examples/mobile-manipulator.yaml) | Mobile manipulator platform example               |
+| File                                                                 | Purpose                                              |
+|----------------------------------------------------------------------|------------------------------------------------------|
+| [recording_config.yaml](recording_config.yaml)                       | Default configuration for UR10E 6-DOF robotic arm    |
+| [recording_config.schema.json](recording_config.schema.json)         | JSON Schema for IDE autocomplete and validation      |
+| [examples/mobile-manipulator.yaml](examples/mobile-manipulator.yaml) | Mobile manipulator platform example                  |
+| [generate_config_schema.py](generate_config_schema.py)               | Regenerates the JSON Schema from the Pydantic models |
 
 Place configuration files at `config/recording_config.yaml` on edge devices. The recording service validates configuration at startup and exits with descriptive errors if validation fails.
 
@@ -143,6 +144,32 @@ gap_detection:
   severity: warning
 ```
 
+## 📂 Output Directory
+
+`output_dir` sets the root directory on the edge device where recorded episodes are written.
+
+| Name         | Type   | Default            | Valid Range   | Description                          |
+|--------------|--------|--------------------|---------------|--------------------------------------|
+| `output_dir` | string | `/data/recordings` | Absolute path | Root directory for recorded episodes |
+
+The path is validated at startup and must be absolute, already exist, be a directory, and be writable by the recording service. The directory is not created for you.
+
+```yaml
+output_dir: /data/recordings
+```
+
+## 🧩 Top-Level Fields
+
+| Field             | Required | Default                                     |
+|-------------------|----------|---------------------------------------------|
+| `topics`          | Yes      | —                                           |
+| `trigger`         | Yes      | —                                           |
+| `disk_thresholds` | No       | `warning_percent: 80, critical_percent: 95` |
+| `gap_detection`   | No       | `threshold_ms: 100.0, severity: warning`    |
+| `output_dir`      | No       | `/data/recordings`                          |
+
+Unknown top-level fields are rejected. The configuration model sets `extra: "forbid"`, so a misspelled key fails validation rather than being silently ignored.
+
 ## 📦 Examples
 
 ### UR10E 6-DOF Arm
@@ -159,13 +186,20 @@ Configuration files are validated using Pydantic models at service startup. Vali
 
 ### Validation Rules
 
-| Rule               | Error Message Pattern                                        |
-|--------------------|--------------------------------------------------------------|
-| Topic name format  | `Topic name must start with /: <name>`                       |
-| Topic uniqueness   | `Duplicate topic names found: [<names>]`                     |
-| Frequency range    | `frequency_hz out of range: <value>`                         |
-| Threshold ordering | `Warning threshold (<n>%) must be less than critical (<m>%)` |
-| Array length match | `Tolerance count (<n>) must match joint index count (<m>)`   |
+Custom validators raise these messages:
+
+| Rule                 | Error Message Pattern                                        |
+|----------------------|--------------------------------------------------------------|
+| Topic name format    | `Topic name must start with /: <name>`                       |
+| Topic uniqueness     | `Duplicate topic names found: [<names>]`                     |
+| Threshold ordering   | `Warning threshold (<n>%) must be less than critical (<m>%)` |
+| Array length match   | `Tolerance count (<n>) must match joint index count (<m>)`   |
+| Output path absolute | `output_dir must be an absolute path, got: <path>`           |
+| Output path exists   | `output_dir does not exist: <path>`                          |
+| Output path is a dir | `output_dir is not a directory: <path>`                      |
+| Output path writable | `output_dir is not writable: <path>`                         |
+
+Range and enum constraints (`frequency_hz`, `pin`, `warning_percent`, `critical_percent`, `threshold_ms`, `compression`, `severity`) are enforced by Pydantic field constraints and report Pydantic's standard messages, for example `Input should be greater than 0` or `Input should be less than or equal to 1000`.
 
 ### JSON Schema Integration
 
@@ -179,11 +213,13 @@ VS Code with the YAML extension (redhat.vscode-yaml) provides inline validation 
 
 ### Runtime Example
 
+Run from `data-pipeline/capture/` so that `models` resolves on the import path:
+
 ```python
 from pathlib import Path
 import yaml
 from pydantic import ValidationError
-from src.common.config_models import RecordingConfig
+from models.config_models import RecordingConfig
 
 config_path = Path("config/recording_config.yaml")
 with config_path.open() as f:
@@ -198,7 +234,7 @@ except ValidationError as exc:
     raise SystemExit(1)
 ```
 
-## � Schema Maintenance
+## 🔧 Schema Maintenance
 
 The JSON Schema (`recording_config.schema.json`) is a **derived artifact** generated from pydantic models in `data-pipeline/capture/models/config_models.py`.
 
@@ -213,28 +249,28 @@ Regenerate the schema whenever you modify:
 
 ### How to Regenerate Schema
 
+Run these commands from the repository root. The generation script writes to a path relative to the repository root, so running it from another directory writes the schema to the wrong location.
+
 ```bash
-# Run the schema generation script
-pip install 'pydantic==2.12.5' && PYTHONPATH=. python config/generate_config_schema.py
+# Install the pydantic version the schema check uses, then regenerate
+uv pip install 'pydantic==2.12.5'
+python data-pipeline/capture/config/generate_config_schema.py
 
 # Verify the updated schema
-git diff config/recording_config.schema.json
+git diff data-pipeline/capture/config/recording_config.schema.json
 ```
 
 The schema generation script:
 
-1. Imports pydantic models from `src.common.config_models`
+1. Imports pydantic models from `models.config_models`
 2. Calls `RecordingConfig.model_json_schema()`
-3. Writes formatted JSON to `config/recording_config.schema.json`
+3. Writes formatted JSON to `data-pipeline/capture/config/recording_config.schema.json`
 
 ### CI/CD Validation
 
-The CI/CD pipeline validates that the schema is up-to-date with the pydantic models. If you see a validation failure, regenerate the schema using the command above.
-
-```txt
-```
+The [validate-config-schema.yml](../../../.github/workflows/validate-config-schema.yml) workflow regenerates the schema and fails the build if the committed file differs from the generated output. If you see a schema drift failure, regenerate the schema using the command above and commit the result.
 
 ## 🔗 Related Documentation
 
-* [LeRobot Integration](../docs/inference/lerobot-inference.md) - Dataset structure and feature mapping
+* [Preparing Datasets for Training](../../../docs/recipes/data-collection/preparing-datasets-for-training.md) - Dataset structure and LeRobot training handoff
 * [AzureML Evaluation Job Debugging](../../../docs/evaluation/azureml-evaluation-job-debugging.md) - Training pipeline integration
