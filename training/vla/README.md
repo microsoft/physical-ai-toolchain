@@ -24,6 +24,9 @@ vla/
 │   └── submit-osmo-lerobot-vla-fine-tuning.sh   # GR00T submission to OSMO
 ├── workflows/
 │   ├── azureml/
+│   │   ├── components/
+│   │   │   └── import-hf-model.yaml             # Pinned Hugging Face model import component
+│   │   ├── import-hf-model.yaml                 # Model import pipeline
 │   │   └── vla-pi0-train.yaml                   # Azure ML pi0 CommandJob template
 │   └── osmo/
 │       └── groot-train.yaml                     # OSMO GR00T fine-tuning workflow
@@ -69,6 +72,32 @@ Any value outside `pi0|pi0_fast|pi05` is rejected by the submit script before an
 ```
 
 The model input uses download mode and forwards its local path to LeRobot as `policy.path`.
+
+### Import a pinned Hugging Face base model
+
+Run the import pipeline on compute that can reach both Hugging Face and the
+private Azure ML datastore:
+
+```bash
+az ml job create \
+  --file training/vla/workflows/azureml/import-hf-model.yaml \
+  --set jobs.import_model.environment_variables.HF_TOKEN="$HF_TOKEN"
+```
+
+Register the completed pipeline output without uploading it again:
+
+```bash
+az ml model create \
+  --name lerobot-pi05-base-b211f3d44c36 \
+  --version 1 \
+  --type custom_model \
+  --path azureml://jobs/<pipeline-job-name>/outputs/model_snapshot/paths/
+```
+
+The component requires a full 40-character Hugging Face commit and writes the
+snapshot to a `uri_folder` output in `workspaceblobstore`. Keep `HF_TOKEN` in a
+local ignored environment file or secret store; never add it to the pipeline
+definition.
 
 ### Register the resulting checkpoint
 

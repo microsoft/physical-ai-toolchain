@@ -1,0 +1,44 @@
+# Hugging Face Model Import Component
+#
+# Downloads one immutable Hugging Face model snapshot into an Azure ML
+# uri_folder output. The parent job supplies HF_TOKEN as an environment
+# variable so credentials are never modeled as component inputs or outputs.
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.json
+type: command
+name: import_huggingface_model
+display_name: Import Hugging Face Model
+version: "1"
+description: Download a revision-pinned Hugging Face model to an Azure ML datastore output.
+
+inputs:
+  repo_id:
+    type: string
+    description: Hugging Face model repository ID.
+  revision:
+    type: string
+    description: Full 40-character Git commit for the model snapshot.
+
+outputs:
+  model_snapshot:
+    type: uri_folder
+    mode: upload
+    description: Revision-pinned Hugging Face model snapshot.
+
+environment:
+  image: pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime@sha256:db80a41f8428644cebcb3d75b0b62df334ab6c0e75785951eb25f48bfbd42407
+
+command: >-
+  bash -c '
+  set -euo pipefail;
+  revision="${{inputs.revision}}";
+  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "revision must be a full 40-character lowercase Git commit" >&2;
+    exit 2;
+  fi;
+  if [[ -z "${HF_TOKEN:-}" ]]; then
+    echo "HF_TOKEN is required" >&2;
+    exit 2;
+  fi;
+  python -m pip install --quiet --break-system-packages --root-user-action=ignore --target /tmp/hf-import-deps huggingface-hub==1.29.0;
+  PYTHONPATH=/tmp/hf-import-deps python -c "import os,sys; from huggingface_hub import snapshot_download; repo_id,revision,output_dir=sys.argv[1:]; snapshot_download(repo_id=repo_id,revision=revision,repo_type=\"model\",token=os.environ[\"HF_TOKEN\"],local_dir=output_dir); print(f\"imported_model={repo_id}@{revision}\")" "${{inputs.repo_id}}" "${{inputs.revision}}" "${{outputs.model_snapshot}}"'
