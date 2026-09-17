@@ -213,6 +213,15 @@ def _parse_k_value(val: str) -> float:
     return float(val)
 
 
+def _resolve_log_step(step_token: str, last_logged_step: int | None, log_frequency: int) -> int:
+    """Resolve the exact optimizer step from LeRobot's formatted log token."""
+    if log_frequency <= 0:
+        raise ValueError(f"log_frequency must be positive, got {log_frequency}")
+    if step_token.endswith("K") and last_logged_step is not None:
+        return last_logged_step + log_frequency
+    return int(_parse_k_value(step_token))
+
+
 def _init_system_collector() -> Any | None:
     """Initialize system metrics collector if enabled and dependencies available."""
     if os.environ.get("SYSTEM_METRICS", "true").lower() != "true":
@@ -336,6 +345,8 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
     uploaded_checkpoints: set[str] = set()
     last_checkpoint_check = 0.0
     last_system_check = 0.0
+    last_logged_step: int | None = None
+    log_frequency = int(os.environ.get("LOG_FREQ", "200"))
     pretrained_load_failed = False
 
     # AzureML jobs auto-create an MLflow run and expose its ID in MLFLOW_RUN_ID.
@@ -436,7 +447,8 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
 
             match = _LOG_PATTERN.search(line)
             if match:
-                step = int(_parse_k_value(match.group(1)))
+                step = _resolve_log_step(match.group(1), last_logged_step, log_frequency)
+                last_logged_step = step
                 metrics = {
                     "train/samples": _parse_k_value(match.group(2)),
                     "train/episodes": _parse_k_value(match.group(3)),
