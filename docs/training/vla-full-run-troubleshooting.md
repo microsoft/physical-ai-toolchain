@@ -15,8 +15,6 @@ keywords:
   - mlflow
 ---
 
-<!-- cspell:ignore nvtop -->
-
 Use this guide when a PI 0.5 smoke test succeeds but a full Azure ML training run fails during model delivery, policy initialization, feature mapping, GPU execution, or metric reporting. It records the observed failure sequence, unsuccessful mitigations, permanent fixes, and the conservative configuration validated on a single RTX PRO 6000 GPU.
 
 ## Scope
