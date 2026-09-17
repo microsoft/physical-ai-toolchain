@@ -16,7 +16,7 @@ settings:
 inputs:
   repo_id: lerobot/pi05_base
   revision: b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba
-  compute: azureml:k8s-cmontazer01
+  compute: azureml:placeholder
 
 outputs:
   model_snapshot:

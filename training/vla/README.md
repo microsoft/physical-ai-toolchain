@@ -116,6 +116,7 @@ private Azure ML datastore:
 ```bash
 az ml job create \
   --file training/vla/workflows/azureml/import-hf-model.yaml \
+  --set inputs.compute="azureml:<compute-name>" \
   --set jobs.import_model.environment_variables.HF_TOKEN="$HF_TOKEN"
 ```
 
