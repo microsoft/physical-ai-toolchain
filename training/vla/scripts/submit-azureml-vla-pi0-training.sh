@@ -93,6 +93,9 @@ TRAINING HYPERPARAMETERS:
         --eval-freq N             Evaluation frequency
         --save-freq N             Checkpoint save frequency (default: 5000)
         --log-freq N              MLflow metric log frequency (default: 200)
+        --rename-map JSON         Map dataset feature names to policy feature names,
+                                  for example:
+                                  '{"observation.images.d435":"observation.images.base_0_rgb"}'
 
 CHECKPOINT REGISTRATION:
     -r, --register-checkpoint NAME  Model name for Azure ML registration
@@ -134,8 +137,9 @@ AZURE CONTEXT:
         --mixed-precision MODE    Accelerate mixed-precision mode (no|fp16|bf16);
                                   default: bf16. pi0 was trained in bf16 upstream;
                                   bf16 is the recommended default for memory and
-                                  numerical-stability reasons. Only effective when
-                                  more than one GPU is visible to the job container.
+                                  numerical-stability reasons. Explicit mixed
+                                  precision uses Accelerate on single- and
+                                  multi-GPU jobs.
         --experiment-name NAME    Experiment name override
         --display-name NAME       Display name override
         --stream                  Stream logs after submission
@@ -276,6 +280,7 @@ batch_size="${BATCH_SIZE:-}"
 eval_freq="${EVAL_FREQ:-}"
 save_freq="${SAVE_FREQ:-5000}"
 log_freq="${LOG_FREQ:-}"
+rename_map="${RENAME_MAP:-}"
 
 register_checkpoint="${REGISTER_CHECKPOINT:-}"
 
@@ -325,6 +330,7 @@ while [[ $# -gt 0 ]]; do
     --eval-freq)                  eval_freq="$2"; shift 2 ;;
     --save-freq)                  save_freq="$2"; shift 2 ;;
     --log-freq)                   log_freq="$2"; shift 2 ;;
+    --rename-map)                 rename_map="$2"; shift 2 ;;
     -r|--register-checkpoint)     register_checkpoint="$2"; shift 2 ;;
     --subscription-id)            subscription_id="$2"; shift 2 ;;
     --resource-group)             resource_group="$2"; shift 2 ;;
@@ -354,7 +360,7 @@ fi
 # Validation
 #------------------------------------------------------------------------------
 
-require_tools az python3
+require_tools az python3 base64
 require_az_extension ml
 
 [[ -n "$subscription_id" ]] || fatal "AZURE_SUBSCRIPTION_ID required"
@@ -380,6 +386,12 @@ case "$mixed_precision" in
   no|fp16|bf16) ;;
   *) fatal "--mixed-precision must be one of: no, fp16, bf16 (got '$mixed_precision')" ;;
 esac
+
+if [[ -n "$rename_map" ]]; then
+  python3 -c \
+    'import json, sys; value = json.loads(sys.argv[1]); assert isinstance(value, dict) and all(isinstance(key, str) and isinstance(item, str) for key, item in value.items())' \
+    "$rename_map" || fatal "--rename-map must be a JSON object containing string-to-string mappings"
+fi
 
 # AzureML model names: alphanumeric, dash, dot, underscore; must start with an
 # alphanumeric or underscore; max 255 chars. Reject upfront so az ml model
@@ -487,6 +499,7 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Instance Type" "$instance_type"
   print_kv "Train Expert Only" "$train_expert_only"
   print_kv "Mixed Precision" "$mixed_precision"
+  print_kv "Rename Map" "${rename_map:-<none>}"
   print_kv "HF Token" "$([[ -n "$hf_token" ]] && echo '<set>' || echo '<none>')"
   print_kv "Environment" "${environment_name}:${environment_version}"
   print_kv "LeRobot Project" "$lerobot_project"
@@ -624,6 +637,10 @@ az_args+=(
 [[ -n "$batch_size" ]]          && az_args+=(--set "environment_variables.BATCH_SIZE=$batch_size")
 [[ -n "$eval_freq" ]]           && az_args+=(--set "environment_variables.EVAL_FREQ=$eval_freq")
 [[ -n "$log_freq" ]]            && az_args+=(--set "environment_variables.LOG_FREQ=$log_freq")
+if [[ -n "$rename_map" ]]; then
+  rename_map_b64=$(printf "%s" "$rename_map" | base64 | tr -d "\n")
+  az_args+=(--set "environment_variables.RENAME_MAP_B64=$rename_map_b64")
+fi
 [[ -n "$register_checkpoint" ]] && az_args+=(--set "environment_variables.REGISTER_CHECKPOINT=$register_checkpoint")
 [[ "$train_expert_only" == "true" ]] && az_args+=(--set "environment_variables.TRAIN_EXPERT_ONLY=true")
 [[ -n "$hf_token" ]] && az_args+=(--set "environment_variables.HF_TOKEN=$hf_token")
@@ -694,6 +711,7 @@ print_kv "Compute" "${compute:-<not set>}"
 print_kv "Instance Type" "$instance_type"
 print_kv "Train Expert Only" "$train_expert_only"
 print_kv "Mixed Precision" "$mixed_precision"
+print_kv "Rename Map" "${rename_map:-<none>}"
 print_kv "Environment" "${environment_name}:${environment_version}"
 print_kv "LeRobot Project" "$lerobot_project"
 print_kv "Workspace" "$workspace_name"

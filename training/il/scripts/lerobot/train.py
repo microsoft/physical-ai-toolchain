@@ -17,16 +17,16 @@ Environment variables:
     EXPERIMENT_NAME: MLflow experiment name.
     AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZUREML_WORKSPACE_NAME: Azure context.
     MIXED_PRECISION: Accelerate mixed-precision mode (``no``/``fp16``/``bf16``).
-        Only effective when more than one CUDA device is visible (multi-GPU
-        Accelerate launch). Under Accelerate the lerobot ``--policy.use_amp``
-        flag is ignored.
+        Explicit mixed precision uses Accelerate on both single-GPU and
+        multi-GPU runs. Under Accelerate the lerobot ``--policy.use_amp`` flag
+        is ignored.
 
 The number of GPUs is detected at runtime via ``torch.cuda.device_count()`` --
 i.e., from the GPU devices the job container can see. On AzureML-on-Kubernetes
 that is driven by the ``InstanceType``'s ``nvidia.com/gpu`` request; on managed
-``AmlCompute`` it is the cluster VM SKU's GPU count. When detection returns
-> 1, ``lerobot-train`` is launched via
-``accelerate launch --multi_gpu --num_processes=N``.
+``AmlCompute`` it is the cluster VM SKU's GPU count. Multi-GPU runs use
+``accelerate launch --multi_gpu --num_processes=N``. Single-GPU runs also use
+Accelerate when explicit mixed precision is requested, without ``--multi_gpu``.
 """
 
 from __future__ import annotations
@@ -155,7 +155,7 @@ def _resolve_lerobot_train() -> str:
 
 
 def _wrap_with_accelerate(cmd: list[str], num_gpus: int, mixed_precision: str) -> list[str]:
-    """Prepend accelerate launch flags for single-node multi-GPU training.
+    """Prepend Accelerate launch flags for single-node training.
 
     Assumes ``cmd[0] == 'lerobot-train'``. Replaces it with the resolved
     absolute path so accelerate launches the right entrypoint.
@@ -166,9 +166,10 @@ def _wrap_with_accelerate(cmd: list[str], num_gpus: int, mixed_precision: str) -
     accelerate_args = [
         "accelerate",
         "launch",
-        "--multi_gpu",
-        f"--num_processes={num_gpus}",
     ]
+    if num_gpus > 1:
+        accelerate_args.append("--multi_gpu")
+    accelerate_args.append(f"--num_processes={num_gpus}")
     # Default mixed_precision is 'no' (script-level default); pass through
     # explicitly so accelerate's environment config never overrides it.
     accelerate_args.append(f"--mixed_precision={mixed_precision}")

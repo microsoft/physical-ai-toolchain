@@ -141,6 +141,14 @@ else
   echo "[INIT-FROM-POLICY-MODEL] Not set; training from random initialization."
 fi
 
+if [[ -n "${RENAME_MAP_B64:-}" ]]; then
+  if ! rename_map=$(printf "%s" "${RENAME_MAP_B64}" | base64 --decode); then
+    echo "ERROR: RENAME_MAP_B64 is not valid base64" >&2
+    exit 1
+  fi
+  train_args+=(--rename_map="${rename_map}")
+fi
+
 echo "[ENTRY] Final lerobot-train args:"
 printf '  %s\n' "${train_args[@]}"
 
