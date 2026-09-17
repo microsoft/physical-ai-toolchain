@@ -1,0 +1,56 @@
+name: VLA Simulation Harness Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'evaluation/sil/vla/**'
+      - 'evaluation/examples/vla/**'
+      - '.github/workflows/vla-sil-pytests.yml'
+  pull_request:
+    paths:
+      - 'evaluation/sil/vla/**'
+      - 'evaluation/examples/vla/**'
+      - '.github/workflows/vla-sil-pytests.yml'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  host-contracts:
+    name: CPU contracts (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    env:
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Check harness lock
+        run: uv lock --check --project evaluation/sil/vla
+
+      - name: Run CPU harness tests
+        working-directory: evaluation/sil/vla
+        run: uv run --frozen --group dev pytest -p pytest_cov -v
+
+      - name: Check harness Python quality
+        run: |
+          uv run --project evaluation/sil/vla --frozen --group dev ruff check evaluation/sil/vla
+          uv run --project evaluation/sil/vla --frozen --group dev ruff format --check evaluation/sil/vla

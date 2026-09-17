@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "instruction": "Pick up the large gear and place it in the bin.",
+  "channels": ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint", "finger_joint"],
+  "image_shapes": {"d435": [480, 640, 3], "d405": [480, 640, 3]},
+  "policy": {
+    "backend": "openpi",
+    "checkpoint": "/absolute/path/to/openpi-checkpoint",
+    "checkpoint_sha256": "REPLACE_WITH_CHECKPOINT_TREE_SHA256",
+    "training_config": "your_registered_ur10e_training_config",
+    "state_key": "state",
+    "prompt_key": "prompt",
+    "image_keys": {"d435": "images/base", "d405": "images/wrist"},
+    "state_mapping": {"indices": [0, 1, 2, 3, 4, 5, 6], "scale": [1, 1, 1, 1, 1, 1, 1], "offset": [0, 0, 0, 0, 0, 0, 0]},
+    "action_mapping": {"indices": [0, 1, 2, 3, 4, 5, 6], "scale": [1, 1, 1, 1, 1, 1, 1], "offset": [0, 0, 0, 0, 0, 0, 0]},
+    "delta_indices": [],
+    "action_horizon": 50
+  },
+  "task": {
+    "adapter": "ur10e_gear",
+    "producer_root": "/absolute/path/to/physical-ai-toolchain-skills/workflows/isaac-sim/ur10e-gear-to-bin/scripts/capture",
+    "expert_config": "/absolute/path/to/physical-ai-toolchain-skills/workflows/isaac-sim/ur10e-gear-to-bin/profiles/privileged-reduced-release.json",
+    "stage": "/absolute/path/to/asset-package/usd/ur10e_single/UR10_Single_training.usda",
+    "reference_root": "/absolute/path/to/asset-package",
+    "runtime_assets": ["OmniPBR.mdl", "https://omniverse-content-production.s3.us-west-2.amazonaws.com/Materials/2023_1/vMaterials_2/Fabric/Felt_Plain.mdl"]
+  },
+  "evaluation": {
+    "control_hz": 30,
+    "execution_horizon": 8,
+    "seeds": {"unverified": [101]},
+    "max_steps": 1800,
+    "timeout_seconds": 60,
+    "minimum_free_gib": 4,
+    "joint_limit_behavior": "reject"
+  }
+}

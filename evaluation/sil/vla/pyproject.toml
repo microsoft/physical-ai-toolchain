@@ -1,0 +1,47 @@
+[project]
+name = "physical-ai-vla-evaluation"
+version = "0.1.0"
+description = "Model-independent VLA policy serving and direct Isaac Sim evaluation"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy>=1.26,<2.3",
+    "msgpack>=1.1,<2",
+    "websockets>=15,<16",
+    "av==15.1.0",
+]
+
+[dependency-groups]
+audit = ["usd-core>=25.11,<27"]
+dev = [
+    { include-group = "audit" },
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.5",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+extend = "../../../pyproject.toml"
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["../.."]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+    "--cov=sil.vla",
+    "--cov-config=pyproject.toml",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-fail-under=80",
+]
+
+[tool.coverage.run]
+branch = true
+omit = ["**/vla/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = ["if __name__ == .__main__.", "if TYPE_CHECKING:", "^\\s*\\.\\.\\.$"]

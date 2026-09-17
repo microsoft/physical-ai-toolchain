@@ -1591,8 +1591,17 @@ x509
 # Cloud Platforms & Services (not covered by public dicts)
 
 # Programming Languages & Frameworks (not covered by public dicts)
+OpenPI
+frombuffer
+itemsize
+mkfifo
+nbytes
+packb
+unpackb
 
 # Data & Analytics
+flatnonzero
+nonfinite
 
 # Business & Enterprise
 
@@ -1607,6 +1616,16 @@ x509
 # Abbreviations & Acronyms
 
 # Technical Terms
+nonloopback
+nonregular
+nonvector
+precached
+precontact
+preimported
+roundtrips
+ungrasped
+wxyz
+Xform
 
 # Proper Nouns & Company Names
 
