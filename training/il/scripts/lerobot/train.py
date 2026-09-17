@@ -571,17 +571,16 @@ def main() -> int:
     datasource = "blob" if has_blob_urls() else "hf"
     source = f"{platform}-lerobot-{datasource}"
 
-    # Single-node multi-GPU: detect the GPU count visible to the job container
+    # Detect the GPU count visible to the job container
     # (AzureML-on-Kubernetes: pod's `nvidia.com/gpu` request via InstanceType;
-    # AmlCompute: cluster VM SKU's GPU count) and, when > 1, wrap with
-    # `accelerate launch` and strip --policy.use_amp (ignored under Accelerate
-    # per the HF guide).
+    # AmlCompute: cluster VM SKU's GPU count). Use Accelerate for multi-GPU
+    # execution and whenever explicit mixed precision is requested.
     num_gpus = _detect_num_gpus()
     mixed_precision = _read_mixed_precision()
-    if num_gpus > 1:
+    if num_gpus > 1 or mixed_precision != "no":
         cmd = _strip_use_amp(cmd)
         cmd = _wrap_with_accelerate(cmd, num_gpus=num_gpus, mixed_precision=mixed_precision)
-        print(f"[ACCELERATE] Multi-GPU run: num_gpus={num_gpus}, mixed_precision={mixed_precision}")
+        print(f"[ACCELERATE] Run: num_gpus={num_gpus}, mixed_precision={mixed_precision}")
     else:
         print("[ACCELERATE] Single-GPU run: launching lerobot-train directly")
 

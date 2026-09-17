@@ -8,8 +8,8 @@ $schema: https://azuremlschemas.azureedge.net/latest/commandComponent.schema.jso
 type: command
 name: import_huggingface_model
 display_name: Import Hugging Face Model
-version: "1"
-description: Download a revision-pinned Hugging Face model to an Azure ML datastore output.
+version: "2"
+description: Download and transport a revision-pinned Hugging Face model through an Azure ML datastore.
 
 inputs:
   repo_id:
@@ -41,4 +41,15 @@ command: >-
     exit 2;
   fi;
   python -m pip install --quiet --break-system-packages --root-user-action=ignore --target /tmp/hf-import-deps huggingface-hub==1.29.0;
-  PYTHONPATH=/tmp/hf-import-deps python -c "import os,sys; from huggingface_hub import snapshot_download; repo_id,revision,output_dir=sys.argv[1:]; snapshot_download(repo_id=repo_id,revision=revision,repo_type=\"model\",token=os.environ[\"HF_TOKEN\"],local_dir=output_dir); print(f\"imported_model={repo_id}@{revision}\")" "${{inputs.repo_id}}" "${{inputs.revision}}" "${{outputs.model_snapshot}}"'
+  output_dir="${{outputs.model_snapshot}}";
+  PYTHONPATH=/tmp/hf-import-deps python -c "import os,sys; from huggingface_hub import snapshot_download; repo_id,revision,output_dir=sys.argv[1:]; snapshot_download(repo_id=repo_id,revision=revision,repo_type=\"model\",token=os.environ[\"HF_TOKEN\"],local_dir=output_dir); print(f\"imported_model={repo_id}@{revision}\")" "${{inputs.repo_id}}" "$revision" "$output_dir";
+  model_file="$output_dir/model.safetensors";
+  if [[ -f "$model_file" ]]; then
+    parts_dir="$output_dir/model.safetensors.parts";
+    mkdir -p "$parts_dir";
+    sha256sum "$model_file" | cut -d " " -f 1 > "$output_dir/model.safetensors.sha256";
+    split -b 1G -d -a 3 --additional-suffix=.part "$model_file" "$parts_dir/part-";
+    find "$parts_dir" -maxdepth 1 -type f -name "part-*.part" | wc -l > "$output_dir/model.safetensors.part-count";
+    rm "$model_file";
+    echo "transport_parts=$(cat "$output_dir/model.safetensors.part-count")";
+  fi'

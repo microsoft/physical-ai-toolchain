@@ -95,9 +95,14 @@ az ml model create \
 ```
 
 The component requires a full 40-character Hugging Face commit and writes the
-snapshot to a `uri_folder` output in `workspaceblobstore`. Keep `HF_TOKEN` in a
-local ignored environment file or secret store; never add it to the pipeline
-definition.
+snapshot to a `uri_folder` output in `workspaceblobstore`. A single
+`model.safetensors` file is split into 1 GiB transport parts before upload.
+The Azure ML training entrypoint reconstructs the original file and verifies
+its SHA-256 before loading the policy. This avoids long-running single-object
+transfers without changing the checkpoint format seen by LeRobot.
+
+Keep `HF_TOKEN` in a local ignored environment file or secret store; never add
+it to the pipeline definition.
 
 ### Register the resulting checkpoint
 

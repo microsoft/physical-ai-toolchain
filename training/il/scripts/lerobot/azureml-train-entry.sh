@@ -89,6 +89,53 @@ if [[ -n "${init_from_policy_model_path}" ]]; then
   echo "[INIT-FROM-POLICY-MODEL] Source URI: ${INIT_FROM_POLICY_MODEL_SOURCE:-<unset>}"
   echo "[INIT-FROM-POLICY-MODEL] Mount path: ${init_from_policy_model_path}"
   ls -la "${init_from_policy_model_path}" || echo "[INIT-FROM-POLICY-MODEL] WARNING: mount path not listable"
+
+  transport_parts_dir="${init_from_policy_model_path}/model.safetensors.parts"
+  if [[ -d "${transport_parts_dir}" ]]; then
+    checksum_file="${init_from_policy_model_path}/model.safetensors.sha256"
+    part_count_file="${init_from_policy_model_path}/model.safetensors.part-count"
+    [[ -s "${checksum_file}" ]] || {
+      echo "ERROR: Chunked policy model is missing model.safetensors.sha256" >&2
+      exit 1
+    }
+    [[ -s "${part_count_file}" ]] || {
+      echo "ERROR: Chunked policy model is missing model.safetensors.part-count" >&2
+      exit 1
+    }
+
+    mapfile -d '' transport_parts < <(
+      find "${transport_parts_dir}" -maxdepth 1 -type f -name "part-*.part" -print0 | sort -z
+    )
+    expected_part_count=$(<"${part_count_file}")
+    if [[ ! "${expected_part_count}" =~ ^[1-9][0-9]*$ ]]; then
+      echo "ERROR: Invalid policy model transport part count: ${expected_part_count}" >&2
+      exit 1
+    fi
+    if [[ ${#transport_parts[@]} -ne ${expected_part_count} ]]; then
+      echo "ERROR: Expected ${expected_part_count} policy model parts, found ${#transport_parts[@]}" >&2
+      exit 1
+    fi
+
+    reconstructed_policy_path="/tmp/lerobot-reconstructed-policy"
+    rm -rf "${reconstructed_policy_path}"
+    mkdir -p "${reconstructed_policy_path}"
+    find "${init_from_policy_model_path}" -mindepth 1 -maxdepth 1 \
+      ! -name "model.safetensors.parts" \
+      ! -name "model.safetensors.sha256" \
+      ! -name "model.safetensors.part-count" \
+      -exec cp -a {} "${reconstructed_policy_path}/" \;
+    cat "${transport_parts[@]}" > "${reconstructed_policy_path}/model.safetensors"
+
+    expected_checksum=$(<"${checksum_file}")
+    actual_checksum=$(sha256sum "${reconstructed_policy_path}/model.safetensors" | cut -d " " -f 1)
+    if [[ "${actual_checksum}" != "${expected_checksum}" ]]; then
+      echo "ERROR: Reconstructed policy model checksum does not match the imported model" >&2
+      exit 1
+    fi
+    echo "[INIT-FROM-POLICY-MODEL] Reconstructed and verified ${#transport_parts[@]} transport parts"
+    init_from_policy_model_path="${reconstructed_policy_path}"
+  fi
+
   train_args+=(--policy.path="${init_from_policy_model_path}")
 else
   echo "[INIT-FROM-POLICY-MODEL] Not set; training from random initialization."
