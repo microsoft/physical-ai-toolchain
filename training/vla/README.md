@@ -103,6 +103,11 @@ of relying only on runtime mixed precision. Add `--gradient-checkpointing` when
 activation memory is the limiting factor; it reduces memory usage by
 recomputing activations during backward.
 
+See [VLA Full-Run Troubleshooting](../../docs/training/vla-full-run-troubleshooting.md)
+for the complete smoke-test-to-full-run failure chronology, diagnostic
+signatures, unsuccessful mitigations, and the validated conservative
+configuration.
+
 ### Import a pinned Hugging Face base model
 
 Run the import pipeline on compute that can reach both Hugging Face and the
