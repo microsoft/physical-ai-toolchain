@@ -15,6 +15,8 @@ keywords:
   - mlflow
 ---
 
+<!-- cspell:ignore nvtop -->
+
 Use this guide when a PI 0.5 smoke test succeeds but a full Azure ML training run fails during model delivery, policy initialization, feature mapping, GPU execution, or metric reporting. It records the observed failure sequence, unsuccessful mitigations, permanent fixes, and the conservative configuration validated on a single RTX PRO 6000 GPU.
 
 ## Scope
@@ -286,6 +288,130 @@ Observed steady-state behavior:
 | Projected duration | Approximately 15 hours for 40,000 steps after training starts       |
 
 Treat these values as an observed baseline, not a performance guarantee. Dataset size, camera count, GPU model, driver, runtime packages, and contention affect results.
+
+## Submit and Monitor Full Training Runs
+
+Submit jobs from a workstation that can reach the Azure ML workspace storage private endpoint. Connect the Azure point-to-site VPN before submission when the workspace disables public storage access. After Azure ML accepts the job, the run continues independently of the workstation, VPN session, terminal, or user login.
+
+### Preview and submit the job
+
+Use the checked-in submission script rather than calling `az ml job create` directly. The script resolves Azure context, registers the pinned environment, uploads the current training source, validates reproducibility inputs, and prints the submitted Azure ML job name and portal URL.
+
+Before submitting the conservative command above, append `--config-preview`. The preview prints the resolved dataset, policy, image, compute, InstanceType, precision, memory controls, rename map, and token presence without making remote changes.
+
+Remove `--config-preview` after reviewing the output. Append `--stream` to the same command to keep the submitting terminal attached to Azure ML logs.
+
+Pressing `Ctrl+C` stops the local log stream but does not cancel an accepted Azure ML job. If the submission process is interrupted before it prints the job name, check the Azure ML jobs page before resubmitting; the service may already have accepted the run.
+
+### Monitor Azure ML status and logs
+
+Set local shell variables from the submission summary or ignored local configuration:
+
+```bash
+AZUREML_JOB_NAME="<job-name>"
+AZURE_RESOURCE_GROUP="<resource-group>"
+AZUREML_WORKSPACE_NAME="<workspace-name>"
+```
+
+Query the control-plane status without attaching to the log stream:
+
+```bash
+az ml job show \
+  --name "$AZUREML_JOB_NAME" \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --workspace-name "$AZUREML_WORKSPACE_NAME" \
+  --query '{name:name,status:status,compute:compute,created:creation_context.created_at}' \
+  --output yaml
+```
+
+Stream service and user logs:
+
+```bash
+az ml job stream \
+  --name "$AZUREML_JOB_NAME" \
+  --resource-group "$AZURE_RESOURCE_GROUP" \
+  --workspace-name "$AZUREML_WORKSPACE_NAME"
+```
+
+Use the portal URL printed by the submitter to inspect job properties, child logs, outputs, and MLflow metrics. Treat Azure ML status and training progress as separate signals: `Running` confirms control-plane state, while training logs and MLflow metrics confirm optimizer progress.
+
+Monitor these MLflow series:
+
+| Metric                | Interpretation                                      |
+|-----------------------|-----------------------------------------------------|
+| `train/loss`          | Optimization progress and exact update-record count |
+| `train/grad_norm`     | Gradient stability; investigate non-finite values   |
+| `train/learning_rate` | Scheduler behavior                                  |
+| `train/update_time_s` | Optimizer update duration                           |
+| `train/data_time_s`   | Input-pipeline delay                                |
+| `train/samples`       | Cumulative processed samples                        |
+| `train/episodes`      | Cumulative processed episodes                       |
+
+For a run created before the exact-step fix, do not infer progress from the rounded chart x-axis after step 1,000. Count the `train/loss` metric-history records when `--log-freq 1`; one record corresponds to one completed optimizer update. Runs submitted with the fixed wrapper retain exact MLflow step numbers.
+
+### Monitor the Arc host and training pod
+
+Run host checks through the K3s Kubernetes client. Use `kubectl` instead of `sudo k3s kubectl` when the current user already has a configured kubeconfig.
+
+List the newest Azure ML pods and identify the training pod by creation time, status, node, and the corresponding Azure ML job:
+
+```bash
+sudo k3s kubectl get pods \
+  --namespace azureml \
+  --output wide \
+  --sort-by=.metadata.creationTimestamp
+```
+
+Inspect the selected pod before choosing a log container:
+
+```bash
+POD="<training-pod>"
+
+sudo k3s kubectl get pod \
+  --namespace azureml \
+  "$POD" \
+  --output jsonpath='{.spec.containers[*].name}{"\n"}'
+
+sudo k3s kubectl describe pod --namespace azureml "$POD"
+```
+
+Stream the user-training container after confirming its name:
+
+```bash
+CONTAINER="<user-training-container>"
+
+sudo k3s kubectl logs \
+  --namespace azureml \
+  "$POD" \
+  --container "$CONTAINER" \
+  --follow \
+  --timestamps
+```
+
+Use `nvtop` on the host for interactive GPU utilization, memory, power, temperature, and process monitoring:
+
+```bash
+nvtop
+```
+
+In `nvtop`, the blue `GPU0 %` line represents utilization, not clock speed. The current graphics clock appears separately in the device header. Use NVIDIA device monitoring when exact clocks or short utilization gaps require investigation:
+
+```bash
+nvidia-smi dmon -s pucm -d 2
+```
+
+Interpret host telemetry with the Azure ML and MLflow signals:
+
+| Observation                       | Likely interpretation                                                           |
+|-----------------------------------|---------------------------------------------------------------------------------|
+| High GPU utilization              | Training kernels are actively executing                                         |
+| Brief utilization drops           | Data loading, synchronization, logging, checkpointing, or step transitions      |
+| Sustained zero utilization        | Inspect pod logs, pod state, CPU activity, storage, and network dependencies    |
+| Stable memory with variable usage | Allocated model state remains resident while compute alternates between phases  |
+| Rising memory each step           | Possible retention or leak; compare across checkpoint and evaluation boundaries |
+| High temperature or clock decline | Check power, thermal, and throttling reasons with `nvidia-smi`                  |
+
+Do not cancel or resubmit solely because utilization dips between updates. Confirm that logs or `train/loss` history have stopped advancing and that the pause exceeds the normal model-download, checkpoint, or logging interval.
 
 ## MLflow Step-Axis Failure
 
