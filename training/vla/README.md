@@ -84,7 +84,6 @@ workspace model-asset transfer is not required:
   --policy-type pi05 \
   --init-from-policy-hf-repo lerobot/pi05_base \
   --init-from-policy-hf-revision b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
-  --no-hf-token \
   --rename-map '{"observation.images.d435":"observation.images.base_0_rgb","observation.images.d405":"observation.images.left_wrist_0_rgb"}'
 ```
 
@@ -92,9 +91,10 @@ The submit script requires a full Git commit and forwards the repository and
 revision as job environment values. The checked-in entrypoint downloads the
 snapshot after installing the locked runtime, validates `config.json` and the
 `model.safetensors` tensor index, and then passes the local directory to
-LeRobot. Public repositories do not require `HF_TOKEN`; provide the token only
-for private or gated repositories. Missing PI 0.5 camera slots are masked and
-padded by LeRobot.
+LeRobot. PI policy processors load their tokenizer from the gated
+`google/paligemma-3b-pt-224` repository, so the job requires `HF_TOKEN` even
+when the policy repository is public. Missing PI 0.5 camera slots are masked
+and padded by LeRobot.
 
 ### Import a pinned Hugging Face base model
 

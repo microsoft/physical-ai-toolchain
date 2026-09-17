@@ -117,12 +117,10 @@ AZURE CONTEXT:
                                   policy initializes from the gated
                                   google/paligemma-3b-pt-224 backbone (i.e.
                                   unless --init-from-policy-model points at an
-                                  already-materialized checkpoint or
-                                  --init-from-policy-hf-repo supplies one).
-                                  Also used for private Hugging Face policies
-                                  and on the HuggingFace Hub dataset path.
-        --no-hf-token             Do not forward HF_TOKEN, including values
-                                  loaded from the local .env file.
+                                  already-materialized checkpoint). Direct
+                                  Hugging Face policy initialization still
+                                  requires the gated PaliGemma tokenizer.
+                                  Also used on the HuggingFace Hub dataset path.
         --instance-type NAME      Instance type for AzureML-on-Kubernetes compute
                                   (default: gpu). pi0 full fine-tuning (~3B
                                   params + paligemma backbone) needs a high-
@@ -356,7 +354,6 @@ while [[ $# -gt 0 ]]; do
     --train-expert-only)          train_expert_only=true; shift ;;
     --mixed-precision)            mixed_precision="$2"; shift 2 ;;
     --hf-token)                   hf_token="$2"; shift 2 ;;
-    --no-hf-token)                hf_token=""; shift ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
     --stream)                     stream_logs=true; shift ;;
@@ -404,6 +401,8 @@ if [[ -n "$init_from_policy_hf_repo_id" || -n "$init_from_policy_hf_revision" ]]
     "--init-from-policy-hf-repo must be a Hugging Face repository ID in OWNER/NAME form"
   [[ "$init_from_policy_hf_revision" =~ ^[0-9a-f]{40}$ ]] || fatal \
     "--init-from-policy-hf-revision must be a full 40-character lowercase Git commit"
+  [[ -n "$hf_token" ]] || fatal \
+    "--hf-token or HF_TOKEN is required because PI policies use the gated PaliGemma tokenizer"
 fi
 
 if [[ -n "$init_from_policy_hf_repo_id" && ( -n "$init_from_policy_model" || -n "$policy_repo_id" ) ]]; then
