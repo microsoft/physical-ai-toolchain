@@ -568,6 +568,8 @@ def main() -> int:
         "EVAL_FREQ": "--env_eval_freq",
         "SAVE_FREQ": "--save_freq",
         "LOG_FREQ": "--log_freq",
+        "POLICY_DTYPE": "--policy.dtype",
+        "GRADIENT_CHECKPOINTING": "--policy.gradient_checkpointing",
     }
     for env_var, arg_name in env_arg_map.items():
         if arg_name not in cli_text:

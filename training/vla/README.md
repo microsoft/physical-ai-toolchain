@@ -84,6 +84,8 @@ workspace model-asset transfer is not required:
   --policy-type pi05 \
   --init-from-policy-hf-repo lerobot/pi05_base \
   --init-from-policy-hf-revision b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
+  --policy-dtype bfloat16 \
+  --gradient-checkpointing \
   --rename-map '{"observation.images.d435":"observation.images.base_0_rgb","observation.images.d405":"observation.images.left_wrist_0_rgb"}'
 ```
 
@@ -95,6 +97,11 @@ LeRobot. PI policy processors load their tokenizer from the gated
 `google/paligemma-3b-pt-224` repository, so the job requires `HF_TOKEN` even
 when the policy repository is public. Missing PI 0.5 camera slots are masked
 and padded by LeRobot.
+
+Use `--policy-dtype bfloat16` to instantiate PI policy storage in BF16 instead
+of relying only on runtime mixed precision. Add `--gradient-checkpointing` when
+activation memory is the limiting factor; it reduces memory usage by
+recomputing activations during backward.
 
 ### Import a pinned Hugging Face base model
 

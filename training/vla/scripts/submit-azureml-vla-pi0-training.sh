@@ -148,6 +148,10 @@ AZURE CONTEXT:
                                   numerical-stability reasons. Explicit mixed
                                   precision uses Accelerate on single- and
                                   multi-GPU jobs.
+        --policy-dtype DTYPE      PI policy storage dtype: float32 or bfloat16
+                                  (default: checkpoint configuration).
+        --gradient-checkpointing  Recompute PI policy activations during backward
+                                  to reduce GPU memory usage.
         --experiment-name NAME    Experiment name override
         --display-name NAME       Display name override
         --stream                  Stream logs after submission
@@ -304,6 +308,8 @@ compute="${AZUREML_COMPUTE:-$(get_compute_target)}"
 instance_type="gpu"
 train_expert_only=false
 mixed_precision="${MIXED_PRECISION:-bf16}"
+policy_dtype="${POLICY_DTYPE:-}"
+gradient_checkpointing=false
 hf_token="${HF_TOKEN:-}"
 experiment_name=""
 display_name=""
@@ -353,6 +359,8 @@ while [[ $# -gt 0 ]]; do
     --instance-type)              instance_type="$2"; shift 2 ;;
     --train-expert-only)          train_expert_only=true; shift ;;
     --mixed-precision)            mixed_precision="$2"; shift 2 ;;
+    --policy-dtype)               policy_dtype="$2"; shift 2 ;;
+    --gradient-checkpointing)     gradient_checkpointing=true; shift ;;
     --hf-token)                   hf_token="$2"; shift 2 ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
@@ -412,6 +420,11 @@ fi
 case "$mixed_precision" in
   no|fp16|bf16) ;;
   *) fatal "--mixed-precision must be one of: no, fp16, bf16 (got '$mixed_precision')" ;;
+esac
+
+case "$policy_dtype" in
+  ""|float32|bfloat16) ;;
+  *) fatal "--policy-dtype must be one of: float32, bfloat16 (got '$policy_dtype')" ;;
 esac
 
 if [[ -n "$rename_map" ]]; then
@@ -528,6 +541,8 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Instance Type" "$instance_type"
   print_kv "Train Expert Only" "$train_expert_only"
   print_kv "Mixed Precision" "$mixed_precision"
+  print_kv "Policy Dtype" "${policy_dtype:-<checkpoint default>}"
+  print_kv "Gradient Checkpointing" "$gradient_checkpointing"
   print_kv "Rename Map" "${rename_map:-<none>}"
   print_kv "HF Token" "$([[ -n "$hf_token" ]] && echo '<set>' || echo '<none>')"
   print_kv "Environment" "${environment_name}:${environment_version}"
@@ -656,6 +671,7 @@ az_args+=(
   --set "environment_variables.OUTPUT_DIR=$output_dir"
   --set "environment_variables.SAVE_FREQ=$save_freq"
   --set "environment_variables.MIXED_PRECISION=$mixed_precision"
+  --set "environment_variables.GRADIENT_CHECKPOINTING=$gradient_checkpointing"
   --set "environment_variables.LEROBOT_PROJECT=$lerobot_project"
 )
 
@@ -664,6 +680,7 @@ az_args+=(
 [[ -n "$init_from_policy_hf_repo_id" ]] && az_args+=(--set "environment_variables.INIT_FROM_POLICY_HF_REPO_ID=$init_from_policy_hf_repo_id")
 [[ -n "$init_from_policy_hf_revision" ]] && az_args+=(--set "environment_variables.INIT_FROM_POLICY_HF_REVISION=$init_from_policy_hf_revision")
 [[ -n "$lerobot_version" ]]     && az_args+=(--set "environment_variables.LEROBOT_VERSION=$lerobot_version")
+[[ -n "$policy_dtype" ]]        && az_args+=(--set "environment_variables.POLICY_DTYPE=$policy_dtype")
 [[ -n "$training_steps" ]]      && az_args+=(--set "environment_variables.TRAINING_STEPS=$training_steps")
 [[ -n "$batch_size" ]]          && az_args+=(--set "environment_variables.BATCH_SIZE=$batch_size")
 [[ -n "$eval_freq" ]]           && az_args+=(--set "environment_variables.EVAL_FREQ=$eval_freq")
@@ -742,6 +759,8 @@ print_kv "Compute" "${compute:-<not set>}"
 print_kv "Instance Type" "$instance_type"
 print_kv "Train Expert Only" "$train_expert_only"
 print_kv "Mixed Precision" "$mixed_precision"
+print_kv "Policy Dtype" "${policy_dtype:-<checkpoint default>}"
+print_kv "Gradient Checkpointing" "$gradient_checkpointing"
 print_kv "Rename Map" "${rename_map:-<none>}"
 print_kv "Environment" "${environment_name}:${environment_version}"
 print_kv "LeRobot Project" "$lerobot_project"
