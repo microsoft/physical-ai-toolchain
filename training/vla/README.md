@@ -103,10 +103,11 @@ of relying only on runtime mixed precision. Add `--gradient-checkpointing` when
 activation memory is the limiting factor; it reduces memory usage by
 recomputing activations during backward.
 
-See [VLA Full-Run Troubleshooting](../../docs/training/vla-full-run-troubleshooting.md)
-for the complete smoke-test-to-full-run failure chronology, diagnostic
-signatures, unsuccessful mitigations, and the validated conservative
-configuration.
+Use [Azure ML Arc VLA Setup and Operations](../../docs/training/vla-azureml-arc-setup.md)
+to prepare Arc-connected K3s compute, submit PI 0.5 training, and monitor the
+run. See [VLA Full-Run Troubleshooting](../../docs/training/vla-full-run-troubleshooting.md)
+for the failure chronology, diagnostic signatures, unsuccessful mitigations,
+and validated recovery configuration.
 
 ### Import a pinned Hugging Face base model
 

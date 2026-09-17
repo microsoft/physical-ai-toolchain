@@ -18,26 +18,28 @@ Training documentation for reinforcement learning with Isaac Lab and behavioral 
 
 ## 📖 Training Guides
 
-| Guide                                                           | Description                                                          |
-|-----------------------------------------------------------------|----------------------------------------------------------------------|
-| [Azure ML Training](azureml-training.md)                        | Submit Isaac Lab and LeRobot training jobs to Azure ML               |
-| [Experiment Tracking](experiment-tracking.md)                   | MLflow setup, model registration, checkpoint flows                   |
-| [Isaac Lab Training](isaac-lab-training.md)                     | RL training with SKRL and RSL-RL backends on Azure ML and OSMO       |
-| [LeRobot Checkpoint Migration](lerobot-checkpoint-migration.md) | Convert pre-0.6 checkpoints to the processor-based format            |
-| [LeRobot Training](lerobot-training.md)                         | Behavioral cloning with ACT and Diffusion policies                   |
-| [MLflow Integration](mlflow-integration.md)                     | SKRL metric logging internals, metric filtering, and troubleshooting |
-| [OSMO Training](osmo-training.md)                               | Submit distributed Isaac Lab training jobs through NVIDIA OSMO       |
+| Guide                                                           | Description                                                            |
+|-----------------------------------------------------------------|------------------------------------------------------------------------|
+| [Azure ML Arc VLA Setup](vla-azureml-arc-setup.md)              | Prepare Arc-connected K3s compute and run PI 0.5 VLA training          |
+| [Azure ML Training](azureml-training.md)                        | Submit Isaac Lab and LeRobot training jobs to Azure ML                 |
+| [Experiment Tracking](experiment-tracking.md)                   | MLflow setup, model registration, checkpoint flows                     |
+| [Isaac Lab Training](isaac-lab-training.md)                     | RL training with SKRL and RSL-RL backends on Azure ML and OSMO         |
+| [LeRobot Checkpoint Migration](lerobot-checkpoint-migration.md) | Convert pre-0.6 checkpoints to the processor-based format              |
+| [LeRobot Training](lerobot-training.md)                         | Behavioral cloning with ACT and Diffusion policies                     |
+| [MLflow Integration](mlflow-integration.md)                     | SKRL metric logging internals, metric filtering, and troubleshooting   |
+| [OSMO Training](osmo-training.md)                               | Submit distributed Isaac Lab training jobs through NVIDIA OSMO         |
+| [VLA Full-Run Troubleshooting](vla-full-run-troubleshooting.md) | Diagnose PI 0.5 transport, initialization, memory, and metric failures |
 
 ## ⚖️ Platform Comparison
 
-| Aspect              | Azure ML                 | OSMO                                    |
-|---------------------|--------------------------|-----------------------------------------|
-| Submission          | `az ml job create`       | `osmo workflow submit`                  |
-| Orchestration       | Azure ML compute targets | OSMO workflow engine + KAI Scheduler    |
-| Experiment tracking | MLflow (managed)         | MLflow (Azure ML backend)               |
-| Dataset injection   | Azure ML datastores      | OSMO object storage or dataset upload   |
-| Model registration  | `az ml model create`     | Via MLflow or post-training script      |
-| Monitoring          | Azure ML Studio          | OSMO UI Dashboard                       |
+| Aspect              | Azure ML                 | OSMO                                  |
+|---------------------|--------------------------|---------------------------------------|
+| Submission          | `az ml job create`       | `osmo workflow submit`                |
+| Orchestration       | Azure ML compute targets | OSMO workflow engine + KAI Scheduler  |
+| Experiment tracking | MLflow (managed)         | MLflow (Azure ML backend)             |
+| Dataset injection   | Azure ML datastores      | OSMO object storage or dataset upload |
+| Model registration  | `az ml model create`     | Via MLflow or post-training script    |
+| Monitoring          | Azure ML Studio          | OSMO UI Dashboard                     |
 
 ## 🚀 Quick Start
 
