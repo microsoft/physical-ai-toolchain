@@ -79,6 +79,12 @@ TRAINING OPTIONS:
                                   are rejected to keep runs reproducible.
                                   Optimizer, scheduler, and step counter start fresh.
                                   Mutually exclusive with --policy-repo-id.
+        --init-from-policy-hf-repo ID
+                                  Download a Hugging Face policy repository directly
+                                  inside the Azure ML job.
+        --init-from-policy-hf-revision SHA
+                                  Full 40-character lowercase Git commit for the
+                                  direct Hugging Face policy repository.
         --lerobot-version VER     Specific LeRobot version or "latest" (default: latest)
         --lerobot-project PATH    Override the LeRobot dependency project, given as
                                   a repo-relative path (default:
@@ -111,8 +117,12 @@ AZURE CONTEXT:
                                   policy initializes from the gated
                                   google/paligemma-3b-pt-224 backbone (i.e.
                                   unless --init-from-policy-model points at an
-                                  already-materialized checkpoint). Also used
-                                  on the HuggingFace Hub dataset path.
+                                  already-materialized checkpoint or
+                                  --init-from-policy-hf-repo supplies one).
+                                  Also used for private Hugging Face policies
+                                  and on the HuggingFace Hub dataset path.
+        --no-hf-token             Do not forward HF_TOKEN, including values
+                                  loaded from the local .env file.
         --instance-type NAME      Instance type for AzureML-on-Kubernetes compute
                                   (default: gpu). pi0 full fine-tuning (~3B
                                   params + paligemma backbone) needs a high-
@@ -267,6 +277,8 @@ job_name="${JOB_NAME:-vla-pi0-training}"
 output_dir="${OUTPUT_DIR:-/workspace/outputs/train}"
 policy_repo_id="${POLICY_REPO_ID:-}"
 init_from_policy_model="${INIT_FROM_POLICY_MODEL:-}"
+init_from_policy_hf_repo_id="${INIT_FROM_POLICY_HF_REPO_ID:-}"
+init_from_policy_hf_revision="${INIT_FROM_POLICY_HF_REVISION:-}"
 lerobot_version="${LEROBOT_VERSION:-}"
 lerobot_project="${LEROBOT_PROJECT:-training/vla/lerobot}"
 
@@ -320,6 +332,8 @@ while [[ $# -gt 0 ]]; do
     -o|--output-dir)              output_dir="$2"; shift 2 ;;
     --policy-repo-id)             policy_repo_id="$2"; shift 2 ;;
     --init-from-policy-model)     init_from_policy_model="$2"; shift 2 ;;
+    --init-from-policy-hf-repo)   init_from_policy_hf_repo_id="$2"; shift 2 ;;
+    --init-from-policy-hf-revision) init_from_policy_hf_revision="$2"; shift 2 ;;
     --lerobot-version)            lerobot_version="$2"; shift 2 ;;
     --lerobot-project)            lerobot_project="$2"; shift 2 ;;
     --dataset-asset)              dataset_assets+=("$2"); shift 2 ;;
@@ -342,6 +356,7 @@ while [[ $# -gt 0 ]]; do
     --train-expert-only)          train_expert_only=true; shift ;;
     --mixed-precision)            mixed_precision="$2"; shift 2 ;;
     --hf-token)                   hf_token="$2"; shift 2 ;;
+    --no-hf-token)                hf_token=""; shift ;;
     --experiment-name)            experiment_name="$2"; shift 2 ;;
     --display-name)               display_name="$2"; shift 2 ;;
     --stream)                     stream_logs=true; shift ;;
@@ -380,6 +395,19 @@ esac
 
 if [[ -n "$init_from_policy_model" && -n "$policy_repo_id" ]]; then
   fatal "--init-from-policy-model and --policy-repo-id are mutually exclusive"
+fi
+
+if [[ -n "$init_from_policy_hf_repo_id" || -n "$init_from_policy_hf_revision" ]]; then
+  [[ -n "$init_from_policy_hf_repo_id" && -n "$init_from_policy_hf_revision" ]] || fatal \
+    "--init-from-policy-hf-repo and --init-from-policy-hf-revision must be provided together"
+  [[ "$init_from_policy_hf_repo_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fatal \
+    "--init-from-policy-hf-repo must be a Hugging Face repository ID in OWNER/NAME form"
+  [[ "$init_from_policy_hf_revision" =~ ^[0-9a-f]{40}$ ]] || fatal \
+    "--init-from-policy-hf-revision must be a full 40-character lowercase Git commit"
+fi
+
+if [[ -n "$init_from_policy_hf_repo_id" && ( -n "$init_from_policy_model" || -n "$policy_repo_id" ) ]]; then
+  fatal "--init-from-policy-hf-repo is mutually exclusive with --init-from-policy-model and --policy-repo-id"
 fi
 
 case "$mixed_precision" in
@@ -482,6 +510,8 @@ if [[ "$config_preview" == "true" ]]; then
   print_kv "Log Freq" "${log_freq:-<default>}"
   print_kv "Register Model" "${register_checkpoint:-<none>}"
   print_kv "Init From Model" "${init_from_policy_model:-<none>}"
+  print_kv "Init From HF Policy" "${init_from_policy_hf_repo_id:-<none>}"
+  print_kv "Init HF Revision" "${init_from_policy_hf_revision:-<none>}"
   if [[ ${#dataset_assets[@]} -gt 0 ]]; then
     print_kv "Data Assets" "${#dataset_assets[@]} asset(s) (ro_mount)"
   fi
@@ -632,6 +662,8 @@ az_args+=(
 
 [[ -n "$policy_repo_id" ]]      && az_args+=(--set "environment_variables.POLICY_REPO_ID=$policy_repo_id")
 [[ -n "$init_from_policy_model" ]] && az_args+=(--set "environment_variables.INIT_FROM_POLICY_MODEL_SOURCE=$init_from_policy_model")
+[[ -n "$init_from_policy_hf_repo_id" ]] && az_args+=(--set "environment_variables.INIT_FROM_POLICY_HF_REPO_ID=$init_from_policy_hf_repo_id")
+[[ -n "$init_from_policy_hf_revision" ]] && az_args+=(--set "environment_variables.INIT_FROM_POLICY_HF_REVISION=$init_from_policy_hf_revision")
 [[ -n "$lerobot_version" ]]     && az_args+=(--set "environment_variables.LEROBOT_VERSION=$lerobot_version")
 [[ -n "$training_steps" ]]      && az_args+=(--set "environment_variables.TRAINING_STEPS=$training_steps")
 [[ -n "$batch_size" ]]          && az_args+=(--set "environment_variables.BATCH_SIZE=$batch_size")
@@ -718,5 +750,6 @@ print_kv "Workspace" "$workspace_name"
 [[ ${#blob_urls[@]} -gt 0 ]] && print_kv "Blob Datasets" "${#blob_urls[@]}"
 [[ ${#dataset_assets[@]} -gt 0 ]] && print_kv "Data Assets" "${#dataset_assets[@]}"
 [[ -n "$init_from_policy_model" ]] && print_kv "Init From Model" "$init_from_policy_model"
+[[ -n "$init_from_policy_hf_repo_id" ]] && print_kv "Init From HF Policy" "${init_from_policy_hf_repo_id}@${init_from_policy_hf_revision}"
 [[ -n "$save_as" ]] && print_kv "Saved Job YAML" "$save_as"
 exit 0

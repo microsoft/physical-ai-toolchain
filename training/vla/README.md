@@ -73,6 +73,29 @@ Any value outside `pi0|pi0_fast|pi05` is rejected by the submit script before an
 
 The model input uses download mode and forwards its local path to LeRobot as `policy.path`.
 
+### Train directly from a pinned Hugging Face policy
+
+Download an immutable policy snapshot inside the Azure ML training pod when
+workspace model-asset transfer is not required:
+
+```bash
+./training/vla/scripts/submit-azureml-vla-pi0-training.sh \
+  --dataset-asset "azureml:ur10e-gear-pick-place-train:1" \
+  --policy-type pi05 \
+  --init-from-policy-hf-repo lerobot/pi05_base \
+  --init-from-policy-hf-revision b211f3d44c36b6acfcf7ae94a64e8e96f75a64ba \
+  --no-hf-token \
+  --rename-map '{"observation.images.d435":"observation.images.base_0_rgb","observation.images.d405":"observation.images.left_wrist_0_rgb"}'
+```
+
+The submit script requires a full Git commit and forwards the repository and
+revision as job environment values. The checked-in entrypoint downloads the
+snapshot after installing the locked runtime, validates `config.json` and the
+`model.safetensors` tensor index, and then passes the local directory to
+LeRobot. Public repositories do not require `HF_TOKEN`; provide the token only
+for private or gated repositories. Missing PI 0.5 camera slots are masked and
+padded by LeRobot.
+
 ### Import a pinned Hugging Face base model
 
 Run the import pipeline on compute that can reach both Hugging Face and the

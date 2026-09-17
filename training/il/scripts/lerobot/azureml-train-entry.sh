@@ -85,6 +85,56 @@ esac
 # input key declared by the submission script (inputs.init_from_policy_model)
 # and must stay in sync with it.
 init_from_policy_model_path="${AZURE_ML_INPUT_init_from_policy_model:-}"
+init_from_policy_hf_repo_id="${INIT_FROM_POLICY_HF_REPO_ID:-}"
+init_from_policy_hf_revision="${INIT_FROM_POLICY_HF_REVISION:-}"
+
+if [[ -n "${init_from_policy_hf_repo_id}" || -n "${init_from_policy_hf_revision}" ]]; then
+  [[ -n "${init_from_policy_hf_repo_id}" && -n "${init_from_policy_hf_revision}" ]] || {
+    echo "ERROR: INIT_FROM_POLICY_HF_REPO_ID and INIT_FROM_POLICY_HF_REVISION must be set together" >&2
+    exit 1
+  }
+  [[ -z "${init_from_policy_model_path}" ]] || {
+    echo "ERROR: Azure ML model input and direct Hugging Face policy initialization are mutually exclusive" >&2
+    exit 1
+  }
+  [[ "${init_from_policy_hf_revision}" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "ERROR: INIT_FROM_POLICY_HF_REVISION must be a full 40-character lowercase Git commit" >&2
+    exit 1
+  }
+  init_from_policy_model_path="${INIT_FROM_POLICY_HF_DIR:-/tmp/lerobot-hf-policy}"
+  python3 - "${init_from_policy_hf_repo_id}" "${init_from_policy_hf_revision}" \
+    "${init_from_policy_model_path}" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+from huggingface_hub import snapshot_download
+from safetensors import safe_open
+
+repo_id, revision, output_dir = sys.argv[1:]
+snapshot_download(
+    repo_id=repo_id,
+    revision=revision,
+    repo_type="model",
+    token=os.environ.get("HF_TOKEN") or None,
+    local_dir=output_dir,
+)
+
+output_path = Path(output_dir)
+config_path = output_path / "config.json"
+model_path = output_path / "model.safetensors"
+if not config_path.is_file():
+    raise RuntimeError(f"Hugging Face policy snapshot is missing config.json: {config_path}")
+if not model_path.is_file():
+    raise RuntimeError(f"Hugging Face policy snapshot is missing model.safetensors: {model_path}")
+with safe_open(model_path, framework="pt", device="cpu") as model:
+    if not model.keys():
+        raise RuntimeError(f"Hugging Face policy has no tensors: {model_path}")
+print(f"[INIT-FROM-POLICY-HF] Downloaded and validated {repo_id}@{revision}")
+PY
+  export INIT_FROM_POLICY_MODEL_SOURCE="hf://${init_from_policy_hf_repo_id}@${init_from_policy_hf_revision}"
+fi
+
 if [[ -n "${init_from_policy_model_path}" ]]; then
   echo "[INIT-FROM-POLICY-MODEL] Source URI: ${INIT_FROM_POLICY_MODEL_SOURCE:-<unset>}"
   echo "[INIT-FROM-POLICY-MODEL] Mount path: ${init_from_policy_model_path}"

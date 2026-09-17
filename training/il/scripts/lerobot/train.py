@@ -62,6 +62,7 @@ _LOG_PATTERN = re.compile(
 )
 
 _VAL_PATTERN = re.compile(r"val[_/]loss[:\s]+([\d.]+)")
+_PRETRAINED_LOAD_FAILURE = "Returning model without loading pretrained weights"
 
 CHECKPOINT_CHECK_INTERVAL = 60
 SYSTEM_METRICS_INTERVAL = 30
@@ -335,6 +336,7 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
     uploaded_checkpoints: set[str] = set()
     last_checkpoint_check = 0.0
     last_system_check = 0.0
+    pretrained_load_failed = False
 
     # AzureML jobs auto-create an MLflow run and expose its ID in MLFLOW_RUN_ID.
     # mlflow.start_run() picks it up automatically when no args are passed; passing
@@ -426,6 +428,12 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
             print(line, end="", flush=True)
             current_time = time.time()
 
+            if not pretrained_load_failed and _PRETRAINED_LOAD_FAILURE in line:
+                pretrained_load_failed = True
+                print("[MLflow] Pretrained policy load failed; terminating training subprocess group", flush=True)
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGTERM)
+
             match = _LOG_PATTERN.search(line)
             if match:
                 step = int(_parse_k_value(match.group(1)))
@@ -464,13 +472,20 @@ def run_training(cmd: list[str], source: str = "osmo-lerobot-training", num_gpus
 
         mlflow.log_param("output_dir", str(output_dir))
 
-        if process.returncode != 0:
+        if process.returncode != 0 or pretrained_load_failed:
             mlflow.set_tag("training_status", "failed")
-            print(f"[MLflow] Training failed with return code: {process.returncode}")
+            failure_reason = (
+                "pretrained policy weights were not loaded"
+                if pretrained_load_failed
+                else f"subprocess returned {process.returncode}"
+            )
+            print(f"[MLflow] Training failed: {failure_reason}")
         else:
             mlflow.set_tag("training_status", "completed")
 
     print("[MLflow] Run completed")
+    if pretrained_load_failed:
+        return EXIT_FAILURE
     return process.returncode or EXIT_SUCCESS
 
 
