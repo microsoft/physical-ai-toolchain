@@ -21,11 +21,13 @@ from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
 from .routes import ai_analysis
 
-# Configure logging to show INFO level
+# Match application verbosity to uvicorn's effective CLI level without replacing its handlers.
+_log_level = logging.getLogger("uvicorn.error").level or logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=_log_level,
+    format="%(asctime)s - %(levelname)s %(name)s - %(message)s",
 )
+logging.getLogger("src.api").setLevel(_log_level)
 
 # Suppress verbose Azure SDK HTTP request logging
 logging.getLogger("azure").setLevel(logging.WARNING)
