@@ -420,10 +420,7 @@ export function ObjectDetectionWidget() {
             </p>
             <ul className="divide-y rounded-md border text-xs">
               {detections.map((det, index) => (
-                <li
-                  key={`${det.className}-${index}`}
-                  className="flex items-center gap-2 px-2 py-1"
-                >
+                <li key={`${det.className}-${index}`} className="flex items-center gap-2 px-2 py-1">
                   <span
                     className="inline-block h-2 w-2 rounded-full"
                     style={{ backgroundColor: paletteColor(index) }}

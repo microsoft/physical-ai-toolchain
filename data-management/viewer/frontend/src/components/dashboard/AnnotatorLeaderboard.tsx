@@ -122,9 +122,7 @@ export function AnnotatorLeaderboard({
                 {/* Last active */}
                 <div className="text-muted-foreground flex items-center gap-1 text-xs">
                   <Clock className="h-3 w-3" />
-                  <span className="hidden sm:inline">
-                    {formatLastActive(annotator.lastActive)}
-                  </span>
+                  <span className="hidden sm:inline">{formatLastActive(annotator.lastActive)}</span>
                 </div>
               </div>
             ))}

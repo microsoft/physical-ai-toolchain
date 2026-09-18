@@ -15,9 +15,8 @@ vi.mock('@/lib/api-client', async (importOriginal) => {
   }
 })
 
-const { apiRequest, handleResponse, mutationHeaders, requestHeaders } = await import(
-  '@/lib/api-client'
-)
+const { apiRequest, handleResponse, mutationHeaders, requestHeaders } =
+  await import('@/lib/api-client')
 const mockApiRequest = vi.mocked(apiRequest)
 const mockHandleResponse = vi.mocked(handleResponse)
 const mockMutationHeaders = vi.mocked(mutationHeaders)
@@ -34,8 +33,7 @@ beforeEach(() => {
   mockRequestHeaders.mockResolvedValue({ Authorization: 'Bearer test' })
   mockApiRequest.mockImplementation(async (path, init) => {
     const method = init?.method ?? 'GET'
-    const baseHeaders =
-      method === 'GET' ? await mockRequestHeaders() : await mockMutationHeaders()
+    const baseHeaders = method === 'GET' ? await mockRequestHeaders() : await mockMutationHeaders()
     const response = await mockFetch(`/api${path}`, {
       ...init,
       headers: { ...baseHeaders, ...(init?.headers as Record<string, string> | undefined) },
@@ -127,6 +125,27 @@ describe('getDetections', () => {
 
     expect(result?.classSummary).toEqual({
       fire_extinguisher: { count: 1, avgConfidence: 0.9 },
+    })
+  })
+
+  it('converts detection summaries without class statistics', async () => {
+    const raw = {
+      total_frames: 1,
+      processed_frames: 1,
+      total_detections: 0,
+      detections_by_frame: [],
+      class_summary: null,
+    }
+    mockApiRequest.mockImplementationOnce(async (_path, _init, transform) => transform!(raw))
+
+    const result = await getDetections('ds-1', 3)
+
+    expect(result).toMatchObject({
+      totalFrames: 1,
+      processedFrames: 1,
+      totalDetections: 0,
+      detectionsByFrame: [],
+      classSummary: null,
     })
   })
 })

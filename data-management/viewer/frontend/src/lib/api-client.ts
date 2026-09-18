@@ -429,19 +429,16 @@ export async function runVlmJudge(
   episodeIndex: number,
   options: VlmJudgeRunOptions = {},
 ): Promise<VlmJudgeResult> {
-  return apiRequest<VlmJudgeResult>(
-    `/datasets/${datasetId}/episodes/${episodeIndex}/judge`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        instruction: options.instruction,
-        views: options.views,
-        process_method: options.processMethod,
-        force: options.force ?? false,
-      }),
-    },
-  )
+  return apiRequest<VlmJudgeResult>(`/datasets/${datasetId}/episodes/${episodeIndex}/judge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      instruction: options.instruction,
+      views: options.views,
+      process_method: options.processMethod,
+      force: options.force ?? false,
+    }),
+  })
 }
 
 // ============================================================================
@@ -461,12 +458,9 @@ export async function setEpisodeLabels(
   episodeIndex: number,
   labels: string[],
 ): Promise<EpisodeLabelsResult> {
-  return apiRequest<EpisodeLabelsResult>(
-    `/datasets/${datasetId}/episodes/${episodeIndex}/labels`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ labels }),
-    },
-  )
+  return apiRequest<EpisodeLabelsResult>(`/datasets/${datasetId}/episodes/${episodeIndex}/labels`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ labels }),
+  })
 }

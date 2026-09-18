@@ -97,7 +97,8 @@ export const EpisodeAnalysisCard = memo(function EpisodeAnalysisCard({
           )}
           {record.notes && <Field label="Notes" value={record.notes} />}
 
-          {(record.motionScore != null || (record.motionFlags && record.motionFlags.length > 0)) && (
+          {(record.motionScore != null ||
+            (record.motionFlags && record.motionFlags.length > 0)) && (
             <div className="flex flex-wrap items-center gap-2 border-t pt-2">
               {record.motionScore != null && (
                 <span className="text-muted-foreground text-xs">

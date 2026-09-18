@@ -52,8 +52,7 @@ beforeEach(() => {
   })
   mockApiRequest.mockImplementation(async (path, init) => {
     const method = init?.method ?? 'GET'
-    const baseHeaders =
-      method === 'GET' ? await mockRequestHeaders() : await mockMutationHeaders()
+    const baseHeaders = method === 'GET' ? await mockRequestHeaders() : await mockMutationHeaders()
     const response = await mockFetch(`/api${path}`, {
       ...init,
       headers: { ...baseHeaders, ...(init?.headers as Record<string, string> | undefined) },
