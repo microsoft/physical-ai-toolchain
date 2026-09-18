@@ -5,6 +5,8 @@ These models define the request/response schemas for object detection
 endpoints and match the frontend TypeScript type definitions.
 """
 
+from __future__ import annotations
+
 from pydantic import Field, field_validator
 
 from ..validation import SanitizedModel
@@ -17,11 +19,11 @@ class DetectionRequest(SanitizedModel):
         default=None,
         description="Specific frame indices to process. If None, processes all frames.",
     )
-    confidence: float = Field(
-        default=0.1,
+    confidence: float | None = Field(
+        default=None,
         ge=0.0,
         le=1.0,
-        description="Minimum confidence threshold for detections.",
+        description="Minimum confidence threshold. Uses the server-configured default when omitted.",
     )
     model: str = Field(
         default="yolo11n",
