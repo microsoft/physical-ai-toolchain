@@ -1,174 +1,205 @@
-"""Tests for YOLO11 object detection service."""
+"""Behavior tests for the object detection service."""
 
+from __future__ import annotations
+
+import sys
 from io import BytesIO
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from PIL import Image
 
-# Skip all tests if ultralytics (or its torch dependency) is not importable.
-# Use a broad except to also handle partial/broken installs (e.g., a torch
-# namespace package missing __init__.py raises AttributeError, not ImportError).
-try:
-    import ultralytics  # noqa: F401
-except Exception as exc:  # pragma: no cover - environment-dependent
-    pytest.skip(f"ultralytics unavailable: {exc}", allow_module_level=True)
+from src.api.services.detection_service import DEFAULT_OPEN_VOCAB_MODEL, DetectionService
 
 
-class TestDetectionService:
-    """Test cases for the detection service."""
+def _jpeg_bytes() -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (32, 24), color=(128, 128, 128)).save(buffer, format="JPEG")
+    return buffer.getvalue()
 
-    def test_model_loads(self):
-        """Test that the YOLO model can be loaded."""
-        from src.api.services.detection_service import get_detection_service
 
-        service = get_detection_service()
-        model = service._get_model("yolo11n")
-        assert model is not None
-        assert hasattr(model, "names")
-        print(f"Model loaded with {len(model.names)} classes")
+class _FakeTensor:
+    def __init__(self, value: int | float) -> None:
+        self._value = value
 
-    def test_detect_synthetic_image(self):
-        """Test detection on a synthetic test image."""
-        from src.api.services.detection_service import DetectionService
+    def item(self) -> int | float:
+        return self._value
 
-        service = DetectionService()
 
-        # Create a synthetic image (solid color - should have no detections)
-        img = Image.new("RGB", (640, 480), color=(128, 128, 128))
-        buffer = BytesIO()
-        img.save(buffer, format="JPEG")
-        image_bytes = buffer.getvalue()
+class _FakeCoordinates:
+    def __init__(self, values: list[float]) -> None:
+        self._values = values
 
-        # Run detection
-        import asyncio
+    def tolist(self) -> list[float]:
+        return self._values
 
-        result = asyncio.run(service.detect_frame(image_bytes, frame_idx=0, confidence=0.25))
 
-        print(f"Synthetic image: {len(result.detections)} detections")
-        assert result.frame == 0
-        # Gray image should have few or no detections
-        assert len(result.detections) >= 0
+class _FakeBoxes:
+    def __init__(
+        self,
+        classes: list[int],
+        confidences: list[float],
+        coordinates: list[list[float]],
+    ) -> None:
+        self.cls = [_FakeTensor(class_id) for class_id in classes]
+        self.conf = [_FakeTensor(confidence) for confidence in confidences]
+        self.xyxy = [_FakeCoordinates(values) for values in coordinates]
 
-    def test_detect_person_image(self):
-        """Test detection on an image that should contain detectable objects."""
-        import os
+    def __len__(self) -> int:
+        return len(self.cls)
 
-        from ultralytics import YOLO
 
-        from src.api.services.detection_service import DetectionService
+class _FakeModel:
+    def __init__(
+        self,
+        boxes: _FakeBoxes | None = None,
+        names: dict[int, str] | list[str] | None = None,
+        *,
+        return_result: bool | None = None,
+    ) -> None:
+        self.names = names if names is not None else {}
+        self._boxes = boxes
+        self._return_result = boxes is not None if return_result is None else return_result
+        self.calls: list[tuple[object, dict[str, object]]] = []
+        self.class_updates: list[list[str]] = []
 
-        service = DetectionService()
+    def __call__(self, image: object, **kwargs: object) -> list[SimpleNamespace]:
+        self.calls.append((image, kwargs))
+        if isinstance(image, np.ndarray):
+            return []
+        if not self._return_result:
+            return []
+        return [SimpleNamespace(boxes=self._boxes)]
 
-        # Check if there's a test image or use a built-in ultralytics test
-        model = YOLO("yolo11n.pt")
+    def set_classes(self, labels: list[str]) -> None:
+        self.class_updates.append(labels)
+        self.names = list(labels)
 
-        # Use ultralytics built-in test image
-        os.path.join(os.path.dirname(model.model_name or ""), "assets")
 
-        # Create a more realistic test - draw some shapes that might trigger detection
-        img = Image.new("RGB", (640, 480), color=(200, 200, 200))
+class _FakeYOLOFactory:
+    def __init__(self, model: _FakeModel) -> None:
+        self.model = model
+        self.model_paths: list[str] = []
 
-        # Draw a circle (might be detected as sports ball)
-        from PIL import ImageDraw
+    def __call__(self, model_path: str) -> _FakeModel:
+        self.model_paths.append(model_path)
+        return self.model
 
-        draw = ImageDraw.Draw(img)
-        draw.ellipse([200, 150, 400, 350], fill=(255, 128, 0), outline=(0, 0, 0))
 
-        buffer = BytesIO()
-        img.save(buffer, format="JPEG")
-        image_bytes = buffer.getvalue()
+def _install_fake_ultralytics(
+    monkeypatch: pytest.MonkeyPatch,
+    model: _FakeModel,
+) -> _FakeYOLOFactory:
+    factory = _FakeYOLOFactory(model)
+    monkeypatch.setitem(sys.modules, "ultralytics", SimpleNamespace(YOLO=factory))
+    return factory
 
-        import asyncio
 
-        result = asyncio.run(service.detect_frame(image_bytes, frame_idx=0, confidence=0.1))
+@pytest.mark.asyncio
+async def test_detect_frame_loads_model_and_returns_exact_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _FakeModel(names={0: "person"})
+    factory = _install_fake_ultralytics(monkeypatch, model)
+    service = DetectionService()
 
-        print(f"Circle image: {len(result.detections)} detections")
-        for det in result.detections:
-            print(f"  - {det.class_name}: {det.confidence:.3f}")
+    result = await service.detect_frame(_jpeg_bytes(), frame_idx=7, confidence=0.4)
 
-    def test_detect_from_hdf5(self):
-        """Test detection on actual HDF5 data."""
-        import os
+    assert result.frame == 7
+    assert result.detections == []
+    assert result.processing_time_ms >= 0
+    assert factory.model_paths == ["yolo11n.pt"]
+    assert len(model.calls) == 2
+    warmup_image, warmup_kwargs = model.calls[0]
+    assert isinstance(warmup_image, np.ndarray)
+    assert warmup_image.shape == (640, 640, 3)
+    assert warmup_image.dtype == np.uint8
+    assert warmup_kwargs == {"verbose": False}
+    inference_image, inference_kwargs = model.calls[1]
+    assert isinstance(inference_image, Image.Image)
+    assert inference_image.size == (32, 24)
+    assert inference_kwargs == {"conf": 0.4, "verbose": False}
 
-        import h5py
 
-        from src.api.services.detection_service import DetectionService
+@pytest.mark.asyncio
+async def test_detect_frame_maps_model_names_and_fallback_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boxes = _FakeBoxes(
+        classes=[2, 0, 999],
+        confidences=[0.875, 0.75, 0.5],
+        coordinates=[
+            [1.0, 2.0, 20.0, 22.0],
+            [3.0, 4.0, 10.0, 12.0],
+            [5.0, 6.0, 15.0, 16.0],
+        ],
+    )
+    model = _FakeModel(boxes=boxes, names={2: "custom-class"})
+    _install_fake_ultralytics(monkeypatch, model)
 
-        service = DetectionService()
+    result = await DetectionService().detect_frame(_jpeg_bytes(), frame_idx=3, confidence=0.25)
 
-        # Find a test HDF5 file
-        test_paths = [
-            "data/test-192-insertions/episode_000000.hdf5",
-            "test-192-insertions/episode_000000.hdf5",
-            "data/test-dataset/episode_000000.hdf5",
-        ]
+    assert [detection.model_dump() for detection in result.detections] == [
+        {
+            "class_id": 2,
+            "class_name": "custom-class",
+            "confidence": 0.875,
+            "bbox": (1.0, 2.0, 20.0, 22.0),
+        },
+        {
+            "class_id": 0,
+            "class_name": "person",
+            "confidence": 0.75,
+            "bbox": (3.0, 4.0, 10.0, 12.0),
+        },
+        {
+            "class_id": 999,
+            "class_name": "class_999",
+            "confidence": 0.5,
+            "bbox": (5.0, 6.0, 15.0, 16.0),
+        },
+    ]
 
-        hdf5_path = None
-        for path in test_paths:
-            if os.path.exists(path):
-                hdf5_path = path
-                break
 
-        if hdf5_path is None:
-            pytest.skip("No test HDF5 file found")
+@pytest.mark.asyncio
+async def test_detect_frame_returns_empty_result_when_model_returns_no_boxes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _FakeModel(names=["person"], return_result=True)
+    _install_fake_ultralytics(monkeypatch, model)
 
-        print(f"Using HDF5: {hdf5_path}")
+    result = await DetectionService().detect_frame(_jpeg_bytes(), frame_idx=5)
 
-        with h5py.File(hdf5_path, "r") as f:
-            # List observation keys
-            if "observation" not in f:
-                pytest.skip("No observation group in HDF5")
+    assert result.frame == 5
+    assert result.detections == []
+    assert result.processing_time_ms >= 0
 
-            obs_keys = list(f["observation"].keys())
-            print(f"Observation keys: {obs_keys}")
 
-            # Find camera data
-            camera_key = None
-            for key in obs_keys:
-                ds = f["observation"][key]
-                print(f"  {key}: shape={ds.shape}, dtype={ds.dtype}")
-                # Look for image-like data (N, H, W, C) with C=3
-                if len(ds.shape) == 4 and ds.shape[-1] == 3:
-                    camera_key = key
-                    break
+@pytest.mark.asyncio
+async def test_detect_frame_uses_open_vocabulary_model_and_reuses_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boxes = _FakeBoxes(classes=[0], confidences=[0.9], coordinates=[[0.0, 1.0, 2.0, 3.0]])
+    model = _FakeModel(boxes=boxes)
+    factory = _install_fake_ultralytics(monkeypatch, model)
+    service = DetectionService()
 
-            if camera_key is None:
-                pytest.skip("No camera data found in HDF5")
+    first = await service.detect_frame(_jpeg_bytes(), frame_idx=1, labels=["widget"])
+    second = await service.detect_frame(_jpeg_bytes(), frame_idx=2, labels=["gadget"])
 
-            print(f"\nUsing camera: {camera_key}")
+    assert factory.model_paths == [f"{DEFAULT_OPEN_VOCAB_MODEL}.pt"]
+    assert model.class_updates == [["widget"], ["gadget"]]
+    assert [detection.class_name for detection in first.detections] == ["widget"]
+    assert [detection.class_name for detection in second.detections] == ["gadget"]
+    assert len(model.calls) == 3
 
-            # Get first frame
-            frame_data = f["observation"][camera_key][0]
-            print(f"Frame shape: {frame_data.shape}")
-            print(f"Frame dtype: {frame_data.dtype}")
-            print(f"Frame range: min={frame_data.min()}, max={frame_data.max()}")
 
-            # Convert to PIL Image
-            img = Image.fromarray(frame_data.astype(np.uint8))
-            print(f"PIL Image: size={img.size}, mode={img.mode}")
+@pytest.mark.asyncio
+async def test_detect_frame_surfaces_missing_model_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(sys.modules, "ultralytics", None)
 
-            # Save for debugging
-            img.save("test_hdf5_frame.jpg")
-            print("Saved test_hdf5_frame.jpg")
-
-            # Convert to bytes
-            buffer = BytesIO()
-            img.save(buffer, format="JPEG")
-            image_bytes = buffer.getvalue()
-
-            # Run detection with low confidence
-            import asyncio
-
-            result = asyncio.run(service.detect_frame(image_bytes, frame_idx=0, confidence=0.1))
-
-            print("\nDetection results:")
-            print(f"  Processing time: {result.processing_time_ms:.1f}ms")
-            print(f"  Detections: {len(result.detections)}")
-
-            for det in result.detections:
-                print(f"    - {det.class_name}: {det.confidence:.3f} @ {det.bbox}")
-
-            # Detection should work even if no objects found
-            assert result.frame == 0
-            assert result.processing_time_ms > 0
+    with pytest.raises(ModuleNotFoundError, match="import of ultralytics halted"):
+        await DetectionService().detect_frame(_jpeg_bytes(), frame_idx=0)

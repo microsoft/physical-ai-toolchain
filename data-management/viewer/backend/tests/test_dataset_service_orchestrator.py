@@ -1,967 +1,780 @@
-"""Unit tests for DatasetService orchestrator branches.
+"""Behavior tests for the DatasetService orchestrator.
 
-Covers blob provider integration, eviction/cleanup, prefetch scheduling,
-discovery fallbacks, and path safety checks using mocked dependencies so
-the suite runs without a real sample dataset or Azure connection.
+The suite exercises public service methods with temporary filesystem data and
+mocked storage collaborators. It does not require repository datasets or cloud
+connections.
 """
 
 from __future__ import annotations
 
-import asyncio
+import tempfile
+from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
 from src.api.models.datasources import DatasetInfo, EpisodeData, EpisodeMeta, TrajectoryPoint
-from src.api.services.dataset_service.base import normalize_feature_names
-from src.api.services.dataset_service.service import (
-    DatasetService,
-    _validate_dataset_id,
-)
+from src.api.services.dataset_service.service import DatasetService
 
 
-def _make_provider(**overrides: Any) -> AsyncMock:
-    """Return an AsyncMock BlobDatasetProvider with sensible defaults."""
-    provider = AsyncMock()
-    provider.sync_dataset_to_local = AsyncMock(return_value=True)
-    provider.sync_meta_only_to_local = AsyncMock(return_value=True)
-    provider.sync_hdf5_dataset_to_local = AsyncMock(return_value=True)
+def _make_provider(**overrides: Any) -> MagicMock:
+    provider = MagicMock()
+    provider.sync_dataset_to_local = AsyncMock(return_value=False)
+    provider.sync_meta_only_to_local = AsyncMock(return_value=False)
+    provider.sync_hdf5_dataset_to_local = AsyncMock(return_value=False)
     provider.sync_hdf5_episode_to_local = AsyncMock(return_value=True)
     provider.count_hdf5_episodes = AsyncMock(return_value=0)
     provider.get_info_json = AsyncMock(return_value=None)
     provider.resolve_video_blob_path = AsyncMock(return_value="blob/path.mp4")
     provider.get_blob_properties = AsyncMock(return_value=None)
     provider.scan_all_dataset_ids = AsyncMock(return_value={"lerobot": [], "hdf5": []})
-    provider.upload_video = AsyncMock(return_value=None)
+    provider.upload_video = AsyncMock(return_value=True)
 
-    async def _empty_stream(*_args: Any, **_kwargs: Any):
+    async def empty_stream(*_args: Any, **_kwargs: Any) -> AsyncIterator[bytes]:
         if False:
             yield b""
 
-    provider.stream_video = _empty_stream
+    provider.stream_video = empty_stream
     for name, value in overrides.items():
         setattr(provider, name, value)
     return provider
 
 
-class TestValidateDatasetId:
-    def test_rejects_forward_slash(self):
-        with pytest.raises(ValueError, match="Invalid dataset identifier"):
-            _validate_dataset_id("foo/bar")
-
-    def test_rejects_backslash(self):
-        with pytest.raises(ValueError, match="Invalid dataset identifier"):
-            _validate_dataset_id("foo\\bar")
-
-    def test_rejects_dotdot(self):
-        with pytest.raises(ValueError, match="Invalid dataset identifier"):
-            _validate_dataset_id("..")
-
-    def test_rejects_dot(self):
-        with pytest.raises(ValueError, match="Invalid dataset identifier"):
-            _validate_dataset_id(".")
-
-    def test_rejects_empty_segment(self):
-        with pytest.raises(ValueError, match="Invalid dataset identifier"):
-            _validate_dataset_id("a----b")
-
-    def test_rejects_too_deep(self):
-        with pytest.raises(ValueError, match="too deep"):
-            _validate_dataset_id("a--b--c--d--e--f")
-
-    def test_accepts_flat_id(self):
-        assert _validate_dataset_id("flat_dataset") == "flat_dataset"
-
-    def test_accepts_nested(self):
-        assert _validate_dataset_id("a--b--c--d--e") == "a--b--c--d--e"
+def _make_storage(annotated_episodes: list[int] | None = None) -> MagicMock:
+    storage = MagicMock()
+    storage.list_annotated_episodes = AsyncMock(return_value=annotated_episodes or [])
+    return storage
 
 
-class TestEnsureBlobSynced:
-    async def test_no_provider_returns_none(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service._ensure_blob_synced("ds") is None
-
-    async def test_returns_cached_path(self, tmp_path):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        cached = tmp_path / "cached"
-        cached.mkdir()
-        service._blob_synced["ds"] = cached
-        assert await service._ensure_blob_synced("ds") == cached
-        provider.sync_dataset_to_local.assert_not_awaited()
-
-    async def test_success_records_path(self, tmp_path, monkeypatch):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        synced = tmp_path / "dvw_x"
-        synced.mkdir()
-        monkeypatch.setattr(
-            "src.api.services.dataset_service.service.tempfile.mkdtemp",
-            lambda *, prefix: str(synced),
-        )
-        result = await service._ensure_blob_synced("ds")
-        assert result == synced
-        assert service._blob_synced["ds"] == synced
-
-    async def test_failure_removes_temp_dir(self, tmp_path, monkeypatch):
-        provider = _make_provider(sync_dataset_to_local=AsyncMock(return_value=False))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        synced = tmp_path / "dvw_fail"
-        synced.mkdir()
-        monkeypatch.setattr(
-            "src.api.services.dataset_service.service.tempfile.mkdtemp",
-            lambda *, prefix: str(synced),
-        )
-        result = await service._ensure_blob_synced("ds\rname")
-        assert result is None
-        assert not synced.exists()
-        assert "ds" not in service._blob_synced
+def _make_handler(**overrides: Any) -> MagicMock:
+    handler = MagicMock()
+    handler.available = True
+    handler.has_loader.return_value = False
+    handler.can_handle.return_value = False
+    handler.get_loader.return_value = False
+    handler.discover.return_value = None
+    handler.list_episodes.return_value = ([], {})
+    handler.load_episode.return_value = None
+    handler.get_trajectory.return_value = []
+    handler.get_frame_image.return_value = None
+    handler.get_cameras.return_value = []
+    handler.get_video_path.return_value = None
+    for name, value in overrides.items():
+        setattr(handler, name, value)
+    return handler
 
 
-class TestEnsureBlobMetaSynced:
-    async def test_no_provider_returns_none(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service._ensure_blob_meta_synced("ds") is None
-
-    async def test_cached_path(self, tmp_path):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        cached = tmp_path / "meta"
-        cached.mkdir()
-        service._blob_meta_synced["ds"] = cached
-        assert await service._ensure_blob_meta_synced("ds") == cached
-
-    async def test_failure_removes_temp_dir(self, tmp_path, monkeypatch):
-        provider = _make_provider(sync_meta_only_to_local=AsyncMock(return_value=False))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        synced = tmp_path / "dvwm_fail"
-        synced.mkdir()
-        monkeypatch.setattr(
-            "src.api.services.dataset_service.service.tempfile.mkdtemp",
-            lambda *, prefix: str(synced),
-        )
-        assert await service._ensure_blob_meta_synced("ds") is None
-        assert not synced.exists()
+def _install_handlers(
+    service: DatasetService,
+    lerobot_handler: MagicMock,
+    hdf5_handler: MagicMock | None = None,
+) -> None:
+    if hdf5_handler is None:
+        hdf5_handler = _make_handler()
+    service._lerobot_handler = lerobot_handler
+    service._hdf5_handler = hdf5_handler
+    service._handlers = [lerobot_handler, hdf5_handler]
 
 
-class TestEnsureBlobHdf5Synced:
-    async def test_no_provider_returns_none(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service._ensure_blob_hdf5_synced("ds") is None
+def _patch_temp_directories(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Path]:
+    created: dict[str, Path] = {}
 
-    async def test_cached_path(self, tmp_path):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        cached = tmp_path / "hdf5"
-        cached.mkdir()
-        service._blob_hdf5_synced["ds"] = cached
-        assert await service._ensure_blob_hdf5_synced("ds") == cached
+    def make_temp_dir(*, prefix: str) -> str:
+        path = tmp_path / prefix.rstrip("_")
+        path.mkdir(exist_ok=True)
+        created[prefix] = path
+        return str(path)
 
-    async def test_success_records_path(self, tmp_path, monkeypatch):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        synced = tmp_path / "dvwh_x"
-        synced.mkdir()
-        monkeypatch.setattr(
-            "src.api.services.dataset_service.service.tempfile.mkdtemp",
-            lambda *, prefix: str(synced),
-        )
-        result = await service._ensure_blob_hdf5_synced("ds")
-        assert result == synced
-        assert service._blob_hdf5_synced["ds"] == synced
-
-    async def test_failure_removes_temp_dir(self, tmp_path, monkeypatch):
-        provider = _make_provider(sync_hdf5_dataset_to_local=AsyncMock(return_value=False))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        synced = tmp_path / "dvwh_fail"
-        synced.mkdir()
-        monkeypatch.setattr(
-            "src.api.services.dataset_service.service.tempfile.mkdtemp",
-            lambda *, prefix: str(synced),
-        )
-        assert await service._ensure_blob_hdf5_synced("ds") is None
-        assert not synced.exists()
+    monkeypatch.setattr("src.api.services.dataset_service.service.tempfile.mkdtemp", make_temp_dir)
+    return created
 
 
-class TestDiscoverBlobHdf5Dataset:
-    async def test_no_provider(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service._discover_blob_hdf5_dataset("ds") is None
-
-    async def test_zero_episodes_returns_none(self, tmp_path):
-        provider = _make_provider(count_hdf5_episodes=AsyncMock(return_value=0))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        assert await service._discover_blob_hdf5_dataset("ds") is None
-
-    async def test_flat_id_no_group(self, tmp_path):
-        provider = _make_provider(count_hdf5_episodes=AsyncMock(return_value=3))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        info = await service._discover_blob_hdf5_dataset("flat")
-        assert info is not None
-        assert info.id == "flat"
-        assert info.name == "flat"
-        assert info.group is None
-        assert info.total_episodes == 3
-        assert "flat" in service._blob_dataset_ids
-
-    async def test_nested_id_sets_group(self, tmp_path):
-        provider = _make_provider(count_hdf5_episodes=AsyncMock(return_value=1))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        info = await service._discover_blob_hdf5_dataset("a--b--c")
-        assert info.name == "c"
-        assert info.group == "a--b"
+def _trajectory_point(frame: int = 0) -> TrajectoryPoint:
+    return TrajectoryPoint(
+        timestamp=float(frame),
+        frame=frame,
+        joint_positions=[float(frame)],
+        joint_velocities=[0.0],
+        end_effector_pose=[0.0] * 6,
+        gripper_state=0.0,
+    )
 
 
-class TestDiscoverBlobDataset:
-    async def test_no_provider(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service._discover_blob_dataset("ds") is None
+class TestDatasetDiscovery:
+    pytestmark = pytest.mark.asyncio
 
-    async def test_no_info_json(self, tmp_path):
-        provider = _make_provider(get_info_json=AsyncMock(return_value=None))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        assert await service._discover_blob_dataset("ds") is None
-
-    async def test_with_features_and_robot_type(self, tmp_path):
-        info_payload = {
-            "robot_type": "so100",
-            "total_episodes": 12,
-            "fps": 24,
-            "features": {
-                "obs.state": {"dtype": "float32", "shape": [6]},
-                "action": {},
-            },
-        }
-        provider = _make_provider(get_info_json=AsyncMock(return_value=info_payload))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        info = await service._discover_blob_dataset("ds")
-        assert info is not None
-        assert info.id == "ds"
-        assert info.name == "ds (so100)"
-        assert info.total_episodes == 12
-        assert info.fps == 24.0
-        assert info.features["obs.state"].dtype == "float32"
-        assert info.features["action"].dtype == "unknown"
-        assert "ds" in service._blob_dataset_ids
-
-    async def test_without_robot_type(self, tmp_path):
-        provider = _make_provider(get_info_json=AsyncMock(return_value={"total_episodes": 0}))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        info = await service._discover_blob_dataset("ds")
-        assert info.name == "ds"
-
-
-class TestBlobVideoStreaming:
-    async def test_get_blob_video_path_no_provider(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service.get_blob_video_path("ds", 0, "cam") is None
-
-    async def test_get_blob_video_path_returns_provider_value(self, tmp_path):
-        provider = _make_provider(resolve_video_blob_path=AsyncMock(return_value="x/y.mp4"))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        assert await service.get_blob_video_path("ds", 1, "cam") == "x/y.mp4"
-
-    async def test_get_blob_video_stream_no_provider(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service.get_blob_video_stream("blob") is None
-
-    async def test_stream_without_props(self, tmp_path):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        result = await service.get_blob_video_stream("blob")
-        assert result is not None
-        headers, media_type, _stream = result
-        assert headers == {"Accept-Ranges": "bytes"}
-        assert media_type == "video/mp4"
-
-    async def test_stream_with_props_no_offset(self, tmp_path):
+    async def test_list_datasets_builds_blob_metadata_for_supported_formats(self, tmp_path: Path) -> None:
         provider = _make_provider(
-            get_blob_properties=AsyncMock(return_value={"size": 100, "content_type": "video/x-matroska"})
+            scan_all_dataset_ids=AsyncMock(
+                return_value={
+                    "lerobot": ["robot--run"],
+                    "hdf5": ["archive--session"],
+                }
+            ),
+            get_info_json=AsyncMock(
+                return_value={
+                    "robot_type": "so100",
+                    "total_episodes": 12,
+                    "fps": 24,
+                    "features": {
+                        "observation.state": {
+                            "dtype": "float32",
+                            "shape": [2],
+                            "names": [["joint_a", "joint_b"]],
+                        },
+                        "action": {},
+                    },
+                }
+            ),
+            count_hdf5_episodes=AsyncMock(return_value=3),
         )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        headers, media_type, _stream = await service.get_blob_video_stream("blob")
-        assert headers["Content-Length"] == "100"
-        assert "Content-Range" not in headers
-        assert media_type == "video/x-matroska"
 
-    async def test_stream_with_props_and_offset(self, tmp_path):
+        datasets = {dataset.id: dataset for dataset in await service.list_datasets()}
+
+        assert set(datasets) == {"robot--run", "archive--session"}
+        assert datasets["robot--run"].name == "robot--run (so100)"
+        assert datasets["robot--run"].total_episodes == 12
+        assert datasets["robot--run"].fps == 24.0
+        assert datasets["robot--run"].features["observation.state"].names == ["joint_a", "joint_b"]
+        assert datasets["robot--run"].features["action"].dtype == "unknown"
+        assert datasets["archive--session"].name == "session"
+        assert datasets["archive--session"].group == "archive"
+        assert datasets["archive--session"].total_episodes == 3
+
+    async def test_list_datasets_keeps_registered_data_when_blob_scan_fails(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        provider = _make_provider(scan_all_dataset_ids=AsyncMock(side_effect=RuntimeError("unavailable")))
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        registered = DatasetInfo(id="registered", name="Registered", total_episodes=1, fps=30.0)
+        await service.register_dataset(registered)
+
+        with caplog.at_level("WARNING"):
+            datasets = await service.list_datasets()
+
+        assert datasets == [registered]
+        assert "Failed to scan blob datasets: unavailable" in caplog.text
+
+    async def test_list_datasets_continues_after_one_blob_dataset_fails(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         provider = _make_provider(
-            get_blob_properties=AsyncMock(return_value={"size": 100, "content_type": "image/png"})
-        )
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        headers, media_type, stream = await service.get_blob_video_stream("blob", offset=10, length=20)
-        assert headers["Content-Length"] == "20"
-        assert headers["Content-Range"] == "bytes 10-29/100"
-        # non-video mime falls back to default
-        assert media_type == "video/mp4"
-
-        chunks = [chunk async for chunk in stream]
-        assert chunks == []
-
-    async def test_stream_with_props_offset_no_length(self, tmp_path):
-        provider = _make_provider(get_blob_properties=AsyncMock(return_value={"size": 100}))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        headers, _media, _stream = await service.get_blob_video_stream("blob", offset=40)
-        assert headers["Content-Length"] == "60"
-        assert headers["Content-Range"] == "bytes 40-99/100"
-
-
-class TestEvictionAndCleanup:
-    def test_evict_removes_hdf5_synced_dir(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        target = tmp_path / "dvwh_x"
-        target.mkdir()
-        # _evict_dataset only handles _blob_synced and _blob_meta_synced;
-        # confirm hdf5 entry is left untouched but other state clears.
-        service._blob_hdf5_synced["ds"] = target
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=0, fps=30.0)
-        service._local_dataset_ids.add("ds")
-        service._blob_dataset_ids.add("ds")
-
-        service._evict_dataset("ds")
-
-        assert "ds" not in service._datasets
-        assert "ds" not in service._local_dataset_ids
-        assert "ds" not in service._blob_dataset_ids
-        # hdf5 sync dir intentionally retained by evict
-        assert target.exists()
-
-    def test_evict_handler_loaders_cleared(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._lerobot_handler._loaders = {"ds": object()}
-        service._hdf5_handler._loaders = {"ds": object()}
-        service._evict_dataset("ds")
-        assert "ds" not in service._lerobot_handler._loaders
-        assert "ds" not in service._hdf5_handler._loaders
-
-    def test_cleanup_temp_dirs_handles_missing_dir(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        ghost = tmp_path / "ghost"
-        service._blob_synced["a"] = ghost  # never created
-        service._blob_meta_synced["b"] = ghost
-        # ignore_errors=True keeps cleanup idempotent
-        service.cleanup_temp_dirs()
-        assert service._blob_synced == {}
-        assert service._blob_meta_synced == {}
-
-
-class TestListDatasetsBlobAndPrune:
-    async def test_blob_scan_failure_does_not_raise(self, tmp_path):
-        provider = _make_provider(scan_all_dataset_ids=AsyncMock(side_effect=RuntimeError("nope")))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        result = await service.list_datasets()
-        assert result == []
-
-    async def test_blob_scan_discovers_both_types(self, tmp_path):
-        provider = _make_provider(
-            scan_all_dataset_ids=AsyncMock(return_value={"lerobot": ["lr1"], "hdf5": ["hd1"]}),
-            get_info_json=AsyncMock(return_value={"total_episodes": 4, "fps": 30.0}),
+            scan_all_dataset_ids=AsyncMock(return_value={"lerobot": ["broken"], "hdf5": ["usable"]}),
+            get_info_json=AsyncMock(side_effect=RuntimeError("bad metadata")),
             count_hdf5_episodes=AsyncMock(return_value=2),
         )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        ids = {d.id for d in await service.list_datasets()}
-        assert ids == {"lr1", "hd1"}
 
-    async def test_blob_scan_skips_already_known(self, tmp_path):
+        with caplog.at_level("WARNING"):
+            datasets = await service.list_datasets()
+
+        assert [(dataset.id, dataset.total_episodes) for dataset in datasets] == [("usable", 2)]
+        assert "Failed to discover blob dataset broken: bad metadata" in caplog.text
+
+    async def test_repeated_listing_reuses_discovered_blob_metadata(self, tmp_path: Path) -> None:
         provider = _make_provider(
-            scan_all_dataset_ids=AsyncMock(return_value={"lerobot": ["lr1"], "hdf5": ["hd1"]}),
+            scan_all_dataset_ids=AsyncMock(return_value={"lerobot": ["dataset"], "hdf5": []}),
+            get_info_json=AsyncMock(return_value={"total_episodes": 4}),
         )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        service._datasets["lr1"] = DatasetInfo(id="lr1", name="lr1", total_episodes=0, fps=30.0)
-        service._datasets["hd1"] = DatasetInfo(id="hd1", name="hd1", total_episodes=0, fps=30.0)
-        await service.list_datasets()
-        provider.get_info_json.assert_not_awaited()
+
+        first = await service.list_datasets()
+        second = await service.list_datasets()
+
+        assert first == second
+        provider.get_info_json.assert_awaited_once_with("dataset")
+
+    async def test_deleted_local_dataset_is_absent_from_listing_and_lookup(self, tmp_path: Path) -> None:
+        dataset_path = tmp_path / "local"
+        dataset_path.mkdir()
+        info = DatasetInfo(id="local", name="Local", total_episodes=1, fps=30.0)
+        handler = _make_handler()
+        handler.can_handle.return_value = True
+        handler.discover.return_value = info
+        service = DatasetService(base_path=str(tmp_path))
+        _install_handlers(service, handler)
+
+        assert await service.list_datasets() == [info]
+
+        dataset_path.rmdir()
+
+        assert await service.list_datasets() == []
+        assert await service.get_dataset("local") is None
+
+
+class TestGetAndRegisterDataset:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_register_dataset_makes_metadata_available(self, tmp_path: Path) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+        info = DatasetInfo(id="registered", name="Registered", total_episodes=2, fps=25.0)
+
+        await service.register_dataset(info)
+
+        assert await service.get_dataset("registered") is info
+
+    async def test_get_dataset_prefers_lerobot_blob_metadata(self, tmp_path: Path) -> None:
+        provider = _make_provider(
+            get_info_json=AsyncMock(return_value={"total_episodes": 7, "fps": 60}),
+            count_hdf5_episodes=AsyncMock(return_value=5),
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+
+        dataset = await service.get_dataset("dataset")
+
+        assert dataset is not None
+        assert dataset.id == "dataset"
+        assert dataset.total_episodes == 7
+        assert dataset.fps == 60.0
         provider.count_hdf5_episodes.assert_not_awaited()
 
-    async def test_missing_base_returns_cached(self, tmp_path):
-        missing = tmp_path / "absent"
-        service = DatasetService(base_path=str(missing))
-        service._datasets["x"] = DatasetInfo(id="x", name="x", total_episodes=0, fps=30.0)
-        result = await service.list_datasets()
-        assert [d.id for d in result] == ["x"]
-
-    async def test_scan_oserror_returns_cached(self, tmp_path, monkeypatch):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["cached"] = DatasetInfo(id="cached", name="cached", total_episodes=0, fps=30.0)
-
-        def boom(*_args: Any, **_kwargs: Any) -> None:
-            raise OSError("permission denied")
-
-        monkeypatch.setattr(service, "_scan_directory", boom)
-        result = await service.list_datasets()
-        assert [d.id for d in result] == ["cached"]
-
-    async def test_prune_evicts_missing_local(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["gone"] = DatasetInfo(id="gone", name="gone", total_episodes=0, fps=30.0)
-        service._local_dataset_ids.add("gone")
-        await service.list_datasets()
-        assert "gone" not in service._datasets
-        assert "gone" not in service._local_dataset_ids
-
-
-class TestGetDatasetEdgeCases:
-    async def test_invalid_local_id_evicts(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=0, fps=30.0)
-        service._local_dataset_ids.add("ds")
-        # No filesystem dir → _get_dataset_path raises ValueError → evict
-        result = await service.get_dataset("ds")
-        assert result is None
-        assert "ds" not in service._datasets
-
-    async def test_returns_cached(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        info = DatasetInfo(id="ds", name="ds", total_episodes=0, fps=30.0)
-        service._datasets["ds"] = info
-        service._blob_dataset_ids.add("ds")
-        assert await service.get_dataset("ds") is info
-
-    async def test_blob_lerobot_then_hdf5_fallback(self, tmp_path):
+    async def test_get_dataset_falls_back_to_hdf5_blob_metadata(self, tmp_path: Path) -> None:
         provider = _make_provider(
             get_info_json=AsyncMock(return_value=None),
             count_hdf5_episodes=AsyncMock(return_value=5),
         )
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        result = await service.get_dataset("ds")
-        assert result is not None
-        assert result.total_episodes == 5
 
-    async def test_blob_lerobot_success(self, tmp_path):
-        provider = _make_provider(
-            get_info_json=AsyncMock(return_value={"total_episodes": 7, "fps": 60}),
+        dataset = await service.get_dataset("group--dataset")
+
+        assert dataset is not None
+        assert dataset.name == "dataset"
+        assert dataset.group == "group"
+        assert dataset.total_episodes == 5
+        assert dataset.fps == 30.0
+
+
+class TestListEpisodes:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_lists_registered_episode_range_with_filters_and_pagination(self, tmp_path: Path) -> None:
+        storage = _make_storage([0, 3])
+        service = DatasetService(base_path=str(tmp_path), storage_adapter=storage)
+        await service.register_dataset(DatasetInfo(id="dataset", name="Dataset", total_episodes=5, fps=30.0))
+
+        annotated = await service.list_episodes("dataset", has_annotations=True)
+        unannotated_page = await service.list_episodes(
+            "dataset",
+            offset=1,
+            limit=2,
+            has_annotations=False,
+            task_index=0,
         )
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        result = await service.get_dataset("ds")
-        assert result is not None
-        assert result.total_episodes == 7
-        provider.count_hdf5_episodes.assert_not_awaited()
 
+        assert [(episode.index, episode.has_annotations) for episode in annotated] == [(0, True), (3, True)]
+        assert [(episode.index, episode.has_annotations) for episode in unannotated_page] == [
+            (2, False),
+            (4, False),
+        ]
+        assert await service.list_episodes("dataset", task_index=99) == []
 
-class TestRegisterAndCapabilities:
-    async def test_register_dataset_stores(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        info = DatasetInfo(id="x", name="x", total_episodes=0, fps=30.0)
+    @pytest.mark.parametrize(
+        ("dataset_id", "message"),
+        [
+            ("foo/bar", "Invalid dataset identifier"),
+            ("foo\\bar", "Invalid dataset identifier"),
+            ("..", "Invalid dataset identifier"),
+            (".", "Invalid dataset identifier"),
+            ("a----b", "Invalid dataset identifier"),
+            ("a--b--c--d--e--f", "Dataset nesting too deep"),
+        ],
+    )
+    async def test_rejects_unsafe_dataset_ids_before_blob_sync(
+        self,
+        tmp_path: Path,
+        dataset_id: str,
+        message: str,
+    ) -> None:
+        provider = _make_provider()
+        service = DatasetService(
+            base_path=str(tmp_path),
+            storage_adapter=_make_storage(),
+            blob_provider=provider,
+        )
+
+        with pytest.raises(ValueError, match=message):
+            await service.list_episodes(dataset_id)
+
+        provider.sync_meta_only_to_local.assert_not_awaited()
+
+    async def test_accepts_five_level_dataset_id(self, tmp_path: Path) -> None:
+        provider = _make_provider()
+        service = DatasetService(
+            base_path=str(tmp_path),
+            storage_adapter=_make_storage(),
+            blob_provider=provider,
+        )
+        info = DatasetInfo(id="a--b--c--d--e", name="Dataset", total_episodes=1, fps=30.0)
         await service.register_dataset(info)
-        assert service._datasets["x"] is info
 
-    def test_has_blob_provider_false(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert service.has_blob_provider() is False
+        episodes = await service.list_episodes(info.id)
 
-    def test_has_blob_provider_true(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path), blob_provider=_make_provider())
-        assert service.has_blob_provider() is True
+        assert [episode.index for episode in episodes] == [0]
+        provider.sync_meta_only_to_local.assert_awaited_once_with(info.id, ANY)
 
-
-class TestListEpisodesFallbacks:
-    async def test_fallback_uses_dataset_total(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=3, fps=30.0)
-        episodes = await service.list_episodes("ds")
-        assert [e.index for e in episodes] == [0, 1, 2]
-
-    async def test_no_indices_returns_empty(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        # No dataset registered, no handler resolved → empty list.
-        assert await service.list_episodes("ds") == []
-
-    async def test_pagination_and_filters(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=5, fps=30.0)
-        # All have task_index=0 by default
-        result = await service.list_episodes("ds", offset=1, limit=2, task_index=0)
-        assert [e.index for e in result] == [1, 2]
-        # Mismatched task filter returns nothing.
-        assert await service.list_episodes("ds", task_index=99) == []
-
-    async def test_has_annotations_filter(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=2, fps=30.0)
-        service._storage.list_annotated_episodes = AsyncMock(return_value=[0])  # type: ignore[method-assign]
-        annotated = await service.list_episodes("ds", has_annotations=True)
-        assert [e.index for e in annotated] == [0]
-        unannotated = await service.list_episodes("ds", has_annotations=False)
-        assert [e.index for e in unannotated] == [1]
-
-
-class TestGetEpisodeBranches:
-    async def test_cached_returns_with_annotations(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        ep = EpisodeData(meta=EpisodeMeta(index=0, length=1, task_index=0))
-        service._episode_cache.put("ds", 0, ep)
-        service._storage.list_annotated_episodes = AsyncMock(return_value=[0])  # type: ignore[method-assign]
-        result = await service.get_episode("ds", 0)
-        assert result is ep
-        assert result.meta.has_annotations is True
-
-    async def test_validate_index_out_of_range(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=2, fps=30.0)
-        assert await service.get_episode("ds", 99) is None
-        assert await service.get_episode("ds", -1) is None
-
-    async def test_unknown_dataset_returns_empty(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        result = await service.get_episode("ds", 0)
-        assert result is not None
-        assert result.meta.index == 0
-        assert result.video_urls == {}
-        assert result.trajectory_data == []
-
-
-class TestGetEpisodeTrajectory:
-    async def test_cached_returns_trajectory(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        point = TrajectoryPoint(
-            timestamp=0.0,
-            frame=0,
-            joint_positions=[0.0],
-            joint_velocities=[0.0],
-            end_effector_pose=[0.0],
-            gripper_state=0.0,
+    async def test_lists_blob_hdf5_episode_metadata(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_temp_directories(monkeypatch, tmp_path)
+        provider = _make_provider(sync_hdf5_dataset_to_local=AsyncMock(return_value=True))
+        hdf5_handler = _make_handler()
+        hdf5_handler.get_loader.return_value = True
+        hdf5_handler.list_episodes.return_value = (
+            [2, 5],
+            {
+                2: {"length": 11, "task_index": 1},
+                5: {"length": 17, "task_index": 2},
+            },
         )
-        ep = EpisodeData(meta=EpisodeMeta(index=0, length=1, task_index=0), trajectory_data=[point])
-        service._episode_cache.put("ds", 0, ep)
-        assert await service.get_episode_trajectory("ds", 0) == [point]
+        service = DatasetService(
+            base_path=str(tmp_path),
+            storage_adapter=_make_storage([5]),
+            blob_provider=provider,
+        )
+        _install_handlers(service, _make_handler(), hdf5_handler)
 
-    async def test_uncached_no_handler(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service.get_episode_trajectory("ds", 0) == []
+        episodes = await service.list_episodes("dataset")
 
-
-class TestSchedulePrefetch:
-    def test_skips_when_cache_disabled(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path), episode_cache_capacity=0)
-        # Cache disabled when capacity is 0; the call must not raise.
-        service._schedule_prefetch("ds", 0)
-        assert service._prefetch_tasks == set()
-
-    def test_skips_when_total_le_one(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=1, fps=30.0)
-        service._schedule_prefetch("ds", 0)
-        assert service._prefetch_tasks == set()
-
-    def test_skips_when_no_indices(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=4, fps=30.0)
-        # Pre-cache the surrounding indices so the indices list becomes empty.
-        for idx in range(4):
-            service._episode_cache.put("ds", idx, EpisodeData(meta=EpisodeMeta(index=idx, length=1, task_index=0)))
-        service._schedule_prefetch("ds", 0)
-        assert service._prefetch_tasks == set()
-
-    def test_runtime_error_swallowed(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=4, fps=30.0)
-        # Outside an event loop asyncio.create_task raises RuntimeError → swallowed.
-        service._schedule_prefetch("ds", 0)
-        assert service._prefetch_tasks == set()
-
-    def test_creates_task_when_loop_running(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=4, fps=30.0)
-
-        async def runner() -> None:
-            service._schedule_prefetch("ds", 1)
-            # Allow the prefetch coroutine to settle (no handler → returns quickly)
-            await asyncio.sleep(0)
-            for task in list(service._prefetch_tasks):
-                if not task.done():
-                    task.cancel()
-
-        asyncio.run(runner())
-
-
-class TestIsSafeVideoPath:
-    def test_inside_base_is_safe(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        target = tmp_path / "video.mp4"
-        target.write_bytes(b"")
-        assert service.is_safe_video_path(str(target)) is True
-
-    def test_equal_to_base_is_safe(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert service.is_safe_video_path(str(tmp_path)) is True
-
-    def test_outside_base_not_safe(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path / "data"))
-        (tmp_path / "data").mkdir()
-        outside = tmp_path / "elsewhere.mp4"
-        outside.write_bytes(b"")
-        assert service.is_safe_video_path(str(outside)) is False
-
-    def test_synced_dir_is_safe(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path / "data"))
-        (tmp_path / "data").mkdir()
-        synced = tmp_path / "synced"
-        synced.mkdir()
-        target = synced / "video.mp4"
-        target.write_bytes(b"")
-        service._blob_synced["ds"] = synced
-        assert service.is_safe_video_path(str(target)) is True
-
-    def test_hdf5_synced_dir_is_safe(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path / "data"))
-        (tmp_path / "data").mkdir()
-        synced = tmp_path / "hdf5synced"
-        synced.mkdir()
-        service._blob_hdf5_synced["ds"] = synced
-        assert service.is_safe_video_path(str(synced)) is True
-
-
-class TestUploadVideoToBlob:
-    def test_upload_success_invokes_provider(self, tmp_path):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        cache = tmp_path / "v.mp4"
-        cache.write_bytes(b"")
-        service._upload_video_to_blob("ds", 1, "cam", cache)
-        provider.upload_video.assert_awaited_once()
-
-
-class TestGetDatasetPath:
-    def test_traversal_rejected(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        with pytest.raises(ValueError, match="Invalid dataset path"):
-            service._get_dataset_path("../escape")
-
-    def test_too_deep_rejected(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        with pytest.raises(ValueError, match="too deep"):
-            service._get_dataset_path("a--b--c--d--e--f")
-
-    def test_missing_directory_raises(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        with pytest.raises(ValueError, match="not found"):
-            service._get_dataset_path("nonexistent")
-
-    def test_missing_base_raises(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path / "absent"))
-        with pytest.raises(ValueError, match="Base path not found"):
-            service._get_dataset_path("anything")
-
-    def test_resolves_existing(self, tmp_path):
-        ds_dir = tmp_path / "ds"
-        ds_dir.mkdir()
-        service = DatasetService(base_path=str(tmp_path))
-        assert service._get_dataset_path("ds") == ds_dir.resolve()
-
-
-class TestInvalidateCache:
-    def test_invalidate_returns_count(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        service._episode_cache.put("ds", 0, EpisodeData(meta=EpisodeMeta(index=0, length=1, task_index=0)))
-        assert service.invalidate_episode_cache("ds", 0) == 1
-        assert service._episode_cache.get("ds", 0) is None
-
-
-class TestCapabilityFlags:
-    def test_dataset_has_hdf5_default_false(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert service.dataset_has_hdf5("missing") is False
-        assert service.dataset_is_lerobot("missing") is False
-
-    def test_format_availability_flags(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        # Whatever the runtime says, both should be booleans
-        assert isinstance(service.has_hdf5_support(), bool)
-        assert isinstance(service.has_lerobot_support(), bool)
-
-
-class TestGetVideoFilePath:
-    async def test_no_handler_returns_none(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert service.get_video_file_path("ds", 0, "cam") is None
-
-    def test_lerobot_handler_returns_path(self, tmp_path, monkeypatch):
-        service = DatasetService(base_path=str(tmp_path))
-        monkeypatch.setattr(service, "_resolve_handler", lambda _ds: service._lerobot_handler)
-        monkeypatch.setattr(service._lerobot_handler, "get_video_path", lambda *_a, **_kw: "/tmp/v.mp4")
-        assert service.get_video_file_path("ds", 0, "cam") == "/tmp/v.mp4"
-
-    def test_hdf5_handler_uploads_when_new(self, tmp_path, monkeypatch):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        monkeypatch.setattr(service, "_resolve_handler", lambda _ds: service._hdf5_handler)
-        cache = tmp_path / "v.mp4"  # does not exist yet
-        monkeypatch.setattr(service._hdf5_handler, "_video_cache_path", lambda *_a, **_kw: cache)
-
-        def fake_get(*_a: Any, **_kw: Any) -> str:
-            cache.write_bytes(b"")
-            return str(cache)
-
-        monkeypatch.setattr(service._hdf5_handler, "get_video_path", fake_get)
-        uploads: list[Any] = []
-        monkeypatch.setattr(service, "_upload_video_to_blob", lambda *args: uploads.append(args))
-        result = service.get_video_file_path("ds", 0, "cam")
-        assert result == str(cache)
-        assert len(uploads) == 1
-
-    def test_hdf5_handler_no_cache_path(self, tmp_path, monkeypatch):
-        service = DatasetService(base_path=str(tmp_path))
-        monkeypatch.setattr(service, "_resolve_handler", lambda _ds: service._hdf5_handler)
-        monkeypatch.setattr(service._hdf5_handler, "_video_cache_path", lambda *_a, **_kw: None)
-        assert service.get_video_file_path("ds", 0, "cam") is None
-
-
-class TestFrameAndCameraDelegation:
-    async def test_get_frame_image_no_handler(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service.get_frame_image("missing", 0, 0, "cam") is None
-
-    async def test_get_episode_cameras_no_handler(self, tmp_path):
-        service = DatasetService(base_path=str(tmp_path))
-        assert await service.get_episode_cameras("missing", 0) == []
-
-
-class TestUploadVideoFailure:
-    def test_upload_failure_logs_warning(self, tmp_path, caplog):
-        provider = _make_provider(upload_video=AsyncMock(side_effect=RuntimeError("boom")))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        cache = tmp_path / "v.mp4"
-        cache.write_bytes(b"")
-        with caplog.at_level("WARNING"):
-            service._upload_video_to_blob("ds", 1, "cam", cache)
-        assert any("Blob upload failed" in r.message for r in caplog.records)
-
-
-class TestGetDatasetServiceSingleton:
-    def test_singleton_creates_instance(self, monkeypatch, tmp_path):
-        from src.api.services.dataset_service import service as svc_mod
-
-        monkeypatch.setattr(svc_mod, "_dataset_service", None)
-
-        class _Cfg:
-            data_path = str(tmp_path)
-            episode_cache_capacity = 4
-            episode_cache_max_mb = 16
-
-        # Stub the lazy imports inside get_dataset_service
-        from src.api import config as cfg_mod
-
-        monkeypatch.setattr(cfg_mod, "get_app_config", lambda: _Cfg(), raising=False)
-        monkeypatch.setattr(cfg_mod, "create_annotation_storage", lambda _c: None, raising=False)
-        monkeypatch.setattr(cfg_mod, "create_blob_dataset_provider", lambda _c: None, raising=False)
-
-        first = svc_mod.get_dataset_service()
-        second = svc_mod.get_dataset_service()
-        assert first is second
-        assert isinstance(first, DatasetService)
-
-
-class TestNormalizeFeatureNames:
-    def test_returns_none_for_none(self):
-        assert normalize_feature_names(None) is None
-
-    def test_returns_string_list_unchanged(self):
-        assert normalize_feature_names(["JOINT_A", "JOINT_B"]) == ["JOINT_A", "JOINT_B"]
-
-    def test_flattens_list_of_lists(self):
-        assert normalize_feature_names([["JOINT_A", "JOINT_B"], ["JOINT_C"]]) == [
-            "JOINT_A",
-            "JOINT_B",
-            "JOINT_C",
+        assert [
+            (episode.index, episode.length, episode.task_index, episode.has_annotations) for episode in episodes
+        ] == [
+            (2, 11, 1, False),
+            (5, 17, 2, True),
         ]
 
-    def test_flattens_dict_values(self):
-        result = normalize_feature_names({"x": "JOINT_A", "y": "JOINT_B"})
-        assert sorted(result) == ["JOINT_A", "JOINT_B"]
 
-    def test_wraps_scalar_in_list(self):
-        assert normalize_feature_names("only") == ["only"]
+class TestEpisodeRetrievalAndCache:
+    pytestmark = pytest.mark.asyncio
 
-    def test_coerces_non_string_items_to_str(self):
-        assert normalize_feature_names([1, 2.5, True]) == ["1", "2.5", "True"]
+    async def test_get_episode_returns_empty_data_for_unknown_dataset(self, tmp_path: Path) -> None:
+        service = DatasetService(base_path=str(tmp_path), storage_adapter=_make_storage())
 
-    def test_returns_none_for_empty_iterable(self):
-        assert normalize_feature_names([]) is None
-        assert normalize_feature_names(()) is None
+        episode = await service.get_episode("unknown", 4)
 
-    def test_flattens_mixed_nested_with_tuples(self):
-        assert normalize_feature_names([("A", "B"), "C"]) == ["A", "B", "C"]
+        assert episode == EpisodeData(
+            meta=EpisodeMeta(index=4, length=0, task_index=0, has_annotations=False),
+            video_urls={},
+            trajectory_data=[],
+        )
 
+    async def test_get_episode_rejects_indices_outside_registered_range(self, tmp_path: Path) -> None:
+        service = DatasetService(base_path=str(tmp_path), storage_adapter=_make_storage())
+        await service.register_dataset(DatasetInfo(id="dataset", name="Dataset", total_episodes=2, fps=30.0))
 
-class TestMaterializeBlobVideo:
-    async def test_returns_none_without_blob_provider(self, tmp_path):
+        assert await service.get_episode("dataset", -1) is None
+        assert await service.get_episode("dataset", 2) is None
+
+    async def test_repeated_get_episode_uses_cache_and_refreshes_annotation_flag(self, tmp_path: Path) -> None:
+        storage = _make_storage()
+        episode = EpisodeData(meta=EpisodeMeta(index=0, length=8, task_index=1))
+        handler = _make_handler()
+        handler.has_loader.return_value = True
+        handler.load_episode.return_value = episode
+        service = DatasetService(base_path=str(tmp_path), storage_adapter=storage)
+        _install_handlers(service, handler)
+        await service.register_dataset(DatasetInfo(id="dataset", name="Dataset", total_episodes=1, fps=30.0))
+
+        first = await service.get_episode("dataset", 0)
+        storage.list_annotated_episodes.return_value = [0]
+        second = await service.get_episode("dataset", 0)
+
+        assert first is second
+        assert second is not None
+        assert second.meta.has_annotations is True
+        handler.load_episode.assert_called_once_with("dataset", 0, dataset_info=ANY)
+
+    async def test_cache_invalidation_forces_episode_reload(self, tmp_path: Path) -> None:
+        first_episode = EpisodeData(meta=EpisodeMeta(index=0, length=3, task_index=0))
+        reloaded_episode = EpisodeData(meta=EpisodeMeta(index=0, length=9, task_index=0))
+        handler = _make_handler()
+        handler.has_loader.return_value = True
+        handler.load_episode.side_effect = [first_episode, reloaded_episode]
+        service = DatasetService(base_path=str(tmp_path), storage_adapter=_make_storage())
+        _install_handlers(service, handler)
+        await service.register_dataset(DatasetInfo(id="dataset", name="Dataset", total_episodes=1, fps=30.0))
+
+        assert (await service.get_episode("dataset", 0)).meta.length == 3
+        assert (await service.get_episode("dataset", 0)).meta.length == 3
+        assert service.invalidate_episode_cache("dataset", 0) == 1
+        assert (await service.get_episode("dataset", 0)).meta.length == 9
+        assert handler.load_episode.call_count == 2
+
+    async def test_get_episode_loads_blob_hdf5_episode(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_temp_directories(monkeypatch, tmp_path)
+        provider = _make_provider(sync_hdf5_dataset_to_local=AsyncMock(return_value=True))
+        episode = EpisodeData(meta=EpisodeMeta(index=2, length=6, task_index=1))
+        hdf5_handler = _make_handler()
+        hdf5_handler.get_loader.return_value = True
+        hdf5_handler.load_episode.return_value = episode
+        service = DatasetService(
+            base_path=str(tmp_path),
+            storage_adapter=_make_storage(),
+            blob_provider=provider,
+        )
+        _install_handlers(service, _make_handler(), hdf5_handler)
+
+        result = await service.get_episode("dataset", 2)
+
+        assert result is episode
+        assert result.meta.length == 6
+        provider.sync_hdf5_episode_to_local.assert_awaited_with("dataset", ANY, 2)
+
+    async def test_get_episode_trajectory_uses_cached_episode(self, tmp_path: Path) -> None:
+        point = _trajectory_point()
+        episode = EpisodeData(
+            meta=EpisodeMeta(index=0, length=1, task_index=0),
+            trajectory_data=[point],
+        )
+        handler = _make_handler()
+        handler.has_loader.return_value = True
+        handler.load_episode.return_value = episode
+        service = DatasetService(base_path=str(tmp_path), storage_adapter=_make_storage())
+        _install_handlers(service, handler)
+        await service.register_dataset(DatasetInfo(id="dataset", name="Dataset", total_episodes=1, fps=30.0))
+        await service.get_episode("dataset", 0)
+
+        trajectory = await service.get_episode_trajectory("dataset", 0)
+
+        assert trajectory == [point]
+        handler.get_trajectory.assert_not_called()
+
+    async def test_get_episode_trajectory_falls_back_between_handlers(self, tmp_path: Path) -> None:
+        point = _trajectory_point(2)
+        primary = _make_handler()
+        primary.has_loader.return_value = True
+        secondary = _make_handler()
+        secondary.get_trajectory.return_value = [point]
         service = DatasetService(base_path=str(tmp_path))
-        assert await service.materialize_blob_video("anything") is None
+        _install_handlers(service, primary, secondary)
 
-    async def test_downloads_and_caches_blob(self, tmp_path, monkeypatch):
-        async def _stream(_path):
+        assert await service.get_episode_trajectory("dataset", 2) == [point]
+
+
+class TestFrameAndCameraAccess:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_get_frame_image_returns_handler_frame(self, tmp_path: Path) -> None:
+        handler = _make_handler()
+        handler.has_loader.return_value = True
+        handler.get_frame_image.return_value = b"jpeg"
+        service = DatasetService(base_path=str(tmp_path))
+        _install_handlers(service, handler)
+
+        assert await service.get_frame_image("dataset", 1, 7, "wrist") == b"jpeg"
+
+    async def test_get_frame_image_materializes_blob_video(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def stream_video(_path: str, **_kwargs: Any) -> AsyncIterator[bytes]:
+            yield b"video"
+
+        provider = _make_provider(
+            get_info_json=AsyncMock(return_value={"total_episodes": 1, "fps": 24}),
+            resolve_video_blob_path=AsyncMock(return_value="dataset/video.mp4"),
+            stream_video=stream_video,
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        monkeypatch.setattr(service, "_try_handlers", MagicMock(return_value=None))
+        monkeypatch.setattr(
+            "src.api.services.dataset_service.service.tempfile.gettempdir",
+            lambda: str(tmp_path),
+        )
+
+        def extract_frame(path: str, frame_idx: int, fps: float) -> bytes | None:
+            if Path(path).read_bytes() == b"video" and frame_idx == 7 and fps == 24.0:
+                return b"blob-jpeg"
+            return None
+
+        monkeypatch.setattr(service._lerobot_handler, "_extract_frame_ffmpeg", extract_frame)
+
+        assert await service.get_frame_image("dataset", 0, 7, "wrist") == b"blob-jpeg"
+
+    async def test_get_frame_image_falls_back_to_cv2(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        video_path = tmp_path / "video.mp4"
+        video_path.write_bytes(b"video")
+        provider = _make_provider(
+            get_info_json=AsyncMock(return_value={"total_episodes": 1}),
+            resolve_video_blob_path=AsyncMock(return_value="dataset/video.mp4"),
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+        monkeypatch.setattr(service, "_try_handlers", MagicMock(return_value=None))
+        monkeypatch.setattr(service, "materialize_blob_video", AsyncMock(return_value=video_path))
+        monkeypatch.setattr(service._lerobot_handler, "_extract_frame_ffmpeg", lambda *_args: None)
+        monkeypatch.setattr(service._lerobot_handler, "_extract_frame_cv2", lambda *_args: b"cv2-jpeg")
+
+        assert await service.get_frame_image("dataset", 0, 3, "wrist") == b"cv2-jpeg"
+
+    async def test_get_frame_image_returns_none_without_local_or_blob_video(self, tmp_path: Path) -> None:
+        service = DatasetService(base_path=str(tmp_path))
+
+        assert await service.get_frame_image("missing", 0, 0, "wrist") is None
+
+    async def test_get_episode_cameras_falls_back_between_handlers(self, tmp_path: Path) -> None:
+        primary = _make_handler()
+        primary.has_loader.return_value = True
+        secondary = _make_handler()
+        secondary.get_cameras.return_value = ["wrist", "overhead"]
+        service = DatasetService(base_path=str(tmp_path))
+        _install_handlers(service, primary, secondary)
+
+        assert await service.get_episode_cameras("dataset", 0) == ["wrist", "overhead"]
+
+
+class TestBlobVideoAccess:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_get_blob_video_path_reports_provider_result(self, tmp_path: Path) -> None:
+        without_provider = DatasetService(base_path=str(tmp_path))
+        provider = _make_provider(resolve_video_blob_path=AsyncMock(return_value="dataset/camera.mp4"))
+        with_provider = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+
+        assert await without_provider.get_blob_video_path("dataset", 0, "wrist") is None
+        assert await with_provider.get_blob_video_path("dataset", 1, "wrist") == "dataset/camera.mp4"
+
+    async def test_get_blob_video_stream_returns_range_headers_and_bytes(self, tmp_path: Path) -> None:
+        async def stream_video(
+            _path: str,
+            *,
+            offset: int | None = None,
+            length: int | None = None,
+        ) -> AsyncIterator[bytes]:
+            assert (offset, length) == (10, 20)
+            yield b"first"
+            yield b"second"
+
+        provider = _make_provider(
+            get_blob_properties=AsyncMock(return_value={"size": 100, "content_type": "video/x-matroska"}),
+            stream_video=stream_video,
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+
+        result = await service.get_blob_video_stream("dataset/video.mkv", offset=10, length=20)
+
+        assert result is not None
+        headers, media_type, stream = result
+        assert headers == {
+            "Accept-Ranges": "bytes",
+            "Content-Length": "20",
+            "Content-Range": "bytes 10-29/100",
+        }
+        assert media_type == "video/x-matroska"
+        assert [chunk async for chunk in stream] == [b"first", b"second"]
+
+    async def test_get_blob_video_stream_defaults_non_video_content_type(self, tmp_path: Path) -> None:
+        provider = _make_provider(
+            get_blob_properties=AsyncMock(return_value={"size": 100, "content_type": "image/png"})
+        )
+        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
+
+        result = await service.get_blob_video_stream("dataset/video")
+
+        assert result is not None
+        headers, media_type, _stream = result
+        assert headers == {"Accept-Ranges": "bytes", "Content-Length": "100"}
+        assert media_type == "video/mp4"
+
+    async def test_materialize_blob_video_caches_download(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        stream_calls = 0
+
+        async def stream_video(_path: str, **_kwargs: Any) -> AsyncIterator[bytes]:
+            nonlocal stream_calls
+            stream_calls += 1
             yield b"chunk-1"
             yield b"chunk-2"
 
-        provider = _make_provider()
-        provider.stream_video = _stream
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        cache_root = tmp_path / "video_cache"
-        monkeypatch.setattr(
-            "src.api.services.dataset_service.service.tempfile.gettempdir",
-            lambda: str(cache_root),
-        )
-
-        path = await service.materialize_blob_video("ds/videos/cam0/file-000.mp4")
-        assert path is not None
-        assert path.exists()
-        assert path.read_bytes() == b"chunk-1chunk-2"
-        assert path.parent == cache_root / "dvw_video_cache" / "blob"
-        assert path.suffix == ".mp4"
-
-    async def test_second_call_returns_cache_without_streaming(self, tmp_path, monkeypatch):
-        stream_calls = {"n": 0}
-
-        async def _stream(_path):
-            stream_calls["n"] += 1
-            yield b"payload"
-
-        provider = _make_provider()
-        provider.stream_video = _stream
+        provider = _make_provider(stream_video=stream_video)
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",
-            lambda: str(tmp_path / "video_cache"),
+            lambda: str(tmp_path),
         )
 
-        first = await service.materialize_blob_video("ds/v.mp4")
-        second = await service.materialize_blob_video("ds/v.mp4")
+        first = await service.materialize_blob_video("dataset/video.mp4")
+        second = await service.materialize_blob_video("dataset/video.mp4")
+
+        assert first is not None
         assert first == second
-        assert stream_calls["n"] == 1
+        assert first.parent == tmp_path / "dvw_video_cache" / "blob"
+        assert first.read_bytes() == b"chunk-1chunk-2"
+        assert stream_calls == 1
 
-    async def test_returns_none_and_cleans_up_part_file_on_stream_error(self, tmp_path, monkeypatch):
-        async def _stream(_path):
+    async def test_materialize_blob_video_removes_partial_download_on_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        async def stream_video(_path: str, **_kwargs: Any) -> AsyncIterator[bytes]:
             yield b"partial"
-            raise RuntimeError("network died")
+            raise RuntimeError("network failure")
 
-        provider = _make_provider()
-        provider.stream_video = _stream
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        cache_root = tmp_path / "video_cache"
-        monkeypatch.setattr(
-            "src.api.services.dataset_service.service.tempfile.gettempdir",
-            lambda: str(cache_root),
-        )
-
-        path = await service.materialize_blob_video("ds/broken.mp4")
-        assert path is None
-        cache_dir = cache_root / "dvw_video_cache" / "blob"
-        assert cache_dir.exists()
-        # No stray .part files left behind.
-        assert not any(p.suffix == ".part" or ".part." in p.name for p in cache_dir.iterdir())
-
-    async def test_default_suffix_when_blob_path_has_no_extension(self, tmp_path, monkeypatch):
-        async def _stream(_path):
-            yield b"x"
-
-        provider = _make_provider()
-        provider.stream_video = _stream
+        provider = _make_provider(stream_video=stream_video)
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
         monkeypatch.setattr(
             "src.api.services.dataset_service.service.tempfile.gettempdir",
-            lambda: str(tmp_path / "video_cache"),
+            lambda: str(tmp_path),
         )
 
-        path = await service.materialize_blob_video("ds/no-extension")
-        assert path is not None
-        assert path.suffix == ".mp4"
+        result = await service.materialize_blob_video("dataset/video-without-extension")
+
+        cache_dir = tmp_path / "dvw_video_cache" / "blob"
+        assert result is None
+        assert list(cache_dir.iterdir()) == []
 
 
-class TestGetFrameImageBlobFallback:
-    async def test_returns_none_when_no_handler_and_no_blob_provider(self, tmp_path):
+class TestVideoFilePath:
+    def test_returns_handler_video_path(self, tmp_path: Path) -> None:
+        video_path = tmp_path / "video.mp4"
+        video_path.write_bytes(b"video")
+        handler = _make_handler()
+        handler.has_loader.return_value = True
+        handler.get_video_path.return_value = str(video_path)
         service = DatasetService(base_path=str(tmp_path))
-        assert await service.get_frame_image("missing", 0, 0, "cam") is None
+        _install_handlers(service, handler)
 
-    async def test_returns_none_when_discovery_fails(self, tmp_path, monkeypatch):
+        assert service.get_video_file_path("dataset", 0, "wrist") == str(video_path)
+
+    def test_generated_hdf5_video_is_uploaded_to_blob(self, tmp_path: Path) -> None:
+        video_path = tmp_path / "video.mp4"
         provider = _make_provider()
+        hdf5_handler = _make_handler()
+        hdf5_handler.has_loader.return_value = True
+        hdf5_handler._video_cache_path.return_value = video_path
+
+        def generate_video(*_args: Any, **_kwargs: Any) -> str:
+            video_path.write_bytes(b"video")
+            return str(video_path)
+
+        hdf5_handler.get_video_path.side_effect = generate_video
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
-        monkeypatch.setattr(service, "_discover_blob_dataset", AsyncMock(return_value=None))
-        assert await service.get_frame_image("ds", 0, 0, "cam") is None
+        _install_handlers(service, _make_handler(), hdf5_handler)
 
-    async def test_returns_none_when_no_blob_video_path(self, tmp_path, monkeypatch):
-        provider = _make_provider(resolve_video_blob_path=AsyncMock(return_value=None))
+        result = service.get_video_file_path("dataset", 2, "wrist")
+
+        assert result == str(video_path)
+        provider.upload_video.assert_awaited_once_with("dataset", "wrist", 2, video_path)
+
+    def test_blob_upload_failure_does_not_hide_generated_video(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        video_path = tmp_path / "video.mp4"
+        provider = _make_provider(upload_video=AsyncMock(side_effect=RuntimeError("upload failed")))
+        hdf5_handler = _make_handler()
+        hdf5_handler.has_loader.return_value = True
+        hdf5_handler._video_cache_path.return_value = video_path
+
+        def generate_video(*_args: Any, **_kwargs: Any) -> str:
+            video_path.write_bytes(b"video")
+            return str(video_path)
+
+        hdf5_handler.get_video_path.side_effect = generate_video
         service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        service._blob_dataset_ids.add("ds")
-        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
-        assert await service.get_frame_image("ds", 0, 0, "cam") is None
+        _install_handlers(service, _make_handler(), hdf5_handler)
 
-    async def test_returns_none_when_materialize_fails(self, tmp_path, monkeypatch):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        service._blob_dataset_ids.add("ds")
-        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
-        monkeypatch.setattr(service, "materialize_blob_video", AsyncMock(return_value=None))
-        assert await service.get_frame_image("ds", 0, 0, "cam") is None
+        with caplog.at_level("WARNING"):
+            result = service.get_video_file_path("dataset", 2, "wrist")
 
-    async def test_returns_ffmpeg_frame_when_available(self, tmp_path, monkeypatch):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        service._blob_dataset_ids.add("ds")
-        service._datasets["ds"] = DatasetInfo(id="ds", name="ds", total_episodes=1, fps=24.0, features={}, tasks=[])
-        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
-        local = tmp_path / "v.mp4"
-        local.write_bytes(b"")
-        monkeypatch.setattr(service, "materialize_blob_video", AsyncMock(return_value=local))
-        captured_fps: dict[str, float] = {}
+        assert result == str(video_path)
+        assert "Blob upload failed for dataset ep 2: upload failed" in caplog.text
 
-        def _ffmpeg(path, frame_idx, fps):
-            captured_fps["fps"] = fps
-            assert path == str(local)
-            assert frame_idx == 7
-            return b"JPEG-bytes"
 
-        monkeypatch.setattr(service._lerobot_handler, "_extract_frame_ffmpeg", staticmethod(_ffmpeg))
+class TestLifecycleAndCapabilities:
+    pytestmark = pytest.mark.asyncio
 
-        result = await service.get_frame_image("ds", 0, 7, "cam")
-        assert result == b"JPEG-bytes"
-        assert captured_fps["fps"] == 24.0
-
-    async def test_falls_back_to_cv2_when_ffmpeg_returns_none(self, tmp_path, monkeypatch):
-        provider = _make_provider()
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        service._blob_dataset_ids.add("ds")
-        monkeypatch.setattr(service, "_try_handlers", lambda *_a, **_kw: None)
-        local = tmp_path / "v.mp4"
-        local.write_bytes(b"")
-        monkeypatch.setattr(service, "materialize_blob_video", AsyncMock(return_value=local))
-        monkeypatch.setattr(
-            service._lerobot_handler,
-            "_extract_frame_ffmpeg",
-            staticmethod(lambda *_a, **_kw: None),
+    async def test_cleanup_removes_synced_metadata_and_allows_resync(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        created = _patch_temp_directories(monkeypatch, tmp_path)
+        provider = _make_provider(sync_meta_only_to_local=AsyncMock(return_value=True))
+        service = DatasetService(
+            base_path=str(tmp_path),
+            storage_adapter=_make_storage(),
+            blob_provider=provider,
         )
-        monkeypatch.setattr(
-            service._lerobot_handler,
-            "_extract_frame_cv2",
-            staticmethod(lambda *_a, **_kw: b"CV2-bytes"),
+        await service.register_dataset(DatasetInfo(id="dataset", name="Dataset", total_episodes=1, fps=30.0))
+
+        assert [episode.index for episode in await service.list_episodes("dataset")] == [0]
+        synced_path = created["dvwm_"]
+        assert synced_path.exists()
+
+        service.cleanup_temp_dirs()
+
+        assert not synced_path.exists()
+        assert [episode.index for episode in await service.list_episodes("dataset")] == [0]
+        assert provider.sync_meta_only_to_local.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_blob_synced_directory_is_accepted_as_safe_video_location(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        synced_paths: dict[str, Path] = {}
+        base_path = tmp_path / "datasets"
+        temp_path = tmp_path / "blob-sync"
+        base_path.mkdir()
+        temp_path.mkdir()
+
+        async def sync_hdf5_dataset(dataset_id: str, destination: Path) -> bool:
+            synced_paths[dataset_id] = destination
+            (destination / "video.mp4").write_bytes(b"video")
+            return True
+
+        monkeypatch.setattr(tempfile, "tempdir", str(temp_path))
+        provider = _make_provider(
+            sync_hdf5_dataset_to_local=AsyncMock(side_effect=sync_hdf5_dataset),
         )
+        service = DatasetService(
+            base_path=str(base_path),
+            storage_adapter=_make_storage(),
+            blob_provider=provider,
+        )
+        await service.register_dataset(DatasetInfo(id="dataset", name="Dataset", total_episodes=1, fps=30.0))
 
-        result = await service.get_frame_image("ds", 0, 3, "cam")
-        assert result == b"CV2-bytes"
+        episodes = await service.list_episodes("dataset")
+        synced_path = synced_paths["dataset"]
+        video_path = synced_path / "video.mp4"
+
+        assert [episode.index for episode in episodes] == [0]
+        provider.sync_hdf5_dataset_to_local.assert_awaited_once_with("dataset", synced_path)
+        assert synced_path.parent == temp_path
+        assert not video_path.is_relative_to(base_path)
+        assert video_path.read_bytes() == b"video"
+        assert service.is_safe_video_path(str(video_path)) is True
 
 
-class TestListDatasetsScanResilience:
-    async def test_scan_failure_falls_back_to_local_only(self, tmp_path, caplog):
-        provider = _make_provider(scan_all_dataset_ids=AsyncMock(side_effect=RuntimeError("boom")))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        with caplog.at_level("WARNING"):
-            result = await service.list_datasets()
-        assert result == []
-        assert any("Failed to scan blob datasets" in r.message for r in caplog.records)
+class TestCapabilities:
+    def test_video_path_outside_service_directories_is_rejected(self, tmp_path: Path) -> None:
+        base_path = tmp_path / "datasets"
+        base_path.mkdir()
+        outside_path = tmp_path / "outside.mp4"
+        outside_path.write_bytes(b"video")
+        service = DatasetService(base_path=str(base_path))
 
-    async def test_per_dataset_discover_lerobot_error_logged(self, tmp_path, caplog, monkeypatch):
-        provider = _make_provider(scan_all_dataset_ids=AsyncMock(return_value={"lerobot": ["bad-ds"], "hdf5": []}))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        monkeypatch.setattr(service, "_discover_blob_dataset", AsyncMock(side_effect=RuntimeError("nope")))
-        with caplog.at_level("WARNING"):
-            await service.list_datasets()
-        assert any("Failed to discover blob dataset bad-ds" in r.message for r in caplog.records)
+        assert service.is_safe_video_path(str(base_path)) is True
+        assert service.is_safe_video_path(str(outside_path)) is False
 
-    async def test_per_dataset_discover_hdf5_error_logged(self, tmp_path, caplog, monkeypatch):
-        provider = _make_provider(scan_all_dataset_ids=AsyncMock(return_value={"lerobot": [], "hdf5": ["bad-h5"]}))
-        service = DatasetService(base_path=str(tmp_path), blob_provider=provider)
-        monkeypatch.setattr(service, "_discover_blob_hdf5_dataset", AsyncMock(side_effect=RuntimeError("nope")))
-        with caplog.at_level("WARNING"):
-            await service.list_datasets()
-        assert any("Failed to discover blob HDF5 dataset bad-h5" in r.message for r in caplog.records)
+    def test_capability_queries_report_configured_state(self, tmp_path: Path) -> None:
+        without_provider = DatasetService(base_path=str(tmp_path))
+        with_provider = DatasetService(base_path=str(tmp_path), blob_provider=_make_provider())
+
+        assert without_provider.has_blob_provider() is False
+        assert with_provider.has_blob_provider() is True
+        assert isinstance(with_provider.has_hdf5_support(), bool)
+        assert isinstance(with_provider.has_lerobot_support(), bool)
+        assert with_provider.dataset_has_hdf5("missing") is False
+        assert with_provider.dataset_is_lerobot("missing") is False

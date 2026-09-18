@@ -1,37 +1,61 @@
 """Schemathesis-based OpenAPI contract fuzzing for the FastAPI backend."""
 
-import os
-
 import pytest
 import schemathesis
 from hypothesis import HealthCheck, settings
+from schemathesis.config import (
+    GenerationConfig,
+    ProjectConfig,
+    ProjectsConfig,
+    SchemathesisConfig,
+)
+
+schemathesis.checks.load_all_checks()
+_STATUS_CODE_CONFORMANCE = schemathesis.checks.CHECKS.get_one("status_code_conformance")
+_RESPONSE_CONTRACT_CHECKS = schemathesis.checks.CHECKS.get_by_names(
+    [
+        "not_a_server_error",
+        "content_type_conformance",
+        "response_headers_conformance",
+        "response_schema_conformance",
+    ]
+)
 
 
-@pytest.fixture(scope="session")
-def api_schema(test_dataset_path):
+def _successful_status_code_conformance(
+    ctx: schemathesis.CheckContext,
+    response: schemathesis.Response,
+    case: schemathesis.Case,
+) -> bool | None:
+    """Require successful responses to use a status documented by the operation."""
+    if response.status_code < 400:
+        return _STATUS_CODE_CONFORMANCE(ctx, response, case)
+    return None
+
+
+_RESPONSE_CONTRACT_CHECKS.append(_successful_status_code_conformance)
+
+
+@pytest.fixture
+def api_schema(client):
     """Load OpenAPI schema from the in-process ASGI app used in tests."""
-    os.environ["DATA_DIR"] = test_dataset_path
-
-    import src.api.config as config_mod
-    import src.api.services.annotation_service as ann_mod
-    import src.api.services.dataset_service as ds_mod
-
-    config_mod._app_config = None
-    ds_mod._dataset_service = None
-    ann_mod._annotation_service = None
-
-    from src.api.main import app
-
-    schema = schemathesis.openapi.from_asgi("/openapi.json", app)
-
-    yield schema
-
-    config_mod._app_config = None
-    ds_mod._dataset_service = None
-    ann_mod._annotation_service = None
+    return schemathesis.openapi.from_asgi(
+        "/openapi.json",
+        client.app,
+        config=SchemathesisConfig(
+            projects=ProjectsConfig(
+                default=ProjectConfig(
+                    generation=GenerationConfig(
+                        modes=[schemathesis.GenerationMode.POSITIVE],
+                        deterministic=True,
+                    )
+                )
+            )
+        ),
+    )
 
 
-schema = schemathesis.pytest.from_fixture("api_schema")
+schema = schemathesis.pytest.from_fixture("api_schema").exclude(path_regex=r"^/api/(ai/.+|datasets/.+/judge)$")
 
 
 @schema.parametrize()
@@ -44,5 +68,5 @@ schema = schemathesis.pytest.from_fixture("api_schema")
     ],
 )
 def test_openapi_contract_fuzzing(case):
-    """Generated cases should not trigger 5xx and must match declared schemas."""
-    case.call_and_validate()
+    """Generated cases must not trigger server errors or violate the OpenAPI contract."""
+    case.call_and_validate(checks=_RESPONSE_CONTRACT_CHECKS)

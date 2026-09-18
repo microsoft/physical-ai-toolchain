@@ -1,244 +1,209 @@
-"""Unit tests for detection service episode processing behavior."""
+"""Behavior tests for episode-level object detection."""
 
-import asyncio
-import types
+from __future__ import annotations
 
 import pytest
 
-from src.api.models.detection import DetectionRequest, DetectionResult
+from src.api.models.detection import Detection, DetectionRequest, DetectionResult
+from src.api.services import detection_service as detection_service_module
 from src.api.services.detection_service import DetectionService
 
 
-class TestDetectionEpisodeProcessing:
-    """Tests for frame index handling in episode detection."""
+@pytest.mark.asyncio
+async def test_detect_episode_forwards_request_and_preserves_frame_indices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = DetectionService()
+    fetched_indices: list[int] = []
+    detection_calls: list[tuple[bytes, int, float, str, list[str] | None]] = []
 
-    def test_detect_episode_preserves_integer_frame_indices(self, monkeypatch):
-        service = DetectionService()
-        observed_indices: list[int] = []
+    async def get_frame_image(frame_idx: int) -> bytes:
+        fetched_indices.append(frame_idx)
+        return f"frame-{frame_idx}".encode()
 
-        async def get_frame_image(frame_idx: int) -> bytes:
-            assert isinstance(frame_idx, int)
-            observed_indices.append(frame_idx)
-            return b"image-bytes"
+    async def detect_frame(
+        image_bytes: bytes,
+        frame_idx: int,
+        confidence: float = 0.25,
+        model_name: str = "yolo11n",
+        labels: list[str] | None = None,
+    ) -> DetectionResult:
+        detection_calls.append((image_bytes, frame_idx, confidence, model_name, labels))
+        return DetectionResult(frame=frame_idx, detections=[], processing_time_ms=1.0)
 
-        async def fake_detect_frame(
-            self,
-            image_bytes: bytes,
-            frame_idx: int,
-            confidence: float = 0.25,
-            model_name: str = "yolo11n",
-            labels: list[str] | None = None,
-        ) -> DetectionResult:
-            assert image_bytes == b"image-bytes"
-            assert isinstance(frame_idx, int)
-            observed_indices.append(frame_idx)
-            return DetectionResult(frame=frame_idx, detections=[], processing_time_ms=1.0)
+    monkeypatch.setattr(service, "detect_frame", detect_frame)
+    request = DetectionRequest(
+        frames=[1, 3],
+        confidence=0.6,
+        model="yolov8s-world",
+        labels=["widget"],
+    )
 
-        monkeypatch.setattr(DetectionService, "detect_frame", fake_detect_frame)
+    summary = await service.detect_episode(
+        dataset_id="dataset",
+        episode_idx=0,
+        request=request,
+        get_frame_image=get_frame_image,
+        total_frames=10,
+    )
 
-        summary = asyncio.run(
-            service.detect_episode(
-                dataset_id="dataset",
-                episode_idx=0,
-                request=DetectionRequest(frames=[1, 3]),
-                get_frame_image=get_frame_image,
-                total_frames=10,
+    assert fetched_indices == [1, 3]
+    assert detection_calls == [
+        (b"frame-1", 1, 0.6, "yolov8s-world", ["widget"]),
+        (b"frame-3", 3, 0.6, "yolov8s-world", ["widget"]),
+    ]
+    assert summary.model_dump() == {
+        "total_frames": 10,
+        "processed_frames": 2,
+        "total_detections": 0,
+        "detections_by_frame": [
+            {"frame": 1, "detections": [], "processing_time_ms": 1.0},
+            {"frame": 3, "detections": [], "processing_time_ms": 1.0},
+        ],
+        "class_summary": {},
+    }
+
+
+@pytest.mark.asyncio
+async def test_detect_episode_skips_missing_and_failed_frames_and_summarizes_classes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = DetectionService()
+
+    async def get_frame_image(frame_idx: int) -> bytes | None:
+        if frame_idx in {1, 2, 3, 4}:
+            return None
+        if frame_idx == 6:
+            raise RuntimeError("unreadable frame")
+        return f"frame-{frame_idx}".encode()
+
+    async def detect_frame(
+        _image_bytes: bytes,
+        frame_idx: int,
+        confidence: float = 0.25,
+        model_name: str = "yolo11n",
+        labels: list[str] | None = None,
+    ) -> DetectionResult:
+        assert confidence == 0.1
+        assert model_name == "yolo11n"
+        assert labels is None
+        detections = [
+            Detection(
+                class_id=0,
+                class_name="person",
+                confidence=0.8 if frame_idx == 0 else 0.6,
+                bbox=(0.0, 0.0, 1.0, 1.0),
             )
+        ]
+        return DetectionResult(frame=frame_idx, detections=detections, processing_time_ms=2.0)
+
+    monkeypatch.setattr(service, "detect_frame", detect_frame)
+
+    summary = await service.detect_episode(
+        dataset_id="dataset",
+        episode_idx=4,
+        request=DetectionRequest(),
+        get_frame_image=get_frame_image,
+        total_frames=7,
+    )
+
+    assert summary.model_dump() == {
+        "total_frames": 7,
+        "processed_frames": 2,
+        "total_detections": 2,
+        "detections_by_frame": [
+            {
+                "frame": 0,
+                "detections": [
+                    {
+                        "class_id": 0,
+                        "class_name": "person",
+                        "confidence": 0.8,
+                        "bbox": (0.0, 0.0, 1.0, 1.0),
+                    }
+                ],
+                "processing_time_ms": 2.0,
+            },
+            {
+                "frame": 5,
+                "detections": [
+                    {
+                        "class_id": 0,
+                        "class_name": "person",
+                        "confidence": 0.6,
+                        "bbox": (0.0, 0.0, 1.0, 1.0),
+                    }
+                ],
+                "processing_time_ms": 2.0,
+            },
+        ],
+        "class_summary": {
+            "person": {
+                "count": 2,
+                "avg_confidence": pytest.approx(0.7),
+            }
+        },
+    }
+    assert service.get_cached("dataset", 4) is summary
+
+
+@pytest.mark.asyncio
+async def test_detect_episode_surfaces_missing_model_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = DetectionService()
+
+    async def get_frame_image(_frame_idx: int) -> bytes:
+        return b"image"
+
+    async def detect_frame(
+        _image_bytes: bytes,
+        _frame_idx: int,
+        confidence: float = 0.25,
+        model_name: str = "yolo11n",
+        labels: list[str] | None = None,
+    ) -> DetectionResult:
+        raise ImportError("ultralytics unavailable")
+
+    monkeypatch.setattr(service, "detect_frame", detect_frame)
+
+    with pytest.raises(ImportError, match="ultralytics unavailable"):
+        await service.detect_episode(
+            dataset_id="dataset",
+            episode_idx=0,
+            request=DetectionRequest(frames=[0]),
+            get_frame_image=get_frame_image,
+            total_frames=1,
         )
-
-        assert observed_indices == [1, 1, 3, 3]
-        assert [result.frame for result in summary.detections_by_frame] == [1, 3]
-        assert summary.processed_frames == 2
-
-    def test_get_model_logs_sanitized_model_name(self, monkeypatch):
-        service = DetectionService()
-        logged: list[tuple[object, ...]] = []
-
-        class FakeYOLO:
-            def __init__(self, model_path: str):
-                self.model_path = model_path
-
-            def __call__(self, *_args, **_kwargs):
-                return []
-
-        monkeypatch.setattr(
-            "src.api.services.detection_service.logger.info",
-            lambda message, *args: logged.append((message, *args)),
-        )
-        monkeypatch.setitem(__import__("sys").modules, "ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
-
-        service._get_model("yolo11n\r\n")
-
-        assert logged[0] == ("Loading YOLO model: %s", "yolo11n")
+    assert service.get_cached("dataset", 0) is None
 
 
-# ---------------------------------------------------------------------------
-# Synthetic-model tests for full coverage of detection_service branches.
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_cache_can_be_read_and_cleared_through_public_methods() -> None:
+    service = DetectionService()
 
-import io
+    async def unexpected_frame_read(_frame_idx: int) -> bytes:
+        raise AssertionError("No frames should be read")
 
-from PIL import Image as _PILImage
+    summary = await service.detect_episode(
+        dataset_id="dataset",
+        episode_idx=2,
+        request=DetectionRequest(),
+        get_frame_image=unexpected_frame_read,
+        total_frames=0,
+    )
 
-from src.api.models.detection import EpisodeDetectionSummary
-from src.api.services import detection_service as ds_module
-
-
-def _png_bytes() -> bytes:
-    buf = io.BytesIO()
-    _PILImage.new("RGB", (8, 8), color=(0, 0, 0)).save(buf, format="PNG")
-    return buf.getvalue()
-
-
-class _FakeTensor:
-    def __init__(self, value):
-        self._value = value
-
-    def item(self):
-        return self._value
+    assert service.get_cached("dataset", 2) is summary
+    assert service.clear_cache("dataset", 2) is True
+    assert service.get_cached("dataset", 2) is None
+    assert service.clear_cache("dataset", 2) is False
 
 
-class _FakeXYXY:
-    def __init__(self, coords):
-        self._coords = coords
+def test_get_detection_service_returns_singleton(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(detection_service_module, "_detection_service", None)
 
-    def tolist(self):
-        return self._coords
+    first = detection_service_module.get_detection_service()
+    second = detection_service_module.get_detection_service()
 
-
-class _FakeBoxes:
-    def __init__(self, classes, confs, xyxy):
-        self.cls = [_FakeTensor(c) for c in classes]
-        self.conf = [_FakeTensor(c) for c in confs]
-        self.xyxy = [_FakeXYXY(b) for b in xyxy]
-
-    def __len__(self):
-        return len(self.cls)
-
-
-class _FakeResult:
-    def __init__(self, boxes):
-        self.boxes = boxes
-
-
-class _FakeYOLOModel:
-    def __init__(self, results):
-        self._results = results
-
-    def __call__(self, *_a, **_kw):
-        return self._results
-
-
-class TestGetModelExtra:
-    def test_returns_cached_model(self):
-        s = DetectionService()
-        sentinel = _FakeYOLOModel([])
-        s._model = sentinel
-        s._model_name = "yolo11n"
-        assert s._get_model("yolo11n") is sentinel
-
-    def test_raises_on_import_error(self, monkeypatch):
-        import builtins as _bi
-
-        s = DetectionService()
-        real_import = _bi.__import__
-
-        def fake_import(name, *a, **kw):
-            if name == "ultralytics":
-                raise ImportError("no ultralytics")
-            return real_import(name, *a, **kw)
-
-        monkeypatch.setattr(_bi, "__import__", fake_import)
-        with pytest.raises(ImportError):
-            s._get_model("yolo11n")
-
-
-class TestCacheHelpers:
-    def test_get_cached_returns_none_and_value(self):
-        s = DetectionService()
-        assert s.get_cached("d", 0) is None
-        summary = EpisodeDetectionSummary(
-            total_frames=1, processed_frames=0, total_detections=0, detections_by_frame=[], class_summary={}
-        )
-        s._cache[s._cache_key("d", 0)] = summary
-        assert s.get_cached("d", 0) is summary
-
-    def test_clear_cache_hit_and_miss(self):
-        s = DetectionService()
-        assert s.clear_cache("d", 0) is False
-        s._cache[s._cache_key("d", 0)] = EpisodeDetectionSummary(
-            total_frames=1, processed_frames=0, total_detections=0, detections_by_frame=[], class_summary={}
-        )
-        assert s.clear_cache("d", 0) is True
-        assert s.get_cached("d", 0) is None
-
-
-class TestDetectFrame:
-    def test_no_results(self):
-        s = DetectionService()
-        s._model = _FakeYOLOModel([])
-        s._model_name = "yolo11n"
-        out = asyncio.run(s.detect_frame(_png_bytes(), frame_idx=2))
-        assert out.frame == 2
-        assert out.detections == []
-
-    def test_no_boxes(self):
-        s = DetectionService()
-        s._model = _FakeYOLOModel([_FakeResult(boxes=None)])
-        s._model_name = "yolo11n"
-        out = asyncio.run(s.detect_frame(_png_bytes(), frame_idx=0))
-        assert out.detections == []
-
-    def test_with_boxes_and_unknown_class(self):
-        s = DetectionService()
-        boxes = _FakeBoxes(
-            classes=[0, 999],
-            confs=[0.9, 0.5],
-            xyxy=[[0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 2.0, 2.0]],
-        )
-        s._model = _FakeYOLOModel([_FakeResult(boxes=boxes)])
-        s._model_name = "yolo11n"
-        out = asyncio.run(s.detect_frame(_png_bytes(), frame_idx=0))
-        names = [d.class_name for d in out.detections]
-        assert names == ["person", "class_999"]
-        assert out.detections[0].confidence == pytest.approx(0.9)
-
-
-class TestDetectEpisodeFull:
-    def test_full_path_with_skips_exception_and_detections(self):
-        s = DetectionService()
-        boxes = _FakeBoxes(classes=[0], confs=[0.8], xyxy=[[0.0, 0.0, 1.0, 1.0]])
-        s._model = _FakeYOLOModel([_FakeResult(boxes=boxes)])
-        s._model_name = "yolo11n"
-
-        async def get_frame_image(idx: int):
-            if idx in (1, 2, 3, 4):
-                return None
-            if idx == 7:
-                raise RuntimeError("explode")
-            return _png_bytes()
-
-        summary = asyncio.run(
-            s.detect_episode(
-                dataset_id="d",
-                episode_idx=0,
-                request=DetectionRequest(),
-                get_frame_image=get_frame_image,
-                total_frames=8,
-            )
-        )
-        assert summary.total_frames == 8
-        assert summary.processed_frames == 3
-        assert summary.total_detections == 3
-        assert "person" in summary.class_summary
-        assert summary.class_summary["person"].count == 3
-        assert s.get_cached("d", 0) is summary
-
-
-class TestSingleton:
-    def test_get_detection_service_returns_singleton(self, monkeypatch):
-        monkeypatch.setattr(ds_module, "_detection_service", None)
-        a = ds_module.get_detection_service()
-        b = ds_module.get_detection_service()
-        assert a is b
-        assert isinstance(a, DetectionService)
+    assert first is second
+    assert isinstance(first, DetectionService)

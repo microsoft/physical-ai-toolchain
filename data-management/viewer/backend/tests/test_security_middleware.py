@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 
 import pytest
 from fastapi.testclient import TestClient
+
+from src.api.middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
 
 
 @pytest.fixture
@@ -337,9 +338,9 @@ class TestDetectionSecurity:
 class TestSecurityHeadersMiddleware:
     """Unit tests for SecurityHeadersMiddleware ASGI class."""
 
-    def test_adds_headers_to_http_response(self):
-        from src.api.middleware import SecurityHeadersMiddleware
+    pytestmark = pytest.mark.asyncio
 
+    async def test_adds_headers_to_http_response(self):
         captured_headers = []
 
         async def dummy_app(scope, receive, send):
@@ -355,16 +356,18 @@ class TestSecurityHeadersMiddleware:
             if message["type"] == "http.response.start":
                 captured_headers.extend(message["headers"])
 
-        asyncio.run(mw({"type": "http", "path": "/other", "headers": []}, mock_receive, mock_send))
+        await mw({"type": "http", "path": "/other", "headers": []}, mock_receive, mock_send)
 
-        header_names = [h[0] for h in captured_headers]
-        assert b"x-content-type-options" in header_names
-        assert b"x-frame-options" in header_names
-        assert b"content-security-policy" in header_names
+        assert dict(captured_headers) == {
+            b"x-content-type-options": b"nosniff",
+            b"x-frame-options": b"DENY",
+            b"referrer-policy": b"strict-origin-when-cross-origin",
+            b"permissions-policy": b"geolocation=(), microphone=(), camera=()",
+            b"cross-origin-opener-policy": b"same-origin",
+            b"content-security-policy": SecurityHeadersMiddleware.CSP_HEADER[1],
+        }
 
-    def test_no_csp_on_api_paths(self):
-        from src.api.middleware import SecurityHeadersMiddleware
-
+    async def test_no_csp_on_api_paths(self):
         captured_headers = []
 
         async def dummy_app(scope, receive, send):
@@ -379,27 +382,21 @@ class TestSecurityHeadersMiddleware:
             if message["type"] == "http.response.start":
                 captured_headers.extend(message["headers"])
 
-        asyncio.run(mw({"type": "http", "path": "/api/datasets", "headers": []}, mock_receive, mock_send))
+        await mw({"type": "http", "path": "/api/datasets", "headers": []}, mock_receive, mock_send)
 
-        header_names = [h[0] for h in captured_headers]
-        assert b"x-content-type-options" in header_names
-        assert b"content-security-policy" not in header_names
+        assert captured_headers == SecurityHeadersMiddleware.HEADERS
 
-    def test_skips_non_http_scopes(self):
-        from src.api.middleware import SecurityHeadersMiddleware
-
+    async def test_skips_non_http_scopes(self):
         calls = []
 
         async def dummy_app(scope, receive, send):
             calls.append(scope["type"])
 
         mw = SecurityHeadersMiddleware(dummy_app)
-        asyncio.run(mw({"type": "websocket"}, None, None))
+        await mw({"type": "websocket"}, None, None)
         assert calls == ["websocket"]
 
-    def test_skips_docs_paths(self):
-        from src.api.middleware import SecurityHeadersMiddleware
-
+    async def test_skips_docs_paths(self):
         captured_headers = []
 
         async def dummy_app(scope, receive, send):
@@ -413,17 +410,16 @@ class TestSecurityHeadersMiddleware:
 
         for path in ("/docs", "/redoc", "/openapi.json"):
             captured_headers.clear()
-            asyncio.run(mw({"type": "http", "path": path, "headers": []}, None, mock_send))
-            header_names = [h[0] for h in captured_headers]
-            assert b"content-security-policy" not in header_names, f"CSP should not be on {path}"
+            await mw({"type": "http", "path": path, "headers": []}, None, mock_send)
+            assert captured_headers == [], f"security headers should not be added to {path}"
 
 
 class TestContentSizeLimitMiddleware:
     """Unit tests for ContentSizeLimitMiddleware ASGI class."""
 
-    def test_rejects_large_content_length(self):
-        from src.api.middleware import ContentSizeLimitMiddleware
+    pytestmark = pytest.mark.asyncio
 
+    async def test_rejects_large_content_length(self):
         captured = []
 
         async def dummy_app(scope, receive, send):
@@ -438,14 +434,14 @@ class TestContentSizeLimitMiddleware:
             captured.append(message)
 
         scope = {"type": "http", "headers": [(b"content-length", b"200")]}
-        asyncio.run(mw(scope, mock_receive, mock_send))
+        await mw(scope, mock_receive, mock_send)
 
         status = next(m for m in captured if m["type"] == "http.response.start")
         assert status["status"] == 413
+        body = b"".join(m.get("body", b"") for m in captured if m["type"] == "http.response.body")
+        assert body == b'{"detail":"Request body too large"}'
 
-    def test_allows_small_body(self):
-        from src.api.middleware import ContentSizeLimitMiddleware
-
+    async def test_allows_small_body(self):
         app_called = []
 
         async def dummy_app(scope, receive, send):
@@ -457,12 +453,10 @@ class TestContentSizeLimitMiddleware:
             return {"type": "http.request", "body": b"small"}
 
         scope = {"type": "http", "headers": [(b"content-length", b"5")]}
-        asyncio.run(mw(scope, mock_receive, lambda m: None))
-        assert app_called
+        await mw(scope, mock_receive, lambda m: None)
+        assert app_called == [True]
 
-    def test_rejects_streaming_body_exceeding_limit(self):
-        from src.api.middleware import ContentSizeLimitMiddleware
-
+    async def test_rejects_streaming_body_exceeding_limit(self):
         captured = []
         chunk_count = 0
 
@@ -490,27 +484,26 @@ class TestContentSizeLimitMiddleware:
             captured.append(message)
 
         scope = {"type": "http", "headers": []}
-        asyncio.run(mw(scope, mock_receive, mock_send))
+        await mw(scope, mock_receive, mock_send)
 
         status = next(m for m in captured if m["type"] == "http.response.start")
         assert status["status"] == 413
+        body = b"".join(m.get("body", b"") for m in captured if m["type"] == "http.response.body")
+        assert body == b'{"detail":"Request body too large"}'
+        assert chunk_count == 1
 
-    def test_skips_non_http_scopes(self):
-        from src.api.middleware import ContentSizeLimitMiddleware
-
+    async def test_skips_non_http_scopes(self):
         calls = []
 
         async def dummy_app(scope, receive, send):
             calls.append(scope["type"])
 
         mw = ContentSizeLimitMiddleware(dummy_app)
-        asyncio.run(mw({"type": "websocket"}, None, None))
+        await mw({"type": "websocket"}, None, None)
         assert calls == ["websocket"]
 
-    def test_invalid_content_length_passes_through(self):
+    async def test_invalid_content_length_passes_through(self):
         """Non-numeric Content-Length is ignored and the request proceeds."""
-        from src.api.middleware import ContentSizeLimitMiddleware
-
         app_called = []
 
         async def dummy_app(scope, receive, send):
@@ -522,8 +515,8 @@ class TestContentSizeLimitMiddleware:
             return {"type": "http.request", "body": b"ok"}
 
         scope = {"type": "http", "headers": [(b"content-length", b"not-a-number")]}
-        asyncio.run(mw(scope, mock_receive, lambda m: None))
-        assert app_called
+        await mw(scope, mock_receive, lambda m: None)
+        assert app_called == [True]
 
 
 # ============================================================================

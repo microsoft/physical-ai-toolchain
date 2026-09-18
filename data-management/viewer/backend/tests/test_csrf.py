@@ -38,6 +38,8 @@ class TestGenerateCsrfToken:
 
 
 class TestRequireCsrfToken:
+    pytestmark = pytest.mark.asyncio
+
     @pytest.fixture(autouse=True)
     def _enable_csrf(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DATAVIEWER_AUTH_DISABLED", "false")

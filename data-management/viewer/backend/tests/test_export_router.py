@@ -17,14 +17,6 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client() -> TestClient:
-    from src.api.main import app
-
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture
 def dataset_layout(tmp_path: Path) -> tuple[Path, Path, Path]:
     """Create a base dir with a dataset folder and an output folder beneath it."""
     base = tmp_path / "datasets"
@@ -80,19 +72,29 @@ def _patch_exporter(monkeypatch: pytest.MonkeyPatch, exporter_mock: MagicMock) -
 
 
 class TestExportEpisodes:
-    def test_dataset_not_found_returns_404(self, client: TestClient, override_service) -> None:
+    def test_dataset_not_found_returns_404(
+        self,
+        client: TestClient,
+        override_service,
+        tmp_path: Path,
+    ) -> None:
         override_service.get_dataset = AsyncMock(return_value=None)
         resp = client.post(
             "/api/datasets/missing/export",
-            json={"episodeIndices": [0], "outputPath": "/tmp/x", "applyEdits": False},
+            json={"episodeIndices": [0], "outputPath": str(tmp_path / "out"), "applyEdits": False},
         )
         assert resp.status_code == 404
 
-    def test_invalid_dataset_path_returns_400(self, client: TestClient, override_service) -> None:
+    def test_invalid_dataset_path_returns_400(
+        self,
+        client: TestClient,
+        override_service,
+        tmp_path: Path,
+    ) -> None:
         override_service._get_dataset_path = MagicMock(side_effect=ValueError("no path"))
         resp = client.post(
             "/api/datasets/ds-1/export",
-            json={"episodeIndices": [0], "outputPath": "/tmp/x", "applyEdits": False},
+            json={"episodeIndices": [0], "outputPath": str(tmp_path / "out"), "applyEdits": False},
         )
         assert resp.status_code == 400
         assert "valid path" in resp.json()["detail"]
@@ -250,19 +252,29 @@ class TestExportEpisodes:
 
 
 class TestExportEpisodesStream:
-    def test_dataset_not_found_returns_404(self, client: TestClient, override_service) -> None:
+    def test_dataset_not_found_returns_404(
+        self,
+        client: TestClient,
+        override_service,
+        tmp_path: Path,
+    ) -> None:
         override_service.get_dataset = AsyncMock(return_value=None)
         resp = client.post(
             "/api/datasets/missing/export/stream",
-            json={"episodeIndices": [0], "outputPath": "/tmp/x", "applyEdits": False},
+            json={"episodeIndices": [0], "outputPath": str(tmp_path / "out"), "applyEdits": False},
         )
         assert resp.status_code == 404
 
-    def test_invalid_dataset_path_returns_400(self, client: TestClient, override_service) -> None:
+    def test_invalid_dataset_path_returns_400(
+        self,
+        client: TestClient,
+        override_service,
+        tmp_path: Path,
+    ) -> None:
         override_service._get_dataset_path = MagicMock(side_effect=ValueError("no path"))
         resp = client.post(
             "/api/datasets/ds-1/export/stream",
-            json={"episodeIndices": [0], "outputPath": "/tmp/x", "applyEdits": False},
+            json={"episodeIndices": [0], "outputPath": str(tmp_path / "out"), "applyEdits": False},
         )
         assert resp.status_code == 400
 
