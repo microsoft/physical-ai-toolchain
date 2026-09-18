@@ -13,16 +13,20 @@ uv run pytest -vv -s -m e2e tests/e2e/test_e2e_osmo_vla_finetune.py
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 import pytest
 
-from tests.e2e._aml import AzureMLWorkspace
-from tests.e2e._common import log_e2e
+from tests.e2e._aml import AzureMLWorkspace, archive_all_model_versions, resolve_registered_model
+from tests.e2e._common import e2e_name, log_e2e
+from tests.e2e._mlflow import assert_osmo_vla_has_mlflow_tracking, delete_mlflow_experiment, delete_mlflow_run
 from tests.e2e._osmo import (
     _vla_base_model_args,
     assert_workflow_task_succeeded,
     cancel_osmo_workflow,
+    fetch_workflow_task_logs,
     start_task_pod_log_stream,
     submit_osmo_vla_finetune,
     wait_until_osmo_completed,
@@ -30,6 +34,16 @@ from tests.e2e._osmo import (
 )
 
 _VLA_TASK_NAME = "train"
+
+
+def _vla_runtime_provenance(logs: str) -> dict[str, object]:
+    marker = "VLA_RUNTIME_PROVENANCE="
+    for line in logs.splitlines():
+        if marker in line:
+            payload = json.loads(line.partition(marker)[2])
+            if isinstance(payload, dict):
+                return payload
+    raise AssertionError(f"Task logs did not contain {marker}")
 
 
 def test_vla_base_model_forwards_revision(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,6 +90,9 @@ def test_osmo_vla_finetune_e2e(
     repo_root: Path,
 ) -> None:
     log_e2e("Starting OSMO VLA (GR00T) fine-tuning e2e test")
+    register_model_name = e2e_name("vla-e2e-osmo-model")
+    request.addfinalizer(lambda: delete_mlflow_experiment(aml_workspace, register_model_name))
+    request.addfinalizer(lambda: archive_all_model_versions(repo_root, aml_workspace, register_model_name))
     workflow = submit_osmo_vla_finetune(
         repo_root,
         aml_workspace,
@@ -84,6 +101,7 @@ def test_osmo_vla_finetune_e2e(
         save_steps=2,
         batch_size=1,
         dataloader_workers=0,
+        register_model_name=register_model_name,
     )
     request.addfinalizer(lambda: cancel_osmo_workflow(workflow, repo_root))
 
@@ -96,8 +114,20 @@ def test_osmo_vla_finetune_e2e(
     # GR00T provisions its training environment inside the workflow before the short fine-tune starts.
     wait_until_osmo_completed(workflow, repo_root, timeout_minutes=45)
     log_stream.stop()
-    # MLflow mirroring only runs when Azure upload/model registration is enabled; this test omits those side effects.
-    log_e2e("Skipping MLflow assertion because Azure upload/model registration is intentionally disabled")
     log_e2e("Validating OSMO VLA fine-tuning workflow task success")
     assert_workflow_task_succeeded(workflow, repo_root, _VLA_TASK_NAME)
+    provenance = _vla_runtime_provenance(fetch_workflow_task_logs(workflow, repo_root, _VLA_TASK_NAME))
+    assert provenance["isaac_groot_ref"]
+    assert provenance["base_model"]
+    assert provenance["base_model_revision"]
+    assert re.fullmatch(r"[0-9a-f]{40}", str(provenance["isaac_groot_ref"]))
+    assert re.fullmatch(r"[0-9a-f]{40}", str(provenance["base_model_revision"]))
+    runtime_versions = provenance["runtime_versions"]
+    expected_runtime_versions = provenance["expected_runtime_versions"]
+    assert isinstance(runtime_versions, dict)
+    assert runtime_versions == expected_runtime_versions
+    run_id = assert_osmo_vla_has_mlflow_tracking(workflow, aml_workspace)
+    request.addfinalizer(lambda: delete_mlflow_run(aml_workspace, run_id))
+    model = resolve_registered_model(repo_root, aml_workspace, model_name=register_model_name)
+    workflow.handle.resource_identifiers["azureml_model"] = f"{model.name}:{model.version}"
     log_e2e("OSMO VLA fine-tuning e2e test finished successfully")

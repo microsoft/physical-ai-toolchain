@@ -5,7 +5,7 @@ import re
 import subprocess
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 import pytest
 
 from tests.e2e._common import (
+    E2EHandle,
+    command_tuple,
     e2e_name,
     env_value,
     format_command_failure,
@@ -38,9 +40,11 @@ def archive_aml_asset(
     aml_workspace: AzureMLWorkspace,
     asset_type: str,
     name: str,
-    version: str,
+    version: str | None,
 ) -> None:
-    log_e2e(f"Archiving AzureML {asset_type} {name}:{version}")
+    rendered_version = f":{version}" if version is not None else ""
+    log_e2e(f"Archiving AzureML {asset_type} {name}{rendered_version}")
+    version_args = ["--version", version] if version is not None else []
     result = run_command(
         [
             "az",
@@ -49,15 +53,14 @@ def archive_aml_asset(
             "archive",
             "--name",
             name,
-            "--version",
-            version,
+            *version_args,
             *aml_workspace_args(aml_workspace),
         ],
         cwd=repo_root,
     )
     if result.returncode != 0:
         raise AssertionError(
-            f"Failed to archive AzureML {asset_type} {name}:{version}\n\n{format_command_failure(result)}"
+            f"Failed to archive AzureML {asset_type} {name}{rendered_version}\n\n{format_command_failure(result)}"
         )
 
 
@@ -66,6 +69,7 @@ class AzureMLJob:
     name: str
     workspace: AzureMLWorkspace
     experiment_name: str
+    handle: E2EHandle = field(default_factory=E2EHandle)
     is_terminal: bool = False
     terminal_status: str | None = None
 
@@ -176,6 +180,46 @@ def archive_all_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace,
     """Archive every registered version of an AzureML model (best-effort cleanup)."""
     for version in _list_model_versions(repo_root, aml_workspace, model_name):
         archive_aml_asset(repo_root, aml_workspace, "model", model_name, str(version))
+
+
+def archive_aml_data_asset(repo_root: Path, aml_workspace: AzureMLWorkspace, asset_name: str) -> None:
+    archive_aml_asset(repo_root, aml_workspace, "data", asset_name, None)
+
+
+def assert_aml_data_asset_exists(
+    repo_root: Path,
+    aml_workspace: AzureMLWorkspace,
+    *,
+    asset_name: str,
+    expected_path: str,
+) -> None:
+    result = run_command(
+        [
+            "az",
+            "ml",
+            "data",
+            "show",
+            "--name",
+            asset_name,
+            "--label",
+            "latest",
+            *aml_workspace_args(aml_workspace),
+            "-o",
+            "json",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"AzureML data asset {asset_name!r} was not registered\n\n{format_command_failure(result)}"
+        )
+    payload = parse_json_from_output(result.stdout)
+    if not isinstance(payload, Mapping):
+        raise AssertionError(f"AzureML data asset {asset_name!r} payload was not a JSON object")
+    actual_path = payload.get("path")
+    if actual_path != expected_path:
+        raise AssertionError(f"AzureML data asset {asset_name!r} had path {actual_path!r}, expected {expected_path!r}")
+    log_e2e(f"AzureML data asset passed: name={asset_name}, path={actual_path}")
 
 
 def _parse_azureml_job_name(output: str) -> str | None:
@@ -568,7 +612,15 @@ def _aml_job_from_submission(
             f"Unable to parse {description} job name from submission output\n\n{combined_output.strip()}"
         )
     log_e2e(f"Submitted {description} job name={job_name}")
-    return AzureMLJob(name=job_name, workspace=aml_workspace, experiment_name=experiment_name)
+    return AzureMLJob(
+        name=job_name,
+        workspace=aml_workspace,
+        experiment_name=experiment_name,
+        handle=E2EHandle(
+            submission_commands=[command_tuple(result.args)],
+            resource_identifiers={"azureml_job": job_name},
+        ),
+    )
 
 
 def fetch_aml_job_payload(job: AzureMLJob, repo_root: Path) -> dict[str, Any]:
@@ -651,9 +703,39 @@ def wait_until_aml_completed(
     log_e2e(f"AzureML job {job.name} completed successfully")
 
 
+def fetch_aml_job_logs(job: AzureMLJob, repo_root: Path) -> str:
+    with tempfile.TemporaryDirectory(prefix=f"e2e-aml-logs-{job.name}-") as download_root:
+        result = run_command(
+            [
+                "az",
+                "ml",
+                "job",
+                "download",
+                "--name",
+                job.name,
+                "--all",
+                "--download-path",
+                download_root,
+                *aml_workspace_args(job.workspace),
+            ],
+            cwd=repo_root,
+        )
+        if result.returncode != 0:
+            raise AssertionError(f"Unable to fetch AzureML job {job.name!r} logs\n\n{format_command_failure(result)}")
+
+        user_logs = sorted(Path(download_root).rglob("user_logs/*.txt"))
+        logs = "\n".join(path.read_text(encoding="utf-8", errors="replace") for path in user_logs)
+        if not logs:
+            raise AssertionError(f"AzureML job {job.name!r} did not produce downloadable user logs")
+
+    job.handle.logs["azureml_job"] = logs
+    return logs
+
+
 def _mark_job_terminal(job: AzureMLJob, terminal_status: str) -> None:
     job.is_terminal = True
     job.terminal_status = terminal_status
+    job.handle.terminal_state = terminal_status
 
 
 def assert_job_has_checkpoint(job: AzureMLJob) -> None:
