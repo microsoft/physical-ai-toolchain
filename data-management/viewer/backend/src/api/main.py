@@ -23,11 +23,13 @@ from .routes import ai_analysis
 from .storage import RevisionConflictError
 from .swagger_ui import install_responsive_swagger_ui
 
-# Configure logging to show INFO level
+# Match application verbosity to uvicorn's effective CLI level without replacing its handlers.
+_log_level = logging.getLogger("uvicorn.error").level or logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=_log_level,
+    format="%(asctime)s - %(levelname)s %(name)s - %(message)s",
 )
+logging.getLogger("src.api").setLevel(_log_level)
 
 # Suppress verbose Azure SDK HTTP request logging
 logging.getLogger("azure").setLevel(logging.WARNING)

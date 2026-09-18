@@ -70,11 +70,15 @@ packages = ["src"]
 extend = "../../../pyproject.toml"
 
 [tool.ruff.lint]
+extend-select = ["T201"]
 ignore = [
     "B008", # Depends() in function defaults is a FastAPI pattern
     "B905", # zip() without strict= is acceptable
     "B904", # Exception cause via constructor, not raise-from
 ]
+
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/**/*.py" = ["T201"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["backend"]
