@@ -40,10 +40,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+        run: uv sync --group dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Run pytest with coverage
-        run: uv run --with-editable ../../../evaluation/vlm_judge pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=90
+        run: uv run --with-editable ../../../evaluation/vlm_judge python -m pytest -v --cov=src --cov-report=xml:../../../logs/coverage-dataviewer.xml --cov-report=term-missing --cov-fail-under=90
 
       - name: Upload coverage.xml artifact
         if: ${{ inputs.code-coverage && always() }}

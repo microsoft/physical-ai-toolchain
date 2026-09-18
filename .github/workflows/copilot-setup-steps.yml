@@ -107,7 +107,7 @@ jobs:
 
       - name: Presync dataviewer backend Python (dev + analysis + hdf5 + export + auth)
         working-directory: data-management/viewer/backend
-        run: uv sync --extra dev --extra analysis --extra hdf5 --extra export --extra auth
+        run: uv sync --group dev --extra analysis --extra hdf5 --extra export --extra auth
 
       - name: Presync evaluation Python dev group
         working-directory: evaluation
