@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Threat Model — Physical AI Toolchain
 description: STRIDE-based threat model covering infrastructure-as-code components, trust boundaries, and remediation roadmap
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-09-17
 ms.topic: concept
 keywords:
   - threat model
@@ -392,7 +392,7 @@ Goal Structuring Notation (GSN) elements supporting the security posture claim.
 | G3      | Network access is restricted to private endpoints, VPN, and NSG-controlled subnets                                |
 | G4      | Supply chain integrity is maintained through SHA-pinned actions and dependency review                             |
 | E1      | 19 STRIDE threats identified; 7 Accepted with compensating controls, 2 Resolved, 10 Open with remediation roadmap |
-| E2      | OpenSSF Passing ~85%; 25 Silver criteria assessed (5 Met, 5 Delegated, 13 N/A, 1 Gap)                             |
+| E2      | OpenSSF Passing 100%, Silver 100%, and Gold 43% as verified on 2026-09-17                                         |
 | A1      | Deployer follows `docs/operations/security-guide.md` hardening checklist                                          |
 | A2      | OSMO vendor provides auth/rate-limiting enablement path in future releases                                        |
 
@@ -410,8 +410,9 @@ Goal Structuring Notation (GSN) elements supporting the security posture claim.
 
 | Metric                   | Current    | Target      |
 |--------------------------|------------|-------------|
-| OpenSSF Passing badge    | ~85%       | 100%        |
-| OpenSSF Silver badge     | ~30%       | 80%         |
+| OpenSSF Passing badge    | 100%       | 100%        |
+| OpenSSF Silver badge     | 100%       | 100%        |
+| OpenSSF Gold badge       | 43%        | 100%        |
 | SHA-pinned actions       | 95%        | 100%        |
 | STRIDE threats mitigated | 9/19 (47%) | 15/19 (79%) |
 | Critical threats open    | 1          | 0           |

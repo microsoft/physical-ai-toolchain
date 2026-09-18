@@ -9,6 +9,8 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://microsoft.github.io/physical-ai-toolchain/)
 <!-- markdownlint-enable MD013 -->
 
+OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12195) holds the Silver badge: Passing 100%, Silver 100%, and Gold 43% as verified on 2026-09-17.
+
 ## Overview
 
 Physical AI and robotics are moving from headlines and experimentation into real-world industrial deployment. The shift creates practical implications for how human-robot-AI collaboration becomes an operational capability in manufacturing, logistics, healthcare, and autonomous systems. Operationalizing physical intelligence at scale, across fleets and federations of intelligent systems, is a challenge no single OEM or software vendor can deliver alone.
@@ -55,14 +57,14 @@ Adoption is modeled as six graduated tiers (T0-T5). Each tier states the minimum
 
 **Edge infra:** ROS 2 and Docker only. **Cloud infra:** none.
 
-| Tier                | When to use it                                                             | Quick start                                                            |
-|---------------------|----------------------------------------------------------------------------|------------------------------------------------------------------------|
-| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and zero Kubernetes.            | [Tier 0 — Dev recipe](docs/recipes/tier-0-dev/README.md)               |
-| **T1 — Lab**        | One site, a few robots, a shared GPU box. First cloud: storage.            | [Tier 1 — Lab recipe](docs/recipes/tier-1-lab/README.md)               |
-| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.         | [Tier 2 — Pilot recipe](docs/recipes/tier-2-pilot/README.md)           |
-| **T3 — Production** | Advanced. Single-site declarative deployment (local k3s + Flux, no Arc).   | [Tier 3 — Production recipe](docs/recipes/tier-3-production/README.md) |
-| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc as reachability broker.       | [Tier 4 — Scale recipe](docs/recipes/tier-4-scale/README.md)           |
-| **T5 — Operate**    | Roadmap. **Fleet intelligence** for drift detection and retraining.        | [Tier 5 — Operate recipe](docs/recipes/tier-5-operate/README.md)       |
+| Tier                | When to use it                                                           | Quick start                                                            |
+|---------------------|--------------------------------------------------------------------------|------------------------------------------------------------------------|
+| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and zero Kubernetes.          | [Tier 0 — Dev recipe](docs/recipes/tier-0-dev/README.md)               |
+| **T1 — Lab**        | One site, a few robots, a shared GPU box. First cloud: storage.          | [Tier 1 — Lab recipe](docs/recipes/tier-1-lab/README.md)               |
+| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.       | [Tier 2 — Pilot recipe](docs/recipes/tier-2-pilot/README.md)           |
+| **T3 — Production** | Advanced. Single-site declarative deployment (local k3s + Flux, no Arc). | [Tier 3 — Production recipe](docs/recipes/tier-3-production/README.md) |
+| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc as reachability broker.     | [Tier 4 — Scale recipe](docs/recipes/tier-4-scale/README.md)           |
+| **T5 — Operate**    | Roadmap. **Fleet intelligence** for drift detection and retraining.      | [Tier 5 — Operate recipe](docs/recipes/tier-5-operate/README.md)       |
 
 ⭐ default · ✅ recommended production
 
@@ -164,7 +166,7 @@ Agents operate within the same security boundaries, managed identities, and RBAC
 | Question                                         | Answer                                                                                                                                                           |
 |--------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Are agents required?                             | No. Every pipeline stage has a manual CLI and API path. Agents are opt-in.                                                                                       |
-| Can I use agents for some stages but not others? | Yes. Agents are composable: use them for data collection but run training manually, or vice versa.                                                              |
+| Can I use agents for some stages but not others? | Yes. Agents are composable: use them for data collection but run training manually, or vice versa.                                                               |
 | Are agents opinionated or customizable?          | Customizable. Agent behavior is driven by configuration files you control: which stages to automate, compute budgets, approval gates, and evaluation thresholds. |
 | What happens if an agent makes a mistake?        | Agents request human approval before destructive actions (deploying to production, deleting data). All intermediate artifacts are versioned and recoverable.     |
 | How are agent actions audited?                   | Every agent action is logged with the initiating instruction, parameters, and outcome. Logs integrate with Azure Monitor and MLflow.                             |
