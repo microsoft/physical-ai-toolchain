@@ -70,9 +70,7 @@ jobs:
         with:
           node-version-file: data-management/viewer/frontend/.nvmrc
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            data-management/viewer/frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
@@ -99,7 +97,7 @@ jobs:
           Install-Module -Name Pester -RequiredVersion 5.7.1 -Force -SkipPublisherCheck -Scope CurrentUser
           Install-Module -Name powershell-yaml -RequiredVersion 0.4.12 -Force -SkipPublisherCheck -Scope CurrentUser
 
-      - name: Install root Node tooling (markdownlint, cspell, table-formatter, link-check)
+      - name: Install Node dependencies
         run: npm ci
 
       - name: Presync root Python dev group
@@ -112,10 +110,6 @@ jobs:
       - name: Presync evaluation Python dev group
         working-directory: evaluation
         run: uv sync --only-group dev
-
-      - name: Presync dataviewer frontend
-        working-directory: data-management/viewer/frontend
-        run: npm ci
 
       - name: Presync Go modules (terraform e2e)
         working-directory: infrastructure/terraform/e2e
