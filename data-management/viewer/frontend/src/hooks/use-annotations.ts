@@ -145,12 +145,12 @@ export function useSaveCurrentAnnotation() {
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
   const mutation = useSaveAnnotation()
 
-  const save = () => {
+  const save = async (): Promise<void> => {
     if (!currentDataset || currentIndex < 0 || !currentAnnotation) {
       return
     }
 
-    mutation.mutate({
+    await mutation.mutateAsync({
       datasetId: currentDataset.id,
       episodeIndex: currentIndex,
       annotation: currentAnnotation,

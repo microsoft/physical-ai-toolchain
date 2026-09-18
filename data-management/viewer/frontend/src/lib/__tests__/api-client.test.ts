@@ -219,12 +219,39 @@ describe('fetchEpisode', () => {
 })
 
 describe('fetchAnnotations', () => {
-  it('calls GET annotations endpoint', async () => {
-    const data = { schemaVersion: '1.0', annotations: [] }
-    mockFetch.mockResolvedValueOnce(jsonResponse(data))
+  it('converts annotation responses to camelCase', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        schema_version: '1.0',
+        episode_index: 0,
+        dataset_id: 'ds-1',
+        annotations: [
+          {
+            annotator_id: 'u1',
+            language_instruction: {
+              instruction: 'Pick up the cube',
+              subtask_instructions: ['Reach', 'Grasp'],
+            },
+          },
+        ],
+      }),
+    )
 
     const result = await fetchAnnotations('ds-1', 0)
-    expect(result).toEqual(data)
+    expect(result).toEqual({
+      schemaVersion: '1.0',
+      episodeIndex: 0,
+      datasetId: 'ds-1',
+      annotations: [
+        {
+          annotatorId: 'u1',
+          languageInstruction: {
+            instruction: 'Pick up the cube',
+            subtaskInstructions: ['Reach', 'Grasp'],
+          },
+        },
+      ],
+    })
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0/annotations', {
       headers: {},
     })
@@ -232,18 +259,46 @@ describe('fetchAnnotations', () => {
 })
 
 describe('saveAnnotation', () => {
-  it('calls PUT with annotation body', async () => {
-    const annotation = { annotatorId: 'u1' }
-    mockMutationFetch(jsonResponse({ success: true }))
+  it('calls PUT with a snake_case annotation body and converts the response', async () => {
+    const annotation = {
+      annotatorId: 'u1',
+      languageInstruction: {
+        instruction: 'Pick up the cube',
+        subtaskInstructions: ['Reach', 'Grasp'],
+      },
+    }
+    mockMutationFetch(
+      jsonResponse({
+        schema_version: '1.0',
+        episode_index: 0,
+        dataset_id: 'ds-1',
+        annotations: [
+          {
+            annotator_id: 'u1',
+            language_instruction: {
+              instruction: 'Pick up the cube',
+              subtask_instructions: ['Reach', 'Grasp'],
+            },
+          },
+        ],
+      }),
+    )
 
-    await saveAnnotation('ds-1', 0, annotation as never)
+    const result = await saveAnnotation('ds-1', 0, annotation as never)
 
     const apiCall = mockFetch.mock.calls[1]
     expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
     expect(apiCall[1]).toMatchObject({
       method: 'PUT',
-      body: JSON.stringify(annotation),
+      body: JSON.stringify({
+        annotator_id: 'u1',
+        language_instruction: {
+          instruction: 'Pick up the cube',
+          subtask_instructions: ['Reach', 'Grasp'],
+        },
+      }),
     })
+    expect(result.annotations[0]?.languageInstruction?.instruction).toBe('Pick up the cube')
   })
 })
 

@@ -86,6 +86,10 @@ export function snakeToCamel(str: string): string {
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
 }
 
+function camelToSnake(str: string): string {
+  return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+}
+
 export function transformKeys<T>(obj: unknown): T {
   if (Array.isArray(obj)) {
     return obj.map(transformKeys) as T
@@ -95,6 +99,21 @@ export function transformKeys<T>(obj: unknown): T {
       Object.entries(obj as Record<string, unknown>).map(([key, value]) => [
         snakeToCamel(key),
         transformKeys(value),
+      ]),
+    ) as T
+  }
+  return obj as T
+}
+
+function transformKeysToSnake<T>(obj: unknown): T {
+  if (Array.isArray(obj)) {
+    return obj.map(transformKeysToSnake) as T
+  }
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj as Record<string, unknown>).map(([key, value]) => [
+        camelToSnake(key),
+        transformKeysToSnake(value),
       ]),
     ) as T
   }
@@ -284,7 +303,8 @@ export async function fetchAnnotations(
     `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
     { headers: await requestHeaders() },
   )
-  return handleResponse<EpisodeAnnotationFile>(response)
+  const data = await handleResponse<unknown>(response)
+  return transformKeys<EpisodeAnnotationFile>(data)
 }
 
 /**
@@ -303,10 +323,11 @@ export async function saveAnnotation(
         'Content-Type': 'application/json',
         ...(await mutationHeaders()),
       },
-      body: JSON.stringify(annotation),
+      body: JSON.stringify(transformKeysToSnake(annotation)),
     },
   )
-  return handleResponse<EpisodeAnnotationFile>(response)
+  const data = await handleResponse<unknown>(response)
+  return transformKeys<EpisodeAnnotationFile>(data)
 }
 
 /**
