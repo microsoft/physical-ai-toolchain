@@ -7,7 +7,7 @@
         "start": "bash start.sh",
         "start:backend": "bash start.sh --backend",
         "start:frontend": "bash start.sh --frontend",
-        "dev:backend": "cd backend && DATA_DIR=${DATA_DIR:-../../../datasets} DATAVIEWER_AUTH_DISABLED=${DATAVIEWER_AUTH_DISABLED:-true} uv run uvicorn src.api.main:app --reload --port ${BACKEND_PORT:-8000}",
+        "dev:backend": "cd backend && DATA_DIR=${DATA_DIR:-../../../datasets} DATAVIEWER_AUTH_DISABLED=${DATAVIEWER_AUTH_DISABLED:-true} uv run uvicorn src.api.main:app --log-config logging.json --reload --port ${BACKEND_PORT:-8000}",
         "dev:frontend": "cd frontend && npm run dev",
         "build:backend": "cd backend && uv sync --frozen",
         "build:frontend": "cd frontend && npm ci && npm run build",
@@ -15,13 +15,13 @@
         "test:backend": "cd backend && uv run --with-editable ../../../evaluation/vlm_judge pytest",
         "test:frontend": "cd frontend && npm run validate",
         "test": "npm run test:backend && npm run test:frontend",
-        "lint:backend": "cd backend && uv run ruff check src/",
+        "lint:backend": "cd backend && uv run ruff check src/ scripts/",
         "lint:frontend": "cd frontend && npm run lint",
         "lint": "npm run lint:backend && npm run lint:frontend",
-        "validate:backend": "cd backend && uv run ruff check src/ && uv run --with-editable ../../../evaluation/vlm_judge pytest",
+        "validate:backend": "cd backend && uv run ruff check src/ scripts/ && uv run --with-editable ../../../evaluation/vlm_judge pytest",
         "validate:frontend": "cd frontend && npm run validate",
         "validate": "npm run validate:backend && npm run validate:frontend",
-        "validate:fix": "cd backend && uv run ruff check src/ --fix && cd ../frontend && npm run lint:fix && npm run format:fix && npm run validate",
+        "validate:fix": "cd backend && uv run ruff check src/ scripts/ --fix && cd ../frontend && npm run lint:fix && npm run format:fix && npm run validate",
         "clean": "rm -rf frontend/dist frontend/node_modules backend/.venv"
     }
 }
