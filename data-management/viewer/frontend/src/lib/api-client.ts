@@ -95,6 +95,10 @@ export function snakeToCamel(str: string): string {
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
 }
 
+function camelToSnake(str: string): string {
+  return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+}
+
 export function transformKeys<T>(obj: unknown): T {
   if (Array.isArray(obj)) {
     return obj.map(transformKeys) as T
@@ -104,6 +108,21 @@ export function transformKeys<T>(obj: unknown): T {
       Object.entries(obj as Record<string, unknown>).map(([key, value]) => [
         snakeToCamel(key),
         transformKeys(value),
+      ]),
+    ) as T
+  }
+  return obj as T
+}
+
+function transformKeysToSnake<T>(obj: unknown): T {
+  if (Array.isArray(obj)) {
+    return obj.map(transformKeysToSnake) as T
+  }
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj as Record<string, unknown>).map(([key, value]) => [
+        camelToSnake(key),
+        transformKeysToSnake(value),
       ]),
     ) as T
   }
@@ -384,7 +403,7 @@ export async function saveAnnotation(
         'Content-Type': 'application/json',
         ...mutationPreconditionHeaders(precondition),
       },
-      body: JSON.stringify(annotation),
+      body: JSON.stringify(transformKeysToSnake(annotation)),
     },
   )
 }

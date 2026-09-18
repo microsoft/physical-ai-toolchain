@@ -103,7 +103,7 @@ class LocalStorageAdapter(StorageAdapter):
         Returns:
             EpisodeAnnotationFile if annotations exist, None otherwise.
         """
-        file_path = self._get_annotation_path(dataset_id, episode_index)
+        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index)
 
         try:
             if not await aiofiles.os.path.exists(file_path):
@@ -163,8 +163,8 @@ class LocalStorageAdapter(StorageAdapter):
         Raises:
             StorageError: If the save operation fails.
         """
-        file_path = self._get_annotation_path(dataset_id, episode_index)
-        annotations_dir = self._get_annotations_dir(dataset_id)
+        annotations_dir = await asyncio.to_thread(self._get_annotations_dir, dataset_id)
+        file_path = annotations_dir / f"episode_{episode_index:06d}.json"
 
         try:
             async with self._resource_lock(file_path):
@@ -214,7 +214,7 @@ class LocalStorageAdapter(StorageAdapter):
         Returns:
             Sorted list of episode indices that have annotations.
         """
-        annotations_dir = self._get_annotations_dir(dataset_id)
+        annotations_dir = await asyncio.to_thread(self._get_annotations_dir, dataset_id)
 
         try:
             if not await aiofiles.os.path.exists(annotations_dir):
@@ -252,7 +252,7 @@ class LocalStorageAdapter(StorageAdapter):
         Returns:
             True if annotations were deleted, False if they didn't exist.
         """
-        file_path = self._get_annotation_path(dataset_id, episode_index)
+        file_path = await asyncio.to_thread(self._get_annotation_path, dataset_id, episode_index)
 
         try:
             async with self._resource_lock(file_path):

@@ -76,6 +76,8 @@ EOF
 }
 
 cleanup() {
+    local exit_code="${1:-0}"
+
     log_info "Shutting down services..."
 
     if [[ -n "${BACKEND_PID}" ]] && kill -0 "${BACKEND_PID}" 2>/dev/null; then
@@ -91,11 +93,11 @@ cleanup() {
     fi
 
     log_success "All services stopped"
+    exit "${exit_code}"
 }
 
 handle_shutdown() {
-    cleanup
-    exit 0
+    cleanup 0
 }
 
 trap handle_shutdown SIGINT SIGTERM
@@ -131,6 +133,10 @@ wait_for_backend() {
     log_info "Waiting for backend to be ready..."
 
     while [[ ${elapsed} -lt ${HEALTH_TIMEOUT} ]]; do
+        if ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
+            log_error "Backend process exited before becoming healthy"
+            return 1
+        fi
         if curl -sf "${url}" >/dev/null 2>&1; then
             log_success "Backend is healthy"
             return 0
@@ -141,6 +147,18 @@ wait_for_backend() {
 
     log_error "Backend failed to start within ${HEALTH_TIMEOUT} seconds"
     return 1
+}
+
+wait_for_either_service() {
+    while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
+        sleep 1
+    done
+
+    if ! kill -0 "${BACKEND_PID}" 2>/dev/null; then
+        wait "${BACKEND_PID}"
+    else
+        wait "${FRONTEND_PID}"
+    fi
 }
 
 start_backend() {
@@ -250,7 +268,7 @@ start_frontend() {
 
     (
         cd "${FRONTEND_DIR}"
-        npm run dev -- --port "${FRONTEND_PORT}" 2>&1
+        npm run dev -- --port "${FRONTEND_PORT}" --strictPort 2>&1
     ) &
     FRONTEND_PID=$!
 
@@ -332,14 +350,13 @@ main() {
             log_info "Press Ctrl+C to stop all services"
             echo ""
 
-            # Bash 3.2 on macOS does not support wait -n.
-            while kill -0 "${BACKEND_PID}" 2>/dev/null && kill -0 "${FRONTEND_PID}" 2>/dev/null; do
-                sleep 1
-            done
-            cleanup
+            if wait_for_either_service; then
+                cleanup
+            else
+                cleanup $?
+            fi
         else
-            cleanup
-            exit 1
+            cleanup 1
         fi
     fi
 }
