@@ -12,32 +12,32 @@ import {
 
 const annotators: AnnotatorInfo[] = [
   {
-    annotator_id: 'u1',
-    annotator_name: 'Alice Anderson',
-    episodes_annotated: 10,
-    average_rating: 4.5,
-    last_active: '2025-01-01T00:00:00Z',
+    annotatorId: 'u1',
+    annotatorName: 'Alice Anderson',
+    episodesAnnotated: 10,
+    averageRating: 4.5,
+    lastActive: '2025-01-01T00:00:00Z',
   },
   {
-    annotator_id: 'u2',
-    annotator_name: 'Bob Brown',
-    episodes_annotated: 30,
-    average_rating: 4.2,
-    last_active: '2025-01-01T00:00:00Z',
+    annotatorId: 'u2',
+    annotatorName: 'Bob Brown',
+    episodesAnnotated: 30,
+    averageRating: 4.2,
+    lastActive: '2025-01-01T00:00:00Z',
   },
   {
-    annotator_id: 'u3',
-    annotator_name: 'Carol Clark',
-    episodes_annotated: 20,
-    average_rating: 4.0,
-    last_active: '2025-01-01T00:00:00Z',
+    annotatorId: 'u3',
+    annotatorName: 'Carol Clark',
+    episodesAnnotated: 20,
+    averageRating: 4.0,
+    lastActive: '2025-01-01T00:00:00Z',
   },
   {
-    annotator_id: 'u4',
-    annotator_name: 'Dave',
-    episodes_annotated: 5,
-    average_rating: 3.8,
-    last_active: '2025-01-01T00:00:00Z',
+    annotatorId: 'u4',
+    annotatorName: 'Dave',
+    episodesAnnotated: 5,
+    averageRating: 3.8,
+    lastActive: '2025-01-01T00:00:00Z',
   },
 ]
 
@@ -47,7 +47,7 @@ describe('AnnotatorLeaderboard', () => {
     expect(screen.getByText('No annotator activity yet')).toBeInTheDocument()
   })
 
-  it('sorts annotators by episodes_annotated descending', () => {
+  it('sorts annotators by episodes annotated descending', () => {
     render(<AnnotatorLeaderboard annotators={annotators} />)
     const names = screen
       .getAllByText(/^(Alice Anderson|Bob Brown|Carol Clark|Dave)$/)

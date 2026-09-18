@@ -1,4 +1,5 @@
-import { handleResponse, mutationHeaders, requestHeaders } from '@/lib/api-client'
+import { apiFetch, apiRequest, handleResponse, transformKeys } from '@/lib/api-client'
+import { recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import type { EpisodeEditOperations, ExportProgress, ExportResult } from '@/types'
 
 export interface ExportPreviewStats {
@@ -18,7 +19,17 @@ export interface ExportRequestWithEdits {
   edits?: Record<number, EpisodeEditOperations>
 }
 
-const API_BASE = '/api'
+function isExportProgress(
+  payload: Record<string, unknown>,
+): payload is Record<string, unknown> & ExportProgress {
+  return typeof payload.percentage === 'number'
+}
+
+function isExportResult(
+  payload: Record<string, unknown>,
+): payload is Record<string, unknown> & ExportResult {
+  return typeof payload.success === 'boolean'
+}
 
 /**
  * Start a synchronous export operation
@@ -27,15 +38,11 @@ export async function exportEpisodes(
   datasetId: string,
   request: ExportRequestWithEdits,
 ): Promise<ExportResult> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}/export`, {
+  return apiRequest<ExportResult>(`/datasets/${datasetId}/export`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(await mutationHeaders()),
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   })
-  return handleResponse<ExportResult>(response)
 }
 
 /**
@@ -51,11 +58,9 @@ export async function getExportPreview(
   if (removedFrames?.length) {
     params.set('removed_frames', removedFrames.join(','))
   }
-  const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/export/preview?${params.toString()}`,
-    { headers: await requestHeaders() },
+  return apiRequest<ExportPreviewStats>(
+    `/datasets/${datasetId}/export/preview?${params.toString()}`,
   )
-  return handleResponse<ExportPreviewStats>(response)
 }
 
 /**
@@ -69,25 +74,22 @@ export function createExportStream(
   onComplete: (result: ExportResult) => void,
   onError: (error: string) => void,
 ): () => void {
-  const url = `${API_BASE}/datasets/${datasetId}/export/stream`
-
   const abortController = new AbortController()
 
   async function startStream() {
     try {
-      const response = await fetch(url, {
+      const response = await apiFetch(`/datasets/${datasetId}/export/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'text/event-stream',
-          ...(await mutationHeaders()),
         },
         body: JSON.stringify(request),
         signal: abortController.signal,
       })
 
       if (!response.ok) {
-        throw new Error(`Export failed: ${response.statusText}`)
+        await handleResponse(response)
       }
 
       const reader = response.body?.getReader()
@@ -108,23 +110,42 @@ export function createExportStream(
 
         let currentEventType = 'message'
         for (const line of lines) {
+          if (line.trim() === '') {
+            currentEventType = 'message'
+            continue
+          }
           if (line.startsWith('event: ')) {
             currentEventType = line.slice(7).trim()
             continue
           }
           if (line.startsWith('data: ')) {
             const data = line.slice(6)
+            let parsed: Record<string, unknown>
             try {
-              const parsed = JSON.parse(data)
-              if (currentEventType === 'error') {
-                onError(parsed.message ?? 'Export failed')
-              } else if ('percentage' in parsed) {
-                onProgress(parsed as ExportProgress)
-              } else if ('success' in parsed) {
-                onComplete(parsed as ExportResult)
+              parsed = transformKeys<Record<string, unknown>>(JSON.parse(data))
+            } catch (error) {
+              const diagnostic = {
+                eventType: currentEventType,
+                message: error instanceof Error ? error.message : 'Invalid JSON payload',
+                payload: data.slice(0, 200),
               }
-            } catch {
-              // Skip malformed JSON
+              recordDiagnosticEvent('export', 'stream-parse-error', diagnostic)
+              console.warn('Failed to parse export stream event', diagnostic)
+              continue
+            }
+
+            if (currentEventType === 'error') {
+              const message =
+                typeof parsed.error === 'string'
+                  ? parsed.error
+                  : typeof parsed.message === 'string'
+                    ? parsed.message
+                    : 'Export failed'
+              onError(message)
+            } else if (isExportProgress(parsed)) {
+              onProgress(parsed)
+            } else if (isExportResult(parsed)) {
+              onComplete(parsed)
             }
           }
         }
