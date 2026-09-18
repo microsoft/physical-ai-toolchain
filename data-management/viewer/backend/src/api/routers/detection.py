@@ -63,11 +63,7 @@ async def run_detection(
         _sanitize_for_log(dataset_id),
         int(episode_idx),
         _sanitize_for_log(request_body.model),
-        float(
-            request_body.confidence
-            if request_body.confidence is not None
-            else detection_service.default_confidence
-        ),
+        float(request_body.confidence if request_body.confidence is not None else detection_service.default_confidence),
     )
 
     # Validate episode exists
