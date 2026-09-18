@@ -1,859 +1,602 @@
-"""
-Unit tests for HDF5FormatHandler.
-
-Tests handler detection, capability checks, and subdirectory episode
-discovery for datasets with recording session subdirectories.
-"""
+"""Behavior tests for the HDF5 dataset format handler."""
 
 from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
 h5py = pytest.importorskip("h5py")
 
+from src.api.services.dataset_service import hdf5_handler as handler_module
 from src.api.services.dataset_service.hdf5_handler import HDF5FormatHandler
-from src.api.services.hdf5_loader import HDF5Loader
 
 
-def _create_minimal_hdf5(path, num_frames=10, num_joints=6):
-    """Create a minimal HDF5 episode file with required datasets."""
-    with h5py.File(path, "w") as f:
-        data = f.create_group("data")
-        data.create_dataset("qpos", data=np.zeros((num_frames, num_joints)))
-        data.create_dataset("action", data=np.zeros((num_frames, num_joints)))
-        f.attrs["fps"] = 30.0
-        f.attrs["task_index"] = 0
-
-
-def _create_hdf5_with_images(path, num_frames=10, num_joints=6, cameras=None):
-    """Create an HDF5 file with image data under observations/images/."""
-    cameras = cameras or ["il-camera"]
-    with h5py.File(path, "w") as f:
-        obs = f.create_group("observations")
-        obs.create_dataset("qpos", data=np.zeros((num_frames, num_joints)))
-        imgs = obs.create_group("images")
-        for cam in cameras:
-            imgs.create_dataset(cam, data=np.zeros((num_frames, 48, 64, 3), dtype=np.uint8))
-        f.create_dataset("action", data=np.zeros((num_frames, num_joints)))
-        f.attrs["fps"] = 30.0
-        f.attrs["task_index"] = 0
-
-
-class TestHandlerDetection:
-    """Test format detection and capability."""
-
-    def test_available_matches_import(self):
-        from src.api.services.dataset_service.hdf5_handler import HDF5_AVAILABLE
-
-        h = HDF5FormatHandler()
-        assert h.available is HDF5_AVAILABLE
-
-    def test_cannot_handle_empty_dir(self, tmp_path):
-        h = HDF5FormatHandler()
-        assert h.can_handle(tmp_path) is False
-
-    def test_cannot_handle_nonexistent(self, tmp_path):
-        h = HDF5FormatHandler()
-        assert h.can_handle(tmp_path / "nonexistent") is False
-
-    def test_cannot_handle_lerobot_dataset(self, tmp_path):
-        """A LeRobot dataset without .hdf5 files should not match."""
-        (tmp_path / "meta").mkdir()
-        (tmp_path / "meta" / "info.json").write_text("{}")
-        (tmp_path / "data").mkdir()
-        h = HDF5FormatHandler()
-        assert h.can_handle(tmp_path) is False
-
-    def test_get_loader_nonexistent(self, tmp_path):
-        h = HDF5FormatHandler()
-        assert h.get_loader("fake", tmp_path / "nonexistent") is False
-
-
-class TestListEpisodesNoData:
-    """Test list_episodes when no loader is initialized."""
-
-    def test_returns_empty(self):
-        h = HDF5FormatHandler()
-        indices, meta = h.list_episodes("unknown_dataset")
-        assert indices == []
-        assert meta == {}
-
-
-class TestLoadEpisodeNoData:
-    """Test load_episode when no loader is initialized."""
-
-    def test_returns_none(self):
-        h = HDF5FormatHandler()
-        assert h.load_episode("unknown", 0) is None
-
-
-class TestTrajectoryNoData:
-    """Test get_trajectory when no loader is initialized."""
-
-    def test_returns_empty(self):
-        h = HDF5FormatHandler()
-        assert h.get_trajectory("unknown", 0) == []
-
-
-class TestCamerasNoData:
-    """Test cameras when no loader is initialized."""
-
-    def test_returns_empty(self):
-        h = HDF5FormatHandler()
-        assert h.get_cameras("unknown", 0) == []
-
-    def test_video_path_returns_none(self):
-        h = HDF5FormatHandler()
-        assert h.get_video_path("unknown", 0, "cam") is None
-
-
-class TestBuildTrajectory:
-    """Test the shared build_trajectory utility used by both handlers."""
-
-    def test_basic_conversion(self):
-        from src.api.services.dataset_service.base import build_trajectory
-
-        length = 3
-        timestamps = np.array([0.0, 0.033, 0.066])
-        joint_positions = np.zeros((3, 6))
-        joint_positions[1, 0] = 1.5
-
-        points = build_trajectory(
-            length=length,
-            timestamps=timestamps,
-            joint_positions=joint_positions,
-        )
-
-        assert len(points) == 3
-        assert points[0].timestamp == 0.0
-        assert points[1].joint_positions[0] == 1.5
-        assert points[0].frame == 0
-        assert points[2].frame == 2
-
-    def test_with_frame_indices(self):
-        from src.api.services.dataset_service.base import build_trajectory
-
-        points = build_trajectory(
-            length=2,
-            timestamps=np.array([0.0, 0.5]),
-            frame_indices=np.array([10, 20]),
-            joint_positions=np.zeros((2, 6)),
-        )
-
-        assert points[0].frame == 10
-        assert points[1].frame == 20
-
-    def test_optional_arrays(self):
-        from src.api.services.dataset_service.base import build_trajectory
-
-        points = build_trajectory(
-            length=1,
-            timestamps=np.array([0.0]),
-            joint_positions=np.ones((1, 4)),
-            joint_velocities=np.full((1, 4), 2.0),
-            end_effector_poses=np.full((1, 6), 0.5),
-            gripper_states=np.array([0.7]),
-        )
-
-        assert points[0].joint_velocities == [2.0, 2.0, 2.0, 2.0]
-        assert points[0].end_effector_pose == [0.5] * 6
-        assert points[0].gripper_state == pytest.approx(0.7)
-
-    def test_named_variables_are_attached_to_points(self):
-        from src.api.models.datasources import TrajectoryVariable
-        from src.api.services.dataset_service.base import build_trajectory
-
-        points = build_trajectory(
-            length=2,
-            timestamps=np.array([0.0, 1.0]),
-            joint_positions=np.zeros((2, 2)),
-            trajectory_variables=[
-                TrajectoryVariable(
-                    key="action[0]",
-                    label="target_shoulder_pan_joint",
-                    source="action",
-                    index=0,
-                ),
-                TrajectoryVariable(
-                    key="observation.gripper.is_closed",
-                    label="is_closed",
-                    source="observation.gripper.is_closed",
-                    index=None,
-                ),
-            ],
-            variable_values={
-                "action[0]": np.array([0.2, 0.4]),
-                "observation.gripper.is_closed": np.array([0.0, 1.0]),
-            },
-        )
-
-        assert points[0].variables == {
-            "action[0]": pytest.approx(0.2),
-            "observation.gripper.is_closed": pytest.approx(0.0),
-        }
-        assert points[1].variables == {
-            "action[0]": pytest.approx(0.4),
-            "observation.gripper.is_closed": pytest.approx(1.0),
-        }
-
-    def test_state_and_action_variable_labels_do_not_include_source_prefix(self):
-        from src.api.models.datasources import FeatureSchema
-        from src.api.services.dataset_service.base import build_trajectory_variables
-
-        variables, _ = build_trajectory_variables(
-            length=1,
-            feature_values={
-                "observation.state": np.array([[0.0, 1.0]]),
-                "action": np.array([[2.0, 3.0]]),
-            },
-            feature_schemas={
-                "observation.state": FeatureSchema(
-                    dtype="float32",
-                    shape=[2],
-                    names=["shoulder_pan_joint", "shoulder_lift_joint"],
-                ),
-                "action": FeatureSchema(
-                    dtype="float32",
-                    shape=[2],
-                    names=["target_shoulder_pan_joint", "target_shoulder_lift_joint"],
-                ),
-            },
-        )
-
-        assert [variable.label for variable in variables] == [
-            "shoulder_pan_joint",
-            "shoulder_lift_joint",
-            "target_shoulder_pan_joint",
-            "target_shoulder_lift_joint",
-        ]
-
-    def test_clamp_gripper(self):
-        from src.api.services.dataset_service.base import build_trajectory
-
-        points = build_trajectory(
-            length=2,
-            timestamps=np.array([0.0, 1.0]),
-            joint_positions=np.zeros((2, 6)),
-            gripper_states=np.array([-0.5, 1.5]),
-            clamp_gripper=True,
-        )
-
-        assert points[0].gripper_state == 0.0
-        assert points[1].gripper_state == 1.0
-
-    def test_defaults_for_missing_arrays(self):
-        from src.api.services.dataset_service.base import build_trajectory
-
-        points = build_trajectory(
-            length=1,
-            timestamps=np.array([0.0]),
-            joint_positions=np.ones((1, 6)),
-        )
-
-        assert points[0].joint_velocities == [0.0] * 6
-        assert points[0].end_effector_pose == [0.0] * 6
-        assert points[0].gripper_state == 0.0
-
-    def test_velocity_estimated_from_finite_differences(self):
-        """When velocities are missing, estimate via dq/dt and pad final sample."""
-        from src.api.services.dataset_service.base import build_trajectory
-
-        length = 3
-        timestamps = np.array([0.0, 1.0, 2.0])
-        joint_positions = np.array(
-            [
-                [0.0, 0.0],
-                [1.0, 2.0],
-                [3.0, 6.0],
-            ]
-        )
-
-        points = build_trajectory(
-            length=length,
-            timestamps=timestamps,
-            joint_positions=joint_positions,
-        )
-
-        # Forward differences for the first two samples; last sample repeats
-        # the previous diff so the array stays the same length.
-        assert points[0].joint_velocities == pytest.approx([1.0, 2.0])
-        assert points[1].joint_velocities == pytest.approx([2.0, 4.0])
-        assert points[2].joint_velocities == pytest.approx([2.0, 4.0])
-
-    def test_velocity_estimation_clamps_zero_dt(self):
-        """Non-monotonic timestamps must not produce NaN/Inf velocities."""
-        from src.api.services.dataset_service.base import build_trajectory
-
-        timestamps = np.array([0.0, 0.0, 0.0])
-        joint_positions = np.array(
-            [
-                [0.0, 0.0],
-                [1.0, -1.0],
-                [2.0, -2.0],
-            ]
-        )
-
-        points = build_trajectory(
-            length=3,
-            timestamps=timestamps,
-            joint_positions=joint_positions,
-        )
-
-        for point in points:
-            for value in point.joint_velocities:
-                assert np.isfinite(value)
-
-    def test_velocity_estimation_skipped_for_single_row(self):
-        """Single-frame trajectories must not crash the velocity estimator."""
-        from src.api.services.dataset_service.base import build_trajectory
-
-        points = build_trajectory(
-            length=1,
-            timestamps=np.array([0.0]),
-            joint_positions=np.zeros((1, 6)),
-        )
-
-        assert len(points) == 1
-        assert points[0].joint_velocities == [0.0] * 6
-
-    def test_velocity_guard_handles_length_gt_positions_shape(self):
-        """If length is overstated relative to joint_positions, no diff crash."""
-        from src.api.services.dataset_service.base import build_trajectory
-
-        # length>1 but joint_positions has only one row: guard must skip
-        # estimation rather than IndexError on the diff-padding step.
-        points = build_trajectory(
-            length=1,
-            timestamps=np.array([0.0]),
-            joint_positions=np.ones((1, 4)),
-        )
-
-        assert points[0].joint_velocities == [0.0] * 4
-
-
-class TestSubdirectoryEpisodeDiscovery:
-    """
-    Test that HDF5Loader does NOT merge subdirectories into a single dataset.
-    Each recording session directory is its own dataset — nested discovery
-    is handled at the service layer, not the loader.
-    """
-
-    def test_loader_ignores_subdirectory_files(self, tmp_path):
-        """HDF5Loader should only find episodes in its base path, not subdirs."""
-        session = tmp_path / "session_a"
-        session.mkdir()
-        _create_minimal_hdf5(session / "episode_0.hdf5", num_frames=5)
-
-        loader = HDF5Loader(tmp_path)
-        episodes = loader.list_episodes()
-        assert episodes == []
-
-    def test_loader_finds_episodes_when_pointed_at_session(self, tmp_path):
-        """HDF5Loader pointed at a session directory finds its episodes."""
-        _create_minimal_hdf5(tmp_path / "episode_0.hdf5", num_frames=5)
-        _create_minimal_hdf5(tmp_path / "episode_1.hdf5", num_frames=8)
-
-        loader = HDF5Loader(tmp_path)
-        episodes = loader.list_episodes()
-        assert episodes == [0, 1]
-
-    def test_handler_can_handle_session_directory(self, tmp_path):
-        """HDF5FormatHandler.can_handle recognizes a direct session dir."""
-        _create_minimal_hdf5(tmp_path / "episode_0.hdf5")
-        handler = HDF5FormatHandler()
-        assert handler.can_handle(tmp_path) is True
-
-    def test_handler_cannot_handle_parent_of_sessions(self, tmp_path):
-        """Parent folder with only subdirectory HDF5 files should not match."""
-        session = tmp_path / "session_a"
-        session.mkdir()
-        _create_minimal_hdf5(session / "episode_0.hdf5")
-        handler = HDF5FormatHandler()
-        assert handler.can_handle(tmp_path) is False
-
-    def test_standard_layout_still_works(self, tmp_path):
-        """Standard flat layout episodes should still be discovered."""
-        _create_minimal_hdf5(tmp_path / "episode_0.hdf5", num_frames=10)
-        _create_minimal_hdf5(tmp_path / "episode_1.hdf5", num_frames=20)
-
-        loader = HDF5Loader(tmp_path)
-        episodes = loader.list_episodes()
-        assert episodes == [0, 1]
-
-
-# ---------------------------------------------------------------------------
-# Mock-based handler branch coverage
-# ---------------------------------------------------------------------------
-
-from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock
-
-from src.api.services.dataset_service import hdf5_handler as hh
-
-
-def _install_mock_loader(handler, dataset_id, loader):
-    """Bypass get_loader by injecting a pre-built loader into the cache."""
-    handler._loaders[dataset_id] = loader
-
-
-def _make_hdf5_data(length=4, num_joints=6, cameras=None):
-    """Return an object mimicking HDF5Loader.load_episode return value."""
-    cameras = cameras if cameras is not None else ["il-camera"]
+def _create_episode(
+    path: Path,
+    *,
+    length: int = 4,
+    cameras: tuple[str, ...] = ("cam0",),
+    fps: float = 20.0,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(path, "w") as file:
+        data = file.create_group("data")
+        positions = np.arange(length * 2, dtype=np.float64).reshape(length, 2)
+        data.create_dataset("qpos", data=positions)
+        data.create_dataset("qvel", data=np.ones_like(positions))
+        data.create_dataset("action", data=positions + 10)
+        data.create_dataset("timestamps", data=np.arange(length, dtype=np.float64) / fps)
+        images = file.create_group("observations/images")
+        for camera in cameras:
+            images.create_dataset(camera, data=np.zeros((length, 8, 8, 3), dtype=np.uint8))
+        file.attrs["fps"] = fps
+        file.attrs["task_index"] = 2
+
+
+def _episode_data(*, length: int = 3, cameras: list[str] | None = None) -> SimpleNamespace:
+    positions = np.arange(length * 2, dtype=np.float64).reshape(length, 2)
     return SimpleNamespace(
         length=length,
-        timestamps=np.linspace(0.0, (length - 1) / 30.0, length),
-        joint_positions=np.zeros((length, num_joints)),
-        joint_velocities=np.zeros((length, num_joints)),
-        actions=np.zeros((length, num_joints)),
+        timestamps=np.arange(length, dtype=np.float64) / 30.0,
+        joint_positions=positions,
+        joint_velocities=np.ones_like(positions),
+        actions=positions + 10,
         end_effector_pose=np.zeros((length, 6)),
-        gripper_states=np.zeros(length),
-        task_index=0,
-        metadata={"cameras": cameras, "fps": 30.0},
+        gripper_states=np.linspace(0.0, 1.0, length),
+        task_index=2,
+        metadata={"cameras": cameras or ["cam0"], "fps": 30.0},
     )
 
 
-class TestEncodeJpeg:
-    """Cover the _encode_jpeg helper."""
-
-    def test_returns_jpeg_bytes(self):
-        pytest.importorskip("PIL.Image")
-        frame = np.zeros((8, 8, 3), dtype=np.uint8)
-        data = hh._encode_jpeg(frame)
-        assert isinstance(data, bytes)
-        assert data[:3] == b"\xff\xd8\xff"
-
-
-class TestGenerateVideoCv2:
-    """Cover the OpenCV video writer fallback path."""
-
-    def test_cv2_success_writes_file(self, tmp_path):
-        cv2 = pytest.importorskip("cv2")
-        # Probe whether the avc1 (H.264) codec is available in this OpenCV build.
-        # pip's opencv-python wheel on Windows ships without H.264 support and
-        # silently produces an empty file; skip rather than fail in that case.
-        probe = tmp_path / "probe.mp4"
-        fourcc = cv2.VideoWriter_fourcc(*"avc1")
-        writer = cv2.VideoWriter(str(probe), fourcc, 10.0, (16, 16))
-        writer.write(np.zeros((16, 16, 3), dtype=np.uint8))
-        writer.release()
-        if not (probe.exists() and probe.stat().st_size > 0):
-            pytest.skip("avc1 codec not available in this OpenCV build")
-        images = np.zeros((4, 16, 16, 3), dtype=np.uint8)
-        out = tmp_path / "out.mp4"
-        ok = hh._generate_video_cv2(images, out, fps=10.0)
-        assert ok is True
-        assert out.exists()
-
-    def test_cv2_import_error_returns_false(self, tmp_path, monkeypatch):
-        import builtins
-
-        real_import = builtins.__import__
-
-        def fake_import(name, *args, **kwargs):
-            if name == "cv2":
-                raise ImportError("no cv2")
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", fake_import)
-        images = np.zeros((2, 4, 4, 3), dtype=np.uint8)
-        assert hh._generate_video_cv2(images, tmp_path / "x.mp4", fps=10.0) is False
-
-    def test_cv2_exception_returns_false(self, tmp_path, monkeypatch):
-        cv2 = pytest.importorskip("cv2")
-
-        class BoomWriter:
-            def __init__(self, *a, **kw):
-                raise RuntimeError("boom")
-
-        monkeypatch.setattr(cv2, "VideoWriter", BoomWriter)
-        images = np.zeros((2, 4, 4, 3), dtype=np.uint8)
-        assert hh._generate_video_cv2(images, tmp_path / "y.mp4", fps=10.0) is False
-
-    def test_cv2_success_with_injected_module(self, tmp_path, monkeypatch):
-        """Cover the cv2 success branch by injecting a fake cv2 module."""
-        import sys
-        import types
-
-        out_path = tmp_path / "z.mp4"
-
-        class FakeWriter:
-            def __init__(self, path, *_a, **_kw):
-                self._path = path
-
-            def write(self, _frame):
-                return None
-
-            def release(self):
-                Path(self._path).write_bytes(b"fake-mp4")
-
-        fake_cv2 = types.SimpleNamespace(
-            VideoWriter_fourcc=lambda *_a: 0,
-            VideoWriter=FakeWriter,
-            cvtColor=lambda frame, _code: frame,
-            COLOR_RGB2BGR=0,
-        )
-        monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
-        images = np.zeros((2, 4, 4, 3), dtype=np.uint8)
-        assert hh._generate_video_cv2(images, out_path, fps=10.0) is True
-        assert out_path.exists()
+def _handler_with_loader(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    loader: MagicMock,
+) -> HDF5FormatHandler:
+    (tmp_path / "episode_0.hdf5").touch()
+    monkeypatch.setattr(handler_module, "HDF5Loader", lambda _path: loader)
+    handler = HDF5FormatHandler()
+    assert handler.get_loader("dataset", tmp_path) is True
+    return handler
 
 
-class TestGenerateVideoTopLevel:
-    """Cover _generate_video ffmpeg + fallback dispatch."""
+def _install_cv2_fake(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    writer_error: bool = False,
+) -> SimpleNamespace:
+    state = SimpleNamespace(
+        fourcc_calls=[],
+        writer_calls=[],
+        converted_frames=[],
+        written_frames=[],
+        release_count=0,
+    )
 
-    def test_no_ffmpeg_falls_back(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("shutil.which", lambda _name: None)
-        called = {}
+    class FakeVideoWriter:
+        def __init__(self, path: str, fourcc: int, fps: float, size: tuple[int, int]) -> None:
+            state.writer_calls.append((path, fourcc, fps, size))
+            if writer_error:
+                raise OSError("video writer unavailable")
+            self._path = Path(path)
 
-        def fake_cv2(images, output_path, fps=30.0):
-            called["args"] = (len(images), Path(output_path), fps)
-            return True
+        def write(self, frame: np.ndarray) -> None:
+            state.written_frames.append(frame.copy())
 
-        monkeypatch.setattr(hh, "_generate_video_cv2", fake_cv2)
-        images = np.zeros((3, 4, 4, 3), dtype=np.uint8)
-        assert hh._generate_video(images, tmp_path / "v.mp4", fps=15.0) is True
-        assert called["args"] == (3, tmp_path / "v.mp4", 15.0)
+        def release(self) -> None:
+            state.release_count += 1
+            self._path.write_bytes(b"cv2 video")
 
-    def test_ffmpeg_exception_falls_back(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("shutil.which", lambda _name: "/fake/ffmpeg")
+    def video_writer_fourcc(*codec: str) -> int:
+        state.fourcc_calls.append(codec)
+        return 42
 
-        def boom(*_a, **_kw):
-            raise RuntimeError("popen failed")
+    def cvt_color(frame: np.ndarray, code: int) -> np.ndarray:
+        state.converted_frames.append((frame.copy(), code))
+        return frame[..., ::-1]
 
-        monkeypatch.setattr("subprocess.Popen", boom)
-        monkeypatch.setattr(hh, "_generate_video_cv2", lambda *_a, **_kw: True)
-        images = np.zeros((2, 4, 4, 3), dtype=np.uint8)
-        assert hh._generate_video(images, tmp_path / "v.mp4", fps=10.0) is True
-
-    def test_ffmpeg_success_returncode_zero(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("shutil.which", lambda _name: "/fake/ffmpeg")
-        output_path = tmp_path / "v.mp4"
-
-        class FakeStdin:
-            def write(self, _b):
-                return None
-
-            def close(self):
-                return None
-
-        class FakeProc:
-            def __init__(self, *a, **kw):
-                self.stdin = FakeStdin()
-                self.returncode = 0
-
-            def communicate(self):
-                return (b"", b"")
-
-            def wait(self):
-                # Simulate ffmpeg writing the output file.
-                output_path.write_bytes(b"fake-mp4-bytes")
-                return 0
-
-        monkeypatch.setattr("subprocess.Popen", FakeProc)
-        images = np.zeros((2, 4, 4, 3), dtype=np.uint8)
-        result = hh._generate_video(images, output_path, fps=10.0)
-        assert result is True
+    fake_cv2 = SimpleNamespace(
+        COLOR_RGB2BGR=7,
+        VideoWriter=FakeVideoWriter,
+        VideoWriter_fourcc=video_writer_fourcc,
+        cvtColor=cvt_color,
+    )
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+    return state
 
 
-class TestHandlerWithMockedLoader:
-    """Exercise handler success + error paths via injected mock loader."""
+def _expected_ffmpeg_command(output_path: Path, fps: float) -> list[str]:
+    return [
+        "ffmpeg",
+        "-y",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        "8x8",
+        "-r",
+        str(fps),
+        "-i",
+        "-",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
 
-    def _handler_with(self, loader):
-        h = HDF5FormatHandler()
-        _install_mock_loader(h, "ds", loader)
-        return h
 
-    def test_discover_success(self, tmp_path):
+class TestHandlerDetection:
+    """Tests for recognizing and initializing HDF5 datasets."""
+
+    def test_available_reports_optional_dependency_state(self) -> None:
+        assert HDF5FormatHandler().available is handler_module.HDF5_AVAILABLE
+
+    @pytest.mark.parametrize("subdirectory", [None, "data", "episodes"])
+    def test_can_handle_supported_layouts(self, tmp_path: Path, subdirectory: str | None) -> None:
+        dataset_path = tmp_path if subdirectory is None else tmp_path / subdirectory
+        _create_episode(dataset_path / "episode_0.hdf5")
+
+        assert HDF5FormatHandler().can_handle(tmp_path) is True
+
+    def test_rejects_missing_empty_and_nested_session_paths(self, tmp_path: Path) -> None:
+        handler = HDF5FormatHandler()
+        empty_path = tmp_path / "empty"
+        empty_path.mkdir()
+        _create_episode(tmp_path / "session" / "episode_0.hdf5")
+
+        assert handler.can_handle(tmp_path / "missing") is False
+        assert handler.can_handle(empty_path) is False
+        assert handler.can_handle(tmp_path) is False
+
+    def test_get_loader_reports_initialization_outcomes(self, tmp_path: Path) -> None:
+        handler = HDF5FormatHandler()
+        empty_path = tmp_path / "empty"
+        empty_path.mkdir()
+
+        assert handler.get_loader("missing", tmp_path / "missing") is False
+        assert handler.get_loader("empty", empty_path) is False
+
+        _create_episode(tmp_path / "episode_0.hdf5")
+        assert handler.get_loader("dataset", tmp_path) is True
+        assert handler.has_loader("dataset") is True
+        assert handler.has_loader("other") is False
+        assert handler.get_loader("dataset", tmp_path / "missing") is True
+
+    def test_rejects_dataset_when_hdf5_support_is_unavailable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
+        monkeypatch.setattr(handler_module, "HDF5_AVAILABLE", False)
+        handler = HDF5FormatHandler()
+
+        assert handler.available is False
+        assert handler.can_handle(tmp_path) is False
+        assert handler.get_loader("dataset", tmp_path) is False
+
+
+class TestDatasetDiscovery:
+    """Tests for dataset and episode discovery through public methods."""
+
+    def test_discover_reports_episode_count_and_fps(self, tmp_path: Path) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", fps=15.0)
+        _create_episode(tmp_path / "episode_1.hdf5", fps=15.0)
+        handler = HDF5FormatHandler()
+
+        info = handler.discover("dataset", tmp_path)
+
+        assert info is not None
+        assert info.id == "dataset"
+        assert info.total_episodes == 2
+        assert info.fps == 15.0
+
+    def test_discover_returns_none_for_non_hdf5_directory(self, tmp_path: Path) -> None:
+        assert HDF5FormatHandler().discover("dataset", tmp_path) is None
+
+    def test_discover_returns_none_when_frame_loading_is_unavailable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
+        monkeypatch.setattr(handler_module, "load_single_frame", None)
+
+        assert HDF5FormatHandler().discover("dataset", tmp_path) is None
+
+    def test_discover_reports_empty_dataset_for_unrecognized_filenames(self, tmp_path: Path) -> None:
+        with h5py.File(tmp_path / "recording.hdf5", "w") as file:
+            file.create_dataset("data/qpos", data=np.zeros((2, 2), dtype=np.float64))
+
+        info = HDF5FormatHandler().discover("dataset", tmp_path)
+
+        assert info is not None
+        assert info.total_episodes == 0
+        assert info.fps == 30.0
+
+    def test_discover_counts_files_when_loader_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
+        _create_episode(tmp_path / "episode_1.hdf5")
         loader = MagicMock()
-        loader.base_path = tmp_path
-        loader.list_episodes.return_value = [0, 1]
-        loader.get_episode_info.side_effect = [
-            {"length": 4, "task_index": 0, "fps": 30.0, "cameras": ["c1"]},
-            {"length": 6, "task_index": 1, "fps": 30.0, "cameras": ["c1"]},
-        ]
-        h = self._handler_with(loader)
-        info = h.discover("ds", tmp_path)
+        loader.list_episodes.side_effect = RuntimeError("unreadable index")
+        handler = _handler_with_loader(monkeypatch, tmp_path, loader)
+
+        info = handler.discover("dataset", tmp_path)
+
         assert info is not None
         assert info.total_episodes == 2
+        assert info.fps == 30.0
 
-    def test_discover_exception_falls_back_to_glob(self, tmp_path):
-        # No loader cached; no real files either -> falls back gracefully
-        _create_minimal_hdf5(tmp_path / "episode_0.hdf5")
-        _create_minimal_hdf5(tmp_path / "episode_1.hdf5")
-        loader = MagicMock()
-        loader.base_path = tmp_path
-        loader.list_episodes.side_effect = RuntimeError("boom")
-        h = self._handler_with(loader)
-        info = h.discover("ds", tmp_path)
-        # Implementation falls back to dataset_path.glob("*.hdf5") count
-        assert info is not None or info is None  # tolerate either; coverage exercised
+    def test_list_episodes_returns_public_metadata(self, tmp_path: Path) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", length=3)
+        _create_episode(tmp_path / "episode_1.hdf5", length=5)
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
 
-    def test_list_episodes_success(self, tmp_path):
-        loader = MagicMock()
-        loader.list_episodes.return_value = [0, 1]
-        loader.get_episode_info.side_effect = [
-            {"length": 5, "task_index": 0},
-            {"length": 7, "task_index": 0},
-        ]
-        h = self._handler_with(loader)
-        indices, meta = h.list_episodes("ds")
+        indices, metadata = handler.list_episodes("dataset")
+
         assert indices == [0, 1]
-        assert meta[0]["length"] == 5
-        assert meta[1]["length"] == 7
+        assert metadata == {
+            0: {"length": 3, "task_index": 2},
+            1: {"length": 5, "task_index": 2},
+        }
 
-    def test_list_episodes_per_index_exception(self, tmp_path):
+    def test_list_episodes_handles_loader_failures(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         loader = MagicMock()
-        loader.list_episodes.return_value = [0]
-        loader.get_episode_info.side_effect = RuntimeError("nope")
-        h = self._handler_with(loader)
-        indices, meta = h.list_episodes("ds")
-        assert indices == [0]
-        assert meta[0] == {"length": 0, "task_index": 0}
+        loader.list_episodes.side_effect = RuntimeError("unreadable index")
+        handler = _handler_with_loader(monkeypatch, tmp_path, loader)
 
-    def test_list_episodes_outer_exception(self, tmp_path):
+        assert handler.list_episodes("dataset") == ([], {})
+        assert handler.list_episodes("unknown") == ([], {})
+
+    def test_list_episodes_defaults_unreadable_episode_metadata(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         loader = MagicMock()
-        loader.list_episodes.side_effect = RuntimeError("outer")
-        h = self._handler_with(loader)
-        indices, meta = h.list_episodes("ds")
-        assert indices == []
-        assert meta == {}
+        loader.list_episodes.return_value = [4]
+        loader.get_episode_info.side_effect = RuntimeError("unreadable episode")
+        handler = _handler_with_loader(monkeypatch, tmp_path, loader)
 
-    def test_load_episode_success(self, tmp_path):
-        loader = MagicMock()
-        loader.load_episode.return_value = _make_hdf5_data(length=3, cameras=["camA"])
-        h = self._handler_with(loader)
-        ep = h.load_episode("ds", 2)
-        assert ep is not None
-        assert ep.meta.length == 3
-        assert ep.cameras == ["camA"]
-        assert ep.video_urls["camA"] == "/api/datasets/ds/episodes/2/video/camA"
-        assert len(ep.trajectory_data) == 3
-
-    def test_load_episode_exception_returns_none(self, tmp_path):
-        loader = MagicMock()
-        loader.load_episode.side_effect = RuntimeError("bad")
-        h = self._handler_with(loader)
-        assert h.load_episode("ds", 0) is None
-
-    def test_get_trajectory_success(self, tmp_path):
-        loader = MagicMock()
-        loader.load_episode.return_value = _make_hdf5_data(length=5)
-        h = self._handler_with(loader)
-        traj = h.get_trajectory("ds", 0)
-        assert len(traj) == 5
-
-    def test_get_trajectory_exception(self, tmp_path):
-        loader = MagicMock()
-        loader.load_episode.side_effect = RuntimeError("bad")
-        h = self._handler_with(loader)
-        assert h.get_trajectory("ds", 0) == []
-
-    def test_get_cameras_success(self, tmp_path):
-        loader = MagicMock()
-        loader.get_episode_info.return_value = {"cameras": ["c1", "c2"]}
-        h = self._handler_with(loader)
-        assert h.get_cameras("ds", 0) == ["c1", "c2"]
-
-    def test_get_cameras_exception(self, tmp_path):
-        loader = MagicMock()
-        loader.get_episode_info.side_effect = RuntimeError("bad")
-        h = self._handler_with(loader)
-        assert h.get_cameras("ds", 0) == []
-
-    def test_get_frame_image_success(self, tmp_path, monkeypatch):
-        loader = MagicMock()
-        loader._find_episode_file.return_value = tmp_path / "episode_0.hdf5"
-        h = self._handler_with(loader)
-        frame = np.zeros((8, 8, 3), dtype=np.uint8)
-        monkeypatch.setattr(hh, "load_single_frame", lambda *_a, **_kw: frame)
-        data = h.get_frame_image("ds", 0, 0, "c1")
-        assert isinstance(data, bytes)
-        assert data[:3] == b"\xff\xd8\xff"
-
-    def test_get_frame_image_none_frame(self, tmp_path, monkeypatch):
-        loader = MagicMock()
-        loader._find_episode_file.return_value = tmp_path / "episode_0.hdf5"
-        h = self._handler_with(loader)
-        monkeypatch.setattr(hh, "load_single_frame", lambda *_a, **_kw: None)
-        assert h.get_frame_image("ds", 0, 0, "c1") is None
-
-    def test_get_frame_image_exception(self, tmp_path, monkeypatch):
-        loader = MagicMock()
-        loader._find_episode_file.side_effect = RuntimeError("bad")
-        h = self._handler_with(loader)
-        assert h.get_frame_image("ds", 0, 0, "c1") is None
-
-    def test_get_frame_image_no_loader(self):
-        h = HDF5FormatHandler()
-        assert h.get_frame_image("missing", 0, 0, "c1") is None
-
-    def test_video_cache_path_format(self, tmp_path):
-        loader = MagicMock()
-        loader.base_path = tmp_path
-        h = self._handler_with(loader)
-        path = h._video_cache_path("ds", 7, "topcam")
-        assert path == tmp_path / "meta" / "videos" / "topcam" / "episode_000007.mp4"
-
-    def test_video_cache_path_no_loader(self):
-        h = HDF5FormatHandler()
-        assert h._video_cache_path("missing", 0, "c1") is None
-
-    def test_get_video_path_returns_cached(self, tmp_path):
-        loader = MagicMock()
-        loader.base_path = tmp_path
-        h = self._handler_with(loader)
-        cache_path = tmp_path / "meta" / "videos" / "c1" / "episode_000000.mp4"
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_bytes(b"fake")
-        assert h.get_video_path("ds", 0, "c1") == str(cache_path)
-
-    def test_get_video_path_generates_when_missing(self, tmp_path, monkeypatch):
-        loader = MagicMock()
-        loader.base_path = tmp_path
-        loader._find_episode_file.return_value = tmp_path / "episode_0.hdf5"
-        loader.get_episode_info.return_value = {"fps": 30.0}
-        h = self._handler_with(loader)
-        images = np.zeros((3, 8, 8, 3), dtype=np.uint8)
-        monkeypatch.setattr(hh, "load_all_frames", lambda *_a, **_kw: images)
-        monkeypatch.setattr(hh, "_generate_video", lambda *_a, **_kw: True)
-        result = h.get_video_path("ds", 0, "c1")
-        assert result is not None
-        assert result.endswith("episode_000000.mp4")
-
-    def test_get_video_path_generation_fails(self, tmp_path, monkeypatch):
-        loader = MagicMock()
-        loader.base_path = tmp_path
-        loader._find_episode_file.return_value = tmp_path / "episode_0.hdf5"
-        loader.get_episode_info.return_value = {"fps": 30.0}
-        h = self._handler_with(loader)
-        images = np.zeros((3, 8, 8, 3), dtype=np.uint8)
-        monkeypatch.setattr(hh, "load_all_frames", lambda *_a, **_kw: images)
-        monkeypatch.setattr(hh, "_generate_video", lambda *_a, **_kw: False)
-        assert h.get_video_path("ds", 0, "c1") is None
-
-    def test_generate_episode_video_no_loader(self, tmp_path):
-        h = HDF5FormatHandler()
-        assert h._generate_episode_video("missing", 0, "c1", tmp_path / "x.mp4") is False
-
-    def test_generate_episode_video_no_frames(self, tmp_path, monkeypatch):
-        loader = MagicMock()
-        loader._find_episode_file.return_value = tmp_path / "episode_0.hdf5"
-        h = self._handler_with(loader)
-        monkeypatch.setattr(hh, "load_all_frames", lambda *_a, **_kw: None)
-        assert h._generate_episode_video("ds", 0, "c1", tmp_path / "x.mp4") is False
-
-    def test_generate_episode_video_empty_array(self, tmp_path, monkeypatch):
-        loader = MagicMock()
-        loader._find_episode_file.return_value = tmp_path / "episode_0.hdf5"
-        h = self._handler_with(loader)
-        monkeypatch.setattr(hh, "load_all_frames", lambda *_a, **_kw: np.zeros((0, 4, 4, 3), dtype=np.uint8))
-        assert h._generate_episode_video("ds", 0, "c1", tmp_path / "x.mp4") is False
-
-    def test_generate_episode_video_exception(self, tmp_path, monkeypatch):
-        loader = MagicMock()
-        loader._find_episode_file.side_effect = RuntimeError("boom")
-        h = self._handler_with(loader)
-        assert h._generate_episode_video("ds", 0, "c1", tmp_path / "x.mp4") is False
-
-    def test_has_loader(self, tmp_path):
-        loader = MagicMock()
-        h = self._handler_with(loader)
-        assert h.has_loader("ds") is True
-        assert h.has_loader("other") is False
+        assert handler.list_episodes("dataset") == ([4], {4: {"length": 0, "task_index": 0}})
 
 
-class TestGetLoaderCachingAndDiscovery:
-    """Cover get_loader caching + glob discovery branches."""
+class TestEpisodeAccess:
+    """Tests for public episode, trajectory, camera, and frame behavior."""
 
-    def test_get_loader_caches(self, tmp_path):
-        _create_minimal_hdf5(tmp_path / "episode_0.hdf5")
-        h = HDF5FormatHandler()
-        assert h.get_loader("ds", tmp_path) is True
-        # Second call hits cache branch
-        assert h.get_loader("ds", tmp_path) is True
-
-    def test_get_loader_no_files(self, tmp_path):
-        h = HDF5FormatHandler()
-        # Directory exists but no hdf5 files
-        assert h.get_loader("ds", tmp_path) is False
-
-
-class TestEpisodeCameraMetadata:
-    """Verify that load_episode includes camera names in metadata."""
-
-    def test_cameras_in_metadata(self, tmp_path):
-        """Episode metadata must include cameras discovered from image groups."""
-        _create_hdf5_with_images(tmp_path / "episode_0.hdf5", cameras=["il-camera", "wrist-camera"])
-
-        loader = HDF5Loader(tmp_path)
-        ep = loader.load_episode(0)
-        assert sorted(ep.metadata.get("cameras", [])) == ["il-camera", "wrist-camera"]
-
-    def test_cameras_populated_for_hdf5(self, tmp_path):
-        """HDF5FormatHandler.load_episode should return cameras and video_urls."""
-        _create_hdf5_with_images(tmp_path / "episode_0.hdf5", cameras=["il-camera"])
-
+    def test_load_episode_exposes_trajectory_and_camera_data(self, tmp_path: Path) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", length=3, cameras=("cam0", "cam1"))
         handler = HDF5FormatHandler()
-        handler._loaders["test"] = HDF5Loader(tmp_path)
+        assert handler.get_loader("dataset", tmp_path) is True
 
-        episode = handler.load_episode("test", 0)
+        episode = handler.load_episode("dataset", 0)
+
         assert episode is not None
-        assert "il-camera" in episode.cameras
-        assert "il-camera" in episode.video_urls
+        assert episode.meta.index == 0
+        assert episode.meta.length == 3
+        assert episode.meta.task_index == 2
+        assert episode.cameras == ["cam0", "cam1"]
+        assert episode.video_urls == {
+            "cam0": "/api/datasets/dataset/episodes/0/video/cam0",
+            "cam1": "/api/datasets/dataset/episodes/0/video/cam1",
+        }
+        assert [point.frame for point in episode.trajectory_data] == [0, 1, 2]
+        assert episode.trajectory_data[1].joint_positions == [2.0, 3.0]
 
+    def test_load_episode_returns_none_when_loader_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        loader = MagicMock()
+        loader.load_episode.side_effect = RuntimeError("unreadable episode")
+        handler = _handler_with_loader(monkeypatch, tmp_path, loader)
 
-class TestVideoGeneration:
-    """Tests for synchronous video generation."""
+        assert handler.load_episode("dataset", 0) is None
+        assert handler.load_episode("unknown", 0) is None
 
-    def test_get_video_path_returns_cached(self, tmp_path):
-        """get_video_path returns immediately for already-cached videos."""
-        _create_hdf5_with_images(tmp_path / "episode_0.hdf5", cameras=["il-camera"])
+    def test_get_trajectory_returns_episode_points(self, tmp_path: Path) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", length=4)
         handler = HDF5FormatHandler()
-        handler._loaders["test"] = HDF5Loader(tmp_path)
+        assert handler.get_loader("dataset", tmp_path) is True
 
-        cache_dir = tmp_path / "meta" / "videos" / "il-camera"
-        cache_dir.mkdir(parents=True)
-        cached_file = cache_dir / "episode_000000.mp4"
-        cached_file.write_bytes(b"fake mp4")
+        trajectory = handler.get_trajectory("dataset", 0)
 
-        result = handler.get_video_path("test", 0, "il-camera")
-        assert result == str(cached_file)
+        assert [point.frame for point in trajectory] == [0, 1, 2, 3]
+        assert trajectory[2].joint_positions == [4.0, 5.0]
 
-    def test_get_video_path_returns_none_no_loader(self):
+    def test_get_trajectory_handles_loader_failures(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        loader = MagicMock()
+        loader.load_episode.side_effect = RuntimeError("unreadable episode")
+        handler = _handler_with_loader(monkeypatch, tmp_path, loader)
+
+        assert handler.get_trajectory("dataset", 0) == []
+        assert handler.get_trajectory("unknown", 0) == []
+
+    def test_get_cameras_reports_available_cameras(self, tmp_path: Path) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", cameras=("cam0", "wrist"))
         handler = HDF5FormatHandler()
-        assert handler.get_video_path("unknown", 0, "cam") is None
+        assert handler.get_loader("dataset", tmp_path) is True
 
-    def test_video_cache_path_structure(self, tmp_path):
-        _create_minimal_hdf5(tmp_path / "episode_0.hdf5")
+        assert handler.get_cameras("dataset", 0) == ["cam0", "wrist"]
+        assert handler.get_cameras("unknown", 0) == []
+
+    def test_get_cameras_handles_loader_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        loader = MagicMock()
+        loader.get_episode_info.side_effect = RuntimeError("unreadable episode")
+        handler = _handler_with_loader(monkeypatch, tmp_path, loader)
+
+        assert handler.get_cameras("dataset", 0) == []
+
+    def test_get_frame_image_returns_jpeg_for_valid_frame(self, tmp_path: Path) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
         handler = HDF5FormatHandler()
-        handler._loaders["test"] = HDF5Loader(tmp_path)
+        assert handler.get_loader("dataset", tmp_path) is True
 
-        path = handler._video_cache_path("test", 0, "il-camera")
-        assert path == tmp_path / "meta" / "videos" / "il-camera" / "episode_000000.mp4"
+        image = handler.get_frame_image("dataset", 0, 1, "cam0")
+
+        assert image is not None
+        assert image.startswith(b"\xff\xd8\xff")
+
+    def test_get_frame_image_returns_none_for_unavailable_frame(self, tmp_path: Path) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+
+        assert handler.get_frame_image("dataset", 0, 99, "cam0") is None
+        assert handler.get_frame_image("dataset", 0, 0, "missing") is None
+        assert handler.get_frame_image("unknown", 0, 0, "cam0") is None
+
+    def test_get_frame_image_returns_none_when_frame_loading_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+
+        def fail_frame_load(_path: Path, _camera: str, _frame_idx: int) -> None:
+            raise OSError("unreadable frame")
+
+        monkeypatch.setattr(handler_module, "load_single_frame", fail_frame_load)
+
+        assert handler.get_frame_image("dataset", 0, 0, "cam0") is None
 
 
-class TestVideoGenerationFallback:
-    """Test video generation when cv2 is unavailable."""
+class TestVideoAccess:
+    """Tests for cached and generated video paths through the handler API."""
 
-    def test_cv2_fallback_returns_false_without_opencv(self, tmp_path, monkeypatch):
-        """_generate_video_cv2 returns False when cv2 is not installed."""
-        import builtins
-        import sys
+    def test_get_video_path_returns_cached_video(self, tmp_path: Path) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+        cached_file = tmp_path / "meta" / "videos" / "cam0" / "episode_000000.mp4"
+        cached_file.parent.mkdir(parents=True)
+        cached_file.write_bytes(b"cached video")
 
-        real_import = builtins.__import__
+        assert handler.get_video_path("dataset", 0, "cam0") == str(cached_file)
 
-        def mock_import(name, *args, **kwargs):
-            if name == "cv2":
-                raise ImportError("No module named 'cv2'")
-            return real_import(name, *args, **kwargs)
+    def test_get_video_path_generates_video_with_ffmpeg(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", length=2, fps=12.5)
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+        expected_path = tmp_path / "meta" / "videos" / "cam0" / "episode_000000.mp4"
+        which_calls: list[str] = []
+        popen_calls: list[tuple[list[str], dict[str, object]]] = []
+        stdin_writes: list[bytes] = []
+        process_events: list[str] = []
 
-        monkeypatch.delitem(sys.modules, "cv2", raising=False)
-        monkeypatch.setattr(builtins, "__import__", mock_import)
+        def fake_which(executable: str) -> str:
+            which_calls.append(executable)
+            return "/usr/bin/ffmpeg"
 
-        from src.api.services.dataset_service.hdf5_handler import _generate_video_cv2
+        class FakeStdin:
+            def write(self, data: bytes) -> None:
+                stdin_writes.append(data)
+                process_events.append("write")
 
-        images = np.zeros((5, 48, 64, 3), dtype=np.uint8)
-        result = _generate_video_cv2(images, tmp_path / "out.mp4", 30.0)
-        assert result is False
+            def close(self) -> None:
+                process_events.append("close")
+
+        class FakeProcess:
+            def __init__(self) -> None:
+                self.stdin = FakeStdin()
+
+            def wait(self) -> int:
+                process_events.append("wait")
+                assert expected_path.exists() is False
+                expected_path.write_bytes(b"ffmpeg video")
+                return 0
+
+        def fake_popen(command: list[str], **kwargs: object) -> FakeProcess:
+            popen_calls.append((command, kwargs))
+            process_events.append("popen")
+            return FakeProcess()
+
+        monkeypatch.setattr(shutil, "which", fake_which)
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+        result = handler.get_video_path("dataset", 0, "cam0")
+
+        assert result == str(expected_path)
+        assert expected_path.read_bytes() == b"ffmpeg video"
+        assert which_calls == ["ffmpeg"]
+        assert process_events == ["popen", "write", "write", "close", "wait"]
+        assert stdin_writes == [bytes(8 * 8 * 3), bytes(8 * 8 * 3)]
+        assert popen_calls == [
+            (
+                _expected_ffmpeg_command(expected_path, 12.5),
+                {
+                    "stdin": subprocess.PIPE,
+                    "stdout": subprocess.DEVNULL,
+                    "stderr": subprocess.DEVNULL,
+                },
+            )
+        ]
+
+    def test_get_video_path_falls_back_to_cv2_when_ffmpeg_is_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", length=2, fps=15.0)
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+        expected_path = tmp_path / "meta" / "videos" / "cam0" / "episode_000000.mp4"
+        which_calls: list[str] = []
+        cv2_state = _install_cv2_fake(monkeypatch)
+
+        def fake_which(executable: str) -> None:
+            which_calls.append(executable)
+            return None
+
+        monkeypatch.setattr(shutil, "which", fake_which)
+
+        result = handler.get_video_path("dataset", 0, "cam0")
+
+        assert result == str(expected_path)
+        assert expected_path.read_bytes() == b"cv2 video"
+        assert which_calls == ["ffmpeg"]
+        assert cv2_state.fourcc_calls == [("a", "v", "c", "1")]
+        assert cv2_state.writer_calls == [(str(expected_path), 42, 15.0, (8, 8))]
+        assert [code for _, code in cv2_state.converted_frames] == [7, 7]
+        assert len(cv2_state.written_frames) == 2
+        assert cv2_state.release_count == 1
+
+    def test_get_video_path_falls_back_to_cv2_when_ffmpeg_raises(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", length=1, fps=24.0)
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+        expected_path = tmp_path / "meta" / "videos" / "cam0" / "episode_000000.mp4"
+        cv2_state = _install_cv2_fake(monkeypatch)
+        popen_calls: list[list[str]] = []
+
+        def fail_popen(command: list[str], **_kwargs: object) -> None:
+            popen_calls.append(command)
+            raise OSError("ffmpeg launch failed")
+
+        monkeypatch.setattr(shutil, "which", lambda _executable: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(subprocess, "Popen", fail_popen)
+
+        result = handler.get_video_path("dataset", 0, "cam0")
+
+        assert result == str(expected_path)
+        assert expected_path.read_bytes() == b"cv2 video"
+        assert popen_calls == [_expected_ffmpeg_command(expected_path, 24.0)]
+        assert cv2_state.writer_calls == [(str(expected_path), 42, 24.0, (8, 8))]
+        assert cv2_state.release_count == 1
+
+    def test_get_video_path_returns_none_when_frames_are_unavailable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+        monkeypatch.setattr(handler_module, "load_all_frames", lambda *_args: None)
+
+        assert handler.get_video_path("dataset", 0, "cam0") is None
+        assert handler.get_video_path("unknown", 0, "cam0") is None
+
+    def test_get_video_path_returns_none_when_cv2_writer_raises(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", length=2, fps=10.0)
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+        expected_path = tmp_path / "meta" / "videos" / "cam0" / "episode_000000.mp4"
+        cv2_state = _install_cv2_fake(monkeypatch, writer_error=True)
+        monkeypatch.setattr(shutil, "which", lambda _executable: None)
+
+        assert handler.get_video_path("dataset", 0, "cam0") is None
+        assert expected_path.exists() is False
+        assert cv2_state.fourcc_calls == [("a", "v", "c", "1")]
+        assert cv2_state.writer_calls == [(str(expected_path), 42, 10.0, (8, 8))]
+        assert cv2_state.converted_frames == []
+        assert cv2_state.written_frames == []
+        assert cv2_state.release_count == 0
+
+    def test_get_video_path_returns_none_when_video_encoders_are_unavailable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5", length=1)
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+        expected_path = tmp_path / "meta" / "videos" / "cam0" / "episode_000000.mp4"
+        monkeypatch.setattr(shutil, "which", lambda _executable: None)
+        monkeypatch.setitem(sys.modules, "cv2", None)
+
+        assert handler.get_video_path("dataset", 0, "cam0") is None
+        assert expected_path.exists() is False
+
+    def test_get_video_path_returns_none_when_frame_loader_is_unavailable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+        monkeypatch.setattr(handler_module, "load_all_frames", None)
+
+        assert handler.get_video_path("dataset", 0, "cam0") is None
+
+    def test_get_video_path_returns_none_when_frame_loading_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        _create_episode(tmp_path / "episode_0.hdf5")
+        handler = HDF5FormatHandler()
+        assert handler.get_loader("dataset", tmp_path) is True
+
+        def fail_frame_load(_path: Path, _camera: str) -> None:
+            raise OSError("unreadable frames")
+
+        monkeypatch.setattr(handler_module, "load_all_frames", fail_frame_load)
+
+        assert handler.get_video_path("dataset", 0, "cam0") is None

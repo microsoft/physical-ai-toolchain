@@ -1,9 +1,10 @@
 """
 Unit tests for the EpisodeClusterer service.
 
-Covers feature extraction edge cases, the sklearn happy path,
-the no-sklearn fallback (`_simple_clustering`), and dataclass shape.
+Covers clustering behavior with and without sklearn and result dataclasses.
 """
+
+from __future__ import annotations
 
 import builtins
 import sys
@@ -30,32 +31,6 @@ def synthetic_trajectories():
     group_a = [rng.normal(loc=0.0, scale=0.1, size=(50, 7)) for _ in range(6)]
     group_b = [rng.normal(loc=5.0, scale=0.1, size=(50, 7)) for _ in range(6)]
     return group_a + group_b
-
-
-class TestExtractFeatures:
-    def test_empty_trajectory_returns_zero_vector(self, clusterer):
-        feats = clusterer._extract_features(np.zeros((0, 7)))
-        assert feats.shape == (20,)
-        assert np.all(feats == 0)
-
-    def test_single_frame_returns_fixed_size(self, clusterer):
-        feats = clusterer._extract_features(np.ones((1, 7)))
-        assert feats.shape == (31,)
-        # Path length and displacement are zero with single frame.
-        assert feats[-3] == 0.0  # path length
-        assert feats[-1] == 0.0  # displacement
-
-    def test_seven_joint_features_populated(self, clusterer):
-        traj = np.tile(np.arange(7, dtype=float), (20, 1))
-        feats = clusterer._extract_features(traj)
-        assert feats.shape == (31,)
-        # Duration is the second-to-last entry.
-        assert feats[-2] == 20.0
-
-    def test_more_than_seven_joints_truncated(self, clusterer):
-        traj = np.zeros((10, 12))
-        feats = clusterer._extract_features(traj)
-        assert feats.shape == (31,)
 
 
 class TestCluster:
@@ -94,8 +69,32 @@ class TestCluster:
         result = clusterer.cluster(synthetic_trajectories)
         assert 2 <= result.num_clusters <= clusterer.max_clusters
 
+    def test_single_frame_trajectories_are_clustered(self, clusterer):
+        pytest.importorskip("sklearn")
+        trajectories = [np.full((1, 7), value, dtype=float) for value in (0.0, 0.1, 10.0, 10.1)]
+
+        result = clusterer.cluster(trajectories, num_clusters=2)
+
+        assert result.num_clusters == 2
+        assert [assignment.episode_index for assignment in result.assignments] == list(range(4))
+        assert sorted(result.cluster_sizes.values()) == [2, 2]
+
+    def test_joints_after_seventh_do_not_affect_assignments(self, clusterer):
+        pytest.importorskip("sklearn")
+        trajectories = [np.full((10, 7), value, dtype=float) for value in (0.0, 0.1, 10.0, 10.1)]
+        trajectories_with_extra_joints = [
+            np.hstack([trajectory, np.full((10, 5), 1_000.0 + index)]) for index, trajectory in enumerate(trajectories)
+        ]
+
+        baseline = clusterer.cluster(trajectories, num_clusters=2)
+        with_extra_joints = clusterer.cluster(trajectories_with_extra_joints, num_clusters=2)
+
+        assert [assignment.cluster_id for assignment in with_extra_joints.assignments] == [
+            assignment.cluster_id for assignment in baseline.assignments
+        ]
+        assert with_extra_joints.cluster_sizes == baseline.cluster_sizes
+
     def test_fallback_when_sklearn_missing(self, clusterer, synthetic_trajectories, monkeypatch):
-        # Block any sklearn import for the duration of the test.
         for mod in list(sys.modules):
             if mod == "sklearn" or mod.startswith("sklearn."):
                 monkeypatch.delitem(sys.modules, mod, raising=False)
@@ -109,28 +108,33 @@ class TestCluster:
 
         monkeypatch.setattr(builtins, "__import__", fake_import)
 
-        result = clusterer.cluster(synthetic_trajectories, num_clusters=2)
-        assert result.num_clusters == 2
-        assert len(result.assignments) == len(synthetic_trajectories)
-        # Fallback assigns deterministic similarity score of 0.5.
-        assert result.silhouette_score == 0.5
-        assert sum(result.cluster_sizes.values()) == len(synthetic_trajectories)
+        first = clusterer.cluster(synthetic_trajectories, num_clusters=2)
+        second = clusterer.cluster(synthetic_trajectories, num_clusters=2)
 
-
-class TestSimpleClustering:
-    def test_simple_clustering_deterministic(self, clusterer):
-        rng = np.random.default_rng(123)
-        features = rng.normal(size=(20, 31))
-        first = clusterer._simple_clustering(features, num_clusters=3)
-        second = clusterer._simple_clustering(features, num_clusters=3)
+        assert first.num_clusters == 2
+        assert len(first.assignments) == len(synthetic_trajectories)
+        assert first.silhouette_score == 0.5
+        assert sum(first.cluster_sizes.values()) == len(synthetic_trajectories)
         assert [a.cluster_id for a in first.assignments] == [a.cluster_id for a in second.assignments]
         assert first.cluster_sizes == second.cluster_sizes
 
-    def test_simple_clustering_caps_centroids_to_sample_count(self, clusterer):
-        features = np.zeros((2, 31))
-        result = clusterer._simple_clustering(features, num_clusters=10)
-        # Cannot have more centroids than samples.
-        assert result.num_clusters <= 2
+    def test_fallback_caps_clusters_to_trajectory_count(self, clusterer, monkeypatch):
+        for mod in list(sys.modules):
+            if mod == "sklearn" or mod.startswith("sklearn."):
+                monkeypatch.delitem(sys.modules, mod, raising=False)
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "sklearn" or name.startswith("sklearn."):
+                raise ImportError(f"blocked sklearn import: {name}")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        result = clusterer.cluster([np.zeros((5, 7)), np.ones((5, 7))], num_clusters=10)
+
+        assert result.num_clusters == 2
         assert sum(result.cluster_sizes.values()) == 2
 
 

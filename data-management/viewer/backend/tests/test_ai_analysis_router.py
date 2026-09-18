@@ -9,16 +9,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-import pytest
 from fastapi.testclient import TestClient
-
-
-@pytest.fixture
-def client() -> TestClient:
-    from src.api.main import app
-
-    with TestClient(app) as c:
-        yield c
 
 
 def _smooth_trajectory(num_points: int = 50, num_joints: int = 6) -> tuple[list[list[float]], list[float]]:

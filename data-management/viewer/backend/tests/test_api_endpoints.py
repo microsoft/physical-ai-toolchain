@@ -1,243 +1,257 @@
-"""
-Integration tests for dataset API endpoints against a sample LeRobot dataset.
+"""HTTP contract tests for dataset endpoints using synthetic data."""
 
-Tests the full HTTP round-trip through FastAPI routes, verifying response
-schemas, status codes, pagination, and data integrity.
-"""
+from __future__ import annotations
 
-from .conftest import TEST_DATASET_ID
+import json
+from collections.abc import Iterator
+from pathlib import Path
 
-DATASET_ID = TEST_DATASET_ID
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pytest
+from fastapi.testclient import TestClient
 
+from src.api.services.dataset_service import DatasetService, get_dataset_service
 
-class TestHealthEndpoint:
-    """Verify the health check still works with the real environment."""
-
-    def test_health(self, client):
-        resp = client.get("/health")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "healthy"
-        assert data["checks"]["api"] == "healthy"
-        assert data["checks"]["storage"] == "healthy"
+_DATASET_ID = "synthetic"
+_CAMERA = "observation.images.front"
 
 
-class TestListDatasets:
-    """GET /api/datasets"""
-
-    def test_returns_dataset(self, client):
-        resp = client.get("/api/datasets")
-        assert resp.status_code == 200
-        datasets = resp.json()
-        ids = [d["id"] for d in datasets]
-        assert DATASET_ID in ids
-
-    def test_dataset_schema(self, client):
-        resp = client.get("/api/datasets")
-        ds = next(d for d in resp.json() if d["id"] == DATASET_ID)
-        assert ds["total_episodes"] == 64
-        assert ds["fps"] == 30.0
-        assert "features" in ds
-        assert "observation.state" in ds["features"]
-
-
-class TestGetDataset:
-    """GET /api/datasets/{dataset_id}"""
-
-    def test_found(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["id"] == DATASET_ID
-        assert data["total_episodes"] == 64
-
-    def test_not_found(self, client):
-        resp = client.get("/api/datasets/nonexistent")
-        assert resp.status_code == 404
-
-
-class TestCapabilities:
-    """GET /api/datasets/{dataset_id}/capabilities"""
-
-    def test_dataset_capabilities(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/capabilities")
-        assert resp.status_code == 200
-        caps = resp.json()
-        assert caps["is_lerobot_dataset"] is True
-        assert caps["has_hdf5_files"] is False
-        assert caps["lerobot_support"] is True
-        assert caps["episode_count"] == 64
-
-
-class TestListEpisodes:
-    """GET /api/datasets/{dataset_id}/episodes"""
-
-    def test_default(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes")
-        assert resp.status_code == 200
-        episodes = resp.json()
-        assert len(episodes) == 64
-
-    def test_pagination(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes?offset=10&limit=5")
-        assert resp.status_code == 200
-        episodes = resp.json()
-        assert len(episodes) == 5
-        assert episodes[0]["index"] == 10
-        assert episodes[4]["index"] == 14
-
-    def test_limit_1(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes?limit=1")
-        assert resp.status_code == 200
-        episodes = resp.json()
-        assert len(episodes) == 1
-
-    def test_offset_beyond_range(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes?offset=100")
-        assert resp.status_code == 200
-        assert resp.json() == []
-
-    def test_episode_meta_schema(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes?limit=1")
-        ep = resp.json()[0]
-        assert "index" in ep
-        assert "length" in ep
-        assert "task_index" in ep
-        assert "has_annotations" in ep
-        assert ep["length"] > 0
-
-    def test_filter_task_index(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes?task_index=0")
-        assert resp.status_code == 200
-        assert len(resp.json()) == 64
-
-    def test_dataset_not_found(self, client):
-        resp = client.get("/api/datasets/nonexistent/episodes")
-        assert resp.status_code == 404
-
-
-class TestGetEpisode:
-    """GET /api/datasets/{dataset_id}/episodes/{episode_idx}"""
-
-    def test_first_episode(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["meta"]["index"] == 0
-        assert data["meta"]["length"] > 0
-        assert len(data["trajectory_data"]) > 0
-
-    def test_last_episode(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/63")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["meta"]["index"] == 63
-
-    def test_trajectory_point_schema(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0")
-        pt = resp.json()["trajectory_data"][0]
-        assert "timestamp" in pt
-        assert "frame" in pt
-        assert "joint_positions" in pt
-        assert "joint_velocities" in pt
-        assert "end_effector_pose" in pt
-        assert "gripper_state" in pt
-        assert len(pt["joint_positions"]) == 16
-        assert len(pt["joint_velocities"]) == 16
-
-    def test_video_urls_present(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0")
-        urls = resp.json()["video_urls"]
-        assert "observation.images.il-camera" in urls
-
-    def test_episode_out_of_range(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/9999")
-        # The service returns 200 with empty trajectory when LeRobot loader
-        # fails for an out-of-range episode (it catches the error and falls through)
-        assert resp.status_code in (200, 404)
-        if resp.status_code == 200:
-            data = resp.json()
-            assert data["trajectory_data"] == []
-
-
-class TestGetTrajectory:
-    """GET /api/datasets/{dataset_id}/episodes/{episode_idx}/trajectory"""
-
-    def test_trajectory_data(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/trajectory")
-        assert resp.status_code == 200
-        traj = resp.json()
-        assert len(traj) > 0
-
-    def test_trajectory_timestamps_ordered(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/trajectory")
-        traj = resp.json()
-        timestamps = [pt["timestamp"] for pt in traj]
-        for i in range(1, len(timestamps)):
-            assert timestamps[i] >= timestamps[i - 1]
-
-
-class TestGetCameras:
-    """GET /api/datasets/{dataset_id}/episodes/{episode_idx}/cameras"""
-
-    def test_cameras(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/cameras")
-        assert resp.status_code == 200
-        cameras = resp.json()
-        assert "observation.images.il-camera" in cameras
-
-
-class TestGetVideo:
-    """GET /api/datasets/{dataset_id}/episodes/{episode_idx}/video/{camera}"""
-
-    def test_video_stream(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera")
-        assert resp.status_code == 200
-        assert "video" in resp.headers.get("content-type", "")
-
-    def test_video_nonexistent_camera(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/video/fake_camera")
-        assert resp.status_code == 404
-
-    def test_video_accept_ranges_header(self, client):
-        resp = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera")
-        assert resp.headers.get("accept-ranges") == "bytes"
-
-    def test_video_range_request(self, client):
-        resp = client.get(
-            f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera",
-            headers={"Range": "bytes=0-1023"},
+def _write_dataset(base_path: Path) -> None:
+    dataset = base_path / _DATASET_ID
+    (dataset / "meta").mkdir(parents=True)
+    (dataset / "data" / "chunk-000").mkdir(parents=True)
+    (dataset / "videos" / "chunk-000" / _CAMERA).mkdir(parents=True)
+    info = {
+        "codebase_version": "v2.1",
+        "robot_type": "synthetic-arm",
+        "total_episodes": 3,
+        "total_frames": 9,
+        "total_tasks": 2,
+        "total_chunks": 1,
+        "chunks_size": 1000,
+        "fps": 20.0,
+        "splits": {"train": "0:3"},
+        "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+        "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
+        "features": {
+            "observation.state": {"dtype": "float32", "shape": [3], "names": ["a", "b", "c"]},
+            "action": {"dtype": "float32", "shape": [3]},
+            _CAMERA: {"dtype": "video", "shape": [48, 64, 3]},
+        },
+    }
+    (dataset / "meta" / "info.json").write_text(json.dumps(info), encoding="utf-8")
+    with (dataset / "meta" / "episodes.jsonl").open("w", encoding="utf-8") as episodes_file:
+        for episode_index, task_index in ((0, 0), (1, 1), (2, 0)):
+            episodes_file.write(
+                json.dumps({"episode_index": episode_index, "length": 3, "task_index": task_index}) + "\n"
+            )
+    with (dataset / "meta" / "tasks.jsonl").open("w", encoding="utf-8") as tasks_file:
+        tasks_file.write(json.dumps({"task_index": 0, "task": "pick"}) + "\n")
+        tasks_file.write(json.dumps({"task_index": 1, "task": "place"}) + "\n")
+    for episode_index, task_index in ((0, 0), (1, 1), (2, 0)):
+        table = pa.table(
+            {
+                "frame_index": [0, 1, 2],
+                "timestamp": [0.0, 0.05, 0.1],
+                "episode_index": [episode_index] * 3,
+                "task_index": [task_index] * 3,
+                "observation.state": [[0.0, 1.0, 2.0], [1.0, 2.0, 3.0], [2.0, 3.0, 4.0]],
+                "action": [[0.4, 0.5, 0.6]] * 3,
+            }
         )
-        assert resp.status_code == 206
-        assert "content-range" in resp.headers
-        assert resp.headers["content-range"].startswith("bytes 0-1023/")
-        assert len(resp.content) == 1024
-
-    def test_video_range_open_ended(self, client):
-        full = client.get(f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera")
-        total = len(full.content)
-
-        resp = client.get(
-            f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera",
-            headers={"Range": f"bytes={total - 100}-"},
+        pq.write_table(table, dataset / "data" / "chunk-000" / f"episode_{episode_index:06d}.parquet")
+        (dataset / "videos" / "chunk-000" / _CAMERA / f"episode_{episode_index:06d}.mp4").write_bytes(
+            bytes(range(256)) * 8
         )
-        assert resp.status_code == 206
-        assert len(resp.content) == 100
-
-    def test_video_head_request(self, client):
-        resp = client.head(f"/api/datasets/{DATASET_ID}/episodes/0/video/observation.images.il-camera")
-        assert resp.status_code == 200
-        assert resp.headers.get("accept-ranges") == "bytes"
-        assert int(resp.headers.get("content-length", 0)) > 0
 
 
-class TestGetFrame:
-    """GET /api/datasets/{dataset_id}/episodes/{episode_idx}/frames/{frame_idx}"""
+@pytest.fixture
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    _write_dataset(tmp_path)
+    service = DatasetService(base_path=str(tmp_path), episode_cache_capacity=0)
 
-    def test_camera_query_strips_crlf(self, client):
-        resp = client.get(
-            f"/api/datasets/{DATASET_ID}/episodes/0/frames/0",
-            params={"camera": "observation.images.il-camera\r\n"},
+    async def keep_source_video(path: Path) -> Path:
+        return path
+
+    async def synthetic_frame(
+        dataset_id: str,
+        episode_idx: int,
+        frame_idx: int,
+        camera: str,
+    ) -> bytes:
+        assert (dataset_id, episode_idx, frame_idx, camera) == (_DATASET_ID, 0, 0, _CAMERA)
+        return b"\xff\xd8synthetic-jpeg\xff\xd9"
+
+    monkeypatch.setattr("src.api.routers.datasets.ensure_browser_compatible", keep_source_video)
+    monkeypatch.setattr(service, "get_frame_image", synthetic_frame)
+
+    from src.api.main import app
+
+    app.dependency_overrides[get_dataset_service] = lambda: service
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.pop(get_dataset_service, None)
+
+
+class TestDatasets:
+    def test_lists_dataset_with_complete_schema(self, client):
+        response = client.get("/api/datasets")
+
+        assert response.status_code == 200
+        assert response.json() == [
+            {
+                "id": _DATASET_ID,
+                "name": "synthetic (synthetic-arm)",
+                "group": None,
+                "total_episodes": 3,
+                "fps": 20.0,
+                "features": {
+                    "observation.state": {
+                        "dtype": "float32",
+                        "shape": [3],
+                        "names": ["a", "b", "c"],
+                    },
+                    "action": {"dtype": "float32", "shape": [3], "names": None},
+                    _CAMERA: {"dtype": "video", "shape": [48, 64, 3], "names": None},
+                },
+                "tasks": [
+                    {"task_index": 0, "description": "pick"},
+                    {"task_index": 1, "description": "place"},
+                ],
+            }
+        ]
+
+    def test_gets_dataset(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}")
+
+        assert response.status_code == 200
+        assert response.json()["id"] == _DATASET_ID
+        assert response.json()["total_episodes"] == 3
+
+    def test_missing_dataset_returns_404(self, client):
+        response = client.get("/api/datasets/missing")
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Dataset 'missing' not found"}
+
+    def test_capabilities_reflect_detected_format(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/capabilities")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "hdf5_support": True,
+            "has_hdf5_files": False,
+            "lerobot_support": True,
+            "is_lerobot_dataset": True,
+            "episode_count": 3,
+        }
+
+
+class TestEpisodes:
+    def test_lists_episode_metadata(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes")
+
+        assert response.status_code == 200
+        assert response.json() == [
+            {"index": 0, "length": 3, "task_index": 0, "has_annotations": False},
+            {"index": 1, "length": 3, "task_index": 1, "has_annotations": False},
+            {"index": 2, "length": 3, "task_index": 0, "has_annotations": False},
+        ]
+
+    def test_applies_pagination(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes?offset=1&limit=1")
+
+        assert response.status_code == 200
+        assert response.json() == [{"index": 1, "length": 3, "task_index": 1, "has_annotations": False}]
+
+    def test_filters_by_task_index(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes?task_index=0")
+
+        assert response.status_code == 200
+        assert [episode["index"] for episode in response.json()] == [0, 2]
+
+    def test_offset_beyond_range_returns_empty_list(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes?offset=100")
+
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_missing_dataset_episodes_return_404(self, client):
+        response = client.get("/api/datasets/missing/episodes")
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Dataset 'missing' not found"}
+
+    def test_gets_complete_episode(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes/1")
+
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "private, max-age=60"
+        data = response.json()
+        assert data["meta"] == {
+            "index": 1,
+            "length": 3,
+            "task_index": 1,
+            "has_annotations": False,
+        }
+        assert data["cameras"] == [_CAMERA]
+        assert len(data["trajectory_data"]) == 3
+        assert data["trajectory_data"][0]["joint_positions"] == [0.0, 1.0, 2.0]
+
+    def test_out_of_range_episode_returns_404(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes/3")
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": f"Episode 3 not found in dataset '{_DATASET_ID}'"}
+
+    def test_gets_trajectory(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes/0/trajectory")
+
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "private, max-age=60"
+        assert [point["frame"] for point in response.json()] == [0, 1, 2]
+        assert [point["timestamp"] for point in response.json()] == pytest.approx([0.0, 0.05, 0.1])
+
+    def test_gets_cameras(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes/0/cameras")
+
+        assert response.status_code == 200
+        assert response.json() == [_CAMERA]
+
+
+class TestMedia:
+    def test_streams_video_with_headers(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes/0/video/{_CAMERA}")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "video/mp4"
+        assert response.headers["accept-ranges"] == "bytes"
+        assert response.content == bytes(range(256)) * 8
+
+    def test_supports_video_byte_range(self, client):
+        response = client.get(
+            f"/api/datasets/{_DATASET_ID}/episodes/0/video/{_CAMERA}",
+            headers={"Range": "bytes=10-19"},
         )
-        assert resp.status_code == 200
-        assert resp.headers.get("content-type") == "image/jpeg"
+
+        assert response.status_code == 206
+        assert response.headers["content-range"] == "bytes 10-19/2048"
+        assert response.content == bytes(range(10, 20))
+
+    def test_missing_camera_returns_404(self, client):
+        response = client.get(f"/api/datasets/{_DATASET_ID}/episodes/0/video/missing")
+
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Video not found for episode 0, camera 'missing'"}
+
+    def test_frame_camera_strips_crlf(self, client):
+        response = client.get(
+            f"/api/datasets/{_DATASET_ID}/episodes/0/frames/0",
+            params={"camera": f"{_CAMERA}\r\n"},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/jpeg"
+        assert response.headers["cache-control"] == "public, max-age=3600"
+        assert response.content == b"\xff\xd8synthetic-jpeg\xff\xd9"

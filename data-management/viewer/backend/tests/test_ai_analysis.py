@@ -1,58 +1,46 @@
-"""
-Integration tests for AI analysis endpoints using real LeRobot data.
+"""Behavior tests for trajectory analysis services and API endpoints."""
 
-Tests trajectory analysis, anomaly detection, and annotation suggestion
-endpoints with trajectory data extracted from the real dataset.
-"""
+from __future__ import annotations
 
 import numpy as np
 import pytest
 
 from src.api.services.anomaly_detection import AnomalyDetector
-from src.api.services.lerobot_loader import LeRobotLoader
 from src.api.services.trajectory_analysis import TrajectoryAnalyzer
 
 
-@pytest.fixture(scope="module")
-def loader(test_dataset_path, test_dataset_id):
-    import os
-
-    return LeRobotLoader(os.path.join(test_dataset_path, test_dataset_id))
-
-
-@pytest.fixture(scope="module")
-def episode_data(loader):
-    return loader.load_episode(0)
+@pytest.fixture
+def smooth_trajectory() -> tuple[np.ndarray, np.ndarray]:
+    timestamps = np.linspace(0.0, 1.0, 11)
+    positions = np.column_stack((timestamps, timestamps * 2.0, timestamps * 3.0))
+    return positions, timestamps
 
 
 class TestTrajectoryAnalyzer:
-    """Unit tests for TrajectoryAnalyzer with real data."""
+    def test_linear_trajectory_returns_exact_contract(self, smooth_trajectory):
+        positions, timestamps = smooth_trajectory
 
-    def test_analyze_returns_metrics(self, episode_data):
-        analyzer = TrajectoryAnalyzer()
-        metrics = analyzer.analyze(episode_data.joint_positions, episode_data.timestamps)
-        assert 0 <= metrics.smoothness <= 1
-        assert 0 <= metrics.efficiency <= 1
-        assert 0 <= metrics.jitter <= 1
-        assert metrics.hesitation_count >= 0
-        assert metrics.correction_count >= 0
-        assert 1 <= metrics.overall_score <= 5
-        assert isinstance(metrics.flags, list)
+        metrics = TrajectoryAnalyzer().analyze(positions, timestamps)
 
-    def test_smoothness_nonzero(self, episode_data):
-        analyzer = TrajectoryAnalyzer()
-        metrics = analyzer.analyze(episode_data.joint_positions, episode_data.timestamps)
-        assert metrics.smoothness > 0
+        assert metrics.smoothness == pytest.approx(1.0)
+        assert metrics.normalized_smoothness == pytest.approx(1.0)
+        assert metrics.efficiency == pytest.approx(1.0)
+        assert metrics.jitter == pytest.approx(0.0)
+        assert metrics.hesitation_count == 0
+        assert metrics.correction_count == 0
+        assert metrics.overall_score == 5
+        assert metrics.flags == []
 
-    def test_short_trajectory(self):
-        analyzer = TrajectoryAnalyzer()
-        positions = np.array([[0, 0], [1, 1]])
-        timestamps = np.array([0.0, 0.033])
-        metrics = analyzer.analyze(positions, timestamps)
+    def test_short_trajectory_uses_neutral_score(self):
+        metrics = TrajectoryAnalyzer().analyze(
+            np.array([[0.0, 0.0], [1.0, 1.0]]),
+            np.array([0.0, 0.033]),
+        )
+
         assert metrics.smoothness == 1.0
         assert metrics.overall_score == 3
 
-    def test_normalized_smoothness_modes_discriminate_degree_scale_trajectory(self):
+    def test_smoothness_modes_discriminate_degree_scale_trajectory(self):
         timestamps = np.linspace(0.0, 0.25, 8)
         steps = np.arange(8, dtype=np.float64)
         positions = np.column_stack([steps**3, (steps**3) * 0.5])
@@ -69,78 +57,70 @@ class TestTrajectoryAnalyzer:
         with pytest.raises(ValueError, match="smoothness_mode must be one of"):
             TrajectoryAnalyzer(smoothness_mode="invalid")
 
-    def test_multiple_episodes_produce_valid_scores(self, loader):
-        analyzer = TrajectoryAnalyzer()
-        for idx in [0, 15, 30, 63]:
-            ep = loader.load_episode(idx)
-            metrics = analyzer.analyze(ep.joint_positions, ep.timestamps)
-            assert 1 <= metrics.overall_score <= 5, f"Episode {idx} score out of range: {metrics.overall_score}"
-
 
 class TestAnomalyDetector:
-    """Unit tests for AnomalyDetector with real data."""
+    def test_linear_trajectory_has_no_anomalies(self, smooth_trajectory):
+        positions, timestamps = smooth_trajectory
 
-    def test_detect_returns_list(self, episode_data):
-        detector = AnomalyDetector()
-        anomalies = detector.detect(episode_data.joint_positions, episode_data.timestamps)
-        assert isinstance(anomalies, list)
+        assert AnomalyDetector().detect(positions, timestamps) == []
 
-    def test_anomaly_fields(self, episode_data):
-        detector = AnomalyDetector()
-        anomalies = detector.detect(episode_data.joint_positions, episode_data.timestamps)
-        for a in anomalies:
-            assert a.frame_range[0] <= a.frame_range[1]
-            assert 0 <= a.confidence <= 1
-            assert a.auto_detected is True
+    def test_velocity_spike_has_public_anomaly_contract(self):
+        timestamps = np.linspace(0.0, 3.0, 100)
+        positions = np.column_stack([np.linspace(0.0, 1.0, 100)] * 6)
+        positions[50] += 100.0
 
-    def test_synthetic_spike(self):
-        """Injecting a velocity spike should be detected."""
-        n = 100
-        timestamps = np.linspace(0, 3.0, n)
-        positions = np.column_stack([np.linspace(0, 1, n)] * 6)
-        positions[50] += 100  # massive spike
+        anomalies = AnomalyDetector().detect(positions, timestamps)
+        velocity_spikes = [anomaly for anomaly in anomalies if anomaly.type.value == "velocity_spike"]
 
-        detector = AnomalyDetector()
-        anomalies = detector.detect(positions, timestamps)
-        types = [a.type.value for a in anomalies]
-        assert "velocity_spike" in types
+        assert velocity_spikes
+        anomaly = velocity_spikes[0]
+        assert anomaly.frame_range[0] <= 50 <= anomaly.frame_range[1]
+        assert anomaly.severity.value in {"medium", "high"}
+        assert 0.0 <= anomaly.confidence <= 1.0
+        assert anomaly.auto_detected is True
 
 
 class TestAIAnalysisEndpoints:
-    """Integration tests for the /api/ai/* endpoints using real data."""
+    def test_trajectory_analysis_returns_complete_response(self, client, smooth_trajectory):
+        positions, timestamps = smooth_trajectory
 
-    def test_trajectory_analysis_endpoint(self, client, episode_data):
-        payload = {
-            "positions": episode_data.joint_positions.tolist(),
-            "timestamps": episode_data.timestamps.tolist(),
+        response = client.post(
+            "/api/ai/trajectory-analysis",
+            json={"positions": positions.tolist(), "timestamps": timestamps.tolist()},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "smoothness": pytest.approx(1.0),
+            "normalized_smoothness": pytest.approx(1.0),
+            "efficiency": pytest.approx(1.0),
+            "jitter": pytest.approx(0.0),
+            "hesitation_count": 0,
+            "correction_count": 0,
+            "overall_score": 5,
+            "flags": [],
         }
-        resp = client.post("/api/ai/trajectory-analysis", json=payload)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "smoothness" in data
-        assert "normalized_smoothness" in data
-        assert "efficiency" in data
-        assert "overall_score" in data
-        assert 1 <= data["overall_score"] <= 5
 
     @pytest.mark.parametrize("mode", ["log-scaled", "radian-based"])
-    def test_trajectory_analysis_endpoint_honors_smoothness_mode(self, client, mode):
+    def test_trajectory_analysis_honors_smoothness_mode(self, client, mode):
         timestamps = np.linspace(0.0, 0.25, 8)
         steps = np.arange(8, dtype=np.float64)
         positions = np.column_stack([steps**3, (steps**3) * 0.5])
-        payload = {
-            "positions": positions.tolist(),
-            "timestamps": timestamps.tolist(),
-            "smoothness_mode": mode,
-        }
 
-        response = client.post("/api/ai/trajectory-analysis", json=payload)
+        response = client.post(
+            "/api/ai/trajectory-analysis",
+            json={
+                "positions": positions.tolist(),
+                "timestamps": timestamps.tolist(),
+                "smoothness_mode": mode,
+            },
+        )
 
         expected = TrajectoryAnalyzer(smoothness_mode=mode).analyze(positions, timestamps)
         assert response.status_code == 200
         assert response.json()["normalized_smoothness"] == pytest.approx(expected.normalized_smoothness)
 
-    def test_trajectory_analysis_endpoint_rejects_invalid_smoothness_mode(self, client):
+    def test_trajectory_analysis_rejects_invalid_mode(self, client):
         response = client.post(
             "/api/ai/trajectory-analysis",
             json={
@@ -151,38 +131,53 @@ class TestAIAnalysisEndpoints:
         )
 
         assert response.status_code == 422
+        assert response.json()["detail"][0]["loc"] == ["body", "smoothness_mode"]
 
-    def test_trajectory_analysis_too_short(self, client):
-        payload = {
-            "positions": [[0, 0], [1, 1]],
-            "timestamps": [0.0, 0.033],
-        }
-        resp = client.post("/api/ai/trajectory-analysis", json=payload)
-        assert resp.status_code == 400
+    def test_trajectory_analysis_rejects_short_trajectory(self, client):
+        response = client.post(
+            "/api/ai/trajectory-analysis",
+            json={"positions": [[0, 0], [1, 1]], "timestamps": [0.0, 0.033]},
+        )
 
-    def test_anomaly_detection_endpoint(self, client, episode_data):
-        payload = {
-            "positions": episode_data.joint_positions.tolist(),
-            "timestamps": episode_data.timestamps.tolist(),
-        }
-        resp = client.post("/api/ai/anomaly-detection", json=payload)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "anomalies" in data
-        assert "total_count" in data
-        assert "severity_counts" in data
-        assert data["total_count"] == len(data["anomalies"])
+        assert response.status_code == 400
+        assert response.json() == {"detail": "Trajectory must have at least 3 positions"}
 
-    def test_suggest_annotation_endpoint(self, client, episode_data):
-        payload = {
-            "positions": episode_data.joint_positions.tolist(),
-            "timestamps": episode_data.timestamps.tolist(),
+    def test_anomaly_detection_returns_severity_totals(self, client, smooth_trajectory):
+        positions, timestamps = smooth_trajectory
+
+        response = client.post(
+            "/api/ai/anomaly-detection",
+            json={"positions": positions.tolist(), "timestamps": timestamps.tolist()},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "anomalies": [],
+            "total_count": 0,
+            "severity_counts": {"low": 0, "medium": 0, "high": 0},
         }
-        resp = client.post("/api/ai/suggest-annotation", json=payload)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert 1 <= data["task_completion_rating"] <= 5
-        assert 1 <= data["trajectory_quality_score"] <= 5
-        assert "suggested_flags" in data
-        assert "reasoning" in data
-        assert 0 <= data["confidence"] <= 1
+
+    def test_suggest_annotation_returns_complete_contract(self, client, smooth_trajectory):
+        positions, timestamps = smooth_trajectory
+
+        response = client.post(
+            "/api/ai/suggest-annotation",
+            json={"positions": positions.tolist(), "timestamps": timestamps.tolist()},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert set(data) == {
+            "task_completion_rating",
+            "trajectory_quality_score",
+            "suggested_flags",
+            "detected_anomalies",
+            "confidence",
+            "reasoning",
+        }
+        assert data["task_completion_rating"] == 5
+        assert data["trajectory_quality_score"] == 5
+        assert data["suggested_flags"] == []
+        assert data["detected_anomalies"] == []
+        assert data["confidence"] == pytest.approx(0.288)
+        assert data["reasoning"] == "Trajectory smoothness: 1.00. Path efficiency: 1.00."
