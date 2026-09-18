@@ -226,7 +226,7 @@ if [[ "$purge_redis" == "true" ]]; then
                                 valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
                             }],
                             command: ["redis-cli"],
-                            args: ["-h", $host, "-p", $port, "--tls", "--insecure", "--no-auth-warning", "PING"]
+                            args: ["-h", $host, "-p", $port, "--tls", "--no-auth-warning", "PING"]
                         }]
                     }
                 }
@@ -422,7 +422,7 @@ if [[ "$purge_redis" == "true" ]]; then
                                 valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
                             }],
                             command: ["redis-cli"],
-                            args: ["-h", $host, "-p", $port, "--tls", "--insecure", "--no-auth-warning", "EVAL", $script, "0"]
+                            args: ["-h", $host, "-p", $port, "--tls", "--no-auth-warning", "EVAL", $script, "0"]
                         }]
                     }
                 }
