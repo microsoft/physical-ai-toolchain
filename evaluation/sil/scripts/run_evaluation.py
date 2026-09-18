@@ -337,9 +337,13 @@ def _load_task_metadata(ds_dir: str) -> tuple[dict[int, str], dict[int, str], di
 
         task_table = pq.read_table(tasks_parquet_path)
         task_columns = task_table.to_pydict()
-        text_column = "task" if "task" in task_columns else next(
-            (name for name in task_columns if name != "task_index"),
-            None,
+        text_column = (
+            "task"
+            if "task" in task_columns
+            else next(
+                (name for name in task_columns if name != "task_index"),
+                None,
+            )
         )
         if text_column is not None:
             for task_index, task in zip(
@@ -462,6 +466,7 @@ def main() -> int:
 
     import av
     import pyarrow.parquet as pq
+
     policy_repo_id = os.environ.get("POLICY_REPO_ID", "").strip()
     policy_type = os.environ.get("POLICY_TYPE", "act").strip().lower()
     dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")

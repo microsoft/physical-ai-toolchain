@@ -143,8 +143,7 @@ def test_write_vla_schema_v1_emits_strict_contract(tmp_path: Path) -> None:
 
     metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
     failure_cases = [
-        json.loads(line)
-        for line in (tmp_path / "failure_cases.jsonl").read_text(encoding="utf-8").splitlines()
+        json.loads(line) for line in (tmp_path / "failure_cases.jsonl").read_text(encoding="utf-8").splitlines()
     ]
 
     assert metrics == {
