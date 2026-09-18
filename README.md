@@ -9,6 +9,8 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://microsoft.github.io/physical-ai-toolchain/)
 <!-- markdownlint-enable MD013 -->
 
+OpenSSF Best Practices project [12195](https://www.bestpractices.dev/projects/12195) holds the Silver badge: Passing 100%, Silver 100%, and Gold 43% as verified on 2026-09-17.
+
 ## Overview
 
 Physical AI and robotics are moving from headlines and experimentation into real-world industrial deployment. The shift creates practical implications for how human-robot-AI collaboration becomes an operational capability in manufacturing, logistics, healthcare, and autonomous systems. Operationalizing physical intelligence at scale, across fleets and federations of intelligent systems, is a challenge no single OEM or software vendor can deliver alone.

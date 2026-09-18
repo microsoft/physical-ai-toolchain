@@ -273,6 +273,12 @@ No external interface is removed without a deprecation notice in a prior release
 
 All contributions require appropriate tests. This policy supports code quality and the project's [OpenSSF Best Practices](https://www.bestpractices.dev/) goals.
 
+### OpenSSF Evidence
+
+Changes to security controls, build and release processes, testing policy, governance, licensing, or contributor requirements can affect the project's [OpenSSF Best Practices questionnaire](https://www.bestpractices.dev/projects/12195). Update `.bestpractices.json` when a contribution changes evidence cited by the questionnaire, then run the `openssf-badge-audit` skill to compare the repository proposal with the live project.
+
+Do not mark a criterion as met without verifiable repository or project evidence. Questionnaire submission remains a maintainer action through the authenticated OpenSSF interface.
+
 ### Policy
 
 - New features require accompanying unit tests.
