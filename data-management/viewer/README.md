@@ -113,6 +113,7 @@ Expected blob structure:
 | `AZURE_STORAGE_SAS_TOKEN`            | —               | SAS token (omit to use DefaultAzureCredential / MSI)           |
 | `BACKEND_HOST`                       | `127.0.0.1`     | Bind address (`0.0.0.0` for containers)                        |
 | `BACKEND_PORT`                       | `8000`          | API server port                                                |
+| `LOG_LEVEL`                          | `info`          | Uvicorn log level for container deployments                    |
 | `FRONTEND_PORT`                      | `5173`          | Dev server port                                                |
 | `CORS_ORIGINS`                       | localhost ports | Comma-separated allowed CORS origins                           |
 
@@ -426,7 +427,7 @@ Available options:
 ```bash
 cd backend
 source .venv/bin/activate
-uvicorn src.api.main:app --reload --port 8000
+uvicorn src.api.main:app --log-config logging.json --reload --port 8000
 ```
 
 #### Start Frontend
@@ -593,6 +594,7 @@ STORAGE_BACKEND=azure
 AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 AZURE_STORAGE_DATASET_CONTAINER=datasets
 BACKEND_HOST=0.0.0.0
+LOG_LEVEL=info
 CORS_ORIGINS=https://your-frontend-url.example.com
 DETECTION_MODELS_DIR=/models
 DETECTION_MODEL_DIGESTS={"yolo11n":"<sha256>","yolov8s-world":"<sha256>"}
