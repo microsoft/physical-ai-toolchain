@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.16.6",
+    "ruff==0.16.7",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
@@ -34,14 +34,14 @@ azure = [
 ]
 analysis = [
     "scipy==1.18.1",
-    "scikit-learn==1.9.0",
+    "scikit-learn==1.9.1",
     "pandas==3.0.5",
 ]
 huggingface = [
-    "huggingface-hub==1.30.0",
+    "huggingface-hub==1.31.0",
 ]
 auth = [
-    "pyjwt[crypto]==2.13.0",
+    "pyjwt[crypto]==2.14.0",
 ]
 hdf5 = [
     "h5py==3.16.0",
@@ -50,12 +50,12 @@ export = [
     "h5py==3.16.0",
 ]
 yolo = [
-    "ultralytics==8.4.144",
+    "ultralytics==8.4.148",
 ]
 vlm-judge = [
     "accelerate==1.15.0",
     "torch==2.14.0",
-    "transformers==5.16.1",
+    "transformers==5.17.0",
 ]
 
 [build-system]
