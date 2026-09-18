@@ -77,7 +77,7 @@ export function useAnnotationWorkflow(
     if (!currentAnnotation || !currentDatasetId) return
 
     try {
-      saveMutation.save()
+      await saveMutation.save()
       markSaved()
       onSaveSuccess?.()
     } catch (error) {

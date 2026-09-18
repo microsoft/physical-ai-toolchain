@@ -18,11 +18,15 @@ Expected blob layout per dataset:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import aiofiles
+import pyarrow.parquet as pq
 
 if TYPE_CHECKING:
     pass
@@ -87,6 +91,7 @@ class BlobDatasetProvider:
         self.container_name = container_name
         self.sas_token = sas_token
         self._client: BlobServiceClient | None = None
+        self._credential: AsyncDefaultAzureCredential | None = None
         self._info_cache: dict[str, dict] = {}
         # Per-dataset cache of episode_index -> {camera -> (chunk, file, from_ts, to_ts)}
         self._episode_video_cache: dict[str, dict[int, dict[str, tuple[int, int, float, float]]]] = {}
@@ -101,7 +106,7 @@ class BlobDatasetProvider:
         return dataset_id_to_blob_prefix(dataset_id)
 
     async def _get_client(self) -> BlobServiceClient:
-        """Return a lazily-initialized async BlobServiceClient."""
+        """Return a client with the SDK's default exponential retry policy."""
         if self._client is None:
             account_url = f"https://{self.account_name}.blob.core.windows.net"
             if self.sas_token:
@@ -110,10 +115,10 @@ class BlobDatasetProvider:
                     credential=self.sas_token,
                 )
             else:
-                credential = AsyncDefaultAzureCredential()
+                self._credential = AsyncDefaultAzureCredential()
                 self._client = BlobServiceClient(
                     account_url=account_url,
-                    credential=credential,
+                    credential=self._credential,
                 )
         return self._client
 
@@ -411,12 +416,7 @@ class BlobDatasetProvider:
         dataset_id: str,
     ) -> dict[int, dict[str, tuple[int, int, float, float]]] | None:
         """Download and parse meta/episodes/chunk-*/file-*.parquet for video lookup."""
-        try:
-            import io
-
-            import pyarrow.parquet as pq
-        except ImportError:
-            return None
+        import io
 
         prefix = self.get_blob_prefix(dataset_id)
         meta_prefix = f"{prefix}/meta/episodes/"
@@ -431,7 +431,7 @@ class BlobDatasetProvider:
                 data = await self._read_blob_bytes(blob.name)
                 if data is None:
                     continue
-                table = pq.read_table(io.BytesIO(data))
+                table = await asyncio.to_thread(pq.read_table, io.BytesIO(data))
                 cols = table.column_names
                 if "episode_index" not in cols:
                     continue
@@ -553,12 +553,14 @@ class BlobDatasetProvider:
         """Upload a locally generated video to blob storage.
 
         Creates a dedicated client to avoid event loop conflicts when called
-        from a worker thread via asyncio.new_event_loop().
+        from a worker thread via asyncio.new_event_loop(). The client uses the
+        SDK's default exponential retry policy.
         """
         prefix = self.get_blob_prefix(dataset_id)
         blob_path = f"{prefix}/meta/videos/{camera}/episode_{episode_idx:06d}.mp4"
 
         account_url = f"https://{self.account_name}.blob.core.windows.net"
+        credential = None
         try:
             credential = AsyncDefaultAzureCredential() if not self.sas_token else None
             effective_credential = self.sas_token or credential
@@ -567,17 +569,23 @@ class BlobDatasetProvider:
             async with client:
                 container = client.get_container_client(self.container_name)
                 blob_client = container.get_blob_client(blob_path)
-                with open(local_path, "rb") as f:
-                    await blob_client.upload_blob(f, overwrite=True)
-
-            if credential:
-                await credential.close()
+                await blob_client.upload_blob(self._read_file_chunks(local_path), overwrite=True)
 
             logger.info("Uploaded video to blob: %s", blob_path)
             return True
         except Exception as e:
             logger.warning("Failed to upload video to blob '%s': %s", blob_path, e)
             return False
+        finally:
+            if credential is not None:
+                await credential.close()
+
+    @staticmethod
+    async def _read_file_chunks(path: Path, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
+        """Read a local file asynchronously in bounded chunks."""
+        async with aiofiles.open(path, "rb") as file:
+            while chunk := await file.read(chunk_size):
+                yield chunk
 
     # ------------------------------------------------------------------
     # Parquet / metadata sync to local temp dir (enables existing loaders)
@@ -598,7 +606,7 @@ class BlobDatasetProvider:
         Returns:
             True if sync completed successfully, False on critical failure.
         """
-        local_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(local_dir.mkdir, parents=True, exist_ok=True)
 
         try:
             client = await self._get_client()
@@ -621,14 +629,14 @@ class BlobDatasetProvider:
                     continue
 
                 local_path = local_dir / relative
-                local_path.parent.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(local_path.parent.mkdir, parents=True, exist_ok=True)
 
-                if local_path.exists():
+                if await asyncio.to_thread(local_path.exists):
                     continue  # Already synced
 
                 data = await self._read_blob_bytes(blob.name)
                 if data is not None:
-                    local_path.write_bytes(data)
+                    await asyncio.to_thread(local_path.write_bytes, data)
                     synced_count += 1
 
             logger.info(
@@ -668,7 +676,7 @@ class BlobDatasetProvider:
         Returns:
             True if meta/info.json was successfully downloaded, False otherwise.
         """
-        local_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(local_dir.mkdir, parents=True, exist_ok=True)
 
         try:
             client = await self._get_client()
@@ -685,17 +693,17 @@ class BlobDatasetProvider:
                     continue
 
                 local_path = local_dir / relative
-                local_path.parent.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(local_path.parent.mkdir, parents=True, exist_ok=True)
 
-                if local_path.exists():
+                if await asyncio.to_thread(local_path.exists):
                     continue
 
                 data = await self._read_blob_bytes(blob.name)
                 if data is not None:
-                    local_path.write_bytes(data)
+                    await asyncio.to_thread(local_path.write_bytes, data)
 
             info_path = local_dir / "meta" / "info.json"
-            if not info_path.exists():
+            if not await asyncio.to_thread(info_path.exists):
                 logger.warning(
                     "meta/info.json not found for dataset '%s'",
                     dataset_id.replace("\r", "").replace("\n", ""),
@@ -725,7 +733,7 @@ class BlobDatasetProvider:
         downloading full episode data. Episode HDF5 files are fetched
         on-demand via sync_hdf5_episode_to_local.
         """
-        local_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(local_dir.mkdir, parents=True, exist_ok=True)
         prefix = self.get_blob_prefix(dataset_id)
         try:
             client = await self._get_client()
@@ -735,30 +743,30 @@ class BlobDatasetProvider:
                 if blob.name.endswith(".json"):
                     filename = blob.name.rsplit("/", 1)[-1]
                     local_path = local_dir / filename
-                    if local_path.exists():
+                    if await asyncio.to_thread(local_path.exists):
                         continue
                     data = await self._read_blob_bytes(blob.name)
                     if data is not None:
-                        local_path.write_bytes(data)
+                        await asyncio.to_thread(local_path.write_bytes, data)
                 elif blob.name.endswith(".hdf5"):
                     found_hdf5 = True
                     filename = blob.name.rsplit("/", 1)[-1]
                     local_path = local_dir / filename
-                    if not local_path.exists():
-                        local_path.touch()
+                    if not await asyncio.to_thread(local_path.exists):
+                        await asyncio.to_thread(local_path.touch)
                 elif blob.name.endswith(".mp4") and "/meta/videos/" in blob.name:
                     relative = blob.name[len(prefix + "/") :]
                     local_path = local_dir / relative
-                    if local_path.exists():
+                    if await asyncio.to_thread(local_path.exists):
                         continue
-                    local_path.parent.mkdir(parents=True, exist_ok=True)
+                    await asyncio.to_thread(local_path.parent.mkdir, parents=True, exist_ok=True)
                     blob_client = container.get_blob_client(blob.name)
                     download = await blob_client.download_blob()
                     tmp_path = local_path.with_suffix(".mp4.tmp")
-                    with open(tmp_path, "wb") as f:
+                    async with aiofiles.open(tmp_path, "wb") as file:
                         async for chunk in download.chunks():
-                            f.write(chunk)
-                    tmp_path.rename(local_path)
+                            await file.write(chunk)
+                    await asyncio.to_thread(tmp_path.replace, local_path)
                     logger.info("Downloaded cached video: %s", relative)
             return found_hdf5
         except Exception as e:
@@ -791,17 +799,17 @@ class BlobDatasetProvider:
                 if filename not in patterns:
                     continue
                 local_path = local_dir / filename
-                if local_path.exists() and local_path.stat().st_size > 0:
+                if await asyncio.to_thread(self._is_non_empty_file, local_path):
                     return True
                 blob_client = container.get_blob_client(blob.name)
                 download = await blob_client.download_blob()
                 tmp_path = local_path.with_suffix(".hdf5.tmp")
                 written = 0
-                with open(tmp_path, "wb") as f:
+                async with aiofiles.open(tmp_path, "wb") as file:
                     async for chunk in download.chunks():
-                        f.write(chunk)
+                        await file.write(chunk)
                         written += len(chunk)
-                tmp_path.rename(local_path)
+                await asyncio.to_thread(tmp_path.replace, local_path)
                 logger.info(
                     "Downloaded HDF5 episode %d for '%s' (%d bytes)",
                     episode_idx,
@@ -818,6 +826,11 @@ class BlobDatasetProvider:
                 e,
             )
             return False
+
+    @staticmethod
+    def _is_non_empty_file(path: Path) -> bool:
+        """Return whether a path exists and contains data."""
+        return path.exists() and path.stat().st_size > 0
 
     async def get_hdf5_dataset_config(self, dataset_id: str) -> dict | None:
         """Read dataset_config.json for a dataset."""
@@ -853,7 +866,12 @@ class BlobDatasetProvider:
     # ------------------------------------------------------------------
 
     async def close(self) -> None:
-        """Release the internal BlobServiceClient."""
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
+        """Release the internal BlobServiceClient and managed credential."""
+        client, self._client = self._client, None
+        credential, self._credential = self._credential, None
+        try:
+            if client is not None:
+                await client.close()
+        finally:
+            if credential is not None:
+                await credential.close()
