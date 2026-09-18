@@ -1,0 +1,12 @@
+**
+!package.json
+!package-lock.json
+!data-management/
+!data-management/viewer/
+!data-management/viewer/frontend/
+!data-management/viewer/frontend/**
+data-management/viewer/frontend/node_modules
+data-management/viewer/frontend/dist
+data-management/viewer/frontend/.env
+data-management/viewer/frontend/.env.*
+data-management/viewer/frontend/*.log
