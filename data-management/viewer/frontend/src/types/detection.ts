@@ -32,9 +32,9 @@ export interface DetectionRequest {
  */
 export interface Detection {
   /** COCO class ID */
-  class_id: number
+  classId: number
   /** Human-readable class name */
-  class_name: string
+  className: string
   /** Detection confidence score (0.0-1.0) */
   confidence: number
   /** Bounding box as [x1, y1, x2, y2] in pixels */
@@ -50,7 +50,7 @@ export interface DetectionResult {
   /** Detections found in this frame */
   detections: Detection[]
   /** Inference time in milliseconds */
-  processing_time_ms: number
+  processingTimeMs: number
 }
 
 /**
@@ -60,7 +60,7 @@ export interface ClassSummary {
   /** Total detections of this class */
   count: number
   /** Average confidence */
-  avg_confidence: number
+  avgConfidence: number
 }
 
 /**
@@ -68,13 +68,13 @@ export interface ClassSummary {
  */
 export interface EpisodeDetectionSummary {
   /** Total frames in episode */
-  total_frames: number
+  totalFrames: number
   /** Number of frames processed */
-  processed_frames: number
+  processedFrames: number
   /** Total detections across all frames */
-  total_detections: number
+  totalDetections: number
   /** Detection results by frame */
-  detections_by_frame: DetectionResult[]
+  detectionsByFrame: DetectionResult[]
   /** Detection statistics by class name */
-  class_summary: Record<string, ClassSummary>
+  classSummary: Record<string, ClassSummary>
 }

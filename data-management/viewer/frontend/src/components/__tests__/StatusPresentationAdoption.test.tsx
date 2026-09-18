@@ -71,8 +71,8 @@ describe('status presentation adoption surfaces', () => {
           {
             id: 'activity-1',
             type: 'review',
-            episode_id: 'episode-12',
-            annotator_name: 'Allen',
+            episodeId: 'episode-12',
+            annotatorName: 'Allen',
             timestamp: '2026-03-06T12:00:00.000Z',
             summary: 'Reviewed the grasp trajectory',
           },
@@ -97,19 +97,19 @@ describe('status presentation adoption surfaces', () => {
     render(
       <SuggestionCard
         suggestion={{
-          task_completion_rating: 4,
-          trajectory_quality_score: 3,
-          suggested_flags: ['jittery'],
-          detected_anomalies: [
+          taskCompletionRating: 4,
+          trajectoryQualityScore: 3,
+          suggestedFlags: ['jittery'],
+          detectedAnomalies: [
             {
               id: 'detected-1',
               type: 'unexpected_stop',
               severity: 'high',
-              frame_start: 10,
-              frame_end: 16,
+              frameStart: 10,
+              frameEnd: 16,
               description: 'The robot pauses before the final motion.',
               confidence: 0.88,
-              auto_detected: true,
+              autoDetected: true,
             },
           ],
           confidence: 0.91,
