@@ -144,6 +144,13 @@ jobs:
       contents: read
       id-token: write
 
+  # Pytest: gpu-offload controller and runtime components
+  pytest-gpu-offload:
+    name: Pytest GPU Offload
+    uses: ./.github/workflows/pytest-gpu-offload.yml
+    permissions:
+      contents: read
+
   # Pytest: shared CI scripts component
   pytest-shared-ci:
     name: Pytest Shared CI
@@ -307,6 +314,7 @@ jobs:
       - pytest-dm-tools
       - pytest-data-pipeline
       - pytest-inference
+      - pytest-gpu-offload
       - pytest-shared-ci
       - dataviewer-frontend-tests
       - dataviewer-backend-pytests

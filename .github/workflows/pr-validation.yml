@@ -29,6 +29,7 @@ jobs:
       dm_tools: ${{ steps.filter.outputs.dm_tools }}
       data_pipeline: ${{ steps.filter.outputs.data_pipeline }}
       inference: ${{ steps.filter.outputs.inference }}
+      gpu_offload: ${{ steps.filter.outputs.gpu_offload }}
       shared_ci: ${{ steps.filter.outputs.shared_ci }}
       dv_backend: ${{ steps.filter.outputs.dv_backend }}
       dv_frontend: ${{ steps.filter.outputs.dv_frontend }}
@@ -69,6 +70,7 @@ jobs:
             echo "dm_tools=$(match '^data-management/tools/')"
             echo "data_pipeline=$(match '^data-pipeline/capture/')"
             echo "inference=$(match '^fleet-deployment/inference/')"
+            echo "gpu_offload=$(match '^gpu-offload/(controller|runtime)/')"
             echo "shared_ci=$(match '^shared/ci/')"
             echo "dv_backend=$(match '^(data-management/viewer/backend/|data-management/viewer/docker-compose\.yml|shared/ci/smoke-docker\.sh|\.github/workflows/smoke-cpu\.yml)')"
             echo "dv_frontend=$(match '^data-management/viewer/frontend/')"
@@ -332,6 +334,15 @@ jobs:
       contents: read
       id-token: write
 
+  # Pytest: gpu-offload controller and runtime components
+  pytest-gpu-offload:
+    name: Pytest GPU Offload
+    needs: changes
+    if: needs.changes.outputs.gpu_offload == 'true'
+    uses: ./.github/workflows/pytest-gpu-offload.yml
+    permissions:
+      contents: read
+
   # Pytest: shared CI scripts component
   pytest-shared-ci:
     name: Pytest Shared CI
@@ -515,6 +526,7 @@ jobs:
       - pytest-dm-tools
       - pytest-data-pipeline
       - pytest-inference
+      - pytest-gpu-offload
       - pytest-shared-ci
       - dataviewer-backend-pytests
       - evaluation-pytests

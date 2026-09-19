@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lerobot-rollout.fullname" . }}
+  labels:
+    {{- include "lerobot-rollout.labels" . | nindent 4 }}
+data:
+  ROBOT_TYPE: {{ .Values.rollout.robotType | quote }}
+  ROBOT_PORT: {{ .Values.rollout.robotPort | quote }}
+  ROBOT_ID: {{ .Values.rollout.robotId | quote }}
+  ROBOT_CAMERAS: {{ .Values.rollout.robotCameras | quote }}
+  LEROBOT_FPS: {{ .Values.rollout.fps | quote }}
+  POLICY_PATH: {{ .Values.rollout.policyPath | quote }}
+  ROLLOUT_RAW_OBSERVATION_OFFLOAD: {{ .Values.offload.rawObservation.enabled | quote }}
+  ROLLOUT_TIMING_ENABLED: {{ .Values.rollout.timing.enabled | quote }}
+  ROLLOUT_TIMING_REPORT_EVERY: {{ .Values.rollout.timing.reportEvery | quote }}

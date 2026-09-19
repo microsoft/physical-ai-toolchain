@@ -1,4 +1,10 @@
-# Tier Model — Canonical Reference
+---
+title: "Tier Model — Canonical Reference"
+description: Canonical reference for tier IDs, stage names, boundaries, and vocabulary of the T0-T5 tiered architecture
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-15
+ms.topic: reference
+---
 
 - **Status:** Canonical (single source of truth)
 - **Operationalizes:** [Tiered Architecture Proposal](tiered-architecture-proposal.md)
@@ -27,18 +33,19 @@ The pairing is always written `T# — Name` (for example, `T0 — Dev`).
 T0 is the documented **default** starting path. T2 is the **recommended production** path. T3–T5 are
 **advanced**. Infra details are drawn from Section 5 of the proposal.
 
-| T# | Stage name | Operator reach / scope                   | Edge infra              | Cloud infra                                          | One-line purpose                                                             |
-|----|------------|------------------------------------------|-------------------------|------------------------------------------------------|------------------------------------------------------------------------------|
-| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker only     | None                                                 | The honest zero-cloud, zero-Kubernetes floor for the full training lifecycle.                       |
-| T1 | Lab        | One site, a few robots, shared GPU       | Shared disk (NFS/SMB)   | One Blob storage account (optional AzureML / MLflow) | Add the first cloud resource, storage, for a small lab or integrator.        |
-| T2 | Pilot      | One site, at scale, team (recommended)   | None beyond Docker      | AzureML + storage + model registry + MLflow          | Cloud training, registry, and shared catalogs become the default.            |
-| T3 | Production | Single site, declarative deployment      | Local k3s + FluxCD      | Same as T2 (no Arc)                                  | GitOps deployment automation at one site, proving Arc is not required.       |
-| T4 | Scale      | Multiple sites you cannot directly reach | Arc + AKS/Flux + gating | T2 + cross-site connectivity / identity              | Multi-site **fleet delivery** terminus; Arc as reachability/identity broker. |
-| T5 | Operate    | Fleet-wide cognition (roadmap)           | + Azure IoT Operations  | + Fabric Real-Time Intelligence + drift/retraining   | **Fleet intelligence**: roadmap capability for drift detection and retraining. |
+| T# | Stage name | Operator reach / scope                   | Edge infra                                | Cloud infra                                          | One-line purpose                                                                  |
+|----|------------|------------------------------------------|-------------------------------------------|------------------------------------------------------|-----------------------------------------------------------------------------------|
+| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker; optional local Kubernetes | None                                                 | The honest zero-cloud floor for the full lifecycle; Kubernetes is never required. |
+| T1 | Lab        | One site, a few robots, shared GPU       | Shared disk (NFS/SMB)                     | One Blob storage account (optional AzureML / MLflow) | Add the first cloud resource, storage, for a small lab or integrator.             |
+| T2 | Pilot      | One site, at scale, team (recommended)   | None beyond Docker                        | AzureML + storage + model registry + MLflow          | Cloud training, registry, and shared catalogs become the default.                 |
+| T3 | Production | Single site, declarative deployment      | Local k3s + FluxCD                        | Same as T2 (no Arc)                                  | GitOps deployment automation at one site, proving Arc is not required.            |
+| T4 | Scale      | Multiple sites you cannot directly reach | Arc + AKS/Flux + gating                   | T2 + cross-site connectivity / identity              | Multi-site **fleet delivery** terminus; Arc as reachability/identity broker.      |
+| T5 | Operate    | Fleet-wide cognition (roadmap)           | + Azure IoT Operations                    | + Fabric Real-Time Intelligence + drift/retraining   | **Fleet intelligence**: roadmap capability for drift detection and retraining.    |
 
 **Full training lifecycle** (the anchor goal): capture demonstrations on a robot, train an imitation policy, validate
 it, and run that policy back on the robot, the full loop for one task. The full training lifecycle is fully achievable at
-T0-T2 with manual deployment and no Kubernetes, Arc, or fleet infrastructure. Data augmentation is a
+T0-T2 with manual deployment and no required Kubernetes, Arc, or fleet infrastructure. T0 may use a
+single-laptop Kubernetes cluster as an optional local orchestration profile. Data augmentation is a
 separate optional axis (A0-A2), not a step in the full training lifecycle.
 
 ### Boundaries
@@ -61,12 +68,12 @@ single-site T3 operator can sit at T5.0, and a multi-site T4 operator can remain
 autonomy stages are how much of the retraining decision a human delegates, not more infrastructure to
 buy.
 
-| Rung | Decision authority                                                                     | Human role                            | Status       |
-|------|----------------------------------------------------------------------------------------|---------------------------------------|--------------|
-| T5.0 | Gated retraining: the system surfaces signals only; humans trigger retraining.          | Human triggers every retraining cycle | Not built    |
-| T5.1 | Human-in-the-loop / active learning: the system proposes what to retrain on and when.   | Human approves each cycle             | Ad-hoc (Hex) |
-| T5.2 | Continual learning: the system retrains on a schedule or trigger.                       | Human reviews before deployment       | Not built    |
-| T5.3 | Autonomous closed-loop: the system detects drift, retrains, gates, and deploys.         | None (fully autonomous)               | Not built    |
+| Rung | Decision authority                                                                    | Human role                            | Status       |
+|------|---------------------------------------------------------------------------------------|---------------------------------------|--------------|
+| T5.0 | Gated retraining: the system surfaces signals only; humans trigger retraining.        | Human triggers every retraining cycle | Not built    |
+| T5.1 | Human-in-the-loop / active learning: the system proposes what to retrain on and when. | Human approves each cycle             | Ad-hoc (Hex) |
+| T5.2 | Continual learning: the system retrains on a schedule or trigger.                     | Human reviews before deployment       | Not built    |
+| T5.3 | Autonomous closed-loop: the system detects drift, retrains, gates, and deploys.       | None (fully autonomous)               | Not built    |
 
 > [!WARNING]
 > Fully autonomous retraining on production data is a foot-gun: a legitimate distribution change can
@@ -152,14 +159,14 @@ Directory: `docs/recipes/`. The naming scheme is one directory per tier, named
 `tier-<n>-<slug>/`, each containing a `README.md` entry point. The slug is the lowercased stage name.
 Entry pages and cross-links use these exact paths.
 
-| T# | Recipe path                                | Status                    |
-|----|--------------------------------------------|---------------------------|
-| T0 | `docs/recipes/tier-0-dev/README.md`        | Default tier              |
-| T1 | `docs/recipes/tier-1-lab/README.md`        | Available                 |
-| T2 | `docs/recipes/tier-2-pilot/README.md`      | Recommended               |
-| T3 | `docs/recipes/tier-3-production/README.md` | Advanced                  |
-| T4 | `docs/recipes/tier-4-scale/README.md`      | Advanced                  |
-| T5 | `docs/recipes/tier-5-operate/README.md`    | Roadmap                   |
+| T# | Recipe path                                | Status       |
+|----|--------------------------------------------|--------------|
+| T0 | `docs/recipes/tier-0-dev/README.md`        | Default tier |
+| T1 | `docs/recipes/tier-1-lab/README.md`        | Available    |
+| T2 | `docs/recipes/tier-2-pilot/README.md`      | Recommended  |
+| T3 | `docs/recipes/tier-3-production/README.md` | Advanced     |
+| T4 | `docs/recipes/tier-4-scale/README.md`      | Advanced     |
+| T5 | `docs/recipes/tier-5-operate/README.md`    | Roadmap      |
 
 > [!NOTE]
 > The existing topic-based recipe folders (`docs/recipes/training/`,

@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Getting Started
 description: Entry point for deploying the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-08-12
 ms.topic: overview
 keywords:
   - getting-started
@@ -20,14 +20,14 @@ The default path starts on a laptop, not in the cloud. Begin with [Start Here �
 
 Adoption is modeled as six graduated tiers (T0-T5). Each tier states the minimum infrastructure needed to complete the full training lifecycle: capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot. Each tier is a legitimate stopping point. Start at T0 and graduate only when a concrete trigger forces it.
 
-| Tier                | When to start here                                                   | Graduate when…                                                                                                                                             | Quick start                                                   |
-|---------------------|----------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
-| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and zero Kubernetes.      | No local GPU; the task needs many training iterations as conditions vary; or a second person needs the data.                                               | [Tier 0 — Dev](../recipes/tier-0-dev/README.md)               |
-| **T1 — Lab**        | One site, a few robots, a shared GPU box; first cloud storage.       | Training scale or team size outgrows one GPU box; dataset governance and catalogs become necessary.                                                        | [Tier 1 — Lab](../recipes/tier-1-lab/README.md)               |
-| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.   | The robot count or update cadence makes hand-updating each robot error-prone and version skew real, while everything is still at one reachable site.       | [Tier 2 — Pilot](../recipes/tier-2-pilot/README.md)           |
-| **T3 — Production** | Advanced. Single-site declarative deploy (local k3s + Flux, no Arc). | Robots span multiple sites, or sites become unreachable from a single operator network.                                                                    | [Tier 3 — Production](../recipes/tier-3-production/README.md) |
-| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc reachability broker.    | You explicitly want production signals to drive retraining and fleet-wide health analytics. This is a deliberate decision, not an automatic consequence of scale. | [Tier 4 — Scale](../recipes/tier-4-scale/README.md)           |
-| **T5 — Operate**    | Roadmap. **Fleet intelligence** for drift detection and retraining.  | Available after the roadmap implementation lands.                                                                                                          | [Tier 5 — Operate](../recipes/tier-5-operate/README.md)       |
+| Tier                | When to start here                                                     | Graduate when…                                                                                                                                                    | Quick start                                                   |
+|---------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and no required Kubernetes. | No local GPU; the task needs many training iterations as conditions vary; or a second person needs the data.                                                      | [Tier 0 — Dev](../recipes/tier-0-dev/README.md)               |
+| **T1 — Lab**        | One site, a few robots, a shared GPU box; first cloud storage.         | Training scale or team size outgrows one GPU box; dataset governance and catalogs become necessary.                                                               | [Tier 1 — Lab](../recipes/tier-1-lab/README.md)               |
+| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.     | The robot count or update cadence makes hand-updating each robot error-prone and version skew real, while everything is still at one reachable site.              | [Tier 2 — Pilot](../recipes/tier-2-pilot/README.md)           |
+| **T3 — Production** | Advanced. Single-site declarative deploy (local k3s + Flux, no Arc).   | Robots span multiple sites, or sites become unreachable from a single operator network.                                                                           | [Tier 3 — Production](../recipes/tier-3-production/README.md) |
+| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc reachability broker.      | You explicitly want production signals to drive retraining and fleet-wide health analytics. This is a deliberate decision, not an automatic consequence of scale. | [Tier 4 — Scale](../recipes/tier-4-scale/README.md)           |
+| **T5 — Operate**    | Roadmap. **Fleet intelligence** for drift detection and retraining.    | Available after the roadmap implementation lands.                                                                                                                 | [Tier 5 — Operate](../recipes/tier-5-operate/README.md)       |
 
 ⭐ default · ✅ recommended production
 
@@ -45,7 +45,7 @@ See the canonical [Tier Model](../design/tier-model.md) for the authoritative ti
 
 ### Start Here — T0 Dev
 
-The default starting path is **one laptop and one robot**, with zero cloud and zero Kubernetes. You close the full capture -> train -> validate -> run loop entirely on local hardware.
+The default starting path is **one laptop and one robot**, with zero cloud and no required Kubernetes. You close the full capture -> train -> validate -> run loop entirely on local hardware. Plain processes are the baseline; local Kubernetes is optional for workloads such as GPU offload.
 
 1. **Set up:** clone the repo and run `./setup-dev.sh` (Python 3.12 via `uv`, virtual environment, training dependencies). No Azure subscription required.
 2. **Capture:** record ROS 2 bags to local disk on the robot or laptop.
@@ -63,13 +63,13 @@ The default starting path is **one laptop and one robot**, with zero cloud and z
 
 ## 🚀 Guides
 
-| Guide                                      | Description                                                |
-|--------------------------------------------|------------------------------------------------------------|
-| [Start Here — T0 Dev](#start-here--t0-dev) | Default local-first path: laptop + one robot, no cloud     |
-| [Choose Your Tier](#choose-your-tier)      | Pick a tier and see its graduation triggers                |
+| Guide                                      | Description                                                    |
+|--------------------------------------------|----------------------------------------------------------------|
+| [Start Here — T0 Dev](#start-here--t0-dev) | Default local-first path: laptop + one robot, no cloud         |
+| [Choose Your Tier](#choose-your-tier)      | Pick a tier and see its graduation triggers                    |
 | [Quickstart](quickstart.md)                | Cloud path (T2 — Pilot): clone to the first cloud training job |
-| Architecture Overview (coming soon)        | System topology, components, and data flow                 |
-| Glossary (coming soon)                     | Term definitions for Azure, NVIDIA, and OSMO               |
+| Architecture Overview (coming soon)        | System topology, components, and data flow                     |
+| Glossary (coming soon)                     | Term definitions for Azure, NVIDIA, and OSMO                   |
 
 ## ⏱️ Time and Cost
 
@@ -86,7 +86,7 @@ The local default path (T0 — Dev) has **no cloud cost**. It runs entirely on y
 
 ## 📋 Prerequisites Summary
 
-The default path (T0 — Dev) needs only **Python ≥3.12** plus ROS 2 and Docker, with no Azure subscription and no Kubernetes tooling. The additional tools below are required only for the cloud path ([Quickstart](quickstart.md), T2 — Pilot and up).
+The default path (T0 — Dev) needs only **Python ≥3.12** plus ROS 2 and Docker, with no Azure subscription or required Kubernetes tooling. Install kind, `kubectl`, and Helm only when selecting an optional local Kubernetes profile such as GPU offload. The additional cloud tools below are required only for the cloud path ([Quickstart](quickstart.md), T2 — Pilot and up).
 
 | Tool      | Version | Required for           |
 |-----------|---------|------------------------|
