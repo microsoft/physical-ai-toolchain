@@ -3,7 +3,7 @@ sidebar_position: 9
 title: Cost Considerations
 description: Testing budgets, cost tracking, and optimization strategies for contribution validation
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: concept
 ---
 
@@ -26,6 +26,8 @@ Full deployment testing incurs Azure costs. This guide provides cost transparenc
 
 ### Cost by Component
 
+The following historical estimate uses illustrative SKUs, not current deployment defaults. The checked-in example uses `Standard_NV36ads_A10_v5` GPU nodes and `Standard_D8ds_v5` system nodes. Root defaults use PostgreSQL `GP_Standard_D2s_v3` and Azure Managed Redis `Balanced_B10`, not the Burstable and Basic tiers priced below. Recalculate costs from your selected `terraform.tfvars` before deployment.
+
 | Component         | Estimated Cost                        | Notes                           |
 |-------------------|---------------------------------------|---------------------------------|
 | AKS Control Plane | Free (tier) or ~$0.10/hour (standard) | Standard tier for production    |
@@ -43,16 +45,13 @@ Full deployment testing incurs Azure costs. This guide provides cost transparenc
 
 **Use smaller deployments:**
 
-```bash
-# Single GPU node instead of default pool size
-terraform apply -var="gpu_node_count=1"
+Configure the supported root inputs in `infrastructure/terraform/terraform.tfvars`, then review the plan before applying:
 
-# Public network mode (simpler, faster)
-terraform apply -var="network_mode=public"
+* In `node_pools`, limit each autoscaled pool with `min_count` and `max_count`. For fixed pools, disable `should_enable_auto_scaling` and set `node_count`.
+* Select a workload-appropriate PostgreSQL tier with `postgresql_sku_name`. Confirm capacity and availability requirements before selecting a cheaper tier.
+* Keep private networking unless a public test environment is approved. `should_enable_private_endpoint` and `should_enable_private_aks_cluster` select the network mode; review `should_enable_public_network_access` separately.
 
-# Burstable database tiers
-terraform apply -var="postgres_sku=B_Standard_B1ms"
-```
+The checked-in single-pool example already caps the A10 pool at one node. Initialize subscription context with `source infrastructure/terraform/prerequisites/az-sub-init.sh` from the repository root before Terraform operations. Use the same reviewed variable file for plan, apply, and destroy.
 
 **Time-bound testing:**
 

@@ -3,7 +3,7 @@ sidebar_position: 7
 title: Infrastructure as Code Style Guide
 description: Terraform conventions, shell script standards, and copyright headers for contributions
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-10
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 
@@ -27,7 +27,7 @@ npm run lint:tf:validate
 ### Variable Naming
 
 * Use descriptive snake_case: `gpu_node_pool_vm_size` not `vm_sku`
-* Prefix booleans with `should_`: `should_enable_private_endpoints`, `should_deploy_vpn`
+* Prefix booleans with `should_`: `should_enable_private_endpoint`, `should_deploy_postgresql`
 * Group related variables with prefixes: `aks_cluster_name`, `aks_node_count`, `aks_version`
 
 ### Module Structure
@@ -166,19 +166,7 @@ run "verify_naming" {
 
 ### Resource Tagging
 
-All Azure resources must include standard tags:
-
-```hcl
-tags = merge(
-  var.common_tags,
-  {
-    environment = var.environment
-    workload    = "robotics-ml"
-    managed_by  = "terraform"
-    cost_center = var.cost_center
-  }
-)
-```
+Supply resource tags through the root `tags` map in `terraform.tfvars`. Include environment, workload, ownership, and cost-allocation labels as appropriate. The root deployment accepts `tags`; it does not define separate `common_tags` or `cost_center` inputs.
 
 ### Security Patterns
 
@@ -190,32 +178,16 @@ tags = merge(
 
 ### Example
 
-```hcl
-resource "azurerm_kubernetes_cluster" "aks" {
-  name                = "aks-${var.environment}-${var.location}"
-  location            = var.location
-  resource_group_name = var.resource_group_name
+Start from [terraform.tfvars.example](../../infrastructure/terraform/terraform.tfvars.example) rather than defining a second AKS resource. The root module exposes these inputs:
 
-  default_node_pool {
-    name       = "system"
-    node_count = var.system_node_count
-    vm_size    = "Standard_D4s_v5"
-  }
-
-  identity {
-    type = "SystemAssigned"
-  }
-
-  private_cluster_enabled = var.network_mode == "private"
-
-  tags = merge(
-    var.common_tags,
-    {
-      component = "aks-cluster"
-    }
-  )
-}
-```
+| Input                               | Purpose                                     |
+|-------------------------------------|---------------------------------------------|
+| `system_node_pool_vm_size`          | System pool VM size                         |
+| `system_node_pool_node_count`       | System pool node count                      |
+| `node_pools`                        | Map of additional pools and scaling options |
+| `should_enable_private_aks_cluster` | Private AKS API endpoint                    |
+| `should_enable_private_endpoint`    | Private endpoints for Azure services        |
+| `tags`                              | Resource tag map                            |
 
 ## Shell Script Conventions
 
@@ -257,7 +229,7 @@ Include header documentation:
 
 ```bash
 # Lint all shell scripts before committing
-shellcheck deploy/**/*.sh scripts/**/*.sh
+npm run lint:sh
 
 # Check specific script
 shellcheck -x infrastructure/setup/01-deploy-robotics-charts.sh
@@ -345,7 +317,7 @@ kind: ConfigMap
 
 ## Documentation Generation
 
-Terraform module documentation generates from source using [terraform-docs](https://terraform-docs.io/) v0.21.0. Each module and deployment directory contains a `TERRAFORM.md` file that terraform-docs produces automatically.
+Terraform module documentation generates from source using [terraform-docs](https://terraform-docs.io/) v0.24.0. Each module and deployment directory contains a `TERRAFORM.md` file that terraform-docs produces automatically.
 
 ### Configuration
 

@@ -1,6 +1,6 @@
 ---
 description: Minimal prerequisites and commands for deploying Isaac Linux VMs with Bicep.
-ms.date: 2026-03-25
+ms.date: 2026-09-19
 ---
 
 # Deploy an Isaac VM for development on Azure
@@ -27,7 +27,7 @@ The deployment script integrates the Isaac Sim Developer Workstation with your e
 ## ⚠️ Limitations
 
 - Only Linux VMs are supported.
-- Only private networking is supported. Public IPs are not supported.
+- The VM NIC has no public IP and supports only private ingress. Optional `enableSubnetNatGatewayEgress` creates a NAT gateway with a public IP for outbound traffic, not direct public access to the VM.
 - The template reuses an existing subnet and an existing network security group.
 - Direct Bicep deployment requires explicit values for `subnetId` and `nsgId`.
 - EncryptionAtHost must be registered for the subscription and supported by the selected VM size.

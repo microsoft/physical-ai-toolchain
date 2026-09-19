@@ -3,7 +3,7 @@ sidebar_position: 3
 title: "Physical AI Toolchain Roadmap"
 description: "Project roadmap covering documentation, testing, CI/CD, governance, security, and OpenSSF compliance through Q1 2027."
 author: wberry
-ms.date: 2026-06-01
+ms.date: 2026-09-19
 ms.topic: reference
 keywords:
   - roadmap
@@ -32,9 +32,9 @@ Tier IDs, stage names, boundaries, and the fleet vocabulary are defined once in 
 
 ## Current State
 
-The project reached v0.1.0 on 2026-02-07 with 30 commits on main and 24 merged pull requests.
-Seven milestones are planned through v0.8.0, spanning foundation work through security hardening.
-OpenSSF Best Practices Passing criteria are approximately 85% met (43 Met, 7 Partial, 12 Gap, 6 N/A).
+The latest release recorded in [CHANGELOG.md](../../CHANGELOG.md) is v0.8.0, dated 2026-05-08; `package.json` also reports 0.8.0.
+Releases v0.2.0 through v0.8.0 are recorded, but release numbers alone do not establish completion of every originally planned deliverable.
+The priorities, success-metric baseline, and timeline below retain the historical planning record. OpenSSF percentages and milestone issue completion were not reassessed during this source review; future tier and autonomy plans are not marked shipped by this update.
 
 ## Priorities
 
