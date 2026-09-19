@@ -446,7 +446,7 @@ The React app has these key areas for Playwright interaction:
 
 | Issue | Solution |
 |-------|----------|
-| Backend fails to start | Check `backend/.venv` exists; run `cd backend && uv venv --python 3.12 && source .venv/bin/activate && uv pip install -e ".[dev,analysis,export]"` |
+| Backend fails to start | Recreate the locked environment with `cd backend && uv sync --frozen --python 3.12 --group dev --extra analysis --extra export` |
 | Frontend shows "Loading..." indefinitely | Verify backend is healthy: `curl http://localhost:8000/health` |
 | No datasets visible | Check `DATA_DIR` in `backend/.env` points to a directory with dataset subdirectories |
 | Port conflict | Set `BACKEND_PORT` or `FRONTEND_PORT` environment variables |

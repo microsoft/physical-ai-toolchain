@@ -141,7 +141,7 @@ wait_for_backend() {
 
 start_backend() {
     log_info "Starting backend on port ${BACKEND_PORT}..."
-    local backend_install_extras=".[dev,analysis,export]"
+    local backend_sync_args=(--frozen --python 3.12 --group dev --extra analysis --extra export)
     local vlm_judge_package_spec="${REPO_ROOT}/evaluation/vlm_judge"
     local should_install_vlm_judge=false
 
@@ -167,7 +167,7 @@ start_backend() {
         should_install_vlm_judge=true
         if [[ "${VLM_JUDGE_BACKEND:-echo}" == "qwen3-vl" ]]; then
             vlm_judge_package_spec="${vlm_judge_package_spec}[qwen3-vl]"
-            backend_install_extras=".[dev,analysis,export,vlm-judge]"
+            backend_sync_args+=(--extra vlm-judge)
         elif [[ "${VLM_JUDGE_BACKEND:-echo}" == "openai-compat" ]]; then
             vlm_judge_package_spec="${vlm_judge_package_spec}[openai]"
         fi
@@ -203,10 +203,8 @@ start_backend() {
     if [[ ! -d "${BACKEND_DIR}/.venv" ]]; then
         log_warn "Virtual environment not found at ${BACKEND_DIR}/.venv"
         log_info "Creating virtual environment..."
-
         if command -v uv &>/dev/null; then
-            (cd "${BACKEND_DIR}" && uv venv --python 3.12)
-            (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
+            (cd "${BACKEND_DIR}" && uv sync "${backend_sync_args[@]}")
             if [[ "${should_install_vlm_judge}" == "true" ]]; then
                 (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
             fi
@@ -216,7 +214,7 @@ start_backend() {
         fi
     elif [[ "${should_install_vlm_judge}" == "true" ]]; then
         log_info "Ensuring VLM judge package dependencies are installed..."
-        (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${backend_install_extras}")
+        (cd "${BACKEND_DIR}" && uv sync "${backend_sync_args[@]}")
         (cd "${BACKEND_DIR}" && source .venv/bin/activate && uv pip install -e "${vlm_judge_package_spec}")
     fi
 
