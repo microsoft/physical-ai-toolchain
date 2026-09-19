@@ -57,6 +57,18 @@ class AppConfig:
     episode_cache_max_mb: int = 100
     """Max memory budget for the LRU cache in megabytes. 0 means count-only."""
 
+    detection_models_dir: str = "./models"
+    """Directory containing approved YOLO weight files."""
+
+    detection_cache_max_size: int = 100
+    """Maximum number of episode detection summaries retained in memory."""
+
+    detection_cache_ttl_seconds: int = 3600
+    """Seconds before an episode detection summary expires."""
+
+    detection_confidence_threshold: float = 0.1
+    """Default detection confidence when the request omits an override."""
+
     vlm_judge_enabled: bool = False
     """Whether the VLM-as-judge router is mounted."""
 
@@ -117,6 +129,11 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     episode_cache_capacity = int(os.environ.get("EPISODE_CACHE_CAPACITY", "32"))
     episode_cache_max_mb = int(os.environ.get("EPISODE_CACHE_MAX_MB", "100"))
 
+    detection_models_dir = os.environ.get("DETECTION_MODELS_DIR", "./models")
+    detection_cache_max_size = _positive_int_env("DETECTION_CACHE_MAX_SIZE", 100)
+    detection_cache_ttl_seconds = _positive_int_env("DETECTION_CACHE_TTL_SECONDS", 3600)
+    detection_confidence_threshold = _bounded_float_env("DETECTION_CONFIDENCE_THRESHOLD", 0.1)
+
     vlm_judge_enabled = os.environ.get("VLM_JUDGE_ENABLED", "false").lower() == "true"
     vlm_judge_backend = os.environ.get("VLM_JUDGE_BACKEND", "echo").lower()
     vlm_judge_model_id = os.environ.get("VLM_JUDGE_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct")
@@ -139,6 +156,10 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         cors_origins=cors_origins,
         episode_cache_capacity=episode_cache_capacity,
         episode_cache_max_mb=episode_cache_max_mb,
+        detection_models_dir=detection_models_dir,
+        detection_cache_max_size=detection_cache_max_size,
+        detection_cache_ttl_seconds=detection_cache_ttl_seconds,
+        detection_confidence_threshold=detection_confidence_threshold,
         vlm_judge_enabled=vlm_judge_enabled,
         vlm_judge_backend=vlm_judge_backend,
         vlm_judge_model_id=vlm_judge_model_id,
@@ -149,6 +170,20 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         vlm_judge_process_method=vlm_judge_process_method,
         vlm_judge_cache_dir=vlm_judge_cache_dir,
     )
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    value = int(os.environ.get(name, str(default)))
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return value
+
+
+def _bounded_float_env(name: str, default: float) -> float:
+    value = float(os.environ.get(name, str(default)))
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be between 0.0 and 1.0")
+    return value
 
 
 def create_annotation_storage(config: AppConfig):

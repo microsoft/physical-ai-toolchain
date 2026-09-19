@@ -5,6 +5,8 @@ Provides endpoints for running detection on episode frames
 and retrieving cached results.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 
@@ -14,7 +16,12 @@ from ..csrf import require_csrf_token
 from ..models.detection import DetectionRequest, EpisodeDetectionSummary
 from ..rate_limiter import limiter
 from ..services.dataset_service import DatasetService, get_dataset_service
-from ..services.detection_service import DetectionService, get_detection_service
+from ..services.detection_service import (
+    DetectionModelUnavailableError,
+    DetectionService,
+    InvalidDetectionModelError,
+    get_detection_service,
+)
 from ..validation import SAFE_DATASET_ID_PATTERN, path_int_param, path_string_param
 
 router = APIRouter()
@@ -56,7 +63,11 @@ async def run_detection(
         _sanitize_for_log(dataset_id),
         int(episode_idx),
         _sanitize_for_log(request_body.model),
-        float(request_body.confidence),
+        float(
+            request_body.confidence
+            if request_body.confidence is not None
+            else detection_service.default_confidence
+        ),
     )
 
     # Validate episode exists
@@ -106,6 +117,10 @@ async def run_detection(
             total_frames,
         )
         return summary
+    except InvalidDetectionModelError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except DetectionModelUnavailableError:
+        raise HTTPException(status_code=503, detail="Configured detection model is unavailable")
     except ImportError:
         raise HTTPException(
             status_code=503,

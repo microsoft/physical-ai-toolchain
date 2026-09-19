@@ -101,6 +101,46 @@ def test_run_detection_unexpected_error_returns_500(client: TestClient, override
     assert response.json()["detail"] == "Detection failed"
 
 
+def test_run_detection_invalid_model_returns_400(client: TestClient, override_services) -> None:
+    from src.api.services.detection_service import InvalidDetectionModelError
+
+    dataset_service, detection_service = override_services
+    dataset_service.get_episode.return_value = EpisodeData(
+        meta=EpisodeMeta(index=0, length=1, task_index=0, has_annotations=False),
+        video_urls={},
+        cameras=["il-camera"],
+        trajectory_data=[],
+    )
+    detection_service.detect_episode.side_effect = InvalidDetectionModelError(
+        "Model must be an approved model identifier"
+    )
+
+    response = client.post("/api/datasets/ds-1/episodes/0/detect", json={"model": "../unsafe"})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Model must be an approved model identifier"
+
+
+def test_run_detection_unavailable_model_returns_503(client: TestClient, override_services) -> None:
+    from src.api.services.detection_service import DetectionModelUnavailableError
+
+    dataset_service, detection_service = override_services
+    dataset_service.get_episode.return_value = EpisodeData(
+        meta=EpisodeMeta(index=0, length=1, task_index=0, has_annotations=False),
+        video_urls={},
+        cameras=["il-camera"],
+        trajectory_data=[],
+    )
+    detection_service.detect_episode.side_effect = DetectionModelUnavailableError(
+        "Approved model file not found: /private/models/yolo11n.pt"
+    )
+
+    response = client.post("/api/datasets/ds-1/episodes/0/detect", json={"model": "yolo11n"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Configured detection model is unavailable"
+
+
 def test_get_detections_returns_cached_summary(client: TestClient, override_services) -> None:
     _, detection_service = override_services
     summary = EpisodeDetectionSummary(total_frames=3, processed_frames=3, total_detections=0)
