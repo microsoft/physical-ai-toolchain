@@ -47,7 +47,7 @@ dependencies = [
     # `dataset` extra we no longer select. Runtime installs use `--no-deps`, so
     # they must be declared here to enter the lock and the build-time export.
     # Held below 3 because lerobot==0.6.1 requires pandas<3.0.0.
-    "pandas==2.3.3",
+    "pandas==3.0.5",
     "jsonlines==4.0.0",
     "torch==2.14.0",
     "torchvision==0.29.0",
