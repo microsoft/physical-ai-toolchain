@@ -35,8 +35,8 @@ dependencies = [
     "pyperclip==1.11.0",
     "datasets==5.0.1",
     "pyarrow==25.0.1",
-    "matplotlib==3.11.1",
-    "huggingface-hub==1.30.0",
+    "matplotlib==3.11.2",
+    "huggingface-hub==1.31.0",
     # `av-dep` rather than `dataset`: the dataset extra requires TorchCodec, which
     # publishes no SBSA CUDA 13 wheel. PyAV also keeps the decoder identical on
     # every target — lerobot.utils.import_utils.get_safe_default_video_backend()
@@ -67,7 +67,7 @@ dependencies = [
     "cryptography==50.0.1",
     # Pin wrapt explicitly to a stable 2.x release. The explicit pin prevents
     # prerelease resolution from selecting a release candidate.
-    "wrapt==2.4.0",
+    "wrapt==2.4.1",
 ]
 
 [build-system]
