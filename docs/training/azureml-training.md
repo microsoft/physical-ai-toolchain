@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Azure ML Training Workflows
 description: Submit Isaac Lab and LeRobot training jobs to Azure Machine Learning
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-07
+ms.date: 2026-09-19
 ms.topic: how-to
 keywords:
   - azure ml
@@ -24,34 +24,38 @@ Submit Isaac Lab reinforcement learning and LeRobot behavioral cloning training 
 
 ## 📦 Available Templates
 
-| Template                   | Purpose                    | Submission Script                               |
-|----------------------------|----------------------------|-------------------------------------------------|
-| `train.yaml`               | Isaac Lab SKRL training    | `scripts/submit-azureml-training.sh`            |
-| `isaaclab-evaluation.yaml` | Isaac Lab evaluation       | `scripts/submit-azureml-isaaclab-evaluation.sh` |
-| `lerobot-train.yaml`       | LeRobot behavioral cloning | `scripts/submit-azureml-lerobot-training.sh`    |
+Selected RL, LeRobot, and software-in-the-loop (SiL) examples, not an exhaustive inventory of training families. See [Workflow Templates (AzureML)](../reference/workflow-templates-azureml.md) for source paths and pipeline templates. Submission scripts supply runtime commands and environment-specific values; structural YAML defaults are not standalone deployment instructions.
+
+| Template                   | Purpose                    | Submission Script                                              |
+|----------------------------|----------------------------|----------------------------------------------------------------|
+| `train.yaml`               | Isaac Lab SKRL training    | `training/rl/scripts/submit-azureml-training.sh`               |
+| `isaaclab-evaluation.yaml` | Isaac Lab evaluation       | `evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh` |
+| `lerobot-train.yaml`       | LeRobot behavioral cloning | `training/il/scripts/submit-azureml-lerobot-training.sh`       |
 
 ## ⚙️ Isaac Lab Training Parameters
 
-| Parameter         | Description                                         |
-|-------------------|-----------------------------------------------------|
-| `mode`            | Train or retrain (default: `train`)                 |
-| `checkpoint_mode` | Checkpoint strategy: `from-scratch`, `from-trained` |
-| `task`            | Isaac Lab task name (e.g., `Isaac-Cartpole-v0`)     |
-| `num_envs`        | Number of parallel environments                     |
-| `headless`        | Run without rendering (default: `true`)             |
-| `max_iterations`  | Maximum training iterations                         |
+| Parameter         | Description                                                 |
+|-------------------|-------------------------------------------------------------|
+| `mode`            | Execution mode: `train` (default) or `smoke-test`           |
+| `checkpoint_mode` | Checkpoint strategy: `from-scratch`, `warm-start`, `resume` |
+| `task`            | Isaac Lab task name (e.g., `Isaac-Cartpole-v0`)             |
+| `num_envs`        | Number of parallel environments                             |
+| `headless`        | Run without rendering (default: `true`)                     |
+| `max_iterations`  | Maximum training iterations                                 |
+
+Continue training with `checkpoint_mode` and a checkpoint URI; `retrain` is not an execution mode.
 
 ## 🤖 LeRobot Training Parameters
 
-| Parameter         | Default                                          | Description                               |
-|-------------------|--------------------------------------------------|-------------------------------------------|
-| `dataset_repo_id` | (required)                                       | HuggingFace dataset repository            |
-| `policy_type`     | `act`                                            | Policy architecture: `act`, `diffusion`   |
-| `job_name`        | `lerobot-act-training`                           | Unique job identifier                     |
-| `image`           | `pytorch/pytorch:2.13.0-cuda13.0-cudnn9-runtime` | Container image                           |
-| `save_freq`       | `5000`                                           | Checkpoint save frequency                 |
-| `instance_type`   | `gpuspot`                                        | Pod size (AzureML-on-Kubernetes only)     |
-| `mixed_precision` | `no`                                             | Accelerate mixed precision (no/fp16/bf16) |
+| Parameter         | Default                       | Description                                      |
+|-------------------|-------------------------------|--------------------------------------------------|
+| `dataset_repo_id` | (required)                    | HuggingFace dataset repository                   |
+| `policy_type`     | `act`                         | Policy architecture: `act`, `diffusion`          |
+| `job_name`        | `lerobot-act-training`        | Unique job identifier                            |
+| `image`           | `DEFAULT_LEROBOT_TRAIN_IMAGE` | Digest-pinned default in `scripts/lib/common.sh` |
+| `save_freq`       | `5000`                        | Checkpoint save frequency                        |
+| `instance_type`   | `gpuspot`                     | Pod size (AzureML-on-Kubernetes only)            |
+| `mixed_precision` | `no`                          | Accelerate mixed precision (no/fp16/bf16)        |
 
 ### Single-node multi-GPU training
 
@@ -65,7 +69,7 @@ Both AzureML compute backends are supported. GPU count is determined by the back
 Managed compute example:
 
 ```bash
-./scripts/submit-azureml-lerobot-training.sh \
+./training/il/scripts/submit-azureml-lerobot-training.sh \
   --dataset-repo-id user/dataset \
   --compute gpu-training \
   --mixed-precision bf16 \
@@ -75,7 +79,7 @@ Managed compute example:
 AzureML-on-Kubernetes example:
 
 ```bash
-./scripts/submit-azureml-lerobot-training.sh \
+./training/il/scripts/submit-azureml-lerobot-training.sh \
   --dataset-repo-id user/dataset \
   --instance-type gpu4 \
   --mixed-precision bf16 \
@@ -83,7 +87,7 @@ AzureML-on-Kubernetes example:
 ```
 
 > [!NOTE]
-> LeRobot does NOT auto-scale the learning rate or training steps with GPU count. The effective batch size is `batch_size × num_gpus` (logged to MLflow as `effective_batch_size`); adjust `--steps` and `--learning-rate` manually if you want to match a single-GPU baseline. The `--policy.use_amp` flag is ignored under Accelerate and is stripped by the wrapper with a warning.
+> LeRobot does NOT auto-scale the learning rate or training steps with GPU count. The effective batch size is `batch_size × num_gpus` (logged to MLflow as `effective_batch_size`); adjust `--training-steps` for the intended training budget. The AzureML submission script does not expose a `--learning-rate` option. The `--policy.use_amp` flag is ignored under Accelerate and is stripped by the wrapper with a warning.
 
 ## 🔧 Environment Variables
 
@@ -102,10 +106,10 @@ Isaac Lab SKRL training:
 
 ```bash
 # Default configuration from Terraform outputs
-./scripts/submit-azureml-training.sh
+./training/rl/scripts/submit-azureml-training.sh
 
 # Custom task and environment count
-./scripts/submit-azureml-training.sh \
+./training/rl/scripts/submit-azureml-training.sh \
   --task Isaac-Cartpole-v0 \
   --num-envs 512 \
   --max-iterations 1000
@@ -114,37 +118,40 @@ Isaac Lab SKRL training:
 Isaac Lab evaluation:
 
 ```bash
-./scripts/submit-azureml-isaaclab-evaluation.sh \
+./evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh \
   --task Isaac-Cartpole-v0 \
-  --checkpoint-mode from-trained
+  --model-name cartpole-policy \
+  --model-version 1
 ```
 
 LeRobot training:
 
 ```bash
-./scripts/submit-azureml-lerobot-training.sh \
+./training/il/scripts/submit-azureml-lerobot-training.sh \
   --dataset-repo-id lerobot/aloha_sim_insertion_human \
   --policy-type act
 ```
 
 ## 💾 Checkpoint Management
 
-| Mode           | Behavior                                  |
-|----------------|-------------------------------------------|
-| `from-scratch` | Start training from random initialization |
-| `from-trained` | Resume from an existing checkpoint        |
+| Mode           | Behavior                                   |
+|----------------|--------------------------------------------|
+| `from-scratch` | Start training from random initialization  |
+| `warm-start`   | Load weights; reset optimizer and counters |
+| `resume`       | Restore training state from a checkpoint   |
 
-Specify the checkpoint mode with `--checkpoint-mode`:
+`fresh` is an alias for `from-scratch`. For `warm-start` or `resume`, supply a checkpoint URI as well as `--checkpoint-mode`:
 
 ```bash
-./scripts/submit-azureml-training.sh \
-  --checkpoint-mode from-trained \
+./training/rl/scripts/submit-azureml-training.sh \
+  --checkpoint-mode resume \
+  --checkpoint-uri "models:/cartpole-policy/1" \
   --task Isaac-Cartpole-v0
 ```
 
 ## 🛌 Scale-from-zero GPU Pools
 
-GPU node pools in this stack default to `min_count = 0` so idle Spot capacity is released. Three unrelated defaults must be overridden for jobs to actually start when the target pool is at zero; all three are applied automatically by the deploy scripts, but the rationale matters when troubleshooting.
+The SiL module's default GPU pool uses `min_count = 0`; the root deployment's default GPU pool uses `min_count = 1`. Check the effective `node_pools` configuration before assuming scale-to-zero. For a pool configured to reach zero, the setup script overrides two scheduler checks and the Terraform pool definition supplies a static GPU label, as described below.
 
 ### `aml-operator` resource validation
 

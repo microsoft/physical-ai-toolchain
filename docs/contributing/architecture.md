@@ -2,7 +2,7 @@
 sidebar_position: 2
 title: Repository Architecture
 description: Tiered architecture for the Physical AI Toolchain, organized around the T0–T5 adoption ladder with the eight lifecycle domains presented as components adopted per tier.
-ms.date: 2026-07-23
+ms.date: 2026-08-12
 ms.topic: concept
 ---
 
@@ -15,20 +15,20 @@ Each tier states the minimum edge and cloud infrastructure required to reach a c
 > [!IMPORTANT]
 > Tier IDs, stage names, boundaries, the autonomy ladder, and the fleet vocabulary rules are defined once in the canonical [Tier Model](../design/tier-model.md). This document cites those definitions rather than redefining them. If a tier boundary or name needs to change, change it there first.
 
-**Reference goal (Goal: Full Training Lifecycle):** capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot, the full loop for one task. Goal: Full Training Lifecycle is fully achievable at `T0`–`T2` with manual deployment and no Kubernetes, Arc, or fleet infrastructure.
+**Reference goal (Goal: Full Training Lifecycle):** capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot, the full loop for one task. Goal: Full Training Lifecycle is fully achievable at `T0`–`T2` with manual deployment and no required Kubernetes, Arc, or fleet infrastructure.
 
 ## The Tier Ladder
 
 `T0` is the documented **default** starting path. `T2` is the **recommended production** path. `T3`–`T5` are **advanced**. The pairing of stable ID and stage name (`T# — Name`) is canonical; see the [Tier Model](../design/tier-model.md#canonical-tier-table) for the authoritative table.
 
-| T# | Stage name | Operator reach / scope                   | Edge infra              | Cloud infra                                        | Status                       |
-|----|------------|------------------------------------------|-------------------------|----------------------------------------------------|------------------------------|
-| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker only     | None                                               | Shipped (default)            |
-| T1 | Lab        | One site, a few robots, shared GPU       | Shared disk (NFS/SMB)   | One Blob account (optional AzureML / MLflow)       | Shipped                      |
-| T2 | Pilot      | One site, at scale, team (recommended)   | None beyond Docker      | AzureML + storage + model registry + MLflow        | Shipped (recommended)        |
-| T3 | Production | Single site, declarative deployment      | Local k3s + FluxCD      | Same as T2 (no Arc)                                | Advanced                     |
-| T4 | Scale      | Multiple sites you cannot directly reach | Arc + AKS/Flux + gating | T2 + cross-site connectivity / identity            | Advanced (fleet delivery)    |
-| T5 | Operate    | Fleet-wide cognition (roadmap)           | + Azure IoT Operations  | + Fabric Real-Time Intelligence + drift/retraining | Roadmap (fleet intelligence) |
+| T# | Stage name | Operator reach / scope                   | Edge infra                                | Cloud infra                                        | Status                       |
+|----|------------|------------------------------------------|-------------------------------------------|----------------------------------------------------|------------------------------|
+| T0 | Dev        | Laptop + 1 robot (default)               | ROS 2 + Docker; optional local Kubernetes | None                                               | Shipped (default)            |
+| T1 | Lab        | One site, a few robots, shared GPU       | Shared disk (NFS/SMB)                     | One Blob account (optional AzureML / MLflow)       | Shipped                      |
+| T2 | Pilot      | One site, at scale, team (recommended)   | None beyond Docker                        | AzureML + storage + model registry + MLflow        | Shipped (recommended)        |
+| T3 | Production | Single site, declarative deployment      | Local k3s + FluxCD                        | Same as T2 (no Arc)                                | Advanced                     |
+| T4 | Scale      | Multiple sites you cannot directly reach | Arc + AKS/Flux + gating                   | T2 + cross-site connectivity / identity            | Advanced (fleet delivery)    |
+| T5 | Operate    | Fleet-wide cognition (roadmap)           | + Azure IoT Operations                    | + Fabric Real-Time Intelligence + drift/retraining | Roadmap (fleet intelligence) |
 
 ### Boundaries
 
@@ -52,7 +52,7 @@ Each tier below adds a defined slice of edge and cloud infrastructure on top of 
 
 ### T0 — Dev
 
-One robot, one laptop. No cloud, no Kubernetes. This is the honest floor for Goal: Full Training Lifecycle. This path exists in the code today: training detects available CUDA devices at runtime, evaluation has an explicit local path, and the dataviewer defaults to `local` mode.
+One robot, one laptop, and no cloud. Kubernetes is not required; plain local processes are the baseline, and a single-laptop cluster is an optional orchestration profile. This is the honest floor for Goal: Full Training Lifecycle. This path exists in the code today: training detects available CUDA devices at runtime, evaluation has an explicit local path, and the dataviewer defaults to `local` mode.
 
 | Concern      | Implementation                                                              |
 |--------------|-----------------------------------------------------------------------------|

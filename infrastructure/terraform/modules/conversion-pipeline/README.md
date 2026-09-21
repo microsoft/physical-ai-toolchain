@@ -2,7 +2,7 @@
 title: Conversion Pipeline Module
 description: Terraform module that provisions Event Grid and Microsoft Fabric on the platform-owned data-lake account for the raw -> converted ingest pipeline
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 
@@ -63,12 +63,16 @@ flowchart LR
 |----------------------------------------|---------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `should_enable_event_grid_dead_letter` | `true`                          | Provision an in-account `event-grid-dlq` container on the platform data-lake account                                                                   |
 | `raw_blob_suffix_filters`              | `[".bag", ".bag.zst", ".mcap"]` | Suffix list for the Event Grid `string_ends_with` advanced filter                                                                                      |
-| `conversion_subscriber_url`            | `null`                          | Webhook URL for the conversion subscriber. Subscription is DLQ-only when `null`                                                                        |
+| `conversion_subscriber_url`            | `null`                          | Webhook URL; `null` omits the webhook. See dead-letter behavior below                                                                                  |
 | `should_create_fabric_capacity`        | `true`                          | Provision a new Fabric capacity                                                                                                                        |
 | `should_create_fabric_workspace`       | `true`                          | Provision a Fabric workspace. `capacity_id` resolves at apply time via a deferred lookup                                                               |
 | `fabric_capacity_sku`                  | `F2`                            | Fabric capacity SKU (`F2` through `F2048`)                                                                                                             |
 | `fabric_admin_members`                 | `[]`                            | Entra UPNs/object IDs granted Fabric capacity administration                                                                                           |
 | `fabric_workspace_sp_object_id`        | `null`                          | Object ID of the Fabric workspace SP. Grants `Storage Blob Data Reader` on the datasets container plus an ADLS Gen2 ACL granting `rwx` on `converted/` |
+
+When `conversion_subscriber_url = null`, the subscription configuration is DLQ-only
+only if `should_enable_event_grid_dead_letter = true`. When both destinations are
+disabled, neither a webhook nor a dead-letter destination is configured.
 
 ## 📥 Inputs
 

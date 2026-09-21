@@ -144,6 +144,13 @@ jobs:
       contents: read
       id-token: write
 
+  # Pytest: gpu-offload controller and runtime components
+  pytest-gpu-offload:
+    name: Pytest GPU Offload
+    uses: ./.github/workflows/pytest-gpu-offload.yml
+    permissions:
+      contents: read
+
   # Pytest: shared CI scripts component
   pytest-shared-ci:
     name: Pytest Shared CI
@@ -307,6 +314,7 @@ jobs:
       - pytest-dm-tools
       - pytest-data-pipeline
       - pytest-inference
+      - pytest-gpu-offload
       - pytest-shared-ci
       - dataviewer-frontend-tests
       - dataviewer-backend-pytests
@@ -366,7 +374,7 @@ jobs:
 
       - name: Setup uv
         if: ${{ steps.release.outputs.prs_created == 'true' }}
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
 
       - name: Regenerate uv.lock
         if: ${{ steps.release.outputs.prs_created == 'true' }}
@@ -558,7 +566,7 @@ jobs:
           python-version: '3.12'
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
 
       - name: Build release wheel
         run: uv build --wheel --out-dir dist

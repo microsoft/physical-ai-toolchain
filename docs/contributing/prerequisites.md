@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Prerequisites and Build Validation
 description: Required tools, Azure access, NGC credentials, and build validation commands for contributing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-27
+ms.date: 2026-09-21
 ms.topic: how-to
 keywords:
   - prerequisites
@@ -28,16 +28,16 @@ Install these tools before contributing:
 | TFLint         | 0.61.0          | <https://github.com/terraform-linters/tflint>                                                                             |
 | Azure CLI      | 2.65.0          | <https://learn.microsoft.com/cli/azure/install-azure-cli>                                                                 |
 | kubectl        | 1.31            | <https://kubernetes.io/docs/tasks/tools/>                                                                                 |
-| Helm           | 4.0             | <https://helm.sh/docs/intro/install/>                                                                                     |
-| Node.js/npm    | 20+ LTS         | <https://nodejs.org/>                                                                                                     |
+| Helm           | 4.2+            | <https://helm.sh/docs/intro/install/>                                                                                     |
+| Node.js/npm    | 24+             | <https://nodejs.org/>                                                                                                     |
 | Python         | 3.12+           | <https://www.python.org/downloads/>                                                                                       |
 | shellcheck     | 0.10+           | <https://www.shellcheck.net/>                                                                                             |
 | uv             | latest          | <https://docs.astral.sh/uv/>                                                                                              |
-| Go             | 1.24+           | <https://go.dev/dl/>                                                                                                      |
+| Go             | 1.26+           | <https://go.dev/dl/>                                                                                                      |
 | golangci-lint  | 2.11+           | <https://golangci-lint.run/welcome/install/>                                                                              |
 | Docker         | latest          | <https://docs.docker.com/get-docker/> (with NVIDIA Container Toolkit)                                                     |
 | OSMO CLI       | latest          | <https://developer.nvidia.com/osmo>                                                                                       |
-| terraform-docs | 0.21.0          | <https://github.com/terraform-docs/terraform-docs/releases>                                                               |
+| terraform-docs | 0.24.0          | <https://github.com/terraform-docs/terraform-docs/releases>                                                               |
 | OSV-Scanner    | 2.3.8           | <https://github.com/google/osv-scanner/releases/tag/v2.3.8> (installed automatically by `setup-dev.sh` / `setup-dev.ps1`) |
 | hve-core       | latest          | <https://github.com/microsoft/hve-core>                                                                                   |
 
@@ -141,8 +141,8 @@ Deploying this architecture requires Azure subscription access with specific per
 ### GPU Quota
 
 * Request GPU VM quota in your target region before deployment
-* Architecture uses `Standard_NC24ads_A100_v4` (24 vCPU, 220 GB RAM, 1x A100 80GB GPU)
-* Check quota: `az vm list-usage --location <region> --query "[?name.value=='standardNCadsA100v4Family']"`
+* The checked-in `terraform.tfvars.example` uses `Standard_NV36ads_A10_v5`; request quota for the VM families selected in your `node_pools` map, including Spot quota when applicable
+* Check regional quota with `az vm list-usage --location <region>` and inspect the selected VM family
 * Request increase through Azure Portal → Quotas → Compute
 
 ### Regional Availability
@@ -161,6 +161,8 @@ Training workflows use NVIDIA GPU Operator and Isaac Lab, which require NGC cred
 ## Cost Awareness
 
 Full deployment validation incurs Azure costs. Understand cost structure before deploying:
+
+The figures below are retained illustrative estimates, not current quotes for the default A10 deployment. Recalculate rates for your region and chosen SKUs using the [Cost Considerations](cost-considerations.md) guidance.
 
 ### GPU Virtual Machines
 
@@ -208,10 +210,10 @@ az version  # >= 2.65.0
 kubectl version --client  # >= 1.31
 
 # Helm
-helm version  # >= 3.16
+helm version  # >= 4.2
 
 # Node.js (for documentation linting)
-node --version  # >= 20
+node --version  # >= 24
 
 # Python (for training scripts)
 python --version  # >= 3.12
@@ -223,7 +225,7 @@ shellcheck --version  # >= 0.10
 uv --version
 
 # Go
-go version  # >= 1.24
+go version  # >= 1.26
 
 # golangci-lint
 golangci-lint version  # >= 2.11
@@ -236,7 +238,7 @@ nvidia-ctk --version
 osmo --version
 
 # terraform-docs
-terraform-docs --version  # >= 0.21.0
+terraform-docs --version  # >= 0.24.0
 
 # OSV-Scanner (dependency vulnerability scanner)
 osv-scanner --version  # == 2.3.8 (pinned; installed by setup-dev scripts)
@@ -286,27 +288,27 @@ the required validation path.
 
 Run these commands before committing:
 
+Run package commands from the repository root after `npm ci`.
+
 **Terraform:**
 
 ```bash
 # Format check (required)
 terraform fmt -check -recursive infrastructure/terraform/
 
-# Initialize and validate (required for infrastructure changes)
-cd infrastructure/terraform/
-terraform init
-terraform validate
+# Initialize without a backend and validate each deployment directory
+npm run lint:tf:validate
 
 # Lint Terraform configurations (required for infrastructure changes)
 tflint --init  # first time only, installs plugins from .tflint.hcl
-tflint --recursive infrastructure/terraform/
+npm run lint:tf
 ```
 
 **Shell Scripts:**
 
 ```bash
 # Lint all shell scripts (required)
-shellcheck deploy/**/*.sh scripts/**/*.sh
+npm run lint:sh
 ```
 
 **Go:**
@@ -326,8 +328,8 @@ npm run test:go
 **Documentation:**
 
 ```bash
-# Install dependencies (first time only)
-npm install
+# Restore dependencies from the committed lock
+npm ci
 
 # Lint markdown (required for documentation changes)
 npm run lint:md
@@ -335,23 +337,15 @@ npm run lint:md
 
 ## VS Code Configuration
 
-The workspace is configured with `python.analysis.extraPaths` pointing to `src/`, enabling imports like:
+The `training` package lives at the repository root. Open the repository root as the workspace and select its Python environment for imports such as:
 
 ```python
 from training.utils import AzureMLContext, bootstrap_azure_ml
 ```
 
-Select the `.venv/bin/python` interpreter in VS Code for IntelliSense support.
+Select `.venv/bin/python` on Linux/macOS or `.venv/Scripts/python.exe` on Windows. The current `python.analysis.extraPaths` includes Isaac Lab source paths and a legacy `src/` entry; that legacy entry is not the location of the `training` package.
 
-The workspace `.vscode/settings.json` also configures Copilot Chat to load instructions, prompts, and chat modes from hve-core:
-
-| Setting                           | hve-core Paths                                                               |
-|-----------------------------------|------------------------------------------------------------------------------|
-| `chat.modeFilesLocations`         | `../hve-core/.github/chatmodes`, `../hve-core/copilot/beads/chatmodes`       |
-| `chat.instructionsFilesLocations` | `../hve-core/.github/instructions`, `../hve-core/copilot/beads/instructions` |
-| `chat.promptFilesLocations`       | `../hve-core/.github/prompts`, `../hve-core/copilot/beads/prompts`           |
-
-These paths resolve when hve-core is installed as a peer directory or via the VS Code Extension. Without hve-core, Copilot still functions but shared conventions, prompts, and chat modes are unavailable.
+The workspace recommends the hve-core extension in `.vscode/extensions.json`. Its settings reference `.github/instructions/commit-message.instructions.md` for Copilot commit messages; they do not configure peer-directory chat-mode, instruction, or prompt locations. Shared hve-core capabilities depend on your installed extension or plugin.
 
 For a complete list of available agents, prompts, and skills, see [Copilot Artifacts](../reference/copilot-artifacts.md).
 

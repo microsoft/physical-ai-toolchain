@@ -1,0 +1,8 @@
+[project]
+name = "lerobot-so101-runtime"
+version = "0.1.0"
+description = "Pinned LeRobot dependency lock for the SO-101 GPU-offload example image"
+requires-python = ">=3.12"
+dependencies = [
+    "lerobot[core-scripts,feetech,training,evaluation,smolvla,pusht]==0.6.1",
+]

@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Cluster Operations and Troubleshooting
 description: Accessing OSMO, troubleshooting common issues, and optional deployment scripts
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: reference
 keywords:
   - troubleshooting
@@ -61,14 +61,13 @@ osmo backend list
 
 If `should_enable_private_aks_cluster = false` and you are not using VPN, use `kubectl port-forward`:
 
-| Service      | Command                                                               | Local URL               |
-|--------------|-----------------------------------------------------------------------|-------------------------|
-| API Service  | `kubectl port-forward svc/osmo-service 9000:80 -n osmo-control-plane` | `http://localhost:9000` |
-| Gateway      | `kubectl port-forward svc/osmo-gateway 8080:80 -n osmo-control-plane` | `http://localhost:8080` |
+| Service              | Command                                                               | Local URL               |
+|----------------------|-----------------------------------------------------------------------|-------------------------|
+| Gateway (UI and API) | `kubectl port-forward svc/osmo-gateway 9000:80 -n osmo-control-plane` | `http://localhost:9000` |
 
 ```bash
-# Terminal 1: Start port-forward for API service
-kubectl port-forward svc/osmo-service 9000:80 -n osmo-control-plane
+# Terminal 1: Start the gateway port-forward
+kubectl port-forward svc/osmo-gateway 9000:80 -n osmo-control-plane
 
 # Terminal 2: Login and use OSMO CLI
 osmo login http://localhost:9000 --method=dev --username=admin
@@ -78,16 +77,7 @@ osmo info
 osmo backend list
 ```
 
-For full OSMO functionality (UI + API + gateway), run these port-forwards in separate terminals:
-
-```bash
-# Terminal 1: API service (for osmo CLI)
-kubectl port-forward svc/osmo-service 9000:80 -n osmo-control-plane
-
-# Terminal 2: Gateway (for web browser and API routing)
-kubectl port-forward svc/osmo-gateway 8080:80 -n osmo-control-plane
-
-```
+This gateway route matches the fallback in `infrastructure/setup/03-deploy-osmo.sh`. Port-forwarding does not make a private AKS API reachable: connect through VPN or another authorized private-network path first when using a private cluster.
 
 > [!NOTE]
 > When accessing OSMO through port-forwarding, `osmo workflow exec` and `osmo workflow port-forward` commands are not supported. These require the gateway service to be accessible via ingress.
@@ -139,17 +129,20 @@ kubectl describe sa osmo-service -n osmo-control-plane
 ## 📁 Directory Structure
 
 ```text
-002-setup/
+infrastructure/setup/
 ├── 01-deploy-robotics-charts.sh
 ├── 02-deploy-azureml-extension.sh
 ├── 03-deploy-osmo.sh
+├── 04-prepare-osmo-hil-node.sh
 ├── cleanup/                    # Cleanup scripts
 ├── config/                     # OSMO configuration templates
-├── lib/                        # Shared functions
 ├── manifests/                  # Kubernetes manifests
 ├── optional/                   # Volcano scheduler, validation
+├── scripts/                    # Setup helpers and GRID installer
 └── values/                     # Helm values files
 ```
+
+Cross-domain shared libraries live in `scripts/lib/` at the repository root.
 
 ## 🧩 Optional Scripts
 

@@ -1,0 +1,8 @@
+{{- /*
+  The upstream node-agent DaemonSet (privileged hostPath staging) is intentionally
+  disabled in this fork. Leaving the template in place but rendering nothing
+  makes it explicit in the chart history while preventing accidental installs.
+*/ -}}
+
+{{- if false }}
+{{- end }}
