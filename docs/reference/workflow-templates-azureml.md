@@ -1,8 +1,8 @@
 ---
 title: Workflow Templates (AzureML)
-description: Canonical AzureML workflow template reference for training and evaluation jobs.
+description: Selected AzureML workflow templates for RL, LeRobot, and SiL training and evaluation.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-18
+ms.date: 2026-09-19
 ms.topic: reference
 keywords:
   - azureml
@@ -12,18 +12,22 @@ keywords:
   - evaluation
 ---
 
-Canonical AzureML workflow templates for RL and LeRobot training and evaluation.
+Selected AzureML workflow templates for RL, LeRobot, and software-in-the-loop (SiL) training and evaluation, consistent with the [AzureML workflow index](../../workflows/azureml/README.md). This is not an exhaustive inventory and does not cover VLA workflows.
 Template names, defaults, and paths in this page are derived from the YAML files
 in `training/` and `evaluation/`.
 
 ## Template Inventory
 
-| Template                   | Purpose                                                   | Source YAML path                                            | Typical submit path                                            |
-|----------------------------|-----------------------------------------------------------|-------------------------------------------------------------|----------------------------------------------------------------|
-| `train.yaml`               | Isaac Lab RL training job structure                       | `training/rl/workflows/azureml/train.yaml`                  | `training/rl/scripts/submit-azureml-training.sh`               |
-| `lerobot-train.yaml`       | LeRobot behavioral cloning training job structure         | `training/il/workflows/azureml/lerobot-train.yaml`          | `training/il/scripts/submit-azureml-lerobot-training.sh`       |
-| `isaaclab-evaluation.yaml` | Isaac Lab policy evaluation against registered models     | `evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml` | `evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh` |
-| `lerobot-eval.yaml`        | LeRobot policy evaluation and optional model registration | `evaluation/sil/workflows/azureml/lerobot-eval.yaml`        | `evaluation/sil/scripts/submit-azureml-lerobot-eval.sh`        |
+| Template                              | Purpose                                                   | Source YAML path                                                    | Typical submit path                                                                                   |
+|---------------------------------------|-----------------------------------------------------------|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| `train.yaml`                          | Isaac Lab RL training job structure                       | `training/rl/workflows/azureml/train.yaml`                          | `training/rl/scripts/submit-azureml-training.sh`                                                      |
+| `lerobot-train.yaml`                  | LeRobot behavioral cloning training job structure         | `training/il/workflows/azureml/lerobot-train.yaml`                  | `training/il/scripts/submit-azureml-lerobot-training.sh`                                              |
+| `isaaclab-evaluation.yaml`            | Isaac Lab policy evaluation against registered models     | `evaluation/sil/workflows/azureml/isaaclab-evaluation.yaml`         | `evaluation/sil/scripts/submit-azureml-isaaclab-evaluation.sh`                                        |
+| `lerobot-eval.yaml`                   | LeRobot policy evaluation and optional model registration | `evaluation/sil/workflows/azureml/lerobot-eval.yaml`                | `evaluation/sil/scripts/submit-azureml-lerobot-eval.sh`                                               |
+| `lerobot-pipeline.yaml`               | LeRobot preprocess/train/evaluate pipeline                | `training/il/workflows/azureml/lerobot-pipeline.yaml`               | `training/il/scripts/submit-azureml-lerobot-pipeline.sh`                                              |
+| `lerobot-pipeline-with-register.yaml` | Pipeline with registration step                           | `training/il/workflows/azureml/lerobot-pipeline-with-register.yaml` | `training/il/scripts/submit-azureml-lerobot-pipeline.sh --with-register --register-model-name <name>` |
+
+The pipeline submitter selects the three-step template by default. `--with-register` selects the four-step variant and requires `--register-model-name`. The sections below describe the standalone command-job templates; pipeline component configuration remains in the source YAML and submitter help.
 
 ## train.yaml
 
@@ -67,10 +71,10 @@ in `training/` and `evaluation/`.
 
 ## Usage Notes
 
-| Topic             | Guidance                                                                                                                                                                                                                   |
-|-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Source of truth   | Use YAML files in `training/` and `evaluation/` for template names, keys, and defaults. `scripts/update-image-digests.sh` synchronizes environment versions with the checked-in image defaults in `scripts/lib/common.sh`. |
-| Override pattern  | Treat templates as structure-first; submission scripts provide runtime command and environment-specific values.                                                                                                            |
-| Azure context     | Set `subscription_id`, `resource_group`, and `workspace_name` through script options or environment variables.                                                                                                             |
+| Topic             | Guidance                                                                                                                                                                                                                                                                                                   |
+|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Source of truth   | Use YAML files in `training/` and `evaluation/` for template names, keys, and defaults. `scripts/update-image-digests.sh` synchronizes environment versions with the checked-in image defaults in `scripts/lib/common.sh`.                                                                                 |
+| Override pattern  | Treat templates as structure-first; submission scripts provide runtime command and environment-specific values.                                                                                                                                                                                            |
+| Azure context     | Set `subscription_id`, `resource_group`, and `workspace_name` through script options or environment variables.                                                                                                                                                                                             |
 | Direct submission | Register the referenced environment asset first. An `Environment asset not found` error means the pinned version has not been registered; run the submission script to register and verify it. The digest-derived version correlates the asset with an image but does not make Azure ML verify that image. |
-| Related reference | See [Reference index](README.md) for adjacent script and artifact guides.                                                                                                                                                  |
+| Related reference | See [Reference index](README.md) for adjacent script and artifact guides.                                                                                                                                                                                                                                  |

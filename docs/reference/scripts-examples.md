@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Script Examples
 description: Detailed submission examples for OSMO dataset training, LeRobot behavioral cloning, inference evaluation, AzureML training, and end-to-end pipelines.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-10
+ms.date: 2026-09-19
 ms.topic: reference
 keywords:
   - examples
@@ -22,22 +22,22 @@ Detailed submission examples for training, inference, and pipeline workflows on 
 
 ## OSMO Dataset Training
 
-The `submit-osmo-dataset-training.sh` script uploads `training/rl/` as a versioned OSMO dataset and enables dataset reuse across runs.
+The `training/rl/scripts/submit-osmo-dataset-training.sh` script uploads `training/rl/` as a versioned OSMO dataset and enables dataset reuse across runs. Run the examples from the repository root.
 
 ### Dataset Submission Example
 
 ```bash
 # Default dataset configuration
-./submit-osmo-dataset-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
+./training/rl/scripts/submit-osmo-dataset-training.sh --task Isaac-Velocity-Rough-Anymal-C-v0
 
 # Custom dataset bucket and name
-./submit-osmo-dataset-training.sh \
+./training/rl/scripts/submit-osmo-dataset-training.sh \
   --dataset-bucket custom-bucket \
   --dataset-name my-training-v1 \
   --task Isaac-Velocity-Rough-Anymal-C-v0
 
 # With checkpoint resume
-./submit-osmo-dataset-training.sh \
+./training/rl/scripts/submit-osmo-dataset-training.sh \
   --task Isaac-Velocity-Rough-Anymal-C-v0 \
   --checkpoint-uri "runs:/abc123/checkpoint" \
   --checkpoint-mode resume
@@ -55,27 +55,27 @@ The script stages files to exclude `__pycache__` and build artifacts via `.amlig
 
 ## LeRobot Behavioral Cloning
 
-The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows supporting ACT and Diffusion policy architectures. It trains from HuggingFace Hub datasets or Azure Blob datasets and installs runtime dependencies exported at build time from `training/il/lerobot/uv.lock`.
+The `training/il/scripts/submit-osmo-lerobot-training.sh` script submits LeRobot training workflows supporting ACT and Diffusion policy architectures. It trains from HuggingFace Hub datasets or Azure Blob datasets. The dependency contract is `training/il/pyproject.toml` with its committed `training/il/uv.lock`; runtime installation must preserve the project's configured package sources.
 
 ### LeRobot Submission Examples
 
 ```bash
 # ACT policy with default MLflow tracking
-./submit-osmo-lerobot-training.sh -d user/my-dataset
+./training/il/scripts/submit-osmo-lerobot-training.sh -d user/my-dataset
 
 # Diffusion policy with Azure MLflow
-./submit-osmo-lerobot-training.sh \
+./training/il/scripts/submit-osmo-lerobot-training.sh \
   -d user/my-dataset \
   -p diffusion \
   -r my-model-name
 
 # Train from Azure Blob Storage
-./submit-osmo-lerobot-training.sh \
+./training/il/scripts/submit-osmo-lerobot-training.sh \
   --blob-url https://account.blob.core.windows.net/datasets/pusht \
   -r pusht-model
 
 # Fine-tune from pre-trained policy
-./submit-osmo-lerobot-training.sh \
+./training/il/scripts/submit-osmo-lerobot-training.sh \
   -d user/my-dataset \
   --policy-repo-id user/pretrained-act \
   --training-steps 50000 \
@@ -98,95 +98,92 @@ The `submit-osmo-lerobot-training.sh` script submits LeRobot training workflows 
 
 ## LeRobot Inference
 
-The `submit-osmo-lerobot-inference.sh` script evaluates trained LeRobot policies from HuggingFace Hub. Downloads the policy, runs evaluation, and optionally registers the model to Azure ML.
+The `evaluation/sil/scripts/submit-osmo-lerobot-eval.sh` script evaluates trained LeRobot policies and optionally registers the model to Azure ML. Hub replay evaluation requires both a policy and a dataset, each with an immutable commit revision. Replace the quoted revision placeholders before submission.
 
 ### LeRobot Inference Examples
 
 ```bash
 # Evaluate a trained policy
-./submit-osmo-lerobot-inference.sh --policy-repo-id user/trained-act-policy
+./evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
+  --policy-repo-id user/trained-act-policy \
+  --policy-revision "<policy-commit-sha>" \
+  --dataset-repo-id user/evaluation-dataset \
+  --dataset-revision "<dataset-commit-sha>"
 
 # Evaluate with model registration
-./submit-osmo-lerobot-inference.sh \
+./evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/trained-act-policy \
+  --policy-revision "<policy-commit-sha>" \
+  --dataset-repo-id user/evaluation-dataset \
+  --dataset-revision "<dataset-commit-sha>" \
   -r my-evaluated-model
 
 # Diffusion policy evaluation
-./submit-osmo-lerobot-inference.sh \
+./evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/trained-diffusion \
+  --policy-revision "<policy-commit-sha>" \
+  --dataset-repo-id user/evaluation-dataset \
+  --dataset-revision "<dataset-commit-sha>" \
   -p diffusion \
   --eval-episodes 50
 ```
 
 ### Inference Parameters
 
-| Parameter           | Default    | Description                          |
-|---------------------|------------|--------------------------------------|
-| `--policy-repo-id`  | (required) | HuggingFace policy repository        |
-| `--policy-type`     | `act`      | Policy: `act`, `diffusion`           |
-| `--eval-episodes`   | `10`       | Number of evaluation episodes        |
-| `--register-model`  | (none)     | Model name for Azure ML registration |
-| `--dataset-repo-id` | (none)     | Dataset for environment replay       |
+| Parameter            | Default            | Description                          |
+|----------------------|--------------------|--------------------------------------|
+| `--policy-repo-id`   | (required)         | HuggingFace policy repository        |
+| `--policy-type`      | `act`              | Policy: `act`, `diffusion`           |
+| `--eval-episodes`    | `10`               | Number of evaluation episodes        |
+| `--register-model`   | (none)             | Model name for Azure ML registration |
+| `--dataset-repo-id`  | (required for Hub) | Dataset for environment replay       |
+| `--policy-revision`  | (required for Hub) | Immutable policy commit SHA          |
+| `--dataset-revision` | (required for Hub) | Immutable dataset commit SHA         |
 
 ## AzureML LeRobot Training
 
-The `submit-azureml-lerobot-training.sh` script submits LeRobot training directly to Azure ML instead of OSMO. It registers an environment, compiles runtime dependencies from `training/il/lerobot/pyproject.toml`, and submits via `az ml job create`.
+The `training/il/scripts/submit-azureml-lerobot-training.sh` script submits LeRobot training directly to Azure ML instead of OSMO. It registers an environment and submits via `az ml job create`. Runtime dependencies follow `training/il/pyproject.toml` and its committed `uv.lock`, not a separate `lerobot/` subproject.
 
 ### AzureML LeRobot Examples
 
 ```bash
 # ACT policy training
-./submit-azureml-lerobot-training.sh -d user/my-dataset
+./training/il/scripts/submit-azureml-lerobot-training.sh -d user/my-dataset
 
 # With model registration and log streaming
-./submit-azureml-lerobot-training.sh \
+./training/il/scripts/submit-azureml-lerobot-training.sh \
   -d user/my-dataset \
   -r my-act-model \
   --stream
 
-# Custom environment and compute
-./submit-azureml-lerobot-training.sh \
+# Custom compute with the checked-in digest-pinned image default
+./training/il/scripts/submit-azureml-lerobot-training.sh \
   -d user/my-dataset \
-  --image custom-registry.io/lerobot:latest \
   --compute my-gpu-cluster
 ```
 
 ## End-to-End Pipeline
 
-The `run-lerobot-pipeline.sh` script orchestrates the full LeRobot lifecycle: training → polling → inference → model registration. It delegates to the individual submission scripts and polls OSMO workflow status between stages.
+The `training/pipelines/run-lerobot-pipeline.sh` wrapper is intended to orchestrate training, polling, evaluation, and registration on OSMO. Its evaluation stage still calls the missing `scripts/submit-osmo-lerobot-inference.sh`; it is not a working end-to-end path. Submit training and evaluation with the individual scripts above until the wrapper is repaired.
 
 ### Pipeline Stages
 
-| Stage | Action                                | Script Used                        |
-|-------|---------------------------------------|------------------------------------|
-| 1     | Submit training workflow              | `submit-osmo-lerobot-training.sh`  |
-| 2     | Poll workflow status until completion | `osmo workflow query`              |
-| 3     | Submit inference/evaluation workflow  | `submit-osmo-lerobot-inference.sh` |
+| Stage | Action                                | Script Used                                           |
+|-------|---------------------------------------|-------------------------------------------------------|
+| 1     | Submit training workflow              | `training/il/scripts/submit-osmo-lerobot-training.sh` |
+| 2     | Poll workflow status until completion | `osmo workflow query`                                 |
+| 3     | Blocked: internal target missing      | `scripts/submit-osmo-lerobot-inference.sh`            |
 
 ### Pipeline Examples
 
 ```bash
-# Full pipeline: train → evaluate → register
-./run-lerobot-pipeline.sh \
-  -d lerobot/aloha_sim_insertion_human \
-  --policy-repo-id user/my-act-policy \
-  -r my-act-model
-
 # Async mode (submit training and exit)
-./run-lerobot-pipeline.sh \
+./training/pipelines/run-lerobot-pipeline.sh \
   -d user/my-dataset \
   --skip-wait
 
-# Diffusion pipeline
-./run-lerobot-pipeline.sh \
-  -d user/my-dataset \
-  --policy-repo-id user/my-diffusion \
-  -p diffusion \
-  --training-steps 100000 \
-  -r my-diffusion-model
-
 # Skip inference (training only with polling)
-./run-lerobot-pipeline.sh \
+./training/pipelines/run-lerobot-pipeline.sh \
   -d user/my-dataset \
   --skip-inference
 ```
@@ -206,6 +203,7 @@ The `run-lerobot-pipeline.sh` script orchestrates the full LeRobot lifecycle: tr
 
 ## Related Documentation
 
+- [AzureML Workflow Templates](workflow-templates-azureml.md) for the separate AzureML preprocess/train/evaluate pipeline and optional registration step
 - [Script Reference](scripts.md) for CLI arguments and script inventory
 - [Reference Hub](README.md) for all reference documentation
 
