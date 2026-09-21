@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
-import time
 import types
 from pathlib import Path
 
@@ -25,6 +25,10 @@ def _png_bytes() -> bytes:
     buf = io.BytesIO()
     PILImage.new("RGB", (8, 8), color=(0, 0, 0)).save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _model_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 class TestDetectionEpisodeProcessing:
@@ -70,8 +74,9 @@ class TestDetectionEpisodeProcessing:
         assert summary.processed_frames == 2
 
     def test_get_model_logs_sanitized_model_name(self, monkeypatch, tmp_path: Path):
-        (tmp_path / "yolo11n.pt").touch()
-        service = DetectionService(models_dir=tmp_path)
+        model_path = tmp_path / "yolo11n.pt"
+        model_path.touch()
+        service = DetectionService(models_dir=tmp_path, model_digests={"yolo11n": _model_digest(model_path)})
         logged: list[tuple[object, ...]] = []
 
         class FakeYOLO:
@@ -142,8 +147,9 @@ class TestGetModelExtra:
     def test_raises_on_import_error(self, monkeypatch, tmp_path: Path):
         import builtins as _bi
 
-        (tmp_path / "yolo11n.pt").touch()
-        s = DetectionService(models_dir=tmp_path)
+        model_path = tmp_path / "yolo11n.pt"
+        model_path.touch()
+        s = DetectionService(models_dir=tmp_path, model_digests={"yolo11n": _model_digest(model_path)})
         real_import = _bi.__import__
 
         def fake_import(name, *a, **kw):
@@ -155,12 +161,49 @@ class TestGetModelExtra:
         with pytest.raises(ImportError):
             s._get_model("yolo11n")
 
+    def test_load_failure_does_not_publish_model_state(self, monkeypatch, tmp_path: Path):
+        model_path = tmp_path / "yolo11n.pt"
+        model_path.write_bytes(b"reviewed checkpoint")
+        service = DetectionService(models_dir=tmp_path, model_digests={"yolo11n": _model_digest(model_path)})
+
+        class FailingYOLO:
+            def __init__(self, _model_path: str):
+                raise RuntimeError("corrupt checkpoint")
+
+        monkeypatch.setitem(__import__("sys").modules, "ultralytics", types.SimpleNamespace(YOLO=FailingYOLO))
+
+        with pytest.raises(DetectionModelUnavailableError):
+            service._get_model("yolo11n")
+
+        assert service._model is None
+        assert service._model_name == ""
+
+    def test_warmup_failure_does_not_publish_model_state(self, monkeypatch, tmp_path: Path):
+        model_path = tmp_path / "yolo11n.pt"
+        model_path.write_bytes(b"reviewed checkpoint")
+        service = DetectionService(models_dir=tmp_path, model_digests={"yolo11n": _model_digest(model_path)})
+
+        class FailingYOLO:
+            def __init__(self, staged_path: str):
+                assert Path(staged_path).read_bytes() == model_path.read_bytes()
+
+            def __call__(self, *_args, **_kwargs):
+                raise RuntimeError("warmup failed")
+
+        monkeypatch.setitem(__import__("sys").modules, "ultralytics", types.SimpleNamespace(YOLO=FailingYOLO))
+
+        with pytest.raises(DetectionModelUnavailableError):
+            service._get_model("yolo11n")
+
+        assert service._model is None
+        assert service._model_name == ""
+
 
 class TestModelPathRestrictions:
     def test_resolves_approved_model_inside_configured_directory(self, tmp_path: Path):
         model_path = tmp_path / "yolo11n.pt"
         model_path.touch()
-        service = DetectionService(models_dir=tmp_path)
+        service = DetectionService(models_dir=tmp_path, model_digests={"yolo11n": _model_digest(model_path)})
 
         assert service._resolve_model_path("yolo11n") == model_path.resolve()
 
@@ -180,7 +223,7 @@ class TestModelPathRestrictions:
             service._resolve_model_path(model_name)
 
     def test_rejects_missing_approved_model_file(self, tmp_path: Path):
-        service = DetectionService(models_dir=tmp_path)
+        service = DetectionService(models_dir=tmp_path, model_digests={"yolo11n": "0" * 64})
 
         with pytest.raises(DetectionModelUnavailableError, match="not found"):
             service._resolve_model_path("yolo11n")
@@ -191,7 +234,7 @@ class TestModelPathRestrictions:
         outside_model = tmp_path / "outside.pt"
         outside_model.touch()
         (models_dir / "yolo11n.pt").symlink_to(outside_model)
-        service = DetectionService(models_dir=models_dir)
+        service = DetectionService(models_dir=models_dir, model_digests={"yolo11n": _model_digest(outside_model)})
 
         with pytest.raises(DetectionModelError, match="outside configured models directory"):
             service._resolve_model_path("yolo11n")
@@ -231,47 +274,90 @@ class TestModelPathRestrictions:
                 )
             )
 
+    def test_rejects_model_without_configured_digest(self, tmp_path: Path):
+        (tmp_path / "yolo11n.pt").touch()
+        service = DetectionService(models_dir=tmp_path)
+
+        with pytest.raises(DetectionModelUnavailableError, match="digest"):
+            service._resolve_model_path("yolo11n")
+
+    def test_rejects_model_with_mismatched_digest(self, tmp_path: Path):
+        model_path = tmp_path / "yolo11n.pt"
+        model_path.write_bytes(b"untrusted checkpoint")
+        service = DetectionService(models_dir=tmp_path, model_digests={"yolo11n": "0" * 64})
+
+        with pytest.raises(DetectionModelUnavailableError, match="integrity"):
+            service._resolve_model_path("yolo11n")
+
 
 class TestCacheHelpers:
-    def test_get_cached_returns_none_and_value(self):
-        s = DetectionService()
-        assert s.get_cached("d", 0) is None
-        summary = EpisodeDetectionSummary(
-            total_frames=1, processed_frames=0, total_detections=0, detections_by_frame=[], class_summary={}
+    @staticmethod
+    def _detect_empty_episode(service: DetectionService, dataset_id: str, episode_idx: int) -> EpisodeDetectionSummary:
+        async def get_frame_image(_frame_idx: int) -> None:
+            return None
+
+        return asyncio.run(
+            service.detect_episode(
+                dataset_id=dataset_id,
+                episode_idx=episode_idx,
+                request=DetectionRequest(),
+                get_frame_image=get_frame_image,
+                total_frames=0,
+            )
         )
-        s._cache[s._cache_key("d", 0)] = summary
-        assert s.get_cached("d", 0) is summary
 
-    def test_clear_cache_hit_and_miss(self):
-        s = DetectionService()
-        assert s.clear_cache("d", 0) is False
-        s._cache[s._cache_key("d", 0)] = EpisodeDetectionSummary(
-            total_frames=1, processed_frames=0, total_detections=0, detections_by_frame=[], class_summary={}
-        )
-        assert s.clear_cache("d", 0) is True
-        assert s.get_cached("d", 0) is None
-
-    def test_cache_evicts_least_recently_used_entry_at_capacity(self):
-        service = DetectionService(cache_max_size=2)
-        summary = EpisodeDetectionSummary(total_frames=1, processed_frames=0, total_detections=0)
-
-        service._cache["d:0"] = summary
-        service._cache["d:1"] = summary
-        assert service.get_cached("d", 0) is summary
-        service._cache["d:2"] = summary
-
-        assert service.get_cached("d", 0) is summary
-        assert service.get_cached("d", 1) is None
-        assert service.get_cached("d", 2) is summary
-
-    def test_cache_entry_expires_after_ttl(self):
-        service = DetectionService(cache_ttl_seconds=0.01)
-        summary = EpisodeDetectionSummary(total_frames=1, processed_frames=0, total_detections=0)
-        service._cache["d:0"] = summary
-
-        time.sleep(0.02)
+    def test_get_cached_returns_none_and_value(self, monkeypatch):
+        service = DetectionService()
+        monkeypatch.setattr(service, "_resolve_model_path", lambda _model_name: Path("yolo11n.pt"))
 
         assert service.get_cached("d", 0) is None
+        summary = self._detect_empty_episode(service, "d", 0)
+
+        assert service.get_cached("d", 0) is summary
+
+    def test_clear_cache_hit_and_miss(self, monkeypatch):
+        service = DetectionService()
+        monkeypatch.setattr(service, "_resolve_model_path", lambda _model_name: Path("yolo11n.pt"))
+
+        assert service.clear_cache("d", 0) is False
+        self._detect_empty_episode(service, "d", 0)
+        assert service.clear_cache("d", 0) is True
+        assert service.get_cached("d", 0) is None
+
+    def test_cache_evicts_least_recently_used_entry_at_capacity(self, monkeypatch):
+        service = DetectionService(cache_max_size=2)
+        monkeypatch.setattr(service, "_resolve_model_path", lambda _model_name: Path("yolo11n.pt"))
+
+        first = self._detect_empty_episode(service, "d", 0)
+        self._detect_empty_episode(service, "d", 1)
+        assert service.get_cached("d", 0) is first
+        third = self._detect_empty_episode(service, "d", 2)
+
+        assert service.get_cached("d", 0) is first
+        assert service.get_cached("d", 1) is None
+        assert service.get_cached("d", 2) is third
+
+    def test_cache_entry_expires_after_ttl(self, monkeypatch):
+        now = 100.0
+        service = DetectionService(cache_ttl_seconds=10, cache_timer=lambda: now)
+        monkeypatch.setattr(service, "_resolve_model_path", lambda _model_name: Path("yolo11n.pt"))
+        self._detect_empty_episode(service, "d", 0)
+
+        now = 111.0
+
+        assert service.get_cached("d", 0) is None
+
+
+class TestEffectiveConfidence:
+    def test_uses_service_default_when_request_omits_confidence(self):
+        service = DetectionService(default_confidence=0.42)
+
+        assert service.effective_confidence(DetectionRequest()) == 0.42
+
+    def test_uses_request_override(self):
+        service = DetectionService(default_confidence=0.42)
+
+        assert service.effective_confidence(DetectionRequest(confidence=0.7)) == 0.7
 
 
 class TestDetectFrame:

@@ -27,6 +27,7 @@ class DetectionRequest(SanitizedModel):
     )
     model: str = Field(
         default="yolo11n",
+        max_length=64,
         description=(
             "YOLO model variant. Closed-vocabulary: yolo11n, yolo11s, yolo11m, yolo11l, yolo11x. "
             "Open-vocabulary (used when 'labels' is supplied): yolov8s-world, yolov8m-world, "

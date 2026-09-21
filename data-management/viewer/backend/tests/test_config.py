@@ -37,6 +37,7 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch):
         "EPISODE_CACHE_CAPACITY",
         "EPISODE_CACHE_MAX_MB",
         "DETECTION_MODELS_DIR",
+        "DETECTION_MODEL_DIGESTS",
         "DETECTION_CACHE_MAX_SIZE",
         "DETECTION_CACHE_TTL_SECONDS",
         "DETECTION_CONFIDENCE_THRESHOLD",
@@ -55,6 +56,7 @@ class TestLoadConfig:
         assert cfg.episode_cache_capacity == 32
         assert cfg.episode_cache_max_mb == 100
         assert cfg.detection_models_dir == "./models"
+        assert cfg.detection_model_digests == {}
         assert cfg.detection_cache_max_size == 100
         assert cfg.detection_cache_ttl_seconds == 3600
         assert cfg.detection_confidence_threshold == 0.1
@@ -81,6 +83,7 @@ class TestLoadConfig:
 
     def test_detection_env_configuration(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("DETECTION_MODELS_DIR", "/srv/models")
+        monkeypatch.setenv("DETECTION_MODEL_DIGESTS", '{"yolo11n":"' + "a" * 64 + '"}')
         monkeypatch.setenv("DETECTION_CACHE_MAX_SIZE", "12")
         monkeypatch.setenv("DETECTION_CACHE_TTL_SECONDS", "45")
         monkeypatch.setenv("DETECTION_CONFIDENCE_THRESHOLD", "0.35")
@@ -88,6 +91,7 @@ class TestLoadConfig:
         cfg = load_config()
 
         assert cfg.detection_models_dir == "/srv/models"
+        assert cfg.detection_model_digests == {"yolo11n": "a" * 64}
         assert cfg.detection_cache_max_size == 12
         assert cfg.detection_cache_ttl_seconds == 45
         assert cfg.detection_confidence_threshold == 0.35
@@ -99,6 +103,8 @@ class TestLoadConfig:
             ("DETECTION_CACHE_TTL_SECONDS", "0"),
             ("DETECTION_CONFIDENCE_THRESHOLD", "-0.1"),
             ("DETECTION_CONFIDENCE_THRESHOLD", "1.1"),
+            ("DETECTION_MODEL_DIGESTS", '{"unknown":"' + "a" * 64 + '"}'),
+            ("DETECTION_MODEL_DIGESTS", '{"yolo11n":"invalid"}'),
         ],
     )
     def test_invalid_detection_configuration_raises(

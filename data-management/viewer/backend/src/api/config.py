@@ -8,10 +8,17 @@ for the configured backend.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any
+
+from .detection_constants import ALLOWED_DETECTION_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +66,9 @@ class AppConfig:
 
     detection_models_dir: str = "./models"
     """Directory containing approved YOLO weight files."""
+
+    detection_model_digests: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    """Approved model identifiers mapped to reviewed SHA-256 checkpoint digests."""
 
     detection_cache_max_size: int = 100
     """Maximum number of episode detection summaries retained in memory."""
@@ -130,6 +140,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
     episode_cache_max_mb = int(os.environ.get("EPISODE_CACHE_MAX_MB", "100"))
 
     detection_models_dir = os.environ.get("DETECTION_MODELS_DIR", "./models")
+    detection_model_digests = _detection_model_digests_env()
     detection_cache_max_size = _positive_int_env("DETECTION_CACHE_MAX_SIZE", 100)
     detection_cache_ttl_seconds = _positive_int_env("DETECTION_CACHE_TTL_SECONDS", 3600)
     detection_confidence_threshold = _bounded_float_env("DETECTION_CONFIDENCE_THRESHOLD", 0.1)
@@ -157,6 +168,7 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         episode_cache_capacity=episode_cache_capacity,
         episode_cache_max_mb=episode_cache_max_mb,
         detection_models_dir=detection_models_dir,
+        detection_model_digests=detection_model_digests,
         detection_cache_max_size=detection_cache_max_size,
         detection_cache_ttl_seconds=detection_cache_ttl_seconds,
         detection_confidence_threshold=detection_confidence_threshold,
@@ -184,6 +196,26 @@ def _bounded_float_env(name: str, default: float) -> float:
     if not 0.0 <= value <= 1.0:
         raise ValueError(f"{name} must be between 0.0 and 1.0")
     return value
+
+
+def _detection_model_digests_env() -> Mapping[str, str]:
+    name = "DETECTION_MODEL_DIGESTS"
+    raw_value = os.environ.get(name, "{}")
+    try:
+        value: Any = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{name} must be a JSON object") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} must be a JSON object")
+
+    digests: dict[str, str] = {}
+    for model_name, digest in value.items():
+        if model_name not in ALLOWED_DETECTION_MODELS:
+            raise ValueError(f"{name} contains an unapproved model identifier")
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None:
+            raise ValueError(f"{name} values must be SHA-256 digests")
+        digests[model_name] = digest.lower()
+    return MappingProxyType(digests)
 
 
 def create_annotation_storage(config: AppConfig):

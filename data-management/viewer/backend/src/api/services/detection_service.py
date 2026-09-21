@@ -7,9 +7,11 @@ for HDF5 episode data.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import tempfile
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -65,19 +67,24 @@ class DetectionService:
         cache_max_size: int = 100,
         cache_ttl_seconds: float = 3600,
         default_confidence: float = 0.1,
+        model_digests: Mapping[str, str] | None = None,
+        cache_timer: Callable[[], float] = time.monotonic,
     ) -> None:
         self._model: YOLO | None = None
         self._model_name: str = ""
         self._model_classes: tuple[str, ...] = ()
         self._models_dir = Path(models_dir).expanduser().resolve()
+        self._model_digests = dict(model_digests or {})
+        self._verified_models_dir = tempfile.TemporaryDirectory(prefix="detection-models-")
         self._cache: TTLCache[str, EpisodeDetectionSummary] = TTLCache(
             maxsize=cache_max_size,
             ttl=cache_ttl_seconds,
+            timer=cache_timer,
         )
-        self.default_confidence = default_confidence
+        self._default_confidence = default_confidence
 
     def _resolve_model_path(self, model_name: str) -> Path:
-        """Resolve an approved identifier to a local weight file."""
+        """Resolve and verify an approved local weight file."""
         self._validate_model_identifier(model_name)
 
         model_path = (self._models_dir / f"{model_name}.pt").resolve()
@@ -85,7 +92,25 @@ class DetectionService:
             raise DetectionModelUnavailableError("Approved model resolves outside configured models directory")
         if not model_path.is_file():
             raise DetectionModelUnavailableError(f"Approved model file not found for identifier '{model_name}'")
+        expected_digest = self._model_digests.get(model_name)
+        if expected_digest is None:
+            raise DetectionModelUnavailableError(
+                f"Approved model digest is not configured for identifier '{model_name}'"
+            )
+        if hashlib.sha256(model_path.read_bytes()).hexdigest() != expected_digest:
+            raise DetectionModelUnavailableError(f"Approved model integrity check failed for identifier '{model_name}'")
         return model_path
+
+    def _stage_verified_model(self, model_name: str) -> Path:
+        source_path = self._resolve_model_path(model_name)
+        model_bytes = source_path.read_bytes()
+        if hashlib.sha256(model_bytes).hexdigest() != self._model_digests[model_name]:
+            raise DetectionModelUnavailableError(f"Approved model integrity check failed for identifier '{model_name}'")
+
+        staged_path = Path(self._verified_models_dir.name) / f"{model_name}.pt"
+        staged_path.write_bytes(model_bytes)
+        staged_path.chmod(0o400)
+        return staged_path
 
     @staticmethod
     def _validate_model_identifier(model_name: str) -> None:
@@ -103,6 +128,10 @@ class DetectionService:
             return DEFAULT_OPEN_VOCAB_MODEL
         return model_name
 
+    def effective_confidence(self, request: DetectionRequest) -> float:
+        """Resolve the request confidence against the configured service default."""
+        return request.confidence if request.confidence is not None else self._default_confidence
+
     def _get_model(
         self,
         model_name: str = "yolo11n",
@@ -117,23 +146,29 @@ class DetectionService:
         model_name = self._effective_model_name(model_name, labels)
 
         if self._model is None or self._model_name != model_name:
-            model_path = self._resolve_model_path(model_name)
             try:
                 from ultralytics import YOLO
-
-                logger.info("Loading YOLO model: %s", model_name.replace("\r", "").replace("\n", ""))
-                self._model = YOLO(str(model_path))
-                self._model_name = model_name
-                self._model_classes = ()
-                # Warmup with dummy inference
-                import numpy as np
-
-                dummy = np.zeros((640, 640, 3), dtype=np.uint8)
-                self._model(dummy, verbose=False)
-                logger.info("YOLO model loaded and warmed up")
             except ImportError:
                 logger.error("ultralytics not installed. Run: uv sync --extra yolo")
                 raise
+            try:
+                model_path = self._stage_verified_model(model_name)
+                logger.info("Loading YOLO model: %s", model_name.replace("\r", "").replace("\n", ""))
+                model = YOLO(str(model_path))
+
+                import numpy as np
+
+                dummy = np.zeros((640, 640, 3), dtype=np.uint8)
+                model(dummy, verbose=False)
+            except DetectionModelError:
+                raise
+            except Exception as exc:
+                raise DetectionModelUnavailableError("Configured detection model is unavailable") from exc
+
+            self._model = model
+            self._model_name = model_name
+            self._model_classes = ()
+            logger.info("YOLO model loaded and warmed up")
 
         if labels:
             label_tuple = tuple(labels)
@@ -282,7 +317,7 @@ class DetectionService:
         )
 
         # Determine frames to process
-        confidence = request.confidence if request.confidence is not None else self.default_confidence
+        confidence = self.effective_confidence(request)
         model_name = self._effective_model_name(request.model, request.labels)
         labels = request.labels
         self._resolve_model_path(model_name)
@@ -391,6 +426,7 @@ def get_detection_service() -> DetectionService:
         config = get_app_config()
         _detection_service = DetectionService(
             models_dir=config.detection_models_dir,
+            model_digests=config.detection_model_digests,
             cache_max_size=config.detection_cache_max_size,
             cache_ttl_seconds=config.detection_cache_ttl_seconds,
             default_confidence=config.detection_confidence_threshold,

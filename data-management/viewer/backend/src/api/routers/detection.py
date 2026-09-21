@@ -63,7 +63,7 @@ async def run_detection(
         _sanitize_for_log(dataset_id),
         int(episode_idx),
         _sanitize_for_log(request_body.model),
-        float(request_body.confidence if request_body.confidence is not None else detection_service.default_confidence),
+        float(detection_service.effective_confidence(request_body)),
     )
 
     # Validate episode exists
@@ -116,6 +116,10 @@ async def run_detection(
     except InvalidDetectionModelError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except DetectionModelUnavailableError:
+        logger.exception(
+            "Configured detection model is unavailable for model %s",
+            _sanitize_for_log(request_body.model),
+        )
         raise HTTPException(status_code=503, detail="Configured detection model is unavailable")
     except ImportError:
         raise HTTPException(

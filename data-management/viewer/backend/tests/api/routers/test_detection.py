@@ -34,6 +34,7 @@ def override_services():
     dataset_service.get_frame_image = AsyncMock(return_value=b"jpeg-bytes")
 
     detection_service = MagicMock()
+    detection_service.effective_confidence.return_value = 0.1
     detection_service.detect_episode = AsyncMock()
     detection_service.clear_cache = MagicMock(return_value=False)
 
@@ -139,6 +140,64 @@ def test_run_detection_unavailable_model_returns_503(client: TestClient, overrid
 
     assert response.status_code == 503
     assert response.json()["detail"] == "Configured detection model is unavailable"
+
+
+def test_run_detection_logs_unavailable_model(client: TestClient, override_services, caplog) -> None:
+    from src.api.services.detection_service import DetectionModelUnavailableError
+
+    dataset_service, detection_service = override_services
+    dataset_service.get_episode.return_value = EpisodeData(
+        meta=EpisodeMeta(index=0, length=1, task_index=0, has_annotations=False),
+        video_urls={},
+        cameras=["il-camera"],
+        trajectory_data=[],
+    )
+    detection_service.detect_episode.side_effect = DetectionModelUnavailableError("private path")
+
+    with caplog.at_level("ERROR"):
+        response = client.post("/api/datasets/ds-1/episodes/0/detect", json={"model": "yolo11n"})
+
+    assert response.status_code == 503
+    assert "Configured detection model is unavailable for model yolo11n" in caplog.text
+
+
+def test_run_detection_model_load_failure_returns_503_without_cache_write(
+    client: TestClient,
+    override_services,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    import hashlib
+    import sys
+    import types
+
+    from src.api.main import app
+    from src.api.services.detection_service import DetectionService, get_detection_service
+
+    dataset_service, _ = override_services
+    dataset_service.get_episode.return_value = EpisodeData(
+        meta=EpisodeMeta(index=0, length=1, task_index=0, has_annotations=False),
+        video_urls={},
+        cameras=["il-camera"],
+        trajectory_data=[],
+    )
+    model_path = tmp_path / "yolo11n.pt"
+    model_path.write_bytes(b"corrupt checkpoint")
+    digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    service = DetectionService(models_dir=tmp_path, model_digests={"yolo11n": digest})
+
+    class FailingYOLO:
+        def __init__(self, _model_path: str):
+            raise RuntimeError("incompatible checkpoint")
+
+    monkeypatch.setitem(sys.modules, "ultralytics", types.SimpleNamespace(YOLO=FailingYOLO))
+    app.dependency_overrides[get_detection_service] = lambda: service
+
+    response = client.post("/api/datasets/ds-1/episodes/0/detect", json={"model": "yolo11n"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Configured detection model is unavailable"
+    assert service.get_cached("ds-1", 0) is None
 
 
 def test_get_detections_returns_cached_summary(client: TestClient, override_services) -> None:
