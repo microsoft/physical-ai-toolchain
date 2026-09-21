@@ -29,6 +29,7 @@ XAVIER_LABEL = "xavier"
 XAVIER_PARENT_KIND_LABEL = "xavier-parent-kind"
 XAVIER_PARENT_NAME_LABEL = "xavier-parent-name"
 XAVIER_DEPLOYMENT_LABEL = "xavierdeployment"
+XAVIER_NETWORK_POLICY_LABEL = "xaviernetworkpolicy"
 SERVER_SELECTOR_LABEL = "apprmt"
 XAVIER_CONFIG_VOLUME_NAME = "xavierconfig"
 XAVIER_CONFIG_MOUNT_PATH = "/xavierconfig"
@@ -168,6 +169,8 @@ def _validate_stage(stage: Any, *, index: int) -> dict[str, Any]:
     normalized["name"] = str(stage.get("name", ""))
     if "encryption" in normalized:
         raise XavierConfigError("encryption is a top-level setting and cannot be configured per server stage")
+    if "networkPolicy" in normalized:
+        raise XavierConfigError("networkPolicy is a top-level setting and cannot be configured per server stage")
     if "perclient" in normalized:
         normalized["perclient"] = _normalize_bool(normalized["perclient"], field=f"serverstages[{index}].perclient")
     if "noserverdeployment" in normalized:
@@ -252,6 +255,13 @@ def validate_xavier_config(
         )
     if "encryption" in normalized:
         normalized["encryption"] = _normalize_bool(normalized["encryption"], field=f"{source}.encryption")
+    if "networkPolicy" in normalized:
+        normalized["networkPolicy"] = _normalize_bool(
+            normalized["networkPolicy"],
+            field=f"{source}.networkPolicy",
+        )
+    else:
+        normalized["networkPolicy"] = True
 
     top_level_perclient = False
     if "perclient" in normalized:
@@ -506,6 +516,7 @@ def _has_xavier_env(container: dict[str, Any]) -> bool:
 # always transfer to the generated server regardless of remoteableenv
 _PROTOCOL_ENV_NAMES = {
     "REMOTER_CONFIG",
+    "REMOTERPORT",
     "CONFIGFROMKUBE",
     "SERVERLABEL",
     "XAVIER_CONTAINER",
@@ -775,6 +786,7 @@ def create_server_deployment_spec(
     replicas = getparam(xavierconfig, stage, "serverreplicas") or 1
     deployment_name = _deployment_name(metadata, stage)
     namespace = metadata.get("namespace", "default")
+    network_policy_enabled = xavierconfig.get("networkPolicy", True) is True
     deployment = {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -784,6 +796,7 @@ def create_server_deployment_spec(
             "labels": {
                 "app": deployment_name,
                 XAVIER_DEPLOYMENT_LABEL: "true",
+                XAVIER_NETWORK_POLICY_LABEL: str(network_policy_enabled).lower(),
             },
         },
         "spec": {
@@ -1025,6 +1038,90 @@ def reconcile_named_server_deployment(
     return "patched"
 
 
+def _network_policy_name(deployment_name: str) -> str:
+    return _bounded_kubernetes_name(f"{deployment_name}-rpc")
+
+
+def _server_remoter_port(deployment: dict[str, Any]) -> int:
+    containers = deployment.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+    if not containers:
+        raise XavierConfigError("Generated server Deployment does not contain a container")
+    raw_port = get_env_var(containers[0], "REMOTERPORT") or "9000"
+    try:
+        port = int(raw_port)
+    except ValueError as exc:
+        raise XavierConfigError(f"REMOTERPORT must be an integer: {raw_port!r}") from exc
+    if not 1 <= port <= 65535:
+        raise XavierConfigError(f"REMOTERPORT must be between 1 and 65535: {port}")
+    return port
+
+
+def create_server_network_policy_spec(deployment: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = deployment.get("metadata", {})
+    labels = metadata.get("labels", {}) or {}
+    if labels.get(XAVIER_NETWORK_POLICY_LABEL) != "true":
+        return None
+
+    deployment_name = metadata["name"]
+    namespace = metadata.get("namespace", "default")
+    policy = {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+            "name": _network_policy_name(deployment_name),
+            "namespace": namespace,
+            "labels": {
+                XAVIER_DEPLOYMENT_LABEL: "true",
+                XAVIER_NETWORK_POLICY_LABEL: "true",
+            },
+        },
+        "spec": {
+            "podSelector": {"matchLabels": {"app": deployment_name}},
+            "policyTypes": ["Ingress"],
+            "ingress": [
+                {
+                    "from": [{"podSelector": {}}],
+                    "ports": [
+                        {"protocol": "TCP", "port": _server_remoter_port(deployment)},
+                        {"protocol": "UDP", "port": _server_remoter_port(deployment)},
+                    ],
+                }
+            ],
+        },
+    }
+    owner_references = metadata.get("ownerReferences")
+    if owner_references:
+        policy["metadata"]["ownerReferences"] = copy.deepcopy(owner_references)
+    return policy
+
+
+def reconcile_named_network_policy(
+    networking_api: client.NetworkingV1Api,
+    *,
+    namespace: str,
+    policy_name: str,
+    desired_spec: dict[str, Any] | None,
+) -> str:
+    try:
+        existing = networking_api.read_namespaced_network_policy(name=policy_name, namespace=namespace)
+    except client.exceptions.ApiException as exc:
+        if exc.status != 404:
+            raise
+        if desired_spec is None:
+            return "absent"
+        networking_api.create_namespaced_network_policy(namespace=namespace, body=desired_spec)
+        return "created"
+
+    if desired_spec is None:
+        networking_api.delete_namespaced_network_policy(name=policy_name, namespace=namespace)
+        return "deleted"
+
+    if _is_subset(_normalize_deployment_for_compare(desired_spec), _normalize_deployment_for_compare(existing)):
+        return "unchanged"
+    networking_api.patch_namespaced_network_policy(name=policy_name, namespace=namespace, body=desired_spec)
+    return "patched"
+
+
 def _create_encryption_secret_spec(secret_name: str, namespace: str, owner_obj: dict[str, Any]) -> dict[str, Any]:
     secret = {
         "apiVersion": "v1",
@@ -1135,6 +1232,7 @@ def reconcile_object(
     core_api: client.CoreV1Api,
     apps_api: client.AppsV1Api,
     batch_api: client.BatchV1Api,
+    networking_api: client.NetworkingV1Api | None = None,
 ) -> dict[str, str]:
     if obj.get("kind") not in SUPPORTED_KINDS:
         return {}
@@ -1179,6 +1277,17 @@ def reconcile_object(
     )
     namespace = obj.get("metadata", {}).get("namespace", "default")
     for deployment_name, desired_spec in desired_deployments.items():
+        if networking_api is not None:
+            policy_name = _network_policy_name(deployment_name)
+            desired_policy = create_server_network_policy_spec(desired_spec) if desired_spec is not None else None
+            policy_outcome = reconcile_named_network_policy(
+                networking_api,
+                namespace=namespace,
+                policy_name=policy_name,
+                desired_spec=desired_policy,
+            )
+            if policy_outcome != "absent":
+                outcomes[policy_name] = policy_outcome
         outcomes[deployment_name] = reconcile_named_server_deployment(
             apps_api,
             namespace=namespace,
@@ -1200,6 +1309,16 @@ def reconcile_object(
             desired_names=set(desired_deployments),
         )
         for deployment_name in orphan_names:
+            if networking_api is not None:
+                policy_name = _network_policy_name(deployment_name)
+                policy_outcome = reconcile_named_network_policy(
+                    networking_api,
+                    namespace=namespace,
+                    policy_name=policy_name,
+                    desired_spec=None,
+                )
+                if policy_outcome != "absent":
+                    outcomes[policy_name] = policy_outcome
             outcomes[deployment_name] = reconcile_named_server_deployment(
                 apps_api,
                 namespace=namespace,
@@ -1269,10 +1388,12 @@ class XavierAdmissionController:
         core_api: client.CoreV1Api | None = None,
         apps_api: client.AppsV1Api | None = None,
         batch_api: client.BatchV1Api | None = None,
+        networking_api: client.NetworkingV1Api | None = None,
     ) -> None:
         self.core_api = core_api
         self.apps_api = apps_api
         self.batch_api = batch_api
+        self.networking_api = networking_api
 
     def handle_admission_review(self, review: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         if review.get("apiVersion") != "admission.k8s.io/v1" or review.get("kind") != "AdmissionReview":
@@ -1335,9 +1456,20 @@ class XavierAdmissionController:
         return HTTPStatus.OK, admission_response(uid=uid, allowed=True, patch=patch)
 
     def reconcile_object(self, obj: dict[str, Any]) -> dict[str, str]:
-        if self.core_api is None or self.apps_api is None or self.batch_api is None:
+        if (
+            self.core_api is None
+            or self.apps_api is None
+            or self.batch_api is None
+            or self.networking_api is None
+        ):
             raise RuntimeError("Kubernetes clients are not configured for reconciliation")
-        return reconcile_object(obj, core_api=self.core_api, apps_api=self.apps_api, batch_api=self.batch_api)
+        return reconcile_object(
+            obj,
+            core_api=self.core_api,
+            apps_api=self.apps_api,
+            batch_api=self.batch_api,
+            networking_api=self.networking_api,
+        )
 
 
 class AdmissionHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -1402,7 +1534,7 @@ def build_ssl_context(cert_file: str, key_file: str) -> ssl.SSLContext:
 
 def load_kubernetes_clients(
     kubeconfig_path: str | None,
-) -> tuple[client.CoreV1Api, client.AppsV1Api, client.BatchV1Api]:
+) -> tuple[client.CoreV1Api, client.AppsV1Api, client.BatchV1Api, client.NetworkingV1Api]:
     if kubeconfig_path:
         config.load_kube_config(config_file=kubeconfig_path)
     else:
@@ -1410,7 +1542,7 @@ def load_kubernetes_clients(
             config.load_incluster_config()
         except config.ConfigException:
             config.load_kube_config()
-    return client.CoreV1Api(), client.AppsV1Api(), client.BatchV1Api()
+    return client.CoreV1Api(), client.AppsV1Api(), client.BatchV1Api(), client.NetworkingV1Api()
 
 
 class ReconcileRuntime:
@@ -1500,11 +1632,16 @@ def main() -> None:
         level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(message)s"
     )
 
-    core_api = apps_api = batch_api = None
+    core_api = apps_api = batch_api = networking_api = None
     runtime: ReconcileRuntime | None = None
     if not args.disable_reconcile:
-        core_api, apps_api, batch_api = load_kubernetes_clients(args.kubeconfig)
-    controller = XavierAdmissionController(core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+        core_api, apps_api, batch_api, networking_api = load_kubernetes_clients(args.kubeconfig)
+    controller = XavierAdmissionController(
+        core_api=core_api,
+        apps_api=apps_api,
+        batch_api=batch_api,
+        networking_api=networking_api,
+    )
     if not args.disable_reconcile:
         runtime = ReconcileRuntime(controller)
         # Run the initial cluster-wide sync and watch loops in the background so the
@@ -1543,10 +1680,12 @@ __all__ = [
     "build_desired_server_deployments",
     "create_json_patch",
     "create_server_deployment_spec",
+    "create_server_network_policy_spec",
     "get_metadata_spec",
     "get_metadata_spec_parent",
     "getserverlabel",
     "merge_configmap_config",
+    "reconcile_named_network_policy",
     "reconcile_named_server_deployment",
     "reconcile_object",
     "validate_xavier_config",

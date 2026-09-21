@@ -22,7 +22,7 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 
 ## Top-Level Keys
 
-`remote.yaml` declares five optional top-level keys. At least one of `serverstages`,
+`remote.yaml` declares six optional top-level keys. At least one of `serverstages`,
 `remoteclasses`, or `remotefuncs` must be present.
 
 | Key              | Type             | Required | Purpose                                      |
@@ -32,6 +32,28 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 | `remotefuncs`    | list of mappings | No       | Functions that execute in stages             |
 | `allowedmodules` | list of strings  | No       | Permit additional runtime module imports     |
 | `encryption`     | boolean          | No       | Encrypt and authenticate RPC payloads        |
+| `networkPolicy`  | boolean          | No       | Restrict server ingress to the namespace     |
+
+## networkPolicy
+
+`networkPolicy` defaults to `true`. The controller creates one ingress
+NetworkPolicy for each generated server Deployment. The policy selects only the
+server pods and permits TCP and UDP traffic to `REMOTERPORT` from pods in the
+same namespace.
+
+The client workload is not selected by these policies, so its inbound and
+outbound connectivity is unchanged.
+
+```yaml
+networkPolicy: false
+serverstages:
+  - name: gpu
+    perclient: false
+```
+
+Set `networkPolicy: false` only when the cluster CNI does not enforce Kubernetes
+NetworkPolicy or when another network-security layer manages server ingress.
+NetworkPolicy enforcement is additive and depends on the installed CNI.
 
 ## encryption
 

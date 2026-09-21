@@ -71,6 +71,7 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 | `env`                | list of name/value    | Implemented | Environment merged into server container              |
 | `remoteableenv`      | list of strings       | Implemented | Client env var names allowed onto the server          |
 | `encryption`         | boolean               | Implemented | AES-GCM with a controller-managed per-workload key    |
+| `networkPolicy`      | boolean               | Implemented | Same-namespace RPC ingress; defaults to `true`        |
 | `noserverdeployment` | boolean               | Implemented | Skips server Deployment creation                      |
 | `serverstages`       | list of stage objects | Implemented | Shared and per-client server stages                   |
 | `remoteablecm`       | string                | Implemented | ConfigMap name (required by controller)               |
@@ -84,6 +85,7 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 4. Atomic per-workload: all containers in a workload see consistent mutation
 5. Idempotent: re-applying the same workload manifest produces same result
 6. Secret isolation: encryption keys are generated in-cluster and mounted as files
+7. Server isolation: generated server pods accept RPC traffic only from their namespace by default
 
 ## Validation
 
