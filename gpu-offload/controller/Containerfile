@@ -1,0 +1,25 @@
+FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9
+
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install Python deps only (no apt-get, no runtime installs). PIP_INDEX_URL is
+# passed as a secret, not a build arg, so a credential embedded in it never
+# lands in image history. Podman's --mount=type=secret does not support an
+# inline `env=` attribute (only id/target/required/mode/uid/gid), so the
+# secret is read from its mounted file instead of being auto-exported.
+RUN --mount=type=secret,id=PIP_INDEX_URL \
+    export PIP_INDEX_URL="$(cat /run/secrets/PIP_INDEX_URL 2>/dev/null || true)"; \
+    pip install --no-cache-dir kubernetes==35.0.0 PyYAML==6.0.2
+
+# Copy controller code
+COPY . /app
+
+# Run as non-root
+RUN adduser --disabled-password --gecos "" appuser || true
+USER appuser
+
+EXPOSE 8443
+
+CMD ["python3", "/app/mutate.py", "--host", "0.0.0.0", "--port", "8443"]

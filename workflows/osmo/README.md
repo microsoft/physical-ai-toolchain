@@ -2,7 +2,7 @@
 title: OSMO Workflows
 description: Pointer page for OSMO workflow template documentation.
 author: Edge AI Team
-ms.date: 2026-04-01
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 
@@ -21,7 +21,8 @@ and `evaluation/sil/workflows/osmo/`.
 
 ## 🔗 Submission Paths
 
-Use script-based submission from:
+These submission paths are a selected subset for RL and LeRobot training and
+software-in-the-loop (SiL) evaluation, not an exhaustive inventory of VLA workflows:
 
 * `training/rl/scripts/submit-osmo-training.sh`
 * `training/rl/scripts/submit-osmo-dataset-training.sh`

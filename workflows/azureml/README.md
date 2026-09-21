@@ -2,7 +2,7 @@
 title: AzureML Workflows
 description: Pointer page for AzureML workflow template documentation.
 author: Edge AI Team
-ms.date: 2026-06-01
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 
@@ -21,7 +21,8 @@ This folder maps to AzureML template sources under
 
 ## 🔗 Submission Paths
 
-Use script-based submission from:
+These submission paths are a selected subset for RL and LeRobot training and
+software-in-the-loop (SiL) evaluation, not an exhaustive inventory of VLA workflows:
 
 * `training/rl/scripts/submit-azureml-training.sh`
 * `training/il/scripts/submit-azureml-lerobot-training.sh`
