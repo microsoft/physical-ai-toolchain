@@ -43,9 +43,18 @@ rollout:
 validation:
   enabled: false
 
+benchmark:
+  enabled: false
+  calls: 100
+  warmupCalls: 10
+  seed: 0
+
 hostPaths:
   policy: /opt/lerobot/policies/act_so101
   calibration: /opt/lerobot/calibration
+
+policyVolume:
+  existingClaim: ""
 
 devices:
   - name: robot
@@ -67,6 +76,7 @@ podAnnotations: {}
 
 offload:
   enabled: false
+  encryption: false
   configMapName: ""
   serviceAccountName: ""
   port: "30001"

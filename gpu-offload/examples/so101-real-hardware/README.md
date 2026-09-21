@@ -167,6 +167,53 @@ Validate policy loading and one synthetic action without opening robot devices:
   --set validation.enabled=true
 ```
 
+Benchmark synthetic sensor observations without opening robot devices:
+
+```bash
+# Direct GPU inference
+./scripts/install_k8s_rollout.sh \
+  --set job.suspend=false \
+  --set benchmark.enabled=true \
+  --set-string 'resources.limits.nvidia\.com/gpu=1'
+
+# Plaintext GPU offload
+./scripts/install_k8s_rollout.sh --offload \
+  --set job.suspend=false \
+  --set benchmark.enabled=true
+
+# AES-GCM GPU offload
+./scripts/install_k8s_rollout.sh --offload \
+  --set job.suspend=false \
+  --set benchmark.enabled=true \
+  --set offload.encryption=true
+```
+
+The benchmark defaults to 10 warm-up calls followed by 100 measured calls. It
+generates deterministic state and camera observations from the policy feature
+configuration and reports mean, p50, p95, p99, maximum, and throughput. Separate
+summaries identify calls that refill the policy action chunk and calls served
+from the existing action queue.
+
+Override `benchmark.calls`, `benchmark.warmupCalls`, and `benchmark.seed` to
+change the workload. Direct mode requires a GPU limit on the client Job.
+Offloaded modes request the GPU only for the generated server Deployment.
+
+Use a Pi0.5 checkpoint by selecting its policy class and mounting an existing
+claim:
+
+```bash
+./scripts/install_k8s_rollout.sh --offload \
+  --set job.suspend=false \
+  --set benchmark.enabled=true \
+  --set policyVolume.existingClaim=so101-pi05-model \
+  --set rollout.policyPath=/policies/pi05_so101 \
+  --set offload.remoteClass=lerobot.policies.pi05.modeling_pi05/PI05Policy
+```
+
+The same Pi0.5 overrides apply to direct and encrypted runs. Omit `--offload`
+and request a client GPU for direct mode; add `--set offload.encryption=true`
+for encrypted offload.
+
 Enable aggregated control-loop timing for a rollout:
 
 ```bash

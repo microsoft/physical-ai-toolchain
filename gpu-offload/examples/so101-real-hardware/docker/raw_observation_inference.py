@@ -187,11 +187,10 @@ def install_raw_observation_offload() -> None:
 
 
 def validate_raw_observation_offload(policy_path: str, robot_type: str) -> None:
-    from lerobot.configs import FeatureType
-    from lerobot.policies.act.configuration_act import ACTConfig
+    from lerobot.configs import FeatureType, PreTrainedConfig
     from lerobot.rollout.context import _load_pretrained_policy
 
-    config = ACTConfig.from_pretrained(policy_path)
+    config = PreTrainedConfig.from_pretrained(policy_path)
     config.pretrained_path = Path(policy_path)
     policy = _load_pretrained_policy(config).to(config.device)
     policy.eval()
@@ -224,7 +223,10 @@ def validate_raw_observation_offload(policy_path: str, robot_type: str) -> None:
     engine.stop()
     if action is None or tuple(action.shape) != (action_dimension,) or not torch.isfinite(action).all():
         raise RuntimeError("Raw observation validation returned an invalid action")
-    print(f"Raw ACT action: shape={tuple(action.shape)}, device={action.device}")
+    print(
+        f"Raw {config.type} action: shape={tuple(action.shape)}, "
+        f"inference_device={config.device}, returned_action_device={action.device}"
+    )
 
 
 def main() -> None:

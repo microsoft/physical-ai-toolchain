@@ -117,6 +117,14 @@ def modifyloc(loc: str, key: str, actclasskey: str) -> str:
         return loc
 
 
+def normalize_location(loc: str) -> str:
+    if loc.startswith("unix://"):
+        return f"unix:{loc[7:]}"
+    if "://" in loc:
+        return loc.split("://", 1)[1]
+    return loc
+
+
 # new exception for stopped by user
 class FunctionStoppedException(Exception):
     pass
@@ -1039,7 +1047,10 @@ class Remoter:
                         tasks = self.tasksByName.get(k, set())
                         for uid in tasks:
                             loc = self.tasks[uid]["loc"]
-                            if v["locations"].get(loc, 0.0) == 0.0:
+                            configured_locations = {
+                                normalize_location(configured_loc) for configured_loc in v["locations"]
+                            }
+                            if normalize_location(loc) not in configured_locations:
                                 logger.debug(f"Cancelling function {uid} at location {loc} due to runloc change")
                                 self.cancelRemotedFunction(uid)  # cancel the function if its location is not allowed
 

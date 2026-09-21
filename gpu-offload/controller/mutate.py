@@ -440,21 +440,13 @@ def has_encryption_secret_mount(
         (item for item in container.get("volumeMounts", []) or [] if item.get("name") == REMOTER_KEY_VOLUME_NAME),
         None,
     )
+    secret = volume.get("secret", {}) if isinstance(volume, dict) else {}
     return (
-        volume
-        == {
-            "name": REMOTER_KEY_VOLUME_NAME,
-            "secret": {
-                "secretName": secret_name,
-                "items": [{"key": REMOTER_KEY_DATA_NAME, "path": REMOTER_KEY_DATA_NAME}],
-            },
-        }
-        and mount
-        == {
-            "name": REMOTER_KEY_VOLUME_NAME,
-            "mountPath": REMOTER_KEY_MOUNT_PATH,
-            "readOnly": True,
-        }
+        secret.get("secretName") == secret_name
+        and secret.get("items") == [{"key": REMOTER_KEY_DATA_NAME, "path": REMOTER_KEY_DATA_NAME}]
+        and isinstance(mount, dict)
+        and mount.get("mountPath") == REMOTER_KEY_MOUNT_PATH
+        and mount.get("readOnly") is True
         and get_env_var(container, "REMOTER_KEY_FILE") == REMOTER_KEY_PATH
     )
 

@@ -29,9 +29,18 @@ rollout:
 validation:
   enabled: false
 
+benchmark:
+  enabled: false
+  calls: 100
+  warmupCalls: 10
+  seed: 0
+
 hostPaths:
   policy: /path/to/act_so101
   calibration: /path/to/lerobot/calibration
+
+policyVolume:
+  existingClaim: ""
 
 devices:
   - name: robot
@@ -43,3 +52,4 @@ devices:
 
 offload:
   enabled: true
+  encryption: false
