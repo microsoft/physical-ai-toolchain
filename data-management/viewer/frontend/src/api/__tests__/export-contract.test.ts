@@ -143,4 +143,13 @@ describe('export wire contract', () => {
     expect(complete).toHaveBeenCalledOnce()
     expect(error).not.toHaveBeenCalled()
   })
+
+  it.each(['', 'event: complete\ndata: {"success":'])(
+    'reports a stream ending without a valid terminal event',
+    async (chunk) => {
+      const { complete, error } = await consume([chunk])
+      expect(complete).not.toHaveBeenCalled()
+      expect(error).toHaveBeenCalledWith('Export failed')
+    },
+  )
 })

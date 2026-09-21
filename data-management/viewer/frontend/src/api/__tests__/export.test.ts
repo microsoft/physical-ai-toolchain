@@ -201,7 +201,7 @@ describe('createExportStream', () => {
 
     expect(onProgress).toHaveBeenCalledWith(progress)
     expect(onComplete).not.toHaveBeenCalled()
-    expect(onError).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith('Export failed')
   })
 
   it('routes completion payloads to onComplete', async () => {
@@ -347,7 +347,7 @@ describe('createExportStream', () => {
     )
     expect(onProgress).toHaveBeenCalledWith(progress)
     expect(onComplete).not.toHaveBeenCalled()
-    expect(onError).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith('Export failed')
   })
 
   it('does not classify callback failures as stream parse errors', async () => {

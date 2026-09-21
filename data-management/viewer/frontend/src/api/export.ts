@@ -149,6 +149,7 @@ export function createExportStream(
       const decoder = new TextDecoder()
       let buffer = ''
       let currentEventType = 'message'
+      let receivedTerminalEvent = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -184,6 +185,7 @@ export function createExportStream(
             }
 
             if (currentEventType === 'error') {
+              receivedTerminalEvent = true
               onError(exportErrorMessage(parsed))
             } else if (currentEventType === 'progress') {
               if (isExportProgress(parsed)) {
@@ -194,6 +196,7 @@ export function createExportStream(
                 })
               }
             } else if (currentEventType === 'complete') {
+              receivedTerminalEvent = true
               if (isExportResult(parsed)) {
                 onComplete(publicExportResult(parsed))
               } else {
@@ -205,6 +208,11 @@ export function createExportStream(
             }
           }
         }
+      }
+
+      if (!receivedTerminalEvent) {
+        recordDiagnosticEvent('export', 'stream-incomplete', {})
+        onError('Export failed')
       }
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
