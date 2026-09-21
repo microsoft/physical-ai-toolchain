@@ -71,6 +71,7 @@ use_local_osmo=false
 config_preview=false
 postgres_image="postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94"
 redis_image="redis:7@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7"
+openssl_image="alpine/openssl@sha256:42c7389ef077aed0eb4e96d0abbd094083d701bbaff1313073b061c0c9cd8278"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -211,13 +212,24 @@ if [[ "$purge_redis" == "true" ]]; then
         --from-file=password=<(printf '%s' "$redis_key") \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
         kubectl delete pod osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1
-        jq -n --arg image "$redis_image" --arg host "$redis_hostname" --arg port "$redis_port" '
+        jq -n --arg image "$redis_image" --arg openssl_image "$openssl_image" \
+                --arg host "$redis_hostname" --arg port "$redis_port" '
                 {
                     apiVersion: "v1",
                     kind: "Pod",
                     metadata: {name: "osmo-purge-redis", namespace: "default"},
                     spec: {
                         restartPolicy: "Never",
+                        initContainers: [{
+                            name: "tls-hostname-check",
+                            image: $openssl_image,
+                            command: ["openssl"],
+                            args: [
+                                "s_client", "-connect", ($host + ":" + $port),
+                                "-servername", $host, "-verify_hostname", $host,
+                                "-verify_return_error", "-brief"
+                            ]
+                        }],
                         containers: [{
                             name: "redis-cli",
                             image: $image,
@@ -226,14 +238,15 @@ if [[ "$purge_redis" == "true" ]]; then
                                 valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
                             }],
                             command: ["redis-cli"],
-                            args: ["-h", $host, "-p", $port, "--tls", "--no-auth-warning", "PING"]
+                            args: ["-h", $host, "-p", $port, "--tls", "--sni", $host, "--no-auth-warning", "PING"]
                         }]
                     }
                 }
         ' | kubectl apply -f - >/dev/null
     if ! kubectl wait pod/osmo-purge-redis -n default \
         --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s >/dev/null 2>&1; then
-        kubectl logs pod/osmo-purge-redis -n default >&2 || true
+        kubectl logs pod/osmo-purge-redis -n default -c tls-hostname-check >&2 || \
+            kubectl logs pod/osmo-purge-redis -n default >&2 || true
         fatal "Redis purge preflight failed"
     fi
     kubectl delete pod osmo-purge-redis -n default --ignore-not-found >/dev/null
@@ -406,14 +419,24 @@ if [[ "$purge_redis" == "true" ]]; then
     kubectl create secret generic osmo-purge-redis -n default \
         --from-file=password=<(printf '%s' "$redis_key") \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-        jq -n --arg image "$redis_image" --arg host "$redis_hostname" --arg port "$redis_port" \
-                --arg script "$flush_script" '
+        jq -n --arg image "$redis_image" --arg openssl_image "$openssl_image" \
+                --arg host "$redis_hostname" --arg port "$redis_port" --arg script "$flush_script" '
                 {
                     apiVersion: "v1",
                     kind: "Pod",
                     metadata: {name: "osmo-purge-redis", namespace: "default"},
                     spec: {
                         restartPolicy: "Never",
+                        initContainers: [{
+                            name: "tls-hostname-check",
+                            image: $openssl_image,
+                            command: ["openssl"],
+                            args: [
+                                "s_client", "-connect", ($host + ":" + $port),
+                                "-servername", $host, "-verify_hostname", $host,
+                                "-verify_return_error", "-brief"
+                            ]
+                        }],
                         containers: [{
                             name: "redis-cli",
                             image: $image,
@@ -422,7 +445,7 @@ if [[ "$purge_redis" == "true" ]]; then
                                 valueFrom: {secretKeyRef: {name: "osmo-purge-redis", key: "password"}}
                             }],
                             command: ["redis-cli"],
-                            args: ["-h", $host, "-p", $port, "--tls", "--no-auth-warning", "EVAL", $script, "0"]
+                            args: ["-h", $host, "-p", $port, "--tls", "--sni", $host, "--no-auth-warning", "EVAL", $script, "0"]
                         }]
                     }
                 }
@@ -431,7 +454,8 @@ if [[ "$purge_redis" == "true" ]]; then
         --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s >/dev/null 2>&1; then
         info "Redis keys flushed"
     else
-        kubectl logs pod/osmo-purge-redis -n default >&2 || true
+        kubectl logs pod/osmo-purge-redis -n default -c tls-hostname-check >&2 || \
+            kubectl logs pod/osmo-purge-redis -n default >&2 || true
         fatal "Failed to flush Redis keys"
     fi
     kubectl delete pod osmo-purge-redis -n default --ignore-not-found >/dev/null 2>&1

@@ -4,6 +4,8 @@
 #Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0' }
 
+# cspell:ignore addext keyout newkey
+
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:DeployScript = Get-Content -Raw (Join-Path $script:RepoRoot 'infrastructure/setup/03-deploy-osmo.sh')
@@ -17,11 +19,95 @@ BeforeAll {
     $script:DataviewerTerraform = Get-Content -Raw (
         Join-Path $script:RepoRoot 'infrastructure/terraform/modules/dataviewer/container-apps.tf'
     )
+    $frontendDockerfile = Get-Content -Raw (
+        Join-Path $script:RepoRoot 'data-management/viewer/frontend/Dockerfile'
+    )
+    $script:NginxImage = [regex]::Match(
+        $frontendDockerfile,
+        '(?m)^FROM\s+(nginxinc/nginx-unprivileged:\S+)\s+AS\s+serve$'
+    ).Groups[1].Value
+    $script:NodeImage = [regex]::Match(
+        $frontendDockerfile,
+        '(?m)^FROM\s+(node:\S+)\s+AS\s+build$'
+    ).Groups[1].Value
+    $script:RedisImage = [regex]::Match(
+        $script:CleanupScript,
+        '(?m)^redis_image="([^"]+)"$'
+    ).Groups[1].Value
+    $script:OpenSslImage = [regex]::Match(
+        $script:CleanupScript,
+        '(?m)^openssl_image="([^"]+)"$'
+    ).Groups[1].Value
     $script:ProductionClients = @(
         Get-ChildItem (Join-Path $script:RepoRoot 'infrastructure/setup') -Recurse -File -Filter '*.sh'
         Get-ChildItem (Join-Path $script:RepoRoot 'data-management/viewer/backend/src') -Recurse -File -Filter '*.py'
         Get-Item (Join-Path $script:RepoRoot 'data-management/viewer/frontend/nginx.conf.template')
     )
+
+    function Invoke-Docker {
+        param(
+            [Parameter(Mandatory)]
+            [string[]] $Arguments
+        )
+
+        $output = & docker @Arguments 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "docker $($Arguments -join ' ') failed: $($output -join "`n")"
+        }
+        return $output
+    }
+
+    function Invoke-NginxFixture {
+        param(
+            [Parameter(Mandatory)]
+            [string] $Name,
+
+            [Parameter(Mandatory)]
+            [string] $BackendHost,
+
+            [Parameter(Mandatory)]
+            [string] $Network,
+
+            [Parameter(Mandatory)]
+            [string] $FixtureDirectory,
+
+            [Parameter()]
+            [switch] $TrustFixtureCertificate
+        )
+
+        $arguments = @(
+            'run', '--detach', '--name', $Name,
+            '--network', $Network,
+            '--publish', '127.0.0.1::8080',
+            '--env', "NGINX_BACKEND_HOST=$BackendHost",
+            '--env', 'NGINX_BACKEND_SCHEME=https',
+            '--env', 'NGINX_RESOLVER=127.0.0.11',
+            '--volume', (
+                "$(Join-Path $script:RepoRoot 'data-management/viewer/frontend/nginx.conf.template')" +
+                ':/etc/nginx/templates/default.conf.template:ro'
+            )
+        )
+        if ($TrustFixtureCertificate) {
+            $arguments += @(
+                '--volume',
+                "${FixtureDirectory}/server.crt:/etc/ssl/certs/ca-certificates.crt:ro"
+            )
+        }
+        $arguments += $script:NginxImage
+
+        Invoke-Docker -Arguments $arguments | Out-Null
+
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $portOutput = & docker port $Name '8080/tcp' 2>$null
+            if ($LASTEXITCODE -eq 0 -and $portOutput) {
+                return ($portOutput -split ':')[-1]
+            }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+
+        throw 'Timed out waiting for the NGINX fixture port'
+    }
 }
 
 Describe 'Production TLS certificate verification' -Tag 'Unit' {
@@ -49,6 +135,8 @@ Describe 'Production TLS certificate verification' -Tag 'Unit' {
 
     It 'verifies Azure Managed Redis for preflight and destructive cleanup' {
         ([regex]::Matches($script:CleanupScript, '"--tls"')).Count | Should -Be 2
+        ([regex]::Matches($script:CleanupScript, '"--sni", \$host')).Count | Should -Be 2
+        ([regex]::Matches($script:CleanupScript, '"-verify_hostname", \$host')).Count | Should -Be 2
         ([regex]::Matches($script:CleanupScript, 'args: \["-h", \$host, "-p", \$port')).Count | Should -Be 2
         $script:CleanupScript | Should -Match 'redis_hostname=\$\(tf_get .*managed_redis_connection_info\.value\.hostname'
     }
@@ -65,74 +153,120 @@ Describe 'Production TLS certificate verification' -Tag 'Unit' {
         $script:DataviewerTerraform | Should -Match 'name\s*=\s*"NGINX_BACKEND_SCHEME"\s+value\s*=\s*"https"'
     }
 
-    It 'prevents authenticated HTTP requests before invalid TLS handshakes complete' {
+    It 'rejects untrusted and wrong-host certificates in production clients' -Skip:(
+        -not (Get-Command docker -ErrorAction SilentlyContinue)
+    ) {
         $fixtureDirectory = Join-Path $TestDrive 'tls-fixture'
         $certificatePath = Join-Path $fixtureDirectory 'server.crt'
         $keyPath = Join-Path $fixtureDirectory 'server.key'
-        $portPath = Join-Path $fixtureDirectory 'port'
         $requestPath = Join-Path $fixtureDirectory 'requests'
-        $serverPath = Join-Path $fixtureDirectory 'server.py'
+        $serverPath = Join-Path $fixtureDirectory 'server.mjs'
+        $suffix = [Guid]::NewGuid().ToString('N')
+        $network = "tls-verification-$suffix"
+        $serverContainer = "tls-server-$suffix"
+        $containers = [System.Collections.Generic.List[string]]::new()
         New-Item -ItemType Directory -Path $fixtureDirectory | Out-Null
 
         & openssl req -x509 -newkey rsa:2048 -nodes -days 1 `
-            -subj '/CN=valid.local' -addext 'subjectAltName=DNS:valid.local' `
+            -subj '/CN=tls-valid' -addext 'subjectAltName=DNS:tls-valid' `
             -keyout $keyPath -out $certificatePath 2>$null
         $LASTEXITCODE | Should -Be 0
 
         @'
-from __future__ import annotations
+import { appendFileSync, readFileSync } from 'node:fs'
+import { createServer } from 'node:tls'
 
-import http.server
-import ssl
-import sys
-from pathlib import Path
+const server = createServer(
+  {
+    cert: readFileSync('/fixture/server.crt'),
+    key: readFileSync('/fixture/server.key'),
+  },
+  (socket) => {
+    socket.once('data', (data) => {
+      appendFileSync('/fixture/requests', data)
+      if (data[0] === 42) {
+        socket.end('+PONG\r\n')
+      } else {
+        socket.end('HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n')
+      }
+    })
+  },
+)
 
-
-class RequestHandler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self) -> None:
-        Path(sys.argv[4]).write_text(self.headers.get("Authorization", ""), encoding="utf-8")
-        self.send_response(204)
-        self.end_headers()
-
-    def log_message(self, format: str, *args: object) -> None:
-        pass
-
-
-server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), RequestHandler)
-context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-context.load_cert_chain(sys.argv[1], sys.argv[2])
-server.socket = context.wrap_socket(server.socket, server_side=True)
-Path(sys.argv[3]).write_text(str(server.server_port), encoding="utf-8")
-server.serve_forever()
+server.listen(443, '0.0.0.0')
 '@ | Set-Content -LiteralPath $serverPath
 
-        $server = Start-Process python3 `
-            -ArgumentList @($serverPath, $certificatePath, $keyPath, $portPath, $requestPath) `
-            -PassThru
         try {
-            $deadline = [DateTime]::UtcNow.AddSeconds(10)
-            while (-not (Test-Path -LiteralPath $portPath) -and [DateTime]::UtcNow -lt $deadline) {
-                Start-Sleep -Milliseconds 100
-            }
-            Test-Path -LiteralPath $portPath | Should -BeTrue
-            $port = Get-Content -Raw -LiteralPath $portPath
+            Invoke-Docker -Arguments @('network', 'create', $network) | Out-Null
+            Invoke-Docker -Arguments @(
+                'run', '--detach', '--name', $serverContainer,
+                '--network', $network,
+                '--network-alias', 'tls-valid',
+                '--network-alias', 'tls-wrong',
+                '--volume', "${fixtureDirectory}:/fixture",
+                $script:NodeImage,
+                'node', '/fixture/server.mjs'
+            ) | Out-Null
+            $containers.Add($serverContainer)
 
-            & curl --silent --show-error --fail --max-time 5 --noproxy '*' `
-                --header 'Authorization: test-secret' `
-                --resolve "valid.local:${port}:127.0.0.1" "https://valid.local:${port}/" 2>$null
+            $untrustedNginx = "tls-nginx-untrusted-$suffix"
+            $untrustedPort = Invoke-NginxFixture `
+                -Name $untrustedNginx `
+                -BackendHost 'tls-valid' `
+                -Network $network `
+                -FixtureDirectory $fixtureDirectory
+            $containers.Add($untrustedNginx)
+            & curl --silent --fail --max-time 5 "http://127.0.0.1:${untrustedPort}/api/" 2>$null
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
-            & curl --silent --show-error --fail --max-time 5 --noproxy '*' `
-                --cacert $certificatePath `
-                --header 'Authorization: test-secret' `
-                --resolve "wrong.local:${port}:127.0.0.1" "https://wrong.local:${port}/" 2>$null
+            $wrongHostNginx = "tls-nginx-wrong-host-$suffix"
+            $wrongHostPort = Invoke-NginxFixture `
+                -Name $wrongHostNginx `
+                -BackendHost 'tls-wrong' `
+                -Network $network `
+                -FixtureDirectory $fixtureDirectory `
+                -TrustFixtureCertificate
+            $containers.Add($wrongHostNginx)
+            & curl --silent --fail --max-time 5 "http://127.0.0.1:${wrongHostPort}/api/" 2>$null
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
+
+            & docker run --rm --network $network $script:RedisImage `
+                redis-cli -h tls-valid -p 443 --tls PING 2>$null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path -LiteralPath $requestPath | Should -BeFalse
+
+            & docker run --rm --network $network `
+                --volume "${fixtureDirectory}:/fixture:ro" `
+                $script:OpenSslImage `
+                s_client -connect tls-wrong:443 -servername tls-wrong `
+                -verify_hostname tls-wrong -verify_return_error `
+                -CAfile /fixture/server.crt -brief 2>$null
+            $LASTEXITCODE | Should -Not -Be 0
+            Test-Path -LiteralPath $requestPath | Should -BeFalse
+
+            & docker run --rm --network $network `
+                --volume "${fixtureDirectory}:/fixture:ro" `
+                $script:OpenSslImage `
+                s_client -connect tls-valid:443 -servername tls-valid `
+                -verify_hostname tls-valid -verify_return_error `
+                -CAfile /fixture/server.crt -brief 2>$null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path -LiteralPath $requestPath | Should -BeFalse
+
+            & docker run --rm --network $network `
+                --volume "${fixtureDirectory}:/fixture:ro" `
+                $script:RedisImage `
+                redis-cli -h tls-valid -p 443 --tls --sni tls-valid --cacert /fixture/server.crt PING 2>$null
+            $LASTEXITCODE | Should -Be 0
+            Test-Path -LiteralPath $requestPath | Should -BeTrue
         }
         finally {
-            $server.Kill()
-            $server.WaitForExit()
+            foreach ($container in $containers) {
+                & docker rm --force $container 2>$null | Out-Null
+            }
+            & docker network rm $network 2>$null | Out-Null
         }
     }
 }

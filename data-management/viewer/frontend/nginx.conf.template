@@ -15,7 +15,8 @@ server {
 
     # Proxy API requests to the backend service.
     # NGINX_BACKEND_HOST defaults to "backend:8000" for local docker-compose.
-    # In Azure Container Apps, set to the app name (same-environment routing).
+    # For HTTPS, set it to the certificate-valid backend FQDN.
+    # Custom HTTPS backends must chain to a CA in ca-certificates.crt.
     # Using a variable forces nginx to resolve DNS per-request via the resolver.
     location /api/ {
         set $backend_upstream ${NGINX_BACKEND_SCHEME}://${NGINX_BACKEND_HOST};
