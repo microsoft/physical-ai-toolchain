@@ -151,6 +151,7 @@ interface LedgerAssessment {
 
 interface CrawlArtifacts {
   blocking: string[];
+  contrastBlocking: string[];
   ledger: {
     assessments: LedgerAssessment[];
     baseline: string;
@@ -163,6 +164,7 @@ interface CrawlArtifacts {
     results: RouteEvidence[];
     schemaVersion: 2;
   };
+  routeBlocking: string[];
   summary: string;
 }
 
@@ -755,7 +757,7 @@ export function buildCrawlArtifacts(
     titles.set(record.title ?? '', [...(titles.get(record.title ?? '') ?? []), record.route]);
   }
 
-  const blocking = [
+  const routeBlocking = [
     ...missingKeys.map((key) => `route state never produced evidence: ${key}`),
     ...unexpectedKeys.map((key) => `route state is not declared by the manifest: ${key}`),
     ...duplicateKeys.map((key) => `route state produced duplicate evidence: ${key}`),
@@ -763,19 +765,22 @@ export function buildCrawlArtifacts(
     ...[...titles.entries()]
       .filter(([, routes]) => routes.length > 1)
       .map(([title, routes]) => `document title "${title}" is not descriptive; shared by ${routes.join(', ')}`),
-    ...assessments
-      .filter((assessment) => assessment.status !== 'accepted')
-      .map((assessment) => `[${assessment.status}] ${assessment.signature} ${assessment.detail}`),
   ];
+  const contrastBlocking = assessments
+    .filter((assessment) => assessment.status !== 'accepted')
+    .map((assessment) => `[${assessment.status}] ${assessment.signature} ${assessment.detail}`);
+  const blocking = [...routeBlocking, ...contrastBlocking];
 
   const artifacts: Omit<CrawlArtifacts, 'summary'> = {
     blocking,
+    contrastBlocking,
     ledger: { assessments, baseline: relativeBaselinePath, entries, schemaVersion: 1, totals },
     results: {
       manifest: path.relative(process.cwd(), deployedRouteManifestPath).replaceAll('\\', '/'),
       results,
       schemaVersion: 2,
     },
+    routeBlocking,
   };
   return { ...artifacts, summary: buildSummary(artifacts, options.expectedKeys) };
 }
@@ -1008,7 +1013,7 @@ async function crawl(page: Page, route: string, theme: Theme, state: RenderedSta
   evidenceByKey.set(evidenceKey(route, theme, state), evidence);
 }
 
-test.describe('all-route default-state evidence', () => {
+test.describe.serial('all-route default-state evidence', () => {
   test.afterAll(() => {
     writeArtifacts(readBaseline());
   });
@@ -1032,10 +1037,14 @@ test.describe('all-route default-state evidence', () => {
     if (baselineWriteRequested) {
       writeBaselineSeed(artifacts.ledger.entries);
       console.log(`Seeded ${artifacts.ledger.entries.length} unresolved signatures into ${relativeBaselinePath}`);
-      expect(artifacts.results.results.flatMap((record) => record.errors), artifacts.summary).toEqual([]);
-      return;
     }
-    expect(artifacts.blocking, artifacts.summary).toEqual([]);
+    expect(artifacts.routeBlocking, artifacts.summary).toEqual([]);
+  });
+
+  test('rejects unresolved contrast signatures', async () => {
+    test.skip(baselineWriteRequested, 'Baseline seeding records unresolved signatures for later review.');
+    const artifacts = writeArtifacts(readBaseline());
+    expect(artifacts.contrastBlocking, artifacts.summary).toEqual([]);
   });
 });
 
@@ -1181,6 +1190,8 @@ test.describe('route and contrast evidence contracts', () => {
     expect(artifacts.blocking).toContain('route state never produced evidence: /missing|light|default');
     expect(artifacts.blocking).toContain('route state is not declared by the manifest: /broken|light|default');
     expect(artifacts.blocking.some((finding) => finding.includes('expected HTTP 200 and received 500'))).toBe(true);
+    expect(artifacts.routeBlocking).toEqual(artifacts.blocking);
+    expect(artifacts.contrastBlocking).toEqual([]);
     expect(artifacts.summary).toContain('expected HTTP 200 and received 500');
     expect(artifacts.summary).toContain('Route states evaluated: 2 of 2 expected');
     // An interrupted run must not claim that unobserved baseline entries are stale.
