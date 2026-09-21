@@ -79,10 +79,10 @@ export function AISuggestionPanel({
 
     setIsApplying(true)
     onApplySuggestion(['task_completion', 'trajectory_quality', 'flags', 'anomalies'], {
-      task_completion_rating: suggestion.taskCompletionRating,
-      trajectory_quality_score: suggestion.trajectoryQualityScore,
-      suggested_flags: suggestion.suggestedFlags,
-      detected_anomalies: suggestion.detectedAnomalies,
+      task_completion_rating: suggestion.task_completion_rating,
+      trajectory_quality_score: suggestion.trajectory_quality_score,
+      suggested_flags: suggestion.suggested_flags,
+      detected_anomalies: suggestion.detected_anomalies,
     })
     setSuggestionStatus('accepted')
     setIsApplying(false)
@@ -100,16 +100,16 @@ export function AISuggestionPanel({
       const values: Record<string, unknown> = {}
 
       if (fields.includes('task_completion')) {
-        values.task_completion_rating = suggestion.taskCompletionRating
+        values.task_completion_rating = suggestion.task_completion_rating
       }
       if (fields.includes('trajectory_quality')) {
-        values.trajectory_quality_score = suggestion.trajectoryQualityScore
+        values.trajectory_quality_score = suggestion.trajectory_quality_score
       }
       if (fields.includes('flags')) {
-        values.suggested_flags = suggestion.suggestedFlags
+        values.suggested_flags = suggestion.suggested_flags
       }
       if (fields.includes('anomalies')) {
-        values.detected_anomalies = suggestion.detectedAnomalies
+        values.detected_anomalies = suggestion.detected_anomalies
       }
 
       onApplySuggestion(fields, values)

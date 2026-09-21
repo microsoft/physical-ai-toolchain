@@ -40,7 +40,9 @@ command: >-
   pip install --quiet uv &&
   uv --directory workflows/azureml/osmo-proxy export --frozen --no-hashes --no-emit-project |
   uv pip install --no-deps --quiet --system -r /dev/stdin &&
-  python workflows/azureml/osmo-proxy/osmo_proxy.py --workflow-yaml ${WORKFLOW_YAML}
+  python workflows/azureml/osmo-proxy/osmo_proxy.py
+  --workflow-yaml ${WORKFLOW_YAML}
+  --output-urls ${OSMO_OUTPUT_URLS}
 
 environment_variables:
   # Auth mode: dev (default, uses x-osmo-user header) or token (Bearer from KV).
@@ -55,6 +57,7 @@ environment_variables:
 
   # OSMO workflow YAML path relative to repo root (set by submission script).
   WORKFLOW_YAML: workflows/osmo/smoke-test-proxy-e2e.yaml
+  OSMO_OUTPUT_URLS: azure://placeholder/osmo/proxy-smoke-test/
 
   # Uncomment and set for template variable substitution:
   # OSMO_SET_VARIABLES: '[{"name": "output_url", "value": "azure://account/container/path/"}]'

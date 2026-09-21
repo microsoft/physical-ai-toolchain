@@ -14,12 +14,12 @@ const mockedUseTrajectoryAnalysis = vi.mocked(useTrajectoryAnalysis)
 
 const buildMetrics = (overrides: Partial<TrajectoryMetrics> = {}): TrajectoryMetrics => ({
   smoothness: 0.000093,
-  normalizedSmoothness: 0.1988,
+  normalized_smoothness: 0.1988,
   efficiency: 0.0483,
   jitter: 0.0036,
-  hesitationCount: 2,
-  correctionCount: 2,
-  overallScore: 2,
+  hesitation_count: 2,
+  correction_count: 2,
+  overall_score: 2,
   flags: ['jittery'],
   ...overrides,
 })
@@ -85,7 +85,7 @@ describe('MotionMetricsPanel', () => {
     // Default mode is log-scaled.
     expect(mockedUseTrajectoryAnalysis).toHaveBeenCalledWith(
       expect.objectContaining({
-        trajectoryData: expect.objectContaining({ smoothnessMode: 'log-scaled' }),
+        trajectoryData: expect.objectContaining({ smoothness_mode: 'log-scaled' }),
       }),
     )
 
@@ -93,7 +93,7 @@ describe('MotionMetricsPanel', () => {
 
     expect(mockedUseTrajectoryAnalysis).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        trajectoryData: expect.objectContaining({ smoothnessMode: 'radian-based' }),
+        trajectoryData: expect.objectContaining({ smoothness_mode: 'radian-based' }),
       }),
     )
   })

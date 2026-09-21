@@ -9,16 +9,16 @@ import { renderHookWithProviders } from '@/test-utils/render'
 
 function makeStats(overrides: Partial<DashboardStats> = {}): DashboardStats {
   return {
-    totalEpisodes: 100,
-    annotatedEpisodes: 50,
-    pendingEpisodes: 50,
-    annotationRate: 0.5,
-    ratingDistribution: {},
-    qualityDistribution: {},
-    annotatorStats: [],
-    recentActivity: [],
-    issuesByType: {},
-    anomaliesByType: {},
+    total_episodes: 100,
+    annotated_episodes: 50,
+    pending_episodes: 50,
+    annotation_rate: 0.5,
+    rating_distribution: {},
+    quality_distribution: {},
+    annotator_stats: [],
+    recent_activity: [],
+    issues_by_type: {},
+    anomalies_by_type: {},
     ...overrides,
   }
 }
@@ -42,22 +42,9 @@ describe('useDashboardStats', () => {
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('returns dashboard stats with response fields converted to camelCase', async () => {
-    const stats = makeStats({ totalEpisodes: 42, annotatedEpisodes: 21, pendingEpisodes: 21 })
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        total_episodes: 42,
-        annotated_episodes: 21,
-        pending_episodes: 21,
-        annotation_rate: 0.5,
-        rating_distribution: {},
-        quality_distribution: {},
-        annotator_stats: [],
-        recent_activity: [],
-        issues_by_type: {},
-        anomalies_by_type: {},
-      }),
-    )
+  it('returns dashboard stats with snake_case fields preserved', async () => {
+    const stats = makeStats({ total_episodes: 42, annotated_episodes: 21 })
+    mockFetch.mockResolvedValueOnce(jsonResponse(stats))
 
     const { result } = renderHookWithProviders(() => useDashboardStats('ds-1'))
 
@@ -67,36 +54,13 @@ describe('useDashboardStats', () => {
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/stats', expect.any(Object))
   })
 
-  it('preserves semantic issue and anomaly category keys', async () => {
-    mockFetch.mockResolvedValueOnce(
-      jsonResponse({
-        total_episodes: 2,
-        annotated_episodes: 1,
-        pending_episodes: 1,
-        annotation_rate: 0.5,
-        rating_distribution: {},
-        quality_distribution: {},
-        annotator_stats: [],
-        recent_activity: [],
-        issues_by_type: { gripper_failure: 4 },
-        anomalies_by_type: { unexpected_stop: 2 },
-      }),
-    )
-
-    const { result } = renderHookWithProviders(() => useDashboardMetrics('ds-1'))
-
-    await waitFor(() => expect(result.current.metrics).not.toBeNull())
-    expect(result.current.metrics?.topIssues).toEqual([{ name: 'gripper_failure', count: 4 }])
-    expect(result.current.metrics?.topAnomalies).toEqual([{ name: 'unexpected_stop', count: 2 }])
-  })
-
   it('exposes errors from failed requests', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'stats failed', code: 'ERR' }, 500))
 
     const { result } = renderHookWithProviders(() => useDashboardStats('ds-1'))
 
     await waitFor(() => expect(result.current.isError).toBe(true))
-    expect(result.current.error?.message).toBe('The server could not complete the request')
+    expect(result.current.error?.message).toBe('stats failed')
   })
 
   it('does not throw when the consumer unmounts before the request resolves', async () => {
@@ -121,7 +85,7 @@ describe('useDashboardMetrics', () => {
 
   it('computes completion percent and protects against zero totals', async () => {
     mockFetch.mockResolvedValueOnce(
-      jsonResponse(makeStats({ totalEpisodes: 0, annotatedEpisodes: 0 })),
+      jsonResponse(makeStats({ total_episodes: 0, annotated_episodes: 0 })),
     )
 
     const { result } = renderHookWithProviders(() => useDashboardMetrics('ds-1'))
@@ -134,10 +98,10 @@ describe('useDashboardMetrics', () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse(
         makeStats({
-          totalEpisodes: 100,
-          annotatedEpisodes: 50,
-          ratingDistribution: { '5': 2, '3': 1 },
-          qualityDistribution: { '4': 4 },
+          total_episodes: 100,
+          annotated_episodes: 50,
+          rating_distribution: { '5': 2, '3': 1 },
+          quality_distribution: { '4': 4 },
         }),
       ),
     )
@@ -155,20 +119,20 @@ describe('useDashboardMetrics', () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse(
         makeStats({
-          recentActivity: [
+          recent_activity: [
             {
               id: 'a1',
               type: 'annotation',
-              episodeId: 'e1',
-              annotatorName: 'a',
+              episode_id: 'e1',
+              annotator_name: 'a',
               timestamp: new Date(now).toISOString(),
               summary: '',
             },
             {
               id: 'a2',
               type: 'annotation',
-              episodeId: 'e2',
-              annotatorName: 'a',
+              episode_id: 'e2',
+              annotator_name: 'a',
               timestamp: new Date(now + 60_000).toISOString(),
               summary: '',
             },
@@ -189,42 +153,42 @@ describe('useDashboardMetrics', () => {
     mockFetch.mockResolvedValueOnce(
       jsonResponse(
         makeStats({
-          recentActivity: [
+          recent_activity: [
             {
               id: 'a1',
               type: 'annotation',
-              episodeId: 'e1',
-              annotatorName: 'a',
+              episode_id: 'e1',
+              annotator_name: 'a',
               timestamp: new Date(start).toISOString(),
               summary: '',
             },
             {
               id: 'a2',
               type: 'annotation',
-              episodeId: 'e2',
-              annotatorName: 'a',
+              episode_id: 'e2',
+              annotator_name: 'a',
               timestamp: new Date(start + hourMs).toISOString(),
               summary: '',
             },
             {
               id: 'a3',
               type: 'annotation',
-              episodeId: 'e3',
-              annotatorName: 'a',
+              episode_id: 'e3',
+              annotator_name: 'a',
               timestamp: new Date(start + 2 * hourMs).toISOString(),
               summary: '',
             },
             {
               id: 'a4',
               type: 'annotation',
-              episodeId: 'e4',
-              annotatorName: 'a',
+              episode_id: 'e4',
+              annotator_name: 'a',
               timestamp: new Date(start + 2 * hourMs).toISOString(),
               summary: '',
             },
           ],
-          issuesByType: { gripper: 5, motion: 1, vision: 9, force: 2, balance: 4, audio: 3 },
-          anomaliesByType: { drift: 7, jitter: 2 },
+          issues_by_type: { gripper: 5, motion: 1, vision: 9, force: 2, balance: 4, audio: 3 },
+          anomalies_by_type: { drift: 7, jitter: 2 },
         }),
       ),
     )

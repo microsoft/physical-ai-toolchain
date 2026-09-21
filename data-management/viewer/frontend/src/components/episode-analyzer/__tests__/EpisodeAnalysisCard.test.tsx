@@ -22,15 +22,15 @@ describe('EpisodeAnalysisCard', () => {
   it('renders the persisted VLM labels for the episode', () => {
     useLabelStore.getState().setAllEpisodeAnalysis({
       '0': {
-        pickFrom: 'front',
+        pick_from: 'front',
         object: 'black cloth',
-        graspSuccess: true,
-        placeSuccess: false,
-        movementQuality: 'Smooth and efficient.',
+        grasp_success: true,
+        place_success: false,
+        movement_quality: 'Smooth and efficient.',
         notes: 'Gripper closed cleanly.',
         source: 'qwen3-vl',
-        motionScore: 2,
-        motionFlags: ['jittery'],
+        motion_score: 2,
+        motion_flags: ['jittery'],
       },
     })
 

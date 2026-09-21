@@ -11,11 +11,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 export interface AnnotatorInfo {
-  annotatorId: string
-  annotatorName: string
-  episodesAnnotated: number
-  averageRating: number
-  lastActive: string
+  annotator_id: string
+  annotator_name: string
+  episodes_annotated: number
+  average_rating: number
+  last_active: string
 }
 
 export interface AnnotatorLeaderboardProps {
@@ -42,7 +42,7 @@ export function AnnotatorLeaderboard({
   className,
 }: AnnotatorLeaderboardProps) {
   const sortedAnnotators = [...annotators]
-    .sort((a, b) => b.episodesAnnotated - a.episodesAnnotated)
+    .sort((a, b) => b.episodes_annotated - a.episodes_annotated)
     .slice(0, limit)
 
   const getInitials = (name: string) => {
@@ -78,7 +78,7 @@ export function AnnotatorLeaderboard({
           <div className="space-y-3">
             {sortedAnnotators.map((annotator, index) => (
               <div
-                key={annotator.annotatorId}
+                key={annotator.annotator_id}
                 className={cn(
                   'flex items-center gap-3 rounded-lg p-2 transition-colors',
                   index < 3 && 'bg-muted/50',
@@ -96,14 +96,14 @@ export function AnnotatorLeaderboard({
                 {/* Avatar */}
                 <Avatar className="h-9 w-9">
                   <AvatarFallback className="bg-primary/10 text-xs font-medium">
-                    {getInitials(annotator.annotatorName)}
+                    {getInitials(annotator.annotator_name)}
                   </AvatarFallback>
                 </Avatar>
 
                 {/* Info */}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-medium">{annotator.annotatorName}</span>
+                    <span className="truncate font-medium">{annotator.annotator_name}</span>
                     {index === 0 && (
                       <Badge variant="secondary" className="text-xs">
                         Top
@@ -111,10 +111,10 @@ export function AnnotatorLeaderboard({
                     )}
                   </div>
                   <div className="text-muted-foreground flex items-center gap-3 text-xs">
-                    <span>{annotator.episodesAnnotated} episodes</span>
+                    <span>{annotator.episodes_annotated} episodes</span>
                     <span className="flex items-center gap-0.5">
                       <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                      {annotator.averageRating.toFixed(1)}
+                      {annotator.average_rating.toFixed(1)}
                     </span>
                   </div>
                 </div>
@@ -122,7 +122,9 @@ export function AnnotatorLeaderboard({
                 {/* Last active */}
                 <div className="text-muted-foreground flex items-center gap-1 text-xs">
                   <Clock className="h-3 w-3" />
-                  <span className="hidden sm:inline">{formatLastActive(annotator.lastActive)}</span>
+                  <span className="hidden sm:inline">
+                    {formatLastActive(annotator.last_active)}
+                  </span>
                 </div>
               </div>
             ))}

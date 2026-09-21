@@ -135,7 +135,7 @@ describe('useSaveAnnotation', () => {
     })
 
     await waitFor(() => expect(result.current.isError).toBe(true))
-    expect(useAnnotationStore.getState().error).toBe('The server could not complete the request')
+    expect(useAnnotationStore.getState().error).toBe('save failed')
   })
 
   it('does not throw when the consumer unmounts before the request resolves', async () => {

@@ -7,7 +7,7 @@ import tempfile
 import threading
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,8 @@ import pytest
 
 from tests.e2e._aml import AmlModelRef, AzureMLWorkspace
 from tests.e2e._common import (
+    E2EHandle,
+    command_tuple,
     delete_blob_prefix,
     e2e_name,
     env_value,
@@ -72,6 +74,7 @@ class OSMOWorkflow:
     workflow_name: str
     experiment_name: str
     correlation_id: str
+    handle: E2EHandle = field(default_factory=E2EHandle)
     is_terminal: bool = False
     terminal_status: str | None = None
 
@@ -340,11 +343,16 @@ def wait_until_osmo_completed(
 def _mark_workflow_terminal(workflow: OSMOWorkflow, terminal_status: str) -> None:
     workflow.is_terminal = True
     workflow.terminal_status = terminal_status
+    workflow.handle.terminal_state = terminal_status
 
 
 def _restart_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
     log_e2e(f"Restarting OSMO workflow {workflow.workflow_id} after node disruption")
-    result = run_command(["osmo", "workflow", "restart", workflow.workflow_id], cwd=repo_root)
+    command = ["osmo", "workflow", "restart", workflow.workflow_id]
+    workflow.handle.submission_commands.append(tuple(command))
+    workflow.handle.attempts.append(f"node-disruption-restart-{len(workflow.handle.attempts)}")
+    workflow.handle.retry_classification = "node-disruption"
+    result = run_command(command, cwd=repo_root)
     if result.returncode != 0:
         raise AssertionError(
             f"Failed to restart OSMO workflow {workflow.workflow_id!r}\n\n{format_command_failure(result)}"
@@ -407,6 +415,39 @@ def assert_workflow_task_succeeded(workflow: OSMOWorkflow, repo_root: Path, task
             )
 
     raise AssertionError(f"OSMO workflow {workflow.workflow_id!r} did not contain task {task_name!r}")
+
+
+def fetch_workflow_task_logs(
+    workflow: OSMOWorkflow,
+    repo_root: Path,
+    task_name: str,
+    *,
+    namespace: str = OSMO_WORKFLOWS_NAMESPACE,
+) -> str:
+    result = run_command(
+        [
+            "kubectl",
+            "logs",
+            "-n",
+            namespace,
+            "-l",
+            f"osmo.workflow_id={workflow.workflow_id},osmo.task_name={task_name}",
+            "-c",
+            task_name,
+            "--tail=-1",
+        ],
+        cwd=repo_root,
+    )
+    cached_logs = workflow.handle.logs.get(task_name, "")
+    if cached_logs:
+        return cached_logs
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Unable to fetch logs for OSMO workflow {workflow.workflow_id!r} task {task_name!r}\n\n"
+            f"{format_command_failure(result)}"
+        )
+    workflow.handle.logs[task_name] = result.stdout
+    return result.stdout
 
 
 def cancel_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
@@ -516,6 +557,7 @@ class TaskPodLogStream:
         self._stop = threading.Event()
         self._proc_lock = threading.Lock()
         self._proc: subprocess.Popen[str] | None = None
+        self._captured_lines: list[str] = []
         self._thread = threading.Thread(target=self._run, name=f"osmo-logs-{task_name}", daemon=True)
 
     def start(self) -> TaskPodLogStream:
@@ -615,10 +657,13 @@ class TaskPodLogStream:
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
-                print(f"[pod {pod_name}] {line.rstrip()}", flush=True)
+                rendered_line = line.rstrip()
+                self._captured_lines.append(rendered_line)
+                print(f"[pod {pod_name}] {rendered_line}", flush=True)
                 if self._stop.is_set():
                     break
         finally:
+            self._workflow.handle.logs[self._task_name] = "\n".join(self._captured_lines)
             with self._proc_lock:
                 self._proc = None
             if proc.poll() is None:
@@ -695,6 +740,10 @@ def _osmo_workflow_from_submission(
         workflow_name=workflow_name,
         experiment_name=experiment_name,
         correlation_id=correlation_id,
+        handle=E2EHandle(
+            submission_commands=[command_tuple(result.args)],
+            resource_identifiers={"osmo_workflow": workflow_id},
+        ),
     )
 
 
@@ -1046,6 +1095,7 @@ def submit_osmo_vla_finetune(
     save_steps: int,
     batch_size: int,
     dataloader_workers: int,
+    register_model_name: str,
 ) -> OSMOWorkflow:
     dataset = _resolve_vla_dataset(request, repo_root)
     vla_version = env_value(_VLA_VERSION_ENV, _DEFAULT_VLA_VERSION)
@@ -1077,6 +1127,8 @@ def submit_osmo_vla_finetune(
         str(dataloader_workers),
         "--job-name",
         job_name,
+        "--run-id-override",
+        job_name,
         "--platform",
         platform,
         "--azure-subscription-id",
@@ -1085,6 +1137,9 @@ def submit_osmo_vla_finetune(
         aml_workspace.resource_group,
         "--azure-workspace-name",
         aml_workspace.workspace_name,
+        "--azure-upload",
+        "--azureml-model-name",
+        register_model_name,
     ]
     args.extend(_vla_base_model_args())
     if dataset.data_config_file is not None:
@@ -1095,7 +1150,12 @@ def submit_osmo_vla_finetune(
     if result.returncode != 0:
         raise AssertionError(f"OSMO VLA fine-tuning e2e submission failed\n\n{format_command_failure(result)}")
 
-    return _osmo_workflow_from_submission(result, job_name, "OSMO VLA fine-tuning")
+    return _osmo_workflow_from_submission(
+        result,
+        register_model_name,
+        "OSMO VLA fine-tuning",
+        correlation_id=job_name,
+    )
 
 
 def submit_osmo_azureml_replay(

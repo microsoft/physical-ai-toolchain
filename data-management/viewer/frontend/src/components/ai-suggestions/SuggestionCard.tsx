@@ -82,7 +82,7 @@ function AnomalyItem({ anomaly }: { anomaly: DetectedAnomaly }) {
         </div>
         <p className="text-muted-foreground truncate text-xs">{anomaly.description}</p>
         <p className="text-muted-foreground text-xs">
-          Frames {anomaly.frameStart} - {anomaly.frameEnd}
+          Frames {anomaly.frame_start} - {anomaly.frame_end}
         </p>
       </div>
     </div>
@@ -194,7 +194,7 @@ export function SuggestionCard({
             )}
             {!onPartialAccept && <span className="text-sm font-medium">Task Completion</span>}
           </div>
-          <StarRatingDisplay rating={suggestion.taskCompletionRating} />
+          <StarRatingDisplay rating={suggestion.task_completion_rating} />
         </div>
 
         {/* Trajectory Quality */}
@@ -211,11 +211,11 @@ export function SuggestionCard({
             )}
             {!onPartialAccept && <span className="text-sm font-medium">Trajectory Quality</span>}
           </div>
-          <StarRatingDisplay rating={suggestion.trajectoryQualityScore} />
+          <StarRatingDisplay rating={suggestion.trajectory_quality_score} />
         </div>
 
         {/* Flags */}
-        {suggestion.suggestedFlags.length > 0 && (
+        {suggestion.suggested_flags.length > 0 && (
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               {onPartialAccept && (
@@ -230,7 +230,7 @@ export function SuggestionCard({
               {!onPartialAccept && <span className="text-sm font-medium">Suggested Flags</span>}
             </div>
             <div className="ml-6 flex flex-wrap gap-1">
-              {suggestion.suggestedFlags.map((flag) => (
+              {suggestion.suggested_flags.map((flag) => (
                 <Badge key={flag} variant="outline" className="text-xs">
                   <Flag className="mr-1 h-3 w-3" />
                   {flag.replace(/_/g, ' ')}
@@ -241,7 +241,7 @@ export function SuggestionCard({
         )}
 
         {/* Anomalies */}
-        {suggestion.detectedAnomalies.length > 0 && (
+        {suggestion.detected_anomalies.length > 0 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -251,12 +251,12 @@ export function SuggestionCard({
                     checked={selectedFields.has('anomalies')}
                     onCheckedChange={(checked) => setFieldSelected('anomalies', checked)}
                   >
-                    Detected Anomalies ({suggestion.detectedAnomalies.length})
+                    Detected Anomalies ({suggestion.detected_anomalies.length})
                   </SuggestionFieldToggle>
                 )}
                 {!onPartialAccept && (
                   <span className="text-sm font-medium">
-                    Detected Anomalies ({suggestion.detectedAnomalies.length})
+                    Detected Anomalies ({suggestion.detected_anomalies.length})
                   </span>
                 )}
               </div>
@@ -275,7 +275,7 @@ export function SuggestionCard({
             </div>
             {isExpanded && (
               <div className="ml-6 space-y-2">
-                {suggestion.detectedAnomalies.map((anomaly) => (
+                {suggestion.detected_anomalies.map((anomaly) => (
                   <AnomalyItem key={anomaly.id} anomaly={anomaly} />
                 ))}
               </div>

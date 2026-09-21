@@ -5,39 +5,63 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect } from 'react'
 
-import { apiRequest } from '@/lib/api-client'
+import { mutationHeaders } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
 import { type JointConfig, useJointConfigStore } from '@/stores/joint-config-store'
+
+const API_BASE = '/api'
+
+interface JointConfigResponse {
+  dataset_id: string
+  labels: Record<string, string>
+  groups: { id: string; label: string; indices: number[] }[]
+}
+
+function transformResponse(data: JointConfigResponse): JointConfig {
+  return {
+    datasetId: data.dataset_id,
+    labels: data.labels,
+    groups: data.groups,
+  }
+}
 
 function toApiPayload(config: JointConfig) {
   return { labels: config.labels, groups: config.groups }
 }
 
 async function fetchJointConfig(datasetId: string): Promise<JointConfig> {
-  return apiRequest<JointConfig>(`/datasets/${datasetId}/joint-config`)
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/joint-config`)
+  if (!res.ok) throw new Error('Failed to fetch joint config')
+  return transformResponse(await res.json())
 }
 
 export async function saveJointConfigApi(
   datasetId: string,
   config: JointConfig,
 ): Promise<JointConfig> {
-  return apiRequest<JointConfig>(`/datasets/${datasetId}/joint-config`, {
+  const res = await fetch(`${API_BASE}/datasets/${datasetId}/joint-config`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await mutationHeaders()) },
     body: JSON.stringify(toApiPayload(config)),
   })
+  if (!res.ok) throw new Error('Failed to save joint config')
+  return transformResponse(await res.json())
 }
 
 async function fetchJointConfigDefaults(): Promise<JointConfig> {
-  return apiRequest<JointConfig>('/joint-config/defaults')
+  const res = await fetch(`${API_BASE}/joint-config/defaults`)
+  if (!res.ok) throw new Error('Failed to fetch joint config defaults')
+  return transformResponse(await res.json())
 }
 
 export async function saveJointConfigDefaultsApi(config: JointConfig): Promise<JointConfig> {
-  return apiRequest<JointConfig>('/joint-config/defaults', {
+  const res = await fetch(`${API_BASE}/joint-config/defaults`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await mutationHeaders()) },
     body: JSON.stringify(toApiPayload(config)),
   })
+  if (!res.ok) throw new Error('Failed to save joint config defaults')
+  return transformResponse(await res.json())
 }
 
 export const jointConfigKeys = {

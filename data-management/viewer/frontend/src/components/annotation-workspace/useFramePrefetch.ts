@@ -1,7 +1,5 @@
 import { useEffect, useRef } from 'react'
 
-import { apiPath } from '@/lib/api-client'
-
 interface UseFramePrefetchOptions {
   datasetId: string | null
   episodeIndex: number | null
@@ -46,9 +44,7 @@ export function useFramePrefetch({
     const newImages: HTMLImageElement[] = []
 
     for (let i = currentFrame + 1; i <= end; i++) {
-      const url = apiPath(
-        `/datasets/${datasetId}/episodes/${episodeIndex}/frames/${i}?camera=${encodedCamera}`,
-      )
+      const url = `/api/datasets/${datasetId}/episodes/${episodeIndex}/frames/${i}?camera=${encodedCamera}`
       if (!prefetchedRef.current.has(url)) {
         prefetchedRef.current.add(url)
         const img = new Image()

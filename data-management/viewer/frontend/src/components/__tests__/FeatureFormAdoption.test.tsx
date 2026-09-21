@@ -14,19 +14,19 @@ describe('feature form adoption surfaces', () => {
     render(
       <SuggestionCard
         suggestion={{
-          taskCompletionRating: 4,
-          trajectoryQualityScore: 3,
-          suggestedFlags: ['jittery'],
-          detectedAnomalies: [
+          task_completion_rating: 4,
+          trajectory_quality_score: 3,
+          suggested_flags: ['jittery'],
+          detected_anomalies: [
             {
               id: 'anomaly-1',
               type: 'unexpected_stop',
               severity: 'medium',
-              frameStart: 10,
-              frameEnd: 20,
+              frame_start: 10,
+              frame_end: 20,
               description: 'Stopped early',
               confidence: 0.82,
-              autoDetected: true,
+              auto_detected: true,
             },
           ],
           confidence: 0.91,

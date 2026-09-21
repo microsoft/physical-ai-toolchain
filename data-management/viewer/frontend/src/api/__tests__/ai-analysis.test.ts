@@ -18,23 +18,20 @@ import {
 } from '../ai-analysis'
 
 vi.mock('@/lib/api-client', () => ({
-  apiRequest: vi.fn(),
   handleResponse: vi.fn(),
+  mutationHeaders: vi.fn(),
 }))
 
-const { apiRequest, handleResponse } = await import('@/lib/api-client')
-const mockApiRequest = vi.mocked(apiRequest)
+const { handleResponse, mutationHeaders } = await import('@/lib/api-client')
 const mockHandleResponse = vi.mocked(handleResponse)
+const mockMutationHeaders = vi.mocked(mutationHeaders)
 const mockFetch = vi.fn()
 
 beforeEach(() => {
   mockFetch.mockReset()
-  mockApiRequest.mockReset()
   mockHandleResponse.mockReset()
-  mockApiRequest.mockImplementation(async (path, init) => {
-    const response = await mockFetch(`/api${path}`, init)
-    return mockHandleResponse(response)
-  })
+  mockMutationHeaders.mockReset()
+  mockMutationHeaders.mockResolvedValue({ 'X-CSRF-Token': 'test-token' })
   vi.stubGlobal('fetch', mockFetch)
 })
 
@@ -52,16 +49,16 @@ describe('analyzeTrajectory', () => {
     const data: TrajectoryData = {
       positions: [[0, 0, 0]],
       timestamps: [0],
-      gripperStates: [0],
+      gripper_states: [0],
     }
     const metrics: TrajectoryMetrics = {
       smoothness: 0.9,
-      normalizedSmoothness: 0.6,
+      normalized_smoothness: 0.6,
       efficiency: 0.8,
       jitter: 0.1,
-      hesitationCount: 0,
-      correctionCount: 0,
-      overallScore: 0.85,
+      hesitation_count: 0,
+      correction_count: 0,
+      overall_score: 0.85,
       flags: [],
     }
     mockFetch.mockResolvedValueOnce(okResponse())
@@ -70,14 +67,14 @@ describe('analyzeTrajectory', () => {
     const result = await analyzeTrajectory(data)
 
     expect(result).toEqual(metrics)
+    expect(mockMutationHeaders).toHaveBeenCalledTimes(1)
     expect(mockFetch).toHaveBeenCalledWith('/api/ai/trajectory-analysis', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        positions: data.positions,
-        timestamps: data.timestamps,
-        gripper_states: data.gripperStates,
-      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': 'test-token',
+      },
+      body: JSON.stringify(data),
     })
     expect(mockHandleResponse).toHaveBeenCalledWith(expect.objectContaining({ ok: true }))
   })
@@ -100,8 +97,8 @@ describe('detectAnomalies', () => {
     }
     const response: AnomalyDetectionResponse = {
       anomalies: [],
-      totalCount: 0,
-      severityCounts: { low: 0, medium: 0, high: 0 },
+      total_count: 0,
+      severity_counts: { low: 0, medium: 0, high: 0 },
     }
     mockFetch.mockResolvedValueOnce(okResponse())
     mockHandleResponse.mockResolvedValueOnce(response)
@@ -113,12 +110,12 @@ describe('detectAnomalies', () => {
     expect(url).toBe('/api/ai/anomaly-detection')
     expect(init).toMatchObject({
       method: 'POST',
-      body: JSON.stringify({
-        positions: request.positions,
-        timestamps: request.timestamps,
-      }),
+      body: JSON.stringify(request),
     })
-    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
+    expect(init.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': 'test-token',
+    })
   })
 })
 
@@ -126,13 +123,13 @@ describe('clusterEpisodes', () => {
   it('POSTs cluster request and returns the response', async () => {
     const request: ClusterRequest = {
       trajectories: [[[0, 0, 0]]],
-      numClusters: 3,
+      num_clusters: 3,
     }
     const response: ClusterResponse = {
-      numClusters: 3,
+      num_clusters: 3,
       assignments: [],
-      clusterSizes: { '0': 0 },
-      silhouetteScore: 0.5,
+      cluster_sizes: { '0': 0 },
+      silhouette_score: 0.5,
     }
     mockFetch.mockResolvedValueOnce(okResponse())
     mockHandleResponse.mockResolvedValueOnce(response)
@@ -144,7 +141,7 @@ describe('clusterEpisodes', () => {
       '/api/ai/cluster',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ trajectories: request.trajectories, num_clusters: 3 }),
+        body: JSON.stringify(request),
       }),
     )
   })
@@ -157,10 +154,10 @@ describe('getAnnotationSuggestion', () => {
       timestamps: [0],
     }
     const suggestion: AnnotationSuggestion = {
-      taskCompletionRating: 4,
-      trajectoryQualityScore: 0.9,
-      suggestedFlags: [],
-      detectedAnomalies: [],
+      task_completion_rating: 4,
+      trajectory_quality_score: 0.9,
+      suggested_flags: [],
+      detected_anomalies: [],
       confidence: 0.95,
       reasoning: 'looks good',
     }
@@ -174,21 +171,18 @@ describe('getAnnotationSuggestion', () => {
       '/api/ai/suggest-annotation',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({
-          positions: request.positions,
-          timestamps: request.timestamps,
-        }),
+        body: JSON.stringify(request),
       }),
     )
   })
 
-  it('routes every request through the canonical client', async () => {
+  it('awaits mutationHeaders for every request', async () => {
     mockFetch.mockResolvedValue(okResponse())
     mockHandleResponse.mockResolvedValue({} as AnnotationSuggestion)
 
     await getAnnotationSuggestion({ positions: [], timestamps: [] })
     await getAnnotationSuggestion({ positions: [], timestamps: [] })
 
-    expect(mockApiRequest).toHaveBeenCalledTimes(2)
+    expect(mockMutationHeaders).toHaveBeenCalledTimes(2)
   })
 })
