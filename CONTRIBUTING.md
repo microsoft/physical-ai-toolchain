@@ -354,10 +354,10 @@ Reviewers verify regression tests are included. Compliance is tracked over time 
 
 ### Running Tests
 
-Tests are split into eight pytest component suites that mirror the CI
-`pytest-*` flags (`pytest-training`, `pytest-dm-tools`,
-`pytest-data-pipeline`, `pytest-inference`, `pytest-shared-ci`,
-`pytest-dataviewer`, `pytest-evaluation`, `pytest-fuzz`). Run a single
+Tests are split into pytest component suites that mirror the CI `pytest-*`
+flags (`pytest-training`, `pytest-dm-tools`, `pytest-data-pipeline`,
+`pytest-inference`, `pytest-shared-ci`, `pytest-dataviewer`,
+`pytest-evaluation`, `pytest-fuzz`, `pytest-gpu-offload`). Run a single
 component locally:
 
 ```bash
@@ -381,6 +381,12 @@ cd data-management/viewer/backend && uv run pytest -v
 
 # Evaluation (evaluation/, run from that dir)
 cd evaluation && uv run pytest -v
+
+# GPU offload controller (gpu-offload/controller, run from that dir; own uv.lock)
+cd gpu-offload/controller && uv sync --extra test && uv run pytest -o addopts="" tests -v
+
+# GPU offload runtime (gpu-offload/runtime, run from that dir; own uv.lock)
+cd gpu-offload/runtime && uv sync --extra test && uv run pytest -o addopts="" tests -v
 
 # Fuzz / regression (tests/, run from repo root)
 uv run pytest tests/ -v
@@ -410,6 +416,9 @@ Substitute the component path and `--cov` target for the pytest component
 suite you are validating. Codecov tracks pytest uploads by flag, but only the
 named project statuses in `codecov.yml` are top-level project gates;
 `pytest-fuzz` is advisory and `terraform` uploads test results only.
+`pytest-gpu-offload` runs its two subprojects (`gpu-offload/controller`,
+`gpu-offload/runtime`) in their own locked environments and is not yet
+wired into Codecov.
 
 ### Test Organization
 

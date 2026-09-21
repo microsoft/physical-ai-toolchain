@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MIT
+#
+# Offload spec for the first-run check, in the form the runtime consumes.
+#
+# This file is the readable reference. The chart renders the same spec into a
+# ConfigMap with the server image, the stage name, and the GPU resources filled
+# in from values.yaml; see templates/manifests.yaml.tpl. The values below are the
+# GPU platform shape, where the stage is named nvidia and gpu_inference is
+# remoted alongside predict. On CPU platforms the chart names the stage cpu,
+# drops the nvidia.com/gpu limit, omits the gpu_inference entry, and reuses the
+# client image for the server stage.
+#
+# The empty class segment in "demo_model//predict" is required: dehydration keys
+# are "<module>/<class>/<attr>", and a module-level function has no class.
+#
+# Validated against ../../specifications/remote-spec-schema.md.
+serverstages:
+  - name: nvidia
+    perclient: false
+    serverimage: localhost/gpu-offload-first-run-gpu:local
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+        nvidia.com/gpu: "1"
+remotefuncs:
+  # The square function is the transport check: identical code reports a
+  # different HOSTNAME only because it executed on the server stage.
+  - "demo_model//predict":
+      remoteloc: nvidia
+  # The GPU check. The client image ships without torch, so this call can only
+  # succeed on the stage.
+  - "gpu_model//gpu_inference":
+      remoteloc: nvidia

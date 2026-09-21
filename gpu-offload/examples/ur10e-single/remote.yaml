@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: MIT
+#
+# Offload spec for the ur10e-single Pi0.5 deployment.
+#
+# The control container runs the unmodified lerobot record loop next to the
+# UR10e. Nothing in this file changes the robot I/O path; it moves the policy
+# and its processor pipelines onto the GPU stage.
+#
+# remoteclasses is what keeps the roughly 7 GB checkpoint resident on the stage.
+# PolicyRunner.load constructs a PI05Policy and two DataProcessorPipeline
+# objects; because those classes are remoted, the control container receives
+# proxies instead of serialized objects, and passing the proxies back into
+# get_action rehydrates them server-side.
+#
+# PolicyProcessorPipeline is a TypeAlias for DataProcessorPipeline, so the
+# concrete runtime class is the one named here. Dehydration is keyed on
+# "<module>/<class>", so an alias or a base class would not match.
+#
+# The chart renders this same spec into a ConfigMap with the server image and
+# resources filled in; see templates/manifests.yaml.tpl. Validated against
+# ../../specifications/remote-spec-schema.md.
+serverstages:
+  - name: gpu
+    perclient: false
+    resources:
+      requests:
+        cpu: "2"
+        memory: 16Gi
+      limits:
+        cpu: "8"
+        memory: 32Gi
+        nvidia.com/gpu: "1"
+remoteclasses:
+  - "lerobot.policies.pi05.modeling_pi05/PI05Policy":
+      remoteloc: gpu
+  - "lerobot.processor.pipeline/DataProcessorPipeline":
+      remoteloc: gpu
+remotefuncs:
+  # singleinstance means "call once on the stage, then memoize the result", so it
+  # belongs only on the calls whose result is the loaded policy itself. load reads
+  # roughly 7 GB of weights onto the GPU and every control cycle reuses the proxies
+  # it returns. reset and get_action must execute on every call.
+  - "ur10e_offload/PolicyRunner/load":
+      singleinstance: true
+      remoteloc: gpu
+  - "ur10e_offload/PolicyRunner/describe":
+      singleinstance: true
+      remoteloc: gpu
+  - "ur10e_offload/PolicyRunner/reset":
+      remoteloc: gpu
+  - "ur10e_offload/PolicyRunner/get_action":
+      remoteloc: gpu
