@@ -36,7 +36,7 @@ npm run lint:sh
 npm run lint:md
 ```
 
-Run the applicable component tests as described in [Testing Requirements](https://github.com/microsoft/physical-ai-toolchain/blob/main/CONTRIBUTING.md#testing-requirements). Static checks alone do not replace tests for code changes.
+Run the applicable component tests as described in [Testing Requirements](../../CONTRIBUTING.md#testing-requirements). Static checks alone do not replace tests for code changes.
 
 **When to use:** Every contribution (documentation, code, infrastructure).
 

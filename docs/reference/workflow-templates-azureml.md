@@ -12,7 +12,7 @@ keywords:
   - evaluation
 ---
 
-Selected AzureML workflow templates for RL, LeRobot, and software-in-the-loop (SiL) training and evaluation, consistent with the [AzureML workflow index](https://github.com/microsoft/physical-ai-toolchain/blob/main/workflows/azureml/README.md). This is not an exhaustive inventory and does not cover VLA workflows.
+Selected AzureML workflow templates for RL, LeRobot, and software-in-the-loop (SiL) training and evaluation, consistent with the [AzureML workflow index](../../workflows/azureml/README.md). This is not an exhaustive inventory and does not cover VLA workflows.
 Template names, defaults, and paths in this page are derived from the YAML files
 in `training/` and `evaluation/`.
 
