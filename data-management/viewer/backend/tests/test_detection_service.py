@@ -198,6 +198,35 @@ class TestGetModelExtra:
         assert service._model is None
         assert service._model_name == ""
 
+    def test_model_switching_uses_distinct_service_generated_staging_paths(self, monkeypatch, tmp_path: Path):
+        model_paths = {
+            "yolo11n": tmp_path / "yolo11n.pt",
+            "yolov8s-world": tmp_path / "yolov8s-world.pt",
+        }
+        for model_name, model_path in model_paths.items():
+            model_path.write_bytes(model_name.encode())
+        service = DetectionService(
+            models_dir=tmp_path,
+            model_digests={model_name: _model_digest(model_path) for model_name, model_path in model_paths.items()},
+        )
+        staged_paths: list[Path] = []
+
+        class FakeYOLO:
+            def __init__(self, staged_path: str):
+                staged_paths.append(Path(staged_path))
+
+            def __call__(self, *_args, **_kwargs):
+                return []
+
+        monkeypatch.setitem(__import__("sys").modules, "ultralytics", types.SimpleNamespace(YOLO=FakeYOLO))
+
+        service._get_model("yolo11n")
+        service._get_model("yolov8s-world")
+        service._get_model("yolo11n")
+
+        assert len(set(staged_paths)) == 3
+        assert all(path.name not in {"yolo11n.pt", "yolov8s-world.pt"} for path in staged_paths)
+
 
 class TestModelPathRestrictions:
     def test_resolves_approved_model_inside_configured_directory(self, tmp_path: Path):

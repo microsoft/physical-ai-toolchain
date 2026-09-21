@@ -107,8 +107,13 @@ class DetectionService:
         if hashlib.sha256(model_bytes).hexdigest() != self._model_digests[model_name]:
             raise DetectionModelUnavailableError(f"Approved model integrity check failed for identifier '{model_name}'")
 
-        staged_path = Path(self._verified_models_dir.name) / f"{model_name}.pt"
-        staged_path.write_bytes(model_bytes)
+        with tempfile.NamedTemporaryFile(
+            dir=self._verified_models_dir.name,
+            suffix=".pt",
+            delete=False,
+        ) as staged_file:
+            staged_file.write(model_bytes)
+            staged_path = Path(staged_file.name)
         staged_path.chmod(0o400)
         return staged_path
 
