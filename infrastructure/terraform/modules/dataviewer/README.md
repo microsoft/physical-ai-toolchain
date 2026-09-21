@@ -2,7 +2,7 @@
 title: Dataviewer Module
 description: Deploys the dataviewer application on Azure Container Apps with networking, identity, and app-level resources.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-22
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 

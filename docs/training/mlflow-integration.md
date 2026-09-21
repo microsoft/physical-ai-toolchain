@@ -3,7 +3,7 @@ sidebar_position: 6
 title: MLflow Integration for SKRL Training
 description: Metric logging integration for SKRL agent training during Isaac Lab runs using monkey-patching
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-09-19
 ms.topic: reference
 keywords:
   - mlflow
@@ -17,7 +17,7 @@ The training pipeline uses monkey-patching to wrap the agent's `update` method, 
 
 ## Available Metrics
 
-The MLflow integration automatically extracts metrics from SKRL agents across several categories:
+The MLflow integration extracts available metrics from SKRL agents across several categories. The names below are candidates, not a guaranteed inventory: only values exposed by the selected agent and accepted by the metric filter are emitted. GPU metrics also depend on NVML availability.
 
 ### Episode Statistics
 
@@ -171,20 +171,20 @@ with mlflow.start_run():
 
 ### Configuring Logging Intervals
 
-Use CLI arguments to control logging frequency:
+Run from the repository root in a configured Isaac Lab runtime. The `train.sh` launcher invokes `training.rl.scripts.launch`, which forwards `--mlflow_log_interval` to SKRL. `skrl_training.py` is a library module, not a standalone training entry point.
 
 ```bash
 # Log after every training step
-python training/rl/scripts/skrl_training.py --mlflow_log_interval step
+bash training/rl/scripts/train.sh --task Isaac-Cartpole-v0 --headless --mlflow_log_interval step
 
 # Log every 10 steps (default)
-python training/rl/scripts/skrl_training.py --mlflow_log_interval balanced
+bash training/rl/scripts/train.sh --task Isaac-Cartpole-v0 --headless --mlflow_log_interval balanced
 
 # Log once per rollout
-python training/rl/scripts/skrl_training.py --mlflow_log_interval rollout
+bash training/rl/scripts/train.sh --task Isaac-Cartpole-v0 --headless --mlflow_log_interval rollout
 
 # Log every 100 steps
-python training/rl/scripts/skrl_training.py --mlflow_log_interval 100
+bash training/rl/scripts/train.sh --task Isaac-Cartpole-v0 --headless --mlflow_log_interval 100
 ```
 
 ### Filtering Metrics for Production
@@ -211,7 +211,7 @@ runner.agent.update = wrapper_func
 The MLflow integration is automatically applied in `skrl_training.py` when training with Isaac Lab tasks:
 
 ```bash
-python training/rl/scripts/skrl_training.py \
+bash training/rl/scripts/train.sh \
     --task Isaac-Cartpole-v0 \
     --num_envs 512 \
     --headless

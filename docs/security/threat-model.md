@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Threat Model — Physical AI Toolchain
 description: STRIDE-based threat model covering infrastructure-as-code components, trust boundaries, and remediation roadmap
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-09-19
 ms.topic: concept
 keywords:
   - threat model
@@ -16,19 +16,22 @@ keywords:
 
 STRIDE-based threat analysis of the Physical AI Toolchain covering infrastructure-as-code components, trust boundaries, and a prioritized remediation roadmap.
 
+> [!IMPORTANT]
+> The 2026-09-19 review corrects repository architecture descriptions only. Threat likelihoods, impacts, ratings, statuses, remediation priorities, and security metrics below are retained historical assessment data and were not reassessed. They do not certify current source or deployed security. Revalidate the registry, including its evidence and control claims, in a dedicated security assessment.
+
 ## Executive Summary
 
-This threat model applies the STRIDE framework to the Physical AI Toolchain. The architecture deploys AKS clusters with GPU node pools, Azure Machine Learning, and NVIDIA OSMO for robotics training and inference workloads. All components are infrastructure-as-code artifacts; no hosted service or user-facing application exists.
+This threat model applies the STRIDE framework to the Physical AI Toolchain. The architecture deploys AKS clusters with GPU node pools, Azure Machine Learning, and NVIDIA OSMO for robotics training and inference workloads. The repository also contains runtime services and the user-facing Dataviewer application (`data-management/viewer/`, FastAPI and React); the system is not limited to infrastructure-as-code artifacts.
 
-| Area              | Status                                 | Evidence                                           |
-|-------------------|----------------------------------------|----------------------------------------------------|
-| Authentication    | Managed identities + workload identity | No password-based auth; `DefaultAzureCredential`   |
-| Secret Management | Azure Key Vault (RBAC) + CSI driver    | Secrets synced to K8s pods at mount time           |
-| Network Isolation | Private endpoints + VPN-only access    | All Azure services behind VNet; no public IPs      |
-| Encryption        | TLS 1.2+ enforced by Azure             | Platform-managed keys for data at rest             |
-| Supply Chain      | 95% SHA-pinned GitHub Actions          | Dependency review blocks moderate+ vulnerabilities |
+| Area              | Status                                                                  | Evidence                                                                                                                  |
+|-------------------|-------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| Authentication    | Managed identities, workload identity, and service-specific credentials | OSMO `defaultAdmin` references the `osmo-default-admin` password secret; Azure SDK code uses `DefaultAzureCredential`     |
+| Secret Management | Azure Key Vault (RBAC) + CSI driver                                     | Secrets synced to K8s pods at mount time                                                                                  |
+| Network Isolation | Configurable private endpoints and private AKS                          | AzureML public network access and NAT egress are enabled in root defaults; private AKS does not imply all-private traffic |
+| Encryption        | TLS 1.2+ enforced by Azure                                              | Platform-managed keys for data at rest                                                                                    |
+| Supply Chain      | 95% SHA-pinned GitHub Actions                                           | Dependency review blocks moderate+ vulnerabilities                                                                        |
 
-Risk summary: 19 threats identified — 1 Critical, 6 High, 7 Medium, 5 Low. Key open risks: T-2 (Critical), S-1 (High), T-1 (High).
+Historical risk summary (not reassessed): 19 threats identified, with 1 Critical, 6 High, 7 Medium, and 5 Low. Previously recorded key open risks: T-2 (Critical), S-1 (High), T-1 (High).
 
 ## System Description
 
@@ -39,17 +42,18 @@ Risk summary: 19 threats identified — 1 Critical, 6 High, 7 Medium, 5 Low. Key
 | Compute        | AKS Cluster                    | Private cluster, CNI networking, GPU node pools (Standard_NC-series) |
 | Data & Storage | Azure Storage Account          | Blob containers for datasets, checkpoints; private endpoint access   |
 | Data & Storage | Azure Database for PostgreSQL  | Flexible server for OSMO metadata; VNet-integrated                   |
-| Data & Storage | Azure Cache for Redis          | Enterprise tier; OSMO session state; private endpoint                |
+| Data & Storage | Azure Managed Redis            | OSMO state; private endpoint when configured                         |
 | ML & AI        | Azure Machine Learning         | Workspace with managed endpoints; K8s compute attach                 |
-| Identity       | Entra ID + Managed Identities  | System-assigned for AKS, user-assigned for workloads                 |
+| Identity       | Entra ID + Managed Identities  | User-assigned AKS identity and workload identities                   |
 | Networking     | VNet + NSG + NAT Gateway + VPN | Hub-spoke implied; P2S VPN for operator access                       |
 | Observability  | Azure Monitor + Log Analytics  | Container Insights, Prometheus metrics, AMPLS for private ingestion  |
 | Security       | Azure Key Vault                | RBAC-mode; CSI Secret Store driver syncs secrets to pods             |
 | NVIDIA/OSMO    | OSMO Control Plane + Backend   | Orchestrates distributed training; Envoy proxy optional              |
+| Application    | Dataviewer                     | FastAPI backend and React frontend for dataset analysis              |
 
 ### Data Flows
 
-Training data flows from Azure Blob Storage through AKS pods to GPU compute. Checkpoints and metrics flow back to storage and MLflow tracking. OSMO coordinates multi-node training via its control plane and PostgreSQL metadata store. All Azure service traffic uses private endpoints — no data traverses the public internet.
+Training data flows from Azure Blob Storage through AKS pods to GPU compute. Checkpoints and metrics flow back to storage and MLflow tracking. OSMO coordinates multi-node training via its control plane and PostgreSQL metadata store. Private endpoint use depends on service configuration and DNS. Root defaults permit AzureML public network access and NAT Gateway internet egress; external registries and APIs can use public routes.
 
 Operator access traverses a P2S VPN gateway to the AKS API server private endpoint. CI/CD pipelines authenticate via GitHub OIDC federation to Entra ID managed identities. Terraform state resides locally on the operator workstation (see T-2 for associated risk).
 
@@ -66,22 +70,24 @@ Operator access traverses a P2S VPN gateway to the AKS API server private endpoi
 
 ## Trust Boundaries
 
-| ID   | Boundary                         | Description                                                       |
-|------|----------------------------------|-------------------------------------------------------------------|
-| TB-1 | Azure Control Plane ↔ Data Plane | ARM API calls cross into subscription data plane                  |
-| TB-2 | VNet Perimeter ↔ Internet        | NAT Gateway egress; VPN ingress; no public endpoints              |
-| TB-3 | AKS ↔ Azure Services             | Pod-to-service traffic via private endpoints and managed identity |
-| TB-4 | K8s Namespace Isolation          | OSMO, training, inference workloads in separate namespaces        |
-| TB-5 | Operator Workstation ↔ Cluster   | P2S VPN tunnel; `kubectl` via private API server                  |
-| TB-6 | CI/CD ↔ Repository               | GitHub Actions with OIDC federation; SHA-pinned actions           |
-| TB-7 | OSMO Control Plane ↔ Backend     | gRPC between control plane and backend pods                       |
-| TB-8 | Training Code ↔ Azure Services   | Python SDK calls via `DefaultAzureCredential`                     |
+| ID   | Boundary                         | Description                                                                                   |
+|------|----------------------------------|-----------------------------------------------------------------------------------------------|
+| TB-1 | Azure Control Plane ↔ Data Plane | ARM API calls cross into subscription data plane                                              |
+| TB-2 | VNet Perimeter ↔ Internet        | NAT Gateway public egress; VPN ingress; service public access depends on configuration        |
+| TB-3 | AKS ↔ Azure Services             | Private or public service routes according to configuration; managed identity where supported |
+| TB-4 | K8s Namespace Isolation          | OSMO, training, inference workloads in separate namespaces                                    |
+| TB-5 | Operator Workstation ↔ Cluster   | P2S VPN tunnel; `kubectl` via private API server                                              |
+| TB-6 | CI/CD ↔ Repository               | GitHub Actions with OIDC federation; SHA-pinned actions                                       |
+| TB-7 | OSMO Control Plane ↔ Backend     | gRPC between control plane and backend pods                                                   |
+| TB-8 | Training Code ↔ Azure Services   | Python SDK calls via `DefaultAzureCredential`                                                 |
 
 ### Credential Delegation Model
 
 Entra ID issues tokens to managed identities. AKS workload identity federation projects service account tokens to pods. Pods exchange projected tokens for Azure resource access. Key Vault stores secrets and syncs them to Kubernetes Secrets via the CSI driver. The chain: Entra ID → Managed Identities → Workload Identity Federation → Key Vault → K8s Secrets.
 
 ## STRIDE Threat Registry
+
+The following entries preserve the prior assessment, including claims that require fresh evidence. Absence of a policy manifest in this repository does not prove absence of controls in a deployed cluster. Do not interpret historical Accepted or Resolved statuses as current approval.
 
 ### Spoofing
 
@@ -382,19 +388,19 @@ Entra ID issues tokens to managed identities. AKS workload identity federation p
 
 ## Assurance Argument
 
-Goal Structuring Notation (GSN) elements supporting the security posture claim.
+Goal Structuring Notation (GSN) elements from the prior assessment. Current architectural facts constrain the claims; assurance has not been re-established.
 
-| Element | Statement                                                                                                         |
-|---------|-------------------------------------------------------------------------------------------------------------------|
-| G0      | The architecture provides adequate security controls for an IaC reference architecture                            |
-| G1      | Authentication uses managed identities and workload federation, eliminating password-based access                 |
-| G2      | Secrets are stored in Azure Key Vault with RBAC authorization and synced via CSI driver                           |
-| G3      | Network access is restricted to private endpoints, VPN, and NSG-controlled subnets                                |
-| G4      | Supply chain integrity is maintained through SHA-pinned actions and dependency review                             |
-| E1      | 19 STRIDE threats identified; 7 Accepted with compensating controls, 2 Resolved, 10 Open with remediation roadmap |
-| E2      | OpenSSF Passing ~85%; 25 Silver criteria assessed (5 Met, 5 Delegated, 13 N/A, 1 Gap)                             |
-| A1      | Deployer follows `docs/operations/security-guide.md` hardening checklist                                          |
-| A2      | OSMO vendor provides auth/rate-limiting enablement path in future releases                                        |
+| Element | Statement                                                                                                             |
+|---------|-----------------------------------------------------------------------------------------------------------------------|
+| G0      | Security adequacy requires a new assessment covering infrastructure, runtime services, and the Dataviewer application |
+| G1      | Managed identities and workload federation coexist with password-based OSMO bootstrap authentication                  |
+| G2      | Secrets are stored in Azure Key Vault with RBAC authorization and synced via CSI driver                               |
+| G3      | Private endpoints, VPN, and NSGs coexist with configurable public service access and NAT egress                       |
+| G4      | Supply chain integrity is maintained through SHA-pinned actions and dependency review                                 |
+| E1      | 19 STRIDE threats identified; 7 Accepted with compensating controls, 2 Resolved, 10 Open with remediation roadmap     |
+| E2      | OpenSSF Passing ~85%; 25 Silver criteria assessed (5 Met, 5 Delegated, 13 N/A, 1 Gap)                                 |
+| A1      | Deployer follows `docs/operations/security-guide.md` hardening checklist                                              |
+| A2      | OSMO vendor provides auth/rate-limiting enablement path in future releases                                            |
 
 ## Remediation Roadmap
 
@@ -407,6 +413,8 @@ Goal Structuring Notation (GSN) elements supporting the security posture claim.
 | 5        | NSG Rules                        | D-2               | Medium-High | NSG Flow Logs observation |
 
 ## Security Metrics
+
+Historical values and targets below are retained without remeasurement.
 
 | Metric                   | Current    | Target      |
 |--------------------------|------------|-------------|

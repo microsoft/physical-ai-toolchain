@@ -34,11 +34,11 @@ Run component cleanup before destroying infrastructure. Follow this order to avo
 
 Cleanup scripts remove Kubernetes resources from the AKS cluster without affecting Azure infrastructure.
 
-| Script                                    | Removes                                        |
-|-------------------------------------------|------------------------------------------------|
-| `cleanup/uninstall-osmo.sh`               | OSMO control plane, backend operator, workflows |
-| `cleanup/uninstall-azureml-extension.sh`  | ML extension, compute target, FICs             |
-| `cleanup/uninstall-robotics-charts.sh`    | GPU Operator, KAI Scheduler                    |
+| Script                                   | Removes                                         |
+|------------------------------------------|-------------------------------------------------|
+| `cleanup/uninstall-osmo.sh`              | OSMO control plane, backend operator, workflows |
+| `cleanup/uninstall-azureml-extension.sh` | ML extension, compute target, FICs              |
+| `cleanup/uninstall-robotics-charts.sh`   | GPU Operator, KAI Scheduler                     |
 
 Run scripts from the `infrastructure/setup/cleanup/` directory:
 
@@ -112,7 +112,7 @@ Fastest cleanup method. Removes all resources regardless of how they were create
 
 ```bash
 # Get resource group name from Terraform outputs
-terraform output -raw resource_group | jq -r '.name'
+terraform output -json resource_group | jq -r '.name'
 
 # Delete resource group
 az group delete --name <resource-group-name> --yes --no-wait

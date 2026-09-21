@@ -1,13 +1,13 @@
 ---
 description: Configuration reference for topic recording, episode triggers, disk monitoring, and gap detection
 author: Microsoft
-ms.date: 2026-06-01
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 
 # ROS 2 Edge Recording Configuration
 
-Configuration schema for ROS 2 edge recording system controlling topic selection, episode triggers, disk usage monitoring, and data quality detection. Platform engineers prepare these configurations for factory floor operators who deploy them to edge devices.
+Configuration schema and Pydantic models for proposed ROS 2 edge recording settings. The repository validates configuration values; it does not implement a recording service, automatic triggers, frequency downsampling, per-topic compression, disk monitoring, or gap detection.
 
 ## 📋 Configuration Files
 
@@ -17,11 +17,11 @@ Configuration schema for ROS 2 edge recording system controlling topic selection
 | [recording_config.schema.json](recording_config.schema.json)         | JSON Schema for IDE autocomplete and validation   |
 | [examples/mobile-manipulator.yaml](examples/mobile-manipulator.yaml) | Mobile manipulator platform example               |
 
-Place configuration files at `config/recording_config.yaml` on edge devices. The recording service validates configuration at startup and exits with descriptive errors if validation fails.
+These files are repository-specific configuration examples, not native `ros2 bag record` input. Native recording uses explicit topic arguments and a separate MCAP writer YAML via `--storage-config-file`; see [Chunking and Compression Configuration](../../../docs/data-pipeline/chunking-compression-config.md). A future consumer must load and validate these settings explicitly.
 
 ## 🎯 Topics Configuration
 
-Topics define which ROS 2 messages to record during episodes with frequency downsampling and compression settings.
+Topics describe intended message selection, target frequency, and compression. Validating these fields does not apply them to ROS 2 recording.
 
 ### Field Reference
 
@@ -31,13 +31,15 @@ Topics define which ROS 2 messages to record during episodes with frequency down
 | `frequency_hz` | float  | required | (0, 1000]             | Target recording frequency in Hz |
 | `compression`  | string | `none`   | `none`, `lz4`, `zstd` | Compression algorithm            |
 
-### Compression Algorithms
+### Compression Choices
 
-| Algorithm | Ratio | CPU Overhead | Use Case                                    |
-|-----------|-------|--------------|---------------------------------------------|
-| `none`    | 1x    | 0%           | Uncompressed recording, maximum write speed |
-| `lz4`     | 2-3x  | <10%         | High-frequency topics (joint states, IMU)   |
-| `zstd`    | 3-5x  | 20-30%       | Images and low-frequency data               |
+| Value  | Intended choice                   |
+|--------|-----------------------------------|
+| `none` | No compression                    |
+| `lz4`  | Low-latency compression candidate |
+| `zstd` | Higher compression candidate      |
+
+Compression ratio and CPU use depend on payload, codec settings, and hardware. Measure them on representative recordings; these schema values neither configure the MCAP writer nor guarantee a performance level.
 
 ### Example
 
@@ -54,7 +56,7 @@ topics:
 
 ## 🎬 Trigger Configuration
 
-Triggers control episode start/stop. Configure one trigger type per recording session.
+The schema accepts one trigger configuration per recording session. No trigger listener or episode start/stop implementation is provided.
 
 ### GPIO Trigger
 
@@ -75,7 +77,7 @@ trigger:
 
 ### Position Trigger
 
-Episodes start when robot reaches target pose within tolerance.
+Position-trigger settings describe joint indices and tolerances. The schema checks matching array lengths, not robot motion or target-pose detection.
 
 | Name            | Type           | Default  | Valid Range  | Description                                      |
 |-----------------|----------------|----------|--------------|--------------------------------------------------|
@@ -111,14 +113,14 @@ trigger:
 
 ## 💾 Disk Usage Thresholds
 
-Disk monitoring prevents storage exhaustion during recording sessions.
+Disk thresholds express intended monitoring limits; they do not install or run a disk monitor.
 
 | Name               | Type    | Default | Valid Range | Description                   |
 |--------------------|---------|---------|-------------|-------------------------------|
 | `warning_percent`  | integer | 80      | [0, 100]    | Warning threshold percentage  |
 | `critical_percent` | integer | 95      | [0, 100]    | Critical threshold percentage |
 
-Validation enforces `warning_percent < critical_percent`. Recording system logs warnings when disk usage exceeds `warning_percent` and halts new episodes when usage exceeds `critical_percent`.
+Validation enforces `warning_percent < critical_percent`. Warning logs and recording shutdown require a separate runtime implementation; these values alone do not prevent disk exhaustion.
 
 ```yaml
 disk_thresholds:
@@ -128,14 +130,14 @@ disk_thresholds:
 
 ## 🔍 Gap Detection
 
-Gap detection identifies missing messages during recording for quality assurance.
+Gap-detection settings describe intended quality checks for missing messages.
 
 | Name           | Type   | Default   | Valid Range                    | Description                             |
 |----------------|--------|-----------|--------------------------------|-----------------------------------------|
 | `threshold_ms` | float  | 100.0     | >0                             | Gap detection threshold in milliseconds |
 | `severity`     | string | `warning` | `warning`, `error`, `critical` | Severity level for gap events           |
 
-The system tracks last message timestamp per topic and flags gaps exceeding `threshold_ms`. Gap events are logged with configured severity and stored in episode metadata for post-processing analysis.
+The model validates the positive threshold and allowed severity. Timestamp tracking, event logging, and episode metadata persistence are not implemented by this configuration package.
 
 ```yaml
 gap_detection:
@@ -147,7 +149,7 @@ gap_detection:
 
 ### UR10E 6-DOF Arm
 
-Default configuration in [recording_config.yaml](recording_config.yaml) records joint states, RGB camera, and IMU data from a Universal Robots UR10E arm with GPIO trigger.
+Default configuration in [recording_config.yaml](recording_config.yaml) describes joint states, RGB camera, and IMU topics for a Universal Robots UR10E arm with a proposed GPIO trigger.
 
 ### Mobile Manipulator
 
@@ -155,7 +157,7 @@ Example in [examples/mobile-manipulator.yaml](examples/mobile-manipulator.yaml) 
 
 ## ✅ Validation
 
-Configuration files are validated using Pydantic models at service startup. Validation is fail-fast: the service exits immediately with descriptive error messages if configuration is invalid.
+Call `RecordingConfig.model_validate()` to validate a loaded mapping. Invalid input raises `ValidationError`; there is no repository-owned recording-service startup hook. The `output_dir` must be an absolute path to an existing writable directory on the machine doing validation.
 
 ### Validation Rules
 
@@ -163,7 +165,7 @@ Configuration files are validated using Pydantic models at service startup. Vali
 |--------------------|--------------------------------------------------------------|
 | Topic name format  | `Topic name must start with /: <name>`                       |
 | Topic uniqueness   | `Duplicate topic names found: [<names>]`                     |
-| Frequency range    | `frequency_hz out of range: <value>`                         |
+| Frequency range    | Pydantic numeric constraints: greater than 0, at most 1000   |
 | Threshold ordering | `Warning threshold (<n>%) must be less than critical (<m>%)` |
 | Array length match | `Tolerance count (<n>) must match joint index count (<m>)`   |
 
@@ -177,17 +179,22 @@ IDE autocomplete and validation are enabled via JSON Schema. Add this directive 
 
 VS Code with the YAML extension (redhat.vscode-yaml) provides inline validation and field suggestions.
 
-### Runtime Example
+### Model Validation Example
+
+Run with the `data-pipeline` Python 3.12+ environment and `data-pipeline/capture/` on the Python import path (for example, as the working directory). This mapping represents loaded configuration; it does not launch recording. Create the output directory separately before validation.
 
 ```python
-from pathlib import Path
-import yaml
-from pydantic import ValidationError
-from src.common.config_models import RecordingConfig
+from __future__ import annotations
 
-config_path = Path("config/recording_config.yaml")
-with config_path.open() as f:
-    config_data = yaml.safe_load(f)
+from pydantic import ValidationError
+
+from models.config_models import RecordingConfig
+
+config_data = {
+  "topics": [{"name": "/joint_states", "frequency_hz": 100.0}],
+  "trigger": {"type": "gpio", "pin": 17},
+  "output_dir": "/data/recordings",
+}
 
 try:
     config = RecordingConfig.model_validate(config_data)
@@ -198,7 +205,7 @@ except ValidationError as exc:
     raise SystemExit(1)
 ```
 
-## � Schema Maintenance
+## 🔧 Schema Maintenance
 
 The JSON Schema (`recording_config.schema.json`) is a **derived artifact** generated from pydantic models in `data-pipeline/capture/models/config_models.py`.
 
@@ -214,27 +221,24 @@ Regenerate the schema whenever you modify:
 ### How to Regenerate Schema
 
 ```bash
-# Run the schema generation script
-pip install 'pydantic==2.12.5' && PYTHONPATH=. python config/generate_config_schema.py
+# Run from the repository root using the data-pipeline lock
+uv run --project data-pipeline --frozen python data-pipeline/capture/config/generate_config_schema.py
 
 # Verify the updated schema
-git diff config/recording_config.schema.json
+git diff -- data-pipeline/capture/config/recording_config.schema.json
 ```
 
 The schema generation script:
 
-1. Imports pydantic models from `src.common.config_models`
+1. Adds `data-pipeline/capture/` to its import path and imports `models.config_models`
 2. Calls `RecordingConfig.model_json_schema()`
-3. Writes formatted JSON to `config/recording_config.schema.json`
+3. Writes formatted JSON to `data-pipeline/capture/config/recording_config.schema.json`
 
-### CI/CD Validation
+### Validation Limits
 
-The CI/CD pipeline validates that the schema is up-to-date with the pydantic models. If you see a validation failure, regenerate the schema using the command above.
-
-```txt
-```
+Review the generated schema diff and run the existing capture tests after model changes. JSON Schema describes field constraints, but Python validators additionally check relationships and the local output directory; IDE validation alone does not establish runtime readiness.
 
 ## 🔗 Related Documentation
 
-* [LeRobot Integration](../docs/inference/lerobot-inference.md) - Dataset structure and feature mapping
+* [LeRobot Training](../../../docs/training/lerobot-training.md) - Dataset and policy training guidance
 * [AzureML Evaluation Job Debugging](../../../docs/evaluation/azureml-evaluation-job-debugging.md) - Training pipeline integration
