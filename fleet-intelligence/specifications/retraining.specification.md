@@ -14,12 +14,12 @@ Loop closure here is **not** a single leap. It decomposes onto the
 [autonomy ladder (T5.0–T5.3)](../../docs/design/tier-model.md#the-autonomy-ladder-t50t53), graded by how
 much of the retraining decision a human delegates:
 
-| Rung | Decision authority                                                 | Human role                 | Status       |
-|------|--------------------------------------------------------------------|----------------------------|--------------|
-| T5.0 | Gated retraining: system surfaces signals only.                    | Human triggers every cycle | Not built    |
-| T5.1 | Human-in-the-loop / active learning: system proposes what/when.    | Human approves each cycle  | Ad-hoc (Hex) |
-| T5.2 | Continual learning: system retrains on a schedule or trigger.      | Human reviews pre-deploy   | Not built    |
-| T5.3 | Autonomous closed-loop: system detects, retrains, gates, deploys.  | None (fully autonomous)    | Not built    |
+| Rung | Decision authority                                                | Human role                 | Status       |
+|------|-------------------------------------------------------------------|----------------------------|--------------|
+| T5.0 | Gated retraining: system surfaces signals only.                   | Human triggers every cycle | Not built    |
+| T5.1 | Human-in-the-loop / active learning: system proposes what/when.   | Human approves each cycle  | Ad-hoc (Hex) |
+| T5.2 | Continual learning: system retrains on a schedule or trigger.     | Human reviews pre-deploy   | Not built    |
+| T5.3 | Autonomous closed-loop: system detects, retrains, gates, deploys. | None (fully autonomous)    | Not built    |
 
 The "Trigger Criteria" below (manual override, scheduled, drift-driven) are the mechanisms that realize
 these rungs; the rung in effect is determined by who holds the trigger authority, not by the mechanism.
