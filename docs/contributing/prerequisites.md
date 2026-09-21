@@ -288,7 +288,7 @@ the required validation path.
 
 Run these commands before committing:
 
-Run package commands from the repository root after `npm install`.
+Run package commands from the repository root after `npm ci`.
 
 **Terraform:**
 
