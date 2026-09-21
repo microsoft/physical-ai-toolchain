@@ -11,11 +11,12 @@ requires-python = ">=3.12"
 #   uv lock
 #
 # This file is a fork of training/il/lerobot/pyproject.toml. The VLA fork
-# differs in two ways:
+# differs in three ways:
 #   1. lerobot is installed with the `[dataset,pi]` extras, which provide the
 #      dataset/video runtime plus pi0 / pi0_fast / pi05 dependencies.
 #   2. transformers and scipy are pinned as direct dependencies so they
 #      appear in the compiled lockfile (the IL lockfile excludes them).
+#   3. matplotlib is included for offline replay evaluation plots.
 #
 # Keep override-dependencies and other shared pins in sync with IL when
 # bumping lerobot, azureml-mlflow, or any other co-versioned package.
@@ -35,6 +36,7 @@ dependencies = [
     # Track azure-ai-ml release notes; bump together when 4.x support lands.
     "marshmallow==3.26.2",
     "mlflow-skinny==3.15.2",
+    "matplotlib==3.11.1",
     "packaging==26.3",
     # Global prerelease resolution would otherwise select pydantic, sentry-sdk,
     # and hf-xet alpha/dev releases; pin stable versions unless a direct

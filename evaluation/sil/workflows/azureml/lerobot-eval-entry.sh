@@ -11,10 +11,27 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "
 # shellcheck source=training/il/scripts/lerobot/lerobot-azureml.sh
 source "${REPO_ROOT}/training/il/scripts/lerobot/lerobot-azureml.sh"
 
-ensure_lerobot_runtime "${LEROBOT_EVAL_VENV:-/opt/lerobot-eval-venv}" "${REPO_ROOT}/training/il/lerobot" av azure.ai.ml azure.identity azure.storage.blob azureml.mlflow lerobot matplotlib mlflow pyarrow
+lerobot_project="${REPO_ROOT}/training/il/lerobot"
+case "${POLICY_TYPE:-act}" in
+  pi0|pi0_fast|pi05)
+    lerobot_project="${REPO_ROOT}/training/vla/lerobot"
+    ;;
+esac
+
+ensure_lerobot_runtime "${LEROBOT_EVAL_VENV:-/opt/lerobot-eval-venv}" "$lerobot_project" av azure.ai.ml azure.identity azure.storage.blob azureml.mlflow lerobot matplotlib mlflow pyarrow transformers
 
 if [[ -n "${AZURE_ML_OUTPUT_eval_results:-}" ]]; then
   export OUTPUT_DIR="${AZURE_ML_OUTPUT_eval_results}"
+fi
+
+if [[ -n "${AZURE_ML_INPUT_dataset_asset:-}" ]]; then
+  export DATASET_DIR="${AZURE_ML_INPUT_dataset_asset}"
+  echo "Using AzureML dataset asset at: ${DATASET_DIR}"
+fi
+
+if [[ -n "${AZURE_ML_INPUT_model_asset:-}" ]]; then
+  export POLICY_REPO_ID="${AZURE_ML_INPUT_model_asset}"
+  echo "Using AzureML model asset at: ${POLICY_REPO_ID}"
 fi
 
 # HuggingFace auth
@@ -23,7 +40,7 @@ if [[ -n "${HF_TOKEN:-}" ]]; then
 fi
 
 # Download model from AzureML registry if specified
-if [[ -n "${AML_MODEL_NAME:-}" && "${AML_MODEL_NAME}" != "none" && -n "${AML_MODEL_VERSION:-}" && "${AML_MODEL_VERSION}" != "none" ]]; then
+if [[ -z "${AZURE_ML_INPUT_model_asset:-}" && -n "${AML_MODEL_NAME:-}" && "${AML_MODEL_NAME}" != "none" && -n "${AML_MODEL_VERSION:-}" && "${AML_MODEL_VERSION}" != "none" ]]; then
   echo "Downloading model from AzureML registry: ${AML_MODEL_NAME}:${AML_MODEL_VERSION}..."
 
   python3 "${REPO_ROOT}/evaluation/sil/scripts/download_aml_model.py"

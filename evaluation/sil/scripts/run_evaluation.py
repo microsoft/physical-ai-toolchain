@@ -7,6 +7,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -270,10 +271,53 @@ def plot_aggregate_summary(episode_metrics):
     return fig
 
 
-def _find_data_file(ds_dir: str, ep_idx: int) -> str | None:
-    info_path = os.path.join(ds_dir, "meta", "info.json")
-    with open(info_path) as f:
-        ds_info = json.load(f)
+def _load_episode_records(ds_dir: str) -> list[dict[str, Any]]:
+    import pyarrow.parquet as pq
+
+    episodes_dir = Path(ds_dir) / "meta" / "episodes"
+    records = []
+    for path in sorted(episodes_dir.glob("chunk-*/file-*.parquet")):
+        records.extend(pq.read_table(path).to_pylist())
+    return records
+
+
+def _find_episode_record(
+    episode_records: list[dict[str, Any]],
+    ep_idx: int,
+) -> dict[str, Any] | None:
+    return next(
+        (record for record in episode_records if record.get("episode_index") == ep_idx),
+        None,
+    )
+
+
+def _find_data_file(
+    ds_dir: str,
+    ep_idx: int,
+    ds_info: dict[str, Any],
+    episode_records: list[dict[str, Any]],
+) -> tuple[str, int, int | None] | None:
+    episode_record = _find_episode_record(episode_records, ep_idx)
+    data_path_template = ds_info.get("data_path")
+    if episode_record and isinstance(data_path_template, str):
+        chunk_index = int(episode_record["data/chunk_index"])
+        file_index = int(episode_record["data/file_index"])
+        path = Path(ds_dir) / data_path_template.format(
+            chunk_index=chunk_index,
+            file_index=file_index,
+        )
+        matching_records = [
+            record
+            for record in episode_records
+            if record.get("data/chunk_index") == chunk_index
+            and record.get("data/file_index") == file_index
+        ]
+        file_start = min(int(record["dataset_from_index"]) for record in matching_records)
+        row_start = int(episode_record["dataset_from_index"]) - file_start
+        row_end = int(episode_record["dataset_to_index"]) - file_start
+        if path.exists():
+            return str(path), row_start, row_end
+
     chunks_size = ds_info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
@@ -282,19 +326,40 @@ def _find_data_file(ds_dir: str, ep_idx: int) -> str | None:
     ]
     for c in candidates:
         if os.path.exists(c):
-            return c
+            return c, 0, None
     return None
 
 
-def _find_video_file(ds_dir: str, vk: str, ep_idx: int) -> str | None:
-    info_path = os.path.join(ds_dir, "meta", "info.json")
-    with open(info_path) as f:
-        ds_info = json.load(f)
+def _find_video_file(
+    ds_dir: str,
+    video_key: str,
+    ep_idx: int,
+    ds_info: dict[str, Any],
+    episode_records: list[dict[str, Any]],
+) -> str | None:
+    episode_record = _find_episode_record(episode_records, ep_idx)
+    video_path_template = ds_info.get("video_path")
+    chunk_key = f"videos/{video_key}/chunk_index"
+    file_key = f"videos/{video_key}/file_index"
+    if (
+        episode_record
+        and isinstance(video_path_template, str)
+        and chunk_key in episode_record
+        and file_key in episode_record
+    ):
+        path = Path(ds_dir) / video_path_template.format(
+            video_key=video_key,
+            chunk_index=int(episode_record[chunk_key]),
+            file_index=int(episode_record[file_key]),
+        )
+        if path.exists():
+            return str(path)
+
     chunks_size = ds_info.get("chunks_size", 1000)
     ep_chunk = ep_idx // chunks_size
     candidates = [
-        os.path.join(ds_dir, "videos", vk, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
-        os.path.join(ds_dir, "videos", vk, f"chunk-{ep_idx:03d}", f"file-{ep_idx:03d}.mp4"),
+        os.path.join(ds_dir, "videos", video_key, f"chunk-{ep_chunk:03d}", f"episode_{ep_idx:06d}.mp4"),
+        os.path.join(ds_dir, "videos", video_key, f"chunk-{ep_chunk:03d}", f"file-{ep_idx:03d}.mp4"),
     ]
     for c in candidates:
         if os.path.exists(c):
@@ -302,16 +367,58 @@ def _find_video_file(ds_dir: str, vk: str, ep_idx: int) -> str | None:
     return None
 
 
+def _load_policy(
+    policy_repo_id: str,
+    policy_revision: str | None,
+    device: torch.device,
+):
+    from lerobot.configs import PreTrainedConfig
+    from lerobot.policies import get_policy_class, make_pre_post_processors
+
+    policy_config = PreTrainedConfig.from_pretrained(
+        policy_repo_id,
+        revision=policy_revision,
+    )
+    policy_config.device = str(device)
+    policy_class = get_policy_class(policy_config.type)
+    policy = policy_class.from_pretrained(
+        policy_repo_id,
+        config=policy_config,
+        revision=policy_revision,
+    )
+    policy.to(device)
+    policy.eval()
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=policy_config,
+        pretrained_path=policy_repo_id,
+        pretrained_revision=policy_revision,
+        preprocessor_overrides={"device_processor": {"device": str(device)}},
+    )
+    return policy_config.type, policy, preprocessor, postprocessor
+
+
+def _prepare_observation(
+    state: np.ndarray,
+    images: dict[str, np.ndarray],
+    device: torch.device,
+    task: str,
+) -> dict:
+    from lerobot.policies.utils import prepare_observation_for_inference
+
+    observation = {"observation.state": state, **images}
+    return prepare_observation_for_inference(observation, device, task=task)
+
+
 def main() -> int:
     global JOINT_NAMES
 
     import av
     import pyarrow.parquet as pq
-    from lerobot.policies.act.modeling_act import ACTPolicy
 
     policy_repo_id = os.environ.get("POLICY_REPO_ID", "").strip()
     policy_type = os.environ.get("POLICY_TYPE", "act")
     dataset_repo_id = os.environ.get("DATASET_REPO_ID", "")
+    task = os.environ.get("TASK_PROMPT", "").strip()
     policy_revision = os.environ.get("POLICY_REVISION", "").strip() or None
     dataset_revision = os.environ.get("DATASET_REVISION") or None
     eval_episodes = int(os.environ.get("EVAL_EPISODES", "10"))
@@ -351,39 +458,52 @@ def main() -> int:
     with open(os.path.join(dataset_dir, "meta", "info.json")) as f:
         info = json.load(f)
     fps = info["fps"]
+    episode_records = _load_episode_records(dataset_dir)
 
     # Resolve dimension labels from the dataset's action feature names so plots
     # carry real joint names; fall back to generic dim_N labels otherwise.
     action_names = info.get("features", {}).get("action", {}).get("names")
     JOINT_NAMES = list(action_names) if isinstance(action_names, list) else []
 
-    # Identify video key from features
+    # Identify video keys from features
     features = info.get("features", {})
     video_keys = [k for k, v in features.items() if v.get("dtype") in ("video", "image")]
-    # Prefer an observation.images.* key for a deterministic choice on
-    # multi-camera datasets; fall back to the first video/image feature.
-    image_key = next(
-        (k for k in video_keys if k.startswith("observation.images.")),
-        video_keys[0] if video_keys else "observation.images.color",
-    )
+    image_keys = [key for key in video_keys if key.startswith("observation.images.")] or video_keys
+    if not image_keys:
+        print("[ERROR] Dataset has no video or image observation features")
+        return 1
 
-    # Load policy (normalization is handled internally by select_action)
+    # Load policy and its saved normalization/tokenization processors.
     print(f"[INFO] Loading policy from: {policy_repo_id}")
     try:
         policy_revision = resolve_hf_revision(policy_repo_id, policy_revision, revision_name="POLICY_REVISION")
     except ValueError as exc:
         print(f"[ERROR] {exc}")
         return 1
-    policy = ACTPolicy.from_pretrained(policy_repo_id, revision=policy_revision)
-    policy.to(device)
+    loaded_policy_type, policy, preprocessor, postprocessor = _load_policy(
+        policy_repo_id,
+        policy_revision,
+        device,
+    )
+    if loaded_policy_type != policy_type:
+        print(
+            f"[ERROR] Requested policy type {policy_type!r} does not match "
+            f"checkpoint type {loaded_policy_type!r}"
+        )
+        return 1
+    if loaded_policy_type in {"pi0", "pi0_fast", "pi05"} and not task:
+        print("[ERROR] TASK_PROMPT is required for PI-family policy evaluation")
+        return 1
 
     # Determine episode range
     episodes_meta_path = os.path.join(dataset_dir, "meta", "episodes.jsonl")
     if os.path.exists(episodes_meta_path):
         with open(episodes_meta_path) as f:
             total_episodes = sum(1 for _ in f)
+    elif episode_records:
+        total_episodes = len(episode_records)
     else:
-        total_episodes = eval_episodes
+        total_episodes = int(info.get("total_episodes", eval_episodes))
     num_episodes = min(eval_episodes, total_episodes)
 
     # Start MLflow run
@@ -396,6 +516,7 @@ def main() -> int:
                 "policy_repo_id": policy_repo_id,
                 "policy_type": policy_type,
                 "dataset_repo_id": dataset_repo_id,
+                "task": task,
                 "eval_episodes": num_episodes,
                 "device": str(device),
                 "fps": fps,
@@ -409,43 +530,54 @@ def main() -> int:
         print(f"Episode {ep}")
         print(f"{'=' * 60}")
 
-        data_file = _find_data_file(dataset_dir, ep)
-        if not data_file:
+        data_source = _find_data_file(dataset_dir, ep, info, episode_records)
+        if not data_source:
             print(f"  [WARNING] No data file for episode {ep}, skipping")
             continue
+        data_file, row_start, row_end = data_source
         table = pq.read_table(data_file)
+        if row_end is not None:
+            table = table.slice(row_start, row_end - row_start)
         data = {col: table[col].to_pylist() for col in table.column_names}
         n_frames = len(data["timestamp"])
 
-        # Load video frames
-        video_file = _find_video_file(dataset_dir, image_key, ep)
-        if not video_file:
-            print(f"  [WARNING] No video for episode {ep} ({image_key}), skipping")
+        # Load all camera streams used by the policy.
+        video_files = {
+            key: _find_video_file(dataset_dir, key, ep, info, episode_records)
+            for key in image_keys
+        }
+        missing_video_keys = [key for key, path in video_files.items() if not path]
+        if missing_video_keys:
+            print(f"  [WARNING] Missing videos for episode {ep}: {', '.join(missing_video_keys)}, skipping")
             continue
-
-        container = av.open(video_file)
-        stream = container.streams.video[0]
-        frames = [av_frame.to_ndarray(format="rgb24") for av_frame in container.decode(stream)]
-        container.close()
+        frames_by_key = {}
+        for image_key, video_file in video_files.items():
+            container = av.open(video_file)
+            stream = container.streams.video[0]
+            frames_by_key[image_key] = [
+                av_frame.to_ndarray(format="rgb24") for av_frame in container.decode(stream)
+            ]
+            container.close()
 
         policy.reset()
+        preprocessor.reset()
+        postprocessor.reset()
         actions_predicted = []
         actions_ground_truth = []
         inference_times_list = []
 
-        for step in range(min(n_frames - 1, len(frames))):
+        available_frames = min(len(frames) for frames in frames_by_key.values())
+        for step in range(min(n_frames - 1, available_frames)):
             state = np.array(data["observation.state"][step], dtype=np.float32)
             gt_action = np.array(data["action"][step], dtype=np.float32)
-            image = frames[step]
-
-            obs = {
-                "observation.state": torch.from_numpy(state).float().unsqueeze(0).to(device),
-                image_key: (torch.from_numpy(image).float().permute(2, 0, 1) / 255.0).unsqueeze(0).to(device),
-            }
+            images = {key: frames[step] for key, frames in frames_by_key.items()}
+            obs = _prepare_observation(state, images, device, task)
 
             t_start = time.time()
             with torch.inference_mode():
+                obs = preprocessor(obs)
                 action = policy.select_action(obs)
+                action = postprocessor(action)
             t_inf = time.time() - t_start
             inference_times_list.append(t_inf)
 
@@ -512,14 +644,18 @@ def main() -> int:
             mlflow.log_artifact(str(npz_path), "predictions")
             print(f"  Logged 4 plots + metrics to MLflow for episode {ep}")
 
+    if not all_episode_metrics:
+        if mlflow_enable:
+            import mlflow
+
+            mlflow.end_run(status="FAILED")
+        raise RuntimeError("Evaluation produced no episode metrics")
+
     # Aggregate metrics
-    if all_episode_metrics:
-        agg_mse = float(np.mean([m["mse"] for m in all_episode_metrics]))
-        agg_mae = float(np.mean([m["mae"] for m in all_episode_metrics]))
-        agg_inf_ms = float(np.mean([m["avg_inference_ms"] for m in all_episode_metrics]))
-        agg_throughput = float(np.mean([m["throughput_hz"] for m in all_episode_metrics]))
-    else:
-        agg_mse = agg_mae = agg_inf_ms = agg_throughput = 0.0
+    agg_mse = float(np.mean([m["mse"] for m in all_episode_metrics]))
+    agg_mae = float(np.mean([m["mae"] for m in all_episode_metrics]))
+    agg_inf_ms = float(np.mean([m["avg_inference_ms"] for m in all_episode_metrics]))
+    agg_throughput = float(np.mean([m["throughput_hz"] for m in all_episode_metrics]))
 
     results = {
         "job_name": job_name,
