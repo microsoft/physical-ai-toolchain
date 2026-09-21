@@ -109,6 +109,17 @@ describe('getDetections', () => {
     expect(result).toBeNull()
   })
 
+  it('preserves an uncached null response through the real API client', async () => {
+    const { apiRequest: realApiRequest } =
+      await vi.importActual<typeof import('@/lib/api-client')>('@/lib/api-client')
+    mockApiRequest.mockImplementationOnce(realApiRequest)
+    mockFetch.mockResolvedValueOnce(new Response('null', { status: 200 }))
+
+    const result = await getDetections('ds-1', 3)
+
+    expect(result).toBeNull()
+  })
+
   it('preserves semantic class summary keys while camelCasing the response', async () => {
     const raw = {
       total_frames: 1,
