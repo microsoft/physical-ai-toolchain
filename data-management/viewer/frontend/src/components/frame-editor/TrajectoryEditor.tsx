@@ -23,6 +23,7 @@ interface TrajectoryEditorProps {
 
 interface AxisInputProps {
   label: string
+  accessibleLabel: string
   value: number
   delta: number
   onDeltaChange: (delta: number) => void
@@ -32,7 +33,7 @@ interface AxisInputProps {
 /**
  * Individual axis input with delta adjustment.
  */
-function AxisInput({ label, value, delta, onDeltaChange, color }: AxisInputProps) {
+function AxisInput({ label, accessibleLabel, value, delta, onDeltaChange, color }: AxisInputProps) {
   const adjustedValue = value + delta
   // Local state for text input to allow partial typing (e.g., "-" or "0.")
   const [inputValue, setInputValue] = useState(delta.toFixed(4))
@@ -69,6 +70,7 @@ function AxisInput({ label, value, delta, onDeltaChange, color }: AxisInputProps
       <div className="flex items-center gap-2">
         <input
           type="range"
+          aria-label={accessibleLabel}
           value={delta}
           onChange={(e) => onDeltaChange(parseFloat(e.target.value))}
           min={-0.5}
@@ -78,6 +80,7 @@ function AxisInput({ label, value, delta, onDeltaChange, color }: AxisInputProps
         />
         <Input
           type="number"
+          aria-label={accessibleLabel}
           value={inputValue}
           onChange={handleInputChange}
           onBlur={handleInputBlur}
@@ -181,6 +184,7 @@ function ArmEditor({
       <div className="space-y-2">
         <AxisInput
           label="X"
+          accessibleLabel={title + ' X delta'}
           value={positions[posIndices[0]] ?? 0}
           delta={currentDelta[0]}
           onDeltaChange={(v) => handleAxisChange(0, v)}
@@ -188,6 +192,7 @@ function ArmEditor({
         />
         <AxisInput
           label="Y"
+          accessibleLabel={title + ' Y delta'}
           value={positions[posIndices[1]] ?? 0}
           delta={currentDelta[1]}
           onDeltaChange={(v) => handleAxisChange(1, v)}
@@ -195,6 +200,7 @@ function ArmEditor({
         />
         <AxisInput
           label="Z"
+          accessibleLabel={title + ' Z delta'}
           value={positions[posIndices[2]] ?? 0}
           delta={currentDelta[2]}
           onDeltaChange={(v) => handleAxisChange(2, v)}
@@ -213,6 +219,7 @@ function ArmEditor({
         <div className="flex items-center gap-2">
           <input
             type="range"
+            aria-label={title + ' Gripper value'}
             value={currentGripperValue}
             onChange={(e) => onGripperChange(parseFloat(e.target.value))}
             min={0}
@@ -222,6 +229,7 @@ function ArmEditor({
           />
           <Input
             type="number"
+            aria-label={title + ' Gripper value'}
             value={gripperInputValue}
             onChange={handleGripperInputChange}
             onBlur={handleGripperInputBlur}

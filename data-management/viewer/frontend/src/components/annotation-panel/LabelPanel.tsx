@@ -133,10 +133,10 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
           prefix: importPrefix.trim() || undefined,
           overwrite: shouldOverwrite,
         })
-        const added = result.labels_added.length
+        const added = result.data.labels_added.length
         setImportMessage(
           `Imported ${added} ${ANALYSIS_FIELD_LABELS[field]} label${added === 1 ? '' : 's'} ` +
-            `across ${result.episodes_updated} episode${result.episodes_updated === 1 ? '' : 's'}.`,
+            `across ${result.data.episodes_updated} episode${result.data.episodes_updated === 1 ? '' : 's'}.`,
         )
         setErrorMessage(null)
       } catch (error) {
@@ -172,6 +172,7 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
             >
               <button
                 type="button"
+                aria-pressed={isSelected}
                 onClick={() => void handleToggleLabel(label)}
                 className="focus-visible:ring-ring inline-flex items-center gap-1 rounded-l-full px-2.5 py-0.5 text-xs font-semibold focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2"
               >

@@ -82,4 +82,36 @@ describe('useAnnotationWorkspaceEpisodeActions', () => {
       }),
     )
   })
+  it('does not reset episode changes when the user cancels confirmation', async () => {
+    const confirmSpy = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirmSpy)
+    const onResetEdits = vi.fn()
+    const onSetEpisodeLabels = vi.fn()
+    const { result } = renderHook(() =>
+      useAnnotationWorkspaceEpisodeActions({
+        diagnosticsEnabled: false,
+        currentDatasetId: 'dataset-1',
+        currentEpisodeIndex: 2,
+        currentEpisodeLabels: ['changed'],
+        savedLabelsForCurrentEpisode: ['saved'],
+        availableLabels: ['changed', 'saved'],
+        labelDataLoaded: true,
+        hasEdits: true,
+        onResetEdits,
+        onSetEpisodeLabels,
+        onSaveEpisodeDraft: vi.fn(),
+        onSaveEpisodeLabels: vi.fn(),
+        onRecordEvent: vi.fn(),
+        canGoNextEpisode: false,
+      }),
+    )
+
+    await act(async () => result.current.handleResetAll())
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Discard unsaved annotation, label, and frame-edit changes for this episode?',
+    )
+    expect(onResetEdits).not.toHaveBeenCalled()
+    expect(onSetEpisodeLabels).not.toHaveBeenCalled()
+  })
 })

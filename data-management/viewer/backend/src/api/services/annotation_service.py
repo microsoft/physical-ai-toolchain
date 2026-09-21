@@ -16,7 +16,7 @@ from ..models.annotations import (
     TrajectoryFlag,
 )
 from ..models.datasources import EpisodeData
-from ..storage import LocalStorageAdapter, StorageAdapter
+from ..storage import LocalStorageAdapter, StorageAdapter, VersionedValue
 
 
 class AnnotationService:
@@ -56,9 +56,23 @@ class AnnotationService:
         """
         return await self._storage.get_annotation(dataset_id, episode_idx)
 
+    async def get_annotation_versioned(
+        self,
+        dataset_id: str,
+        episode_idx: int,
+    ) -> VersionedValue[EpisodeAnnotationFile]:
+        """Get an annotation resource with its strong validator."""
+        return await self._storage.get_annotation_versioned(dataset_id, episode_idx)
+
     async def save_annotation(
-        self, dataset_id: str, episode_idx: int, annotation: EpisodeAnnotation
-    ) -> EpisodeAnnotationFile:
+        self,
+        dataset_id: str,
+        episode_idx: int,
+        annotation: EpisodeAnnotation,
+        *,
+        if_match: str | None = None,
+        if_none_match: bool = False,
+    ) -> VersionedValue[EpisodeAnnotationFile]:
         """
         Save or update an annotation for an episode.
 
@@ -74,7 +88,8 @@ class AnnotationService:
             Updated EpisodeAnnotationFile.
         """
         # Get existing annotation file or create new one
-        annotation_file = await self._storage.get_annotation(dataset_id, episode_idx)
+        current = await self._storage.get_annotation_versioned(dataset_id, episode_idx)
+        annotation_file = current.value
         if annotation_file is None:
             annotation_file = EpisodeAnnotationFile(
                 episode_index=episode_idx,
@@ -93,10 +108,23 @@ class AnnotationService:
             annotation_file.annotations.append(annotation)
 
         # Save updated file
-        await self._storage.save_annotation(dataset_id, episode_idx, annotation_file)
-        return annotation_file
+        etag = await self._storage.save_annotation(
+            dataset_id,
+            episode_idx,
+            annotation_file,
+            if_match=if_match,
+            if_none_match=if_none_match,
+        )
+        return VersionedValue(value=annotation_file, etag=etag)
 
-    async def delete_annotation(self, dataset_id: str, episode_idx: int, annotator_id: str | None = None) -> bool:
+    async def delete_annotation(
+        self,
+        dataset_id: str,
+        episode_idx: int,
+        annotator_id: str | None = None,
+        *,
+        if_match: str | None = None,
+    ) -> bool:
         """
         Delete annotations for an episode.
 
@@ -111,7 +139,7 @@ class AnnotationService:
         """
         if annotator_id is None:
             # Delete entire annotation file
-            return await self._storage.delete_annotation(dataset_id, episode_idx)
+            return await self._storage.delete_annotation(dataset_id, episode_idx, if_match=if_match)
 
         # Remove specific annotator's contribution
         annotation_file = await self._storage.get_annotation(dataset_id, episode_idx)
@@ -126,10 +154,10 @@ class AnnotationService:
 
         if len(annotation_file.annotations) == 0:
             # No annotations left, delete file
-            return await self._storage.delete_annotation(dataset_id, episode_idx)
+            return await self._storage.delete_annotation(dataset_id, episode_idx, if_match=if_match)
 
         # Save updated file
-        await self._storage.save_annotation(dataset_id, episode_idx, annotation_file)
+        await self._storage.save_annotation(dataset_id, episode_idx, annotation_file, if_match=if_match)
         return True
 
     async def run_auto_analysis(self, dataset_id: str, episode_idx: int, episode: EpisodeData) -> AutoQualityAnalysis:

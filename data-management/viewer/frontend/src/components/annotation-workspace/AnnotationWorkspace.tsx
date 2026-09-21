@@ -1,5 +1,6 @@
 import { AnnotationWorkspaceContent } from '@/components/annotation-workspace/AnnotationWorkspaceContent'
 import { AnnotationWorkspaceEmptyState } from '@/components/annotation-workspace/AnnotationWorkspaceEmptyState'
+import { DraftConflictDialog } from '@/components/annotation-workspace/DraftConflictDialog'
 import { useAnnotationWorkspaceShell } from '@/components/annotation-workspace/useAnnotationWorkspaceShell'
 
 interface AnnotationWorkspaceProps {
@@ -35,8 +36,18 @@ export function AnnotationWorkspace({
   })
 
   if (!shell.currentDataset || !shell.currentEpisode) {
-    return <AnnotationWorkspaceEmptyState />
+    return (
+      <>
+        <AnnotationWorkspaceEmptyState />
+        <DraftConflictDialog />
+      </>
+    )
   }
 
-  return <AnnotationWorkspaceContent shell={shell} />
+  return (
+    <>
+      <AnnotationWorkspaceContent shell={shell} />
+      <DraftConflictDialog />
+    </>
+  )
 }

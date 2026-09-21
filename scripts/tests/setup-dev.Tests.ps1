@@ -253,3 +253,83 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
         } | Should -Throw 'Failed to install uv v0.11.21'
     }
 }
+
+$script:GitBashPath = Join-Path $env:ProgramFiles 'Git/bin/bash.exe'
+$script:BashAvailable = (Test-Path -LiteralPath $script:GitBashPath) -or
+    $null -ne (Get-Command bash -ErrorAction SilentlyContinue)
+
+Describe 'Bash launcher accessibility contracts' -Tag 'Unit' {
+    BeforeAll {
+        $script:RepositoryRoot = Resolve-Path (Join-Path $PSScriptRoot '../..')
+        $gitBash = if ($env:ProgramFiles) {
+            Join-Path $env:ProgramFiles 'Git/bin/bash.exe'
+        }
+        else {
+            $null
+        }
+        $script:BashExecutable = if ($gitBash -and (Test-Path -LiteralPath $gitBash)) {
+            $gitBash
+        }
+        else {
+            'bash'
+        }
+        function ConvertTo-BashPath {
+            param([string]$Path)
+
+            $normalized = $Path.Replace('\', '/')
+            if ($script:BashExecutable -ne 'bash') {
+                return $normalized
+            }
+            if ($normalized -match '^([A-Za-z]):/(.*)$') {
+                return "/mnt/$($Matches[1].ToLowerInvariant())/$($Matches[2])"
+            }
+            return $normalized
+        }
+
+        $script:SetupDevBashPath = ConvertTo-BashPath (Join-Path $script:RepositoryRoot 'setup-dev.sh')
+        $script:ViewerStartPath = ConvertTo-BashPath (
+            Join-Path $script:RepositoryRoot 'data-management/viewer/start.sh'
+        )
+    }
+
+    It 'Provides setup help without requiring deployment tools' -Skip:(-not $script:BashAvailable) {
+        $output = & $script:BashExecutable $script:SetupDevBashPath --help 2>&1
+
+        $LASTEXITCODE | Should -Be 0
+        $output -join "`n" | Should -Match 'Usage:'
+        $output -join "`n" | Should -Match '--config-preview'
+    }
+
+    It 'Previews setup configuration without mutation' -Skip:(-not $script:BashAvailable) {
+        $output = & $script:BashExecutable $script:SetupDevBashPath --config-preview 2>&1
+
+        $LASTEXITCODE | Should -Be 0
+        $output -join "`n" | Should -Match 'Configuration Preview'
+        $output -join "`n" | Should -Match 'Mutation.*None'
+    }
+
+    It 'Previews Viewer configuration without ANSI output when NO_COLOR is present' -Skip:(-not $script:BashAvailable) {
+        $originalNoColor = $env:NO_COLOR
+        try {
+            $env:NO_COLOR = '1'
+            $output = & $script:BashExecutable $script:ViewerStartPath --config-preview 2>&1
+        }
+        finally {
+            $env:NO_COLOR = $originalNoColor
+        }
+
+        $LASTEXITCODE | Should -Be 0
+        $text = $output -join "`n"
+        $text | Should -Match 'Configuration Preview'
+        $text | Should -Match 'Mutation.*None'
+        $text | Should -Not -Match ([regex]::Escape([char]27))
+    }
+
+    It 'Rejects an unknown Viewer option with visible recovery guidance' -Skip:(-not $script:BashAvailable) {
+        $output = & $script:BashExecutable $script:ViewerStartPath --not-a-real-option 2>&1
+
+        $LASTEXITCODE | Should -Not -Be 0
+        $output -join "`n" | Should -Match 'Unknown option.*--not-a-real-option'
+        $output -join "`n" | Should -Match 'Usage:'
+    }
+}
