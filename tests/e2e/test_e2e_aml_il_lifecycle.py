@@ -25,6 +25,7 @@ from tests.e2e._aml import (
     AzureMLWorkspace,
     aml_lerobot_policy_source_from_model,
     archive_all_model_versions,
+    assert_aml_lerobot_eval_artifact_contract,
     assert_job_has_checkpoint,
     assert_job_snapshot_contains_only_training,
     cancel_aml_job,
@@ -139,6 +140,8 @@ def test_aml_il_lifecycle_e2e(
     wait_until_aml_started(eval_job, repo_root, timeout_minutes=15, poll_interval_seconds=30)
     log_e2e(f"Waiting for AzureML LeRobot eval job {eval_job.name} to complete")
     wait_until_aml_completed(eval_job, repo_root, timeout_minutes=30, poll_interval_seconds=30)
+    log_e2e("Validating AzureML LeRobot eval artifact contract")
+    assert_aml_lerobot_eval_artifact_contract(eval_job, eval_episodes=1)
     log_e2e("Validating AzureML LeRobot eval MLflow tracking")
     assert_aml_lerobot_eval_has_mlflow_tracking(eval_job, aml_workspace)
     log_e2e("AzureML LeRobot lifecycle e2e test finished successfully")
