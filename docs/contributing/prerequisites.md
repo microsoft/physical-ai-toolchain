@@ -3,7 +3,7 @@ sidebar_position: 6
 title: Prerequisites and Build Validation
 description: Required tools, Azure access, NGC credentials, and build validation commands for contributing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-09-21
 ms.topic: how-to
 keywords:
   - prerequisites
@@ -328,8 +328,8 @@ npm run test:go
 **Documentation:**
 
 ```bash
-# Install dependencies (first time only)
-npm install
+# Restore dependencies from the committed lock
+npm ci
 
 # Lint markdown (required for documentation changes)
 npm run lint:md

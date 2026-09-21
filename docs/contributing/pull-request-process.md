@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Pull Request Process
 description: PR workflow, reviewer assignment, review cycles, approval criteria, and update process
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-09-21
 ms.topic: how-to
 keywords:
   - pull request
@@ -102,12 +102,16 @@ terraform init -upgrade
 helm repo update
 helm search repo nvidia-gpu-operator --versions
 
-# Update the affected Python project's lock, then sync
-uv lock --upgrade
+# Restore the affected Python project from its committed lock
 uv sync --frozen
 ```
 
-After merging Dependabot dependency PRs that update Python manifests, Dependabot regenerates the affected `uv.lock` natively. The read-only `uv lock --check` CI gate fails any PR whose lock drifts from its `pyproject.toml`, so no manual `uv lock` step is required.
+Use Dependabot for updates to existing Python dependencies. Run `uv lock` for
+dependency additions or deliberate lock regeneration only from an approved
+environment with direct access to the public registry. Proxy-restricted
+contributors must not regenerate locks locally. Use `uv sync --frozen` as the
+local restore check. The read-only `uv lock --check` CI gate fails any PR whose
+lock drifts from its `pyproject.toml`.
 
 ### Migration Approach
 
