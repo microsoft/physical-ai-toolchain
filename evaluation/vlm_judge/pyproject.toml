@@ -23,8 +23,8 @@ qwen3-vl = [
     "accelerate==1.15.0",
     # Prevent prerelease resolution from selecting hf-xet 1.6.1a0.
     "hf-xet==1.6.0",
-    "torch==2.13.0",
-    "torchvision==0.28.0",
+    "torch==2.14.0",
+    "torchvision==0.29.0",
     "transformers==5.16.1",
 ]
 
