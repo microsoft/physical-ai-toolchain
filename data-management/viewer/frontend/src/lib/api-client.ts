@@ -163,6 +163,27 @@ export class ApiClientError extends Error {
   }
 }
 
+export interface VersionedResource<T> {
+  data: T
+  etag: string | null
+}
+
+export interface MutationPrecondition {
+  etag?: string
+  createOnly?: boolean
+}
+
+export function mutationPreconditionHeaders(
+  precondition: MutationPrecondition,
+): Record<string, string> {
+  if (precondition.etag && precondition.createOnly) {
+    throw new Error('Specify only one mutation precondition')
+  }
+  if (precondition.etag) return { 'If-Match': precondition.etag }
+  if (precondition.createOnly) return { 'If-None-Match': '*' }
+  throw new Error('A mutation precondition is required')
+}
+
 /**
  * Handle API response, throwing on error.
  */
@@ -279,12 +300,15 @@ export async function fetchEpisode(datasetId: string, episodeIndex: number): Pro
 export async function fetchAnnotations(
   datasetId: string,
   episodeIndex: number,
-): Promise<EpisodeAnnotationFile> {
+): Promise<VersionedResource<EpisodeAnnotationFile>> {
   const response = await fetch(
     `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
     { headers: await requestHeaders() },
   )
-  return handleResponse<EpisodeAnnotationFile>(response)
+  return {
+    data: await handleResponse<EpisodeAnnotationFile>(response),
+    etag: response.headers.get('ETag'),
+  }
 }
 
 /**
@@ -294,19 +318,24 @@ export async function saveAnnotation(
   datasetId: string,
   episodeIndex: number,
   annotation: EpisodeAnnotation,
-): Promise<EpisodeAnnotationFile> {
+  precondition: MutationPrecondition,
+): Promise<VersionedResource<EpisodeAnnotationFile>> {
   const response = await fetch(
     `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
     {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
+        ...mutationPreconditionHeaders(precondition),
         ...(await mutationHeaders()),
       },
       body: JSON.stringify(annotation),
     },
   )
-  return handleResponse<EpisodeAnnotationFile>(response)
+  return {
+    data: await handleResponse<EpisodeAnnotationFile>(response),
+    etag: response.headers.get('ETag'),
+  }
 }
 
 /**
@@ -315,14 +344,13 @@ export async function saveAnnotation(
 export async function deleteAnnotations(
   datasetId: string,
   episodeIndex: number,
-  annotatorId?: string,
+  etag: string,
 ): Promise<{ deleted: boolean; episodeIndex: number }> {
-  const params = annotatorId ? `?annotator_id=${annotatorId}` : ''
   const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations${params}`,
+    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
     {
       method: 'DELETE',
-      headers: await mutationHeaders(),
+      headers: { 'If-Match': etag, ...(await mutationHeaders()) },
     },
   )
   return handleResponse(response)
@@ -462,15 +490,22 @@ export async function setEpisodeLabels(
   datasetId: string,
   episodeIndex: number,
   labels: string[],
-): Promise<EpisodeLabelsResult> {
+  precondition: MutationPrecondition,
+): Promise<VersionedResource<EpisodeLabelsResult>> {
   const response = await mutationFetch(
     `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/labels`,
     {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...mutationPreconditionHeaders(precondition),
+      },
       body: JSON.stringify({ labels }),
     },
   )
   const data = await handleResponse<unknown>(response)
-  return transformKeys<EpisodeLabelsResult>(data)
+  return {
+    data: transformKeys<EpisodeLabelsResult>(data),
+    etag: response.headers.get('ETag'),
+  }
 }

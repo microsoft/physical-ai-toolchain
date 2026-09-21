@@ -20,6 +20,12 @@ const nextEpisodeMock = vi.fn()
 
 beforeEach(() => {
   saveMock.mockReset()
+  saveMock.mockImplementation(async () => {
+    const state = useAnnotationStore.getState()
+    if (state.currentAnnotation) {
+      state.markSubmittedSaved(state.currentAnnotation, state.editGeneration)
+    }
+  })
   nextEpisodeMock.mockReset()
   useAnnotationStore.getState().clear()
   useEpisodeStore.getState().reset()
@@ -51,6 +57,27 @@ describe('useAnnotationWorkflow', () => {
 
     expect(saveMock).toHaveBeenCalledTimes(1)
     expect(useAnnotationStore.getState().isDirty).toBe(false)
+    expect(onSaveSuccess).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not report success until the save promise resolves', async () => {
+    let resolveSave!: () => void
+    saveMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveSave = resolve
+      }),
+    )
+    const onSaveSuccess = vi.fn()
+    const { result } = renderHook(() => useAnnotationWorkflow({ onSaveSuccess }))
+
+    let savePromise!: Promise<void>
+    act(() => {
+      savePromise = result.current.save()
+    })
+
+    expect(onSaveSuccess).not.toHaveBeenCalled()
+    resolveSave()
+    await act(async () => savePromise)
     expect(onSaveSuccess).toHaveBeenCalledTimes(1)
   })
 
