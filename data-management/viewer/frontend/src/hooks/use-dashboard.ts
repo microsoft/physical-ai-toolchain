@@ -4,7 +4,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 
-import { apiRequest } from '@/lib/api-client'
+import { apiRequest, transformKeys } from '@/lib/api-client'
 
 /** Dashboard statistics */
 export interface DashboardStats {
@@ -47,8 +47,24 @@ export const dashboardKeys = {
 /**
  * Fetch dashboard statistics.
  */
+function transformDashboardStats(data: unknown): DashboardStats {
+  const raw = data as Record<string, unknown>
+  const stats = transformKeys<DashboardStats>(raw)
+  const issuesByType = raw.issues_by_type
+  const anomaliesByType = raw.anomalies_by_type
+
+  if (issuesByType && typeof issuesByType === 'object') {
+    stats.issuesByType = { ...(issuesByType as Record<string, number>) }
+  }
+  if (anomaliesByType && typeof anomaliesByType === 'object') {
+    stats.anomaliesByType = { ...(anomaliesByType as Record<string, number>) }
+  }
+
+  return stats
+}
+
 async function fetchDashboardStats(datasetId: string): Promise<DashboardStats> {
-  return apiRequest<DashboardStats>(`/datasets/${datasetId}/stats`)
+  return apiRequest<DashboardStats>(`/datasets/${datasetId}/stats`, {}, transformDashboardStats)
 }
 
 /**

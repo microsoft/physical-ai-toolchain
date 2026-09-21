@@ -145,8 +145,9 @@ describe('getDetections', () => {
       processedFrames: 1,
       totalDetections: 0,
       detectionsByFrame: [],
-      classSummary: null,
+      classSummary: {},
     })
+    expect(result?.classSummary).toEqual({})
   })
 })
 

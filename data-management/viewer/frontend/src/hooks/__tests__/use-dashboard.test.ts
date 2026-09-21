@@ -67,13 +67,36 @@ describe('useDashboardStats', () => {
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/stats', expect.any(Object))
   })
 
+  it('preserves semantic issue and anomaly category keys', async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        total_episodes: 2,
+        annotated_episodes: 1,
+        pending_episodes: 1,
+        annotation_rate: 0.5,
+        rating_distribution: {},
+        quality_distribution: {},
+        annotator_stats: [],
+        recent_activity: [],
+        issues_by_type: { gripper_failure: 4 },
+        anomalies_by_type: { unexpected_stop: 2 },
+      }),
+    )
+
+    const { result } = renderHookWithProviders(() => useDashboardMetrics('ds-1'))
+
+    await waitFor(() => expect(result.current.metrics).not.toBeNull())
+    expect(result.current.metrics?.topIssues).toEqual([{ name: 'gripper_failure', count: 4 }])
+    expect(result.current.metrics?.topAnomalies).toEqual([{ name: 'unexpected_stop', count: 2 }])
+  })
+
   it('exposes errors from failed requests', async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ message: 'stats failed', code: 'ERR' }, 500))
 
     const { result } = renderHookWithProviders(() => useDashboardStats('ds-1'))
 
     await waitFor(() => expect(result.current.isError).toBe(true))
-    expect(result.current.error?.message).toBe('stats failed')
+    expect(result.current.error?.message).toBe('The server could not complete the request')
   })
 
   it('does not throw when the consumer unmounts before the request resolves', async () => {

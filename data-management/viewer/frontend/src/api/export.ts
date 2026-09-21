@@ -19,16 +19,61 @@ export interface ExportRequestWithEdits {
   edits?: Record<number, EpisodeEditOperations>
 }
 
-function isExportProgress(
-  payload: Record<string, unknown>,
-): payload is Record<string, unknown> & ExportProgress {
-  return typeof payload.percentage === 'number'
+function isRecord(payload: unknown): payload is Record<string, unknown> {
+  return payload !== null && typeof payload === 'object' && !Array.isArray(payload)
 }
 
-function isExportResult(
-  payload: Record<string, unknown>,
-): payload is Record<string, unknown> & ExportResult {
-  return typeof payload.success === 'boolean'
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isExportProgress(payload: unknown): payload is ExportProgress {
+  return (
+    isRecord(payload) &&
+    isFiniteNumber(payload.currentEpisode) &&
+    isFiniteNumber(payload.totalEpisodes) &&
+    isFiniteNumber(payload.currentFrame) &&
+    isFiniteNumber(payload.totalFrames) &&
+    isFiniteNumber(payload.percentage) &&
+    typeof payload.status === 'string'
+  )
+}
+
+function isExportResult(payload: unknown): payload is ExportResult {
+  return (
+    isRecord(payload) &&
+    typeof payload.success === 'boolean' &&
+    Array.isArray(payload.outputFiles) &&
+    payload.outputFiles.every((value) => typeof value === 'string') &&
+    (payload.error === null || typeof payload.error === 'string') &&
+    isRecord(payload.stats) &&
+    isFiniteNumber(payload.stats.totalEpisodes) &&
+    isFiniteNumber(payload.stats.totalFrames) &&
+    isFiniteNumber(payload.stats.removedFrames) &&
+    isFiniteNumber(payload.stats.durationMs)
+  )
+}
+
+function exportErrorMessage(payload: unknown): string {
+  switch (isRecord(payload) ? payload.code : undefined) {
+    case 'EXPORT_UNAVAILABLE':
+      return 'Export is unavailable'
+    case 'EXPORT_FAILED':
+    default:
+      return 'Export failed'
+  }
+}
+
+function publicExportResult(result: ExportResult): ExportResult {
+  return { ...result, error: result.success ? null : 'Export failed' }
+}
+
+function transformExportResult(data: unknown): ExportResult {
+  const result = transformKeys<unknown>(data)
+  if (!isExportResult(result)) {
+    throw new Error('Invalid export response')
+  }
+  return publicExportResult(result)
 }
 
 /**
@@ -38,11 +83,15 @@ export async function exportEpisodes(
   datasetId: string,
   request: ExportRequestWithEdits,
 ): Promise<ExportResult> {
-  return apiRequest<ExportResult>(`/datasets/${datasetId}/export`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  })
+  return apiRequest<ExportResult>(
+    `/datasets/${datasetId}/export`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    },
+    transformExportResult,
+  )
 }
 
 /**
@@ -99,6 +148,7 @@ export function createExportStream(
 
       const decoder = new TextDecoder()
       let buffer = ''
+      let currentEventType = 'message'
 
       while (true) {
         const { done, value } = await reader.read()
@@ -108,7 +158,6 @@ export function createExportStream(
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
 
-        let currentEventType = 'message'
         for (const line of lines) {
           if (line.trim() === '') {
             currentEventType = 'message'
@@ -120,9 +169,9 @@ export function createExportStream(
           }
           if (line.startsWith('data: ')) {
             const data = line.slice(6)
-            let parsed: Record<string, unknown>
+            let parsed: unknown
             try {
-              parsed = transformKeys<Record<string, unknown>>(JSON.parse(data))
+              parsed = transformKeys<unknown>(JSON.parse(data))
             } catch (error) {
               const diagnostic = {
                 eventType: currentEventType,
@@ -135,17 +184,24 @@ export function createExportStream(
             }
 
             if (currentEventType === 'error') {
-              const message =
-                typeof parsed.error === 'string'
-                  ? parsed.error
-                  : typeof parsed.message === 'string'
-                    ? parsed.message
-                    : 'Export failed'
-              onError(message)
-            } else if (isExportProgress(parsed)) {
-              onProgress(parsed)
-            } else if (isExportResult(parsed)) {
-              onComplete(parsed)
+              onError(exportErrorMessage(parsed))
+            } else if (currentEventType === 'progress') {
+              if (isExportProgress(parsed)) {
+                onProgress(parsed)
+              } else {
+                recordDiagnosticEvent('export', 'stream-schema-error', {
+                  eventType: currentEventType,
+                })
+              }
+            } else if (currentEventType === 'complete') {
+              if (isExportResult(parsed)) {
+                onComplete(publicExportResult(parsed))
+              } else {
+                recordDiagnosticEvent('export', 'stream-schema-error', {
+                  eventType: currentEventType,
+                })
+                onError('Export failed')
+              }
             }
           }
         }

@@ -6,7 +6,6 @@
 
 import type {
   AnnotationSummary,
-  ApiError,
   AutoQualityAnalysis,
   DatasetCapabilities,
   DatasetInfo,
@@ -173,6 +172,33 @@ export class ApiClientError extends Error {
   }
 }
 
+function publicErrorMessage(status: number): string {
+  if (status >= 500) {
+    return 'The server could not complete the request'
+  }
+
+  switch (status) {
+    case 400:
+      return 'The request is invalid'
+    case 401:
+      return 'Authentication is required'
+    case 403:
+      return 'You do not have permission to perform this action'
+    case 404:
+      return 'The requested resource was not found'
+    case 409:
+      return 'The request conflicts with the current state'
+    case 413:
+      return 'The request is too large'
+    case 422:
+      return 'The request contains invalid data'
+    case 429:
+      return 'Too many requests; try again later'
+    default:
+      return 'The request could not be completed'
+  }
+}
+
 /**
  * Handle API response, throwing on error.
  */
@@ -181,28 +207,22 @@ export async function handleResponse<T>(
   transform: (data: unknown) => T = transformKeys<T>,
 ): Promise<T> {
   if (!response.ok) {
-    let error: ApiError
+    let code = `HTTP_${response.status}`
     try {
-      const payload = (await response.json()) as Partial<ApiError> & { detail?: unknown }
-      const detail =
-        typeof payload.detail === 'string'
-          ? payload.detail
-          : payload.detail
-            ? JSON.stringify(payload.detail)
-            : undefined
-      error = {
-        code: payload.code ?? `HTTP_${response.status}`,
-        message: payload.message ?? detail ?? (response.statusText || 'An unknown error occurred'),
-        details: payload.details,
+      const payload: unknown = await response.json()
+      if (
+        payload !== null &&
+        typeof payload === 'object' &&
+        'code' in payload &&
+        typeof payload.code === 'string'
+      ) {
+        code = payload.code
       }
     } catch {
-      error = {
-        code: `HTTP_${response.status}`,
-        message: response.statusText || 'An unknown error occurred',
-      }
+      // Non-JSON errors still surface through the status-derived public error.
     }
 
-    throw new ApiClientError(error.message, error.code, response.status, error.details)
+    throw new ApiClientError(publicErrorMessage(response.status), code, response.status)
   }
 
   if (response.status === 204) {

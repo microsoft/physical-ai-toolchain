@@ -17,6 +17,8 @@ function transformDetectionSummary(data: unknown): EpisodeDetectionSummary {
         transformKeys(value),
       ]),
     )
+  } else if (rawClassSummary == null) {
+    summary.classSummary = {}
   }
 
   return summary

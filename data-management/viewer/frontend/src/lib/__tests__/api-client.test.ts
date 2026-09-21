@@ -72,14 +72,33 @@ describe('ApiClientError', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1', { headers: {} })
     })
 
-    it('throws a typed error for FastAPI detail responses', async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ detail: 'Dataset is unavailable' }, 503))
+    it('does not expose FastAPI detail text for server errors', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ detail: '/srv/data/private: permission denied' }, 500),
+      )
 
       await expect(apiRequest('/datasets/ds-1')).rejects.toMatchObject({
         name: 'ApiClientError',
-        code: 'HTTP_503',
-        status: 503,
-        message: 'Dataset is unavailable',
+        code: 'HTTP_500',
+        status: 500,
+        message: 'The server could not complete the request',
+      })
+    })
+
+    it('uses a generic message for 5xx even with a known code and diagnostic details', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: 'DATASET_NOT_FOUND',
+            message: '/srv/data/private: permission denied',
+            details: { path: '/srv/data/private' },
+          },
+          500,
+        ),
+      )
+      await expect(apiRequest('/datasets/ds-1')).rejects.toMatchObject({
+        message: 'The server could not complete the request',
+        details: undefined,
       })
     })
   })
@@ -362,7 +381,7 @@ describe('error handling', () => {
       expect(err).toBeInstanceOf(ApiClientError)
       const apiErr = err as ApiClientError
       expect(apiErr.code).toBe('HTTP_500')
-      expect(apiErr.message).toBe('Internal Server Error')
+      expect(apiErr.message).toBe('The server could not complete the request')
     }
   })
 })

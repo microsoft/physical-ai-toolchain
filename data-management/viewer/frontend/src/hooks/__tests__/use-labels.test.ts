@@ -388,7 +388,7 @@ describe('use-labels hooks', () => {
         name: 'ApiClientError',
         code: 'HTTP_500',
         status: 500,
-        message: 'import failed',
+        message: 'The server could not complete the request',
       })
     })
   })

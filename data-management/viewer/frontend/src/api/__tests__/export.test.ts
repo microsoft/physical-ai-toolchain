@@ -84,6 +84,7 @@ describe('exportEpisodes', () => {
     const result: ExportResult = {
       success: true,
       outputFiles: ['out.parquet'],
+      error: null,
       stats: { totalEpisodes: 3, totalFrames: 300, removedFrames: 0, durationMs: 100 },
     }
     mockFetch.mockResolvedValueOnce(okResponse())
@@ -207,6 +208,7 @@ describe('createExportStream', () => {
     const result: ExportResult = {
       success: true,
       outputFiles: ['out.parquet'],
+      error: null,
       stats: { totalEpisodes: 3, totalFrames: 300, removedFrames: 0, durationMs: 100 },
     }
     mockFetch.mockResolvedValueOnce(
@@ -223,26 +225,89 @@ describe('createExportStream', () => {
     expect(onProgress).not.toHaveBeenCalled()
   })
 
+  it('routes failed batch completion payloads to onComplete', async () => {
+    const result: ExportResult = {
+      success: false,
+      outputFiles: [],
+      error: 'Export failed',
+      stats: { totalEpisodes: 3, totalFrames: 0, removedFrames: 0, durationMs: 100 },
+    }
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([`event: complete\ndata: ${JSON.stringify(result)}\n\n`]),
+    )
+    const onComplete = vi.fn()
+
+    createExportStream('ds-1', baseRequest, vi.fn(), onComplete, vi.fn())
+    await flushMicrotasks()
+
+    expect(onComplete).toHaveBeenCalledWith(result)
+  })
+
   it('routes backend error events to onError', async () => {
     mockFetch.mockResolvedValueOnce(
-      streamResponse([`event: error\ndata: ${JSON.stringify({ error: 'boom' })}\n\n`]),
+      streamResponse([
+        `event: error\ndata: ${JSON.stringify({
+          code: 'EXPORT_FAILED',
+          message: 'Export failed',
+          error: '/srv/data/private: permission denied',
+        })}\n\n`,
+      ]),
     )
     const onError = vi.fn()
 
     createExportStream('ds-1', baseRequest, vi.fn(), vi.fn(), onError)
     await flushMicrotasks()
 
-    expect(onError).toHaveBeenCalledWith('boom')
+    expect(onError).toHaveBeenCalledWith('Export failed')
   })
 
-  it('falls back to a default error message when none is provided', async () => {
-    mockFetch.mockResolvedValueOnce(streamResponse([`event: error\ndata: {}\n\n`]))
+  it('does not expose unknown backend error text', async () => {
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([
+        `event: error\ndata: ${JSON.stringify({
+          code: 'UNKNOWN',
+          error: '/srv/data/private: permission denied',
+        })}\n\n`,
+      ]),
+    )
     const onError = vi.fn()
 
     createExportStream('ds-1', baseRequest, vi.fn(), vi.fn(), onError)
     await flushMicrotasks()
 
     expect(onError).toHaveBeenCalledWith('Export failed')
+  })
+
+  it('ignores incomplete progress payloads', async () => {
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([`event: progress\ndata: ${JSON.stringify({ percentage: 50 })}\n\n`]),
+    )
+    const onProgress = vi.fn()
+
+    createExportStream('ds-1', baseRequest, onProgress, vi.fn(), vi.fn())
+    await flushMicrotasks()
+
+    expect(onProgress).not.toHaveBeenCalled()
+    expect(mockRecordDiagnosticEvent).toHaveBeenCalledWith('export', 'stream-schema-error', {
+      eventType: 'progress',
+    })
+  })
+
+  it('reports incomplete completion payloads without invoking onComplete', async () => {
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([`event: complete\ndata: ${JSON.stringify({ success: true })}\n\n`]),
+    )
+    const onComplete = vi.fn()
+    const onError = vi.fn()
+
+    createExportStream('ds-1', baseRequest, vi.fn(), onComplete, onError)
+    await flushMicrotasks()
+
+    expect(onComplete).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith('Export failed')
+    expect(mockRecordDiagnosticEvent).toHaveBeenCalledWith('export', 'stream-schema-error', {
+      eventType: 'complete',
+    })
   })
 
   it('records malformed JSON data lines and continues processing later events', async () => {
