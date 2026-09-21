@@ -294,6 +294,8 @@ Use this flowchart when recording performance degrades or storage fills faster t
 
 ```mermaid
 flowchart TD
+  accTitle: Recording performance troubleshooting flow
+  accDescr: Decision tree for resolving disk growth, dropped messages, high CPU use, disk latency, and slow uploads by adjusting compression, camera frequency, chunk size, and gap detection.
     A[Recording problem detected] --> B{Disk filling too fast?}
     B -- Yes --> C{CPU usage above 80%?}
     C -- No --> D[Increase compression level<br/>zstd-1 → zstd-3 → zstd-6]

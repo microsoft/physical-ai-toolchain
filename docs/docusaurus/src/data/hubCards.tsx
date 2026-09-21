@@ -5,47 +5,50 @@ import React from 'react';
 import { RocketIcon, BookIcon, CodeIcon, CloudIcon, CpuIcon, ShieldIcon } from '../components/Icons';
 import type { IconCardProps } from '../components/IconCard';
 import type { BoxCardProps } from '../components/BoxCard';
+import labelData from './labelRegistry.cjs';
+
+const { labelRegistry } = labelData;
 
 export const iconCards: IconCardProps[] = [
   {
     icon: <RocketIcon />,
-    supertitle: 'Quickstart',
-    title: 'Getting Started',
+    supertitle: labelRegistry.quickstart,
+    title: labelRegistry.gettingStarted,
     href: '/getting-started/',
     description: 'Set up your environment and deploy the reference architecture end-to-end.',
   },
   {
     icon: <CloudIcon />,
-    supertitle: 'Infrastructure',
-    title: 'Deploy Infrastructure',
+    supertitle: labelRegistry.infrastructure,
+    title: labelRegistry.deployInfrastructure,
     href: '/infrastructure/',
     description: 'Provision AKS clusters, networking, storage, and identity with Terraform.',
   },
   {
     icon: <CpuIcon />,
-    supertitle: 'Simulation',
-    title: 'Training',
+    supertitle: labelRegistry.simulation,
+    title: labelRegistry.training,
     href: '/training/',
     description: 'Run reinforcement learning and imitation learning jobs on GPU clusters.',
   },
   {
     icon: <CodeIcon />,
-    supertitle: 'Models',
-    title: 'Evaluation',
+    supertitle: labelRegistry.models,
+    title: labelRegistry.evaluation,
     href: '/evaluation/',
     description: 'Validate trained models in simulation and on hardware.',
   },
   {
     icon: <BookIcon />,
-    supertitle: 'Devices',
-    title: 'Fleet Deployment',
+    supertitle: labelRegistry.devices,
+    title: labelRegistry.fleetDeployment,
     href: '/fleet-deployment/',
     description: 'Deploy trained models to robot fleets via FluxCD GitOps pipelines.',
   },
   {
     icon: <ShieldIcon />,
-    supertitle: 'Platform',
-    title: 'Operations',
+    supertitle: labelRegistry.platform,
+    title: labelRegistry.operations,
     href: '/operations/',
     description: 'Monitor, scale, and manage the robotics platform in production.',
   },
@@ -53,16 +56,16 @@ export const iconCards: IconCardProps[] = [
 
 export const boxCards: BoxCardProps[] = [
   {
-    title: 'Architecture Guide',
+    title: labelRegistry.architectureGuide,
     links: [
       { label: 'System architecture', href: '/contributing/architecture' },
       { label: 'Network topology', href: '/infrastructure/infrastructure-reference' },
-      { label: 'Lifecycle domains', href: '/contributing/architecture#domain-overview' },
+      { label: 'Lifecycle domains', href: '/contributing/architecture#lifecycle-domains' },
     ],
     icon: '/img/icons/clipboard-task.svg',
   },
   {
-    title: 'GPU Configuration',
+    title: labelRegistry.gpuConfiguration,
     links: [
       { label: 'H100 setup', href: '/reference/gpu-configuration#h100-nodes' },
       { label: 'RTX PRO 6000 setup', href: '/reference/gpu-configuration#rtx-pro-6000-nodes' },
@@ -71,7 +74,7 @@ export const boxCards: BoxCardProps[] = [
     icon: '/img/icons/developer-board.svg',
   },
   {
-    title: 'Security',
+    title: labelRegistry.security,
     links: [
       { label: 'Security review checklist', href: '/contributing/security-review' },
       { label: 'Private cluster access', href: '/infrastructure/vpn' },
@@ -80,7 +83,7 @@ export const boxCards: BoxCardProps[] = [
     icon: '/img/icons/shield-lock.svg',
   },
   {
-    title: 'Contributing',
+    title: labelRegistry.contributing,
     links: [
       { label: 'Contribution workflow', href: '/contributing/contribution-workflow' },
       { label: 'Infrastructure style guide', href: '/contributing/infrastructure-style' },

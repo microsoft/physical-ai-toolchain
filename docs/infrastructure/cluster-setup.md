@@ -156,7 +156,7 @@ cd ../002-setup
 
 ### Scenario Comparison
 
-|              | Workload Identity | Workload Identity + ACR |
+| Setting      | Workload Identity | Workload Identity + ACR |
 |--------------|:-----------------:|:-----------------------:|
 | Storage Auth | Workload Identity |    Workload Identity    |
 | Registry     |      nvcr.io      |       Private ACR       |
