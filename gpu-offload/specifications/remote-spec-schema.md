@@ -1,7 +1,7 @@
 ---
 title: remote.yaml Schema
 description: Schema and examples for remote.yaml offload specification
-ms.date: 2026-08-10
+ms.date: 2026-09-21
 ms.topic: reference
 ---
 
@@ -22,14 +22,29 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 
 ## Top-Level Keys
 
-`remote.yaml` declares three optional top-level keys. At least one of `serverstages`,
+`remote.yaml` declares four optional top-level keys. At least one of `serverstages`,
 `remoteclasses`, or `remotefuncs` must be present.
 
-| Key             | Type             | Required | Purpose                                 |
-|-----------------|------------------|----------|-----------------------------------------|
-| `serverstages`  | list of objects  | Yes      | Define named GPU worker pods            |
-| `remoteclasses` | list of mappings | No       | Classes whose methods execute in stages |
-| `remotefuncs`   | list of mappings | No       | Functions that execute in stages        |
+| Key              | Type             | Required | Purpose                                      |
+|------------------|------------------|----------|----------------------------------------------|
+| `serverstages`   | list of objects  | Yes      | Define named GPU worker pods                 |
+| `remoteclasses`  | list of mappings | No       | Classes whose methods execute in stages      |
+| `remotefuncs`    | list of mappings | No       | Functions that execute in stages             |
+| `allowedmodules` | list of strings  | No       | Permit additional runtime module imports     |
+
+## allowedmodules
+
+The runtime imports only modules present in its exact-match allowlist. Modules
+referenced by `remoteclasses`, `remotefuncs`, and `stubs` are added automatically.
+Use `allowedmodules` for modules that RPC reconstruction requires but the remote
+symbol configuration does not reference directly.
+
+```yaml
+allowedmodules:
+  - mypackage.shared_types
+```
+
+Parent package names and similarly prefixed modules are not implicitly allowed.
 
 ## serverstages
 

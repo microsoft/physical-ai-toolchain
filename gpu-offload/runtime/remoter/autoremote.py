@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import inspect
 import logging
 import os
@@ -65,14 +64,16 @@ def get_main_script_dir():
 
 def importmodule(mod):
     try:
-        return importlib.import_module(mod)
+        return remoter.import_allowed_module(mod)
+    except remoter.ModuleNotAllowedError:
+        raise
     except Exception as e:
         # if module not found, try to import from main script directory
         main_script_dir = get_main_script_dir()
         if main_script_dir is not None:
             sys.path.insert(0, main_script_dir)
             try:
-                return importlib.import_module(mod)
+                return remoter.import_allowed_module(mod)
             except Exception as e2:
                 logger.error(f"Failed to import module {mod} from main script directory {main_script_dir}: {e2}")
                 raise e2
@@ -81,9 +82,37 @@ def importmodule(mod):
             raise e
 
 
+def allow_configured_modules(cfg: dict) -> None:
+    module_names = cfg.get("allowedmodules", [])
+    if not isinstance(module_names, list):
+        raise ValueError("allowedmodules must be a list of module names")
+    for module_name in module_names:
+        remoter.allow_module(module_name)
+
+    target_paths = []
+    for config_key in ("remotefuncs", "remoteclasses"):
+        for item in cfg.get(config_key, []):
+            if not isinstance(item, dict):
+                raise ValueError(f"{config_key} entries must be mappings")
+            target_paths.extend(item.keys())
+
+    stubs = cfg.get("stubs", {})
+    if not isinstance(stubs, dict):
+        raise ValueError("stubs must be a mapping")
+    target_paths.extend(stubs.keys())
+    target_paths.extend(stubs.values())
+
+    for target_path in target_paths:
+        module_name, separator, _ = target_path.partition("/")
+        if not separator or not module_name:
+            raise ValueError(f"Remote target must include a module path: {target_path!r}")
+        remoter.allow_module(module_name)
+
+
 def apply_decorators_from_config(configpath) -> bool:
     logger.info(f"Applying remoter decorators from config file: {configpath}", color="cyan")
     cfg = load_config(configpath)
+    allow_configured_modules(cfg)
     isserver = remoter.remoterparams["server"]
 
     # print(f"Command line exe: {sys.argv[0]}\n{sys.argv}")

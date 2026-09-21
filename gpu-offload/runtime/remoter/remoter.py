@@ -149,6 +149,10 @@ remotedclassmetadata = {}  # key: class object id -> metadata dict for object
 def setstubclasses(stub2class):
     # of the form a.b.c: d.e
     # where a.b.c is the stub class, d.e is the actual class
+    for class_path in (*stub2class.keys(), *stub2class.values()):
+        module_name, separator, _ = class_path.partition("/")
+        if separator:
+            allow_module(module_name)
     stub_to_class.update(stub2class)
     class_to_stub.update({v: k for k, v in stub2class.items()})
 
@@ -158,6 +162,7 @@ remotedclasses = set()
 
 
 def addremotedclass(cls):
+    allow_module(cls.__module__)
     remotedclasses.add(cls)
 
 
@@ -286,10 +291,35 @@ imported_modules: dict[str, ModuleType] = {}
 imported_functions: dict[str, Callable] = {}
 
 allowed_functions = set()
+allowed_modules = {"remoter.remoter", "remoter.rmtclass"}
 allowed_print = False
 is_process = False
 mprunq = None
 mpresults = None
+
+
+class ModuleNotAllowedError(ImportError):
+    pass
+
+
+def allow_module(module_name: str) -> None:
+    if not isinstance(module_name, str) or not module_name:
+        raise ValueError("Allowed module names must be non-empty strings")
+    allowed_modules.add(module_name)
+
+
+def allow_function(key: str) -> None:
+    module_name, separator, _ = key.partition("/")
+    if not separator or not module_name:
+        raise ValueError(f"Function key must include a module path: {key!r}")
+    allow_module(module_name)
+    allowed_functions.add(key)
+
+
+def import_allowed_module(module_name: str) -> ModuleType:
+    if module_name not in allowed_modules:
+        raise ModuleNotAllowedError(f"Module {module_name!r} is not allowed to be imported")
+    return importlib.import_module(module_name)
 
 
 def default_func_key(func):
@@ -301,7 +331,7 @@ def getclassinstancefromname(name):
     try:
         module_name, class_name = name.split("/")
         if module_name not in imported_modules:
-            imported_modules[module_name] = importlib.import_module(module_name)
+            imported_modules[module_name] = import_allowed_module(module_name)
         module = imported_modules[module_name]
         class_type = getattr(module, class_name)
         return class_type.__new__(class_type)
@@ -328,7 +358,7 @@ def getfuncname(func) -> tuple[str, str, str, str]:
 def getfuncobjfromname(key, module_name, func_name, class_name):
     # Get the module object
     if module_name not in imported_modules:
-        imported_modules[module_name] = importlib.import_module(module_name)
+        imported_modules[module_name] = import_allowed_module(module_name)
     module = imported_modules[module_name]
 
     # Get the function object
@@ -1641,7 +1671,7 @@ class Remoter:
             else:
                 logger.debug(f"Using already initialized single instance class {args0.__class__} with ID {fnid}")
                 func = funcinit  # this will do nothing and wait for the event to be set
-                allowed_functions.add("remoter.remoter/Remoter/modifycall_singleinstance_init")
+                allow_function("remoter.remoter/Remoter/modifycall_singleinstance_init")
                 callback = orig_callback
                 # callback remains the same, it will be called with the same arguments
         return callback, func
@@ -1685,7 +1715,7 @@ class Remoter:
             else:
                 logger.debug(f"Using already initialized single instance function for {key}")
                 func = funcnotfirst  # this will do nothing and wait for the event to be set
-                allowed_functions.add("remoter.remoter/Remoter/modifycall_singleinstance")
+                allow_function("remoter.remoter/Remoter/modifycall_singleinstance")
                 callback = orig_callback
                 # callback remains the same, it will be called with the same arguments
         return callback, func
@@ -2080,7 +2110,7 @@ def createRemotedTask(
     func, taskname, functype="threadpooltask", nowait=False, fallbackfn=None, timeout=None
 ) -> Callable:
     key, _, _, _ = getfuncname(func)
-    allowed_functions.add(key)
+    allow_function(key)
     logger.info(f"Adding remoted function {key} to allowed functions")
 
     if localhasattr(func, "__isremoted__"):

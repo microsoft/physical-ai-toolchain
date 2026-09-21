@@ -203,7 +203,7 @@ def allowallfunctions(cls, isserver):
             if attr_name == "__init__":
                 initfound = True
             logger.info(f"Adding function {key} to allowed functions")
-            remoter.allowed_functions.add(key)
+            remoter.allow_function(key)
             # now check if func is remotable task - client is always remotable by default, server not
             remoteable = isremoteable(isserver, key, actclasskey)
             singleinstance = remoter.getparam("singleinstance", key, actclasskey, False)
@@ -216,7 +216,7 @@ def allowallfunctions(cls, isserver):
                 cls.__new__ = remoter.singleton_new
                 cls.__orig_init__ = attr_value
                 setattr(cls, attr_name, remoter.singleton_init)
-                remoter.allowed_functions.add("remoter.remoter//singleton_init")
+                remoter.allow_function("remoter.remoter//singleton_init")
                 # remoter.allowed_functions.add(f"remoter.remoter//singleton_new")
                 logger.info(f"Single instance non-remoteable class {actclasskey} __init__ decorated", color="green")
             elif remoteable and (attr_name not in noremotefuncs):
@@ -253,9 +253,9 @@ def allowallfunctions(cls, isserver):
     if remoteableclass:
         cls.__getattribute__ = getattribute
         cls.__setattr__ = setattribute
-    remoter.allowed_functions.add("remoter.rmtclass//_getfromremote")
-    remoter.allowed_functions.add("remoter.rmtclass//objgetattr")
-    remoter.allowed_functions.add("remoter.rmtclass//objsetattr")
+    remoter.allow_function("remoter.rmtclass//_getfromremote")
+    remoter.allow_function("remoter.rmtclass//objgetattr")
+    remoter.allow_function("remoter.rmtclass//objsetattr")
 
 
 def addsingleinstance(cls, classparams):
