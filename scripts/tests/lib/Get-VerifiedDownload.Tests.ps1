@@ -365,21 +365,29 @@ Describe 'Invoke-VerifiedDownload' {
         }
 
         It 'Cleans up temp file on hash failure' {
+            $script:downloadTempPath = $null
             Mock Invoke-WebRequest {
                 param($OutFile)
+                $script:downloadTempPath = $OutFile
                 Set-Content -Path $OutFile -Value 'bad content' -NoNewline
+                $OutFile | Should -Exist
             }
             Mock Get-FileHashValue { return 'MISMATCHHASH23456789012345678901234567890123456789012345678901' }
-            Mock Remove-Item { Microsoft.PowerShell.Management\Remove-Item -Path $Path -ErrorAction SilentlyContinue } -Verifiable
 
-            { Invoke-VerifiedDownload `
-                    -Url $script:testUrl `
-                    -DestinationDirectory $script:testDestDir `
-                    -ExpectedHash 'EXPECTEDHASH567890123456789012345678901234567890123456789012345'
-            } | Should -Throw
+            try {
+                { Invoke-VerifiedDownload `
+                        -Url $script:testUrl `
+                        -DestinationDirectory $script:testDestDir `
+                        -ExpectedHash 'EXPECTEDHASH567890123456789012345678901234567890123456789012345'
+                } | Should -Throw '*Checksum verification failed*'
 
-            # The finally block should clean up temp files
-            Should -InvokeVerifiable
+                $script:downloadTempPath | Should -Not -BeNullOrEmpty
+                $script:downloadTempPath | Should -Not -Exist
+            } finally {
+                if ($script:downloadTempPath -and (Test-Path -LiteralPath $script:downloadTempPath)) {
+                    Remove-Item -LiteralPath $script:downloadTempPath -Force
+                }
+            }
         }
     }
 
