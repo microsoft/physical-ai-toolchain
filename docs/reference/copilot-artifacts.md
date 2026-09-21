@@ -4,7 +4,7 @@ description: >-
   Inventory and reference for GitHub Copilot agents, instructions, prompts,
   and skills configured in this repository.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-01
+ms.date: 2026-09-19
 ms.topic: reference
 keywords:
   - copilot
@@ -26,6 +26,8 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 |-------------|----------------------------|-----------------------------------------------------|-------------------------------------------------------------------|
 | Agent       | Dataviewer Developer       | Interactive dataset analysis and tool development   | `.github/agents/dataviewer-developer.agent.md`                    |
 | Agent       | OSMO Training Manager      | LeRobot training lifecycle on OSMO with Azure ML    | `.github/agents/osmo-training-manager.agent.md`                   |
+| Agent       | Dependabot PR Reviewer     | Dependency update review                            | `.github/agents/dependabot-pr-reviewer.agent.md`                  |
+| Agent       | Agentic Workflows          | GitHub agentic workflow authoring                   | `.github/agents/agentic-workflows.agent.md`                       |
 | Instruction | Commit Messages            | Conventional Commits format for all commit messages | `.github/instructions/commit-message.instructions.md`             |
 | Instruction | Dataviewer                 | Coding standards for dataviewer development         | `.github/instructions/dataviewer.instructions.md`                 |
 | Instruction | Docs Style and Conventions | Writing standards for all markdown files            | `.github/instructions/docs-style-and-conventions.instructions.md` |
@@ -34,6 +36,7 @@ The cloud-agent setup workflow provisions the RPI skill suite at runtime.
 | Prompt      | `/chatlog`                 | Create and maintain conversation logs               | `.github/prompts/chatlog.prompt.md`                               |
 | Prompt      | `/check-training-status`   | Monitor OSMO training job progress                  | `.github/prompts/check-training-status.prompt.md`                 |
 | Prompt      | `/start-dataviewer`        | Launch Dataset Analysis Tool                        | `.github/prompts/start-dataviewer.prompt.md`                      |
+| Prompt      | `/dataviewer-annotate`     | Annotate dataset episodes                           | `.github/prompts/dataviewer-annotate.prompt.md`                   |
 | Prompt      | `/submit-lerobot-training` | Submit LeRobot training job to OSMO                 | `.github/prompts/submit-lerobot-training.prompt.md`               |
 | Skill       | dataviewer                 | Dataset browsing, annotation, and export            | `.github/skills/dataviewer/SKILL.md`                              |
 | Skill       | environment-deployment     | Generate and consume environment deployment bundles | `.github/skills/environment-deployment/SKILL.md`                  |
@@ -71,10 +74,10 @@ Dataset Analysis Tool.
 | Handoffs | Start Dataviewer, Browse Dataset, Annotate Episodes |
 | Tools    | All (no restrictions)                               |
 | Skill    | `dataviewer`                                        |
-| Prompts  | `/start-dataviewer`                                 |
+| Prompts  | `/start-dataviewer`, `/dataviewer-annotate`         |
 
-Four-phase workflow: Launch/Configure → Interactive Browsing (Playwright) →
-Episode Annotation (API+UI) → Feature Development (React+FastAPI).
+Five-phase workflow: Launch/Configure → Interactive Browsing (Playwright) →
+Episode Annotation (API+UI) → Feature Development (React+FastAPI) → VLM-as-Judge Evaluation.
 
 ### OSMO Training Manager
 
@@ -109,12 +112,13 @@ pattern appear in the chat context.
 Prompts are slash commands invoked via `/` in the chat input. Each prompt
 targets a specific agent.
 
-| Command                    | Agent Target          | Required Inputs       |
-|----------------------------|-----------------------|-----------------------|
-| `/chatlog`                 | Generic               | None                  |
-| `/check-training-status`   | OSMO Training Manager | workflowId (optional) |
-| `/start-dataviewer`        | Dataviewer Developer  | datasetPath           |
-| `/submit-lerobot-training` | OSMO Training Manager | dataset (required)    |
+| Command                    | Agent Target          | Required Inputs                |
+|----------------------------|-----------------------|--------------------------------|
+| `/chatlog`                 | Generic               | None                           |
+| `/check-training-status`   | OSMO Training Manager | workflowId (optional)          |
+| `/start-dataviewer`        | Dataviewer Developer  | datasetPath                    |
+| `/dataviewer-annotate`     | Dataviewer Developer  | Dataset and annotation context |
+| `/submit-lerobot-training` | OSMO Training Manager | dataset (required)             |
 
 ## 🛠️ Skills
 
@@ -169,6 +173,7 @@ OSMO Training Manager (agent)
 
 Dataviewer Developer (agent)
   ├── /start-dataviewer        (prompt)
+  ├── /dataviewer-annotate     (prompt)
   └── dataviewer               (skill)
        └── references/PLAYWRIGHT.md
 

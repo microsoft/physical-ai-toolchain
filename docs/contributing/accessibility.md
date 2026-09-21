@@ -1,25 +1,26 @@
 ---
 sidebar_position: 13
 title: Accessibility Best Practices
-description: Standards for accessible documentation and CLI output in this project
+description: Standards for accessible documentation, CLI output, and the dataviewer web application
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 
-This document defines accessibility requirements for documentation and CLI output in this repository. Use it when authoring Markdown files or shell scripts that produce user-facing text.
+Apply accessibility requirements when authoring documentation, CLI output, and dataviewer user interfaces.
 
 ## Scope
 
-This project applies accessibility best practices to two areas.
+This project applies accessibility best practices to three areas.
 
-| Area          | What the project controls                                    |
-|---------------|--------------------------------------------------------------|
-| Documentation | Markdown files rendered on GitHub and documentation sites    |
-| CLI output    | Shell scripts in `deploy/` and `scripts/` that emit messages |
+| Area          | What the project controls                                                  |
+|---------------|----------------------------------------------------------------------------|
+| Documentation | Markdown files rendered on GitHub and documentation sites                  |
+| CLI output    | Shell scripts in `infrastructure/setup/` and `scripts/` that emit messages |
+| Web UI        | React application in `data-management/viewer/frontend/`                    |
 
 > [!NOTE]
-> Runtime application accessibility (screen reader support, WCAG UI compliance) is outside the scope of this infrastructure-focused repository. If the project adds a web UI or desktop component in the future, revisit this page and expand coverage.
+> The dataviewer frontend enables the recommended `jsx-a11y` ESLint rules. Static linting is not evidence of WCAG conformance; interaction and assistive-technology checks remain part of UI review.
 
 ## Documentation Accessibility
 
@@ -68,6 +69,12 @@ else
   error() { printf '[ERROR] %s\n' "$*" >&2; }
 fi
 ```
+
+## Dataviewer Accessibility
+
+Use semantic controls, accessible names, visible keyboard focus, and keyboard-operable interactions when changing the viewer. Preserve the accessibility behavior of the existing Radix UI primitives. Run `npm run validate` from `data-management/viewer/frontend/` after installing its dependencies, and review keyboard navigation and screen-reader behavior for affected controls.
+
+The [frontend ESLint configuration](../../data-management/viewer/frontend/eslint.config.js) defines the automated accessibility checks.
 
 ## Generated Artifacts
 

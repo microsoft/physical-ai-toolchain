@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Documentation Maintenance Policy
 description: Update triggers, ownership, review criteria, freshness policy, and release lifecycle for project documentation
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: reference
 keywords:
   - documentation
@@ -37,7 +37,7 @@ Documentation ownership maps areas to responsible teams. The `.github/CODEOWNERS
 | Area                                           | Owner                                                  |
 |------------------------------------------------|--------------------------------------------------------|
 | `/docs/**/*.md`                                | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
-| `/deploy/**/README.md`                         | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
+| Component `README.md` files (`*.md` rule)      | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
 | `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md` | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
 | Root `README.md`                               | Repository maintainers (`@microsoft/edge-ai-core-dev`) |
 
@@ -59,7 +59,7 @@ Run validation commands before approving documentation PRs:
 
 ```bash
 npm run lint:md        # Markdownlint
-npm run lint:links     # Link validation
+npm run lint:links     # Language-specific URL check
 npm run spell-check    # cspell
 ```
 
@@ -117,13 +117,13 @@ This section defines versioning, release notes, deprecation notices, and breakin
 
 This project uses [release-please](https://github.com/googleapis/release-please) for automated semantic versioning. Version bumps follow conventional commit types:
 
-| Commit Type        | Version Bump | Example                                        |
-|--------------------|--------------|------------------------------------------------|
-| `feat:`            | Minor        | `feat(terraform): add GPU monitoring module`   |
-| `fix:`             | Patch        | `fix(scripts): correct AKS credential path`    |
-| `BREAKING CHANGE:` | Major        | Footer in commit triggers major bump           |
-| `security:`        | Patch        | `security: fix CVE-2024-XXXX input validation` |
-| `docs:`, `chore:`  | None         | Appears in changelog without version bump      |
+| Commit Type        | Version Bump                     | Example                                           |
+|--------------------|----------------------------------|---------------------------------------------------|
+| `feat:`            | Minor                            | `feat(infrastructure): add GPU monitoring module` |
+| `fix:`             | Patch                            | `fix(scripts): correct AKS credential path`       |
+| `BREAKING CHANGE:` | Minor before 1.0; major from 1.0 | Breaking-change footer                            |
+| `security:`        | Patch                            | `security: fix CVE-2024-XXXX input validation`    |
+| `docs:`, `chore:`  | None                             | Appears in changelog without version bump         |
 
 `CHANGELOG.md` is updated automatically by release-please when a release PR merges.
 
@@ -150,7 +150,7 @@ For the complete deprecation lifecycle, scope, and deprecation period definition
 
 Breaking changes require explicit communication and migration support:
 
-* Use the `BREAKING CHANGE:` footer in the commit message to trigger a major version bump.
+* Use the `BREAKING CHANGE:` footer in the commit message. The current `bump-minor-pre-major: true` configuration produces a minor bump before 1.0 and a major bump from 1.0 onward.
 * Include migration guidance in the PR description explaining what changed and how to update.
 * Update all affected documentation (READMEs, guides, workflow templates) in the same PR.
 * Add a `> [!CAUTION]` alert in relevant guides describing the breaking change and linking to migration steps.

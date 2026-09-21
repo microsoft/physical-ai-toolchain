@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Isaac Lab Training
 description: Reinforcement learning training with SKRL and RSL-RL backends on Azure ML and OSMO platforms
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-09-19
 ms.topic: how-to
 keywords:
   - isaac lab
@@ -33,7 +33,7 @@ Isaac Lab reinforcement learning training with SKRL and RSL-RL backends. Both Az
 ### Azure ML
 
 ```bash
-./scripts/submit-azureml-training.sh \
+./training/rl/scripts/submit-azureml-training.sh \
   --task Isaac-Velocity-Rough-Anymal-C-v0 \
   --num-envs 2048 \
   --stream
@@ -42,7 +42,7 @@ Isaac Lab reinforcement learning training with SKRL and RSL-RL backends. Both Az
 ### OSMO (Object Storage)
 
 ```bash
-./scripts/submit-osmo-training.sh \
+./training/rl/scripts/submit-osmo-training.sh \
   --task Isaac-Velocity-Rough-Anymal-C-v0 \
   --num-envs 2048
 ```
@@ -50,7 +50,7 @@ Isaac Lab reinforcement learning training with SKRL and RSL-RL backends. Both Az
 ### OSMO (Dataset Injection)
 
 ```bash
-./scripts/submit-osmo-dataset-training.sh \
+./training/rl/scripts/submit-osmo-dataset-training.sh \
   --task Isaac-Velocity-Rough-Anymal-C-v0 \
   --dataset-name my-training-v1
 ```
@@ -59,14 +59,14 @@ Dataset injection provides named, reusable dataset versions across runs.
 
 ## ⚖️ Platform Selection
 
-| Aspect              | Azure ML                              | OSMO                                 |
-|---------------------|---------------------------------------|--------------------------------------|
-| Submission          | `az ml job create` via YAML templates | `osmo workflow submit`               |
-| Orchestration       | AKS compute targets                   | KAI Scheduler / Volcano integration  |
-| Experiment tracking | MLflow (managed)                      | MLflow (Azure ML backend)            |
+| Aspect              | Azure ML                              | OSMO                                          |
+|---------------------|---------------------------------------|-----------------------------------------------|
+| Submission          | `az ml job create` via YAML templates | `osmo workflow submit`                        |
+| Orchestration       | AKS compute targets                   | KAI Scheduler / Volcano integration           |
+| Experiment tracking | MLflow (managed)                      | MLflow (Azure ML backend)                     |
 | Dataset delivery    | Azure ML datastores                   | Object storage (`url:`) or OSMO bucket upload |
-| Monitoring          | Azure ML Studio                       | OSMO UI Dashboard                    |
-| Payload modes       | Single (YAML template)                | Object storage (`url:`) or dataset injection |
+| Monitoring          | Azure ML Studio                       | OSMO UI Dashboard                             |
+| Payload modes       | Single (YAML template)                | Object storage (`url:`) or dataset injection  |
 
 Azure ML provides managed compute and experiment tracking through Azure ML Studio. OSMO adds distributed training coordination, KAI Scheduler integration, and a dataset versioning system.
 
@@ -74,14 +74,14 @@ Azure ML provides managed compute and experiment tracking through Azure ML Studi
 
 Core parameters shared across platforms:
 
-| Parameter          | Default                            | Description                          |
-|--------------------|------------------------------------|--------------------------------------|
-| `--task`           | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task identifier            |
-| `--num-envs`       | `2048`                             | Parallel simulation environments     |
-| `--max-iterations` | (unset)                            | Training iteration limit             |
-| `--image`          | `nvcr.io/nvidia/isaac-lab:2.3.2`   | Container image                      |
-| `--backend`        | `skrl`                             | Training backend: `skrl` or `rsl_rl` |
-| `--headless`       | `true`                             | Disable rendering                    |
+| Parameter          | Default                            | Description                                      |
+|--------------------|------------------------------------|--------------------------------------------------|
+| `--task`           | `Isaac-Velocity-Rough-Anymal-C-v0` | Isaac Lab task identifier                        |
+| `--num-envs`       | `2048`                             | Parallel simulation environments                 |
+| `--max-iterations` | (unset)                            | Training iteration limit                         |
+| `--image`          | `DEFAULT_ISAAC_LAB_IMAGE`          | Digest-pinned default in `scripts/lib/common.sh` |
+| `--backend`        | `skrl`                             | Training backend: `skrl` or `rsl_rl`             |
+| `--headless`       | `true`                             | Disable rendering                                |
 
 Values resolve in order: CLI arguments → environment variables → Terraform outputs.
 
@@ -96,25 +96,24 @@ SKRL is the default backend and supports automatic MLflow metric logging via mon
 
 ## 🔄 Checkpoint Workflows
 
-Four checkpoint modes control how training initializes:
+Three distinct checkpoint modes control how training initializes. The accepted `fresh` alias normalizes to `from-scratch`; it does not load a checkpoint architecture.
 
 | Mode           | Behavior                                                    |
 |----------------|-------------------------------------------------------------|
 | `from-scratch` | Default. No checkpoint loaded, training starts fresh.       |
 | `warm-start`   | Load weights only. Resets optimizer and iteration counters. |
-| `resume`       | Load full state. Continues from exact training position.    |
-| `fresh`        | Load model architecture only. Reinitializes all parameters. |
+| `resume`       | Restore the training state available in the checkpoint.     |
 
 ### Checkpoint Examples
 
 ```bash
 # Resume interrupted training (Azure ML)
-./scripts/submit-azureml-training.sh \
+./training/rl/scripts/submit-azureml-training.sh \
   --checkpoint-uri "runs:/abc123/checkpoint" \
   --checkpoint-mode resume
 
 # Warm-start from a registered model (OSMO)
-./scripts/submit-osmo-training.sh \
+./training/rl/scripts/submit-osmo-training.sh \
   --checkpoint-uri "models:/anymal-c-velocity/1" \
   --checkpoint-mode warm-start
 ```
@@ -125,11 +124,11 @@ Training scripts register checkpoints to Azure ML automatically. Override the mo
 
 ```bash
 # Custom model name
-./scripts/submit-azureml-training.sh \
+./training/rl/scripts/submit-azureml-training.sh \
   --register-checkpoint my-custom-model
 
 # Skip registration
-./scripts/submit-osmo-training.sh \
+./training/rl/scripts/submit-osmo-training.sh \
   --skip-register-checkpoint
 ```
 
@@ -137,15 +136,15 @@ Training scripts register checkpoints to Azure ML automatically. Override the mo
 
 OSMO supports two payload delivery modes for training code:
 
-| Mode                  | Script                            | Size Limit | Versioning |
-|-----------------------|-----------------------------------|------------|------------|
-| Object storage (`url:`) | `submit-osmo-training.sh`         | Unlimited  | Per submit |
-| Dataset injection     | `submit-osmo-dataset-training.sh` | Unlimited  | Automatic  |
+| Mode                    | Script                                                | Size Limit | Versioning |
+|-------------------------|-------------------------------------------------------|------------|------------|
+| Object storage (`url:`) | `training/rl/scripts/submit-osmo-training.sh`         | Unlimited  | Per submit |
+| Dataset injection       | `training/rl/scripts/submit-osmo-dataset-training.sh` | Unlimited  | Automatic  |
 
 Dataset injection uploads `training/rl/` as a versioned OSMO dataset, mounted at `/data/<dataset_name>/training` in the container:
 
 ```bash
-./scripts/submit-osmo-dataset-training.sh \
+./training/rl/scripts/submit-osmo-dataset-training.sh \
   --dataset-bucket custom-bucket \
   --dataset-name my-training-v1 \
   --task Isaac-Velocity-Rough-Anymal-C-v0

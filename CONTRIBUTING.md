@@ -2,7 +2,7 @@
 title: Contributing
 description: How to contribute to the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-08
+ms.date: 2026-09-19
 ms.topic: how-to
 keywords:
   - contributing
@@ -144,7 +144,7 @@ Run these commands to validate changes before submitting a PR:
 
 ```bash
 npm run lint:md        # Markdownlint
-npm run lint:links     # Markdown link validation
+npm run lint:links     # Language-specific URL check
 npm run lint:toml      # Taplo format check
 npm run lint:vuln      # OSV-Scanner v2.3.8 dependency vulnerability scan
 npm run spell-check    # cspell
@@ -155,7 +155,7 @@ For Terraform and shell script validation, see the [Prerequisites](docs/contribu
 
 ### Warning Policy
 
-All CI linters enforce warnings-as-errors. PRs that introduce new warnings will not merge.
+Required CI lint checks enforce warnings-as-errors. Advisory security scans are reported separately; the current PR workflow determines which checks block merging.
 
 | Linter                | Enforcement       | Configuration                                     |
 |-----------------------|-------------------|---------------------------------------------------|
@@ -168,8 +168,8 @@ All CI linters enforce warnings-as-errors. PRs that introduce new warnings will 
 | Python (lint:py)      | Errors block      | pyproject.toml [tool.ruff]                        |
 | TOML (lint:toml)      | Formatting blocks | taplo.toml                                        |
 | uv lock (lint:uvlock) | Drift blocks      | scripts/linting/Invoke-UvLockConsistencyCheck.ps1 |
-| Vulns (lint:vuln)     | Errors block      | osv-scanner.toml                                  |
-| Link check            | Errors block      | .markdownlint-cli2.jsonc                          |
+| Vulns (lint:vuln)     | Advisory in CI    | osv-scanner.toml                                  |
+| Link language check   | Errors block      | scripts/linting/Link-Lang-Check.ps1               |
 
 To suppress a specific warning locally, use the linter's inline suppression syntax. Do not change CI configuration to suppress warnings globally without team discussion.
 
@@ -187,7 +187,7 @@ Use structured titles to maintain consistency and enable automation.
 
 | Format         | Use Case       | Example                            |
 |----------------|----------------|------------------------------------|
-| `type(scope):` | Code changes   | `feat(ci): Add pytest workflow`    |
+| `type(scope):` | Code changes   | `feat(build): add pytest workflow` |
 | `[Task]:`      | Work items     | `[Task]: Achieve OpenSSF badge`    |
 | `[Policy]:`    | Governance     | `[Policy]: Define code of conduct` |
 | `[Docs]:`      | Doc planning   | `[Docs]: Publish security policy`  |
@@ -195,37 +195,20 @@ Use structured titles to maintain consistency and enable automation.
 
 ### Conventional Commits Types
 
-| Type       | Description                             |
-|------------|-----------------------------------------|
-| `feat`     | New feature or capability               |
-| `fix`      | Bug fix                                 |
-| `docs`     | Documentation only                      |
-| `refactor` | Code change that neither fixes nor adds |
-| `test`     | Adding or correcting tests              |
-| `ci`       | CI configuration changes                |
-| `chore`    | Maintenance tasks                       |
+Use `feat`, `fix`, `refactor`, `perf`, `style`, `test`, `docs`, `build`, `ops`, `chore`, or `security`. The [commit-message instructions](.github/instructions/commit-message.instructions.md) define the authoritative types, scopes, length limits, and attribution footer.
 
 ### Repository Scopes
 
-| Scope       | Area                     |
-|-------------|--------------------------|
-| `terraform` | Infrastructure as Code   |
-| `scripts`   | Shell and Python scripts |
-| `training`  | ML training code         |
-| `workflows` | AzureML/Osmo workflows   |
-| `ci`        | GitHub Actions           |
-| `deploy`    | Deployment artifacts     |
-| `docs`      | Documentation            |
-| `security`  | Security-related changes |
+Select a scope from the [allowed scope list](.github/instructions/commit-message.instructions.md#scopes). Use `infrastructure` for Terraform and cluster setup, `build` for GitHub Actions, `training` for training workflows, and `deployment` for fleet deployment. Use imperative descriptions.
 
 ### Title Examples
 
 ```text
-feat(ci): Add CodeQL security scanning workflow
-fix(terraform): Correct AKS node pool configuration
-docs(deploy): Add VPN deployment documentation
-refactor(scripts): Consolidate common functions
-test(training): Add pytest fixtures
+feat(build): add CodeQL security scanning workflow
+fix(infrastructure): correct AKS node pool configuration
+docs(docs): add VPN deployment documentation
+refactor(scripts): consolidate common functions
+test(training): add pytest fixtures
 [Task]: Achieve code coverage target
 [Policy]: Define input validation requirements
 ```
@@ -237,7 +220,7 @@ This project uses [release-please](https://github.com/googleapis/release-please)
 - `feat:` commits trigger a **minor** version bump
 - `fix:` commits trigger a **patch** version bump
 - `docs:`, `chore:`, `refactor:` commits appear in the changelog without a version bump
-- Commits with `BREAKING CHANGE:` footer trigger a **major** version bump
+- Commits with `BREAKING CHANGE:` footer trigger a minor version bump while pre-1.0 (`bump-minor-pre-major: true`), then a major bump from 1.0 onward
 
 After merging to `main`, release-please automatically creates a release PR with updated `CHANGELOG.md` and version bumps. Merging that PR creates a GitHub Release and git tag.
 
@@ -430,13 +413,13 @@ named project statuses in `codecov.yml` are top-level project gates;
 
 ### Test Organization
 
-Tests mirror the source directory structure under `tests/`:
+Tests are grouped in their component test directories:
 
-| Source Path                    | Test Path                        |
-|--------------------------------|----------------------------------|
-| `training/rl/utils/env.py`     | `training/tests/test_env.py`     |
-| `training/rl/utils/metrics.py` | `training/tests/test_metrics.py` |
-| `training/rl/cli_args.py`      | `tests/unit/test_cli_args.py`    |
+| Source Path                 | Test Path                         |
+|-----------------------------|-----------------------------------|
+| `training/utils/env.py`     | `training/tests/test_env.py`      |
+| `training/utils/metrics.py` | `training/tests/test_metrics.py`  |
+| `training/rl/cli_args.py`   | `training/tests/test_cli_args.py` |
 
 ### Test Categories
 
@@ -512,9 +495,9 @@ This project uses a corporate-sponsored maintainer model. See [GOVERNANCE.md](GO
 
 ## Internationalization
 
-This project currently produces no user-facing applications or localizable content. All technical documentation is maintained in English.
+The project includes the dataviewer web application. Technical documentation is maintained in English; this does not establish a localization policy for the application.
 
-If user-facing components are added in the future, follow [W3C Internationalization](https://www.w3.org/International/) guidelines and [Unicode CLDR](https://cldr.unicode.org/) for locale data. Use [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags for locale identifiers.
+When adding localization to user-facing components, follow [W3C Internationalization](https://www.w3.org/International/) guidelines and [Unicode CLDR](https://cldr.unicode.org/) for locale data. Use [BCP 47](https://www.rfc-editor.org/info/bcp47) language tags for locale identifiers.
 
 ## Code of Conduct
 

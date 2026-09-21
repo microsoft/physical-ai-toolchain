@@ -3,14 +3,16 @@ sidebar_position: 8
 title: Deployment Validation Guide
 description: Validation levels, testing templates, and cost optimization for contribution testing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: how-to
 ---
 
 > [!NOTE]
 > This guide expands on the [Deployment Validation](README.md#-deployment-validation) section of the main contributing guide.
 
-This reference architecture validates through deployment rather than automated unit or integration tests. Validation approach depends on contribution scope and cost constraints.
+Automated linting, component tests, Terraform tests, and smoke checks provide the validation baseline. Deployment and workflow validation supplement those checks for environment-dependent changes. Select additional validation based on contribution scope and cost constraints.
+
+Costs below are illustrative estimates, not current quotes or measurements for the default deployment. Confirm the selected resources and regional rates before deploying.
 
 ## Validation Levels
 
@@ -21,16 +23,20 @@ Required for all contributions before submitting PR.
 **Commands:**
 
 ```bash
+# Install validation dependencies from the repository root
+npm ci
+
 # Terraform formatting and validation
 npm run lint:tf:validate
 
 # Shell script linting
-shellcheck infrastructure/**/*.sh scripts/**/*.sh
+npm run lint:sh
 
 # Documentation validation
-npm install
 npm run lint:md
 ```
+
+Run the applicable component tests as described in [Testing Requirements](../../CONTRIBUTING.md#testing-requirements). Static checks alone do not replace tests for code changes.
 
 **When to use:** Every contribution (documentation, code, infrastructure).
 
@@ -43,6 +49,7 @@ Required for Terraform module or configuration changes.
 **Commands:**
 
 ```bash
+source infrastructure/terraform/prerequisites/az-sub-init.sh
 cd infrastructure/terraform
 cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your subscription details
@@ -69,11 +76,13 @@ Optional for most PRs due to cost (~$25-50 for 8-hour session). Required for sig
 **Minimal test deployment:**
 
 ```bash
-# Use public network mode for faster/simpler testing
+# Initialize subscription context from the repository root
+source infrastructure/terraform/prerequisites/az-sub-init.sh
 cd infrastructure/terraform
-terraform apply -var-file=terraform.tfvars -var="network_mode=public"
+terraform apply -var-file=terraform.tfvars
 
 # Test specific functionality
+# Connect the VPN first when should_enable_private_aks_cluster is true
 az aks get-credentials --resource-group <rg> --name <aks-name>
 kubectl get nodes  # Verify GPU nodes
 helm list -A  # Verify Helm chart deployments
@@ -81,6 +90,8 @@ helm list -A  # Verify Helm chart deployments
 # Destroy promptly
 terraform destroy -var-file=terraform.tfvars
 ```
+
+The default example uses private endpoints and a private AKS API. For an approved public test environment, set both `should_enable_private_endpoint` and `should_enable_private_aks_cluster` to `false` in `terraform.tfvars`; review `should_enable_public_network_access` and access restrictions as well. Keep the same variable file for plan, apply, and destroy. Terraform provisions infrastructure; install GPU Operator and OSMO with the ordered scripts in `infrastructure/setup/` before checking Helm releases.
 
 **Documentation required in PR:**
 
@@ -90,7 +101,7 @@ terraform destroy -var-file=terraform.tfvars
 
 **Example:**
 
-> Deployed full infrastructure in eastus with public network mode. Verified GPU node pool created with 1 Standard_NC24ads_A100_v4 node. Confirmed GPU Operator and OSMO backend deployed successfully. Did not test private network mode. Cost: ~$30 for 6-hour deployment test.
+> Example report: Deployed infrastructure in the selected region with a private AKS API. Verified one Standard_NV36ads_A10_v5 GPU node. Connected the VPN and ran the setup scripts, then confirmed GPU Operator and OSMO backend were available. Record the actual duration, cost estimate, and untested scenarios for your run.
 
 **When to use:** Major infrastructure changes, new modules, network architecture changes.
 
@@ -102,12 +113,14 @@ Required for changes to training scripts, workflow templates, or AzureML integra
 
 **Commands:**
 
+Run these RL submission examples from the repository root after deploying and configuring the selected platform:
+
 ```bash
 # AzureML training job
-./scripts/submit-azureml-training.sh
+./training/rl/scripts/submit-azureml-training.sh
 
 # OSMO workflow
-./scripts/submit-osmo-training.sh
+./training/rl/scripts/submit-osmo-training.sh
 ```
 
 **Documentation required in PR:**
@@ -179,13 +192,9 @@ Strategies for minimizing testing costs while maintaining validation quality.
 
 **Use smaller deployments:**
 
-```bash
-# Single GPU node instead of default pool size
-terraform apply -var="gpu_node_count=1"
+Edit `node_pools` in `terraform.tfvars`. For an autoscaled pool, set `should_enable_auto_scaling = true` and `min_count = max_count = 1`; for a fixed pool, set `should_enable_auto_scaling = false` and `node_count = 1`. Preserve its VM size, subnet, GPU driver, labels, and taints. The checked-in single-pool example already limits the A10 pool to one node.
 
-# Public network mode (simpler, faster)
-terraform apply -var="network_mode=public"
-```
+Do not make networking public solely to reduce cost. Use the approved network mode and account for VPN and managed-service costs.
 
 **Set spending alerts:**
 
