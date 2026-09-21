@@ -22,7 +22,7 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 
 ## Top-Level Keys
 
-`remote.yaml` declares four optional top-level keys. At least one of `serverstages`,
+`remote.yaml` declares five optional top-level keys. At least one of `serverstages`,
 `remoteclasses`, or `remotefuncs` must be present.
 
 | Key              | Type             | Required | Purpose                                      |
@@ -31,6 +31,30 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 | `remoteclasses`  | list of mappings | No       | Classes whose methods execute in stages      |
 | `remotefuncs`    | list of mappings | No       | Functions that execute in stages             |
 | `allowedmodules` | list of strings  | No       | Permit additional runtime module imports     |
+| `encryption`     | boolean          | No       | Encrypt and authenticate RPC payloads        |
+
+## encryption
+
+Set `encryption: true` to enable AES-GCM for RPC data messages. The controller
+generates one random 32-byte key per opted-in workload, stores it in a
+controller-managed Kubernetes Secret, and mounts the same key read-only into the
+client containers and every generated server stage.
+
+```yaml
+encryption: true
+serverstages:
+  - name: gpu
+    perclient: false
+```
+
+The key value is generated during reconciliation and does not appear in Helm
+values, workload manifests, ConfigMaps, command-line arguments, or environment
+variables. The manifest contains only the generated Secret name and the
+`REMOTER_KEY_FILE` path.
+
+`encryption` is a top-level workload setting because the runtime uses one
+transport key for all server stages. Configure it before creating the workload;
+changing the ConfigMap does not mutate an existing client pod template.
 
 ## allowedmodules
 

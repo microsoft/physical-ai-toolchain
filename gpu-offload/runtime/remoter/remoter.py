@@ -2059,17 +2059,17 @@ def initRemoterFromArgs(args):
         key = secrets.token_bytes(32)
         with open(args.key, "wb") as f:
             f.write(key)
-        logger.info(f"Generated key (hex): {key.hex()}")
+        logger.info(f"Generated remoter key at {args.key}")
         exit(0)
     if args.key:
         if os.path.exists(args.key):
             with open(args.key, "rb") as f:
                 key = f.read()
-            logger.info(f"Using key (hex): {key.hex()}")
         else:
             # load from hex string
             key = bytes.fromhex(args.key)
-            assert len(key) == 32, "Key must be 32 bytes long (256 bits)"
+        if len(key) != 32:
+            raise ValueError("Key must be 32 bytes long (256 bits)")
         msgsock.msgkey = key
     if args.configserver:
         configserver = rmtconfig.ConfigServer(args.confighost, args.configport, args.ssl, args.config)

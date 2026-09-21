@@ -28,14 +28,30 @@ class _FakeConfigMap:
 
 
 class _FakeCoreApi:
-    def __init__(self, configmaps=None):
+    def __init__(self, configmaps=None, secrets=None):
         self.configmaps = configmaps or {}
+        self.secrets = secrets or {}
+        self.actions = []
 
     def read_namespaced_config_map(self, name, namespace):
         key = (namespace, name)
         if key not in self.configmaps:
             raise client.exceptions.ApiException(status=404)
         return _FakeConfigMap(self.configmaps[key])
+
+    def read_namespaced_secret(self, name, namespace):
+        key = (namespace, name)
+        if key not in self.secrets:
+            raise client.exceptions.ApiException(status=404)
+        return copy.deepcopy(self.secrets[key])
+
+    def create_namespaced_secret(self, namespace, body):
+        self.secrets[(namespace, body["metadata"]["name"])] = copy.deepcopy(body)
+        self.actions.append(("create-secret", namespace, body["metadata"]["name"]))
+
+    def delete_namespaced_secret(self, name, namespace):
+        self.secrets.pop((namespace, name), None)
+        self.actions.append(("delete-secret", namespace, name))
 
 
 class _FakeAppsApi:
@@ -269,6 +285,32 @@ def test_admission_review_returns_patch_for_opted_workload():
     )
 
 
+def test_admission_review_injects_encryption_secret_from_remote_config():
+    mod = _load_mutate_module()
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": "encryption: true\nserverstages:\n  - name: gpu\n"}}
+    )
+    controller = mod.XavierAdmissionController(core_api=core_api)
+    review = {
+        "apiVersion": "admission.k8s.io/v1",
+        "kind": "AdmissionReview",
+        "request": {
+            "uid": "encrypted",
+            "operation": "CREATE",
+            "object": _base_workload(),
+        },
+    }
+
+    status_code, response = controller.handle_admission_review(review)
+
+    assert status_code == 200
+    assert response["response"]["allowed"] is True
+    patch_json = json.dumps(_decode_patch(response))
+    assert "client-deployment-remoter-key" in patch_json
+    assert "REMOTER_KEY_FILE" in patch_json
+    assert mod.REMOTER_KEY_PATH in patch_json
+
+
 def test_admission_review_passes_through_non_opted_workload():
     mod = _load_mutate_module()
     controller = mod.XavierAdmissionController()
@@ -404,6 +446,24 @@ def test_validate_xavier_config_rejects_escalation_capabilities_and_unconfined_s
         require_remoteablecm=True,
     )
     assert normalized["securityContext"]["capabilities"]["drop"] == ["ALL"]
+
+
+def test_validate_xavier_config_accepts_only_top_level_encryption():
+    mod = _load_mutate_module()
+
+    normalized = mod.validate_xavier_config(
+        {"remoteablecm": "cm", "encryption": "true"},
+        source="annotation",
+        require_remoteablecm=True,
+    )
+
+    assert normalized["encryption"] is True
+    with pytest.raises(mod.XavierConfigError, match="top-level setting"):
+        mod.validate_xavier_config(
+            {"remoteablecm": "cm", "serverstages": [{"name": "gpu", "encryption": True}]},
+            source="annotation",
+            require_remoteablecm=True,
+        )
 
 
 def test_build_desired_server_deployments_merges_supported_schema_fields():
@@ -668,6 +728,71 @@ def test_reconcile_named_server_deployment_ignores_kubernetes_defaulted_fields()
 
     assert outcome == "unchanged"
     assert apps_api.actions == []
+
+
+def test_reconcile_object_creates_stable_encryption_secret_and_mounts_it():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    mod.DoMutate(
+        deploy,
+        strict=True,
+        resolved_config={"remoteablecm": "client-cm", "encryption": True},
+    )
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"].append(
+        {"name": "REMOTERPORT", "value": "30001"}
+    )
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'encryption: true\nserverstages:\n  - name: ""\n'}}
+    )
+    apps_api = _FakeAppsApi()
+    batch_api = _FakeBatchApi()
+
+    first = mod.reconcile_object(deploy, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+    secret = core_api.secrets[("default", "client-deployment-remoter-key")]
+    first_key = base64.b64decode(secret["data"]["key"])
+    server = apps_api.deployments[("default", "client-remote-server")]
+    server_spec = server["spec"]["template"]["spec"]
+    server_container = server_spec["containers"][0]
+
+    assert first["client-deployment-remoter-key"] == "created"
+    assert len(first_key) == 32
+    assert server_spec["volumes"][-1]["secret"]["secretName"] == "client-deployment-remoter-key"
+    assert server_container["volumeMounts"][-1]["mountPath"] == mod.REMOTER_KEY_MOUNT_PATH
+    assert mod.get_env_var(server_container, "REMOTER_KEY_FILE") == mod.REMOTER_KEY_PATH
+
+    second = mod.reconcile_object(deploy, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
+
+    assert second["client-deployment-remoter-key"] == "unchanged"
+    assert (
+        base64.b64decode(core_api.secrets[("default", "client-deployment-remoter-key")]["data"]["key"])
+        == first_key
+    )
+
+
+def test_reconcile_object_deletes_managed_secret_when_encryption_is_disabled():
+    mod = _load_mutate_module()
+    deploy = _base_workload()
+    deploy["metadata"]["labels"] = {"xavier": "true"}
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"] = [
+        {"name": "XAVIER_CONTAINER", "value": "true"},
+        {"name": "REMOTERPORT", "value": "30001"},
+    ]
+    secret = mod._create_encryption_secret_spec("client-deployment-remoter-key", "default", deploy)
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}},
+        {("default", "client-deployment-remoter-key"): secret},
+    )
+
+    outcomes = mod.reconcile_object(
+        deploy,
+        core_api=core_api,
+        apps_api=_FakeAppsApi(),
+        batch_api=_FakeBatchApi(),
+    )
+
+    assert outcomes["client-deployment-remoter-key"] == "deleted"
+    assert ("default", "client-deployment-remoter-key") not in core_api.secrets
 
 
 def test_reconcile_object_deletes_server_deployment_for_removed_stage():

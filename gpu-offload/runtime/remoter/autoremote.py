@@ -9,7 +9,7 @@ import sys
 # use by sitecustomize.py
 import yaml
 
-from . import remoter, rmtclass, rmtconfigkube
+from . import msgsock, remoter, rmtclass, rmtconfigkube
 from .simplelog import initlog
 
 
@@ -107,6 +107,25 @@ def allow_configured_modules(cfg: dict) -> None:
         if not separator or not module_name:
             raise ValueError(f"Remote target must include a module path: {target_path!r}")
         remoter.allow_module(module_name)
+
+
+def configure_message_encryption(cfg: dict) -> None:
+    encryption_enabled = cfg.get("encryption", False)
+    if not isinstance(encryption_enabled, bool):
+        raise ValueError("encryption must be a boolean")
+    if not encryption_enabled:
+        msgsock.msgkey = None
+        return
+
+    key_file = os.environ.get("REMOTER_KEY_FILE")
+    if not key_file:
+        raise RuntimeError("REMOTER_KEY_FILE is required when encryption is enabled")
+    with open(key_file, "rb") as file:
+        key = file.read()
+    if len(key) != 32:
+        raise ValueError(f"REMOTER_KEY_FILE must contain exactly 32 bytes: {key_file}")
+    msgsock.msgkey = key
+    logger.info("Enabled AES-GCM message encryption")
 
 
 def apply_decorators_from_config(configpath) -> bool:
@@ -263,7 +282,9 @@ def start(serveronly=True):
     else:
         newremoteconfig = remoteconfig
 
-    remoter.setparams(load_config(newremoteconfig))
+    runtime_config = load_config(newremoteconfig)
+    configure_message_encryption(runtime_config)
+    remoter.setparams(runtime_config)
     remoted = apply_decorators_from_config(newremoteconfig)
     if remoted:
         remoter.initRemoter(

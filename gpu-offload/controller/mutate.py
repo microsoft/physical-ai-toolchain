@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import signal
 import ssl
 import threading
@@ -32,6 +33,11 @@ SERVER_SELECTOR_LABEL = "apprmt"
 XAVIER_CONFIG_VOLUME_NAME = "xavierconfig"
 XAVIER_CONFIG_MOUNT_PATH = "/xavierconfig"
 REMOTE_CONFIG_PATH = f"{XAVIER_CONFIG_MOUNT_PATH}/remote.yaml"
+REMOTER_KEY_VOLUME_NAME = "xavier-remoter-key"
+REMOTER_KEY_MOUNT_PATH = "/var/run/xavier-remoter"
+REMOTER_KEY_PATH = f"{REMOTER_KEY_MOUNT_PATH}/key"
+REMOTER_KEY_DATA_NAME = "key"
+XAVIER_ENCRYPTION_SECRET_LABEL = "xavier-encryption-secret"
 DEFAULT_TLS_CERT_PATH = "/tls/tls.crt"
 DEFAULT_TLS_KEY_PATH = "/tls/tls.key"
 DEFAULT_PORT = 8443
@@ -160,6 +166,8 @@ def _validate_stage(stage: Any, *, index: int) -> dict[str, Any]:
         raise XavierConfigError(f"serverstages[{index}] must be a mapping")
     normalized = copy.deepcopy(stage)
     normalized["name"] = str(stage.get("name", ""))
+    if "encryption" in normalized:
+        raise XavierConfigError("encryption is a top-level setting and cannot be configured per server stage")
     if "perclient" in normalized:
         normalized["perclient"] = _normalize_bool(normalized["perclient"], field=f"serverstages[{index}].perclient")
     if "noserverdeployment" in normalized:
@@ -242,6 +250,8 @@ def validate_xavier_config(
             normalized["noserverdeployment"],
             field=f"{source}.noserverdeployment",
         )
+    if "encryption" in normalized:
+        normalized["encryption"] = _normalize_bool(normalized["encryption"], field=f"{source}.encryption")
 
     top_level_perclient = False
     if "perclient" in normalized:
@@ -335,6 +345,18 @@ def set_env_var_if_not_exists(container: dict[str, Any], name: str, value: Any) 
     return True
 
 
+def ensure_env_var(container: dict[str, Any], name: str, value: str) -> bool:
+    env_vars = container.setdefault("env", [])
+    for env_var in env_vars:
+        if env_var.get("name") != name:
+            continue
+        if env_var == {"name": name, "value": value}:
+            return False
+        raise XavierConfigError(f"{name} is managed by the GPU offload controller")
+    env_vars.append({"name": name, "value": value})
+    return True
+
+
 def add_configmap_volume(spec: dict[str, Any], cm_name: str) -> bool:
     volumes = spec.setdefault("volumes", [])
     for volume in volumes:
@@ -357,6 +379,74 @@ def add_volume_mounts_to_container(container: dict[str, Any]) -> bool:
         }
     )
     return True
+
+
+def add_encryption_secret_volume(spec: dict[str, Any], secret_name: str) -> bool:
+    desired = {
+        "name": REMOTER_KEY_VOLUME_NAME,
+        "secret": {
+            "secretName": secret_name,
+            "items": [{"key": REMOTER_KEY_DATA_NAME, "path": REMOTER_KEY_DATA_NAME}],
+        },
+    }
+    volumes = spec.setdefault("volumes", [])
+    for volume in volumes:
+        if volume.get("name") == REMOTER_KEY_VOLUME_NAME:
+            if volume == desired:
+                return False
+            raise XavierConfigError(f"Volume {REMOTER_KEY_VOLUME_NAME!r} is managed by the GPU offload controller")
+    volumes.append(desired)
+    return True
+
+
+def add_encryption_secret_mount(container: dict[str, Any]) -> bool:
+    desired = {
+        "name": REMOTER_KEY_VOLUME_NAME,
+        "mountPath": REMOTER_KEY_MOUNT_PATH,
+        "readOnly": True,
+    }
+    mounts = container.setdefault("volumeMounts", [])
+    for mount in mounts:
+        if mount.get("name") == REMOTER_KEY_VOLUME_NAME:
+            if mount == desired:
+                return False
+            raise XavierConfigError(
+                f"Volume mount {REMOTER_KEY_VOLUME_NAME!r} is managed by the GPU offload controller"
+            )
+    mounts.append(desired)
+    return True
+
+
+def has_encryption_secret_mount(
+    spec: dict[str, Any],
+    container: dict[str, Any],
+    secret_name: str,
+) -> bool:
+    volume = next(
+        (item for item in spec.get("volumes", []) or [] if item.get("name") == REMOTER_KEY_VOLUME_NAME),
+        None,
+    )
+    mount = next(
+        (item for item in container.get("volumeMounts", []) or [] if item.get("name") == REMOTER_KEY_VOLUME_NAME),
+        None,
+    )
+    return (
+        volume
+        == {
+            "name": REMOTER_KEY_VOLUME_NAME,
+            "secret": {
+                "secretName": secret_name,
+                "items": [{"key": REMOTER_KEY_DATA_NAME, "path": REMOTER_KEY_DATA_NAME}],
+            },
+        }
+        and mount
+        == {
+            "name": REMOTER_KEY_VOLUME_NAME,
+            "mountPath": REMOTER_KEY_MOUNT_PATH,
+            "readOnly": True,
+        }
+        and get_env_var(container, "REMOTER_KEY_FILE") == REMOTER_KEY_PATH
+    )
 
 
 def serverlabelkey() -> str:
@@ -424,7 +514,13 @@ _PROTOCOL_ENV_NAMES = {
 }
 
 
-def _add_client_env(container: dict[str, Any], server_label: str, *, perclient_label: str | None) -> bool:
+def _add_client_env(
+    container: dict[str, Any],
+    server_label: str,
+    *,
+    perclient_label: str | None,
+    encryption_enabled: bool,
+) -> bool:
     changed = False
     changed |= set_env_var_if_not_exists(container, "REMOTER_CONFIG", REMOTE_CONFIG_PATH)
     changed |= set_env_var_if_not_exists(container, "CONFIGFROMKUBE", "true")
@@ -433,10 +529,18 @@ def _add_client_env(container: dict[str, Any], server_label: str, *, perclient_l
     changed |= set_env_var_if_not_exists(container, "STAGE_NAME", "client")
     if perclient_label is not None:
         changed |= set_env_var_if_not_exists(container, "PERCLIENTSERVERLABEL", perclient_label)
+    if encryption_enabled:
+        changed |= ensure_env_var(container, "REMOTER_KEY_FILE", REMOTER_KEY_PATH)
     return changed
 
 
-def DoMutate(obj: dict[str, Any], objOrig: dict[str, Any] | None = None, *, strict: bool = False) -> bool:
+def DoMutate(
+    obj: dict[str, Any],
+    objOrig: dict[str, Any] | None = None,
+    *,
+    strict: bool = False,
+    resolved_config: dict[str, Any] | None = None,
+) -> bool:
     kind = obj.get("kind")
     if kind not in SUPPORTED_KINDS:
         return False
@@ -457,6 +561,8 @@ def DoMutate(obj: dict[str, Any], objOrig: dict[str, Any] | None = None, *, stri
     if xaviercfg is None:
         return False
 
+    effective_config = resolved_config if resolved_config is not None else xaviercfg
+    encryption_enabled = effective_config.get("encryption", False) is True
     changed = False
     template_metadata = get_template_metadata(obj)
     if template_metadata is not None:
@@ -473,6 +579,8 @@ def DoMutate(obj: dict[str, Any], objOrig: dict[str, Any] | None = None, *, stri
             changed = True
 
     changed |= add_configmap_volume(spec, xaviercfg["remoteablecm"])
+    if encryption_enabled:
+        changed |= add_encryption_secret_volume(spec, encryption_secret_name(obj))
 
     remoteable_containers = set(xaviercfg.get("remoteableconts", []) or [])
     workload_name = metadata.get("name", "unknown")
@@ -482,7 +590,14 @@ def DoMutate(obj: dict[str, Any], objOrig: dict[str, Any] | None = None, *, stri
         if remoteable_containers and container.get("name") not in remoteable_containers:
             continue
         changed |= add_volume_mounts_to_container(container)
-        changed |= _add_client_env(container, server_label, perclient_label=perclient_label)
+        if encryption_enabled:
+            changed |= add_encryption_secret_mount(container)
+        changed |= _add_client_env(
+            container,
+            server_label,
+            perclient_label=perclient_label,
+            encryption_enabled=encryption_enabled,
+        )
     return changed
 
 
@@ -503,19 +618,31 @@ def get_xavier_container(spec: dict[str, Any]) -> dict[str, Any] | None:
 _MAX_K8S_LABEL_LENGTH = 63
 
 
+def _bounded_kubernetes_name(name: str) -> str:
+    if len(name) <= _MAX_K8S_LABEL_LENGTH:
+        return name
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    prefix_len = _MAX_K8S_LABEL_LENGTH - len(digest) - 1
+    return f"{name[:prefix_len].rstrip('-')}-{digest}"
+
+
 def _deployment_name(metadata: dict[str, Any], stage: str) -> str:
     deployment_name = f"{metadata['name']}-remote-server"
     if stage:
         deployment_name = f"{deployment_name}-{stage}"
-    if len(deployment_name) <= _MAX_K8S_LABEL_LENGTH:
-        return deployment_name
     # Kubernetes object names allow up to 253 characters, but this value is also
     # used as a label value (63-character limit) -- truncate the human-readable
     # prefix and append a short hash of the full name so two names that collide
     # after truncation don't collide with each other too.
-    digest = hashlib.sha256(deployment_name.encode()).hexdigest()[:8]
-    prefix_len = _MAX_K8S_LABEL_LENGTH - len(digest) - 1
-    return f"{deployment_name[:prefix_len].rstrip('-')}-{digest}"
+    return _bounded_kubernetes_name(deployment_name)
+
+
+def encryption_secret_name(obj: dict[str, Any]) -> str:
+    metadata = obj.get("metadata", {})
+    labels = metadata.get("labels") or {}
+    owner_name = labels.get(XAVIER_PARENT_NAME_LABEL) or metadata["name"]
+    owner_kind = labels.get(XAVIER_PARENT_KIND_LABEL) or obj.get("kind", "workload")
+    return _bounded_kubernetes_name(f"{owner_name}-{str(owner_kind).lower()}-remoter-key")
 
 
 def _api_version_for_owner(owner_obj: dict[str, Any]) -> str:
@@ -694,6 +821,17 @@ def create_server_deployment_spec(
     copy_allowed_volumes_and_mounts(deployment["spec"]["template"]["spec"], spec, xavier_container)
 
     container = deployment["spec"]["template"]["spec"]["containers"][0]
+    encryption_enabled = xavierconfig.get("encryption", False) is True
+    secret_name = encryption_secret_name(obj)
+    client_encryption_enabled = has_encryption_secret_mount(spec, xavier_container, secret_name)
+    if encryption_enabled != client_encryption_enabled:
+        raise XavierConfigError(
+            "the encryption setting does not match the admitted client workload; recreate the workload "
+            "after changing encryption"
+        )
+    if encryption_enabled:
+        add_encryption_secret_volume(deployment["spec"]["template"]["spec"], secret_name)
+        add_encryption_secret_mount(container)
     if "imagePullPolicy" in xavier_container:
         container["imagePullPolicy"] = xavier_container["imagePullPolicy"]
     # the client's env is not trusted by default -- forwarding everything (including
@@ -712,6 +850,8 @@ def create_server_deployment_spec(
             "REMOTER_CONFIG": REMOTE_CONFIG_PATH,
         }
     )
+    if encryption_enabled:
+        env_dict["REMOTER_KEY_FILE"] = REMOTER_KEY_PATH
     if env_dict.get("PERCLIENTSERVERLABEL") == "unknown":
         # recompute rather than strip "-{stage}" off deployment_name: once
         # _deployment_name truncates+hashes for length, that suffix isn't there
@@ -885,6 +1025,73 @@ def reconcile_named_server_deployment(
     return "patched"
 
 
+def _create_encryption_secret_spec(secret_name: str, namespace: str, owner_obj: dict[str, Any]) -> dict[str, Any]:
+    secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": secret_name,
+            "namespace": namespace,
+            "labels": {XAVIER_ENCRYPTION_SECRET_LABEL: "true"},
+        },
+        "type": "Opaque",
+        "data": {REMOTER_KEY_DATA_NAME: base64.b64encode(secrets.token_bytes(32)).decode("ascii")},
+    }
+    add_owner_reference(secret, owner_obj)
+    return secret
+
+
+def _validate_managed_encryption_secret(secret_obj: Any, secret_name: str) -> None:
+    secret = kubernetes_object_to_dict(secret_obj)
+    metadata = secret.get("metadata", {}) or {}
+    labels = metadata.get("labels", {}) or {}
+    if labels.get(XAVIER_ENCRYPTION_SECRET_LABEL) != "true":
+        raise XavierConfigError(
+            f"Secret {secret_name!r} already exists and is not managed by the GPU offload controller"
+        )
+    encoded_key = (secret.get("data") or {}).get(REMOTER_KEY_DATA_NAME)
+    if not isinstance(encoded_key, str):
+        raise XavierConfigError(f"Managed Secret {secret_name!r} does not contain key data")
+    try:
+        key = base64.b64decode(encoded_key, validate=True)
+    except ValueError as exc:
+        raise XavierConfigError(f"Managed Secret {secret_name!r} contains invalid key data") from exc
+    if len(key) != 32:
+        raise XavierConfigError(f"Managed Secret {secret_name!r} must contain a 32-byte key")
+
+
+def reconcile_encryption_secret(
+    core_api: client.CoreV1Api,
+    *,
+    namespace: str,
+    secret_name: str,
+    owner_obj: dict[str, Any],
+    enabled: bool,
+) -> str:
+    try:
+        existing = core_api.read_namespaced_secret(name=secret_name, namespace=namespace)
+    except client.exceptions.ApiException as exc:
+        if exc.status != 404:
+            raise
+        if not enabled:
+            return "absent"
+        core_api.create_namespaced_secret(
+            namespace=namespace,
+            body=_create_encryption_secret_spec(secret_name, namespace, owner_obj),
+        )
+        return "created"
+
+    if enabled:
+        _validate_managed_encryption_secret(existing, secret_name)
+        return "unchanged"
+    secret = kubernetes_object_to_dict(existing)
+    labels = (secret.get("metadata", {}) or {}).get("labels", {}) or {}
+    if labels.get(XAVIER_ENCRYPTION_SECRET_LABEL) != "true":
+        return "absent"
+    core_api.delete_namespaced_secret(name=secret_name, namespace=namespace)
+    return "deleted"
+
+
 def _orphaned_server_deployment_names(
     apps_api: client.AppsV1Api,
     *,
@@ -931,6 +1138,39 @@ def reconcile_object(
 ) -> dict[str, str]:
     if obj.get("kind") not in SUPPORTED_KINDS:
         return {}
+    outcomes: dict[str, str] = {}
+    metadata, spec, xaviercfg = get_metadata_spec(obj, strict=True)
+    is_opted_root = (
+        metadata is not None
+        and spec is not None
+        and xaviercfg is not None
+        and not _is_parent_labeled_pod(metadata)
+        and _is_fully_opted_root_workload(metadata, spec)
+    )
+    if is_opted_root:
+        namespace = metadata.get("namespace", "default")
+        xavierconfig = merge_configmap_config(core_api, xaviercfg, namespace)
+        encryption_enabled = xavierconfig.get("encryption", False) is True
+        xavier_container = get_xavier_container(spec)
+        secret_name = encryption_secret_name(obj)
+        client_encryption_enabled = (
+            xavier_container is not None and has_encryption_secret_mount(spec, xavier_container, secret_name)
+        )
+        if encryption_enabled != client_encryption_enabled:
+            raise XavierConfigError(
+                "the encryption setting does not match the admitted client workload; recreate the workload "
+                "after changing encryption"
+            )
+        secret_outcome = reconcile_encryption_secret(
+            core_api,
+            namespace=namespace,
+            secret_name=secret_name,
+            owner_obj=obj,
+            enabled=encryption_enabled,
+        )
+        if secret_outcome != "absent":
+            outcomes[secret_name] = secret_outcome
+
     desired_deployments = build_desired_server_deployments(
         obj,
         core_api=core_api,
@@ -938,7 +1178,6 @@ def reconcile_object(
         batch_api=batch_api,
     )
     namespace = obj.get("metadata", {}).get("namespace", "default")
-    outcomes: dict[str, str] = {}
     for deployment_name, desired_spec in desired_deployments.items():
         outcomes[deployment_name] = reconcile_named_server_deployment(
             apps_api,
@@ -952,14 +1191,6 @@ def reconcile_object(
     # object is the (sole) owner of a `<name>-remote-server*` family of
     # Deployments, and the only case where "no longer in serverstages" is a
     # meaningful signal at all.
-    metadata, spec, xaviercfg = get_metadata_spec(obj, strict=False)
-    is_opted_root = (
-        metadata is not None
-        and spec is not None
-        and xaviercfg is not None
-        and not _is_parent_labeled_pod(metadata)
-        and _is_fully_opted_root_workload(metadata, spec)
-    )
     if is_opted_root:
         orphan_names = _orphaned_server_deployment_names(
             apps_api,
@@ -1075,7 +1306,20 @@ class XavierAdmissionController:
         try:
             original = copy.deepcopy(obj)
             mutated = copy.deepcopy(obj)
-            changed = DoMutate(mutated, original, strict=True)
+            resolved_config = None
+            metadata, _, xaviercfg = get_metadata_spec(mutated, strict=True)
+            if (
+                self.core_api is not None
+                and metadata is not None
+                and xaviercfg is not None
+                and not _is_parent_labeled_pod(metadata)
+            ):
+                resolved_config = merge_configmap_config(
+                    self.core_api,
+                    xaviercfg,
+                    metadata.get("namespace", "default"),
+                )
+            changed = DoMutate(mutated, original, strict=True, resolved_config=resolved_config)
         except XavierConfigError as exc:
             return HTTPStatus.OK, admission_response(uid=uid, allowed=False, status_message=str(exc))
         except Exception as exc:  # pragma: no cover - defensive path

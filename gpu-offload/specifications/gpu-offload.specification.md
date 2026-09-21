@@ -70,6 +70,7 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 | `securityContext`    | object                | Implemented | Validated server container security context           |
 | `env`                | list of name/value    | Implemented | Environment merged into server container              |
 | `remoteableenv`      | list of strings       | Implemented | Client env var names allowed onto the server          |
+| `encryption`         | boolean               | Implemented | AES-GCM with a controller-managed per-workload key    |
 | `noserverdeployment` | boolean               | Implemented | Skips server Deployment creation                      |
 | `serverstages`       | list of stage objects | Implemented | Shared and per-client server stages                   |
 | `remoteablecm`       | string                | Implemented | ConfigMap name (required by controller)               |
@@ -82,6 +83,7 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 3. No privilege escalation: controller never adds privileged contexts
 4. Atomic per-workload: all containers in a workload see consistent mutation
 5. Idempotent: re-applying the same workload manifest produces same result
+6. Secret isolation: encryption keys are generated in-cluster and mounted as files
 
 ## Validation
 
