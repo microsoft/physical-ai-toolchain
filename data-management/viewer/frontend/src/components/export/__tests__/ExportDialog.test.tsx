@@ -138,7 +138,11 @@ describe('ExportDialog', () => {
       <ExportDialog open onOpenChange={vi.fn()} datasetId="dataset-1" episodeIndices={[0, 1]} />,
     )
 
-    expect(screen.getByText('Exporting frames...')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Exporting frames...')
+    expect(screen.getByRole('progressbar', { name: 'Export progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '50',
+    )
     expect(screen.getByText(/Episode 1 of 2/i)).toBeInTheDocument()
     expect(screen.getByText(/Frame 50 of 100/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /cancel export/i })).toBeInTheDocument()

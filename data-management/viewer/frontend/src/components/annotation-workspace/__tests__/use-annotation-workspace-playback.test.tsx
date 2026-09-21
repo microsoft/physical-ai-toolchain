@@ -98,4 +98,90 @@ describe('useAnnotationWorkspacePlayback', () => {
       }),
     )
   })
+
+  it('restores playing state exactly once when an active selection is cancelled', () => {
+    const handleResumePlayback = vi.fn()
+    const handleTogglePlayback = vi.fn()
+    const { result } = renderHook(() =>
+      useAnnotationWorkspacePlayback({
+        autoLoop: false,
+        currentFrame: 3,
+        isPlaying: true,
+        subtasks: [],
+        totalFrames: 12,
+        onSeekFrame: vi.fn((frame: number) => frame),
+        onResumePlayback: handleResumePlayback,
+        onSetCurrentFrame: vi.fn(),
+        onTogglePlayback: handleTogglePlayback,
+        onRecordEvent: vi.fn(),
+      }),
+    )
+
+    act(() => {
+      result.current.handleSelectionStart()
+      result.current.handleSelectionCancel()
+      result.current.handleSelectionCancel()
+    })
+
+    expect(handleTogglePlayback).toHaveBeenCalledTimes(2)
+    expect(handleResumePlayback).toHaveBeenCalledOnce()
+    expect(handleResumePlayback).toHaveBeenCalledWith(3)
+  })
+
+  it('does not start playback when a paused selection is cancelled', () => {
+    const handleResumePlayback = vi.fn()
+    const handleTogglePlayback = vi.fn()
+    const { result } = renderHook(() =>
+      useAnnotationWorkspacePlayback({
+        autoLoop: false,
+        currentFrame: 3,
+        isPlaying: false,
+        subtasks: [],
+        totalFrames: 12,
+        onSeekFrame: vi.fn((frame: number) => frame),
+        onResumePlayback: handleResumePlayback,
+        onSetCurrentFrame: vi.fn(),
+        onTogglePlayback: handleTogglePlayback,
+        onRecordEvent: vi.fn(),
+      }),
+    )
+
+    act(() => {
+      result.current.handleSelectionStart()
+      result.current.handleSelectionCancel()
+    })
+
+    expect(handleTogglePlayback).not.toHaveBeenCalled()
+    expect(handleResumePlayback).not.toHaveBeenCalled()
+  })
+
+  it('consumes a selection transaction after the first terminal event', () => {
+    const handleSeekFrame = vi.fn((frame: number) => frame)
+    const handleTogglePlayback = vi.fn()
+    const { result } = renderHook(() =>
+      useAnnotationWorkspacePlayback({
+        autoLoop: false,
+        currentFrame: 3,
+        isPlaying: true,
+        subtasks: [],
+        totalFrames: 12,
+        onSeekFrame: handleSeekFrame,
+        onResumePlayback: vi.fn(),
+        onSetCurrentFrame: vi.fn(),
+        onTogglePlayback: handleTogglePlayback,
+        onRecordEvent: vi.fn(),
+      }),
+    )
+
+    act(() => {
+      result.current.handleSelectionStart()
+      result.current.handleSelectionComplete([4, 8])
+      result.current.handleSelectionComplete([5, 9])
+      result.current.handleSelectionCancel()
+    })
+
+    expect(handleSeekFrame).toHaveBeenCalledOnce()
+    expect(handleTogglePlayback).toHaveBeenCalledTimes(2)
+    expect(result.current.selectedRange).toEqual([4, 8])
+  })
 })
