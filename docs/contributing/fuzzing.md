@@ -3,7 +3,7 @@ sidebar_position: 12
 title: Fuzzing and Property-Based Testing
 description: Running fuzz targets and property-based tests for Python and TypeScript code
 author: Microsoft Robotics-AI Team
-ms.date: 2026-04-15
+ms.date: 2026-09-19
 ms.topic: how-to
 keywords:
   - fuzzing
@@ -108,7 +108,7 @@ def fuzz_my_function(data: bytes) -> None:
         my_function(value)
 ```
 
-1. Register it in the `_FUZZ_TARGETS` list at the bottom of the harness.
+1. Register it in the `FUZZ_TARGETS` list in the harness.
 
 1. Add a corresponding `Test*` class with deterministic edge-case inputs:
 
@@ -201,7 +201,7 @@ Fuzz and property test coverage merges into existing Codecov flags:
 | Dataviewer backend        | `pytest-dataviewer` | `logs/coverage-dataviewer.xml`    |
 | TypeScript property tests | `vitest`            | `coverage/cobertura-coverage.xml` |
 
-Per-flag patch coverage status is set to `informational: true` so fuzz coverage differences never block PRs. This follows the pattern used in [microsoft/hve-core](https://github.com/microsoft/hve-core).
+The `pytest-fuzz` and `vitest` flags are omitted from top-level project status gates. The `fuzz-suite` component has `statuses: []`; other components retain their configured project and patch checks. See [codecov.yml](../../codecov.yml) for current coverage gates.
 
 ## Related Documentation
 

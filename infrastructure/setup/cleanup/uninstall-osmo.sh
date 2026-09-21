@@ -69,8 +69,8 @@ purge_redis=false
 db_name="osmo"
 use_local_osmo=false
 config_preview=false
-postgres_image="postgres:16@sha256:eb4759788a2182f08257135e61a34f2cfc3c2914079f3465d64ee62350f4d081"
-redis_image="redis:7@sha256:a8f08480e1f88f2647fed492d1178c06abb0d0c1fbf02c682a61e2f483fb3954"
+postgres_image="postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94"
+redis_image="redis:7@sha256:71da9275c5f3fcb97d0fa0c8c5b36cc995327265420f17a04bfd544f458059f7"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

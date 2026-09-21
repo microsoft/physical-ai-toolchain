@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Infrastructure Reference
 description: Architecture, module structure, outputs, and troubleshooting for the Terraform deployment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-09-19
 ms.topic: reference
 keywords:
   - architecture
@@ -22,7 +22,7 @@ Architecture details, module structure, Terraform outputs, and troubleshooting f
 ### Directory Structure
 
 ```text
-001-iac/
+infrastructure/terraform/
 ├── main.tf                            # Module composition
 ├── variables.tf                       # Input variables
 ├── outputs.tf                         # Output values
@@ -54,7 +54,7 @@ Architecture details, module structure, Terraform outputs, and troubleshooting f
 ### Module Structure
 
 ```text
-Root Module (001-iac/)
+Root Module (infrastructure/terraform/)
 ├── Platform Module         # Shared Azure services
 │   ├── Networking          # VNet, subnets, NAT Gateway, DNS resolver
 │   ├── Security            # Key Vault (RBAC), managed identities
@@ -108,6 +108,27 @@ Use `aml_managed_network_isolation_mode` to control the AzureML workspace manage
 | `AllowOnlyApprovedOutbound` | AzureML managed network is on and outbound access is restricted      |
 
 Treat changes to `aml_managed_network_isolation_mode` as AzureML redeploy operations. AzureML does not support disabling managed network isolation after it is enabled, or switching between `AllowInternetOutbound` and `AllowOnlyApprovedOutbound` in place. Delete and recreate managed compute resources when enabling managed networking on an existing workspace; recreate the workspace for unsupported mode transitions.
+
+### AzureML workspace provider migration
+
+> [!CAUTION]
+> Existing deployments require a one-time Terraform state migration from the AzAPI resource address to the AzureRM resource address. Without this migration, Terraform attempts to create a workspace with the existing name and then destroy the workspace tracked by the old address.
+
+Back up the current state, remove the old state entry without deleting the Azure resource, then import the existing workspace at the new address:
+
+```bash
+terraform state pull > terraform.tfstate.pre-aml-workspace-migration.backup
+
+terraform state rm 'module.platform.azapi_resource.ml_workspace'
+
+terraform import -var-file=terraform.tfvars \
+  'module.platform.azurerm_machine_learning_workspace.main' \
+  '/subscriptions/<sub-id>/resourceGroups/<rg-name>/providers/Microsoft.MachineLearningServices/workspaces/<workspace-name>'
+
+terraform plan -var-file=terraform.tfvars
+```
+
+Confirm that the plan does not replace the workspace before applying.
 
 ### AzureML compute cluster migration
 
@@ -165,7 +186,7 @@ terraform output -json aks_cluster | jq -r '.name'
 terraform output postgresql_connection_info
 terraform output managed_redis_connection_info
 
-# Key Vault name (for 002-setup scripts)
+# Key Vault name (for infrastructure/setup scripts)
 terraform output key_vault_name
 
 # DNS server IP (for VPN clients)
@@ -277,6 +298,8 @@ terraform plan -var-file=terraform.tfvars
 
 #### Import Existing Resources
 
+The resource-group import requires `should_create_resource_group = true`; when it is `false`, Terraform looks up the existing group through a data source instead. The AKS import requires `should_deploy_aks = true`. Both examples include the configured `count` instance index.
+
 ```bash
 terraform plan -var-file=terraform.tfvars
 
@@ -284,12 +307,12 @@ terraform import -var-file=terraform.tfvars '<resource_address>' '<azure_resourc
 
 # Example: Import a resource group
 terraform import -var-file=terraform.tfvars \
-  'module.platform.azurerm_resource_group.main' \
+  'azurerm_resource_group.this[0]' \
   '/subscriptions/<sub-id>/resourceGroups/<rg-name>'
 
 # Example: Import an AKS cluster
 terraform import -var-file=terraform.tfvars \
-  'module.sil.azurerm_kubernetes_cluster.main' \
+  'module.sil[0].azurerm_kubernetes_cluster.main' \
   '/subscriptions/<sub-id>/resourceGroups/<rg-name>/providers/Microsoft.ContainerService/managedClusters/<aks-name>'
 ```
 

@@ -1,14 +1,16 @@
 ---
 title: SiL Module (Software-in-the-Loop)
-description: Deploys AKS-specific infrastructure for robotics ML workloads with GPU node pools, AzureML integration, and observability.
+description: Deploys AKS-specific infrastructure for robotics ML workloads with GPU node pools and observability.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-22
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 
 Deploys AKS-specific infrastructure for robotics ML workloads including
-AKS Cluster with GPU node pools, Azure Machine Learning extension and compute targets,
-and Data Collection Rule associations for observability.
+an AKS cluster with GPU node pools and Data Collection Rule associations for observability.
+Azure Machine Learning extension installation and Kubernetes compute attachment are
+managed by the [AzureML setup script](../../../setup/02-deploy-azureml-extension.sh),
+not this Terraform module.
 
 ## 📖 Documentation
 

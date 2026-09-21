@@ -1,0 +1,8 @@
+include = ["**/*.toml"]
+exclude = ["**/.venv/**", "external/**", "scripts/tests/Fixtures/**", "shared/ci/tests/Fixtures/**"]
+
+[formatting]
+array_auto_collapse = false
+column_width = 120
+indent_string = "    "
+reorder_keys = false

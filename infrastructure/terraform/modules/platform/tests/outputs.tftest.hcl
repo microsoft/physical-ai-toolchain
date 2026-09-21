@@ -106,6 +106,48 @@ run "aml_compute_clusters_output_populated" {
   }
 }
 
+run "azureml_workspace_output_shape" {
+  command = plan
+
+  override_resource {
+    target          = azurerm_machine_learning_workspace.main
+    override_during = plan
+    values = {
+      id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.MachineLearningServices/workspaces/mlw-test-dev-001"
+      workspace_id = "00000000-0000-0000-0000-000000000002"
+    }
+  }
+
+  variables {
+    resource_prefix  = run.setup.resource_prefix
+    environment      = run.setup.environment
+    instance         = run.setup.instance
+    location         = run.setup.location
+    resource_group   = run.setup.resource_group
+    current_user_oid = run.setup.current_user_oid
+  }
+
+  assert {
+    condition     = output.azureml_workspace.id == "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test-dev-001/providers/Microsoft.MachineLearningServices/workspaces/mlw-test-dev-001"
+    error_message = "azureml_workspace output should expose the workspace resource ID"
+  }
+
+  assert {
+    condition     = output.azureml_workspace.name == "mlw-${run.setup.resource_prefix}-${run.setup.environment}-${run.setup.instance}"
+    error_message = "azureml_workspace output should expose the workspace name"
+  }
+
+  assert {
+    condition     = output.azureml_workspace.workspace_id == "00000000-0000-0000-0000-000000000002"
+    error_message = "azureml_workspace output should expose the workspace GUID"
+  }
+
+  assert {
+    condition     = length(keys(output.azureml_workspace)) == 3 && alltrue([for key in ["id", "name", "workspace_id"] : contains(keys(output.azureml_workspace), key)])
+    error_message = "azureml_workspace output should preserve the id, name, and workspace_id contract"
+  }
+}
+
 run "private_dns_zones_empty_when_pe_disabled" {
   command = plan
 

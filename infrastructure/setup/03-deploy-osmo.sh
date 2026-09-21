@@ -470,7 +470,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: psql
-      image: postgres:16@sha256:eb4759788a2182f08257135e61a34f2cfc3c2914079f3465d64ee62350f4d081
+      image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
       env:
         - name: PGPASSWORD
           valueFrom:

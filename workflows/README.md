@@ -2,7 +2,7 @@
 title: Workflows
 description: Pointer index for workflow template reference documentation.
 author: Edge AI Team
-ms.date: 2026-04-01
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 

@@ -116,6 +116,6 @@ Set `OSMO_METRICS_SPEC` to the path of a spec file at submission time. See `work
 | `AML_WORKSPACE_NAME` | No | — | AML workspace for data asset registration |
 
 > [!WARNING]
-> `azureml-mlflow` is a required dependency alongside `mlflow`. Plain `mlflow` silently drops all metrics inside AML job pods because it does not register the `azureml://` tracking store plugin. The proxy installs both via the conda overlay in `workflows/azureml/osmo-proxy-job.yaml`.
+> `azureml-mlflow` is required alongside `mlflow-skinny` to register the `azureml://` tracking store plugin. The proxy installs the frozen dependency set from `workflows/azureml/osmo-proxy/uv.lock`.
 
 The proxy must run as an AML job inside the cluster. The `OSMO_GATEWAY_URL` is only reachable from pods inside the AKS cluster.

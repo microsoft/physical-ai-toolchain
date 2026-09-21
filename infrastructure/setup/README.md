@@ -113,19 +113,21 @@ AzureML integration is configured in the OSMO workflow YAML directly. The workfl
 
 ### Using
 
-Submit a replay for any completed run:
+Submit a replay for a completed OSMO workflow with a declared persisted output:
 
 ```bash
-./training/utils/replay-azureml.sh <run-id> [model-name]
+./training/utils/replay-azureml.sh <workflow-id> <output-uri> [model-name]
 ```
+
+Use the `azure://` URI declared by the source workflow's task output. Set `OSMO_OUTPUT_SUBPATH` when checkpoints are below that output root.
 
 ### What it does
 
-| Component       | Action                                                                     |
-|-----------------|----------------------------------------------------------------------------|
-| Workflow YAML   | Passes AzureML workspace coordinates as env vars to the training container |
-| Replay workflow | Spawns an OSMO pod that reads the run's output directory                   |
-| `aml_mirror.py` | Uploads tensorboard logs + filtered final checkpoint                       |
+| Component       | Action                                                                      |
+|-----------------|-----------------------------------------------------------------------------|
+| Workflow YAML   | Passes AzureML workspace coordinates as env vars to the training container  |
+| Replay workflow | Mounts the completed workflow's persisted output and uploads its checkpoint |
+| `aml_mirror.py` | Uploads tensorboard logs + filtered final checkpoint                        |
 
 ### Troubleshooting
 

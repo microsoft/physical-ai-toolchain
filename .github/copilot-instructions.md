@@ -54,7 +54,7 @@ Conventions, domain knowledge, and non-obvious patterns for agents working in th
 * Do not modify files in `external/`
 * Version: managed by release-please across `pyproject.toml` and `package.json`
 * Python: >=3.12, managed by `uv` (not pip); `hatchling` builds `training/rl` into wheel
-* Linting: `npm run lint:md` (markdownlint-cli2), `npm run spell-check` (cspell), `npm run lint:yaml` (yaml-lint)
+* Linting: `npm run lint:md` (markdownlint-cli2), `npm run lint:toml` (Taplo), `npm run spell-check` (cspell), `npm run lint:yaml` (yaml-lint)
 
 ## Terraform Conventions
 
@@ -469,6 +469,7 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 | `*.sh` | `shellcheck <file>` |
 | `*.ps1` | `npm run lint:ps` |
 | `*.yml` (GitHub Actions) | `npm run lint:yaml` |
+| `*.toml` | `npm run lint:toml`; run `npm run format:toml` to fix formatting |
 | `data-management/viewer/frontend/**` | `cd data-management/viewer/frontend && npm run validate` (type-check + lint + test) |
 | `data-management/viewer/backend/**` | `cd data-management/viewer/backend && pytest` and `ruff check src/` |
 | `training/**/*.py` | `cd training && ruff check . && pytest` |
@@ -480,9 +481,9 @@ Run `npm install` (or `npm ci`) before any `npm run` lint commands. `shellcheck`
 
 ### Linting
 
-* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` + `lint:go` + `lint:sh` + `lint:py` + `lint:hfpins` + `lint:uvlock` in sequence
+* `npm run lint:all` runs `lint:md` + `lint:ps` + `lint:links` + `lint:yaml` + `lint:tf` + `lint:toml` + `lint:go` + `lint:sh` + `lint:py` + `lint:hfpins` + `lint:uvlock` in sequence
 * `npm run spell-check` and `npm run format:tables` are NOT included in `lint:all` — run them separately
-* `npm run lint:md:fix` and `npm run format:tables` auto-fix markdown issues
+* `npm run lint:md:fix`, `npm run format:toml`, and `npm run format:tables` apply formatting fixes
 * `.copilot-tracking/` is excluded from markdown linting via `.markdownlint-cli2.jsonc`
 
 ### Terraform
@@ -510,7 +511,9 @@ Terraform validation is per-directory — each deployment directory has its own 
 ## CI/CD Pipeline
 
 * Two orchestrators: `main.yml` (push to main), `pr-validation.yml` (PRs) using reusable `workflow_call` workflows
-* PR validation sequence: spell check → markdown lint → table format → frontmatter → PSScriptAnalyzer → YAML lint → link check → Python lint → Python tests → uv lock consistency → frontend tests → Pester → dependency review → dependency pinning → CodeQL
+* PR validation formatting and documentation checks: spelling, Markdown, TOML, tables, frontmatter, YAML, and links
+* PR validation code checks: PowerShell, Python, Terraform, Go, shell, and uv lock consistency
+* PR validation test and security checks: Python and frontend tests, Pester, dependency review and pinning, and CodeQL
 * Security: all actions SHA-pinned (not tag-referenced), `persist-credentials: false` on all checkouts
 * Security workflows: CodeQL (weekly + PR), Gitleaks (push + PR), OpenSSF Scorecard (weekly), dependency review (PR), SHA pinning scan (PR + main), container image digest freshness (weekly)
 * Pre-commit: Husky v9 + lint-staged on frontend files only (ESLint + Prettier auto-fix)

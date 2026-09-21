@@ -21,6 +21,7 @@ from tests.e2e._osmo import (
     _osmo_status,
     _task_statuses,
     cancel_osmo_workflow,
+    submit_osmo_replay_output_fixture,
     wait_until_osmo_completed,
     wait_until_osmo_started,
 )
@@ -77,6 +78,40 @@ def test_cancel_osmo_workflow_raises_on_failed_cancel(monkeypatch: pytest.Monkey
 
     with pytest.raises(AssertionError, match="Failed to cancel OSMO workflow"):
         cancel_osmo_workflow(workflow, tmp_path)
+
+
+def test_submit_osmo_replay_output_fixture_forwards_safe_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured_args: list[str] = []
+
+    def fake_run_command(
+        args: list[str], *, cwd: Path, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        captured_args.extend(args)
+        if args == ["osmo", "config", "show", "WORKFLOW"]:
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout='{"workflow_data":{"credential":{"endpoint":"azure://storage1/custom/workflows/data"}}}',
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout='{"workflow_id":"fixture-1","name":"fixture-1"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr("tests.e2e._osmo.run_command", fake_run_command)
+
+    workflow, output_uri = submit_osmo_replay_output_fixture(tmp_path)
+
+    assert workflow.workflow_id == "fixture-1"
+    assert output_uri.startswith("azure://storage1/custom/workflows/data/e2e/replay/")
+    assert f"output_uri={output_uri}" in captured_args
+    assert captured_args[-2:] == ["--format-type", "json"]
 
 
 def test_wait_until_started_restarts_after_startup_disruption(

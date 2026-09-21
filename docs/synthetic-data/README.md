@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Synthetic Data
 description: Generate photorealistic training data from simulation using NVIDIA Cosmos world foundation models
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: overview
 keywords:
   - synthetic data
@@ -15,11 +15,11 @@ keywords:
   - Cosmos Reason
 ---
 
-Generate photorealistic training data from simulation using NVIDIA Cosmos world foundation models. This section covers the SDG pipeline architecture, Cosmos model integration, and workflow submission.
+Planned synthetic data generation uses NVIDIA Cosmos world foundation models to transform simulation output. The checked-in OSMO workflows are placeholders marked `Status: Planned`, with containers still `TBD`; they are not ready for submission.
 
-## SDG Pipeline
+## 🧪 SDG Pipeline
 
-The synthetic data generation pipeline chains three Cosmos capabilities:
+The planned synthetic data generation pipeline chains three Cosmos capabilities:
 
 | Stage    | Model               | Description                                         |
 |----------|---------------------|-----------------------------------------------------|

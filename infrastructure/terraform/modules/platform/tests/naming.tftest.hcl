@@ -110,7 +110,7 @@ run "verify_standard_naming" {
 
   // AzureML Workspace
   assert {
-    condition     = azapi_resource.ml_workspace.name == "mlw-${run.setup.resource_prefix}-${run.setup.environment}-${run.setup.instance}"
+    condition     = azurerm_machine_learning_workspace.main.name == "mlw-${run.setup.resource_prefix}-${run.setup.environment}-${run.setup.instance}"
     error_message = "ML workspace name must follow mlw-{prefix}-{env}-{instance}"
   }
 
@@ -149,6 +149,30 @@ run "verify_no_hyphen_naming" {
   assert {
     condition     = azurerm_storage_account.main.name == "st${run.setup.resource_prefix}${run.setup.environment}${run.setup.instance}"
     error_message = "Storage account name must follow st{prefix}{env}{instance} (no hyphens)"
+  }
+}
+
+run "verify_aml_workspace_name_suffix" {
+  command = plan
+
+  variables {
+    resource_prefix       = run.setup.resource_prefix
+    environment           = run.setup.environment
+    instance              = run.setup.instance
+    location              = run.setup.location
+    resource_group        = run.setup.resource_group
+    current_user_oid      = run.setup.current_user_oid
+    workspace_name_suffix = "-secondary"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_workspace.main.name == "mlw-${run.setup.resource_prefix}-${run.setup.environment}-${run.setup.instance}-secondary"
+    error_message = "ML workspace name should include workspace_name_suffix"
+  }
+
+  assert {
+    condition     = azurerm_machine_learning_workspace.main.friendly_name == "mlw-${run.setup.resource_prefix}-${run.setup.environment}-${run.setup.instance}"
+    error_message = "ML workspace friendly name should remain the base workspace name"
   }
 }
 

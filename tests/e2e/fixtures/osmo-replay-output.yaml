@@ -1,0 +1,20 @@
+workflow:
+  name: "{{workflow_name}}"
+  resources:
+    default: { cpu: 1, memory: 1Gi, storage: 1Gi, gpu: 0 }
+  timeout: { exec_timeout: 10m, queue_timeout: 10m }
+  tasks:
+    - name: manage-output
+      image: python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6
+      outputs:
+        - url: "{{output_uri}}"
+      command: ["bash", "-euc"]
+      args:
+        - |
+          mkdir -p "{{output}}/run-e2e/checkpoint-1"
+          printf '%s\n' '{"model_type":"e2e-replay-fixture"}' > "{{output}}/run-e2e/checkpoint-1/config.json"
+          printf '%s\n' 'e2e replay weights' > "{{output}}/run-e2e/checkpoint-1/model.safetensors"
+
+default-values:
+  workflow_name: replay-output-fixture
+  output_uri: azure://placeholder/osmo/workflows/data/e2e/replay-output-fixture

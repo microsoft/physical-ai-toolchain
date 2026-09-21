@@ -96,7 +96,7 @@ if [[ "$*" == *"auth.docker.io"* || "$*" == *"proxy_auth"* ]]; then
 else
   case "$*" in
     *2.3.2*)  digest="$(printf 'a%.0s' {1..64})" ;;
-    *2.11.0*) digest="$(printf 'b%.0s' {1..64})" ;;
+    *2.13.0*) digest="$(printf 'b%.0s' {1..64})" ;;
     *2.4.1*)  digest="$(printf 'c%.0s' {1..64})" ;;
     *)        digest="$(printf 'd%.0s' {1..64})" ;;
   esac
@@ -227,7 +227,7 @@ Describe 'AzureML environment pins' -Tag 'Unit' {
             $ref = $image -replace '@sha256:[0-9a-fA-F]{64}$', ''
             $digest = switch -Wildcard ($ref) {
                 '*:2.3.2' { 'a' * 64 }
-                '*:2.11.0-*' { 'b' * 64 }
+                '*:2.13.0-*' { 'b' * 64 }
                 '*:2.4.1-*' { 'c' * 64 }
                 default { 'd' * 64 }
             }
