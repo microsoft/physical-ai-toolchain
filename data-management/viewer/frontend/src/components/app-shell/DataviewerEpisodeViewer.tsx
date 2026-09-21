@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
 import { AnnotationWorkspace } from '@/components/annotation-workspace/AnnotationWorkspace'
 import { useEpisode } from '@/hooks/use-datasets'
@@ -27,6 +27,7 @@ export function DataviewerEpisodeViewer({
 }: DataviewerEpisodeViewerProps) {
   const { data: episode, isLoading, error } = useEpisode(datasetId, episodeIndex)
   const setCurrentEpisode = useEpisodeStore((state) => state.setCurrentEpisode)
+  const [navigationStatus, setNavigationStatus] = useState<string | null>(null)
 
   useEffect(() => {
     if (episode) {
@@ -34,38 +35,67 @@ export function DataviewerEpisodeViewer({
     }
   }, [episode, setCurrentEpisode])
 
+  useEffect(() => {
+    if (!navigationStatus) return
+    const timeout = window.setTimeout(() => setNavigationStatus(null), 2400)
+    return () => window.clearTimeout(timeout)
+  }, [navigationStatus])
+
+  let content: ReactNode
   if (isLoading) {
-    return (
+    content = (
       <div className="flex h-full items-center justify-center">
-        <div className="text-muted-foreground">Loading episode {episodeIndex}...</div>
+        <div role="status" aria-live="polite" className="text-muted-foreground">
+          Loading episode {episodeIndex}...
+        </div>
       </div>
     )
-  }
-
-  if (error) {
-    return (
+  } else if (error) {
+    content = (
       <div className="flex h-full items-center justify-center">
-        <div className="text-red-500">Error loading episode: {error.message}</div>
+        <div role="alert" className="text-status-danger-foreground">
+          Error loading episode: {error.message}
+        </div>
       </div>
     )
-  }
-
-  if (!episode) {
-    return (
+  } else if (!episode) {
+    content = (
       <div className="flex h-full items-center justify-center">
-        <div className="text-muted-foreground">No episode data</div>
+        <div role="status" className="text-muted-foreground">
+          No episode data
+        </div>
       </div>
+    )
+  } else {
+    content = (
+      <AnnotationWorkspace
+        diagnosticsVisible={diagnosticsVisible}
+        canGoPreviousEpisode={canGoPreviousEpisode}
+        onPreviousEpisode={onPreviousEpisode}
+        canGoNextEpisode={canGoNextEpisode}
+        onNextEpisode={onNextEpisode}
+        onSaveAndNextEpisode={() => {
+          setNavigationStatus('Episode changes saved.')
+          onSaveAndNextEpisode()
+        }}
+      />
     )
   }
 
   return (
-    <AnnotationWorkspace
-      diagnosticsVisible={diagnosticsVisible}
-      canGoPreviousEpisode={canGoPreviousEpisode}
-      onPreviousEpisode={onPreviousEpisode}
-      canGoNextEpisode={canGoNextEpisode}
-      onNextEpisode={onNextEpisode}
-      onSaveAndNextEpisode={onSaveAndNextEpisode}
-    />
+    <>
+      {episode && !isLoading && !error && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+          data-testid="episode-navigation-status"
+        >
+          {navigationStatus}
+        </div>
+      )}
+      {content}
+    </>
   )
 }

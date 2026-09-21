@@ -1,0 +1,21 @@
+{
+  "valid": [
+    "en",
+    "zh-Hant",
+    "en-US",
+    "es-419",
+    "sl-rozaj",
+    "en-u-ca-gregory",
+    "de-CH-x-robot",
+    "x-robot"
+  ],
+  "invalid": [
+    "",
+    "en_US",
+    "e",
+    "en-u",
+    "en-x",
+    "en--US",
+    "x"
+  ]
+}

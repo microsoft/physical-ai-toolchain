@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1.0.0",
+  "baseUrl": "http://127.0.0.1:8002",
+  "serveMode": "served",
+  "allowlist": ["127.0.0.1:8002/docs*", "127.0.0.1:8002/redoc*", "127.0.0.1:8002/openapi.json", "127.0.0.1:8002/health", "127.0.0.1:8002/v1/models", "127.0.0.1:8002/v1/chat/completions"],
+  "routes": [
+    {"path": "/docs", "title": "OpenAI Shim Swagger UI", "surfaceIds": ["F05"]},
+    {"path": "/redoc", "title": "OpenAI Shim ReDoc", "surfaceIds": ["F06"]}
+  ],
+  "surfaces": [
+    {"id": "F05", "type": "page", "route": "/docs", "selector": "#swagger-ui", "states": [{"state": "default"}, {"state": "open"}, {"state": "health"}, {"state": "models"}, {"state": "completion"}, {"state": "unsupported-stream"}, {"state": "invalid-image"}, {"state": "focus"}, {"state": "reflow-320"}]},
+    {"id": "F06", "type": "page", "route": "/redoc", "selector": "redoc, .redoc-wrap", "states": [{"state": "default"}, {"state": "navigation"}, {"state": "open"}, {"state": "message-alternatives"}, {"state": "error-model"}, {"state": "focus"}, {"state": "reflow-320"}]}
+  ],
+  "probeScoping": [
+    {"probe": "probe-axe", "surfaces": ["F05", "F06"], "states": ["default", "open", "unsupported-stream", "invalid-image"]},
+    {"probe": "probe-aria-tree", "surfaces": ["F05", "F06"], "states": ["default", "open", "focus"]},
+    {"probe": "probe-keyboard-traversal", "surfaces": ["F05", "F06"], "states": ["default", "open", "focus"]},
+    {"probe": "probe-reflow-resize", "surfaces": ["F05", "F06"], "states": ["default", "reflow-320"]},
+    {"probe": "probe-contrast", "surfaces": ["F05", "F06"], "states": ["default"]},
+    {"probe": "probe-console-errors", "surfaces": ["F05", "F06"], "states": ["default", "unsupported-stream"]},
+    {"probe": "probe-broken-links", "surfaces": ["F05", "F06"], "states": ["default"]},
+    {"probe": "probe-title-lang", "surfaces": ["F05", "F06"], "states": ["default"]}
+  ],
+  "visualReview": {
+    "enabled": true,
+    "evidenceRoot": "artifacts/accessibility/current/hve-shim-docs",
+    "publicLoopbackOnly": true,
+    "rejectPersonalData": true,
+    "operatorConfirmedNoPersonalData": true,
+    "fullPage": true,
+    "traceSnapshots": true,
+    "routes": [{"path": "/docs", "state": "default", "surfaceId": "F05"}, {"path": "/redoc", "state": "default", "surfaceId": "F06"}],
+    "states": ["default", "open", "reflow-320"]
+  }
+}

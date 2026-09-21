@@ -57,8 +57,8 @@ export function AppContent() {
         isWarmingCache={shellState.isWarmingCache}
       />
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="bg-card flex w-64 flex-col overflow-hidden border-r">
+      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        <aside className="bg-card flex max-h-64 w-full flex-col overflow-hidden border-b sm:max-h-none sm:w-64 sm:border-r sm:border-b-0">
           <DataviewerEpisodeList
             datasetId={datasetId}
             onSelectEpisode={setSelectedEpisode}
@@ -66,7 +66,7 @@ export function AppContent() {
           />
         </aside>
 
-        <main className="bg-background flex-1 overflow-hidden">
+        <main className="bg-background min-w-0 flex-1 overflow-hidden">
           <DataviewerEpisodeViewer
             datasetId={datasetId}
             episodeIndex={selectedEpisode}

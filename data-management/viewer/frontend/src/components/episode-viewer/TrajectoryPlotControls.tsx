@@ -70,6 +70,8 @@ export function TrajectoryPlotControls({
       </div>
       <div className="flex w-full shrink-0 flex-wrap items-center gap-2 lg:w-auto lg:justify-end lg:self-start">
         <button
+          type="button"
+          aria-pressed={!showVelocity}
           onClick={() => onSetShowVelocity(false)}
           className={
             !showVelocity
@@ -80,6 +82,8 @@ export function TrajectoryPlotControls({
           Position
         </button>
         <button
+          type="button"
+          aria-pressed={showVelocity}
           onClick={() => onSetShowVelocity(true)}
           className={
             showVelocity
