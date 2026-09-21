@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiClientMocks = vi.hoisted(() => ({
+  apiRequest: vi.fn(async () => ({})),
   mutationHeaders: vi.fn(async () => ({ 'X-CSRF-Token': 'test-token' })),
   handleResponse: vi.fn(async () => ({})),
 }))
@@ -47,6 +48,7 @@ beforeEach(() => {
   setOnline(true)
   apiClientMocks.mutationHeaders.mockResolvedValue({ 'X-CSRF-Token': 'test-token' })
   apiClientMocks.handleResponse.mockResolvedValue({})
+  apiClientMocks.apiRequest.mockResolvedValue({})
   offlineStorageMocks.getPendingSyncItems.mockResolvedValue([])
   offlineStorageMocks.removeSyncItem.mockResolvedValue(undefined)
   offlineStorageMocks.updateAnnotationSyncStatus.mockResolvedValue(undefined)
@@ -114,8 +116,8 @@ describe('processSyncQueue', () => {
     await vi.runAllTimersAsync()
     const result = await promise
 
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      '/api/datasets/ds-1/episodes/ep-1/annotations',
+    expect(apiClientMocks.apiRequest).toHaveBeenCalledWith(
+      '/datasets/ds-1/episodes/ep-1/annotations',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ foo: 'bar' }),
@@ -141,8 +143,8 @@ describe('processSyncQueue', () => {
     await vi.runAllTimersAsync()
     await promise
 
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      '/api/annotations/ann-9',
+    expect(apiClientMocks.apiRequest).toHaveBeenCalledWith(
+      '/annotations/ann-9',
       expect.objectContaining({ method: 'PUT' }),
     )
   })
@@ -157,15 +159,15 @@ describe('processSyncQueue', () => {
     await vi.runAllTimersAsync()
     await promise
 
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      '/api/annotations/ann-9',
+    expect(apiClientMocks.apiRequest).toHaveBeenCalledWith(
+      '/annotations/ann-9',
       expect.objectContaining({ method: 'DELETE' }),
     )
   })
 
   it('marks annotation as conflict and removes the item on 409', async () => {
     offlineStorageMocks.getPendingSyncItems.mockResolvedValueOnce([makeItem()])
-    apiClientMocks.handleResponse.mockRejectedValueOnce(
+    apiClientMocks.apiRequest.mockRejectedValueOnce(
       Object.assign(new Error('conflict'), { status: 409 }),
     )
     vi.useFakeTimers()
@@ -184,7 +186,7 @@ describe('processSyncQueue', () => {
     offlineStorageMocks.getPendingSyncItems.mockResolvedValueOnce([
       makeItem({ lastError: 'previous failure' }),
     ])
-    apiClientMocks.handleResponse.mockRejectedValueOnce(new Error('network down'))
+    apiClientMocks.apiRequest.mockRejectedValueOnce(new Error('network down'))
     vi.useFakeTimers()
 
     const promise = processSyncQueue()
@@ -204,7 +206,7 @@ describe('processSyncQueue', () => {
 
     const result = await processSyncQueue()
 
-    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(apiClientMocks.apiRequest).not.toHaveBeenCalled()
     expect(result.failedCount).toBe(1)
     expect(result.errors[0]).toEqual({ id: 'item-1', error: 'Exceeded max retries: boom' })
   })
