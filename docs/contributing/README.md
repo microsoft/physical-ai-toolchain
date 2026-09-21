@@ -183,7 +183,7 @@ Run applicable automated checks and tests first. Add the deployment validation l
 Run relevant static checks from the repository root after installing dependencies:
 
 ```bash
-npm install
+npm ci
 npm run lint:tf:validate
 npm run lint:sh
 npm run lint:md
