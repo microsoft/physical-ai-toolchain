@@ -24,7 +24,7 @@ Required for all contributions before submitting PR.
 
 ```bash
 # Install validation dependencies from the repository root
-npm install
+npm ci
 
 # Terraform formatting and validation
 npm run lint:tf:validate
