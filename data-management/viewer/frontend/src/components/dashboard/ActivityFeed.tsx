@@ -14,8 +14,8 @@ import { cn } from '@/lib/utils'
 export interface ActivityItem {
   id: string
   type: 'annotation' | 'review' | 'edit'
-  episode_id: string
-  annotator_name: string
+  episodeId: string
+  annotatorName: string
   timestamp: string
   summary: string
 }
@@ -107,14 +107,14 @@ export function ActivityFeed({
                     {/* Content */}
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate font-medium">{activity.annotator_name}</span>
+                        <span className="truncate font-medium">{activity.annotatorName}</span>
                         <Badge variant="status" tone={tone} className="text-xs">
                           {config.label}
                         </Badge>
                       </div>
                       <div className="text-muted-foreground flex items-center gap-2 text-sm">
                         <FileText className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{activity.episode_id}</span>
+                        <span className="truncate">{activity.episodeId}</span>
                       </div>
                       {activity.summary && (
                         <p className="text-muted-foreground truncate text-xs">{activity.summary}</p>

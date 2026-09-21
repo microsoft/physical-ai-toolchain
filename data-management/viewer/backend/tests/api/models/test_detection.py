@@ -18,7 +18,7 @@ class TestDetectionRequest:
     def test_defaults(self):
         req = DetectionRequest()
         assert req.frames is None
-        assert req.confidence == 0.1
+        assert req.confidence is None
         assert req.model == "yolo11n"
 
     def test_validate_frames_none_returns_none(self):
