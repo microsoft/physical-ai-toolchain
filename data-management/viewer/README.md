@@ -616,10 +616,10 @@ Mount the reviewed model directory read-only at `/models`. Update the mount and 
 
 ```bash
 # Backend
-docker build -t dataviewer-backend ./backend
+docker build --file data-management/viewer/backend/Dockerfile --tag dataviewer-backend data-management/viewer/backend
 
 # Frontend
-docker build -t dataviewer-frontend ./frontend
+docker build --file data-management/viewer/frontend/Dockerfile --tag dataviewer-frontend .
 ```
 
 ## 🧪 Development
