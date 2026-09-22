@@ -207,6 +207,11 @@ html[data-theme='dark'] .navbar {
    Breadcrumbs
    ================================================================ */
 
+.docBreadcrumbs {
+  --ifm-breadcrumb-size-multiplier: 0.8;
+  margin-bottom: 0.8rem;
+}
+
 .breadcrumbs {
   margin-bottom: 0.5rem;
 }
