@@ -11,8 +11,6 @@ import HomeBreadcrumbItem from '@theme-original/DocBreadcrumbs/Items/Home';
 import DocBreadcrumbsStructuredData from '@theme-original/DocBreadcrumbs/StructuredData';
 import clsx from 'clsx';
 
-import styles from './styles.module.css';
-
 interface BreadcrumbLinkProps {
   children: React.ReactNode;
   href?: string;
@@ -48,7 +46,7 @@ export default function DocBreadcrumbs(): React.ReactElement | null {
     <>
       <DocBreadcrumbsStructuredData breadcrumbs={breadcrumbs} />
       <nav
-        className={clsx(ThemeClassNames.docs.docBreadcrumbs, styles.breadcrumbsContainer)}
+        className={clsx(ThemeClassNames.docs.docBreadcrumbs, 'docBreadcrumbs')}
         aria-label={translate({
           id: 'theme.docs.breadcrumbs.navAriaLabel',
           message: 'Breadcrumbs',
