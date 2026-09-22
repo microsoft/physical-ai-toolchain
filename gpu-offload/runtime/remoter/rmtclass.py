@@ -196,9 +196,7 @@ def _server_callable_methods(methodsKV: dict, actclasskey: str) -> set[str]:
     class_params = remoter.remoterclassparams.get(actclasskey, {})
     legacy_fields = sorted({"remoteableserver", "remoteableon"} & class_params.keys())
     if legacy_fields:
-        raise ValueError(
-            f"{', '.join(legacy_fields)} for {actclasskey} is not supported; use servercallablemethods"
-        )
+        raise ValueError(f"{', '.join(legacy_fields)} for {actclasskey} is not supported; use servercallablemethods")
     method_names = {
         attr_name for attr_name, attr_value in methodsKV.items() if isinstance(attr_value, types.FunctionType)
     }

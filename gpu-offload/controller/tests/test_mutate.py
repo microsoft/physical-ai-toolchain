@@ -947,9 +947,7 @@ def test_reconcile_object_creates_stable_encryption_secret_and_mounts_it():
         strict=True,
         resolved_config={"remoteablecm": "client-cm"},
     )
-    deploy["spec"]["template"]["spec"]["containers"][0]["env"].append(
-        {"name": "REMOTERPORT", "value": "30001"}
-    )
+    deploy["spec"]["template"]["spec"]["containers"][0]["env"].append({"name": "REMOTERPORT", "value": "30001"})
     core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
     apps_api = _FakeAppsApi()
     batch_api = _FakeBatchApi()
@@ -970,10 +968,7 @@ def test_reconcile_object_creates_stable_encryption_secret_and_mounts_it():
     second = mod.reconcile_object(deploy, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
 
     assert second["client-deployment-remoter-key"] == "unchanged"
-    assert (
-        base64.b64decode(core_api.secrets[("default", "client-deployment-remoter-key")]["data"]["key"])
-        == first_key
-    )
+    assert base64.b64decode(core_api.secrets[("default", "client-deployment-remoter-key")]["data"]["key"]) == first_key
 
 
 def test_reconcile_object_deletes_managed_secret_when_encryption_is_disabled():

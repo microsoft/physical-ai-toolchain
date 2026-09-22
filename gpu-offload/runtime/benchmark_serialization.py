@@ -229,9 +229,7 @@ def _decrypt_aes_gcm(payload: bytes, key: bytes) -> bytes:
 
 
 def _median_for(measurements: list[Measurement], codec: str, operation: str) -> float:
-    measurement = next(
-        item for item in measurements if item.codec == codec and item.operation == operation
-    )
+    measurement = next(item for item in measurements if item.codec == codec and item.operation == operation)
     return statistics.median(measurement.samples_seconds)
 
 

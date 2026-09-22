@@ -1247,8 +1247,8 @@ def reconcile_object(
         encryption_enabled = xavierconfig.get("encryption", True) is True
         xavier_container = get_xavier_container(spec)
         secret_name = encryption_secret_name(obj)
-        client_encryption_enabled = (
-            xavier_container is not None and has_encryption_secret_mount(spec, xavier_container, secret_name)
+        client_encryption_enabled = xavier_container is not None and has_encryption_secret_mount(
+            spec, xavier_container, secret_name
         )
         if encryption_enabled != client_encryption_enabled:
             raise XavierConfigError(
@@ -1463,12 +1463,7 @@ class XavierAdmissionController:
         return HTTPStatus.OK, admission_response(uid=uid, allowed=True, patch=patch)
 
     def reconcile_object(self, obj: dict[str, Any]) -> dict[str, str]:
-        if (
-            self.core_api is None
-            or self.apps_api is None
-            or self.batch_api is None
-            or self.networking_api is None
-        ):
+        if self.core_api is None or self.apps_api is None or self.batch_api is None or self.networking_api is None:
             raise RuntimeError("Kubernetes clients are not configured for reconciliation")
         return reconcile_object(
             obj,
