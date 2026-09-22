@@ -1,6 +1,8 @@
 """Integration and unit tests for label API endpoints."""
 
 import asyncio
+import hashlib
+import json
 import os
 import tempfile
 from types import SimpleNamespace
@@ -497,6 +499,45 @@ def test_blob_label_storage_load_missing_returns_defaults():
     assert result.available_labels == ["SUCCESS", "FAILURE", "PARTIAL"]
 
 
+def test_blob_label_storage_load_uses_provider_etag():
+    """BlobLabelStorage prefers the provider's native ETag when available."""
+    blob_client = SimpleNamespace(get_blob_properties=AsyncMock(return_value=SimpleNamespace(etag='"azure-revision"')))
+    container = MagicMock()
+    container.get_blob_client.return_value = blob_client
+    client = MagicMock()
+    client.get_container_client.return_value = container
+    provider = SimpleNamespace(
+        _read_blob_bytes=AsyncMock(
+            return_value=json.dumps(labels_mod.DatasetLabelsFile(dataset_id="ds").model_dump()).encode()
+        ),
+        _get_client=AsyncMock(return_value=client),
+        container_name="datasets",
+    )
+    storage = labels_mod.BlobLabelStorage(provider)
+
+    result = asyncio.run(storage.load_versioned("ds"))
+
+    assert result.etag == '"azure-revision"'
+    assert result.value is not None
+    assert result.value.dataset_id == "ds"
+
+
+def test_blob_label_storage_load_falls_back_when_provider_etag_fails():
+    """BlobLabelStorage retains its content ETag when provider metadata fails."""
+    content = json.dumps(labels_mod.DatasetLabelsFile(dataset_id="ds").model_dump()).encode()
+    provider = SimpleNamespace(
+        _read_blob_bytes=AsyncMock(return_value=content),
+        _get_client=AsyncMock(side_effect=RuntimeError("metadata unavailable")),
+        container_name="datasets",
+    )
+    storage = labels_mod.BlobLabelStorage(provider)
+
+    result = asyncio.run(storage.load_versioned("ds"))
+
+    assert result.etag == f'"{hashlib.sha256(content).hexdigest()}"'
+    assert result.value is not None
+
+
 def test_blob_label_storage_save_uploads_json():
     """BlobLabelStorage.save uploads serialized JSON via the blob client."""
     blob_client = SimpleNamespace(upload_blob=AsyncMock())
@@ -545,6 +586,30 @@ def test_blob_label_storage_save_uses_matching_revision(monkeypatch):
     assert kwargs["match_condition"] == "if-not-modified"
 
 
+def test_blob_label_storage_save_uses_create_only_precondition():
+    """Blob label creation sends Azure's create-only precondition."""
+    blob_client = SimpleNamespace(upload_blob=AsyncMock(return_value={}))
+    container = MagicMock()
+    container.get_blob_client.return_value = blob_client
+    client = MagicMock()
+    client.get_container_client.return_value = container
+    provider = SimpleNamespace(_get_client=AsyncMock(return_value=client), container_name="datasets")
+    storage = labels_mod.BlobLabelStorage(provider)
+
+    etag = asyncio.run(
+        storage.save(
+            "ds",
+            labels_mod.DatasetLabelsFile(dataset_id="ds"),
+            if_none_match=True,
+        )
+    )
+
+    kwargs = blob_client.upload_blob.await_args.kwargs
+    assert kwargs["overwrite"] is False
+    assert kwargs["if_none_match"] == "*"
+    assert etag.startswith('"') and etag.endswith('"')
+
+
 def test_blob_label_storage_save_failure_raises_500(monkeypatch):
     """BlobLabelStorage.save logs and raises HTTPException(500) on errors."""
     logged: list[tuple[object, ...]] = []
@@ -565,6 +630,22 @@ def test_blob_label_storage_save_failure_raises_500(monkeypatch):
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to save labels"
     assert logged and logged[0][1] == "dsx"
+
+
+@pytest.mark.parametrize(
+    ("if_match", "if_none_match", "expected_status"),
+    [
+        (None, None, 428),
+        ('"revision"', "*", 400),
+        (None, '"revision"', 400),
+    ],
+)
+def test_revision_precondition_rejects_invalid_header_combinations(if_match, if_none_match, expected_status):
+    """Revision preconditions reject missing, conflicting, and non-wildcard headers."""
+    with pytest.raises(HTTPException) as exc_info:
+        labels_mod.require_revision_precondition(if_match, if_none_match)
+
+    assert exc_info.value.status_code == expected_status
 
 
 # ---------------------------------------------------------------------------

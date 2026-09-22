@@ -160,8 +160,7 @@ export function useDatasetLabels() {
   }, [currentDataset?.id, prepareDatasetLabels])
 
   useEffect(() => {
-    if (!query.data || query.data.data.datasetId !== currentDataset?.id || !principalScopeId)
-      return
+    if (!query.data || query.data.data.datasetId !== currentDataset?.id || !principalScopeId) return
 
     const datasetId = query.data.data.datasetId
     setAvailableLabels(query.data.data.availableLabels)
