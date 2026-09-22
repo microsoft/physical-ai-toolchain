@@ -8,10 +8,7 @@ from typing import BinaryIO
 
 def _encode_command(*parts: str) -> bytes:
     encoded = [part.encode() for part in parts]
-    return (
-        f"*{len(encoded)}\r\n".encode()
-        + b"".join(f"${len(part)}\r\n".encode() + part + b"\r\n" for part in encoded)
-    )
+    return f"*{len(encoded)}\r\n".encode() + b"".join(f"${len(part)}\r\n".encode() + part + b"\r\n" for part in encoded)
 
 
 def _read_response(stream: BinaryIO) -> str:
@@ -40,13 +37,15 @@ def main() -> None:
     command = _build_operation_command(operation, os.environ.get("REDIS_SCRIPT"))
 
     context = ssl.create_default_context()
-    with socket.create_connection((host, port), timeout=30) as raw_socket:
-        with context.wrap_socket(raw_socket, server_hostname=host) as tls_socket:
-            stream = tls_socket.makefile("rwb", buffering=0)
-            stream.write(_encode_command("AUTH", password))
-            _read_response(stream)
-            stream.write(_encode_command(*command))
-            print(_read_response(stream))
+    with (
+        socket.create_connection((host, port), timeout=30) as raw_socket,
+        context.wrap_socket(raw_socket, server_hostname=host) as tls_socket,
+    ):
+        stream = tls_socket.makefile("rwb", buffering=0)
+        stream.write(_encode_command("AUTH", password))
+        _read_response(stream)
+        stream.write(_encode_command(*command))
+        print(_read_response(stream))
 
 
 if __name__ == "__main__":
