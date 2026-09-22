@@ -14,12 +14,11 @@ COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea0996
 # Copy dependency manifests
 COPY pyproject.toml uv.lock ./
 
-# Install production + azure dependencies into /app/.venv.
-# The 'azure' extra includes azure-storage-blob and azure-identity for MSI support.
+# Install production dependencies and runtime feature extras into /app/.venv.
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH=/app/.venv/bin:$PATH
-RUN uv sync --frozen --no-dev --extra azure --extra analysis --extra export --extra auth
+RUN uv sync --frozen --no-dev --extra azure --extra analysis --extra export --extra auth --extra yolo
 
 # Copy application source
 COPY src/ ./src/
@@ -36,7 +35,8 @@ EXPOSE 8000
 ENV BACKEND_HOST=0.0.0.0 \
     BACKEND_PORT=8000 \
     STORAGE_BACKEND=local \
-    DATA_DIR=/data
+    DATA_DIR=/data \
+    DETECTION_MODELS_DIR=/models
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \

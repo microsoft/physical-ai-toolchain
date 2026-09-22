@@ -76,20 +76,20 @@ export function QualityDashboard({ datasetId, className }: QualityDashboardProps
       {/* Top row: Progress + Charts */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <ProgressOverview
-          totalEpisodes={data.total_episodes}
-          annotatedEpisodes={data.annotated_episodes}
-          pendingEpisodes={data.pending_episodes}
+          totalEpisodes={data.totalEpisodes}
+          annotatedEpisodes={data.annotatedEpisodes}
+          pendingEpisodes={data.pendingEpisodes}
           episodesPerHour={metrics.episodesPerHour}
         />
 
         <RatingDistribution
-          distribution={data.rating_distribution}
+          distribution={data.ratingDistribution}
           title="Task Completion Ratings"
           colorScheme="rating"
         />
 
         <RatingDistribution
-          distribution={data.quality_distribution}
+          distribution={data.qualityDistribution}
           title="Trajectory Quality"
           colorScheme="quality"
         />
@@ -100,14 +100,14 @@ export function QualityDashboard({ datasetId, className }: QualityDashboardProps
         <IssuesSummary
           issues={metrics.topIssues}
           anomalies={metrics.topAnomalies}
-          totalEpisodes={data.annotated_episodes}
+          totalEpisodes={data.annotatedEpisodes}
         />
 
-        <AnnotatorLeaderboard annotators={data.annotator_stats} limit={5} />
+        <AnnotatorLeaderboard annotators={data.annotatorStats} limit={5} />
       </div>
 
       {/* Bottom row: Activity Feed */}
-      <ActivityFeed activities={data.recent_activity} limit={15} maxHeight={350} />
+      <ActivityFeed activities={data.recentActivity} limit={15} maxHeight={350} />
     </div>
   )
 }

@@ -49,8 +49,8 @@ describe('LabelPanel', () => {
     mockAddLabelOption.mockResolvedValue(undefined)
     mockRemoveLabelOption.mockResolvedValue(undefined)
     mockImportAnalysisLabels.mockResolvedValue({
-      labels_added: [],
-      episodes_updated: 0,
+      labelsAdded: [],
+      episodesUpdated: 0,
     })
     mockCurrentLabels = ['SUCCESS']
     useLabelStore.getState().reset()
@@ -114,11 +114,11 @@ describe('LabelPanel', () => {
   it('imports detected analysis fields with custom prefix and overwrite enabled', async () => {
     const user = userEvent.setup()
     useLabelStore.getState().setAllEpisodeAnalysis({
-      '3': { object: 'red cube', grasp_success: true },
+      '3': { object: 'red cube', graspSuccess: true },
     })
     mockImportAnalysisLabels.mockResolvedValueOnce({
-      labels_added: ['ITEM: RED CUBE'],
-      episodes_updated: 1,
+      labelsAdded: ['ITEM: RED CUBE'],
+      episodesUpdated: 1,
     })
 
     render(<LabelPanel episodeIndex={3} />)

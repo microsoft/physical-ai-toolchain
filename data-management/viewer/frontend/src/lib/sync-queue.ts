@@ -4,7 +4,7 @@
  * Handles background synchronization of local changes with the server.
  */
 
-import { handleResponse, mutationHeaders } from '@/lib/api-client'
+import { apiRequest } from '@/lib/api-client'
 
 import {
   getPendingSyncItems,
@@ -66,37 +66,29 @@ export function waitForOnline(): Promise<void> {
  */
 async function processSyncItem(item: SyncQueueItem): Promise<boolean> {
   try {
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(await mutationHeaders()),
-    }
-
-    let response: Response
     switch (item.type) {
       case 'create':
-        response = await fetch(
-          `/api/datasets/${item.datasetId}/episodes/${item.episodeId}/annotations`,
-          { method: 'POST', headers, body: JSON.stringify(item.payload) },
-        )
+        await apiRequest(`/datasets/${item.datasetId}/episodes/${item.episodeId}/annotations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item.payload),
+        })
         break
 
       case 'update':
-        response = await fetch(`/api/annotations/${item.annotationId}`, {
+        await apiRequest(`/annotations/${item.annotationId}`, {
           method: 'PUT',
-          headers,
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(item.payload),
         })
         break
 
       case 'delete':
-        response = await fetch(`/api/annotations/${item.annotationId}`, {
+        await apiRequest(`/annotations/${item.annotationId}`, {
           method: 'DELETE',
-          headers: await mutationHeaders(),
         })
         break
     }
-
-    await handleResponse(response)
 
     // Mark annotation as synced
     await updateAnnotationSyncStatus(item.annotationId, 'synced', new Date().toISOString())
