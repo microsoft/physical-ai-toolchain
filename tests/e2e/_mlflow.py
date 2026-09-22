@@ -234,6 +234,7 @@ def assert_osmo_workflow_has_mlflow_tracking(workflow: OSMOWorkflow, aml_workspa
             f"expected {workflow.correlation_id!r}"
         )
 
+    workflow.handle.resource_identifiers["mlflow_run"] = run_id
     rendered_tags = ", ".join(
         f"{name}={value}" for name, value in sorted(tracking.tags.items()) if name == "correlation_id"
     )
