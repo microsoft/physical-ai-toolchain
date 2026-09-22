@@ -2,7 +2,7 @@
 title: Workflow Templates (AzureML)
 description: Selected AzureML workflow templates for RL, LeRobot, and SiL training and evaluation.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-09-21
 ms.topic: reference
 keywords:
   - azureml

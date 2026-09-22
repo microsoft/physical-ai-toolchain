@@ -40,6 +40,8 @@ function Invoke-TerraformValidationCore {
         [switch]$ChangedFilesOnly
     )
 
+    # Native failures are recorded per directory rather than terminating reporting.
+    $PSNativeCommandUseErrorActionPreference = $false
     $repoRoot = & git rev-parse --show-toplevel 2>$null
     if (-not $repoRoot) {
         $repoRoot = (Get-Item $PSScriptRoot).Parent.Parent.Parent.FullName
@@ -118,28 +120,56 @@ function Invoke-TerraformValidationCore {
 
         Push-Location $fullPath
         try {
-            & terraform init -backend=false -input=false -no-color 2>&1 | Out-Null
-            $validateOutput = & terraform validate -json -no-color 2>&1
+            $initOutput = & terraform init -backend=false -input=false -no-color 2>&1
             $validateExit = $LASTEXITCODE
-
-            $validateResult = $validateOutput | Out-String | ConvertFrom-Json
+            if ($validateExit -ne 0) {
+                $validateResult = @{
+                    diagnostics = @(@{
+                            severity = 'error'
+                            summary  = "Terraform initialization failed: $displayPath"
+                            detail   = ($initOutput | Out-String).Trim()
+                        })
+                }
+            }
+            else {
+                $validateOutput = & terraform validate -json -no-color 2>&1
+                $validateExit = $LASTEXITCODE
+                try {
+                    $validateResult = $validateOutput | Out-String | ConvertFrom-Json -AsHashtable
+                    if ($null -eq $validateResult -or -not $validateResult.Contains('diagnostics')) {
+                        throw 'Terraform validation output has no diagnostics field.'
+                    }
+                }
+                catch {
+                    $validateExit = 1
+                    $validateResult = @{
+                        diagnostics = @(@{
+                                severity = 'error'
+                                summary  = "Invalid Terraform validation output: $displayPath"
+                                detail   = ($validateOutput | Out-String).Trim()
+                            })
+                    }
+                }
+            }
 
             $errors = @()
             $warnings = @()
 
             if ($validateResult.diagnostics) {
                 foreach ($diag in $validateResult.diagnostics) {
-                    $diagFile = if ($diag.range.filename) { "$displayPath/$($diag.range.filename)" } else { $null }
-                    $diagLine = if ($diag.range.start.line) { $diag.range.start.line } else { 0 }
+                    $range = $diag['range']
+                    $diagFile = if ($range -and $range['filename']) { "$displayPath/$($range['filename'])" } else { $null }
+                    $diagLine = if ($range -and $range['start'] -and $range['start']['line']) { $range['start']['line'] } else { 0 }
 
                     $entry = @{
                         severity = $diag.severity
                         summary  = $diag.summary
-                        detail   = $diag.detail
+                        detail   = $diag['detail']
                         file     = $diagFile
                         line     = $diagLine
                     }
 
+                    if ($entry.detail) { Write-Host $entry.detail }
                     if ($diag.severity -eq 'error') {
                         $errors += $entry
                         $annotParams = @{ Level = 'Error'; Message = $diag.summary }
