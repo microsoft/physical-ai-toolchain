@@ -65,8 +65,8 @@ export const MotionMetricsPanel = memo(function MotionMetricsPanel({
     return {
       positions,
       timestamps,
-      gripper_states: gripperStates,
-      smoothness_mode: mode,
+      gripperStates,
+      smoothnessMode: mode,
     }
   }, [hasData, positions, timestamps, gripperStates, mode])
 
@@ -138,10 +138,10 @@ export const MotionMetricsPanel = memo(function MotionMetricsPanel({
               data-testid="motion-score"
               className={cn(
                 'inline-flex size-8 items-center justify-center rounded-full border text-sm font-semibold',
-                SCORE_STYLES[data.overall_score] ?? 'border-muted bg-muted',
+                SCORE_STYLES[data.overallScore] ?? 'border-muted bg-muted',
               )}
             >
-              {data.overall_score}
+              {data.overallScore}
             </span>
             <span className="text-muted-foreground text-xs">Overall motion score (1–5)</span>
           </div>
@@ -149,14 +149,14 @@ export const MotionMetricsPanel = memo(function MotionMetricsPanel({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <Metric
               label="Normalized smoothness"
-              value={data.normalized_smoothness.toFixed(3)}
+              value={data.normalizedSmoothness.toFixed(3)}
               hint={modeHint}
             />
             <Metric label="Raw smoothness" value={data.smoothness.toFixed(6)} />
             <Metric label="Efficiency" value={data.efficiency.toFixed(3)} />
             <Metric label="Jitter" value={data.jitter.toFixed(4)} />
-            <Metric label="Hesitations" value={String(data.hesitation_count)} />
-            <Metric label="Corrections" value={String(data.correction_count)} />
+            <Metric label="Hesitations" value={String(data.hesitationCount)} />
+            <Metric label="Corrections" value={String(data.correctionCount)} />
           </div>
 
           <div>

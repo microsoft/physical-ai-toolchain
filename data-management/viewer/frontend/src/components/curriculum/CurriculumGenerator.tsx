@@ -55,13 +55,13 @@ export function CurriculumGenerator({
         const getValue = (field: string): number | boolean | undefined => {
           switch (field) {
             case 'task_completion_rating':
-              return episode.task_completion_rating
+              return episode.taskCompletionRating
             case 'trajectory_quality_score':
-              return episode.trajectory_quality_score
+              return episode.trajectoryQualityScore
             case 'has_anomalies':
-              return episode.has_anomalies
+              return episode.hasAnomalies
             case 'has_issues':
-              return episode.has_issues
+              return episode.hasIssues
             default:
               return undefined
           }

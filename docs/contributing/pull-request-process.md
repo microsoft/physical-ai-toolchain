@@ -3,7 +3,7 @@ sidebar_position: 5
 title: Pull Request Process
 description: PR workflow, reviewer assignment, review cycles, approval criteria, and update process
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-21
 ms.topic: how-to
 keywords:
   - pull request
@@ -15,13 +15,13 @@ keywords:
 > [!NOTE]
 > This guide expands on the [Pull Request Process](README.md#-pull-request-process) section of the main contributing guide.
 
-This reference architecture uses a deployment-based validation model rather than automated testing. The PR workflow adapts to different contribution types and validation levels.
+Automated linting, security checks, and component tests form the validation baseline. Deployment and workflow validation supplement these checks for environment-dependent changes; document any untested scenarios and costs in the PR.
 
 ## PR Workflow Steps
 
 1. Fork and Branch: Create a feature branch from your fork's main branch
 2. Make Changes: Implement improvements following style guides
-3. Validate Locally: Run appropriate validation level (static/plan/deployment)
+3. Validate Locally: Run applicable static checks and tests, plus plan or deployment validation when needed
 4. Create Draft PR: Open draft PR with validation documentation
 5. Request Review: Mark PR ready when validation complete
 
@@ -58,7 +58,7 @@ Maintainers assign reviewers based on contribution type:
 
 ## Update Process
 
-This reference architecture uses a rolling update model rather than semantic versioning. Users fork and adapt the blueprint for their own use.
+This project uses release-please for automated semantic versioning and changelog generation. With `bump-minor-pre-major: true`, breaking changes increment the minor version before 1.0 and the major version from 1.0 onward. Users who fork the blueprint review release notes and migration guidance before adopting updates.
 
 ## Update Types
 
@@ -82,7 +82,8 @@ This reference architecture uses a rolling update model rather than semantic ver
 
 ### Breaking Change Communication
 
-* GitHub Release with `[BREAKING]` prefix
+* Conventional Commit breaking-change marker (`!` or a `BREAKING CHANGE:` footer) for release-please
+* Breaking changes highlighted in the GitHub Release
 * Migration guide in release notes
 * Updated deployment documentation
 * Announcement in repository discussions
@@ -101,11 +102,16 @@ terraform init -upgrade
 helm repo update
 helm search repo nvidia-gpu-operator --versions
 
-# Update Python dependencies
-uv sync
+# Restore the affected Python project from its committed lock
+uv sync --frozen
 ```
 
-After merging Dependabot dependency PRs that update Python manifests, Dependabot regenerates the affected `uv.lock` natively. The read-only `uv lock --check` CI gate fails any PR whose lock drifts from its `pyproject.toml`, so no manual `uv lock` step is required.
+Use Dependabot for updates to existing Python dependencies. Run `uv lock` for
+dependency additions or deliberate lock regeneration only from an approved
+environment with direct access to the public registry. Proxy-restricted
+contributors must not regenerate locks locally. Use `uv sync --frozen` as the
+local restore check. The read-only `uv lock --check` CI gate fails any PR whose
+lock drifts from its `pyproject.toml`.
 
 ### Migration Approach
 

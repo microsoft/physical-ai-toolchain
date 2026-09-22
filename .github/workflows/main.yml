@@ -144,6 +144,13 @@ jobs:
       contents: read
       id-token: write
 
+  # Pytest: gpu-offload controller and runtime components
+  pytest-gpu-offload:
+    name: Pytest GPU Offload
+    uses: ./.github/workflows/pytest-gpu-offload.yml
+    permissions:
+      contents: read
+
   # Pytest: shared CI scripts component
   pytest-shared-ci:
     name: Pytest Shared CI
@@ -307,6 +314,7 @@ jobs:
       - pytest-dm-tools
       - pytest-data-pipeline
       - pytest-inference
+      - pytest-gpu-offload
       - pytest-shared-ci
       - dataviewer-frontend-tests
       - dataviewer-backend-pytests
@@ -366,7 +374,7 @@ jobs:
 
       - name: Setup uv
         if: ${{ steps.release.outputs.prs_created == 'true' }}
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
 
       - name: Regenerate uv.lock
         if: ${{ steps.release.outputs.prs_created == 'true' }}
@@ -480,7 +488,7 @@ jobs:
             infrastructure/terraform/e2e/go.mod
 
       - name: Generate dependency SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
         with:
           path: .
           format: spdx-json
@@ -491,7 +499,7 @@ jobs:
           syft-version: v1.20.0
 
       - name: Generate dependency SBOM (CycloneDX)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
         with:
           path: .
           format: cyclonedx-json
@@ -558,7 +566,7 @@ jobs:
           python-version: '3.12'
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
 
       - name: Build release wheel
         run: uv build --wheel --out-dir dist
@@ -571,7 +579,7 @@ jobs:
         shell: bash
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
         with:
           path: .
           format: spdx-json
@@ -580,7 +588,7 @@ jobs:
           syft-version: v1.20.0
 
       - name: Generate SBOM (CycloneDX)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
         with:
           path: .
           format: cyclonedx-json

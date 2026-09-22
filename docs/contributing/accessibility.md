@@ -1,9 +1,9 @@
 ---
 sidebar_position: 13
 title: Accessibility Best Practices
-description: Standards for accessible documentation and CLI output in this project
+description: Standards for accessible documentation, CLI output, and project-owned web applications
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-18
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 
@@ -13,15 +13,18 @@ This document defines accessibility requirements for documentation, runtime web 
 
 This project targets WCAG 2.2 Level AA for project-owned web interfaces. Section 508 and EN 301 549 require an explicit scope decision based on authoritative organizational facts.
 
-| Area               | What the project controls                                                       |
-|--------------------|---------------------------------------------------------------------------------|
-| Documentation      | Markdown files rendered on GitHub and the Docusaurus site                       |
+| Area               | What the project controls                                                        |
+|--------------------|----------------------------------------------------------------------------------|
+| Documentation      | Markdown files rendered on GitHub and the Docusaurus site                        |
 | Dataset Viewer     | Project-owned React interaction, adaptive layout, and assistive-technology paths |
 | Docusaurus runtime | Local production build, navigation, search, content semantics, and visual states |
 | Generated evidence | Project mappings, state proofs, composed bundles, and non-attestation summaries  |
 | CLI output         | Shell scripts in `infrastructure/setup/` and `scripts/` that emit messages       |
 
 GitHub Pages hosting behavior remains provider-owned. Accessibility criterion evidence targets the immutable local Docusaurus production build before publication.
+
+> [!NOTE]
+> The Dataset Viewer enables the recommended `jsx-a11y` ESLint rules. Static linting is not evidence of WCAG conformance; interaction and assistive-technology checks remain part of UI review.
 
 ## Documentation Accessibility
 
@@ -72,6 +75,12 @@ else
   error() { printf '[ERROR] %s\n' "$*" >&2; }
 fi
 ```
+
+## Dataviewer Accessibility
+
+Use semantic controls, accessible names, visible keyboard focus, and keyboard-operable interactions when changing the viewer. Preserve the accessibility behavior of the existing Radix UI primitives. Run `npm run validate` from `data-management/viewer/frontend/` after installing its dependencies, and review keyboard navigation and screen-reader behavior for affected controls.
+
+The [frontend ESLint configuration](../../data-management/viewer/frontend/eslint.config.js) defines the automated accessibility checks.
 
 ## Runtime Accessibility Validation
 
