@@ -36,6 +36,11 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch):
         "CORS_ORIGINS",
         "EPISODE_CACHE_CAPACITY",
         "EPISODE_CACHE_MAX_MB",
+        "DETECTION_MODELS_DIR",
+        "DETECTION_MODEL_DIGESTS",
+        "DETECTION_CACHE_MAX_SIZE",
+        "DETECTION_CACHE_TTL_SECONDS",
+        "DETECTION_CONFIDENCE_THRESHOLD",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -50,6 +55,11 @@ class TestLoadConfig:
         assert cfg.backend_port == 8000
         assert cfg.episode_cache_capacity == 32
         assert cfg.episode_cache_max_mb == 100
+        assert cfg.detection_models_dir == "./models"
+        assert cfg.detection_model_digests == {}
+        assert cfg.detection_cache_max_size == 100
+        assert cfg.detection_cache_ttl_seconds == 3600
+        assert cfg.detection_confidence_threshold == 0.1
         assert "http://localhost:5173" in cfg.cors_origins
 
     def test_storage_backend_lowercased(self, monkeypatch: pytest.MonkeyPatch):
@@ -70,6 +80,43 @@ class TestLoadConfig:
         assert cfg.backend_port == 9090
         assert cfg.episode_cache_capacity == 8
         assert cfg.episode_cache_max_mb == 0
+
+    def test_detection_env_configuration(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("DETECTION_MODELS_DIR", "/srv/models")
+        monkeypatch.setenv("DETECTION_MODEL_DIGESTS", '{"yolo11n":"' + "a" * 64 + '"}')
+        monkeypatch.setenv("DETECTION_CACHE_MAX_SIZE", "12")
+        monkeypatch.setenv("DETECTION_CACHE_TTL_SECONDS", "45")
+        monkeypatch.setenv("DETECTION_CONFIDENCE_THRESHOLD", "0.35")
+
+        cfg = load_config()
+
+        assert cfg.detection_models_dir == "/srv/models"
+        assert cfg.detection_model_digests == {"yolo11n": "a" * 64}
+        assert cfg.detection_cache_max_size == 12
+        assert cfg.detection_cache_ttl_seconds == 45
+        assert cfg.detection_confidence_threshold == 0.35
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("DETECTION_CACHE_MAX_SIZE", "0"),
+            ("DETECTION_CACHE_TTL_SECONDS", "0"),
+            ("DETECTION_CONFIDENCE_THRESHOLD", "-0.1"),
+            ("DETECTION_CONFIDENCE_THRESHOLD", "1.1"),
+            ("DETECTION_MODEL_DIGESTS", '{"unknown":"' + "a" * 64 + '"}'),
+            ("DETECTION_MODEL_DIGESTS", '{"yolo11n":"invalid"}'),
+        ],
+    )
+    def test_invalid_detection_configuration_raises(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        name: str,
+        value: str,
+    ):
+        monkeypatch.setenv(name, value)
+
+        with pytest.raises(ValueError, match=name):
+            load_config()
 
     def test_azure_env_populated(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("STORAGE_BACKEND", "azure")

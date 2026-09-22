@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { apiPath } from '@/lib/api-client'
 import { useAnnotationStore } from '@/stores'
 import { useDatasetStore } from '@/stores/dataset-store'
 import { useEpisodeStore } from '@/stores/episode-store'
@@ -100,8 +101,8 @@ export function ObjectDetectionWidget() {
     )
     if (saved) {
       const restored: Detection[] = saved.detections.map((det) => ({
-        class_id: 0,
-        class_name: det.label,
+        classId: 0,
+        className: det.label,
         confidence: det.confidence,
         bbox: det.bbox,
       }))
@@ -116,7 +117,9 @@ export function ObjectDetectionWidget() {
 
   const imageUrl = useMemo(() => {
     if (!datasetId || episodeIndex == null || !camera) return null
-    return `/api/datasets/${datasetId}/episodes/${episodeIndex}/frames/${frameIndex}?camera=${encodeURIComponent(camera)}`
+    return apiPath(
+      `/datasets/${datasetId}/episodes/${episodeIndex}/frames/${frameIndex}?camera=${encodeURIComponent(camera)}`,
+    )
   }, [datasetId, episodeIndex, frameIndex, camera])
 
   const addLabel = useCallback((raw: string) => {
@@ -162,7 +165,7 @@ export function ObjectDetectionWidget() {
         model: requestLabels ? DEFAULT_OPEN_VOCAB_MODEL : undefined,
         camera: camera ?? undefined,
       })
-      const frameResult = summary.detections_by_frame.find((entry) => entry.frame === frameIndex)
+      const frameResult = summary.detectionsByFrame.find((entry) => entry.frame === frameIndex)
       setDetections(frameResult?.detections ?? [])
       setQueriedLabels(requestLabels ?? [])
     } catch (caught) {
@@ -180,7 +183,7 @@ export function ObjectDetectionWidget() {
       camera,
       queriedLabels,
       detections: detections.map<ObjectDetectionBox>((det) => ({
-        label: det.class_name,
+        label: det.className,
         confidence: det.confidence,
         bbox: det.bbox,
       })),
@@ -417,15 +420,12 @@ export function ObjectDetectionWidget() {
             </p>
             <ul className="divide-y rounded-md border text-xs">
               {detections.map((det, index) => (
-                <li
-                  key={`${det.class_name}-${index}`}
-                  className="flex items-center gap-2 px-2 py-1"
-                >
+                <li key={`${det.className}-${index}`} className="flex items-center gap-2 px-2 py-1">
                   <span
                     className="inline-block h-2 w-2 rounded-full"
                     style={{ backgroundColor: paletteColor(index) }}
                   />
-                  <span className="font-medium">{det.class_name}</span>
+                  <span className="font-medium">{det.className}</span>
                   <span className="text-muted-foreground">
                     {(det.confidence * 100).toFixed(0)}%
                   </span>
@@ -497,7 +497,7 @@ function FramePreview({ imageUrl, detections, onLoaded }: FramePreviewProps) {
         ctx.lineWidth = 2
         ctx.strokeRect(sx, sy, sw, sh)
 
-        const label = `${det.class_name} ${(det.confidence * 100).toFixed(0)}%`
+        const label = `${det.className} ${(det.confidence * 100).toFixed(0)}%`
         ctx.font = '11px sans-serif'
         const textWidth = ctx.measureText(label).width
         ctx.fillStyle = color

@@ -66,7 +66,7 @@ def _make_export_result(success: bool = True, error: str | None = None) -> Magic
     result.success = success
     result.output_files = ["episode_0.hdf5"]
     result.error = error
-    result.stats = {"episodes": 1, "frames_written": 10}
+    result.stats = {"total_episodes": 1, "total_frames": 10, "removed_frames": 0, "duration_ms": 25}
     return result
 
 
@@ -199,7 +199,8 @@ class TestExportEpisodes:
         data = resp.json()
         assert data["success"] is True
         assert data["outputFiles"] == ["episode_0.hdf5"]
-        assert data["stats"]["episodes"] == 1
+        assert data["stats"]["total_episodes"] == 1
+        assert data["error"] is None
         # Edits should have been parsed into the exporter call.
         kwargs = exporter_instance.export_episodes.call_args.kwargs
         assert kwargs["episode_indices"] == [0]
@@ -250,6 +251,39 @@ class TestExportEpisodes:
 
 
 class TestExportEpisodesStream:
+    @pytest.mark.parametrize("suffix", ["", "/stream"])
+    def test_failed_results_hide_diagnostics(
+        self,
+        client: TestClient,
+        override_service,
+        dataset_layout,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        suffix: str,
+    ) -> None:
+        _, _, output_dir = dataset_layout
+        exporter = MagicMock()
+        exporter.export_episodes.return_value = _make_export_result(
+            success=False, error="/srv/data/private: permission denied"
+        )
+        _patch_exporter(monkeypatch, MagicMock(return_value=exporter))
+        response = client.post(
+            f"/api/datasets/ds-1/export{suffix}",
+            json={"episodeIndices": [0], "outputPath": str(output_dir), "applyEdits": False},
+        )
+        assert response.status_code == 200
+        payload = (
+            json.loads(response.text.split("event: complete\ndata: ", 1)[1].split("\n\n", 1)[0])
+            if suffix
+            else response.json()
+        )
+        assert payload["success"] is False
+        assert payload["error"] == "Export failed"
+        assert payload["outputFiles"] == ["episode_0.hdf5"]
+        assert payload["stats"]["total_episodes"] == 1
+        assert "/srv/data/private" not in response.text
+        assert "/srv/data/private" in caplog.text
+
     def test_dataset_not_found_returns_404(self, client: TestClient, override_service) -> None:
         override_service.get_dataset = AsyncMock(return_value=None)
         resp = client.post(
@@ -352,7 +386,9 @@ class TestExportEpisodesStream:
             body = "".join(resp.iter_text())
 
         assert "event: error" in body
-        assert "Export not available" in body
+        assert '"code": "EXPORT_UNAVAILABLE"' in body
+        assert '"message": "Export is unavailable"' in body
+        assert "missing dep" not in body
 
     def test_stream_generic_exception_emits_error_event(
         self,
@@ -376,7 +412,9 @@ class TestExportEpisodesStream:
             body = "".join(resp.iter_text())
 
         assert "event: error" in body
-        assert "disk full" in body
+        assert '"code": "EXPORT_FAILED"' in body
+        assert '"message": "Export failed"' in body
+        assert "disk full" not in body
 
 
 # ---------------------------------------------------------------------------

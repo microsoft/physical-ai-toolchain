@@ -5,16 +5,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect } from 'react'
 
-import { mutationFetch, setEpisodeLabels } from '@/lib/api-client'
+import { apiRequest, setEpisodeLabels } from '@/lib/api-client'
 import { useDatasetStore } from '@/stores'
 import { useLabelStore } from '@/stores/label-store'
 import type { EpisodeAnalysisRecord } from '@/types/api'
 
-const API_BASE = '/api'
-
 interface DatasetLabelsResponse {
-  dataset_id: string
-  available_labels: string[]
+  datasetId: string
+  availableLabels: string[]
   episodes: Record<string, string[]>
   analysis?: Record<string, EpisodeAnalysisRecord>
 }
@@ -28,30 +26,24 @@ export const labelKeys = {
 }
 
 async function fetchDatasetLabels(datasetId: string): Promise<DatasetLabelsResponse> {
-  const res = await fetch(`${API_BASE}/datasets/${datasetId}/labels`)
-  if (!res.ok) throw new Error('Failed to fetch labels')
-  return res.json()
+  return apiRequest<DatasetLabelsResponse>(`/datasets/${datasetId}/labels`)
 }
 
 async function addLabelOption(datasetId: string, label: string): Promise<string[]> {
-  const res = await mutationFetch(`${API_BASE}/datasets/${datasetId}/labels/options`, {
+  return apiRequest<string[]>(`/datasets/${datasetId}/labels/options`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ label }),
   })
-  if (!res.ok) throw new Error('Failed to add label option')
-  return res.json()
 }
 
 async function removeLabelOption(datasetId: string, label: string): Promise<string[]> {
-  const res = await mutationFetch(
-    `${API_BASE}/datasets/${datasetId}/labels/options/${encodeURIComponent(label.trim().toUpperCase())}`,
+  return apiRequest<string[]>(
+    `/datasets/${datasetId}/labels/options/${encodeURIComponent(label.trim().toUpperCase())}`,
     {
       method: 'DELETE',
     },
   )
-  if (!res.ok) throw new Error('Failed to delete label option')
-  return res.json()
 }
 
 /** Analysis fields that can be promoted into filterable episode labels. */
@@ -68,13 +60,13 @@ export const IMPORTABLE_ANALYSIS_FIELDS = [
 export type ImportableAnalysisField = (typeof IMPORTABLE_ANALYSIS_FIELDS)[number]
 
 interface ImportAnalysisResult {
-  dataset_id: string
-  available_labels: string[]
+  datasetId: string
+  availableLabels: string[]
   episodes: Record<string, string[]>
   field: string
   prefix: string
-  labels_added: string[]
-  episodes_updated: number
+  labelsAdded: string[]
+  episodesUpdated: number
 }
 
 async function importAnalysisLabels(
@@ -82,7 +74,7 @@ async function importAnalysisLabels(
   field: ImportableAnalysisField,
   options?: { prefix?: string; overwrite?: boolean },
 ): Promise<ImportAnalysisResult> {
-  const res = await mutationFetch(`${API_BASE}/datasets/${datasetId}/labels/import-from-analysis`, {
+  return apiRequest<ImportAnalysisResult>(`/datasets/${datasetId}/labels/import-from-analysis`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -91,8 +83,6 @@ async function importAnalysisLabels(
       overwrite: options?.overwrite ?? false,
     }),
   })
-  if (!res.ok) throw new Error('Failed to import analysis labels')
-  return res.json()
 }
 
 /**
@@ -120,12 +110,12 @@ export function useDatasetLabels() {
   }, [currentDataset?.id, prepareDatasetLabels])
 
   useEffect(() => {
-    if (query.data && query.data.dataset_id === currentDataset?.id) {
-      setAvailableLabels(query.data.available_labels)
-      if (labelDatasetId === query.data.dataset_id) {
-        reconcileEpisodeLabels(query.data.dataset_id, query.data.episodes)
+    if (query.data && query.data.datasetId === currentDataset?.id) {
+      setAvailableLabels(query.data.availableLabels)
+      if (labelDatasetId === query.data.datasetId) {
+        reconcileEpisodeLabels(query.data.datasetId, query.data.episodes)
       } else {
-        setDatasetEpisodeLabels(query.data.dataset_id, query.data.episodes)
+        setDatasetEpisodeLabels(query.data.datasetId, query.data.episodes)
       }
       setAllEpisodeAnalysis(query.data.analysis ?? {})
       setLoaded(true)
@@ -241,10 +231,10 @@ export function useImportAnalysisLabels() {
       return importAnalysisLabels(currentDataset.id, field, { prefix, overwrite })
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: labelKeys.dataset(data.dataset_id) })
-      if (useDatasetStore.getState().currentDataset?.id !== data.dataset_id) return
-      setAvailableLabels(data.available_labels)
-      reconcileEpisodeLabels(data.dataset_id, data.episodes)
+      queryClient.invalidateQueries({ queryKey: labelKeys.dataset(data.datasetId) })
+      if (useDatasetStore.getState().currentDataset?.id !== data.datasetId) return
+      setAvailableLabels(data.availableLabels)
+      reconcileEpisodeLabels(data.datasetId, data.episodes)
     },
   })
 

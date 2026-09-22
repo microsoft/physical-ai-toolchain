@@ -3,7 +3,7 @@ sidebar_position: 10
 title: Cleanup and Destroy
 description: Remove cluster components, destroy Azure infrastructure, and clean up development environment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-19
+ms.date: 2026-09-21
 ms.topic: how-to
 keywords:
   - cleanup
@@ -54,13 +54,13 @@ cd infrastructure/setup/cleanup
 
 Uninstall scripts preserve data by default. Use flags for complete removal.
 
-| Script                         | Flag                  | Description                                    |
-|--------------------------------|-----------------------|------------------------------------------------|
-| `uninstall-osmo.sh`            | `--delete-container`  | Deletes blob container with workflow artifacts |
-| `uninstall-osmo.sh`            | `--purge-postgres`    | Drops OSMO tables from PostgreSQL              |
-| `uninstall-osmo.sh`            | `--purge-redis`       | Flushes OSMO keys from Redis                   |
-| `uninstall-robotics-charts.sh` | `--delete-namespaces` | Removes gpu-operator, kai-scheduler namespaces |
-| `uninstall-robotics-charts.sh` | `--delete-crds`       | Removes GPU Operator CRDs                      |
+| Script                         | Flag                  | Description                                               |
+|--------------------------------|-----------------------|-----------------------------------------------------------|
+| `uninstall-osmo.sh`            | `--delete-container`  | Deletes blob container with workflow artifacts            |
+| `uninstall-osmo.sh`            | `--purge-postgres`    | Drops OSMO tables from PostgreSQL                         |
+| `uninstall-osmo.sh`            | `--purge-redis`       | Flushes OSMO keys after Redis TLS and hostname validation |
+| `uninstall-robotics-charts.sh` | `--delete-namespaces` | Removes gpu-operator, kai-scheduler namespaces            |
+| `uninstall-robotics-charts.sh` | `--delete-crds`       | Removes GPU Operator CRDs                                 |
 
 Full cleanup including all data:
 
