@@ -5,7 +5,7 @@ description = "API for LeRobot episode annotation system"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.141.1",
-    "uvicorn[standard]==0.52.4",
+    "uvicorn[standard]==0.53.0",
     "pydantic==2.13.5",
     "python-multipart==0.0.32",
     "python-dotenv==1.2.3",
@@ -20,13 +20,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.16.6",
+    "ruff==0.16.7",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov==7.1.0",
     "httpx==0.28.1",
     "hypothesis==6.168.0",
-    "schemathesis==4.26.1",
+    "schemathesis==4.27.1",
 ]
 azure = [
     "aiohttp==3.14.3",
@@ -35,14 +35,14 @@ azure = [
 ]
 analysis = [
     "scipy==1.18.1",
-    "scikit-learn==1.9.0",
+    "scikit-learn==1.9.1",
     "pandas==3.0.5",
 ]
 huggingface = [
-    "huggingface-hub==1.30.0",
+    "huggingface-hub==1.31.0",
 ]
 auth = [
-    "pyjwt[crypto]==2.13.0",
+    "pyjwt[crypto]==2.14.0",
 ]
 hdf5 = [
     "h5py==3.16.0",
@@ -51,12 +51,12 @@ export = [
     "h5py==3.16.0",
 ]
 yolo = [
-    "ultralytics==8.4.144",
+    "ultralytics==8.4.152",
 ]
 vlm-judge = [
     "accelerate==1.15.0",
     "torch==2.14.0",
-    "transformers==5.16.1",
+    "transformers==5.17.0",
 ]
 
 [build-system]
