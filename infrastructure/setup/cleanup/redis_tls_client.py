@@ -37,6 +37,7 @@ def main() -> None:
     command = _build_operation_command(operation, os.environ.get("REDIS_SCRIPT"))
 
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     with (
         socket.create_connection((host, port), timeout=30) as raw_socket,
         context.wrap_socket(raw_socket, server_hostname=host) as tls_socket,
