@@ -12,7 +12,7 @@
       "invalidation": "Viewer composition, behavior, authentication, media, or dependency changes",
       "retest": "Run affected Viewer journeys and preserve unexecuted states",
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md"
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts"
       ],
       "dependency_refs": [
         "project-user-ui-surface-area-plan:P02-T02"
@@ -711,7 +711,7 @@
         "MEDIA_EQUIVALENCE_REVIEW"
       ],
       "evidence_refs": [
-        "docs/docusaurus/build/mermaid-routes.json",
+        "docs/docusaurus/scripts/validate-mermaid-accessibility.mjs",
         "docs/docusaurus/e2e/structure.spec.ts"
       ],
       "dependency_refs": []
@@ -943,7 +943,7 @@
         "PLAYWRIGHT_TREE"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
         "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
       ],
@@ -1044,7 +1044,7 @@
         "PLAYWRIGHT_LIVE_REGION"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
         "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
         "data-management/viewer/frontend/e2e/accessibility-states.spec.ts",
@@ -1080,7 +1080,7 @@
         "MEDIA_EQUIVALENCE_REVIEW"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
         "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
       ],
@@ -1144,7 +1144,7 @@
         "PLAYWRIGHT_VISUAL"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
         "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
         "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
@@ -1176,7 +1176,7 @@
         "PLAYWRIGHT_LIVE_REGION"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts",
         "data-management/viewer/frontend/e2e/accessibility-adaptive.spec.ts"
       ],
@@ -1236,7 +1236,7 @@
         "PLAYWRIGHT_LIVE_REGION"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-states.spec.ts"
       ],
       "dependency_refs": []
@@ -1266,7 +1266,7 @@
         "PLAYWRIGHT_LIVE_REGION"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
       ],
       "dependency_refs": []
@@ -1296,7 +1296,7 @@
         "PLAYWRIGHT_LIVE_REGION"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-static.spec.ts"
       ],
       "dependency_refs": []
@@ -1327,7 +1327,7 @@
         "PLAYWRIGHT_VISUAL"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-static.spec.ts"
       ],
       "dependency_refs": [
@@ -1392,7 +1392,7 @@
         "PLAYWRIGHT_LIVE_REGION"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-keyboard.spec.ts"
       ],
       "dependency_refs": []
@@ -1451,7 +1451,7 @@
         "PLAYWRIGHT_LIVE_REGION"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md",
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts",
         "data-management/viewer/frontend/e2e/accessibility-static.spec.ts",
         "data-management/viewer/frontend/e2e/accessibility-states.spec.ts"
       ],
@@ -2514,7 +2514,7 @@
         "PLAYWRIGHT_VISUAL"
       ],
       "evidence_refs": [
-        ".copilot-tracking/changes/2026-09-11/project-user-ui-surface-area-changes.md"
+        "data-management/viewer/frontend/e2e/accessibility-manifest.ts"
       ],
       "dependency_refs": [
         "project-user-ui-surface-area-plan:P02-T02 for playback equivalence"
