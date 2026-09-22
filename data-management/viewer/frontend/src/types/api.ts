@@ -137,27 +137,25 @@ export interface EpisodeData {
 }
 
 /**
- * Structured per-episode analysis persisted beside the dataset (VLM-derived
- * labels + computed motion metrics). Served snake_case inside the dataset
- * labels file, so fields stay snake_case here.
+ * Structured per-episode analysis persisted beside the dataset.
  */
 export interface EpisodeAnalysisRecord {
-  pick_from?: string | null
+  pickFrom?: string | null
   object?: string | null
-  grasp_success?: boolean | null
-  place_success?: boolean | null
-  movement_quality?: string | null
+  graspSuccess?: boolean | null
+  placeSuccess?: boolean | null
+  movementQuality?: string | null
   notes?: string | null
   instruction?: string | null
-  duration_s?: number | null
+  durationS?: number | null
   smoothness?: number | null
-  normalized_smoothness?: number | null
+  normalizedSmoothness?: number | null
   efficiency?: number | null
   jitter?: number | null
-  hesitation_count?: number | null
-  correction_count?: number | null
-  motion_score?: number | null
-  motion_flags?: string[]
+  hesitationCount?: number | null
+  correctionCount?: number | null
+  motionScore?: number | null
+  motionFlags?: string[]
   source?: string | null
 }
 

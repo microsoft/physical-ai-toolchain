@@ -3,7 +3,7 @@ sidebar_position: 2
 title: Release Verification
 description: Verify release artifact provenance and SBOM attestations for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-22
+ms.date: 2026-09-21
 ms.topic: reference
 ---
 
@@ -11,12 +11,12 @@ Verify the provenance and integrity of release artifacts published by this repos
 
 ## Prerequisites
 
-| Requirement     | Minimum Version | Purpose                                            |
-|-----------------|-----------------|----------------------------------------------------|
-| GitHub CLI      | 2.49.0+         | `gh attestation verify` subcommand for validation  |
-| sigstore-python | 4.3.0+          | `sigstore verify identity` for wheel signatures    |
-| gitsign         | 0.13.0+         | `gitsign verify-tag` for constrained tag identity  |
-| jq              | 1.6+            | Inspect SBOM JSON contents                         |
+| Requirement     | Minimum Version | Purpose                                           |
+|-----------------|-----------------|---------------------------------------------------|
+| GitHub CLI      | 2.49.0+         | `gh attestation verify` subcommand for validation |
+| sigstore-python | 4.3.0+          | `sigstore verify identity` for wheel signatures   |
+| gitsign         | 0.13.0+         | `gitsign verify-tag` for constrained tag identity |
+| jq              | 1.6+            | Inspect SBOM JSON contents                        |
 
 Install or update GitHub CLI: <https://cli.github.com/>
 

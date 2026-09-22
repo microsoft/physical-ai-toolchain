@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Data Pipeline
 description: Robot-to-cloud data capture, recording configuration, and Arc agent setup for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: overview
 keywords:
   - data pipeline
@@ -15,6 +15,8 @@ keywords:
 ---
 
 Robot-to-cloud data capture pipeline for recording, compressing, and uploading robotic training episodes. This section covers recording configuration, edge device setup, and data flow from ROS 2 nodes to Azure storage.
+
+The `capture/` directory provides configuration models, schema, examples, and tests, not a recording service. Use native ROS 2 recording options separately from the repository's proposed trigger, compression, and monitoring settings.
 
 ## 📖 Guides
 

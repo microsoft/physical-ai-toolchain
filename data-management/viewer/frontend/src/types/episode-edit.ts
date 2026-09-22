@@ -180,15 +180,12 @@ export interface ExportProgress {
   status: string
 }
 
-/** Export completion result */
+/** Batch export result; statistics include successful episodes even when others fail. */
 export interface ExportResult {
-  /** Whether export completed successfully */
   success: boolean
-  /** Output file paths */
   outputFiles: string[]
-  /** Error message if failed */
-  error?: string
-  /** Export statistics */
+  /** Public failure message, or null on success. */
+  error: string | null
   stats: {
     totalEpisodes: number
     totalFrames: number
