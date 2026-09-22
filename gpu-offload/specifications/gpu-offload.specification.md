@@ -1,7 +1,7 @@
 ---
 title: GPU Offload Specification
 description: Opt-in contract and behavior specification
-ms.date: 2026-08-10
+ms.date: 2026-09-22
 ms.topic: specification
 ---
 
@@ -21,6 +21,32 @@ offloading for that workload.
 
 The annotation value points to a ConfigMap containing the `remote.yaml` offload
 specification. See [remote-spec-schema.md](./remote-spec-schema.md) for schema.
+
+## Namespace Trust Model
+
+GPU offload treats a namespace as a single administrative trust boundary.
+Principals that can create or modify the referenced `remote.yaml` ConfigMap must
+already be authorized to create arbitrary Deployments in that namespace.
+
+ConfigMap write access is privileged because `remote.yaml` can select the server
+image, environment, scheduling, resources, and transferable workload data. The
+generated server can also use the client workload's service account, image pull
+secrets, runtime class, and permitted mounts. Treat modification of an offload
+ConfigMap as equivalent to deploying code with that execution context.
+
+This trust model requires:
+
+- No less-trusted principal or automation has write access to offload ConfigMaps
+- ConfigMap writers may create arbitrary Deployments and select container images
+- ConfigMap writers may use the referenced service accounts, identities, and data
+- Workloads with different trust levels run in separate namespaces
+- Service accounts and workload identities follow least privilege
+- Admission policy restricts images and pod capabilities where required
+
+The controller does not provide privilege separation between ConfigMap editors
+and workload deployment operators. A shared or multi-tenant namespace requires an
+administrator-owned profile system or an equivalent admission control boundary;
+that model is not implemented.
 
 ## Controller Behavior
 
@@ -81,7 +107,7 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 
 1. Mutation is opt-in: controller only acts on workloads with all three signals
 2. Immutable remote.yaml: ConfigMap mounted read-only
-3. No privilege escalation: controller never adds privileged contexts
+3. No container privilege escalation: controller never adds privileged contexts
 4. Atomic per-workload: all containers in a workload see consistent mutation
 5. Idempotent: re-applying the same workload manifest produces same result
 6. Peer authentication: AES-GCM is enabled by default with an explicit plaintext opt-out

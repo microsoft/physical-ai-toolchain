@@ -1,7 +1,7 @@
 ---
 title: remote.yaml Schema
 description: Schema and examples for remote.yaml offload specification
-ms.date: 2026-09-21
+ms.date: 2026-09-22
 ms.topic: reference
 ---
 
@@ -19,6 +19,13 @@ no application code changes.
 The control container calls its policy as if it ran locally; the platform
 intercepts named symbols and routes execution to the GPU pod. This separation
 keeps the robot container lightweight while GPU capacity is reserved for inference.
+
+> [!WARNING]
+> Treat write access to `remote.yaml` as equivalent to arbitrary Deployment
+> creation in its namespace. The controller assumes ConfigMap editors are trusted
+> deployment operators authorized to select images and use the workload's
+> service account, runtime class, image pull secrets, and permitted mounts. Do
+> not grant this access to less-trusted users or automation.
 
 ## Top-Level Keys
 
