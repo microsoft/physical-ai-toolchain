@@ -157,8 +157,8 @@ afterEach(() => {
 })
 
 const makeDetection = (overrides: Partial<Detection> = {}): Detection => ({
-  class_id: 0,
-  class_name: 'person',
+  classId: 0,
+  className: 'person',
   confidence: 0.95,
   bbox: [10, 20, 110, 120],
   ...overrides,
@@ -178,7 +178,7 @@ describe('DetectionViewer', () => {
   })
 
   it('renders a plural badge when more than one detection is present', () => {
-    const detections = [makeDetection(), makeDetection({ class_name: 'car' })]
+    const detections = [makeDetection(), makeDetection({ className: 'car' })]
     const { getByText } = render(<DetectionViewer imageUrl="/img.png" detections={detections} />)
     expect(getByText('2 detections')).toBeInTheDocument()
   })
@@ -191,7 +191,7 @@ describe('DetectionViewer', () => {
   })
 
   it('draws the image and one strokeRect per detection after the image loads', async () => {
-    const detections = [makeDetection(), makeDetection({ class_name: 'car', bbox: [0, 0, 50, 50] })]
+    const detections = [makeDetection(), makeDetection({ className: 'car', bbox: [0, 0, 50, 50] })]
     render(<DetectionViewer imageUrl="/img.png" detections={detections} />)
     await waitFor(() => expect(ctxMock.drawImage).toHaveBeenCalledTimes(1))
     expect(ctxMock.strokeRect).toHaveBeenCalledTimes(2)
@@ -223,7 +223,7 @@ describe('DetectionViewer', () => {
     render(
       <DetectionViewer
         imageUrl="/img.png"
-        detections={[makeDetection({ class_name: 'dog', confidence: 0.876 })]}
+        detections={[makeDetection({ className: 'dog', confidence: 0.876 })]}
       />,
     )
     await waitFor(() => expect(ctxMock.fillText).toHaveBeenCalled())
@@ -232,7 +232,7 @@ describe('DetectionViewer', () => {
 
   it('uses the class palette color for known class names', async () => {
     render(
-      <DetectionViewer imageUrl="/img.png" detections={[makeDetection({ class_name: 'car' })]} />,
+      <DetectionViewer imageUrl="/img.png" detections={[makeDetection({ className: 'car' })]} />,
     )
     await waitFor(() => expect(ctxMock.strokeRect).toHaveBeenCalled())
     expect(ctxMock.strokeStyleHistory).toContain('#4ECDC4')
@@ -242,7 +242,7 @@ describe('DetectionViewer', () => {
     render(
       <DetectionViewer
         imageUrl="/img.png"
-        detections={[makeDetection({ class_name: 'spaceship' })]}
+        detections={[makeDetection({ className: 'spaceship' })]}
       />,
     )
     await waitFor(() => expect(ctxMock.strokeRect).toHaveBeenCalled())
@@ -279,7 +279,7 @@ describe('DetectionViewer', () => {
     rerender(
       <DetectionViewer
         imageUrl="/img.png"
-        detections={[makeDetection(), makeDetection({ class_name: 'car' })]}
+        detections={[makeDetection(), makeDetection({ className: 'car' })]}
       />,
     )
     await waitFor(() => expect(ctxMock.strokeRect).toHaveBeenCalledTimes(3))

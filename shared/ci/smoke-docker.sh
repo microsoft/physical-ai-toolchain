@@ -27,7 +27,10 @@ export VITE_AZURE_TENANT_ID="${VITE_AZURE_TENANT_ID:-00000000-0000-0000-0000-000
 # Isolate the backend's read-only data mount so the run leaves no root-owned
 # directory in the working tree.
 data_dir="$(mktemp -d)"
+models_dir="$(mktemp -d)"
 export DATAVIEWER_HOST_DATA_DIR="$data_dir"
+export DATAVIEWER_HOST_MODELS_DIR="$models_dir"
+export DETECTION_MODEL_DIGESTS="${DETECTION_MODEL_DIGESTS:-{}}"
 
 cleanup() {
   local status=$?
@@ -36,7 +39,7 @@ cleanup() {
     docker compose -f "$compose" logs --no-color --tail 100 || true
   fi
   docker compose -f "$compose" down --volumes --remove-orphans || true
-  rm -rf "$data_dir"
+  rm -rf "$data_dir" "$models_dir"
 }
 trap cleanup EXIT
 

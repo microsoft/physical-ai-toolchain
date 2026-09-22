@@ -6,15 +6,27 @@ import type { ExportPreviewStats, ExportRequestWithEdits } from '../export'
 import { createExportStream, exportEpisodes, getExportPreview } from '../export'
 
 vi.mock('@/lib/api-client', () => ({
+  apiFetch: vi.fn(),
+  apiRequest: vi.fn(),
   handleResponse: vi.fn(),
   mutationHeaders: vi.fn(),
   requestHeaders: vi.fn(),
+  transformKeys: vi.fn((value) => value),
 }))
 
-const { handleResponse, mutationHeaders, requestHeaders } = await import('@/lib/api-client')
+vi.mock('@/lib/playback-diagnostics', () => ({
+  recordDiagnosticEvent: vi.fn(),
+}))
+
+const { apiFetch, apiRequest, handleResponse, mutationHeaders, requestHeaders } =
+  await import('@/lib/api-client')
+const { recordDiagnosticEvent } = await import('@/lib/playback-diagnostics')
+const mockApiFetch = vi.mocked(apiFetch)
+const mockApiRequest = vi.mocked(apiRequest)
 const mockHandleResponse = vi.mocked(handleResponse)
 const mockMutationHeaders = vi.mocked(mutationHeaders)
 const mockRequestHeaders = vi.mocked(requestHeaders)
+const mockRecordDiagnosticEvent = vi.mocked(recordDiagnosticEvent)
 const mockFetch = vi.fn()
 
 beforeEach(() => {
@@ -22,8 +34,31 @@ beforeEach(() => {
   mockHandleResponse.mockReset()
   mockMutationHeaders.mockReset()
   mockRequestHeaders.mockReset()
+  mockApiFetch.mockReset()
+  mockApiRequest.mockReset()
+  mockRecordDiagnosticEvent.mockReset()
+  mockHandleResponse.mockImplementation(async (response) => {
+    if (!response.ok) throw new Error(response.statusText)
+    return {}
+  })
   mockMutationHeaders.mockResolvedValue({ 'X-CSRF-Token': 'test-token' })
   mockRequestHeaders.mockResolvedValue({ Authorization: 'Bearer test' })
+  mockApiFetch.mockImplementation(async (path, init) => {
+    const headers = await mockMutationHeaders()
+    return mockFetch(`/api${path}`, {
+      ...init,
+      headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
+    })
+  })
+  mockApiRequest.mockImplementation(async (path, init) => {
+    const method = init?.method ?? 'GET'
+    const baseHeaders = method === 'GET' ? await mockRequestHeaders() : await mockMutationHeaders()
+    const response = await mockFetch(`/api${path}`, {
+      ...init,
+      headers: { ...baseHeaders, ...(init?.headers as Record<string, string> | undefined) },
+    })
+    return mockHandleResponse(response)
+  })
   vi.stubGlobal('fetch', mockFetch)
 })
 
@@ -49,6 +84,7 @@ describe('exportEpisodes', () => {
     const result: ExportResult = {
       success: true,
       outputFiles: ['out.parquet'],
+      error: null,
       stats: { totalEpisodes: 3, totalFrames: 300, removedFrames: 0, durationMs: 100 },
     }
     mockFetch.mockResolvedValueOnce(okResponse())
@@ -165,13 +201,14 @@ describe('createExportStream', () => {
 
     expect(onProgress).toHaveBeenCalledWith(progress)
     expect(onComplete).not.toHaveBeenCalled()
-    expect(onError).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith('Export failed')
   })
 
   it('routes completion payloads to onComplete', async () => {
     const result: ExportResult = {
       success: true,
       outputFiles: ['out.parquet'],
+      error: null,
       stats: { totalEpisodes: 3, totalFrames: 300, removedFrames: 0, durationMs: 100 },
     }
     mockFetch.mockResolvedValueOnce(
@@ -188,20 +225,34 @@ describe('createExportStream', () => {
     expect(onProgress).not.toHaveBeenCalled()
   })
 
-  it('routes error events to onError using the message field', async () => {
+  it('routes failed batch completion payloads to onComplete', async () => {
+    const result: ExportResult = {
+      success: false,
+      outputFiles: [],
+      error: 'Export failed',
+      stats: { totalEpisodes: 3, totalFrames: 0, removedFrames: 0, durationMs: 100 },
+    }
     mockFetch.mockResolvedValueOnce(
-      streamResponse([`event: error\ndata: ${JSON.stringify({ message: 'boom' })}\n\n`]),
+      streamResponse([`event: complete\ndata: ${JSON.stringify(result)}\n\n`]),
     )
-    const onError = vi.fn()
+    const onComplete = vi.fn()
 
-    createExportStream('ds-1', baseRequest, vi.fn(), vi.fn(), onError)
+    createExportStream('ds-1', baseRequest, vi.fn(), onComplete, vi.fn())
     await flushMicrotasks()
 
-    expect(onError).toHaveBeenCalledWith('boom')
+    expect(onComplete).toHaveBeenCalledWith(result)
   })
 
-  it('falls back to a default error message when none is provided', async () => {
-    mockFetch.mockResolvedValueOnce(streamResponse([`event: error\ndata: {}\n\n`]))
+  it('routes backend error events to onError', async () => {
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([
+        `event: error\ndata: ${JSON.stringify({
+          code: 'EXPORT_FAILED',
+          message: 'Export failed',
+          error: '/srv/data/private: permission denied',
+        })}\n\n`,
+      ]),
+    )
     const onError = vi.fn()
 
     createExportStream('ds-1', baseRequest, vi.fn(), vi.fn(), onError)
@@ -210,8 +261,70 @@ describe('createExportStream', () => {
     expect(onError).toHaveBeenCalledWith('Export failed')
   })
 
-  it('ignores malformed JSON data lines', async () => {
-    mockFetch.mockResolvedValueOnce(streamResponse([`data: not-json\n\n`]))
+  it('does not expose unknown backend error text', async () => {
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([
+        `event: error\ndata: ${JSON.stringify({
+          code: 'UNKNOWN',
+          error: '/srv/data/private: permission denied',
+        })}\n\n`,
+      ]),
+    )
+    const onError = vi.fn()
+
+    createExportStream('ds-1', baseRequest, vi.fn(), vi.fn(), onError)
+    await flushMicrotasks()
+
+    expect(onError).toHaveBeenCalledWith('Export failed')
+  })
+
+  it('ignores incomplete progress payloads', async () => {
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([`event: progress\ndata: ${JSON.stringify({ percentage: 50 })}\n\n`]),
+    )
+    const onProgress = vi.fn()
+
+    createExportStream('ds-1', baseRequest, onProgress, vi.fn(), vi.fn())
+    await flushMicrotasks()
+
+    expect(onProgress).not.toHaveBeenCalled()
+    expect(mockRecordDiagnosticEvent).toHaveBeenCalledWith('export', 'stream-schema-error', {
+      eventType: 'progress',
+    })
+  })
+
+  it('reports incomplete completion payloads without invoking onComplete', async () => {
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([`event: complete\ndata: ${JSON.stringify({ success: true })}\n\n`]),
+    )
+    const onComplete = vi.fn()
+    const onError = vi.fn()
+
+    createExportStream('ds-1', baseRequest, vi.fn(), onComplete, onError)
+    await flushMicrotasks()
+
+    expect(onComplete).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith('Export failed')
+    expect(mockRecordDiagnosticEvent).toHaveBeenCalledWith('export', 'stream-schema-error', {
+      eventType: 'complete',
+    })
+  })
+
+  it('records malformed JSON data lines and continues processing later events', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const progress: ExportProgress = {
+      currentEpisode: 1,
+      totalEpisodes: 3,
+      currentFrame: 50,
+      totalFrames: 300,
+      percentage: 50,
+      status: 'processing',
+    }
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([
+        `event: error\ndata: not-json\n\nevent: progress\ndata: ${JSON.stringify(progress)}\n\n`,
+      ]),
+    )
     const onProgress = vi.fn()
     const onComplete = vi.fn()
     const onError = vi.fn()
@@ -219,9 +332,51 @@ describe('createExportStream', () => {
     createExportStream('ds-1', baseRequest, onProgress, onComplete, onError)
     await flushMicrotasks()
 
-    expect(onProgress).not.toHaveBeenCalled()
+    expect(mockRecordDiagnosticEvent).toHaveBeenCalledWith(
+      'export',
+      'stream-parse-error',
+      expect.objectContaining({
+        eventType: 'error',
+        message: expect.any(String),
+        payload: 'not-json',
+      }),
+    )
+    expect(consoleWarn).toHaveBeenCalledWith(
+      'Failed to parse export stream event',
+      expect.objectContaining({ eventType: 'error', payload: 'not-json' }),
+    )
+    expect(onProgress).toHaveBeenCalledWith(progress)
     expect(onComplete).not.toHaveBeenCalled()
-    expect(onError).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith('Export failed')
+  })
+
+  it('does not classify callback failures as stream parse errors', async () => {
+    const progress: ExportProgress = {
+      currentEpisode: 1,
+      totalEpisodes: 3,
+      currentFrame: 50,
+      totalFrames: 300,
+      percentage: 50,
+      status: 'processing',
+    }
+    mockFetch.mockResolvedValueOnce(
+      streamResponse([`event: progress\ndata: ${JSON.stringify(progress)}\n\n`]),
+    )
+    const onError = vi.fn()
+
+    createExportStream(
+      'ds-1',
+      baseRequest,
+      () => {
+        throw new Error('render failed')
+      },
+      vi.fn(),
+      onError,
+    )
+    await flushMicrotasks()
+
+    expect(mockRecordDiagnosticEvent).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith('render failed')
   })
 
   it('reports HTTP errors via onError', async () => {
@@ -236,7 +391,7 @@ describe('createExportStream', () => {
     createExportStream('ds-1', baseRequest, vi.fn(), vi.fn(), onError)
     await flushMicrotasks()
 
-    expect(onError).toHaveBeenCalledWith('Export failed: Server Error')
+    expect(onError).toHaveBeenCalledWith('Server Error')
   })
 
   it('reports missing response body via onError', async () => {

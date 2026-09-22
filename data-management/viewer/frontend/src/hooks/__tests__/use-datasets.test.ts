@@ -51,7 +51,7 @@ describe('useDatasets', () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true))
 
-    expect(useDatasetStore.getState().error).toBe('boom')
+    expect(useDatasetStore.getState().error).toBe('The server could not complete the request')
   })
 })
 
