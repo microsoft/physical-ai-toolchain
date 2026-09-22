@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: MIT
+# Adapted from an upstream GPU-offloading reference implementation.
+
+# -- Container registry that hosts the prebuilt offloading images. This chart does
+# NOT build these images; they are consumed as prebuilt external artifacts. Set to
+# the registry you have mirrored the images into (placeholder shown below).
+image:
+  # Neutral default registry: leave empty to use fully-qualified image names
+  # or set to your registry (e.g. ghcr.io/my-org, docker.io/my-org).
+  registry: ""
+  # Applied to every container in this chart.
+  pullPolicy: Always
+
+# -- References to registry pull secrets. Leave empty and prefer workload identity
+# (AKS: federated credentials on a managed identity + AcrPull role assignment) so no
+# registry credential is stored in the cluster. To use a secret instead, create it
+# out of band and list its name here. NEVER inline registry credentials in values.
+#
+# imagePullSecrets:
+#   - name: acr-pull-secret
+imagePullSecrets: []
+
+# -- Mutating admission webhook that rewrites opt-in workloads for GPU offloading.
+mutate:
+  image:
+    # -- Real image name consumed from `image.registry`.
+    repository: xavier-mutate
+    # -- Leave `tag` empty and set `digest` to a sha256 pin for reproducible,
+    # tamper-evident deploys (recommended). When `digest` is set it wins over `tag`.
+    # Example: digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    tag: ""
+    digest: ""
+  # -- TLS port the webhook Service and admission endpoint listen on.
+  webhookPort: 6443
+  # Log verbosity for the mutate controller (error | warning | info | debug).
+  logLevel: warning
+  # Host paths that may be copied from opted-in workloads to remote server deployments.
+  # Exact path matches only. An empty list denies all hostPath volumes.
+  allowedHostPaths: []
+  # TLS mode options (choose one):
+  # - certManager.enabled: true  -> use cert-manager Certificate (recommended for production)
+  # - tls.secretName: <name>     -> use an existing `kubernetes.io/tls` Secret in this namespace
+  certManager:
+    enabled: false
+    # Certificate validity window (used only when cert-manager is enabled).
+    duration: 4320h
+  tls:
+    # Optional: reference an existing Secret that contains `tls.crt`, `tls.key`, and `ca.crt`.
+    secretName: ""
+
+# Pod scheduling and security defaults for the mutate controller. These are
+# conservative, non-privileged defaults suitable for most clusters and can be
+# overridden per-environment.
+mutateScheduling:
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  tolerations: []
+  affinity: {}
+
+mutateSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

@@ -65,6 +65,8 @@ export function useVlmJudgeBatch(datasetId: string | null, totalEpisodes: number
       setError(null)
       setProgress({ phase, done: 0, total: totalEpisodes })
       try {
+        const labelQueryKey = labelKeys.dataset(datasetId)
+        let labelEtag = queryClient.getQueryData<{ etag: string | null }>(labelQueryKey)?.etag
         for (let index = 0; index < totalEpisodes; index += 1) {
           if (cancelRef.current) break
           const result = await runVlmJudge(datasetId, index, {
@@ -73,8 +75,20 @@ export function useVlmJudgeBatch(datasetId: string | null, totalEpisodes: number
           if (applyLabels) {
             const existing = useLabelStore.getState().episodeLabels[index] ?? []
             const next = applyOutcomeLabel(existing, outcomeToLabel(result))
-            const saved = await setEpisodeLabels(datasetId, index, next)
-            commitEpisodeLabels(saved.episodeIndex, saved.labels)
+            const saved = await setEpisodeLabels(
+              datasetId,
+              index,
+              next,
+              labelEtag ? { etag: labelEtag } : { createOnly: true },
+            )
+            labelEtag = saved.etag ?? labelEtag
+            commitEpisodeLabels(saved.data.episodeIndex, saved.data.labels)
+            if (labelEtag) {
+              const nextEtag = labelEtag
+              queryClient.setQueryData<{ etag: string | null }>(labelQueryKey, (current) =>
+                current ? { ...current, etag: nextEtag } : current,
+              )
+            }
           }
           setProgress({ phase, done: index + 1, total: totalEpisodes })
         }

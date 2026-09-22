@@ -804,6 +804,106 @@ Describe 'Get-DockerImageViolations' -Tag 'Unit' {
     }
 }
 
+Describe 'Get-DockerfileFromViolations' -Tag 'Unit' {
+    Context 'Compliant Dockerfiles' {
+        It 'Returns no violations for a digest-pinned multi-stage Dockerfile with an intermediate alias reference' {
+            $content = @'
+FROM golang:1.21@sha256:1111111111111111111111111111111111111111111111111111111111111111111111111111 AS builder
+FROM builder AS final
+'@
+            $tmp = Join-Path $TestDrive 'compliant.Dockerfile'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerfileFromViolations -FileInfo @{ Path = $tmp; Type = 'dockerfile-base-image'; RelativePath = 'compliant.Dockerfile' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats FROM scratch as compliant' {
+            $content = 'FROM scratch'
+            $tmp = Join-Path $TestDrive 'scratch.Dockerfile'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerfileFromViolations -FileInfo @{ Path = $tmp; Type = 'dockerfile-base-image'; RelativePath = 'scratch.Dockerfile' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats a bare build-arg/variable base as compliant' {
+            $content = 'FROM ${SOME_VAR}'
+            $tmp = Join-Path $TestDrive 'bare-var.Dockerfile'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerfileFromViolations -FileInfo @{ Path = $tmp; Type = 'dockerfile-base-image'; RelativePath = 'bare-var.Dockerfile' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Skips a FROM referencing an earlier stage alias' {
+            $content = @'
+FROM golang:1.21@sha256:1111111111111111111111111111111111111111111111111111111111111111111111111111 AS builder
+FROM builder AS final
+'@
+            $tmp = Join-Path $TestDrive 'alias-ref.Dockerfile'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerfileFromViolations -FileInfo @{ Path = $tmp; Type = 'dockerfile-base-image'; RelativePath = 'alias-ref.Dockerfile' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Treats a tag+digest pinned base as compliant' {
+            $content = 'FROM repo/image:tag@sha256:2222222222222222222222222222222222222222222222222222222222222222222222222222'
+            $tmp = Join-Path $TestDrive 'pinned.Dockerfile'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerfileFromViolations -FileInfo @{ Path = $tmp; Type = 'dockerfile-base-image'; RelativePath = 'pinned.Dockerfile' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Unpinned base images' {
+        It 'Flags an unpinned FROM repo:tag with the correct Type/Name/Version/Line' {
+            $content = "ARG BASE=ignored`nFROM ubuntu:22.04"
+            $tmp = Join-Path $TestDrive 'unpinned.Dockerfile'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerfileFromViolations -FileInfo @{ Path = $tmp; Type = 'dockerfile-base-image'; RelativePath = 'unpinned.Dockerfile' })
+
+            $result.Count | Should -Be 1
+            $result[0].Type | Should -Be 'dockerfile-base-image'
+            $result[0].Name | Should -Be 'ubuntu'
+            $result[0].Version | Should -Be '22.04'
+            $result[0].Line | Should -Be 2
+            $result[0].Severity | Should -Be 'warning'
+        }
+
+        It 'Flags a partially variable base (not a bare variable reference)' {
+            $content = 'FROM python:${PYTHON_VERSION}-slim'
+            $tmp = Join-Path $TestDrive 'partial-var.Dockerfile'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerfileFromViolations -FileInfo @{ Path = $tmp; Type = 'dockerfile-base-image'; RelativePath = 'partial-var.Dockerfile' })
+            $result.Count | Should -Be 1
+            $result[0].Name | Should -Be 'python'
+        }
+    }
+
+    Context 'pinning-ignore directive' {
+        It 'Exempts a same-line marked FROM' {
+            $content = 'FROM ubuntu:22.04  # pinning-ignore'
+            $tmp = Join-Path $TestDrive 'ignore-sameline.Dockerfile'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerfileFromViolations -FileInfo @{ Path = $tmp; Type = 'dockerfile-base-image'; RelativePath = 'ignore-sameline.Dockerfile' })
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'Exempts a FROM preceded by a dedicated pinning-ignore comment line' {
+            $content = "# pinning-ignore: intentional`nFROM ubuntu:22.04"
+            $tmp = Join-Path $TestDrive 'ignore-prevline.Dockerfile'
+            Set-Content -Path $tmp -Value $content
+            $result = @(Get-DockerfileFromViolations -FileInfo @{ Path = $tmp; Type = 'dockerfile-base-image'; RelativePath = 'ignore-prevline.Dockerfile' })
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'File not found' {
+        It 'Returns empty array for non-existent file' {
+            $result = Get-DockerfileFromViolations -FileInfo @{ Path = 'TestDrive:/nope/Dockerfile'; Type = 'dockerfile-base-image'; RelativePath = 'nope/Dockerfile' }
+            $result | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Get-AzureMLEnvironmentViolations' -Tag 'Unit' {
     It 'Flags the ambiguous explicit AzureML environment version latest' {
         $content = '  environment: azureml:lerobot-training-env:latest'
@@ -935,10 +1035,10 @@ Describe 'Get-FilesToScan docker discovery' -Tag 'Unit' {
         }
     }
 
-    It 'Discovers workflow YAML but not .sh under the docker type' {
+    It 'Discovers workflow YAML and .sh under the docker type' {
         $rels = @(Get-FilesToScan -ScanPath $script:DockerScanRoot -Types @('docker') -Recursive).RelativePath -replace '\\', '/'
         $rels | Should -Contain 'training/workflows/osmo/t.yaml'
-        $rels | Should -Not -Contain 'training/workflows/osmo/notes.sh'
+        $rels | Should -Contain 'training/workflows/osmo/notes.sh'
     }
 
     It 'Keeps one scan entry per path and type for overlapping scanners' {

@@ -54,10 +54,10 @@ function seed({ withStores = true }: { withStores?: boolean } = {}) {
 }
 
 const successSummary = {
-  detections_by_frame: [
+  detectionsByFrame: [
     {
       frame: 0,
-      detections: [{ class_id: 0, class_name: 'block', confidence: 0.91, bbox: [0, 0, 10, 10] }],
+      detections: [{ classId: 0, className: 'block', confidence: 0.91, bbox: [0, 0, 10, 10] }],
     },
   ],
 }

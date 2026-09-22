@@ -14,7 +14,8 @@ Describe 'Get-FileHashValue' {
             $result = Get-FileHashValue -Path $tempFile.FullName -Algorithm 'SHA256'
             $result | Should -BeOfType [string]
             $result | Should -Match '^[A-F0-9]{64}$'
-        } finally {
+        }
+        finally {
             Remove-Item -Path $tempFile.FullName -Force -ErrorAction SilentlyContinue
         }
     }
@@ -25,7 +26,8 @@ Describe 'Get-FileHashValue' {
             'test' | Set-Content -Path $tempFile.FullName -NoNewline
             $result = Get-FileHashValue -Path $tempFile.FullName -Algorithm 'SHA384'
             $result | Should -Match '^[A-F0-9]{96}$'
-        } finally {
+        }
+        finally {
             Remove-Item -Path $tempFile.FullName -Force -ErrorAction SilentlyContinue
         }
     }
@@ -36,7 +38,8 @@ Describe 'Get-FileHashValue' {
             'test' | Set-Content -Path $tempFile.FullName -NoNewline
             $result = Get-FileHashValue -Path $tempFile.FullName -Algorithm 'SHA512'
             $result | Should -Match '^[A-F0-9]{128}$'
-        } finally {
+        }
+        finally {
             Remove-Item -Path $tempFile.FullName -Force -ErrorAction SilentlyContinue
         }
     }
@@ -91,7 +94,8 @@ Describe 'Test-ExistingFileValid' {
             $expectedHash = (Get-FileHash -Path $tempFile.FullName -Algorithm SHA256).Hash
             $result = Test-ExistingFileValid -Path $tempFile.FullName -ExpectedHash $expectedHash -Algorithm 'SHA256'
             $result | Should -BeTrue
-        } finally {
+        }
+        finally {
             Remove-Item -Path $tempFile.FullName -Force -ErrorAction SilentlyContinue
         }
     }
@@ -102,7 +106,8 @@ Describe 'Test-ExistingFileValid' {
             'some content' | Set-Content -Path $tempFile.FullName -NoNewline
             $result = Test-ExistingFileValid -Path $tempFile.FullName -ExpectedHash 'INVALID_HASH' -Algorithm 'SHA256'
             $result | Should -BeFalse
-        } finally {
+        }
+        finally {
             Remove-Item -Path $tempFile.FullName -Force -ErrorAction SilentlyContinue
         }
     }
@@ -365,21 +370,30 @@ Describe 'Invoke-VerifiedDownload' {
         }
 
         It 'Cleans up temp file on hash failure' {
+            $script:downloadTempPath = $null
             Mock Invoke-WebRequest {
                 param($OutFile)
+                $script:downloadTempPath = $OutFile
                 Set-Content -Path $OutFile -Value 'bad content' -NoNewline
+                $OutFile | Should -Exist
             }
             Mock Get-FileHashValue { return 'MISMATCHHASH23456789012345678901234567890123456789012345678901' }
-            Mock Remove-Item { Microsoft.PowerShell.Management\Remove-Item -Path $Path -ErrorAction SilentlyContinue } -Verifiable
 
-            { Invoke-VerifiedDownload `
-                    -Url $script:testUrl `
-                    -DestinationDirectory $script:testDestDir `
-                    -ExpectedHash 'EXPECTEDHASH567890123456789012345678901234567890123456789012345'
-            } | Should -Throw
+            try {
+                { Invoke-VerifiedDownload `
+                        -Url $script:testUrl `
+                        -DestinationDirectory $script:testDestDir `
+                        -ExpectedHash 'EXPECTEDHASH567890123456789012345678901234567890123456789012345'
+                } | Should -Throw '*Checksum verification failed*'
 
-            # The finally block should clean up temp files
-            Should -InvokeVerifiable
+                $script:downloadTempPath | Should -Not -BeNullOrEmpty
+                $script:downloadTempPath | Should -Not -Exist
+            }
+            finally {
+                if ($script:downloadTempPath -and (Test-Path -LiteralPath $script:downloadTempPath)) {
+                    Remove-Item -LiteralPath $script:downloadTempPath -Force
+                }
+            }
         }
     }
 
@@ -610,9 +624,9 @@ Describe 'Invoke-VerifiedDownload' {
 
             $proc = Start-Process -FilePath 'pwsh' `
                 -ArgumentList '-NoProfile', '-File', $script:scriptPath, `
-                    '-Url', 'https://invalid.test.example/nonexistent.bin', `
-                    '-ExpectedSHA256', 'abc123', `
-                    '-OutputPath', $outputPath `
+                '-Url', 'https://invalid.test.example/nonexistent.bin', `
+                '-ExpectedSHA256', 'abc123', `
+                '-OutputPath', $outputPath `
                 -Wait -PassThru -NoNewWindow `
                 -RedirectStandardOutput (Join-Path $TestDrive 'stdout.txt') `
                 -RedirectStandardError (Join-Path $TestDrive 'stderr.txt')

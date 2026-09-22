@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+import { apiPath } from '@/lib/api-client'
 import { combineCssFilters } from '@/lib/css-filters'
 import type { DatasetInfo, EpisodeData } from '@/types'
 import type { ColorAdjustment, FrameInsertion, ImageTransform } from '@/types/episode-edit'
@@ -157,7 +158,9 @@ export function useAnnotationWorkspaceMediaSources({
       return null
     }
 
-    return `/api/datasets/${currentDataset.id}/episodes/${currentEpisode.meta.index}/frames/${originalFrameIndex}?camera=${encodeURIComponent(cameraName)}`
+    return apiPath(
+      `/datasets/${currentDataset.id}/episodes/${currentEpisode.meta.index}/frames/${originalFrameIndex}?camera=${encodeURIComponent(cameraName)}`,
+    )
   }, [cameraName, currentDataset, currentEpisode, originalFrameIndex])
 
   useEffect(() => {
@@ -177,8 +180,12 @@ export function useAnnotationWorkspaceMediaSources({
     }
 
     const encodedCamera = encodeURIComponent(cameraName)
-    const beforeUrl = `/api/datasets/${currentDataset.id}/episodes/${currentEpisode.meta.index}/frames/${adjacentFrames.beforeFrame}?camera=${encodedCamera}`
-    const afterUrl = `/api/datasets/${currentDataset.id}/episodes/${currentEpisode.meta.index}/frames/${adjacentFrames.afterFrame}?camera=${encodedCamera}`
+    const beforeUrl = apiPath(
+      `/datasets/${currentDataset.id}/episodes/${currentEpisode.meta.index}/frames/${adjacentFrames.beforeFrame}?camera=${encodedCamera}`,
+    )
+    const afterUrl = apiPath(
+      `/datasets/${currentDataset.id}/episodes/${currentEpisode.meta.index}/frames/${adjacentFrames.afterFrame}?camera=${encodedCamera}`,
+    )
 
     const img1 = new Image()
     const img2 = new Image()

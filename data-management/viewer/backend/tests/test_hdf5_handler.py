@@ -7,6 +7,8 @@ discovery for datasets with recording session subdirectories.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -68,6 +70,25 @@ class TestHandlerDetection:
     def test_get_loader_nonexistent(self, tmp_path):
         h = HDF5FormatHandler()
         assert h.get_loader("fake", tmp_path / "nonexistent") is False
+
+
+class TestAccessibilityDatasetFixture:
+    """Test the deterministic browser accessibility dataset contract."""
+
+    def test_fixture_exposes_two_episodes_and_cameras(self, accessibility_dataset_path: Path) -> None:
+        # Arrange
+        dataset_path = accessibility_dataset_path / "a11y-synthetic"
+        loader = HDF5Loader(dataset_path)
+
+        # Act
+        episodes = loader.list_episodes()
+        first_episode = loader.load_episode(0)
+
+        # Assert
+        assert episodes == [0, 1]
+        assert first_episode is not None
+        assert first_episode.length == 12
+        assert first_episode.metadata["cameras"] == ["front", "wrist"]
 
 
 class TestListEpisodesNoData:
@@ -386,7 +407,6 @@ class TestSubdirectoryEpisodeDiscovery:
 # Mock-based handler branch coverage
 # ---------------------------------------------------------------------------
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 

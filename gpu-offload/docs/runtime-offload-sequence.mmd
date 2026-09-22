@@ -1,0 +1,35 @@
+sequenceDiagram
+    %% cspell:ignore MessagePack
+    box Robot site (outside Kubernetes)
+        participant Robot
+    end
+    box CPU worker - client Pod
+        participant App as Client application
+        participant ClientSDK as Client runtime/remoter/
+    end
+    box Managed control plane
+        participant API as kube-apiserver
+    end
+    box GPU worker - node service
+        participant GPUKubelet as GPU-node kubelet
+    end
+    box GPU worker - server Pod
+        participant ServerSDK as Server runtime/remoter/
+        participant Model as Model inference on GPU
+    end
+
+    ServerSDK->>ServerSDK: Load remote.yaml and start TCP listener
+    ServerSDK->>ServerSDK: Write /ready.txt
+    GPUKubelet->>ServerSDK: Run readiness probe
+    GPUKubelet->>API: Report server pod Ready
+    ClientSDK->>API: List and watch labeled server pods
+    API-->>ClientSDK: Ready server pod IP and REMOTERPORT
+
+    Robot->>App: Sensor observation
+    App->>ClientSDK: Call decorated model function
+    ClientSDK->>ServerSDK: MessagePack request over TCP
+    ServerSDK->>Model: Execute remote function
+    Model-->>ServerSDK: Inference result
+    ServerSDK-->>ClientSDK: MessagePack response
+    ClientSDK-->>App: Return result as a local call
+    App-->>Robot: Actuator command
