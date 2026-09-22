@@ -2,7 +2,7 @@
 title: "T0 — Dev: The Local Training Lifecycle Loop"
 description: Run the full capture, curate, train, validate, and run loop on one laptop and one robot with zero cloud
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-21
+ms.date: 2026-09-22
 ms.topic: tutorial
 ---
 
