@@ -1,0 +1,323 @@
+{{/*
+SPDX-License-Identifier: MIT
+Authoritative MutatingWebhookConfiguration and TLS wiring.
+The chart supports three TLS modes:
+- cert-manager Certificate and CA injection
+- user-supplied TLS Secret
+- Helm-generated self-signed Secret reused through lookup on upgrade
+*/}}
+
+{{- $fullname := include "gpu-offload.fullname" . -}}
+{{- $serviceName := printf "%s-mutate" $fullname -}}
+{{- $namespace := .Release.Namespace -}}
+{{- $tlsSecretName := include "gpu-offload.mutate.tlsSecretName" . -}}
+{{- $serviceDNS := printf "%s.%s.svc" $serviceName $namespace -}}
+{{- $serviceDNSCluster := printf "%s.%s.svc.cluster.local" $serviceName $namespace -}}
+
+{{- if .Values.mutate.certManager.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fullname }}-issuer
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullname }}-mutate-cert
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $tlsSecretName }}
+  dnsNames:
+    - {{ $serviceName }}
+    - {{ $serviceDNS }}
+    - {{ $serviceDNSCluster }}
+  issuerRef:
+    name: {{ $fullname }}-issuer
+  duration: {{ .Values.mutate.certManager.duration }}
+  privateKey:
+    rotationPolicy: Always
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ $namespace }}/{{ $fullname }}-mutate-cert
+webhooks:
+  - name: mutate.gpu-offload.io
+    clientConfig:
+      service:
+        name: {{ $serviceName }}
+        namespace: {{ $namespace }}
+        path: /mutate
+        port: {{ .Values.mutate.webhookPort }}
+    objectSelector:
+      matchExpressions:
+        - key: xavier
+          operator: In
+          values:
+            - "true"
+            - "True"
+            - "TRUE"
+            - "1"
+    sideEffects: None
+    admissionReviewVersions:
+      - v1
+    failurePolicy: Fail
+    rules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - pods
+        scope: Namespaced
+      - apiGroups:
+          - apps
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - deployments
+          - statefulsets
+        scope: Namespaced
+      - apiGroups:
+          - batch
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - jobs
+        scope: Namespaced
+{{- else if ne .Values.mutate.tls.secretName "" }}
+{{- $suppliedSecret := lookup "v1" "Secret" $namespace .Values.mutate.tls.secretName -}}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+webhooks:
+  - name: mutate.gpu-offload.io
+    clientConfig:
+      service:
+        name: {{ $serviceName }}
+        namespace: {{ $namespace }}
+        path: /mutate
+        port: {{ .Values.mutate.webhookPort }}
+      {{- if $suppliedSecret }}
+      caBundle: {{ default (index $suppliedSecret.data "ca.crt") (index $suppliedSecret.data "tls.crt") | quote }}
+      {{- end }}
+    objectSelector:
+      matchExpressions:
+        - key: xavier
+          operator: In
+          values:
+            - "true"
+            - "True"
+            - "TRUE"
+            - "1"
+    sideEffects: None
+    admissionReviewVersions:
+      - v1
+    failurePolicy: Fail
+    rules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - pods
+        scope: Namespaced
+      - apiGroups:
+          - apps
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - deployments
+          - statefulsets
+        scope: Namespaced
+      - apiGroups:
+          - batch
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - jobs
+        scope: Namespaced
+{{- else }}
+{{- $existingSecret := lookup "v1" "Secret" $namespace $tlsSecretName -}}
+{{- if $existingSecret }}
+{{- $tlsCrt := index $existingSecret.data "tls.crt" -}}
+{{- $tlsKey := index $existingSecret.data "tls.key" -}}
+{{- $caCert := default (index $existingSecret.data "ca.crt") (index $existingSecret.data "tls.crt") -}}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $tlsSecretName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $tlsCrt | quote }}
+  tls.key: {{ $tlsKey | quote }}
+  ca.crt: {{ $caCert | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+webhooks:
+  - name: mutate.gpu-offload.io
+    clientConfig:
+      service:
+        name: {{ $serviceName }}
+        namespace: {{ $namespace }}
+        path: /mutate
+        port: {{ .Values.mutate.webhookPort }}
+      caBundle: {{ $caCert | quote }}
+    objectSelector:
+      matchExpressions:
+        - key: xavier
+          operator: In
+          values:
+            - "true"
+            - "True"
+            - "TRUE"
+            - "1"
+    sideEffects: None
+    admissionReviewVersions:
+      - v1
+    failurePolicy: Fail
+    rules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - pods
+        scope: Namespaced
+      - apiGroups:
+          - apps
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - deployments
+          - statefulsets
+        scope: Namespaced
+      - apiGroups:
+          - batch
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - jobs
+        scope: Namespaced
+{{- else }}
+{{- $ca := genCA (printf "%s-mutate-ca" $fullname) 3650 -}}
+{{- $cert := genSignedCert $serviceDNS nil (list $serviceDNS $serviceDNSCluster) 3650 $ca -}}
+{{- $tlsCrt := $cert.Cert | b64enc -}}
+{{- $tlsKey := $cert.Key | b64enc -}}
+{{- $caCert := $ca.Cert | b64enc -}}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $tlsSecretName }}
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $tlsCrt | quote }}
+  tls.key: {{ $tlsKey | quote }}
+  ca.crt: {{ $caCert | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ $serviceName }}
+  labels:
+    {{- include "gpu-offload.labels" . | nindent 4 }}
+webhooks:
+  - name: mutate.gpu-offload.io
+    clientConfig:
+      service:
+        name: {{ $serviceName }}
+        namespace: {{ $namespace }}
+        path: /mutate
+        port: {{ .Values.mutate.webhookPort }}
+      caBundle: {{ $caCert | quote }}
+    objectSelector:
+      matchExpressions:
+        - key: xavier
+          operator: In
+          values:
+            - "true"
+            - "True"
+            - "TRUE"
+            - "1"
+    sideEffects: None
+    admissionReviewVersions:
+      - v1
+    failurePolicy: Fail
+    rules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - pods
+        scope: Namespaced
+      - apiGroups:
+          - apps
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - deployments
+          - statefulsets
+        scope: Namespaced
+      - apiGroups:
+          - batch
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - jobs
+        scope: Namespaced
+{{- end }}
+{{- end }}

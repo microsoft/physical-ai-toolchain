@@ -499,3 +499,91 @@ updates:
   commit-message:
     prefix: chore
     include: scope
+- package-ecosystem: docker
+  directory: /gpu-offload/controller
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    gpu-offload-controller-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - docker
+  - gpu-offload
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /gpu-offload/examples/first-run
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    gpu-offload-examples-first-run-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - docker
+  - gpu-offload
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /gpu-offload/examples/ur10e-single
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    gpu-offload-examples-ur10e-single-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - docker
+  - gpu-offload
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /gpu-offload/examples/so101-real-hardware/docker
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    gpu-offload-examples-so101-real-hardware-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - docker
+  - gpu-offload
+  commit-message:
+    prefix: chore
+    include: scope

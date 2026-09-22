@@ -1,10 +1,10 @@
 ---
+title: "AML → OSMO Proxy"
+description: Run OSMO workflows from Azure Machine Learning with submission, monitoring, and metric logging
 author: Edge AI Team
 ms.date: 2026-07-16
 ms.topic: reference
 ---
-
-# AML → OSMO Proxy
 
 Run any OSMO workflow from Azure Machine Learning — submit, monitor, and log metrics without modifying the workflow YAML.
 
@@ -44,10 +44,10 @@ az ml job create \
 
 ## Auth Modes
 
-| Mode | Header | When to use | Configuration |
-|------|--------|-------------|---------------|
-| `dev` (default) | `x-osmo-user: admin` | Development clusters with `--method dev` OSMO login | Set `OSMO_AUTH_MODE=dev`, `OSMO_USERNAME=admin` (defaults) |
-| `token` | `Authorization: Bearer <token>` | Production / shared environments | Set `OSMO_AUTH_MODE=token`, `OSMO_TOKEN` from Key Vault secret `osmo-proxy-token` |
+| Mode            | Header                          | When to use                                         | Configuration                                                                     |
+|-----------------|---------------------------------|-----------------------------------------------------|-----------------------------------------------------------------------------------|
+| `dev` (default) | `x-osmo-user: admin`            | Development clusters with `--method dev` OSMO login | Set `OSMO_AUTH_MODE=dev`, `OSMO_USERNAME=admin` (defaults)                        |
+| `token`         | `Authorization: Bearer <token>` | Production / shared environments                    | Set `OSMO_AUTH_MODE=token`, `OSMO_TOKEN` from Key Vault secret `osmo-proxy-token` |
 
 > [!WARNING]
 > The OSMO admin token is stored under key `password` (not `token`) in the `osmo-default-admin` Kubernetes secret in the `osmo-control-plane` namespace. Extract it with: `kubectl get secret osmo-default-admin -n osmo-control-plane -o jsonpath='{.data.password}' | base64 -d`
@@ -69,23 +69,23 @@ Set `WORKFLOW_YAML` to the path of the OSMO workflow YAML relative to the repo r
 
 Collected on every proxy run from the OSMO API response. No configuration required.
 
-| MLflow key | Type | Description |
-|---|---|---|
-| `osmo.workflow_id` | tag | OSMO workflow UUID |
-| `osmo.status` | tag | Terminal status (`COMPLETED`, `FAILED_*`) |
-| `osmo.pool` | tag | OSMO pool name |
-| `osmo.first_error` | tag | Error message from first failed task |
-| `osmo.task_count` | metric | Total tasks across all groups |
-| `osmo.task_completed` | metric | Tasks with status `COMPLETED` |
-| `osmo.failed_tasks` | metric | Tasks with any `FAILED*` status |
-| `osmo.task_success_rate` | metric | `completed / total` |
-| `osmo.duration_seconds` | metric | Workflow wall-clock time |
-| `osmo.task_duration_mean_s` | metric | Mean per-task elapsed time |
-| `osmo.task_duration_max_s` | metric | Max per-task elapsed time |
-| `osmo.task_duration_p95_s` | metric | P95 per-task elapsed time |
-| `osmo.group.<name>.task_count` | metric | Per-group task count |
-| `osmo.group.<name>.completed` | metric | Per-group completed count |
-| `osmo.group.<name>.failed` | metric | Per-group failed count |
+| MLflow key                     | Type   | Description                               |
+|--------------------------------|--------|-------------------------------------------|
+| `osmo.workflow_id`             | tag    | OSMO workflow UUID                        |
+| `osmo.status`                  | tag    | Terminal status (`COMPLETED`, `FAILED_*`) |
+| `osmo.pool`                    | tag    | OSMO pool name                            |
+| `osmo.first_error`             | tag    | Error message from first failed task      |
+| `osmo.task_count`              | metric | Total tasks across all groups             |
+| `osmo.task_completed`          | metric | Tasks with status `COMPLETED`             |
+| `osmo.failed_tasks`            | metric | Tasks with any `FAILED*` status           |
+| `osmo.task_success_rate`       | metric | `completed / total`                       |
+| `osmo.duration_seconds`        | metric | Workflow wall-clock time                  |
+| `osmo.task_duration_mean_s`    | metric | Mean per-task elapsed time                |
+| `osmo.task_duration_max_s`     | metric | Max per-task elapsed time                 |
+| `osmo.task_duration_p95_s`     | metric | P95 per-task elapsed time                 |
+| `osmo.group.<name>.task_count` | metric | Per-group task count                      |
+| `osmo.group.<name>.completed`  | metric | Per-group completed count                 |
+| `osmo.group.<name>.failed`     | metric | Per-group failed count                    |
 
 ### Tier 2 — Spec-Driven Blob Metrics (Optional)
 
@@ -99,21 +99,21 @@ Set `OSMO_METRICS_SPEC` to the path of a spec file at submission time. See `work
 
 ## Environment Variables
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `WORKFLOW_YAML` | Yes | `workflows/osmo/smoke-test-proxy-e2e.yaml` | Path to OSMO workflow YAML (relative to repo root) |
-| `OSMO_GATEWAY_URL` | No | `http://osmo-gateway.osmo-control-plane.svc.cluster.local` | OSMO in-cluster gateway URL |
-| `OSMO_POOL` | No | `default` | OSMO pool name |
-| `OSMO_AUTH_MODE` | No | `dev` | Auth mode: `dev` or `token` |
-| `OSMO_USERNAME` | No | `admin` | Username for dev auth mode |
-| `OSMO_TOKEN` | Conditional | — | Bearer token for token auth mode |
-| `POLL_INTERVAL_SECS` | No | `30` | Seconds between status polls |
-| `OSMO_SET_VARIABLES` | No | — | JSON array `[{"name": "k", "value": "v"}]` for workflow template substitution |
-| `OSMO_METRICS_SPEC` | No | — | Path to Tier 2 metrics spec YAML file |
-| `AZURE_CLIENT_ID` | No | — | MSI client ID for blob auth (Tier 2 metrics, data asset registration) |
-| `AML_SUBSCRIPTION_ID` | No | — | Azure subscription for data asset registration |
-| `AML_RESOURCE_GROUP` | No | — | Resource group for data asset registration |
-| `AML_WORKSPACE_NAME` | No | — | AML workspace for data asset registration |
+| Variable              | Required    | Default                                                    | Description                                                                   |
+|-----------------------|-------------|------------------------------------------------------------|-------------------------------------------------------------------------------|
+| `WORKFLOW_YAML`       | Yes         | `workflows/osmo/smoke-test-proxy-e2e.yaml`                 | Path to OSMO workflow YAML (relative to repo root)                            |
+| `OSMO_GATEWAY_URL`    | No          | `http://osmo-gateway.osmo-control-plane.svc.cluster.local` | OSMO in-cluster gateway URL                                                   |
+| `OSMO_POOL`           | No          | `default`                                                  | OSMO pool name                                                                |
+| `OSMO_AUTH_MODE`      | No          | `dev`                                                      | Auth mode: `dev` or `token`                                                   |
+| `OSMO_USERNAME`       | No          | `admin`                                                    | Username for dev auth mode                                                    |
+| `OSMO_TOKEN`          | Conditional | —                                                          | Bearer token for token auth mode                                              |
+| `POLL_INTERVAL_SECS`  | No          | `30`                                                       | Seconds between status polls                                                  |
+| `OSMO_SET_VARIABLES`  | No          | —                                                          | JSON array `[{"name": "k", "value": "v"}]` for workflow template substitution |
+| `OSMO_METRICS_SPEC`   | No          | —                                                          | Path to Tier 2 metrics spec YAML file                                         |
+| `AZURE_CLIENT_ID`     | No          | —                                                          | MSI client ID for blob auth (Tier 2 metrics, data asset registration)         |
+| `AML_SUBSCRIPTION_ID` | No          | —                                                          | Azure subscription for data asset registration                                |
+| `AML_RESOURCE_GROUP`  | No          | —                                                          | Resource group for data asset registration                                    |
+| `AML_WORKSPACE_NAME`  | No          | —                                                          | AML workspace for data asset registration                                     |
 
 > [!WARNING]
 > `azureml-mlflow` is required alongside `mlflow-skinny` to register the `azureml://` tracking store plugin. The proxy installs the frozen dependency set from `workflows/azureml/osmo-proxy/uv.lock`.
