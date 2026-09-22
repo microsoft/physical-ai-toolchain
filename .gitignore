@@ -485,7 +485,6 @@ dependency-pinning-artifacts/*
 .beads/
 external/
 AGENTS.md
-.gitattributes
 
 # Terraform Environments
 envs/
