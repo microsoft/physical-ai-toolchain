@@ -84,6 +84,27 @@ default. Only offload-protocol variables the controller itself injects (e.g.
 `valueFrom` references such as `secretKeyRef` -- is left behind so a client's
 credentials aren't exposed to a separately specified server image or node.
 
+## Controller Health
+
+The controller exposes separate process-liveness and reconciliation-readiness
+endpoints:
+
+| Endpoint   | Success condition                                                        |
+|------------|--------------------------------------------------------------------------|
+| `/healthz` | The admission HTTP server is running                                     |
+| `/readyz`  | Initial cluster reconciliation completed and all watch workers are alive |
+
+Initial reconciliation retries with bounded exponential backoff when a
+cluster-wide list operation fails. Pod, Deployment, Job, and StatefulSet watch
+workers start only after the initial synchronization succeeds. Watch failures
+also retry with bounded backoff.
+
+`/readyz` returns HTTP 503 while initial synchronization is pending, a required
+watch worker is stopped or reconnecting after an API failure, or reconciliation
+is stopping. The Helm readiness probe uses this endpoint so Kubernetes does not
+route admission traffic to a controller that cannot create the corresponding
+server resources.
+
 ## Configuration Fields
 
 The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:

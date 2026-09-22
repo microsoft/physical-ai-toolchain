@@ -399,6 +399,11 @@ def test_http_server_exposes_health_and_mutate_routes():
         assert response.status == 200
         assert json.loads(response.read()) == {"status": "ok"}
 
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+
         review = {
             "apiVersion": "admission.k8s.io/v1",
             "kind": "AdmissionReview",
@@ -415,6 +420,175 @@ def test_http_server_exposes_health_and_mutate_routes():
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_http_readyz_reflects_reconciliation_status():
+    mod = _load_mutate_module()
+    readiness = {"ready": False}
+    controller = mod.XavierAdmissionController(
+        readiness_check=lambda: (readiness["ready"], "workers unavailable"),
+    )
+    server = mod.AdmissionHTTPServer(("127.0.0.1", 0), controller, ssl_context=None)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/healthz")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 503
+        assert json.loads(response.read()) == {"status": "not ready", "reason": "workers unavailable"}
+
+        readiness["ready"] = True
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_controller_readiness_fails_closed_when_check_raises():
+    mod = _load_mutate_module()
+    controller = mod.XavierAdmissionController(
+        readiness_check=lambda: (_ for _ in ()).throw(RuntimeError("broken")),
+    )
+
+    assert controller.readiness_status() == (False, "readiness check failed")
+
+
+def _reconcile_controller(list_pods):
+    def empty_list():
+        return types.SimpleNamespace(items=[])
+
+    return types.SimpleNamespace(
+        core_api=types.SimpleNamespace(list_pod_for_all_namespaces=list_pods),
+        apps_api=types.SimpleNamespace(
+            list_deployment_for_all_namespaces=empty_list,
+            list_stateful_set_for_all_namespaces=empty_list,
+        ),
+        batch_api=types.SimpleNamespace(list_job_for_all_namespaces=empty_list),
+        reconcile_object=lambda _obj: None,
+    )
+
+
+def test_reconcile_runtime_retries_initial_sync_before_starting_workers(monkeypatch):
+    mod = _load_mutate_module()
+    attempts = 0
+
+    def list_pods():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise client.exceptions.ApiException(status=503)
+        return types.SimpleNamespace(items=[])
+
+    runtime = mod.ReconcileRuntime(
+        _reconcile_controller(list_pods),
+        initial_sync_retry_delays=(0.0,),
+    )
+    monkeypatch.setattr(runtime, "_watch_kind", lambda _kind, _list_fn: runtime.stop_event.wait())
+
+    runtime.start()
+    try:
+        assert attempts == 2
+        assert runtime.initial_sync_complete.is_set()
+        assert runtime.readiness_status() == (True, "ready")
+        assert set(runtime.threads) == {"Pod", "Deployment", "Job", "StatefulSet"}
+    finally:
+        runtime.stop()
+        for thread in runtime.threads.values():
+            thread.join(timeout=5)
+
+
+def test_reconcile_runtime_remains_unready_during_initial_sync_failures():
+    mod = _load_mutate_module()
+    retried = threading.Event()
+    attempts = 0
+
+    def list_pods():
+        nonlocal attempts
+        attempts += 1
+        if attempts >= 2:
+            retried.set()
+        raise client.exceptions.ApiException(status=503)
+
+    runtime = mod.ReconcileRuntime(
+        _reconcile_controller(list_pods),
+        initial_sync_retry_delays=(0.01,),
+    )
+    thread = threading.Thread(target=runtime.start, daemon=True)
+    thread.start()
+    try:
+        assert retried.wait(timeout=2)
+        assert runtime.readiness_status() == (False, "initial reconciliation is pending")
+        assert runtime.threads == {}
+    finally:
+        runtime.stop()
+        thread.join(timeout=5)
+
+
+def test_reconcile_runtime_readiness_detects_dead_worker():
+    mod = _load_mutate_module()
+
+    class Worker:
+        def __init__(self, alive):
+            self.alive = alive
+
+        def is_alive(self):
+            return self.alive
+
+    runtime = mod.ReconcileRuntime(_reconcile_controller(lambda: types.SimpleNamespace(items=[])))
+    runtime.initial_sync_complete.set()
+    runtime.threads = {
+        "Pod": Worker(True),
+        "Deployment": Worker(False),
+        "Job": Worker(True),
+        "StatefulSet": Worker(True),
+    }
+    runtime.worker_available = {kind: True for kind in runtime.threads}
+
+    assert runtime.readiness_status() == (
+        False,
+        "reconciliation workers unavailable: Deployment",
+    )
+
+
+def test_reconcile_runtime_backs_off_after_watch_failure(monkeypatch):
+    mod = _load_mutate_module()
+    waits = []
+
+    class FailingWatch:
+        def stream(self, _list_fn, timeout_seconds):
+            assert timeout_seconds == 30
+            raise RuntimeError("watch failed")
+
+    class StopAfterWait:
+        def is_set(self):
+            return False
+
+        def wait(self, delay):
+            waits.append(delay)
+            return True
+
+    runtime = mod.ReconcileRuntime(
+        _reconcile_controller(lambda: types.SimpleNamespace(items=[])),
+        watch_retry_delays=(0.25, 0.5),
+    )
+    runtime.stop_event = StopAfterWait()
+    runtime.worker_available["Pod"] = True
+    monkeypatch.setattr(mod.watch, "Watch", FailingWatch)
+
+    runtime._watch_kind("Pod", lambda: None)
+
+    assert waits == [0.25]
+    assert runtime.worker_available["Pod"] is False
 
 
 def test_validate_xavier_config_rejects_privileged_root_settings():

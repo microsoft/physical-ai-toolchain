@@ -43,6 +43,8 @@ DEFAULT_TLS_CERT_PATH = "/tls/tls.crt"
 DEFAULT_TLS_KEY_PATH = "/tls/tls.key"
 DEFAULT_PORT = 8443
 ALLOWED_SERVER_HOST_PATHS_ENV = "ALLOWED_SERVER_HOST_PATHS"
+INITIAL_SYNC_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
+WATCH_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 
 READINESS_PROBE = {
     "exec": {"command": ["cat", "/ready.txt"]},
@@ -1383,11 +1385,22 @@ class XavierAdmissionController:
         apps_api: client.AppsV1Api | None = None,
         batch_api: client.BatchV1Api | None = None,
         networking_api: client.NetworkingV1Api | None = None,
+        readiness_check: Callable[[], tuple[bool, str]] | None = None,
     ) -> None:
         self.core_api = core_api
         self.apps_api = apps_api
         self.batch_api = batch_api
         self.networking_api = networking_api
+        self.readiness_check = readiness_check
+
+    def readiness_status(self) -> tuple[bool, str]:
+        if self.readiness_check is None:
+            return True, "ready"
+        try:
+            return self.readiness_check()
+        except Exception:
+            logger.exception("Readiness check failed")
+            return False, "readiness check failed"
 
     def handle_admission_review(self, review: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         if review.get("apiVersion") != "admission.k8s.io/v1" or review.get("kind") != "AdmissionReview":
@@ -1470,10 +1483,18 @@ class AdmissionHTTPRequestHandler(BaseHTTPRequestHandler):
     server_version = "gpu-offload-controller/1.0"
 
     def do_GET(self) -> None:
-        if urlsplit(self.path).path not in {"/healthz", "/readyz"}:
+        path = urlsplit(self.path).path
+        if path == "/healthz":
+            self._send_json(HTTPStatus.OK, {"status": "ok"})
+            return
+        if path != "/readyz":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
-        self._send_json(HTTPStatus.OK, {"status": "ok"})
+        ready, reason = self.server.controller.readiness_status()
+        if ready:
+            self._send_json(HTTPStatus.OK, {"status": "ok"})
+            return
+        self._send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"status": "not ready", "reason": reason})
 
     def do_POST(self) -> None:
         if urlsplit(self.path).path != "/mutate":
@@ -1540,25 +1561,85 @@ def load_kubernetes_clients(
 
 
 class ReconcileRuntime:
-    def __init__(self, controller: XavierAdmissionController) -> None:
+    _WORKER_KINDS = ("Pod", "Deployment", "Job", "StatefulSet")
+
+    def __init__(
+        self,
+        controller: XavierAdmissionController,
+        *,
+        initial_sync_retry_delays: tuple[float, ...] = INITIAL_SYNC_RETRY_DELAYS,
+        watch_retry_delays: tuple[float, ...] = WATCH_RETRY_DELAYS,
+    ) -> None:
         self.controller = controller
         self.stop_event = threading.Event()
-        self.threads: list[threading.Thread] = []
+        self.threads: dict[str, threading.Thread] = {}
+        self.initial_sync_complete = threading.Event()
+        self.initial_sync_retry_delays = initial_sync_retry_delays
+        self.watch_retry_delays = watch_retry_delays
+        self.state_lock = threading.Lock()
+        self.initial_sync_error: str | None = None
+        self.worker_available: dict[str, bool] = {}
 
     def start(self) -> None:
-        self.reconcile_existing_objects()
+        attempt = 0
+        while not self.stop_event.is_set():
+            try:
+                self.reconcile_existing_objects()
+            except Exception as exc:
+                with self.state_lock:
+                    self.initial_sync_error = type(exc).__name__
+                delay = self._retry_delay(self.initial_sync_retry_delays, attempt)
+                attempt += 1
+                logger.exception("Initial reconciliation failed; retrying in %.1f seconds", delay)
+                if self.stop_event.wait(delay):
+                    return
+                continue
+            with self.state_lock:
+                self.initial_sync_error = None
+            self.initial_sync_complete.set()
+            break
+
+        if self.stop_event.is_set():
+            return
         for kind, list_fn in (
             ("Pod", self.controller.core_api.list_pod_for_all_namespaces),
             ("Deployment", self.controller.apps_api.list_deployment_for_all_namespaces),
             ("Job", self.controller.batch_api.list_job_for_all_namespaces),
             ("StatefulSet", self.controller.apps_api.list_stateful_set_for_all_namespaces),
         ):
-            thread = threading.Thread(target=self._watch_kind, args=(kind, list_fn), daemon=True)
+            thread = threading.Thread(
+                target=self._watch_kind,
+                args=(kind, list_fn),
+                name=f"reconcile-watch-{kind.lower()}",
+                daemon=True,
+            )
+            with self.state_lock:
+                self.threads[kind] = thread
+                self.worker_available[kind] = True
             thread.start()
-            self.threads.append(thread)
 
     def stop(self) -> None:
         self.stop_event.set()
+
+    def readiness_status(self) -> tuple[bool, str]:
+        if self.stop_event.is_set():
+            return False, "reconciliation is stopping"
+        if not self.initial_sync_complete.is_set():
+            return False, "initial reconciliation is pending"
+        with self.state_lock:
+            missing = [kind for kind in self._WORKER_KINDS if kind not in self.threads]
+            stopped = [kind for kind, thread in self.threads.items() if not thread.is_alive()]
+            disconnected = [kind for kind, available in self.worker_available.items() if not available]
+        unavailable = sorted(set(missing + stopped + disconnected))
+        if unavailable:
+            return False, f"reconciliation workers unavailable: {', '.join(unavailable)}"
+        return True, "ready"
+
+    @staticmethod
+    def _retry_delay(delays: tuple[float, ...], attempt: int) -> float:
+        if not delays:
+            return 0.0
+        return delays[min(attempt, len(delays) - 1)]
 
     def reconcile_existing_objects(self) -> None:
         for list_fn in (
@@ -1572,6 +1653,7 @@ class ReconcileRuntime:
                 self._reconcile_obj(obj)
 
     def _watch_kind(self, kind: str, list_fn: Callable[..., Any]) -> None:
+        attempt = 0
         while not self.stop_event.is_set():
             watcher = watch.Watch()
             try:
@@ -1588,9 +1670,20 @@ class ReconcileRuntime:
                     obj_dict = kubernetes_object_to_dict(obj)
                     if obj_dict.get("metadata", {}).get("deletionTimestamp") is not None:
                         continue
+                    with self.state_lock:
+                        self.worker_available[kind] = True
                     self._reconcile_obj(obj_dict)
+                with self.state_lock:
+                    self.worker_available[kind] = True
+                attempt = 0
             except Exception:  # pragma: no cover - defensive path around watch loops
-                logger.exception("Watch for %s failed; restarting", kind)
+                with self.state_lock:
+                    self.worker_available[kind] = False
+                delay = self._retry_delay(self.watch_retry_delays, attempt)
+                attempt += 1
+                logger.exception("Watch for %s failed; restarting in %.1f seconds", kind, delay)
+                if self.stop_event.wait(delay):
+                    return
 
     def _reconcile_obj(self, obj: dict[str, Any]) -> None:
         try:
@@ -1638,6 +1731,7 @@ def main() -> None:
     )
     if not args.disable_reconcile:
         runtime = ReconcileRuntime(controller)
+        controller.readiness_check = runtime.readiness_status
         # Run the initial cluster-wide sync and watch loops in the background so the
         # webhook server below can start accepting requests immediately instead of
         # only after the sync completes -- otherwise Kubernetes can route admission
