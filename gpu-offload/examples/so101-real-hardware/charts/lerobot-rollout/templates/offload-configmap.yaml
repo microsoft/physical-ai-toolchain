@@ -28,7 +28,12 @@ data:
       {{- if or .Values.offload.rawObservation.enabled .Values.benchmark.enabled }}
       - {{ .Values.offload.rawObservation.remoteClass | quote }}:
           remoteloc: {{ .Values.offload.stageName | quote }}
-          remoteableserver: true
+          servercallablemethods:
+            - __init__
+            - start
+            - reset
+            - get_action
+            - stop
           noremotefuncs:
             - notify_observation
       {{- end }}

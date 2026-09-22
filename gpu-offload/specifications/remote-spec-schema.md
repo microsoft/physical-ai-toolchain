@@ -96,12 +96,13 @@ referenced by `remoteclasses`, `remotefuncs`, and `stubs` are added automaticall
 Use `allowedmodules` for modules that RPC reconstruction requires but the remote
 symbol configuration does not reference directly.
 
-The runtime builds an exact callable policy after applying remoteability,
-`noremotefuncs`, and stub mappings. It freezes the policy before opening the
-RPC listener. Each request must provide matching `key`, module, class, and
-function fields, and the resulting canonical identity must be in the frozen
-policy. Rejection occurs before argument rehydration, module import, attribute
-lookup, or class construction.
+The runtime builds an exact callable policy after expanding
+`servercallablemethods`, applying `serverdeniedmethods` and `noremotefuncs`,
+and resolving stub mappings. It freezes the policy before opening the RPC
+listener. Each request must provide matching `key`, module, class, and function
+fields, and the resulting canonical identity must be in the frozen policy.
+Rejection occurs before argument rehydration, module import, attribute lookup,
+or class construction.
 
 Standalone deployments build the same policy from the local `remote.yaml`.
 They do not require Kubernetes or the controller. Configure all remote
@@ -146,10 +147,22 @@ Each entry is a single-key map: the key is a fully-qualified class path, value
 selects the target stage. Method calls on instances execute transparently in the
 stage pod.
 
-| Field       | Type   | Required | Meaning                                    |
-|-------------|--------|----------|--------------------------------------------|
-| _(map key)_ | string | Yes      | Class path in `module.path/ClassName` form |
-| `remoteloc` | string | Yes      | Target `serverstages` entry `name`         |
+| Field                   | Type            | Required | Meaning                                                        |
+|-------------------------|-----------------|----------|----------------------------------------------------------------|
+| _(map key)_             | string          | Yes      | Class path in `module.path/ClassName` form                     |
+| `remoteloc`             | string          | Yes      | Target `serverstages` entry `name`                             |
+| `servercallablemethods` | list of strings | No       | Exact names or glob patterns accepted as inbound server calls  |
+| `serverdeniedmethods`   | list of strings | No       | Exact names or glob patterns removed from the server allowlist |
+| `noremotefuncs`         | list of strings | No       | Method names that remain local in the calling process          |
+
+Method patterns use case-sensitive, full-name shell matching. The runtime
+expands patterns against concrete and inherited methods during startup, logs
+wildcard expansions, and stores only exact canonical callable keys. A pattern
+that matches no methods fails startup. Denials take precedence over allows.
+
+Use exact names for production configurations. Wildcards also authorize methods
+introduced by future dependency versions when those names match the configured
+pattern.
 
 **Example:**
 
@@ -157,7 +170,18 @@ stage pod.
 remoteclasses:
   - "mypackage.policy/Policy":
       remoteloc: gpu
+      servercallablemethods:
+        - __init__
+        - start
+        - get_*
+        - stop
+      serverdeniedmethods:
+        - get_debug_*
 ```
+
+`servercallablemethods: ["*"]` accepts every discovered method, including
+inherited and private methods. Use this only when the complete class API is an
+intentional RPC surface.
 
 ## remotefuncs
 

@@ -96,20 +96,20 @@ def _write_config(config_path: Path, first_server_port: int, second_server_port:
             {
                 "tests.remoter_test_fixture/Accumulator": {
                     "remoteloc": second_server,
-                    "remoteableserver": True,
+                    "servercallablemethods": ["__init__", "add", "get_*"],
                 }
             },
             {
                 "tests.remoter_test_fixture/SingletonAccumulator": {
                     "remoteloc": second_server,
-                    "remoteableserver": True,
+                    "servercallablemethods": ["__init__", "add", "get_*"],
                     "singleinstance": True,
                 }
             },
             {
                 "tests.remoter_test_fixture/StubAccumulator": {
                     "remoteloc": second_server,
-                    "remoteableserver": True,
+                    "servercallablemethods": ["__init__", "add", "describe", "get_*"],
                 }
             },
         ],

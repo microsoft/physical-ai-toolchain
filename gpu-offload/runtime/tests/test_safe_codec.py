@@ -361,7 +361,7 @@ def test_allowall_runtime_mode_is_rejected() -> None:
         remoter.Remoter({}, "127.0.0.1", 0, None, None, 0, True, None)
 
 
-def test_class_policy_excludes_nonremoteable_and_blocked_methods(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_server_callable_patterns_expand_to_exact_unwrapped_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     class Policy:
         def __init__(self) -> None:
             pass
@@ -380,6 +380,9 @@ def test_class_policy_excludes_nonremoteable_and_blocked_methods(monkeypatch: py
         getattr(Policy, method_name).__qualname__ = f"Policy.{method_name}"
 
     module_name = Policy.__module__
+    class_key = f"{module_name}/Policy"
+    original_init = Policy.__init__
+    original_allowed = Policy.allowed
     monkeypatch.setattr(
         remoter,
         "allowed_functions",
@@ -390,24 +393,60 @@ def test_class_policy_excludes_nonremoteable_and_blocked_methods(monkeypatch: py
     )
     monkeypatch.setattr(remoter, "callable_policy_frozen", False)
     monkeypatch.setattr(
-        rmtclass,
-        "isremoteable",
-        lambda _isserver, key, _classkey: key.endswith("/allowed") or key.endswith("/blocked"),
+        remoter,
+        "remoterclassparams",
+        {
+            class_key: {
+                "servercallablemethods": ["__init__", "allow*", "blocked"],
+                "serverdeniedmethods": ["block*"],
+            }
+        },
     )
-
-    def getparam(name: str, _key: str, _classkey: str, default: object) -> object:
-        if name == "noremotefuncs":
-            return ["blocked"]
-        return default
-
-    monkeypatch.setattr(remoter, "getparam", getparam)
 
     rmtclass.allowallfunctions(Policy, isserver=True)
 
+    assert f"{module_name}/Policy/__init__" in remoter.allowed_functions
     assert f"{module_name}/Policy/allowed" in remoter.allowed_functions
     assert f"{module_name}/Policy/blocked" not in remoter.allowed_functions
     assert f"{module_name}/Policy/local_only" not in remoter.allowed_functions
-    assert f"{module_name}/Policy/__init__" not in remoter.allowed_functions
+    assert Policy.__init__ is original_init
+    assert Policy.allowed is original_allowed
+
+
+def test_server_callable_pattern_must_match_a_method(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Policy:
+        def __init__(self) -> None:
+            pass
+
+    Policy.__qualname__ = "Policy"
+    Policy.__init__.__qualname__ = "Policy.__init__"
+    class_key = f"{Policy.__module__}/Policy"
+    monkeypatch.setattr(remoter, "allowed_functions", set())
+    monkeypatch.setattr(remoter, "callable_policy_frozen", False)
+    monkeypatch.setattr(
+        remoter,
+        "remoterclassparams",
+        {class_key: {"servercallablemethods": ["missing_*"]}},
+    )
+
+    with pytest.raises(ValueError, match="matches no methods"):
+        rmtclass.allowallfunctions(Policy, isserver=True)
+
+
+def test_legacy_server_remoteability_field_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Policy:
+        def __init__(self) -> None:
+            pass
+
+    Policy.__qualname__ = "Policy"
+    Policy.__init__.__qualname__ = "Policy.__init__"
+    class_key = f"{Policy.__module__}/Policy"
+    monkeypatch.setattr(remoter, "allowed_functions", set())
+    monkeypatch.setattr(remoter, "callable_policy_frozen", False)
+    monkeypatch.setattr(remoter, "remoterclassparams", {class_key: {"remoteableserver": True}})
+
+    with pytest.raises(ValueError, match="use servercallablemethods"):
+        rmtclass.allowallfunctions(Policy, isserver=True)
 
 
 def test_inherited_method_policy_uses_configured_class_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -432,11 +471,13 @@ def test_inherited_method_policy_uses_configured_class_identity(monkeypatch: pyt
     monkeypatch.setattr(remoter, "allowed_functions", set())
     monkeypatch.setattr(remoter, "callable_policy_frozen", False)
     monkeypatch.setattr(
-        rmtclass,
-        "isremoteable",
-        lambda _isserver, key, class_key: class_key.endswith("/AllowedPolicy") and key.endswith("/predict"),
+        remoter,
+        "remoterclassparams",
+        {
+            f"{AllowedPolicy.__module__}/AllowedPolicy": {"servercallablemethods": ["pre*"]},
+            f"{BlockedPolicy.__module__}/BlockedPolicy": {"servercallablemethods": []},
+        },
     )
-    monkeypatch.setattr(remoter, "getparam", lambda _name, _key, _classkey, default: default)
 
     rmtclass.allowallfunctions(AllowedPolicy, isserver=True)
     rmtclass.allowallfunctions(BlockedPolicy, isserver=True)
@@ -449,6 +490,7 @@ def test_inherited_method_policy_uses_configured_class_identity(monkeypatch: pyt
     assert blocked_key not in remoter.allowed_functions
     assert base_key not in remoter.allowed_functions
 
+    rmtclass.allowallfunctions(AllowedPolicy, isserver=False)
     instance = object.__new__(AllowedPolicy)
     payload = remoter.encode_function_call(instance.predict, "direct", {}, None)
     _, key, decoded_module, func_name, class_name, _, _ = remoter.deserialize_payload(payload)
