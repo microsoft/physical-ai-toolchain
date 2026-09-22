@@ -223,6 +223,46 @@ def test_save_annotations_requires_revision_precondition(client: TestClient, ove
     assert response.status_code == 428
 
 
+def test_save_annotations_rejects_multiple_revision_preconditions(client: TestClient, override_services) -> None:
+    dataset_service, _ = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+
+    response = client.put(
+        "/api/datasets/ds-1/episodes/4/annotations",
+        json=_make_annotation().model_dump(mode="json"),
+        headers={"If-Match": '"revision"', "If-None-Match": "*"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_save_annotations_rejects_non_wildcard_create_precondition(client: TestClient, override_services) -> None:
+    dataset_service, _ = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+
+    response = client.put(
+        "/api/datasets/ds-1/episodes/4/annotations",
+        json=_make_annotation().model_dump(mode="json"),
+        headers={"If-None-Match": '"revision"'},
+    )
+
+    assert response.status_code == 400
+
+
+def test_save_annotations_rejects_missing_saved_value(client: TestClient, override_services) -> None:
+    dataset_service, annotation_service = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+    annotation_service.save_annotation.return_value = VersionedValue(value=None, etag='"revision"')
+
+    response = client.put(
+        "/api/datasets/ds-1/episodes/4/annotations",
+        json=_make_annotation().model_dump(mode="json"),
+        headers={"If-None-Match": "*"},
+    )
+
+    assert response.status_code == 500
+
+
 def test_save_annotations_returns_412_with_current_revision(client: TestClient, override_services) -> None:
     dataset_service, annotation_service = override_services
     dataset_service.get_dataset.return_value = _make_dataset()
@@ -250,6 +290,15 @@ def test_delete_annotations_dataset_not_found_returns_404(client: TestClient, ov
     response = client.delete("/api/datasets/ds-1/episodes/0/annotations")
 
     assert response.status_code == 404
+
+
+def test_delete_annotations_requires_current_revision(client: TestClient, override_services) -> None:
+    dataset_service, _ = override_services
+    dataset_service.get_dataset.return_value = _make_dataset()
+
+    response = client.delete("/api/datasets/ds-1/episodes/0/annotations")
+
+    assert response.status_code == 428
 
 
 def test_delete_annotations_ignores_client_owner_and_uses_authenticated_owner(

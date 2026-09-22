@@ -258,7 +258,6 @@ class TestAnnotationEndpoints:
         annotations = get_response.json()["annotations"]
         assert annotations == []
 
-
     def test_rejects_invalid_language_tag(self, client, registered_dataset, sample_annotation):
         payload = sample_annotation.model_dump(mode="json")
         payload["language_instruction"] = {
@@ -275,6 +274,7 @@ class TestAnnotationEndpoints:
         )
 
         assert response.status_code == 422
+
 
 class TestAnnotationSummaryEndpoint:
     """Tests for annotation summary endpoint."""
