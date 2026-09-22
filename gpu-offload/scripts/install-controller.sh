@@ -22,25 +22,32 @@ kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" rollout status deployment/gpu-offl
   --namespace gpu-offload \
   --timeout=180s
 
-# rollout status only confirms the pod is Ready; it says nothing about whether
-# the Service is actually routable yet. Even once the Endpoints object reports
-# the pod's address, kube-proxy still has to program the ClusterIP's netfilter
-# rule on the node before traffic to it succeeds -- a real, observed race
-# (confirmed in CI: the Endpoints wait reported ready, then the very next
-# admission call still hit "connection refused" ~250ms later). failurePolicy:
-# Fail means any miss blocks every offload-labeled pod/deployment/job, so
-# retry a real admission call rather than trust an API object's state.
-# --dry-run=server exercises the webhook (it's invoked for dry-run requests
-# because the webhook declares sideEffects: None) without persisting anything,
-# so this needs no cleanup.
+# A Ready pod does not guarantee that the webhook Service is routable. Retry an
+# actual mutation because failurePolicy: Fail blocks offload-labeled workloads.
+probe_name="gpu-offload-webhook-probe-$$"
 probe_manifest="$(mktemp --suffix=-webhook-probe.yaml)"
-trap 'rm -f "$probe_manifest"' EXIT
-cat > "$probe_manifest" << 'YAML'
+cleanup() {
+  rm -f "$probe_manifest"
+  kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" delete configmap "$probe_name" \
+    --namespace gpu-offload --ignore-not-found >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" create configmap "$probe_name" \
+  --namespace gpu-offload \
+  --from-literal=remote.yaml=$'encryption: false\nnoserverdeployment: true\n' \
+  --dry-run=client -o yaml |
+  kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply -f - >/dev/null
+
+cat > "$probe_manifest" << YAML
 apiVersion: v1
 kind: Pod
 metadata:
-  name: gpu-offload-webhook-probe
+  name: $probe_name
   namespace: gpu-offload
+  annotations:
+    xavierconfig: |
+      remoteablecm: $probe_name
   labels:
     xavier: "true"
 spec:
@@ -48,15 +55,27 @@ spec:
     - name: probe
       image: probe
       command: ["true"]
+      env:
+        - name: REMOTERPORT
+          value: "30000"
 YAML
 
 attempt=0
-until kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply --dry-run=server -f "$probe_manifest" >/dev/null 2>&1; do
+until mutation_marker="$(
+  kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply --dry-run=server -f "$probe_manifest" \
+    -o jsonpath='{.spec.containers[0].env[?(@.name=="XAVIER_CONTAINER")].value}' 2>/dev/null
+)"; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 15 ]; then
     echo "Mutating webhook still unreachable after ${attempt}s; last attempt:" >&2
-    kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply --dry-run=server -f "$probe_manifest"
+    kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply --dry-run=server -f "$probe_manifest" -o yaml
     exit 1
   fi
   sleep 1
 done
+
+if [[ "$mutation_marker" != "true" ]]; then
+  echo "Mutating webhook admitted the probe without applying the GPU-offload mutation" >&2
+  kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply --dry-run=server -f "$probe_manifest" -o yaml
+  exit 1
+fi
