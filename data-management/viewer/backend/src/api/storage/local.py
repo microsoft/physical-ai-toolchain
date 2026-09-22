@@ -60,9 +60,14 @@ class LocalStorageAdapter(StorageAdapter):
         )
 
     async def _read_content(self, path: Path) -> str | None:
-        if not await aiofiles.os.path.exists(path):
+        safe_base = os.path.realpath(str(self.base_path))
+        normalized = os.path.normpath(os.path.realpath(str(path)))
+        if not normalized.startswith(safe_base + os.sep):
+            raise StorageError("Annotation path escapes the configured dataset directory")
+        safe_path = Path(normalized)
+        if not await aiofiles.os.path.exists(safe_path):
             return None
-        async with aiofiles.open(path, encoding="utf-8") as file:
+        async with aiofiles.open(safe_path, encoding="utf-8") as file:
             return await file.read()
 
     def _get_annotations_dir(self, dataset_id: str) -> Path:
