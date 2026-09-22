@@ -300,7 +300,11 @@ class BlobLabelStorage:
                 if azure_etag:
                     etag = str(azure_etag)
             except Exception:
-                pass
+                logger.debug(
+                    "Unable to read Azure label ETag for %s",
+                    dataset_id.replace("\r", "").replace("\n", ""),
+                    exc_info=True,
+                )
         try:
             return VersionedValue(
                 value=DatasetLabelsFile.model_validate(json.loads(data.decode("utf-8"))),
