@@ -1,0 +1,37 @@
+{{- if .Values.offload.enabled }}
+{{- $configMapName := default (printf "%s-offload" (include "lerobot-rollout.fullname" .)) .Values.offload.configMapName }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $configMapName }}
+  labels:
+    {{- include "lerobot-rollout.labels" . | nindent 4 }}
+    app.kubernetes.io/component: offload-config
+data:
+  remote.yaml: |
+    serverstages:
+      - name: {{ .Values.offload.stageName | quote }}
+        perclient: true
+        serverreplicas: {{ .Values.offload.server.replicas }}
+        {{- with .Values.offload.server.nodeSelector }}
+        nodeSelector:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- with .Values.offload.server.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+    remoteclasses:
+      - {{ .Values.offload.remoteClass | quote }}:
+          remoteloc: {{ .Values.offload.stageName | quote }}
+      {{- if .Values.offload.rawObservation.enabled }}
+      - {{ .Values.offload.rawObservation.remoteClass | quote }}:
+          remoteloc: {{ .Values.offload.stageName | quote }}
+          noremotefuncs:
+            - notify_observation
+      {{- end }}
+    remotefuncs:
+      - {{ .Values.offload.loadFunction | quote }}:
+          singleinstance: true
+          remoteloc: {{ .Values.offload.stageName | quote }}
+{{- end }}

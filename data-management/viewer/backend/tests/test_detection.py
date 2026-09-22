@@ -1,10 +1,17 @@
 """Tests for YOLO11 object detection service."""
 
+from __future__ import annotations
+
+import json
+import os
 from io import BytesIO
+from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
+
+from src.api.services.detection_service import DetectionService
 
 # Skip all tests if ultralytics (or its torch dependency) is not importable.
 # Use a broad except to also handle partial/broken installs (e.g., a torch
@@ -18,22 +25,35 @@ except Exception as exc:  # pragma: no cover - environment-dependent
 class TestDetectionService:
     """Test cases for the detection service."""
 
-    def test_model_loads(self):
-        """Test that the YOLO model can be loaded."""
-        from src.api.services.detection_service import get_detection_service
+    @pytest.fixture(scope="class")
+    def service(self) -> DetectionService:
+        models_dir = Path(os.environ.get("DETECTION_MODELS_DIR", "./models"))
+        digests = json.loads(os.environ.get("DETECTION_MODEL_DIGESTS", "{}"))
+        required_models = {"yolo11n", "yolov8s-world"}
+        missing_models = sorted(name for name in required_models if not (models_dir / f"{name}.pt").is_file())
+        missing_digests = sorted(required_models - digests.keys())
+        if missing_models or missing_digests:
+            pytest.skip(
+                f"Detection smoke test requires weights {missing_models} and configured digests {missing_digests}"
+            )
+        return DetectionService(models_dir=models_dir, model_digests=digests)
 
-        service = get_detection_service()
-        model = service._get_model("yolo11n")
+    @pytest.mark.parametrize(
+        ("model_name", "labels"),
+        [
+            ("yolo11n", None),
+            ("yolov8s-world", ["robot"]),
+        ],
+    )
+    def test_model_loads(self, service, model_name: str, labels: list[str] | None):
+        """Test that closed- and open-vocabulary YOLO models load and warm up."""
+        model = service._get_model(model_name, labels=labels)
         assert model is not None
         assert hasattr(model, "names")
         print(f"Model loaded with {len(model.names)} classes")
 
-    def test_detect_synthetic_image(self):
+    def test_detect_synthetic_image(self, service):
         """Test detection on a synthetic test image."""
-        from src.api.services.detection_service import DetectionService
-
-        service = DetectionService()
-
         # Create a synthetic image (solid color - should have no detections)
         img = Image.new("RGB", (640, 480), color=(128, 128, 128))
         buffer = BytesIO()
@@ -50,22 +70,8 @@ class TestDetectionService:
         # Gray image should have few or no detections
         assert len(result.detections) >= 0
 
-    def test_detect_person_image(self):
+    def test_detect_person_image(self, service):
         """Test detection on an image that should contain detectable objects."""
-        import os
-
-        from ultralytics import YOLO
-
-        from src.api.services.detection_service import DetectionService
-
-        service = DetectionService()
-
-        # Check if there's a test image or use a built-in ultralytics test
-        model = YOLO("yolo11n.pt")
-
-        # Use ultralytics built-in test image
-        os.path.join(os.path.dirname(model.model_name or ""), "assets")
-
         # Create a more realistic test - draw some shapes that might trigger detection
         img = Image.new("RGB", (640, 480), color=(200, 200, 200))
 
@@ -87,15 +93,9 @@ class TestDetectionService:
         for det in result.detections:
             print(f"  - {det.class_name}: {det.confidence:.3f}")
 
-    def test_detect_from_hdf5(self):
+    def test_detect_from_hdf5(self, service):
         """Test detection on actual HDF5 data."""
-        import os
-
         import h5py
-
-        from src.api.services.detection_service import DetectionService
-
-        service = DetectionService()
 
         # Find a test HDF5 file
         test_paths = [

@@ -15,6 +15,8 @@ services:
 
       # Local storage (used when STORAGE_BACKEND=local)
       DATA_DIR: "/data"
+      DETECTION_MODELS_DIR: "/models"
+      DETECTION_MODEL_DIGESTS: "${DETECTION_MODEL_DIGESTS:?Set reviewed model SHA-256 digests}"
 
       # Azure Blob Storage (required when STORAGE_BACKEND=azure)
       AZURE_STORAGE_ACCOUNT_NAME: "${AZURE_STORAGE_ACCOUNT_NAME:-}"
@@ -31,6 +33,8 @@ services:
     volumes:
       # Mount local dataset directory when using local storage backend
       - "${DATAVIEWER_HOST_DATA_DIR:-./datasets}:/data:ro"
+      # Mount reviewed detection weights as immutable runtime inputs
+      - "${DATAVIEWER_HOST_MODELS_DIR:-./models}:/models:ro"
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
       interval: 30s

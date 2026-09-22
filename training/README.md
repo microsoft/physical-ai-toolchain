@@ -55,12 +55,12 @@ Trained policies export to ONNX and TensorRT formats via `packaging/scripts/expo
 
 ## 📋 Specifications
 
-| Document                                                     | Description                                       |
-|--------------------------------------------------------------|---------------------------------------------------|
-| [RL Training](specifications/rl-training.specification.md)   | SKRL, RSL-RL, Isaac Lab runtime configuration     |
-| [IL Training](specifications/il-training.specification.md)   | LeRobot ACT/Diffusion policies, blob datasets     |
-| [VLA Training](specifications/vla-training.specification.md) | Multi-modal transformer training (planned)        |
-| [Packaging](specifications/packaging.specification.md)       | ONNX/TensorRT model export                        |
+| Document                                                     | Description                                   |
+|--------------------------------------------------------------|-----------------------------------------------|
+| [RL Training](specifications/rl-training.specification.md)   | SKRL, RSL-RL, Isaac Lab runtime configuration |
+| [IL Training](specifications/il-training.specification.md)   | LeRobot ACT/Diffusion policies, blob datasets |
+| [VLA Training](specifications/vla-training.specification.md) | Multi-modal transformer training (planned)    |
+| [Packaging](specifications/packaging.specification.md)       | ONNX/TensorRT model export                    |
 
 > [!NOTE]
 > Evaluation capabilities are managed separately and will be extracted to a dedicated evaluation domain.

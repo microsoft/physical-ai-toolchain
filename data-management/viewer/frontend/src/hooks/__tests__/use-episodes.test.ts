@@ -73,7 +73,7 @@ describe('useEpisodeList', () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true))
 
-    expect(useEpisodeStore.getState().error).toBe('list failed')
+    expect(useEpisodeStore.getState().error).toBe('The server could not complete the request')
   })
 })
 
