@@ -96,3 +96,4 @@ offload:
         nvidia.com/gpu: 1
   remoteClass: lerobot.policies.act.modeling_act/ACTPolicy
   loadFunction: lerobot.rollout.context//_load_pretrained_policy
+  benchmarkLoadFunction: raw_observation_inference//load_pretrained_policy

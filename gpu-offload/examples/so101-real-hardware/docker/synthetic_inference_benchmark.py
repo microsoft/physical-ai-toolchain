@@ -8,8 +8,7 @@ from typing import Any
 
 import torch
 from lerobot.configs import FeatureType, PreTrainedConfig
-from lerobot.rollout.context import _load_pretrained_policy
-from raw_observation_inference import RawObservationSyncInferenceEngine
+from raw_observation_inference import RawObservationSyncInferenceEngine, load_pretrained_policy
 
 
 def _parse_args() -> argparse.Namespace:
@@ -76,8 +75,7 @@ def _build_engine(
 ) -> tuple[RawObservationSyncInferenceEngine, PreTrainedConfig]:
     config = PreTrainedConfig.from_pretrained(policy_path)
     config.pretrained_path = Path(policy_path)
-    policy = _load_pretrained_policy(config).to(config.device)
-    policy.eval()
+    policy = load_pretrained_policy(config)
 
     action_dimension = config.output_features["action"].shape[0]
     action_keys = getattr(config, "action_feature_names", None) or [

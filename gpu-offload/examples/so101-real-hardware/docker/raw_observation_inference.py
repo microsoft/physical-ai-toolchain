@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from lerobot.configs import PreTrainedConfig
 from lerobot.policies import make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import make_robot_action
@@ -23,6 +24,14 @@ logger = logging.getLogger(__name__)
 
 _ENABLED_VALUE = "true"
 _INSTALLED = False
+
+
+def load_pretrained_policy(config: PreTrainedConfig) -> PreTrainedPolicy:
+    from lerobot.rollout.context import _load_pretrained_policy
+
+    policy = _load_pretrained_policy(config).to(config.device)
+    policy.eval()
+    return policy
 
 
 def _percentile(sorted_values: list[float], percentile: float) -> float:
@@ -187,14 +196,11 @@ def install_raw_observation_offload() -> None:
 
 
 def validate_raw_observation_offload(policy_path: str, robot_type: str) -> None:
-    from lerobot.configs import FeatureType, PreTrainedConfig
-    from lerobot.rollout.context import _load_pretrained_policy
+    from lerobot.configs import FeatureType
 
     config = PreTrainedConfig.from_pretrained(policy_path)
     config.pretrained_path = Path(policy_path)
-    policy = _load_pretrained_policy(config).to(config.device)
-    policy.eval()
-
+    policy = load_pretrained_policy(config)
     observation = {}
     for name, feature in config.input_features.items():
         shape = tuple(feature.shape)

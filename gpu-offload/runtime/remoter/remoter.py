@@ -877,7 +877,7 @@ def decode_function_call(
         clientloc = None
     argsn, kwargs = rehydrate_args(args, kwargs, remotedClasses, clientloc, callbackOnCacheAdd)
     if func_name == "__init__":  # noqa: SIM102 vendored from microsoft/xavier, not refactored
-        if len(argsn) > 0 and type(argsn[0]) in remotedClasses:
+        if len(argsn) > 0 and type(argsn[0]) in remotedclasses:
             # set the remoted class owner to True
             argsn[0].rmtowner_rmt0bf = True
             logger.debug(f"Setting remoted class with ID {argsn[0].uuid_rmt0bf} owner to True")
@@ -2150,17 +2150,17 @@ class Remoter:
             # handle function call message
             fnid, classuid, fn = self.execfunction(message, callback, conn)
             logger.debug(f"Function call executed with ID {fnid} - classuid: {classuid} - sockkey: {sockkey}")
-            if conn is not None and fn != {}:
+            if conn is not None:
                 with conn["lock"]:
-                    if conn["alive"]:
-                        if fnid in conn["fns"]:
-                            assert conn["fns"][fnid] is None, f"Function {fnid} already in connection??"
-                            # remove the function from the connection
-                            del conn["fns"][fnid]
-                        else:
+                    if fnid in conn["fns"]:
+                        assert conn["fns"][fnid] is None, f"Function {fnid} already in connection??"
+                        # remove the completion marker added before registration
+                        del conn["fns"][fnid]
+                    elif fn != {}:
+                        if conn["alive"]:
                             conn["fns"][fnid] = fn
-                    else:
-                        self.stopfn(fnid, fn, None)
+                        else:
+                            self.stopfn(fnid, fn, None)
         elif msgtype == MessageType.FunctionResult:
             # handle function result message - only come here if (loc != direct) and (loc != directqueue)
             assert loc != "direct" and loc != "directqueue", (

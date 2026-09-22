@@ -28,11 +28,12 @@ data:
       {{- if or .Values.offload.rawObservation.enabled .Values.benchmark.enabled }}
       - {{ .Values.offload.rawObservation.remoteClass | quote }}:
           remoteloc: {{ .Values.offload.stageName | quote }}
+          remoteableserver: true
           noremotefuncs:
             - notify_observation
       {{- end }}
     remotefuncs:
-      - {{ .Values.offload.loadFunction | quote }}:
+      - {{ ternary .Values.offload.benchmarkLoadFunction .Values.offload.loadFunction .Values.benchmark.enabled | quote }}:
           singleinstance: true
           remoteloc: {{ .Values.offload.stageName | quote }}
 {{- end }}
