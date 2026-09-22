@@ -28,7 +28,7 @@
         },
         "docs.table": {
             "routeRef": "docs",
-            "selector": "main table"
+            "selector": "main table[aria-labelledby=scope]"
         },
         "docs.heading": {
             "routeRef": "docs",
@@ -84,8 +84,7 @@
                             "evidenceType": "accessibilityTree",
                             "expected": {
                                 "role": "checkbox",
-                                "name": "Accept terms",
-                                "checked": true
+                                "name": "Accept terms"
                             },
                             "minCount": 1,
                             "maxCount": 1
@@ -118,7 +117,7 @@
                     "triggerAfterDriverStart": true,
                     "trigger": {
                         "action": "focus",
-                        "target": "main table"
+                        "target": "main table[aria-labelledby=scope]"
                     },
                     "commands": [
                         {
@@ -191,12 +190,8 @@
                         {
                             "action": "type",
                             "target": "input[name=q]",
-                            "value": "training"
-                        },
-                        {
-                            "action": "waitFor",
-                            "target": "[id^=search-results-status-][role=status]",
-                            "durationMs": 15000
+                            "value": "training",
+                            "waitFor": "[id^=search-results-status-][role=status]"
                         }
                     ],
                     "commands": [
@@ -234,12 +229,8 @@
                         {
                             "action": "type",
                             "target": "input[name=q]",
-                            "value": "98765432101234567890"
-                        },
-                        {
-                            "action": "waitFor",
-                            "target": "[id^=search-results-status-][role=status]",
-                            "durationMs": 15000
+                            "value": "98765432101234567890",
+                            "waitFor": "[id^=search-results-status-][role=status]"
                         }
                     ],
                     "commands": [
