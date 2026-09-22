@@ -116,7 +116,7 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
         BeforeEach {
             Mock terraform {
                 $global:LASTEXITCODE = 1
-                return "infrastructure/terraform/main.tf`ninfrastructure/terraform/vpn/variables.tf"
+                return @('infrastructure/terraform/main.tf', 'infrastructure/terraform/vpn/variables.tf')
             } -ParameterFilter { $args[0] -eq 'fmt' }
         }
 
@@ -210,6 +210,228 @@ Describe 'Invoke-TerraformValidationCore' -Tag 'Unit' {
             $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
             $withWarnings = $json.validation | Where-Object { $_.warnings.Count -gt 0 }
             $withWarnings | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Context 'optional <Severity> diagnostic fields' -ForEach @(
+        @{ Severity = 'error'; ExitCode = 1; AnnotationLevel = 'Error'; Bucket = 'errors' }
+        @{ Severity = 'warning'; ExitCode = 0; AnnotationLevel = 'Warning'; Bucket = 'warnings' }
+    ) {
+        BeforeEach {
+            $ErrorActionPreference = 'Stop'
+            Mock Write-Host {}
+        }
+
+        It 'Reports a diagnostic with <Name>' -ForEach @(
+            @{ Name = 'no range'; Fields = @{}; HasFile = $false; ExpectedLine = 0; HasDetail = $true }
+            @{ Name = 'null range'; Fields = @{ range = $null }; HasFile = $false; ExpectedLine = 0; HasDetail = $true }
+            @{ Name = 'empty range'; Fields = @{ range = @{} }; HasFile = $false; ExpectedLine = 0; HasDetail = $true }
+            @{ Name = 'no filename'; Fields = @{ range = @{ start = @{ line = 12 } } }; HasFile = $false; ExpectedLine = 12; HasDetail = $true }
+            @{ Name = 'no start'; Fields = @{ range = @{ filename = 'main.tf' } }; HasFile = $true; ExpectedLine = 0; HasDetail = $true }
+            @{ Name = 'empty start'; Fields = @{ range = @{ filename = 'main.tf'; start = @{} } }; HasFile = $true; ExpectedLine = 0; HasDetail = $true }
+            @{ Name = 'no line'; Fields = @{ range = @{ filename = 'main.tf'; start = @{ column = 1 } } }; HasFile = $true; ExpectedLine = 0; HasDetail = $true }
+            @{ Name = 'no detail'; Fields = @{ range = @{ filename = 'main.tf'; start = @{ line = 12 } } }; HasFile = $true; ExpectedLine = 12; HasDetail = $false }
+        ) {
+            $diagnostic = @{ severity = $Severity; summary = 'Diagnostic summary' } + $Fields
+            if ($HasDetail) { $diagnostic.detail = 'Diagnostic detail' }
+            $expectedAnnotationLine = if ($ExpectedLine -gt 0) { $ExpectedLine } else { $null }
+            $script:ValidateResponse = @{ diagnostics = @($diagnostic) } | ConvertTo-Json -Depth 10
+            $script:ValidateExitCode = $ExitCode
+            Mock terraform {
+                $global:LASTEXITCODE = $script:ValidateExitCode
+                return $script:ValidateResponse
+            } -ParameterFilter { $args[0] -eq 'validate' }
+
+            $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir
+
+            $result | Should -Be $ExitCode
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json -AsHashtable
+            $json.validation | Should -HaveCount 4
+            foreach ($directory in $json.validation) {
+                $directory.passed | Should -Be ($ExitCode -eq 0)
+                $directory.skipped | Should -BeFalse
+                $directory[$Bucket] | Should -HaveCount 1
+                $entry = $directory[$Bucket][0]
+                $entry.severity | Should -Be $Severity
+                $entry.summary | Should -Be 'Diagnostic summary'
+                $entry.line | Should -Be $ExpectedLine
+                if ($HasFile) {
+                    $expectedFile = "$($directory.directory)/main.tf"
+                    $entry.file | Should -Be $expectedFile
+                    Should -Invoke Write-CIAnnotation -Times 1 -Exactly -ParameterFilter {
+                        $Level -eq $AnnotationLevel -and $Message -eq 'Diagnostic summary' -and
+                        $File -eq $expectedFile -and $Line -eq $expectedAnnotationLine
+                    }
+                }
+                else {
+                    $entry.file | Should -BeNullOrEmpty
+                }
+                if ($HasDetail) { $entry.detail | Should -Be 'Diagnostic detail' }
+                else { $entry.detail | Should -BeNullOrEmpty }
+                $otherBucket = if ($Bucket -eq 'errors') { 'warnings' } else { 'errors' }
+                $directory[$otherBucket] | Should -HaveCount 0
+            }
+            Should -Invoke Write-CIAnnotation -Times 4 -Exactly -ParameterFilter {
+                $Level -eq $AnnotationLevel -and $Message -eq 'Diagnostic summary' -and $Line -eq $expectedAnnotationLine
+            }
+            if (-not $HasFile) {
+                Should -Invoke Write-CIAnnotation -Times 0 -Exactly -ParameterFilter { $File }
+            }
+            $detailCalls = if ($HasDetail) { 4 } else { 0 }
+            Should -Invoke Write-Host -Times $detailCalls -Exactly -ParameterFilter { $Object -eq 'Diagnostic detail' }
+            $json.summary.directories_checked | Should -Be 4
+            $json.summary.directories_passed | Should -Be $(if ($ExitCode -eq 0) { 4 } else { 0 })
+            $json.summary.overall_passed | Should -Be ($ExitCode -eq 0)
+            Should -Invoke Write-CIStepSummary -Times 1 -Exactly
+        }
+    }
+
+    Context 'initialization failures' {
+        It 'Completes reporting when initialization fails in <FailureMode>' -ForEach @(
+            @{ FailureMode = 'all directories'; FailAll = $true; ExpectedPassed = 0 }
+            @{ FailureMode = 'only vpn'; FailAll = $false; ExpectedPassed = 3 }
+        ) {
+            $ErrorActionPreference = 'Stop'
+            $originalLocation = (Get-Location).Path
+            $script:FailAllInitializations = $FailAll
+            $script:ValidatedDirectories = @()
+            Mock Write-Host {}
+            Mock terraform {
+                if ($script:FailAllInitializations -or (Split-Path (Get-Location).Path -Leaf) -eq 'vpn') {
+                    $global:LASTEXITCODE = 1
+                    return @('Provider installation failed', 'Registry unavailable')
+                }
+                $global:LASTEXITCODE = 0
+                return ''
+            } -ParameterFilter { $args[0] -eq 'init' }
+            Mock terraform {
+                $script:ValidatedDirectories += (Get-Location).Path
+                $global:LASTEXITCODE = 0
+                return '{"valid":true,"diagnostics":[]}'
+            } -ParameterFilter { $args[0] -eq 'validate' }
+
+            $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir
+
+            $result | Should -Be 1
+            (Get-Location).Path | Should -Be $originalLocation
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.validation | Should -HaveCount 4
+            foreach ($directory in $json.validation) {
+                $shouldFail = $FailAll -or $directory.directory -like '*/vpn'
+                $directory.passed | Should -Be (-not $shouldFail)
+                $directory.skipped | Should -BeFalse
+                $directory.warnings | Should -HaveCount 0
+                if ($shouldFail) {
+                    $directory.errors | Should -HaveCount 1
+                    $errorEntry = $directory.errors[0]
+                    $errorEntry.severity | Should -Be 'error'
+                    $errorEntry.summary | Should -Be "Terraform initialization failed: $($directory.directory)"
+                    $errorEntry.detail | Should -Be ("Provider installation failed`nRegistry unavailable" -replace "`n", [Environment]::NewLine)
+                    $errorEntry.file | Should -BeNullOrEmpty
+                    $errorEntry.line | Should -Be 0
+                }
+                else {
+                    $directory.errors | Should -HaveCount 0
+                    $script:ValidatedDirectories | Should -Contain (Get-Item $directory.directory).FullName -Because 'successful peer directories must still be validated'
+                }
+            }
+            $script:ValidatedDirectories | Should -Not -Contain (Join-Path $script:TestTerraformDir 'vpn')
+            $json.summary.directories_checked | Should -Be 4
+            $json.summary.directories_passed | Should -Be $ExpectedPassed
+            $json.summary.directories_skipped | Should -Be 0
+            $json.summary.overall_passed | Should -BeFalse
+            Should -Invoke terraform -Times 4 -Exactly -ParameterFilter { $args[0] -eq 'init' }
+            Should -Invoke terraform -Times $ExpectedPassed -Exactly -ParameterFilter { $args[0] -eq 'validate' }
+            $expectedFailures = 4 - $ExpectedPassed
+            Should -Invoke Write-CIAnnotation -Times $expectedFailures -Exactly -ParameterFilter {
+                $Level -eq 'Error' -and $Message -like 'Terraform initialization failed:*' -and $null -eq $File -and $null -eq $Line
+            }
+            Should -Invoke Write-Host -Times $expectedFailures -Exactly -ParameterFilter {
+                $Object -match 'Provider installation failed' -and $Object -match 'Registry unavailable'
+            }
+            Should -Invoke Write-CIStepSummary -Times 1 -Exactly -ParameterFilter { $Content -match 'Terraform Validation Results' }
+        }
+    }
+
+    Context 'invalid validation output' {
+        It 'Reports <Name> as a failure and continues to later directories' -ForEach @(
+            @{ Name = 'malformed JSON'; Output = 'not JSON'; NativeExitCode = 1 }
+            @{ Name = 'empty output'; Output = ''; NativeExitCode = 0 }
+            @{ Name = 'JSON null'; Output = 'null'; NativeExitCode = 0 }
+            @{ Name = 'missing diagnostics'; Output = '{"valid":true,"error_count":0,"warning_count":0}'; NativeExitCode = 0 }
+        ) {
+            $ErrorActionPreference = 'Stop'
+            $originalLocation = (Get-Location).Path
+            $script:InvalidValidateOutput = $Output
+            $script:InvalidValidateExit = $NativeExitCode
+            Mock terraform {
+                if ((Split-Path (Get-Location).Path -Leaf) -eq 'vpn') {
+                    $global:LASTEXITCODE = $script:InvalidValidateExit
+                    return $script:InvalidValidateOutput
+                }
+                $global:LASTEXITCODE = 0
+                return '{"valid":true,"diagnostics":[]}'
+            } -ParameterFilter { $args[0] -eq 'validate' }
+
+            $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir
+
+            $result | Should -Be 1
+            (Get-Location).Path | Should -Be $originalLocation
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.validation | Should -HaveCount 4
+            $failed = @($json.validation | Where-Object { -not $_.passed })
+            $failed | Should -HaveCount 1
+            $failed[0].directory | Should -Be "$script:TestTerraformDir/vpn"
+            $failed[0].errors | Should -HaveCount 1
+            $entry = $failed[0].errors[0]
+            $entry.severity | Should -Be 'error'
+            $entry.summary | Should -Be "Invalid Terraform validation output: $script:TestTerraformDir/vpn"
+            $entry.detail | Should -Be $Output
+            $entry.file | Should -BeNullOrEmpty
+            $entry.line | Should -Be 0
+            foreach ($directory in $json.validation) {
+                $directory.skipped | Should -BeFalse
+                $directory.warnings | Should -HaveCount 0
+                if ($directory.passed) { $directory.errors | Should -HaveCount 0 }
+            }
+            $json.summary.directories_checked | Should -Be 4
+            $json.summary.directories_passed | Should -Be 3
+            $json.summary.overall_passed | Should -BeFalse
+            Should -Invoke terraform -Times 4 -Exactly -ParameterFilter { $args[0] -eq 'validate' }
+            Should -Invoke Write-CIAnnotation -Times 1 -Exactly -ParameterFilter {
+                $Level -eq 'Error' -and $Message -eq "Invalid Terraform validation output: $script:TestTerraformDir/vpn" -and
+                $null -eq $File -and $null -eq $Line
+            }
+            Should -Invoke Write-CIStepSummary -Times 1 -Exactly
+        }
+    }
+
+    Context 'native error preference' {
+        It 'Reports nonzero exits without changing the caller native error preference' {
+            $ErrorActionPreference = 'Stop'
+            $PSNativeCommandUseErrorActionPreference = $true
+            $script:ObservedNativePreferences = @()
+            Mock terraform {
+                $script:ObservedNativePreferences += $PSNativeCommandUseErrorActionPreference
+                $global:LASTEXITCODE = 1
+                return 'Provider installation failed'
+            } -ParameterFilter { $args[0] -eq 'init' }
+
+            $result = Invoke-TerraformValidationCore -OutputPath $script:TestOutputPath `
+                -TerraformDir $script:TestTerraformDir
+
+            $result | Should -Be 1
+            $script:ObservedNativePreferences | Should -HaveCount 4
+            $script:ObservedNativePreferences | ForEach-Object { $_ | Should -BeFalse }
+            $PSNativeCommandUseErrorActionPreference | Should -BeTrue
+            $ErrorActionPreference | Should -Be 'Stop'
+            $json = Get-Content $script:TestOutputPath -Raw | ConvertFrom-Json
+            $json.summary.directories_checked | Should -Be 4
+            $json.summary.overall_passed | Should -BeFalse
+            Should -Invoke Write-CIStepSummary -Times 1 -Exactly
         }
     }
 
