@@ -27,7 +27,8 @@ class E2EHandle:
 
 
 class FinalizerRegistrar(Protocol):
-    def addfinalizer(self, finalizer: Callable[[], object]) -> None: ...
+    def addfinalizer(self, finalizer: Callable[[], object]) -> None:
+        pass
 
 
 def register_cleanup(
