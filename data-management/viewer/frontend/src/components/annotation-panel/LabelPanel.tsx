@@ -29,6 +29,7 @@ import {
 } from '@/hooks/use-labels'
 import { cn } from '@/lib/utils'
 import { DEFAULT_LABELS, useLabelStore } from '@/stores/label-store'
+import type { EpisodeAnalysisRecord } from '@/types/api'
 
 interface LabelPanelProps {
   episodeIndex: number
@@ -42,6 +43,16 @@ const ANALYSIS_FIELD_LABELS: Record<ImportableAnalysisField, string> = {
   motion_score: 'Motion score',
   motion_flags: 'Motion flags',
   source: 'Source',
+}
+
+const ANALYSIS_FIELD_KEYS: Record<ImportableAnalysisField, keyof EpisodeAnalysisRecord> = {
+  object: 'object',
+  pick_from: 'pickFrom',
+  grasp_success: 'graspSuccess',
+  place_success: 'placeSuccess',
+  motion_score: 'motionScore',
+  motion_flags: 'motionFlags',
+  source: 'source',
 }
 
 export function LabelPanel({ episodeIndex }: LabelPanelProps) {
@@ -62,7 +73,7 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
     const present = new Set<ImportableAnalysisField>()
     for (const record of Object.values(episodeAnalysis)) {
       for (const field of IMPORTABLE_ANALYSIS_FIELDS) {
-        const value = record[field]
+        const value = record[ANALYSIS_FIELD_KEYS[field]]
         if (value === null || value === undefined) continue
         if (Array.isArray(value) && value.length === 0) continue
         present.add(field)
@@ -133,10 +144,10 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
           prefix: importPrefix.trim() || undefined,
           overwrite: shouldOverwrite,
         })
-        const added = result.labels_added.length
+        const added = result.data.labelsAdded.length
         setImportMessage(
           `Imported ${added} ${ANALYSIS_FIELD_LABELS[field]} label${added === 1 ? '' : 's'} ` +
-            `across ${result.episodes_updated} episode${result.episodes_updated === 1 ? '' : 's'}.`,
+            `across ${result.data.episodesUpdated} episode${result.data.episodesUpdated === 1 ? '' : 's'}.`,
         )
         setErrorMessage(null)
       } catch (error) {
@@ -172,6 +183,7 @@ export function LabelPanel({ episodeIndex }: LabelPanelProps) {
             >
               <button
                 type="button"
+                aria-pressed={isSelected}
                 onClick={() => void handleToggleLabel(label)}
                 className="focus-visible:ring-ring inline-flex items-center gap-1 rounded-l-full px-2.5 py-0.5 text-xs font-semibold focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2"
               >

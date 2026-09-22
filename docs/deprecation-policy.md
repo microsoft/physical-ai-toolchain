@@ -3,7 +3,7 @@ sidebar_position: 99
 title: Deprecation Policy
 description: Policy for handling deprecated external interfaces including announcement, maintenance duration, migration guidance, and breaking-change communication
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: reference
 keywords:
   - deprecation
@@ -18,14 +18,14 @@ This policy defines how external interfaces are deprecated, maintained during a 
 
 This policy applies to all external interfaces that users or downstream automation depend on:
 
-| Interface Type         | Examples                                    | Location                                |
-|------------------------|---------------------------------------------|-----------------------------------------|
-| Shell script arguments | `--config-dir`, `--tf-dir`, `--dry-run`     | `infrastructure/setup/`, `scripts/`     |
-| Environment variables  | `GPU_OPERATOR_VERSION`, `NS_GPU_OPERATOR`   | `infrastructure/setup/defaults.conf`    |
-| Terraform variables    | `environment`, `should_deploy_postgresql`   | `infrastructure/terraform/variables.tf` |
-| Terraform outputs      | `aks_cluster`, `postgresql_connection_info` | `infrastructure/terraform/outputs.tf`   |
-| Configuration schemas  | Recording config properties                 | `config/recording_config.schema.json`   |
-| Workflow templates     | AzureML and OSMO YAML fields                | `workflows/`                            |
+| Interface Type         | Examples                                    | Location                                                    |
+|------------------------|---------------------------------------------|-------------------------------------------------------------|
+| Shell script arguments | `--config-dir`, `--tf-dir`, `--dry-run`     | `infrastructure/setup/`, `scripts/`                         |
+| Environment variables  | `GPU_OPERATOR_VERSION`, `NS_GPU_OPERATOR`   | `infrastructure/setup/defaults.conf`                        |
+| Terraform variables    | `environment`, `should_deploy_postgresql`   | `infrastructure/terraform/variables.tf`                     |
+| Terraform outputs      | `aks_cluster`, `postgresql_connection_info` | `infrastructure/terraform/outputs.tf`                       |
+| Configuration schemas  | Recording config properties                 | `data-pipeline/capture/config/recording_config.schema.json` |
+| Workflow templates     | AzureML and OSMO YAML fields                | `workflows/`                                                |
 
 Internal implementation details, private functions, and module-internal resources are excluded. Changes to these do not require a deprecation notice.
 
@@ -86,25 +86,25 @@ Use this template for deprecation notices in documentation:
 ## Breaking Change Communication
 
 Breaking changes follow the decision tier defined in [GOVERNANCE.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/GOVERNANCE.md), which requires two maintainer approvals with explicit breaking-change acknowledgment and a documented migration path.
-The communication plan in [Pull Request Process](contributing/pull-request-process.md) specifies that breaking changes include a `[BREAKING]` prefix in the GitHub Release, migration guidance in release notes, updated deployment documentation, and an announcement in repository discussions.
+The communication plan in [Pull Request Process](contributing/pull-request-process.md) uses Conventional Commit breaking-change markers (`!` or a `BREAKING CHANGE:` footer) for release-please. Include migration guidance in release notes, updated deployment documentation, and an announcement in repository discussions.
 
 No external interface will be removed without a deprecation notice in a prior release.
 
 ## Example Deprecation Notice
 
-The following example demonstrates a deprecation of the `GPU_OPERATOR_VERSION` environment variable in `infrastructure/setup/defaults.conf`, renamed to `NVIDIA_GPU_OPERATOR_VERSION` for naming consistency.
+The following hypothetical example renames `OLD_COMPONENT_VERSION` to `NEW_COMPONENT_VERSION`. These are illustrative names, not active repository variables or a current deprecation.
 
 Documentation alert added to the affected guide:
 
 ```markdown
 > [!WARNING]
-> **Deprecated**: `GPU_OPERATOR_VERSION` is deprecated and will be removed in v0.5.0 (estimated 2026-06-04).
+> **Deprecated**: `OLD_COMPONENT_VERSION` is deprecated and will be removed in vX.Y.0 (estimated YYYY-MM-DD).
 >
-> **Replacement**: Use `NVIDIA_GPU_OPERATOR_VERSION` instead.
+> **Replacement**: Use `NEW_COMPONENT_VERSION` instead.
 >
 > **Migration**:
 >
-> 1. Replace `GPU_OPERATOR_VERSION` with `NVIDIA_GPU_OPERATOR_VERSION` in `defaults.conf` and any `.env.local` overrides.
+> 1. Replace `OLD_COMPONENT_VERSION` with `NEW_COMPONENT_VERSION` in `defaults.conf` and any `.env.local` overrides.
 > 2. Update CI/CD pipelines or scripts that set this variable.
 > 3. Both variable names are honored during the deprecation period; the old name takes lower precedence.
 ```
@@ -114,14 +114,14 @@ CHANGELOG.md entry:
 ```markdown
 ### Deprecated
 
-* `GPU_OPERATOR_VERSION` environment variable in `defaults.conf` is deprecated in favor of `NVIDIA_GPU_OPERATOR_VERSION`. The old variable will be removed after 90 days or 1 breaking-change release (whichever is longer).
+* `OLD_COMPONENT_VERSION` environment variable in `defaults.conf` is deprecated in favor of `NEW_COMPONENT_VERSION`. The old variable will be removed after 90 days or 1 breaking-change release (whichever is longer).
 ```
 
 Migration steps:
 
-1. Open `infrastructure/setup/defaults.conf` and rename `GPU_OPERATOR_VERSION` to `NVIDIA_GPU_OPERATOR_VERSION`.
-2. Search for `GPU_OPERATOR_VERSION` in any `.env.local` files or CI/CD variables and update them.
-3. Verify the deployment with `./01-deploy-robotics-charts.sh --config-preview`.
+1. Rename `OLD_COMPONENT_VERSION` to `NEW_COMPONENT_VERSION` in the affected configuration.
+2. Search for `OLD_COMPONENT_VERSION` in any `.env.local` files or CI/CD variables and update them.
+3. Verify the affected script's resolved configuration with `--config-preview`.
 
 ## Active Deprecations
 

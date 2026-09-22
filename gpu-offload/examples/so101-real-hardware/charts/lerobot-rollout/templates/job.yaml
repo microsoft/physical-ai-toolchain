@@ -1,0 +1,155 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "lerobot-rollout.fullname" . }}
+  labels:
+    {{- include "lerobot-rollout.labels" . | nindent 4 }}
+    {{- if .Values.offload.enabled }}
+    xavier: "true"
+    {{- end }}
+  {{- if .Values.offload.enabled }}
+  annotations:
+    xavierconfig: |
+      remoteablecm: {{ default (printf "%s-offload" (include "lerobot-rollout.fullname" .)) .Values.offload.configMapName }}
+      remoteableconts:
+        - rollout
+      env:
+        - name: REMOTERPORT
+          value: {{ .Values.offload.port | quote }}
+        - name: XAVIER_LOGLEVEL
+          value: {{ .Values.offload.logLevel | quote }}
+        - name: XAVIER_PRINTLOGLEVEL
+          value: {{ .Values.offload.printLogLevel | quote }}
+  {{- end }}
+spec:
+  suspend: {{ .Values.job.suspend }}
+  backoffLimit: {{ .Values.job.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.job.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "lerobot-rollout.labels" . | nindent 8 }}
+        {{- if .Values.offload.enabled }}
+        xavier: "true"
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.runtimeClass.name }}
+      runtimeClassName: {{ . }}
+      {{- end }}
+      {{- if .Values.offload.enabled }}
+      serviceAccountName: {{ default (printf "%s-offload" (include "lerobot-rollout.fullname" .)) .Values.offload.serviceAccountName }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: rollout
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.validation.enabled }}
+          command:
+            - python
+            - -c
+            - |
+              {{- if .Values.offload.rawObservation.enabled }}
+              import os
+
+              from raw_observation_inference import validate_raw_observation_offload
+
+              validate_raw_observation_offload(os.environ["POLICY_PATH"], os.environ["ROBOT_TYPE"])
+              {{- else }}
+              import os
+              from pathlib import Path
+
+              import torch
+
+              from lerobot.configs import FeatureType
+              from lerobot.policies.act.configuration_act import ACTConfig
+              from lerobot.rollout.context import _load_pretrained_policy
+
+              config = ACTConfig.from_pretrained(os.environ["POLICY_PATH"])
+              config.pretrained_path = Path(os.environ["POLICY_PATH"])
+              policy = _load_pretrained_policy(config).to(config.device)
+              policy.eval()
+              batch = {
+                  name: torch.zeros((1, *feature.shape), device=config.device)
+                  for name, feature in config.input_features.items()
+                  if feature.type in (FeatureType.STATE, FeatureType.VISUAL, FeatureType.ENV)
+              }
+              action = policy.select_action(batch)
+              print(f"ACT action: shape={tuple(action.shape)}, device={action.device}")
+              {{- end }}
+          {{- else }}
+          command:
+            - /opt/xavier/lerobot/scripts/rollout.sh
+          args:
+            - --policy
+            - {{ .Values.rollout.policyPath | quote }}
+            - --task
+            - {{ .Values.rollout.task | quote }}
+            - --duration
+            - {{ .Values.rollout.duration | quote }}
+            - --inference
+            - {{ .Values.rollout.inference | quote }}
+            {{- if .Values.offload.enabled }}
+            - --offload
+            {{- end }}
+            {{- range .Values.rollout.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "lerobot-rollout.fullname" . }}
+          {{- if .Values.offload.enabled }}
+          env:
+            - name: REMOTERPORT
+              value: {{ .Values.offload.port | quote }}
+            - name: XAVIER_LOGLEVEL
+              value: {{ .Values.offload.logLevel | quote }}
+            - name: XAVIER_PRINTLOGLEVEL
+              value: {{ .Values.offload.printLogLevel | quote }}
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          {{- end }}
+          securityContext:
+            privileged: {{ .Values.securityContext.privileged }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: policy
+              mountPath: {{ .Values.rollout.policyPath }}
+              readOnly: true
+            {{- if not .Values.validation.enabled }}
+            - name: calibration
+              mountPath: {{ .Values.rollout.calibrationMountPath }}
+            {{- range .Values.devices }}
+            - name: {{ .name }}
+              mountPath: {{ .path }}
+            {{- end }}
+            {{- end }}
+      volumes:
+        - name: policy
+          hostPath:
+            path: {{ .Values.hostPaths.policy }}
+            type: Directory
+        {{- if not .Values.validation.enabled }}
+        - name: calibration
+          hostPath:
+            path: {{ .Values.hostPaths.calibration }}
+            type: Directory
+        {{- range .Values.devices }}
+        - name: {{ .name }}
+          hostPath:
+            path: {{ .path }}
+            type: CharDevice
+        {{- end }}
+        {{- end }}

@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Experiment Tracking
 description: MLflow experiment tracking configuration for training workflows on Azure ML and OSMO
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-03
+ms.date: 2026-09-19
 ms.topic: how-to
 keywords:
   - mlflow
@@ -20,9 +20,18 @@ Azure ML manages MLflow as the default experiment tracking backend. Isaac Lab tr
 
 ### Isaac Lab (Automatic)
 
-SKRL training logs metrics to MLflow without additional configuration. Metrics include episode rewards, training losses, optimization stats, and timing data.
+With MLflow configured, SKRL training logs the metrics exposed by the selected agent, including available episode rewards, training losses, optimization stats, and timing data. Metric availability varies by algorithm and run.
 
-Configure logging frequency with `--mlflow_log_interval`:
+Configure logging frequency through the launcher in a configured Isaac Lab runtime, from the repository root:
+
+```bash
+bash training/rl/scripts/train.sh \
+  --task Isaac-Cartpole-v0 \
+  --headless \
+  --mlflow_log_interval balanced
+```
+
+The direct training argument is `--mlflow_log_interval`, not a submission-script flag:
 
 | Interval   | Behavior                     | Use Case          |
 |------------|------------------------------|-------------------|
@@ -51,15 +60,16 @@ training/il/scripts/submit-osmo-lerobot-training.sh \
 
 ## Model Registration
 
-Training scripts register model checkpoints to Azure ML automatically at completion.
+Isaac Lab RL submitters enable checkpoint registration by default. LeRobot registration is opt-in through the applicable training, evaluation, or pipeline submitter; the flags are not interchangeable across families.
 
 ### Registration Parameters
 
-| Parameter                    | Default           | Description                    |
-|------------------------------|-------------------|--------------------------------|
-| `--register-checkpoint`      | Derived from task | Model name for registration    |
-| `--skip-register-checkpoint` | `false`           | Skip automatic registration    |
-| `--register-model`           | (none)            | Model name (LeRobot inference) |
+| Parameter                                   | Default                                | Description                                                 |
+|---------------------------------------------|----------------------------------------|-------------------------------------------------------------|
+| `--register-checkpoint`                     | Derived from task (RL); none (LeRobot) | RL and LeRobot training submitters: registration name       |
+| `--skip-register-checkpoint`                | `false`                                | RL submitters: skip registration                            |
+| `--register-model`                          | (none)                                 | LeRobot evaluation submitters: registration name            |
+| `--with-register` + `--register-model-name` | Disabled                               | AzureML LeRobot pipeline: enable registration step and name |
 
 ### Registration Examples
 
@@ -75,6 +85,9 @@ training/rl/scripts/submit-osmo-training.sh \
 # LeRobot: register after evaluation
 evaluation/sil/scripts/submit-osmo-lerobot-eval.sh \
   --policy-repo-id user/trained-policy \
+  --policy-revision "<policy-commit-sha>" \
+  --dataset-repo-id user/evaluation-dataset \
+  --dataset-revision "<dataset-commit-sha>" \
   -r my-evaluated-model
 ```
 
@@ -92,7 +105,7 @@ huggingface-cli download user/trained-policy --local-dir ./checkpoint
 
 ## 🔄 Checkpoint Workflows
 
-Training supports three checkpoint initialization modes:
+Isaac Lab RL training supports three checkpoint initialization modes:
 
 | Mode           | Weights | Optimizer | Counters | Use Case                      |
 |----------------|---------|-----------|----------|-------------------------------|

@@ -1,0 +1,108 @@
+# All pulls resolve through the host-local registry that scripts/registry-start.sh
+# runs and registers as a k3s mirror, so the cluster never reaches the internet for
+# this workload. Override image.registry only to point at a different mirror.
+image:
+  registry: localhost:5000
+  repository: gpu-offload-ur10e-single
+  tag: local
+  digest: ""
+  # The tag is mutable and the registry is host-local, so the digest is rechecked
+  # on every pod start; IfNotPresent would pin the node to a stale build.
+  pullPolicy: Always
+
+imagePullSecrets: []
+
+serverStage:
+  name: gpu
+  # Leave the repository empty to reuse the client image; both sides need the same
+  # lerobot runtime and the same offload seam module.
+  image:
+    repository: ""
+    tag: ""
+  gpu:
+    resourceName: nvidia.com/gpu
+    quantity: "1"
+  # The checkpoint is roughly 7 GB of weights, plus headroom for the CUDA context
+  # and the PaliGemma tokenizer.
+  resources:
+    requests:
+      cpu: "2"
+      memory: 16Gi
+    limits:
+      cpu: "8"
+      memory: 32Gi
+
+# Trained checkpoint, mounted read-only from the node filesystem. The controller
+# refuses to copy hostPath volumes into a generated server pod, so the checkpoint is
+# published as a hostPath PersistentVolume and consumed through a claim. Keeping it
+# on the node avoids re-pulling 7 GB on every rollout.
+# hostPath is machine-local and has no default: set UR10E_MODEL_HOST_PATH in .env, or
+# pass --set model.hostPath=<dir> when installing the chart directly.
+model:
+  hostPath: ""
+  mountPath: /models/pi05-ur10e
+  capacity: 16Gi
+
+# PaliGemma tokenizer cache. pi05 loads a gated tokenizer that must already be
+# present on the node; the pods run with HF_HUB_OFFLINE=1. Set
+# UR10E_HF_CACHE_HOST_PATH in .env.
+huggingFaceCache:
+  hostPath: ""
+  mountPath: /hf-cache
+  capacity: 8Gi
+
+policy:
+  # self-check drives synthetic observations through the GPU stage and needs no
+  # robot. Switch to record once the UR10e is reachable from the cluster.
+  mode: self-check
+  # pi05 is language-conditioned and was trained single-task on this verbatim string.
+  task: "Pick up the large white gear and place it in the blue bin."
+  checkpointMountPath: /models/pi05-ur10e
+  device: cuda
+  # Training control frequency. The action chunk replays at this rate.
+  fps: "10"
+  # Actions consumed per predicted chunk.
+  nActionSteps: "50"
+  # Synthetic inference steps run in self-check mode.
+  selfCheckSteps: "3"
+
+robot:
+  configPath: /workspace/script/ur10e_config_demo.json
+  datasetRepoId: gpu-offload/eval_demo
+  numEpisodes: "1000"
+  episodeTimeS: "10"
+  # Six UR10e joints plus one gripper value.
+  stateDim: "7"
+  # headless mode. maxSteps of "0" runs until the pod is deleted; homeSpeed is the
+  # joint speed for the moves to the home pose taken before and after the run.
+  maxSteps: "0"
+  homeSpeed: "0.2"
+  # Log one action event every N steps. debugInference makes the GPU stage emit a
+  # per-call observation fingerprint, which separates a stalled control loop from a
+  # stalled policy.
+  logEvery: "50"
+  debugInference: ""
+  # The RealSense cameras are USB devices on the node. libuvc rebinds and reopens
+  # them at runtime, so the control container needs the whole USB bus rather than a
+  # fixed device node, plus the privileges to claim an interface on it.
+  #
+  # This applies to the control container only. The cameras stay client-side: the
+  # GPU stage receives decoded frames over the wire and never touches USB. The
+  # controller rejects hostPath volumes when copying to the server pod, so this
+  # volume is deliberately declared outside the propagated set.
+  usb:
+    enabled: false
+    hostPath: /dev/bus/usb
+    privileged: true
+
+clientResources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    cpu: "4"
+    memory: 8Gi
+
+# Pin the control pod to the node holding the checkpoint and the GPU. Closed-loop
+# control also benefits from keeping offload traffic on one host.
+nodeSelector: {}

@@ -70,9 +70,5 @@ export {
   useRemoveLabelOption,
   useSaveEpisodeLabels,
 } from './use-labels'
-export {
-  type OfflineAnnotation,
-  useOfflineAnnotations,
-  type UseOfflineAnnotationsResult,
-} from './use-offline-annotations'
+export { usePrincipalContext } from './use-principal-context'
 export { useRunVlmJudge, useVlmJudgeStatus, vlmJudgeKeys } from './use-vlm-judge'

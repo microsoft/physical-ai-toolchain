@@ -1,0 +1,220 @@
+name: Accessibility Evidence
+
+on:
+  workflow_call:
+    inputs:
+      run-product-evidence:
+        description: 'Run deterministic product accessibility producers'
+        required: false
+        default: false
+        type: boolean
+      validate-generated-bundle:
+        description: 'Validate and aggregate the generated evidence bundle'
+        required: false
+        default: false
+        type: boolean
+      evidence-cadence:
+        description: 'Docusaurus evidence completeness cadence'
+        required: false
+        default: pull-request
+        type: string
+  workflow_dispatch:
+    inputs:
+      evidence-cadence:
+        description: 'Docusaurus evidence completeness cadence'
+        required: true
+        default: scheduled
+        type: choice
+        options:
+          - pull-request
+          - scheduled
+          - release
+  schedule:
+    - cron: '17 9 * * 2'
+
+permissions:
+  contents: read
+
+env:
+  HVE_ACCESSIBILITY_REF: 56c30bcbbba1a8235970c44f5e79a9d83e296f54
+  HVE_ACCESSIBILITY_TREE: c6875ad36ceeca2acec665195c385792f4b1f32f
+  HVE_CRITERION_MAP_SHA256: 4297ee41d235f2d66697a669d81c1612e5cf21fbb368268fed57d89aa462684f
+  HVE_NODE_LOCK_SHA256: c7b069b44e7f4e3db6008bad8a0d956e88fd5966e70432781935c6cf081960d3
+  HVE_UV_LOCK_SHA256: 0930c70adfa8a4e86fff9e326f13e3dd710cde447c3674036aa25898deba665d
+
+jobs:
+  evidence:
+    name: Contracts, Provenance and Evidence
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Prepare evidence directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/accessibility/ci logs
+
+      - name: Validate project evidence contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project \
+            --with pydantic==2.13.5 \
+            --with pytest==9.1.1 \
+            --with pyyaml==6.0.3 \
+            pytest -c /dev/null -q \
+            --junitxml=logs/accessibility-evidence-tests.xml \
+            tests/test_accessibility_evidence.py
+          uvx --from ruff==0.16.5 ruff check \
+            scripts/accessibility/evidence_gate.py \
+            tests/test_accessibility_evidence.py
+          uv run --no-project --with pydantic==2.13.5 --with pyyaml==6.0.3 \
+            scripts/accessibility/evidence_gate.py --config-preview \
+            > artifacts/accessibility/ci/contract-preview.json
+          uv run --no-project --with pydantic==2.13.5 --with pyyaml==6.0.3 \
+            scripts/accessibility/evidence_gate.py --validate-github --repository-root . \
+            > artifacts/accessibility/ci/github-source-summary.json
+
+      - name: Acquire reviewed HVE accessibility harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          hve_root="$RUNNER_TEMP/hve-core"
+          git init --quiet "$hve_root"
+          git -C "$hve_root" remote add origin https://github.com/microsoft/hve-core.git
+          git -C "$hve_root" fetch --depth 1 origin "$HVE_ACCESSIBILITY_REF"
+          git -C "$hve_root" checkout --quiet --detach FETCH_HEAD
+
+          actual_ref=$(git -C "$hve_root" rev-parse HEAD)
+          if [ "$actual_ref" != "$HVE_ACCESSIBILITY_REF" ]; then
+            echo "::error::HVE accessibility commit provenance mismatch"
+            exit 1
+          fi
+
+          skill_path='.github/skills/accessibility/accessibility'
+          actual_tree=$(git -C "$hve_root" rev-parse "HEAD:$skill_path")
+          if [ "$actual_tree" != "$HVE_ACCESSIBILITY_TREE" ]; then
+            echo "::error::HVE accessibility package tree mismatch"
+            exit 1
+          fi
+
+          skill_root="$hve_root/$skill_path"
+          printf '%s  %s\n' "$HVE_CRITERION_MAP_SHA256" \
+            "$skill_root/scripts/runtime_a11y/probe-criteria-map.json" | sha256sum --check --status
+          printf '%s  %s\n' "$HVE_NODE_LOCK_SHA256" \
+            "$skill_root/scripts/runtime_a11y/package-lock.json" | sha256sum --check --status
+          printf '%s  %s\n' "$HVE_UV_LOCK_SHA256" \
+            "$skill_root/uv.lock" | sha256sum --check --status
+
+          jq -n \
+            --arg commit "$actual_ref" \
+            --arg tree "$actual_tree" \
+            --arg criterionMapSha256 "$HVE_CRITERION_MAP_SHA256" \
+            --arg nodeLockSha256 "$HVE_NODE_LOCK_SHA256" \
+            --arg uvLockSha256 "$HVE_UV_LOCK_SHA256" \
+            '{commit: $commit, packageTree: $tree, criterionMapSha256: $criterionMapSha256,
+              nodeLockSha256: $nodeLockSha256, uvLockSha256: $uvLockSha256}' \
+            > artifacts/accessibility/ci/hve-provenance.json
+
+      - name: Verify system Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          google-chrome --version | tee artifacts/accessibility/ci/chrome-version.txt
+
+      - name: Run HVE accessibility self-tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          skill_root="$RUNNER_TEMP/hve-core/.github/skills/accessibility/accessibility"
+          npm ci --prefix "$skill_root/scripts/runtime_a11y"
+          uv sync --project "$skill_root" --frozen
+          uv run --project "$skill_root" --frozen pytest -q
+
+      - name: Run deterministic product evidence
+        if: ${{ inputs.run-product-evidence == true || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        working-directory: data-management/viewer/frontend
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run test:a11y
+          node --experimental-strip-types e2e/accessibility-manifest.ts \
+            ../../../artifacts/accessibility/current/viewer-evidence-manifest.json
+          python - <<'PY'
+          import json
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          report = Path('../../../artifacts/accessibility/current/playwright-results.xml')
+          manifest = json.loads(
+              Path('../../../artifacts/accessibility/current/viewer-evidence-manifest.json').read_text()
+          )
+          requirements = json.loads(
+              Path('../../../.github/accessibility/requirement-evidence.json').read_text()
+          )
+          cases = manifest['cases']
+          expected_titles = {case['testTitle'] for case in cases}
+          actual_titles = {case.attrib['name'] for case in ET.parse(report).iter('testcase')}
+          if expected_titles != actual_titles:
+              missing = sorted(expected_titles - actual_titles)
+              unexpected = sorted(actual_titles - expected_titles)
+              raise SystemExit(f'Viewer manifest mismatch: missing={missing}, unexpected={unexpected}')
+          canonical_criteria = {f"WCAG22-{item['criterion']}" for item in requirements['requirements']}
+          for case in cases:
+              for field in ('controls', 'states', 'criteria', 'methods'):
+                  if not case[field]:
+                      raise SystemExit(f"Viewer manifest {case['testId']} has empty {field}")
+              unknown = set(case['criteria']) - canonical_criteria
+              if unknown:
+                  raise SystemExit(f"Viewer manifest {case['testId']} has unknown criteria: {sorted(unknown)}")
+          PY
+
+      - name: Validate generated evidence bundle
+        if: ${{ inputs.validate-generated-bundle == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic==2.13.5 \
+            scripts/accessibility/evidence_gate.py \
+            artifacts/accessibility/current/evidence-bundle.json \
+            --repository-root . \
+            > artifacts/accessibility/current/evidence-summary.json
+
+      - name: Upload accessibility evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: accessibility-evidence-${{ github.run_id }}
+          path: |
+            artifacts/accessibility/
+            logs/accessibility-evidence-tests.xml
+          if-no-files-found: warn
+          retention-days: 30
+
+  scheduled-docusaurus:
+    name: Cadenced Docusaurus Evidence
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    uses: ./.github/workflows/docusaurus-tests.yml
+    with:
+      soft-fail: false
+      evidence-cadence: ${{ github.event_name == 'schedule' && 'scheduled' || inputs.evidence-cadence }}
+    permissions:
+      contents: read
+      id-token: write

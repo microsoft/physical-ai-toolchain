@@ -5,8 +5,11 @@ Provides endpoints for exporting episodes to HDF5 files with
 frame editing, removal, and sub-task annotations applied.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -20,6 +23,7 @@ from ..services.dataset_service import DatasetService, get_dataset_service
 from ..services.hdf5_exporter import (
     EpisodeEditOperations,
     ExportProgress,
+    ExportResult,
     HDF5Exporter,
     HDF5ExportError,
     parse_edit_operations,
@@ -32,6 +36,7 @@ from ..validation import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class ImageTransformRequest(SanitizedModel):
@@ -100,12 +105,23 @@ class ExportRequest(SanitizedModel):
 
 
 class ExportResultResponse(BaseModel):
-    """Export result response model."""
+    """Batch result with public error text and aggregate statistics on success or failure."""
 
     success: bool
     outputFiles: list[str]
     error: str | None = None
     stats: dict[str, Any] = Field(default_factory=dict)
+
+
+def _public_export_result(result: ExportResult) -> ExportResultResponse:
+    if not result.success:
+        logger.error("Export failed: %s", result.error)
+    return ExportResultResponse(
+        success=result.success,
+        outputFiles=result.output_files,
+        error=None if result.success else "Export failed",
+        stats=result.stats,
+    )
 
 
 @router.post(
@@ -203,12 +219,7 @@ async def export_episodes(
             edits_map=edits_map,
         )
 
-        return ExportResultResponse(
-            success=result.success,
-            outputFiles=result.output_files,
-            error=result.error,
-            stats=result.stats,
-        )
+        return _public_export_result(result)
 
     except ImportError as e:
         raise HTTPException(
@@ -377,19 +388,17 @@ async def export_episodes_stream(
                     break
 
             # Send completion event
-            complete_data = {
-                "success": result.success,
-                "outputFiles": result.output_files,
-                "error": result.error,
-                "stats": result.stats,
-            }
+            complete_data = _public_export_result(result).model_dump()
             yield f"event: complete\ndata: {json.dumps(complete_data)}\n\n"
 
-        except ImportError as e:
-            error_msg = f"Export not available: {e}"
-            yield f"event: error\ndata: {json.dumps({'error': error_msg})}\n\n"
-        except Exception as e:
-            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        except ImportError:
+            logger.exception("Export stream unavailable")
+            payload = {"code": "EXPORT_UNAVAILABLE", "message": "Export is unavailable"}
+            yield f"event: error\ndata: {json.dumps(payload)}\n\n"
+        except Exception:
+            logger.exception("Export stream failed")
+            payload = {"code": "EXPORT_FAILED", "message": "Export failed"}
+            yield f"event: error\ndata: {json.dumps(payload)}\n\n"
 
     return StreamingResponse(
         event_generator(),

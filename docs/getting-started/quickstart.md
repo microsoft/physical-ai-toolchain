@@ -3,7 +3,7 @@ sidebar_position: 2
 title: "Quickstart: Clone to First Training Job"
 description: Deploy infrastructure and submit your first robotics training job in 9 steps
 author: Microsoft Robotics-AI Team
-ms.date: 2026-08-31
+ms.date: 2026-09-11
 ms.topic: tutorial
 keywords:
   - quickstart
@@ -14,7 +14,7 @@ keywords:
 
 ## Quick Start
 
-The **default starting path is local, not cloud.** On T0 — Dev you close the full capture → train → validate → run loop on one laptop and one robot with zero cloud and zero Kubernetes, using `./setup-dev.sh` and the [Tier 0 — Dev recipe](../recipes/tier-0-dev/README.md). Start there; come back here when you graduate.
+The **default starting path is local, not cloud.** On T0 — Dev you close the full capture → train → validate → run loop on one laptop and one robot with zero cloud and no required Kubernetes, using `./setup-dev.sh` and the [Tier 0 — Dev recipe](../recipes/tier-0-dev/README.md). A single-laptop Kubernetes cluster is an optional local orchestration profile. Start there; come back here when you graduate.
 
 This guide is the **cloud path (T2 — Pilot)**: deploy the Azure + NVIDIA stack and submit a cloud training job in ~1.5-2 hours, using full-public networking and Access Keys authentication for the simplest path. Adopt it when training scale, team collaboration, or a shared model registry outgrows the laptop.
 
@@ -200,7 +200,7 @@ osmo profile set pool default
 osmo version
 ```
 
-See [OSMO Training — Connection Methods](../training/osmo-training.md#-connection-methods) for alternative access options (internal load balancer, ingress).
+See [Accessing OSMO](../training/osmo-training.md#-accessing-osmo) for alternative access options (internal load balancer, ingress).
 
 ## Step 9: Submit First Training Job
 

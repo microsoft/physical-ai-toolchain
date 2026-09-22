@@ -6,15 +6,18 @@ Supports both SAS token and managed identity authentication.
 
 from __future__ import annotations
 
+import hashlib
 import json
+from collections.abc import Mapping
 
 from ..models.annotations import EpisodeAnnotationFile
-from .base import StorageAdapter, StorageError
+from .base import RevisionConflictError, StorageAdapter, StorageError, VersionedValue
 from .paths import dataset_id_to_blob_prefix
 from .serializers import DateTimeEncoder
 
 # Azure SDK imports are optional - only required when using this adapter
 try:
+    from azure.core import MatchConditions
     from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
     from azure.identity.aio import DefaultAzureCredential
     from azure.storage.blob import ContentSettings
@@ -33,6 +36,7 @@ except ImportError:
 
     HttpResponseError = _HttpResponseErrorStub
     ResourceNotFoundError = _ResourceNotFoundErrorStub
+    MatchConditions = None
     DefaultAzureCredential = None
     ContentSettings = None
     BlobServiceClient = None
@@ -106,6 +110,18 @@ class AzureBlobStorageAdapter(StorageAdapter):
         blob_prefix = dataset_id_to_blob_prefix(dataset_id)
         return f"{blob_prefix}/annotations/episodes/episode_{episode_index:06d}.json"
 
+    @staticmethod
+    def _fallback_etag(content: bytes) -> str:
+        """Create a strong validator when a test double omits Azure properties."""
+        return f'"{hashlib.sha256(content).hexdigest()}"'
+
+    @staticmethod
+    def _response_etag(response: object, fallback: str) -> str:
+        if isinstance(response, Mapping) and response.get("etag"):
+            return str(response["etag"])
+        etag = getattr(response, "etag", None)
+        return str(etag) if isinstance(etag, str) and etag else fallback
+
     async def get_annotation(self, dataset_id: str, episode_index: int) -> EpisodeAnnotationFile | None:
         """
         Retrieve annotations for an episode from Azure Blob Storage.
@@ -141,7 +157,47 @@ class AzureBlobStorageAdapter(StorageAdapter):
         except Exception as e:
             raise StorageError(f"Failed to read blob {blob_path}: {e}", cause=e)
 
-    async def save_annotation(self, dataset_id: str, episode_index: int, annotation: EpisodeAnnotationFile) -> None:
+    async def get_annotation_versioned(
+        self,
+        dataset_id: str,
+        episode_index: int,
+    ) -> VersionedValue[EpisodeAnnotationFile]:
+        """Retrieve an annotation with its Azure ETag."""
+        blob_path = self._get_blob_path(dataset_id, episode_index)
+        try:
+            client = await self._get_client()
+            blob_client = client.get_container_client(self.container_name).get_blob_client(blob_path)
+            download = await blob_client.download_blob()
+            content = await download.readall()
+            properties = getattr(download, "properties", None)
+            etag = getattr(properties, "etag", None)
+            if isinstance(properties, Mapping):
+                etag = properties.get("etag")
+            return VersionedValue(
+                value=EpisodeAnnotationFile.model_validate(json.loads(content.decode("utf-8"))),
+                etag=str(etag) if etag else self._fallback_etag(content),
+            )
+        except ResourceNotFoundError:
+            return VersionedValue(value=None, etag=None)
+        except json.JSONDecodeError as exc:
+            raise StorageError(f"Invalid JSON in blob {blob_path}: {exc}", cause=exc) from exc
+        except HttpResponseError as exc:
+            raise StorageError(
+                f"Azure HTTP error reading blob {blob_path}: status={exc.status_code} error_code={exc.error_code}",
+                cause=exc,
+            ) from exc
+        except Exception as exc:
+            raise StorageError(f"Failed to read blob {blob_path}: {exc}", cause=exc) from exc
+
+    async def save_annotation(
+        self,
+        dataset_id: str,
+        episode_index: int,
+        annotation: EpisodeAnnotationFile,
+        *,
+        if_match: str | None = None,
+        if_none_match: bool = False,
+    ) -> str:
         """
         Save annotations for an episode to Azure Blob Storage.
 
@@ -168,13 +224,26 @@ class AzureBlobStorageAdapter(StorageAdapter):
                 cls=DateTimeEncoder,
             )
 
-            await blob_client.upload_blob(
-                json_content.encode("utf-8"),
-                overwrite=True,
+            content = json_content.encode("utf-8")
+            conditions: dict[str, object] = {"overwrite": True}
+            if if_match is not None:
+                conditions.update(etag=if_match, match_condition=MatchConditions.IfNotModified)
+            elif if_none_match:
+                conditions.update(overwrite=False, if_none_match="*")
+
+            result = await blob_client.upload_blob(
+                content,
                 content_settings=ContentSettings(content_type="application/json"),
+                **conditions,
             )
+            return self._response_etag(result, self._fallback_etag(content))
 
         except HttpResponseError as e:
+            if e.status_code == 412:
+                response = getattr(e, "response", None)
+                headers = getattr(response, "headers", {})
+                current_etag = headers.get("ETag") if headers else None
+                raise RevisionConflictError(current_etag) from e
             raise StorageError(
                 f"Azure HTTP error saving blob {blob_path}: status={e.status_code} error_code={e.error_code}",
                 cause=e,
@@ -222,7 +291,13 @@ class AzureBlobStorageAdapter(StorageAdapter):
         except Exception as e:
             raise StorageError(f"Failed to list annotations for {dataset_id}: {e}", cause=e)
 
-    async def delete_annotation(self, dataset_id: str, episode_index: int) -> bool:
+    async def delete_annotation(
+        self,
+        dataset_id: str,
+        episode_index: int,
+        *,
+        if_match: str | None = None,
+    ) -> bool:
         """
         Delete annotations for an episode from Azure Blob Storage.
 
@@ -240,12 +315,20 @@ class AzureBlobStorageAdapter(StorageAdapter):
             container_client = client.get_container_client(self.container_name)
             blob_client = container_client.get_blob_client(blob_path)
 
-            await blob_client.delete_blob()
+            conditions = {}
+            if if_match is not None:
+                conditions = {"etag": if_match, "match_condition": MatchConditions.IfNotModified}
+            await blob_client.delete_blob(**conditions)
             return True
 
         except ResourceNotFoundError:
             return False
         except HttpResponseError as e:
+            if e.status_code == 412:
+                response = getattr(e, "response", None)
+                headers = getattr(response, "headers", {})
+                current_etag = headers.get("ETag") if headers else None
+                raise RevisionConflictError(current_etag) from e
             raise StorageError(
                 f"Azure HTTP error deleting blob {blob_path}: status={e.status_code} error_code={e.error_code}",
                 cause=e,
