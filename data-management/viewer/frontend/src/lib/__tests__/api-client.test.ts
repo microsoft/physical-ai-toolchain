@@ -10,6 +10,8 @@ import {
 import {
   _resetCsrfToken,
   ApiClientError,
+  apiPath,
+  apiRequest,
   deleteAnnotations,
   fetchAnnotations,
   fetchAnnotationSummary,
@@ -45,6 +47,60 @@ describe('ApiClientError', () => {
     expect(err.status).toBe(404)
     expect(err.details).toEqual({ id: '1' })
     expect(err.name).toBe('ApiClientError')
+  })
+
+  describe('canonical transport', () => {
+    it('builds all backend paths from the shared API base', () => {
+      expect(apiPath('/datasets')).toBe('/api/datasets')
+      expect(apiPath('datasets/ds-1')).toBe('/api/datasets/ds-1')
+    })
+
+    it('attaches request headers and camelCases successful JSON responses', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          dataset_id: 'ds-1',
+          nested_value: { frame_count: 12 },
+        }),
+      )
+
+      await expect(
+        apiRequest<{ datasetId: string; nestedValue: { frameCount: number } }>('/datasets/ds-1'),
+      ).resolves.toEqual({
+        datasetId: 'ds-1',
+        nestedValue: { frameCount: 12 },
+      })
+      expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1', { headers: {} })
+    })
+
+    it('does not expose FastAPI detail text for server errors', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ detail: '/srv/data/private: permission denied' }, 500),
+      )
+
+      await expect(apiRequest('/datasets/ds-1')).rejects.toMatchObject({
+        name: 'ApiClientError',
+        code: 'HTTP_500',
+        status: 500,
+        message: 'The server could not complete the request',
+      })
+    })
+
+    it('uses a generic message for 5xx even with a known code and diagnostic details', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: 'DATASET_NOT_FOUND',
+            message: '/srv/data/private: permission denied',
+            details: { path: '/srv/data/private' },
+          },
+          500,
+        ),
+      )
+      await expect(apiRequest('/datasets/ds-1')).rejects.toMatchObject({
+        message: 'The server could not complete the request',
+        details: undefined,
+      })
+    })
   })
 })
 
@@ -324,8 +380,8 @@ describe('error handling', () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ApiClientError)
       const apiErr = err as ApiClientError
-      expect(apiErr.code).toBe('UNKNOWN_ERROR')
-      expect(apiErr.message).toBe('Internal Server Error')
+      expect(apiErr.code).toBe('HTTP_500')
+      expect(apiErr.message).toBe('The server could not complete the request')
     }
   })
 })
@@ -385,8 +441,8 @@ describe('mutationFetch', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
     const [url, init] = mockFetch.mock.calls[0]
     expect(url).toBe('/api/thing')
-    const headers = (init as RequestInit).headers as Record<string, string>
-    expect(headers).not.toHaveProperty('X-CSRF-Token')
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.has('X-CSRF-Token')).toBe(false)
   })
 
   it('skips CSRF fetch and omits X-CSRF-Token for HEAD requests', async () => {
@@ -396,8 +452,8 @@ describe('mutationFetch', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1)
     const [, init] = mockFetch.mock.calls[0]
-    const headers = (init as RequestInit).headers as Record<string, string>
-    expect(headers).not.toHaveProperty('X-CSRF-Token')
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.has('X-CSRF-Token')).toBe(false)
   })
 
   it.each(['POST', 'PUT', 'DELETE', 'PATCH'])(
@@ -410,8 +466,8 @@ describe('mutationFetch', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2)
       expect(mockFetch.mock.calls[0][0]).toBe('/api/csrf-token')
       const [, init] = mockFetch.mock.calls[1]
-      const headers = (init as RequestInit).headers as Record<string, string>
-      expect(headers['X-CSRF-Token']).toBe('test-csrf-token')
+      const headers = new Headers((init as RequestInit).headers)
+      expect(headers.get('X-CSRF-Token')).toBe('test-csrf-token')
     },
   )
 
@@ -423,8 +479,8 @@ describe('mutationFetch', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2)
     expect(mockFetch.mock.calls[0][0]).toBe('/api/csrf-token')
     const [, init] = mockFetch.mock.calls[1]
-    const headers = (init as RequestInit).headers as Record<string, string>
-    expect(headers['X-CSRF-Token']).toBe('test-csrf-token')
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.get('X-CSRF-Token')).toBe('test-csrf-token')
   })
 
   it('lets caller-provided headers win on key collision with X-CSRF-Token', async () => {
@@ -436,8 +492,22 @@ describe('mutationFetch', () => {
     })
 
     const [, init] = mockFetch.mock.calls[1]
-    const headers = (init as RequestInit).headers as Record<string, string>
-    expect(headers['X-CSRF-Token']).toBe('caller-override')
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.get('X-CSRF-Token')).toBe('caller-override')
+  })
+
+  it('lets differently-cased caller headers replace generated headers', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+
+    await mutationFetch('/api/thing', {
+      method: 'POST',
+      headers: { 'x-csrf-token': 'caller-override' },
+    })
+
+    const [, init] = mockFetch.mock.calls[1]
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.get('X-CSRF-Token')).toBe('caller-override')
+    expect([...headers.keys()].filter((name) => name === 'x-csrf-token')).toHaveLength(1)
   })
 })
 

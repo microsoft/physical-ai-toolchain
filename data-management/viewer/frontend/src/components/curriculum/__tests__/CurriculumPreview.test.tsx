@@ -8,9 +8,9 @@ import {
 
 const episode = (overrides: Partial<EpisodePreviewItem> = {}): EpisodePreviewItem => ({
   id: 'ep-1',
-  episode_id: 'episode_001',
-  has_anomalies: false,
-  has_issues: false,
+  episodeId: 'episode_001',
+  hasAnomalies: false,
+  hasIssues: false,
   ...overrides,
 })
 
@@ -40,11 +40,11 @@ describe('CurriculumPreview', () => {
     expect(screen.getByText('1,500 episodes')).toBeInTheDocument()
   })
 
-  it('renders each episode_id for displayed episodes', () => {
+  it('renders each episode ID for displayed episodes', () => {
     const episodes = [
-      episode({ id: 'a', episode_id: 'episode_aaa' }),
-      episode({ id: 'b', episode_id: 'episode_bbb' }),
-      episode({ id: 'c', episode_id: 'episode_ccc' }),
+      episode({ id: 'a', episodeId: 'episode_aaa' }),
+      episode({ id: 'b', episodeId: 'episode_bbb' }),
+      episode({ id: 'c', episodeId: 'episode_ccc' }),
     ]
 
     render(<CurriculumPreview episodes={episodes} totalCount={3} />)
@@ -55,7 +55,7 @@ describe('CurriculumPreview', () => {
   })
 
   it('renders task completion rating when present', () => {
-    render(<CurriculumPreview episodes={[episode({ task_completion_rating: 4 })]} totalCount={1} />)
+    render(<CurriculumPreview episodes={[episode({ taskCompletionRating: 4 })]} totalCount={1} />)
 
     expect(screen.getByText('4')).toBeInTheDocument()
   })
@@ -68,7 +68,7 @@ describe('CurriculumPreview', () => {
 
   it('renders trajectory quality score when present', () => {
     render(
-      <CurriculumPreview episodes={[episode({ trajectory_quality_score: 0.95 })]} totalCount={1} />,
+      <CurriculumPreview episodes={[episode({ trajectoryQualityScore: 0.95 })]} totalCount={1} />,
     )
 
     expect(screen.getByText('0.95')).toBeInTheDocument()
@@ -80,10 +80,10 @@ describe('CurriculumPreview', () => {
     expect(container.querySelector('.text-green-500')).toBeNull()
   })
 
-  it('renders thumbnail image when thumbnail_url provided', () => {
+  it('renders thumbnail image when thumbnail URL is provided', () => {
     render(
       <CurriculumPreview
-        episodes={[episode({ thumbnail_url: 'https://example.com/thumb.jpg' })]}
+        episodes={[episode({ thumbnailUrl: 'https://example.com/thumb.jpg' })]}
         totalCount={1}
       />,
     )
@@ -93,32 +93,32 @@ describe('CurriculumPreview', () => {
     expect(img?.getAttribute('src')).toBe('https://example.com/thumb.jpg')
   })
 
-  it('renders placeholder icon when thumbnail_url is missing', () => {
+  it('renders placeholder icon when thumbnail URL is missing', () => {
     const { container } = render(<CurriculumPreview episodes={[episode()]} totalCount={1} />)
 
     expect(container.querySelector('img')).toBeNull()
     expect(container.querySelector('.bg-muted.flex.h-10.w-14')).not.toBeNull()
   })
 
-  it('renders Anomaly badge when has_anomalies is true', () => {
-    render(<CurriculumPreview episodes={[episode({ has_anomalies: true })]} totalCount={1} />)
+  it('renders Anomaly badge when hasAnomalies is true', () => {
+    render(<CurriculumPreview episodes={[episode({ hasAnomalies: true })]} totalCount={1} />)
 
     expect(screen.getByText('Anomaly')).toBeInTheDocument()
   })
 
-  it('does not render Anomaly badge when has_anomalies is false', () => {
+  it('does not render Anomaly badge when hasAnomalies is false', () => {
     render(<CurriculumPreview episodes={[episode()]} totalCount={1} />)
 
     expect(screen.queryByText('Anomaly')).not.toBeInTheDocument()
   })
 
-  it('renders Issue badge when has_issues is true', () => {
-    render(<CurriculumPreview episodes={[episode({ has_issues: true })]} totalCount={1} />)
+  it('renders Issue badge when hasIssues is true', () => {
+    render(<CurriculumPreview episodes={[episode({ hasIssues: true })]} totalCount={1} />)
 
     expect(screen.getByText('Issue')).toBeInTheDocument()
   })
 
-  it('does not render Issue badge when has_issues is false', () => {
+  it('does not render Issue badge when hasIssues is false', () => {
     render(<CurriculumPreview episodes={[episode()]} totalCount={1} />)
 
     expect(screen.queryByText('Issue')).not.toBeInTheDocument()
@@ -126,7 +126,7 @@ describe('CurriculumPreview', () => {
 
   it('renders "more episodes" footer when totalCount exceeds previewLimit', () => {
     const episodes = Array.from({ length: 50 }, (_, i) =>
-      episode({ id: `e-${i}`, episode_id: `episode_${i}` }),
+      episode({ id: `e-${i}`, episodeId: `episode_${i}` }),
     )
 
     render(<CurriculumPreview episodes={episodes} totalCount={100} />)
@@ -136,7 +136,7 @@ describe('CurriculumPreview', () => {
 
   it('omits "more episodes" footer when totalCount equals previewLimit', () => {
     const episodes = Array.from({ length: 3 }, (_, i) =>
-      episode({ id: `e-${i}`, episode_id: `episode_${i}` }),
+      episode({ id: `e-${i}`, episodeId: `episode_${i}` }),
     )
 
     render(<CurriculumPreview episodes={episodes} totalCount={3} />)
@@ -146,7 +146,7 @@ describe('CurriculumPreview', () => {
 
   it('limits displayed episodes to previewLimit', () => {
     const episodes = Array.from({ length: 60 }, (_, i) =>
-      episode({ id: `e-${i}`, episode_id: `episode_${i.toString().padStart(3, '0')}` }),
+      episode({ id: `e-${i}`, episodeId: `episode_${i.toString().padStart(3, '0')}` }),
     )
 
     render(<CurriculumPreview episodes={episodes} totalCount={60} previewLimit={10} />)
@@ -159,7 +159,7 @@ describe('CurriculumPreview', () => {
 
   it('shows custom previewLimit footer math', () => {
     const episodes = Array.from({ length: 5 }, (_, i) =>
-      episode({ id: `e-${i}`, episode_id: `episode_${i}` }),
+      episode({ id: `e-${i}`, episodeId: `episode_${i}` }),
     )
 
     render(<CurriculumPreview episodes={episodes} totalCount={20} previewLimit={5} />)
@@ -186,7 +186,7 @@ describe('CurriculumPreview', () => {
   it('renders both rating and quality score together when both are present', () => {
     render(
       <CurriculumPreview
-        episodes={[episode({ task_completion_rating: 5, trajectory_quality_score: 0.87 })]}
+        episodes={[episode({ taskCompletionRating: 5, trajectoryQualityScore: 0.87 })]}
         totalCount={1}
       />,
     )
@@ -198,7 +198,7 @@ describe('CurriculumPreview', () => {
   it('renders both Anomaly and Issue badges when both flags are true', () => {
     render(
       <CurriculumPreview
-        episodes={[episode({ has_anomalies: true, has_issues: true })]}
+        episodes={[episode({ hasAnomalies: true, hasIssues: true })]}
         totalCount={1}
       />,
     )
@@ -211,17 +211,17 @@ describe('CurriculumPreview', () => {
     const episodes: EpisodePreviewItem[] = [
       episode({
         id: '1',
-        episode_id: 'with_thumb',
-        thumbnail_url: 'https://example.com/1.jpg',
-        task_completion_rating: 3,
+        episodeId: 'with_thumb',
+        thumbnailUrl: 'https://example.com/1.jpg',
+        taskCompletionRating: 3,
       }),
       episode({
         id: '2',
-        episode_id: 'with_score',
-        trajectory_quality_score: 0.5,
-        has_anomalies: true,
+        episodeId: 'with_score',
+        trajectoryQualityScore: 0.5,
+        hasAnomalies: true,
       }),
-      episode({ id: '3', episode_id: 'plain' }),
+      episode({ id: '3', episodeId: 'plain' }),
     ]
 
     render(<CurriculumPreview episodes={episodes} totalCount={3} />)
