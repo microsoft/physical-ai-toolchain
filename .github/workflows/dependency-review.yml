@@ -22,6 +22,8 @@ jobs:
           persist-credentials: false
 
       - name: Dependency Review
+        id: dependency-review
+        continue-on-error: true
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: moderate
@@ -34,7 +36,6 @@ jobs:
           # GHSA-46r5-x6jq-v8g6: mlflow — AJAX artifact download authorization bypass; no upstream fix; server-side only, repo uses client only (CVE-2026-33866)
           # GHSA-fh64-r2vc-xvhr: mlflow — stored XSS via YAML MLmodel artifacts; fixed in 3.11.1; blocked by azureml-mlflow<=3.9.0 ceiling; server-side only (CVE-2026-33865)
           # GHSA-h35f-9h28-mq5c: setuptools — macOS Unicode normalization bypass when publishing sdists; runtime lock installs wheels on Linux and never publishes packages
-          # GHSA-xrqw-3rrv-vx5w: transformers — save_pretrained() path traversal via attacker-controlled chat_template keys; fixed in 5.10.0; lerobot==0.6.1 constrains transformers<5.6.0 so no fix is installable yet; the SO-101 example never calls save_pretrained() on a Hub-downloaded tokenizer/processor, only load()s its own pinned checkpoint (CVE-2026-9856)
           allow-ghsas: >-
             GHSA-wf7f-8fxf-xfxc,
             GHSA-pgqp-8h46-6x4j,
@@ -43,5 +44,96 @@ jobs:
             GHSA-7qhf-v65m-g5f3,
             GHSA-46r5-x6jq-v8g6,
             GHSA-fh64-r2vc-xvhr,
-            GHSA-h35f-9h28-mq5c,
-            GHSA-xrqw-3rrv-vx5w
+            GHSA-h35f-9h28-mq5c
+
+      # GHSA-xrqw-3rrv-vx5w affects transformers<5.10.0, while LeRobot 0.6.1
+      # constrains the SO-101 lock below 5.6.0. The example does not save
+      # attacker-supplied tokenizers or processors.
+      # Exception owner: @microsoft/edge-ai-core-dev.
+      # Remove after adopting a LeRobot release compatible with transformers>=5.10.0
+      # and regenerating the SO-101 uv.lock with the patched transformers release.
+      - name: Enforce path-scoped vulnerability exceptions
+        if: always()
+        env:
+          DEPENDENCY_REVIEW_OUTCOME: ${{ steps.dependency-review.outcome }}
+          VULNERABLE_CHANGES: ${{ steps.dependency-review.outputs.vulnerable-changes }}
+          INVALID_LICENSE_CHANGES: ${{ steps.dependency-review.outputs.invalid-license-changes }}
+          DENIED_CHANGES: ${{ steps.dependency-review.outputs.denied-changes }}
+          SCOPED_GHSA: GHSA-xrqw-3rrv-vx5w
+          SCOPED_MANIFEST: gpu-offload/examples/so101-real-hardware/uv.lock
+          SCOPED_PACKAGE: transformers
+        shell: bash
+        run: |
+          set -o errexit -o nounset -o pipefail
+
+          if [[ "$DEPENDENCY_REVIEW_OUTCOME" == "success" ]]; then
+            exit 0
+          fi
+
+          if [[ -z "$VULNERABLE_CHANGES" || -z "$INVALID_LICENSE_CHANGES" || -z "$DENIED_CHANGES" ]]; then
+            echo "::error::Dependency review failed without complete policy outputs"
+            exit 1
+          fi
+
+          for policy_output in "$VULNERABLE_CHANGES" "$INVALID_LICENSE_CHANGES" "$DENIED_CHANGES"; do
+            if ! jq -e . >/dev/null 2>&1 <<< "$policy_output"; then
+              echo "::error::Dependency review returned an invalid policy output"
+              exit 1
+            fi
+          done
+
+          scoped_exception_count="$(
+            jq \
+              --arg advisory "$SCOPED_GHSA" \
+              --arg manifest "$SCOPED_MANIFEST" \
+              --arg package "$SCOPED_PACKAGE" \
+              '[
+                .[] as $change
+                | $change.vulnerabilities[]
+                | select(
+                    $change.change_type == "added"
+                    and $change.ecosystem == "pip"
+                    and $change.name == $package
+                    and (($change.manifest | ltrimstr("./") | ltrimstr("/")) == $manifest)
+                    and .advisory_ghsa_id == $advisory
+                  )
+              ] | length' <<< "$VULNERABLE_CHANGES"
+          )"
+
+          remaining_vulnerabilities="$(
+            jq \
+              --arg advisory "$SCOPED_GHSA" \
+              --arg manifest "$SCOPED_MANIFEST" \
+              --arg package "$SCOPED_PACKAGE" \
+              '[
+                .[]
+                | . as $change
+                | .vulnerabilities |= map(
+                    select(
+                      $change.change_type != "added"
+                      or $change.ecosystem != "pip"
+                      or $change.name != $package
+                      or (($change.manifest | ltrimstr("./") | ltrimstr("/")) != $manifest)
+                      or .advisory_ghsa_id != $advisory
+                    )
+                  )
+                | select(.vulnerabilities | length > 0)
+              ]' <<< "$VULNERABLE_CHANGES"
+          )"
+          remaining_vulnerability_count="$(jq 'length' <<< "$remaining_vulnerabilities")"
+          invalid_license_count="$(
+            jq '[.forbidden[], .unresolved[]] | length' <<< "$INVALID_LICENSE_CHANGES"
+          )"
+          denied_change_count="$(jq 'length' <<< "$DENIED_CHANGES")"
+
+          if [[ "$scoped_exception_count" -gt 0
+            && "$remaining_vulnerability_count" -eq 0
+            && "$invalid_license_count" -eq 0
+            && "$denied_change_count" -eq 0 ]]; then
+            echo "::notice::Accepted $SCOPED_GHSA only for $SCOPED_PACKAGE in $SCOPED_MANIFEST"
+            exit 0
+          fi
+
+          echo "::error::Dependency review found policy violations outside the path-scoped exception"
+          jq . <<< "$remaining_vulnerabilities"
+          exit 1
