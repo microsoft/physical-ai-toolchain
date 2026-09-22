@@ -255,6 +255,8 @@ def validate_xavier_config(
         )
     if "encryption" in normalized:
         normalized["encryption"] = _normalize_bool(normalized["encryption"], field=f"{source}.encryption")
+    elif materialize_default_stage:
+        normalized["encryption"] = True
     if "networkPolicy" in normalized:
         normalized["networkPolicy"] = _normalize_bool(
             normalized["networkPolicy"],
@@ -565,7 +567,7 @@ def DoMutate(
         return False
 
     effective_config = resolved_config if resolved_config is not None else xaviercfg
-    encryption_enabled = effective_config.get("encryption", False) is True
+    encryption_enabled = effective_config.get("encryption", True) is True
     changed = False
     template_metadata = get_template_metadata(obj)
     if template_metadata is not None:
@@ -826,7 +828,7 @@ def create_server_deployment_spec(
     copy_allowed_volumes_and_mounts(deployment["spec"]["template"]["spec"], spec, xavier_container)
 
     container = deployment["spec"]["template"]["spec"]["containers"][0]
-    encryption_enabled = xavierconfig.get("encryption", False) is True
+    encryption_enabled = xavierconfig.get("encryption", True) is True
     secret_name = encryption_secret_name(obj)
     client_encryption_enabled = has_encryption_secret_mount(spec, xavier_container, secret_name)
     if encryption_enabled != client_encryption_enabled:
@@ -1240,7 +1242,7 @@ def reconcile_object(
     if is_opted_root:
         namespace = metadata.get("namespace", "default")
         xavierconfig = merge_configmap_config(core_api, xaviercfg, namespace)
-        encryption_enabled = xavierconfig.get("encryption", False) is True
+        encryption_enabled = xavierconfig.get("encryption", True) is True
         xavier_container = get_xavier_container(spec)
         secret_name = encryption_secret_name(obj)
         client_encryption_enabled = (

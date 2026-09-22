@@ -197,13 +197,12 @@ def allowallfunctions(cls, isserver):
             # if function is defined in this class, then qualname uses this class, and module
             # in this case actclasskey is mod.thisclass, and funcname is func, so key is mod.thisclass.func
             key, module_name, func_name, class_name = remoter.getfuncname(attr_value)  # noqa: RUF059 vendored from microsoft/xavier, not refactored
+            callable_key = f"{actclasskey}/{attr_name}"
             # assert func_name == attr_name, "Function name mismatch" -- this fails sometimes
             if func_name != attr_name:
                 logger.warning(f"Function name mismatch: {func_name} != {attr_name}", color="yellow")
             if attr_name == "__init__":
                 initfound = True
-            logger.info(f"Adding function {key} to allowed functions")
-            remoter.allow_function(key)
             # now check if func is remotable task - client is always remotable by default, server not
             remoteable = isremoteable(isserver, key, actclasskey)
             singleinstance = remoter.getparam("singleinstance", key, actclasskey, False)
@@ -220,17 +219,20 @@ def allowallfunctions(cls, isserver):
                 # remoter.allowed_functions.add(f"remoter.remoter//singleton_new")
                 logger.info(f"Single instance non-remoteable class {actclasskey} __init__ decorated", color="green")
             elif remoteable and (attr_name not in noremotefuncs):
-                # if already has "__isremoted__" attribute, skip
-                if hasattr(attr_value, "__isremoted__"):
-                    logger.info(f"Function {key} already decorated, skipping", color="yellow")
-                    continue
+                logger.info(f"Adding function {callable_key} to allowed functions")
                 remotefunc = remoter.createRemotedTask(
-                    attr_value, taskname, functype, timeout=timeout
+                    attr_value,
+                    taskname,
+                    functype,
+                    timeout=timeout,
+                    callable_key=callable_key,
                 )  # overwrite functions
                 setattr(cls, attr_name, remotefunc)
-                logger.info(f"Function {key} remoteable={remoteable} remoteloc={remoteloc}", color="green")
-            if remoteloc is not None:
-                remoter.setfixedlocs({key: remoteloc})
+                logger.info(f"Function {callable_key} remoteable={remoteable} remoteloc={remoteloc}", color="green")
+                if remoteloc is not None:
+                    remoter.setfixedlocs({callable_key: remoteloc})
+            else:
+                remoter.disallow_function(callable_key)
     assert initfound, "No __init__ method found in remoted class"
     remoteableclass = isremoteable(isserver, actclasskey + "/", actclasskey)
     singleinstanceclass = remoter.getparam("singleinstance", actclasskey + "/", actclasskey, False)

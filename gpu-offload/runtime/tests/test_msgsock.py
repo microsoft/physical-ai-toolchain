@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import secrets
+import socket
+import threading
 
 import pytest
 
 from remoter import autoremote, msgsock
 from remoter.msgsock import decryptMessage, encryptMessage, noncelen
+from remoter.msgtcp import MessengerTCP
 
 _AES_GCM_TAG_BYTES = 16
 
@@ -47,24 +50,24 @@ def test_aes_gcm_uses_unique_nonces() -> None:
     assert decryptMessage(second, key) == payload
 
 
-def test_configure_message_encryption_loads_key_file(tmp_path, monkeypatch) -> None:
+def test_configure_message_encryption_defaults_to_enabled(tmp_path, monkeypatch) -> None:
     key = secrets.token_bytes(32)
     key_file = tmp_path / "key"
     key_file.write_bytes(key)
     monkeypatch.setenv("REMOTER_KEY_FILE", str(key_file))
     monkeypatch.setattr(msgsock, "msgkey", None)
 
-    autoremote.configure_message_encryption({"encryption": True})
+    autoremote.configure_message_encryption({})
 
     assert msgsock.msgkey == key
 
 
-def test_configure_message_encryption_requires_key_file(monkeypatch) -> None:
+def test_configure_message_encryption_rejects_unauthenticated_default(monkeypatch) -> None:
     monkeypatch.delenv("REMOTER_KEY_FILE", raising=False)
     monkeypatch.setattr(msgsock, "msgkey", None)
 
     with pytest.raises(RuntimeError, match="REMOTER_KEY_FILE"):
-        autoremote.configure_message_encryption({"encryption": True})
+        autoremote.configure_message_encryption({})
 
 
 def test_configure_message_encryption_rejects_invalid_key_length(tmp_path, monkeypatch) -> None:
@@ -83,3 +86,29 @@ def test_configure_message_encryption_clears_key_when_disabled(monkeypatch) -> N
     autoremote.configure_message_encryption({"encryption": False})
 
     assert msgsock.msgkey is None
+
+
+def test_forged_peer_message_is_rejected_before_handler(monkeypatch) -> None:
+    server_key = secrets.token_bytes(32)
+    client_sock, server_sock = socket.socketpair()
+    handled = []
+    closed = threading.Event()
+    monkeypatch.setattr(msgsock, "msgkey", server_key)
+    messenger = MessengerTCP(
+        server_sock,
+        "tcp://forged-peer:1",
+        handlefn=lambda data, _messenger, _endpoint: handled.append(data),
+        closefn=lambda _messenger, _endpoint: closed.set(),
+    )
+    thread = threading.Thread(target=messenger.recvthread)
+    thread.start()
+
+    payload = encryptMessage(b"forged RPC payload", secrets.token_bytes(32))
+    frame = messenger.data + payload
+    client_sock.sendall(len(frame).to_bytes(4, "big") + frame)
+
+    assert closed.wait(timeout=2)
+    thread.join(timeout=2)
+    assert handled == []
+    assert messenger.closecalled is True
+    client_sock.close()

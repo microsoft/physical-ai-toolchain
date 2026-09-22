@@ -70,7 +70,7 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 | `securityContext`    | object                | Implemented | Validated server container security context           |
 | `env`                | list of name/value    | Implemented | Environment merged into server container              |
 | `remoteableenv`      | list of strings       | Implemented | Client env var names allowed onto the server          |
-| `encryption`         | boolean               | Implemented | AES-GCM with a controller-managed per-workload key    |
+| `encryption`         | boolean               | Implemented | AES-GCM with a controller-managed key; defaults to `true` |
 | `networkPolicy`      | boolean               | Implemented | Same-namespace RPC ingress; defaults to `true`        |
 | `noserverdeployment` | boolean               | Implemented | Skips server Deployment creation                      |
 | `serverstages`       | list of stage objects | Implemented | Shared and per-client server stages                   |
@@ -84,8 +84,10 @@ The `remote.yaml` ConfigMap in `data.remote.yaml` may include these fields:
 3. No privilege escalation: controller never adds privileged contexts
 4. Atomic per-workload: all containers in a workload see consistent mutation
 5. Idempotent: re-applying the same workload manifest produces same result
-6. Secret isolation: encryption keys are generated in-cluster and mounted as files
-7. Server isolation: generated server pods accept RPC traffic only from their namespace by default
+6. Peer authentication: AES-GCM is enabled by default with an explicit plaintext opt-out
+7. Callable authorization: exact identities are checked against an immutable policy before import or argument rehydration
+8. Secret isolation: encryption keys are generated in-cluster and mounted as files
+9. Server isolation: generated server pods accept RPC traffic only from their namespace by default
 
 ## Validation
 

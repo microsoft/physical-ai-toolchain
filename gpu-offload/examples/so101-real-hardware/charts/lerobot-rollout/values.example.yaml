@@ -52,4 +52,4 @@ devices:
 
 offload:
   enabled: true
-  encryption: false
+  encryption: true

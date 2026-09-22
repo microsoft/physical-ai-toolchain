@@ -285,11 +285,9 @@ def test_admission_review_returns_patch_for_opted_workload():
     )
 
 
-def test_admission_review_injects_encryption_secret_from_remote_config():
+def test_admission_review_injects_encryption_secret_by_default():
     mod = _load_mutate_module()
-    core_api = _FakeCoreApi(
-        {("default", "client-cm"): {"remote.yaml": "encryption: true\nserverstages:\n  - name: gpu\n"}}
-    )
+    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": "serverstages:\n  - name: gpu\n"}})
     controller = mod.XavierAdmissionController(core_api=core_api)
     review = {
         "apiVersion": "admission.k8s.io/v1",
@@ -309,6 +307,31 @@ def test_admission_review_injects_encryption_secret_from_remote_config():
     assert "client-deployment-remoter-key" in patch_json
     assert "REMOTER_KEY_FILE" in patch_json
     assert mod.REMOTER_KEY_PATH in patch_json
+
+
+def test_admission_review_allows_explicit_encryption_opt_out():
+    mod = _load_mutate_module()
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": "encryption: false\nserverstages:\n  - name: gpu\n"}}
+    )
+    controller = mod.XavierAdmissionController(core_api=core_api)
+    review = {
+        "apiVersion": "admission.k8s.io/v1",
+        "kind": "AdmissionReview",
+        "request": {
+            "uid": "plaintext",
+            "operation": "CREATE",
+            "object": _base_workload(),
+        },
+    }
+
+    status_code, response = controller.handle_admission_review(review)
+
+    assert status_code == 200
+    assert response["response"]["allowed"] is True
+    patch_json = json.dumps(_decode_patch(response))
+    assert "client-deployment-remoter-key" not in patch_json
+    assert "REMOTER_KEY_FILE" not in patch_json
 
 
 def test_admission_review_passes_through_non_opted_workload():
@@ -451,13 +474,19 @@ def test_validate_xavier_config_rejects_escalation_capabilities_and_unconfined_s
 def test_validate_xavier_config_accepts_only_top_level_encryption():
     mod = _load_mutate_module()
 
+    defaulted = mod.validate_xavier_config(
+        {"remoteablecm": "cm"},
+        source="annotation",
+        require_remoteablecm=True,
+    )
     normalized = mod.validate_xavier_config(
-        {"remoteablecm": "cm", "encryption": "true"},
+        {"remoteablecm": "cm", "encryption": "false"},
         source="annotation",
         require_remoteablecm=True,
     )
 
-    assert normalized["encryption"] is True
+    assert defaulted["encryption"] is True
+    assert normalized["encryption"] is False
     with pytest.raises(mod.XavierConfigError, match="top-level setting"):
         mod.validate_xavier_config(
             {"remoteablecm": "cm", "serverstages": [{"name": "gpu", "encryption": True}]},
@@ -497,6 +526,7 @@ def test_build_desired_server_deployments_merges_supported_schema_fields():
                 "remote.yaml": (
                     "serverimage: registry/default:1\n"
                     "serverreplicas: 2\n"
+                    "encryption: false\n"
                     "remoteableenv:\n"
                     "  - KEEP_ME\n"
                     "  - FROM_FIELD\n"
@@ -627,7 +657,11 @@ def test_build_desired_server_deployments_uses_parent_config_for_perclient_pods(
     parent["metadata"]["annotations"]["xavierconfig"] = "remoteablecm: client-cm\n"
     parent["spec"]["template"]["spec"]["containers"][0]["env"] = [{"name": "XAVIER_CONTAINER", "value": "true"}]
     core_api = _FakeCoreApi(
-        {("default", "client-cm"): {"remote.yaml": "serverstages:\n  - name: perclient\n    perclient: true\n"}}
+        {
+            ("default", "client-cm"): {
+                "remote.yaml": "encryption: false\nserverstages:\n  - name: perclient\n    perclient: true\n"
+            }
+        }
     )
     apps_api = _FakeAppsApi(parent_deployments={("default", "owner"): parent})
     batch_api = _FakeBatchApi()
@@ -737,14 +771,12 @@ def test_reconcile_object_creates_stable_encryption_secret_and_mounts_it():
     mod.DoMutate(
         deploy,
         strict=True,
-        resolved_config={"remoteablecm": "client-cm", "encryption": True},
+        resolved_config={"remoteablecm": "client-cm"},
     )
     deploy["spec"]["template"]["spec"]["containers"][0]["env"].append(
         {"name": "REMOTERPORT", "value": "30001"}
     )
-    core_api = _FakeCoreApi(
-        {("default", "client-cm"): {"remote.yaml": 'encryption: true\nserverstages:\n  - name: ""\n'}}
-    )
+    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
     apps_api = _FakeAppsApi()
     batch_api = _FakeBatchApi()
 
@@ -780,7 +812,7 @@ def test_reconcile_object_deletes_managed_secret_when_encryption_is_disabled():
     ]
     secret = mod._create_encryption_secret_spec("client-deployment-remoter-key", "default", deploy)
     core_api = _FakeCoreApi(
-        {("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}},
+        {("default", "client-cm"): {"remote.yaml": 'encryption: false\nserverstages:\n  - name: ""\n'}},
         {("default", "client-deployment-remoter-key"): secret},
     )
 
@@ -819,7 +851,9 @@ def test_reconcile_object_deletes_server_deployment_for_removed_stage():
             }
         }
     )
-    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'encryption: false\nserverstages:\n  - name: ""\n'}}
+    )
     batch_api = _FakeBatchApi()
 
     outcomes = mod.reconcile_object(deploy, core_api=core_api, apps_api=apps_api, batch_api=batch_api)
@@ -883,7 +917,9 @@ def test_create_server_deployment_spec_excludes_secret_bearing_volumes():
         },
         {"name": "config", "configMap": {"name": "app-config"}},
     ]
-    core_api = _FakeCoreApi({("default", "client-cm"): {"remote.yaml": 'serverstages:\n  - name: ""\n'}})
+    core_api = _FakeCoreApi(
+        {("default", "client-cm"): {"remote.yaml": 'encryption: false\nserverstages:\n  - name: ""\n'}}
+    )
     apps_api = _FakeAppsApi()
     batch_api = _FakeBatchApi()
 
@@ -910,7 +946,9 @@ def test_create_server_deployment_spec_only_forwards_allow_listed_env():
     core_api = _FakeCoreApi(
         {
             ("default", "client-cm"): {
-                "remote.yaml": "\n".join(["serverstages:", '  - name: ""', "remoteableenv:", "  - SAFE_VALUE", ""])
+                "remote.yaml": "\n".join(
+                    ["encryption: false", "serverstages:", '  - name: ""', "remoteableenv:", "  - SAFE_VALUE", ""]
+                )
             }
         }
     )

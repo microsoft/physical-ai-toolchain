@@ -110,7 +110,7 @@ def allow_configured_modules(cfg: dict) -> None:
 
 
 def configure_message_encryption(cfg: dict) -> None:
-    encryption_enabled = cfg.get("encryption", False)
+    encryption_enabled = cfg.get("encryption", True)
     if not isinstance(encryption_enabled, bool):
         raise ValueError("encryption must be a boolean")
     if not encryption_enabled:
@@ -186,7 +186,13 @@ def apply_decorators_from_config(configpath) -> bool:
             timeout = params.get("timeout", None)
 
             if inspect.isfunction(target):
-                new_target = remoter.createRemotedTask(target, taskkey, functype, timeout=timeout)
+                new_target = remoter.createRemotedTask(
+                    target,
+                    taskkey,
+                    functype,
+                    timeout=timeout,
+                    callable_key=target_path,
+                )
                 if class_name:
                     setattr(cls, attr_name, new_target)
                 else:

@@ -31,7 +31,7 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 | `remoteclasses`  | list of mappings | No       | Classes whose methods execute in stages      |
 | `remotefuncs`    | list of mappings | No       | Functions that execute in stages             |
 | `allowedmodules` | list of strings  | No       | Permit additional runtime module imports     |
-| `encryption`     | boolean          | No       | Encrypt and authenticate RPC payloads        |
+| `encryption`     | boolean          | No       | Encrypt and authenticate RPC payloads; default `true` |
 | `networkPolicy`  | boolean          | No       | Restrict server ingress to the namespace     |
 
 ## networkPolicy
@@ -57,10 +57,10 @@ NetworkPolicy enforcement is additive and depends on the installed CNI.
 
 ## encryption
 
-Set `encryption: true` to enable AES-GCM for RPC data messages. The controller
-generates one random 32-byte key per opted-in workload, stores it in a
-controller-managed Kubernetes Secret, and mounts the same key read-only into the
-client containers and every generated server stage.
+`encryption` defaults to `true`. AES-GCM encrypts and authenticates RPC data
+messages. The controller generates one random 32-byte key per opted-in workload,
+stores it in a controller-managed Kubernetes Secret, and mounts the same key
+read-only into the client containers and every generated server stage.
 
 ```yaml
 encryption: true
@@ -78,12 +78,29 @@ variables. The manifest contains only the generated Secret name and the
 transport key for all server stages. Configure it before creating the workload;
 changing the ConfigMap does not mutate an existing client pod template.
 
+Set `encryption: false` only for trusted development environments that require
+plaintext RPC. NetworkPolicy isolation does not authenticate same-namespace
+peers and does not replace transport authentication.
+
 ## allowedmodules
 
 The runtime imports only modules present in its exact-match allowlist. Modules
 referenced by `remoteclasses`, `remotefuncs`, and `stubs` are added automatically.
 Use `allowedmodules` for modules that RPC reconstruction requires but the remote
 symbol configuration does not reference directly.
+
+The runtime builds an exact callable policy after applying remoteability,
+`noremotefuncs`, and stub mappings. It freezes the policy before opening the
+RPC listener. Each request must provide matching `key`, module, class, and
+function fields, and the resulting canonical identity must be in the frozen
+policy. Rejection occurs before argument rehydration, module import, attribute
+lookup, or class construction.
+
+Standalone deployments build the same policy from the local `remote.yaml`.
+They do not require Kubernetes or the controller. Configure all remote
+functions and classes before starting the runtime; authorization cannot expand
+after startup. The deprecated `--allowall` runtime option is rejected because
+it bypasses exact callable authorization.
 
 ```yaml
 allowedmodules:

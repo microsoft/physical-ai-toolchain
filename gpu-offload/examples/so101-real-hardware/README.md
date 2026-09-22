@@ -179,13 +179,13 @@ Benchmark synthetic sensor observations without opening robot devices:
 # Plaintext GPU offload
 ./scripts/install_k8s_rollout.sh --offload \
   --set job.suspend=false \
-  --set benchmark.enabled=true
+  --set benchmark.enabled=true \
+  --set offload.encryption=false
 
-# AES-GCM GPU offload
+# AES-GCM GPU offload (default)
 ./scripts/install_k8s_rollout.sh --offload \
   --set job.suspend=false \
-  --set benchmark.enabled=true \
-  --set offload.encryption=true
+  --set benchmark.enabled=true
 ```
 
 The benchmark defaults to 10 warm-up calls followed by 100 measured calls. It
@@ -197,6 +197,9 @@ from the existing action queue.
 Override `benchmark.calls`, `benchmark.warmupCalls`, and `benchmark.seed` to
 change the workload. Direct mode requires a GPU limit on the client Job.
 Offloaded modes request the GPU only for the generated server Deployment.
+AES-GCM peer authentication and encryption are enabled by default. Set
+`offload.encryption=false` only for trusted development environments that
+require plaintext RPC.
 
 Use a Pi0.5 checkpoint by selecting its policy class and mounting an existing
 claim:
@@ -211,8 +214,8 @@ claim:
 ```
 
 The same Pi0.5 overrides apply to direct and encrypted runs. Omit `--offload`
-and request a client GPU for direct mode; add `--set offload.encryption=true`
-for encrypted offload.
+and request a client GPU for direct mode; add
+`--set offload.encryption=false` only for plaintext offload.
 
 Enable aggregated control-loop timing for a rollout:
 

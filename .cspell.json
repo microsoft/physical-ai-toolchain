@@ -9,6 +9,8 @@
 	"words": [
 		"acrosmorbt",
 		"admissionregistration",
+		"allowall",
+		"allowedmodules",
 		"apprmt",
 		"aoai",
 		"asname",
@@ -85,6 +87,7 @@
 		"remoteableconts",
 		"remoteableenv",
 		"remoteable",
+		"remoteability",
 		"remoteclass",
 		"remoteclasses",
 		"remoted",

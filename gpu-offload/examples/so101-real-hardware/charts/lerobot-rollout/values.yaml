@@ -76,7 +76,7 @@ podAnnotations: {}
 
 offload:
   enabled: false
-  encryption: false
+  encryption: true
   configMapName: ""
   serviceAccountName: ""
   port: "30001"

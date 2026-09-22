@@ -298,7 +298,8 @@ def getdictparam(key: str, funckey: str, actclasskey: str) -> dict:
 imported_modules: dict[str, ModuleType] = {}
 imported_functions: dict[str, Callable] = {}
 
-allowed_functions = set()
+allowed_functions: set[str] | frozenset[str] = set()
+callable_policy_frozen = False
 allowed_modules = {"remoter.remoter", "remoter.rmtclass"}
 allowed_print = False
 is_process = False
@@ -310,18 +311,53 @@ class ModuleNotAllowedError(ImportError):
     pass
 
 
+class CallableNotAllowedError(CodecError):
+    pass
+
+
 def allow_module(module_name: str) -> None:
     if not isinstance(module_name, str) or not module_name:
         raise ValueError("Allowed module names must be non-empty strings")
     allowed_modules.add(module_name)
 
 
+def canonical_function_key(module_name: str, class_name: str, func_name: str) -> str:
+    if not module_name or not func_name:
+        raise ValueError("Function identity requires non-empty module and function names")
+    if any("/" in value for value in (module_name, class_name, func_name)):
+        raise ValueError("Function identity fields cannot contain '/'")
+    return f"{module_name}/{class_name}/{func_name}"
+
+
 def allow_function(key: str) -> None:
-    module_name, separator, _ = key.partition("/")
-    if not separator or not module_name:
-        raise ValueError(f"Function key must include a module path: {key!r}")
+    try:
+        module_name, class_name, func_name = key.split("/")
+        canonical_key = canonical_function_key(module_name, class_name, func_name)
+    except ValueError as exc:
+        raise ValueError(f"Invalid function key: {key!r}") from exc
+    if key != canonical_key:
+        raise ValueError(f"Function key is not canonical: {key!r}")
+    if callable_policy_frozen:
+        if key not in allowed_functions:
+            raise RuntimeError(f"Callable policy is frozen; cannot authorize {key!r}")
+        return
     allow_module(module_name)
     allowed_functions.add(key)
+
+
+def disallow_function(key: str) -> None:
+    if callable_policy_frozen:
+        raise RuntimeError(f"Callable policy is frozen; cannot remove {key!r}")
+    allowed_functions.discard(key)
+
+
+def freeze_callable_policy() -> frozenset[str]:
+    global allowed_functions, callable_policy_frozen
+
+    if not callable_policy_frozen:
+        allowed_functions = frozenset(allowed_functions)
+        callable_policy_frozen = True
+    return allowed_functions
 
 
 def import_allowed_module(module_name: str) -> ModuleType:
@@ -360,6 +396,14 @@ def getfuncname(func) -> tuple[str, str, str, str]:
     else:
         class_name = ""
     key = f"{module_name}/{class_name}/{func_name}"
+    return key, module_name, func_name, class_name
+
+
+def get_callable_identity(func) -> tuple[str, str, str, str]:
+    key = getattr(func, "__remote_callable_key__", None)
+    if key is None:
+        return getfuncname(func)
+    module_name, class_name, func_name = key.split("/")
     return key, module_name, func_name, class_name
 
 
@@ -758,8 +802,19 @@ def get_func_from_stub_func(key: str):
         return key, module_name, func_name, class_name
 
 
-def encode_function_call(func, loc: str, remotedclasscache: dict, callbackOnCacheAdd, *args, **kwargs) -> bytes:
-    key, _, _, _ = getfuncname(func)
+def encode_function_call(
+    func,
+    loc: str,
+    remotedclasscache: dict,
+    callbackOnCacheAdd,
+    *args,
+    callable_key=None,
+    **kwargs,
+) -> bytes:
+    if callable_key is None:
+        key, _, _, _ = get_callable_identity(func)
+    else:
+        key = callable_key
     key, module_name, func_name, class_name = get_func_from_stub_func(key)
     # args is a tuple, kwargs is a dictionary
     # shallow copy of args into list
@@ -799,6 +854,22 @@ def decode_function_call(
         "func_name": func_name,
         "class_name": class_name,
     }
+    try:
+        canonical_key = canonical_function_key(module_name, class_name, func_name)
+    except ValueError as exc:
+        decode_error = CallableNotAllowedError(str(exc))
+        logger.error(f"Rejected function call identity: {decode_error}")
+        return None, funcargs, (), {}, decode_error
+    if key != canonical_key:
+        decode_error = CallableNotAllowedError(
+            f"Function key {key!r} does not match decoded identity {canonical_key!r}"
+        )
+        logger.error(f"Rejected function call identity: {decode_error}")
+        return None, funcargs, (), {}, decode_error
+    if canonical_key not in allowed_functions:
+        decode_error = CallableNotAllowedError(f"Function {canonical_key!r} is not allowed to be called remotely")
+        logger.error(f"Rejected function call identity: {decode_error}")
+        return None, funcargs, (), {}, decode_error
     # rehydrate args on server side
     if conn is not None:  # noqa: SIM108 vendored from microsoft/xavier, not refactored
         clientloc = conn.get("key", "")
@@ -861,13 +932,30 @@ class FunctionType:
             raise Exception(f"Invalid function type: {functype}")
 
 
-def functionToMsg(func, loc: str, functype, fnid: uuid.UUID, remotedClassesCache, *args, **kwargs) -> bytes:
+def functionToMsg(
+    func,
+    loc: str,
+    functype,
+    fnid: uuid.UUID,
+    remotedClassesCache,
+    *args,
+    callable_key=None,
+    **kwargs,
+) -> bytes:
     # message type is the first byte
     msg = int.to_bytes(MessageType.FunctionCall, 1, "big")
     msg += int.to_bytes(FunctionType.toint(functype), 1, "big")
     # add the function ID to the message
     msg += fnid.bytes
-    payload = encode_function_call(func, loc, remotedClassesCache, None, *args, **kwargs)
+    payload = encode_function_call(
+        func,
+        loc,
+        remotedClassesCache,
+        None,
+        *args,
+        callable_key=callable_key,
+        **kwargs,
+    )
     msg += payload
     return msg
 
@@ -899,6 +987,9 @@ class Remoter:
         return x
 
     def __init__(self, config: dict, host, port, sockpath, fixedrmtloc, rmtport, allowall, locconfig):
+        if allowall:
+            raise ValueError("allowall is not supported; configure exact remote functions and classes")
+        freeze_callable_policy()
         # param init
         setparams(config)
         # config
@@ -907,8 +998,6 @@ class Remoter:
         self.init = True
         # finished
         self.finished = False
-        # allowall functions
-        self.allowall = allowall
         # message handler callback has signature: handleFn(msg, self.uid, *self.args, **self.kwargs)
         # host a function remoter on the given port
         # can start both if fnserver is different
@@ -1254,11 +1343,11 @@ class Remoter:
             logger.debug(f"Remoted class keys: {remotedclasskey}")
             allowed_print = True
         try:
-            key, module_name, func_name, class_name = getfuncname(func)  # noqa: RUF059 vendored from microsoft/xavier, not refactored
+            key = funcargs["key"]
             logger.debug(f"Running function with ID {fnid} -- function: {key}")
-            if key not in allowed_functions and not self.allowall:
+            if key not in allowed_functions:
                 logger.error(f"Function {key} is not allowed to be called remotely")
-                raise Exception(f"Function {key} is not allowed to be called remotely")
+                raise CallableNotAllowedError(f"Function {key} is not allowed to be called remotely")
             result = self.runfunc(func, *args, **kwargs)
             logger.debug(f"Function with ID {fnid} completed execution")
             if funcargs["func_name"] == "__init__":  # noqa: SIM102 vendored from microsoft/xavier, not refactored
@@ -1449,11 +1538,23 @@ class Remoter:
         return False
 
     def runRemotedfunction(
-        self, taskname, functype, nowait, fixedloc, func, *args, **kwargs
+        self,
+        taskname,
+        functype,
+        nowait,
+        fixedloc,
+        func,
+        *args,
+        _remote_callable_key=None,
+        **kwargs,
     ) -> tuple[bool, uuid.UUID, asyncio.Event | threading.Event]:
 
         self.initrmtclassonclient(*args)
-        key, module_name, func_name, class_name = getfuncname(func)
+        if _remote_callable_key is None:
+            key, module_name, func_name, class_name = get_callable_identity(func)
+        else:
+            key = _remote_callable_key
+            module_name, class_name, func_name = key.split("/")
         isremotedclass, classuid = self.isremotedclass(args)
         if isremotedclass:
             actclasskey = f"{args[0].__class__.__module__}/{args[0].__class__.__name__}"
@@ -1506,7 +1607,16 @@ class Remoter:
             return True, uid, event
         else:
             # serialize the function and arguments
-            msg = functionToMsg(func, loc, functype, uid, self.remotedClasses, *args, **kwargs)
+            msg = functionToMsg(
+                func,
+                loc,
+                functype,
+                uid,
+                self.remotedClasses,
+                *args,
+                callable_key=key,
+                **kwargs,
+            )
             if loc == "directqueue":
                 logger.debug(f"Sending function {taskname} to queue with ID {uid} - msglen: {len(msg)}")
                 self.fnqueueProc.putMessage(msg)
@@ -1584,11 +1694,31 @@ class Remoter:
             else:
                 assert False, f"Unknown multiprocHandler message type: {ret['type']}"  # noqa: B011 vendored from microsoft/xavier, not refactored
 
-    async def runAsyncFunction(self, taskname, functype, nowait, timeout, loc, func, *args, **kwargs):
+    async def runAsyncFunction(
+        self,
+        taskname,
+        functype,
+        nowait,
+        timeout,
+        loc,
+        func,
+        *args,
+        _remote_callable_key=None,
+        **kwargs,
+    ):
         global is_process
         if is_process:
             raise Exception("Cannot run async function from within a process pool")
-        success, uid, event = self.runRemotedfunction(taskname, functype, nowait, loc, func, *args, **kwargs)
+        success, uid, event = self.runRemotedfunction(
+            taskname,
+            functype,
+            nowait,
+            loc,
+            func,
+            *args,
+            _remote_callable_key=_remote_callable_key,
+            **kwargs,
+        )
         if not success:
             raise Exception(f"Function {taskname} with uid {uid} not found in results - perhaps connection closed")
         event: asyncio.Event = event
@@ -1620,10 +1750,39 @@ class Remoter:
         else:
             raise ex
 
-    def runSyncFunction(self, taskname, functype, nowait, timeout, loc, func, *args, **kwargs):
+    def runSyncFunction(
+        self,
+        taskname,
+        functype,
+        nowait,
+        timeout,
+        loc,
+        func,
+        *args,
+        _remote_callable_key=None,
+        **kwargs,
+    ):
         if is_process:
-            return self.runSyncFunctionProc(taskname, functype, nowait, loc, func, *args, **kwargs)
-        success, uid, event = self.runRemotedfunction(taskname, functype, nowait, loc, func, *args, **kwargs)
+            return self.runSyncFunctionProc(
+                taskname,
+                functype,
+                nowait,
+                loc,
+                func,
+                *args,
+                _remote_callable_key=_remote_callable_key,
+                **kwargs,
+            )
+        success, uid, event = self.runRemotedfunction(
+            taskname,
+            functype,
+            nowait,
+            loc,
+            func,
+            *args,
+            _remote_callable_key=_remote_callable_key,
+            **kwargs,
+        )
         if not success:
             raise Exception(f"Function {taskname} with uid {uid} not found in results - perhaps connection closed")
         event: threading.Event = event
@@ -1682,7 +1841,6 @@ class Remoter:
             else:
                 logger.debug(f"Using already initialized single instance class {args0.__class__} with ID {fnid}")
                 func = funcinit  # this will do nothing and wait for the event to be set
-                allow_function("remoter.remoter/Remoter/modifycall_singleinstance_init")
                 callback = orig_callback
                 # callback remains the same, it will be called with the same arguments
         return callback, func
@@ -1726,7 +1884,6 @@ class Remoter:
             else:
                 logger.debug(f"Using already initialized single instance function for {key}")
                 func = funcnotfirst  # this will do nothing and wait for the event to be set
-                allow_function("remoter.remoter/Remoter/modifycall_singleinstance")
                 callback = orig_callback
                 # callback remains the same, it will be called with the same arguments
         return callback, func
@@ -2118,15 +2275,25 @@ def checkForRemotedClass(taskname, func, *args):
 
 
 def createRemotedTask(
-    func, taskname, functype="threadpooltask", nowait=False, fallbackfn=None, timeout=None
+    func,
+    taskname,
+    functype="threadpooltask",
+    nowait=False,
+    fallbackfn=None,
+    timeout=None,
+    callable_key=None,
 ) -> Callable:
     key, _, _, _ = getfuncname(func)
-    allow_function(key)
-    logger.info(f"Adding remoted function {key} to allowed functions")
+    authorized_key = callable_key or key
+    allow_function(authorized_key)
+    logger.info(f"Adding remoted function {authorized_key} to allowed functions")
 
     if localhasattr(func, "__isremoted__"):
-        logger.info(f"Function {key} already has __isremoted__ attribute, skipping remoter wrapping")
-        return func
+        existing_key = getattr(func, "__remote_callable_key__", key)
+        if existing_key == authorized_key:
+            logger.info(f"Function {authorized_key} already has __isremoted__ attribute, skipping remoter wrapping")
+            return func
+        func = func.__origfunc__
 
     if functype.lower() in ["process", "processpooltask"]:
         global needmultiproc
@@ -2142,7 +2309,17 @@ def createRemotedTask(
                 logger.debug(f"Using fallback function for remoted class function {taskname}")
                 return fallbackfn(*args, **kwargs)
             return func(*args, **kwargs)
-        return runtime.runSyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
+        return runtime.runSyncFunction(
+            taskname,
+            functype,
+            nowait,
+            timeout,
+            None,
+            func,
+            *args,
+            _remote_callable_key=authorized_key,
+            **kwargs,
+        )
 
     @wraps(func)
     def wrapper_async(*args, **kwargs):
@@ -2154,7 +2331,17 @@ def createRemotedTask(
                 logger.debug(f"Using fallback function for remoted class function {taskname}")
                 return fallbackfn(*args, **kwargs)
             return func(*args, **kwargs)
-        return runtime.runAsyncFunction(taskname, functype, nowait, timeout, None, func, *args, **kwargs)
+        return runtime.runAsyncFunction(
+            taskname,
+            functype,
+            nowait,
+            timeout,
+            None,
+            func,
+            *args,
+            _remote_callable_key=authorized_key,
+            **kwargs,
+        )
 
     if inspect.iscoroutinefunction(func):
         isasync = True
@@ -2168,6 +2355,7 @@ def createRemotedTask(
     ret.__remotedfunctype__ = functype
     ret.__isasync__ = isasync
     ret.__origfunc__ = func
+    ret.__remote_callable_key__ = authorized_key
 
     return ret
 
@@ -2234,7 +2422,7 @@ def add_args(parser, **kwargs):
     parser.add_argument(
         "--allowall",
         action="store_true",
-        help="Allow remoting arbitrary functions (not recommended) -- otherwise only remotetask",
+        help="Deprecated and rejected; configure exact remote functions and classes",
     )
     parser.add_argument(
         "--configserver",
