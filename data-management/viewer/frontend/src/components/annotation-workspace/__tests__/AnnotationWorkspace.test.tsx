@@ -20,6 +20,10 @@ vi.mock('@/components/annotation-workspace/AnnotationWorkspaceEmptyState', () =>
   AnnotationWorkspaceEmptyState: () => <div data-testid="empty-stub">EMPTY_STUB</div>,
 }))
 
+vi.mock('@/components/annotation-workspace/DraftConflictDialog', () => ({
+  DraftConflictDialog: () => null,
+}))
+
 describe('AnnotationWorkspace', () => {
   beforeEach(() => {
     mockShellResult = { currentDataset: null, currentEpisode: null } as unknown as Shell

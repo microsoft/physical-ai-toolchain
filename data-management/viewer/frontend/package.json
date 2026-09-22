@@ -10,6 +10,7 @@
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests",
+    "test:a11y": "playwright test --config=playwright.config.ts",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "type-check": "tsc --noEmit",
@@ -55,7 +56,9 @@
     "zustand": "5.0.15"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.61.1",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/eslint-plugin-query": "5.102.8",
     "@testing-library/dom": "10.4.2",

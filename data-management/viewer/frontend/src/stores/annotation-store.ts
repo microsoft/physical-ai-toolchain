@@ -31,6 +31,15 @@ interface AnnotationState {
   error: string | null
   /** Current annotator ID */
   annotatorId: string
+  /** Generation of the active principal/resource context */
+  contextGeneration: number
+  /** Generation of local edits within the active context */
+  editGeneration: number
+  /** Stale-write conflict retained for explicit resolution */
+  conflict: {
+    currentEtag: string | null
+    submitted: EpisodeAnnotation
+  } | null
 }
 
 interface AnnotationActions {
@@ -38,6 +47,8 @@ interface AnnotationActions {
   initializeAnnotation: (annotatorId: string) => void
   /** Load an existing annotation */
   loadAnnotation: (annotation: EpisodeAnnotation) => void
+  /** Restore a dirty local draft over its server baseline */
+  restoreAnnotationDraft: (draft: EpisodeAnnotation, baseline: EpisodeAnnotation) => void
   /** Update task completeness annotation */
   updateTaskCompleteness: (update: Partial<TaskCompletenessAnnotation>) => void
   /** Update trajectory quality annotation */
@@ -70,6 +81,12 @@ interface AnnotationActions {
   setError: (error: string | null) => void
   /** Mark annotation as saved (reset dirty state) */
   markSaved: () => void
+  /** Commit only the snapshot and edit generation submitted to the server */
+  markSubmittedSaved: (submitted: EpisodeAnnotation, submittedEditGeneration: number) => void
+  /** Retain a stale-write conflict without discarding local edits */
+  setConflict: (currentEtag: string | null, submitted: EpisodeAnnotation) => void
+  /** Apply a rebased draft over the latest server baseline */
+  resolveConflict: (merged: EpisodeAnnotation, serverBaseline: EpisodeAnnotation) => void
   /** Reset annotation to original state */
   resetAnnotation: () => void
   /** Clear the current annotation */
@@ -85,6 +102,9 @@ const initialState: AnnotationState = {
   isSaving: false,
   error: null,
   annotatorId: '',
+  contextGeneration: 0,
+  editGeneration: 0,
+  conflict: null,
 }
 
 /**
@@ -142,6 +162,9 @@ export const useAnnotationStore = create<AnnotationStore>()(
             annotatorId,
             isDirty: false,
             error: null,
+            contextGeneration: 0,
+            editGeneration: 0,
+            conflict: null,
           },
           false,
           'initializeAnnotation',
@@ -156,12 +179,31 @@ export const useAnnotationStore = create<AnnotationStore>()(
             annotatorId: annotation.annotatorId,
             isDirty: false,
             error: null,
+            contextGeneration: 0,
+            editGeneration: 0,
+            conflict: null,
           },
           false,
           'loadAnnotation',
         )
       },
 
+      restoreAnnotationDraft: (draft, baseline) => {
+        set(
+          {
+            currentAnnotation: structuredClone(draft),
+            originalAnnotation: structuredClone(baseline),
+            annotatorId: draft.annotatorId,
+            isDirty: true,
+            error: null,
+            contextGeneration: get().contextGeneration + 1,
+            editGeneration: 1,
+            conflict: null,
+          },
+          false,
+          'restoreAnnotationDraft',
+        )
+      },
       updateTaskCompleteness: (update) => {
         const { currentAnnotation } = get()
         if (!currentAnnotation) return
@@ -177,6 +219,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               },
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'updateTaskCompleteness',
@@ -202,6 +245,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               },
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'updateTrajectoryQuality',
@@ -223,6 +267,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               },
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'updateDataQuality',
@@ -243,6 +288,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               },
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'addAnomaly',
@@ -265,6 +311,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               },
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'updateAnomaly',
@@ -285,6 +332,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               },
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'removeAnomaly',
@@ -307,6 +355,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               },
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'toggleAnomalyVerified',
@@ -325,6 +374,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               notes,
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'updateNotes',
@@ -354,6 +404,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               },
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'updateLanguageInstruction',
@@ -372,6 +423,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               timestamp: new Date().toISOString(),
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'clearLanguageInstruction',
@@ -390,6 +442,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               objectDetections: structuredClone(detections),
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'setObjectDetections',
@@ -413,6 +466,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               objectDetections: next,
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'upsertObjectDetection',
@@ -434,6 +488,7 @@ export const useAnnotationStore = create<AnnotationStore>()(
               objectDetections: next,
             },
             isDirty: true,
+            editGeneration: get().editGeneration + 1,
           },
           false,
           'removeObjectDetection',
@@ -471,6 +526,48 @@ export const useAnnotationStore = create<AnnotationStore>()(
           },
           false,
           'resetAnnotation',
+        )
+      },
+
+      markSubmittedSaved: (submitted, submittedEditGeneration) => {
+        const { editGeneration } = get()
+        set(
+          {
+            originalAnnotation: structuredClone(submitted),
+            isDirty: editGeneration !== submittedEditGeneration,
+            isSaving: false,
+            error: null,
+            conflict: null,
+          },
+          false,
+          'markSubmittedSaved',
+        )
+      },
+
+      setConflict: (currentEtag, submitted) => {
+        set(
+          {
+            conflict: { currentEtag, submitted: structuredClone(submitted) },
+            isSaving: false,
+            isDirty: true,
+          },
+          false,
+          'setConflict',
+        )
+      },
+
+      resolveConflict: (merged, serverBaseline) => {
+        set(
+          {
+            currentAnnotation: structuredClone(merged),
+            originalAnnotation: structuredClone(serverBaseline),
+            isDirty: true,
+            error: null,
+            conflict: null,
+            editGeneration: get().editGeneration + 1,
+          },
+          false,
+          'resolveAnnotationConflict',
         )
       },
 

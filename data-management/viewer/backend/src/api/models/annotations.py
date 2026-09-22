@@ -5,13 +5,28 @@ These models match the TypeScript type definitions and PRD schema specifications
 for task completeness, trajectory quality, data quality, and anomaly annotations.
 """
 
+from __future__ import annotations
+
+import re
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, ClassVar
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from ..validation import SanitizedModel
+
+_BCP47_LANGUAGE = r"(?:[a-z]{2,3}(?:-[a-z]{3}){0,3}|[a-z]{4}|[a-z]{5,8})"
+_BCP47_SCRIPT = r"(?:-[a-z]{4})?"
+_BCP47_REGION = r"(?:-(?:[a-z]{2}|[0-9]{3}))?"
+_BCP47_VARIANTS = r"(?:-(?:[a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*"
+_BCP47_EXTENSIONS = r"(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*"
+_BCP47_PRIVATE_USE = r"(?:-x(?:-[a-z0-9]{1,8})+)?"
+_BCP47_PATTERN = re.compile(
+    rf"^(?:{_BCP47_LANGUAGE}{_BCP47_SCRIPT}{_BCP47_REGION}{_BCP47_VARIANTS}"
+    rf"{_BCP47_EXTENSIONS}{_BCP47_PRIVATE_USE}|x(?:-[a-z0-9]{{1,8}})+)$",
+    re.IGNORECASE,
+)
 
 # ============================================================================
 # Task Completeness Types
@@ -224,7 +239,16 @@ class LanguageInstructionAnnotation(SanitizedModel):
 
     instruction: str = Field(min_length=1, max_length=1000)
     source: InstructionSource
-    language: str = Field(default="en", max_length=10)
+    language: str = Field(default="en", max_length=35)
+
+    @field_validator("language")
+    @classmethod
+    def validate_language(cls, value: str) -> str:
+        language = value.strip()
+        if not _BCP47_PATTERN.fullmatch(language):
+            raise ValueError("language must be a valid BCP 47 tag")
+        return language
+
     paraphrases: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=50)
     subtask_instructions: list[Annotated[str, Field(max_length=1000)]] = Field(default_factory=list, max_length=100)
 

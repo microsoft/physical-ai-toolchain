@@ -3,17 +3,21 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 import {
+  ApiClientError,
   deleteAnnotations,
   fetchAnnotations,
   fetchAnnotationSummary,
   saveAnnotation,
   triggerAutoAnalysis,
+  type VersionedResource,
 } from '@/lib/api-client'
+import { loadPersistedAnnotationDraft, persistAnnotationDraft } from '@/lib/edit-draft-storage'
+import { fetchPrincipalContext } from '@/lib/principal-context'
 import { useAnnotationStore, useDatasetStore, useEpisodeStore } from '@/stores'
-import type { EpisodeAnnotation } from '@/types'
+import type { EpisodeAnnotation, EpisodeAnnotationFile } from '@/types'
 
 /**
  * Query key factory for annotations.
@@ -23,8 +27,10 @@ export const annotationKeys = {
   lists: () => [...annotationKeys.all, 'list'] as const,
   list: (datasetId: string) => [...annotationKeys.lists(), datasetId] as const,
   details: () => [...annotationKeys.all, 'detail'] as const,
-  detail: (datasetId: string, episodeIndex: number) =>
+  resource: (datasetId: string, episodeIndex: number) =>
     [...annotationKeys.details(), datasetId, episodeIndex] as const,
+  detail: (datasetId: string, episodeIndex: number, principalScopeId: string) =>
+    [...annotationKeys.resource(datasetId, episodeIndex), principalScopeId] as const,
   summary: (datasetId: string) => [...annotationKeys.all, 'summary', datasetId] as const,
   autoAnalysis: (datasetId: string, episodeIndex: number) =>
     [...annotationKeys.all, 'auto', datasetId, episodeIndex] as const,
@@ -35,40 +41,108 @@ export const annotationKeys = {
  *
  * Syncs the current user's annotation with the annotation store.
  *
- * @param annotatorId - Current user's annotator ID
- *
  * @example
  * ```tsx
- * const { isLoading } = useEpisodeAnnotations('user-123');
+ * const { isLoading } = useEpisodeAnnotations();
  * const annotation = useAnnotationStore(state => state.currentAnnotation);
  * ```
  */
-export function useEpisodeAnnotations(annotatorId: string) {
+export function useEpisodeAnnotations() {
+  const principalQuery = useQuery({
+    queryKey: ['auth', 'principal-context'],
+    queryFn: fetchPrincipalContext,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const annotatorId = principalQuery.data?.scopeId
   const currentDataset = useDatasetStore((state) => state.currentDataset)
   const currentIndex = useEpisodeStore((state) => state.currentIndex)
   const loadAnnotation = useAnnotationStore((state) => state.loadAnnotation)
   const initializeAnnotation = useAnnotationStore((state) => state.initializeAnnotation)
+  const restoreAnnotationDraft = useAnnotationStore((state) => state.restoreAnnotationDraft)
+  const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
+  const originalAnnotation = useAnnotationStore((state) => state.originalAnnotation)
+  const isDirty = useAnnotationStore((state) => state.isDirty)
+  const hydratedKeyRef = useRef<string | null>(null)
 
   const query = useQuery({
-    queryKey: annotationKeys.detail(currentDataset?.id ?? '', currentIndex),
+    queryKey: annotationKeys.detail(currentDataset?.id ?? '', currentIndex, annotatorId ?? ''),
     queryFn: () => fetchAnnotations(currentDataset!.id, currentIndex),
-    enabled: !!currentDataset && currentIndex >= 0,
+    enabled: !!currentDataset && currentIndex >= 0 && !!annotatorId,
     staleTime: 30 * 1000,
   })
 
-  // Sync with annotation store
   useEffect(() => {
-    if (query.data) {
-      // Find the current user's annotation or initialize a new one
-      const userAnnotation = query.data.annotations.find((a) => a.annotatorId === annotatorId)
+    if (!query.data || !currentDataset || !annotatorId) return
 
-      if (userAnnotation) {
-        loadAnnotation(userAnnotation)
-      } else {
-        initializeAnnotation(annotatorId)
-      }
+    let active = true
+    const key = `${currentDataset.id}:${currentIndex}:${annotatorId}`
+    const userAnnotation = query.data.data.annotations.find(
+      (annotation) => annotation.annotatorId === annotatorId,
+    )
+
+    if (!userAnnotation) {
+      hydratedKeyRef.current = key
+      initializeAnnotation(annotatorId)
+      return
     }
-  }, [query.data, annotatorId, loadAnnotation, initializeAnnotation])
+
+    loadAnnotation(userAnnotation)
+    hydratedKeyRef.current = key
+    const hydrationEditGeneration = useAnnotationStore.getState().editGeneration
+    void loadPersistedAnnotationDraft(currentDataset.id, currentIndex, annotatorId).then(
+      (draft) => {
+        if (!active) return
+        const state = useAnnotationStore.getState()
+        if (
+          hydratedKeyRef.current !== key ||
+          state.annotatorId !== annotatorId ||
+          state.editGeneration !== hydrationEditGeneration
+        ) {
+          return
+        }
+        if (draft) restoreAnnotationDraft(draft.draft, userAnnotation)
+      },
+    )
+
+    return () => {
+      active = false
+    }
+  }, [
+    annotatorId,
+    currentDataset,
+    currentIndex,
+    initializeAnnotation,
+    loadAnnotation,
+    query.data,
+    restoreAnnotationDraft,
+  ])
+
+  useEffect(() => {
+    if (!currentDataset || !currentAnnotation || !annotatorId) return
+    const key = `${currentDataset.id}:${currentIndex}:${annotatorId}`
+    if (hydratedKeyRef.current !== key) return
+
+    void persistAnnotationDraft(
+      currentDataset.id,
+      currentIndex,
+      annotatorId,
+      isDirty && originalAnnotation
+        ? {
+            draft: currentAnnotation,
+            baseline: originalAnnotation,
+            baseEtag: query.data?.etag ?? null,
+          }
+        : null,
+    )
+  }, [
+    annotatorId,
+    currentAnnotation,
+    currentDataset,
+    currentIndex,
+    isDirty,
+    originalAnnotation,
+    query.data?.etag,
+  ])
 
   return query
 }
@@ -88,7 +162,8 @@ export function useSaveAnnotation() {
   const queryClient = useQueryClient()
   const setSaving = useAnnotationStore((state) => state.setSaving)
   const setError = useAnnotationStore((state) => state.setError)
-  const markSaved = useAnnotationStore((state) => state.markSaved)
+  const markSubmittedSaved = useAnnotationStore((state) => state.markSubmittedSaved)
+  const setConflict = useAnnotationStore((state) => state.setConflict)
 
   return useMutation({
     mutationFn: ({
@@ -99,19 +174,29 @@ export function useSaveAnnotation() {
       datasetId: string
       episodeIndex: number
       annotation: EpisodeAnnotation
-    }) => saveAnnotation(datasetId, episodeIndex, annotation),
+    }) => {
+      const queryKey = annotationKeys.detail(datasetId, episodeIndex, annotation.annotatorId)
+      const current = queryClient.getQueryData<VersionedResource<EpisodeAnnotationFile>>(queryKey)
+      const precondition = current?.etag ? { etag: current.etag } : { createOnly: true }
+      return saveAnnotation(datasetId, episodeIndex, annotation, precondition)
+    },
 
     onMutate: () => {
       setSaving(true)
+      return { submittedEditGeneration: useAnnotationStore.getState().editGeneration }
     },
 
-    onSuccess: (data, variables) => {
-      markSaved()
+    onSuccess: (versioned, variables, context) => {
+      markSubmittedSaved(variables.annotation, context.submittedEditGeneration)
 
       // Update cache
       queryClient.setQueryData(
-        annotationKeys.detail(variables.datasetId, variables.episodeIndex),
-        data,
+        annotationKeys.detail(
+          variables.datasetId,
+          variables.episodeIndex,
+          variables.annotation.annotatorId,
+        ),
+        versioned,
       )
 
       // Invalidate summary since it might have changed
@@ -120,7 +205,12 @@ export function useSaveAnnotation() {
       })
     },
 
-    onError: (error) => {
+    onError: (error, variables) => {
+      if (error instanceof ApiClientError && error.status === 412) {
+        const currentEtag =
+          typeof error.details?.currentEtag === 'string' ? error.details.currentEtag : null
+        setConflict(currentEtag, variables.annotation)
+      }
       setError(error.message)
     },
   })
@@ -145,12 +235,12 @@ export function useSaveCurrentAnnotation() {
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
   const mutation = useSaveAnnotation()
 
-  const save = () => {
+  const save = (): Promise<VersionedResource<EpisodeAnnotationFile> | undefined> => {
     if (!currentDataset || currentIndex < 0 || !currentAnnotation) {
-      return
+      return Promise.resolve(undefined)
     }
 
-    mutation.mutate({
+    return mutation.mutateAsync({
       datasetId: currentDataset.id,
       episodeIndex: currentIndex,
       annotation: currentAnnotation,
@@ -181,25 +271,21 @@ export function useDeleteAnnotation() {
   const clear = useAnnotationStore((state) => state.clear)
 
   return useMutation({
-    mutationFn: ({
-      datasetId,
-      episodeIndex,
-      annotatorId,
-    }: {
-      datasetId: string
-      episodeIndex: number
-      annotatorId?: string
-    }) => deleteAnnotations(datasetId, episodeIndex, annotatorId),
+    mutationFn: ({ datasetId, episodeIndex }: { datasetId: string; episodeIndex: number }) => {
+      const cached = queryClient.getQueriesData<VersionedResource<EpisodeAnnotationFile>>({
+        queryKey: annotationKeys.resource(datasetId, episodeIndex),
+      })
+      const etag = cached.find(([, value]) => value?.etag)?.[1]?.etag
+      if (!etag) throw new Error('Cannot delete annotations without a current revision')
+      return deleteAnnotations(datasetId, episodeIndex, etag)
+    },
 
     onSuccess: (_, variables) => {
-      // Clear store if deleting all
-      if (!variables.annotatorId) {
-        clear()
-      }
+      clear()
 
       // Invalidate queries
       queryClient.invalidateQueries({
-        queryKey: annotationKeys.detail(variables.datasetId, variables.episodeIndex),
+        queryKey: annotationKeys.resource(variables.datasetId, variables.episodeIndex),
       })
       queryClient.invalidateQueries({
         queryKey: annotationKeys.summary(variables.datasetId),

@@ -102,6 +102,7 @@ export function FrameInsertionToolbar() {
         <Label className="shrink-0 text-xs">Blend Factor:</Label>
         <Input
           type="number"
+          aria-label="Interpolation blend factor"
           className="h-8 w-20"
           value={interpolationFactor}
           min={0}
@@ -187,6 +188,7 @@ export function FrameInsertionToolbar() {
           <Label className="shrink-0 text-xs">Every</Label>
           <Input
             type="number"
+            aria-label="Frame insertion frequency"
             className="h-8 w-16"
             value={frequency}
             min={1}

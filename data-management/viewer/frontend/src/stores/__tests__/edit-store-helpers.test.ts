@@ -315,6 +315,7 @@ describe('edit-store-helpers', () => {
       expect(vi.mocked(persistEditDraft)).toHaveBeenCalledWith(
         'ds-1',
         0,
+        'local',
         expect.objectContaining({ datasetId: 'ds-1', episodeIndex: 0, removedFrames: [2, 4] }),
       )
     })

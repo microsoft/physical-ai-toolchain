@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from src.api.models.annotations import TaskCompletenessRating
-from src.api.storage.local import LocalStorageAdapter, StorageError
+from src.api.storage.local import LocalStorageAdapter, RevisionConflictError, StorageError
 
 from .conftest import create_test_annotation
 
@@ -68,6 +68,39 @@ class TestLocalStorageAdapter(TestCase):
         # Retrieve and verify updated
         result = asyncio.run(self.adapter.get_annotation(self.dataset_id, 1))
         assert result.annotations[0].notes == "Updated notes"
+
+    def test_conditional_save_rejects_stale_revision_without_modifying_data(self):
+        annotation = create_test_annotation(episode_index=1)
+        initial_etag = asyncio.run(
+            self.adapter.save_annotation(self.dataset_id, 1, annotation, if_none_match=True)
+        )
+        updated = create_test_annotation(episode_index=1)
+        updated.annotations[0].notes = "Current notes"
+        current_etag = asyncio.run(
+            self.adapter.save_annotation(self.dataset_id, 1, updated, if_match=initial_etag)
+        )
+        stale = create_test_annotation(episode_index=1)
+        stale.annotations[0].notes = "Stale notes"
+
+        with pytest.raises(RevisionConflictError) as exc_info:
+            asyncio.run(self.adapter.save_annotation(self.dataset_id, 1, stale, if_match=initial_etag))
+
+        assert exc_info.value.current_etag == current_etag
+        versioned = asyncio.run(self.adapter.get_annotation_versioned(self.dataset_id, 1))
+        assert versioned.etag == current_etag
+        assert versioned.value is not None
+        assert versioned.value.annotations[0].notes == "Current notes"
+
+    def test_create_only_save_rejects_existing_resource(self):
+        annotation = create_test_annotation(episode_index=2)
+        current_etag = asyncio.run(
+            self.adapter.save_annotation(self.dataset_id, 2, annotation, if_none_match=True)
+        )
+
+        with pytest.raises(RevisionConflictError) as exc_info:
+            asyncio.run(self.adapter.save_annotation(self.dataset_id, 2, annotation, if_none_match=True))
+
+        assert exc_info.value.current_etag == current_etag
 
     def test_list_annotated_episodes_empty(self):
         """Test listing episodes when no annotations exist."""

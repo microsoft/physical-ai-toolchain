@@ -38,6 +38,12 @@ def client():
         labels_mod._label_storage = None
 
 
+def _revision_headers(client: TestClient, dataset_id: str) -> dict[str, str]:
+    response = client.get(f"/api/datasets/{dataset_id}/labels")
+    etag = response.headers.get("etag")
+    return {"If-Match": etag} if etag else {"If-None-Match": "*"}
+
+
 # ---------------------------------------------------------------------------
 # HTTP endpoint tests
 # ---------------------------------------------------------------------------
@@ -65,6 +71,7 @@ def test_add_label_option_normalizes_and_dedupes(client):
     response = client.post(
         "/api/datasets/test/labels/options",
         json={"label": " review "},
+        headers=_revision_headers(client, "test"),
     )
     assert response.status_code == 200
     assert response.json() == ["SUCCESS", "FAILURE", "PARTIAL", "REVIEW"]
@@ -73,6 +80,7 @@ def test_add_label_option_normalizes_and_dedupes(client):
     response = client.post(
         "/api/datasets/test/labels/options",
         json={"label": "review"},
+        headers=_revision_headers(client, "test"),
     )
     assert response.status_code == 200
     assert response.json() == ["SUCCESS", "FAILURE", "PARTIAL", "REVIEW"]
@@ -83,6 +91,7 @@ def test_add_label_option_rejects_empty(client):
     response = client.post(
         "/api/datasets/test/labels/options",
         json={"label": "   "},
+        headers=_revision_headers(client, "test"),
     )
     assert response.status_code == 400
     assert response.json()["detail"] == "Label cannot be empty"
@@ -112,15 +121,37 @@ def test_set_episode_labels_auto_adds_and_invalidates_cache(client, monkeypatch)
     response = client.put(
         "/api/datasets/test/episodes/3/labels",
         json={"labels": [" custom ", "success"]},
+        headers={"If-None-Match": "*"},
     )
     assert response.status_code == 200
     body = response.json()
     assert body["episode_index"] == 3
     assert body["labels"] == ["CUSTOM", "SUCCESS"]
     assert invalidations == [("test", 3)]
+    assert response.headers["etag"]
 
     options = client.get("/api/datasets/test/labels/options").json()
     assert "CUSTOM" in options
+
+
+def test_set_episode_labels_rejects_stale_revision_without_modifying_labels(client):
+    created = client.put(
+        "/api/datasets/test/episodes/3/labels",
+        json={"labels": ["SUCCESS"]},
+        headers={"If-None-Match": "*"},
+    )
+
+    stale = client.put(
+        "/api/datasets/test/episodes/3/labels",
+        json={"labels": ["FAILURE"]},
+        headers={"If-Match": '"stale-revision"'},
+    )
+
+    assert created.status_code == 200
+    assert stale.status_code == 412
+    current = client.get("/api/datasets/test/labels")
+    assert current.headers["etag"] == created.headers["etag"]
+    assert current.json()["episodes"]["3"] == ["SUCCESS"]
 
 
 def test_save_all_labels_roundtrip(client):
@@ -128,8 +159,12 @@ def test_save_all_labels_roundtrip(client):
     client.put(
         "/api/datasets/test/episodes/1/labels",
         json={"labels": ["SUCCESS"]},
+        headers=_revision_headers(client, "test"),
     )
-    response = client.post("/api/datasets/test/labels/save")
+    response = client.post(
+        "/api/datasets/test/labels/save",
+        headers=_revision_headers(client, "test"),
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["dataset_id"] == "test"
@@ -141,13 +176,18 @@ def test_delete_label_option_removes_assignments(client):
     client.put(
         "/api/datasets/test-dataset/episodes/1/labels",
         json={"labels": ["SUCCESS", "REVIEW"]},
+        headers=_revision_headers(client, "test-dataset"),
     )
     client.put(
         "/api/datasets/test-dataset/episodes/2/labels",
         json={"labels": ["REVIEW"]},
+        headers=_revision_headers(client, "test-dataset"),
     )
 
-    response = client.delete("/api/datasets/test-dataset/labels/options/review")
+    response = client.delete(
+        "/api/datasets/test-dataset/labels/options/review",
+        headers=_revision_headers(client, "test-dataset"),
+    )
 
     assert response.status_code == 200
     assert response.json() == ["SUCCESS", "FAILURE", "PARTIAL"]
@@ -160,7 +200,10 @@ def test_delete_label_option_removes_assignments(client):
 
 def test_delete_default_label_option_rejected(client):
     """Built-in labels should not be deletable."""
-    response = client.delete("/api/datasets/test-dataset/labels/options/success")
+    response = client.delete(
+        "/api/datasets/test-dataset/labels/options/success",
+        headers=_revision_headers(client, "test-dataset"),
+    )
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Built-in labels cannot be deleted"
@@ -168,7 +211,10 @@ def test_delete_default_label_option_rejected(client):
 
 def test_delete_label_option_rejects_empty(client):
     """Whitespace-only label name returns 400."""
-    response = client.delete("/api/datasets/test/labels/options/%20")
+    response = client.delete(
+        "/api/datasets/test/labels/options/%20",
+        headers=_revision_headers(client, "test"),
+    )
     assert response.status_code == 400
     assert response.json()["detail"] == "Label cannot be empty"
 
@@ -201,7 +247,11 @@ def test_set_and_get_episode_analysis_roundtrip(client, monkeypatch):
         "source": "qwen3-vl",
     }
 
-    put_resp = client.put("/api/datasets/test/episodes/5/analysis", json=record)
+    put_resp = client.put(
+        "/api/datasets/test/episodes/5/analysis",
+        json=record,
+        headers=_revision_headers(client, "test"),
+    )
     assert put_resp.status_code == 200
     assert put_resp.json()["object"] == "black cloth"
     assert invalidations == [("test", 5)]
@@ -230,16 +280,19 @@ def test_import_analysis_labels_handles_scalar_boolean_and_list_values(client, m
     client.put(
         "/api/datasets/test/episodes/0/analysis",
         json={"object": "Black Cloth", "grasp_success": True, "motion_flags": ["jittery", "hesitation"]},
+        headers=_revision_headers(client, "test"),
     )
     client.put(
         "/api/datasets/test/episodes/1/analysis",
         json={"object": "Black Cloth", "grasp_success": False, "motion_flags": []},
+        headers=_revision_headers(client, "test"),
     )
     invalidations.clear()
 
     object_response = client.post(
         "/api/datasets/test/labels/import-from-analysis",
         json={"field": "object", "prefix": "item"},
+        headers=_revision_headers(client, "test"),
     )
     assert object_response.status_code == 200
     assert object_response.json()["labels_added"] == ["ITEM: BLACK CLOTH"]
@@ -248,6 +301,7 @@ def test_import_analysis_labels_handles_scalar_boolean_and_list_values(client, m
     grasp_response = client.post(
         "/api/datasets/test/labels/import-from-analysis",
         json={"field": "grasp_success"},
+        headers=_revision_headers(client, "test"),
     )
     assert grasp_response.status_code == 200
     assert grasp_response.json()["labels_added"] == ["GRASP: YES", "GRASP: NO"]
@@ -256,6 +310,7 @@ def test_import_analysis_labels_handles_scalar_boolean_and_list_values(client, m
     flags_response = client.post(
         "/api/datasets/test/labels/import-from-analysis",
         json={"field": "motion_flags"},
+        headers=_revision_headers(client, "test"),
     )
     assert flags_response.status_code == 200
     assert flags_response.json()["labels_added"] == ["FLAG: JITTERY", "FLAG: HESITATION"]
@@ -271,13 +326,22 @@ def test_import_analysis_labels_overwrites_stale_namespace_and_is_idempotent(cli
         lambda self, dataset_id, episode_idx=None: invalidations.append((dataset_id, episode_idx)),
     )
 
-    client.put("/api/datasets/test/episodes/2/labels", json={"labels": ["SUCCESS", "OBJECT: OLD"]})
-    client.put("/api/datasets/test/episodes/2/analysis", json={"object": "new"})
+    client.put(
+        "/api/datasets/test/episodes/2/labels",
+        json={"labels": ["SUCCESS", "OBJECT: OLD"]},
+        headers=_revision_headers(client, "test"),
+    )
+    client.put(
+        "/api/datasets/test/episodes/2/analysis",
+        json={"object": "new"},
+        headers=_revision_headers(client, "test"),
+    )
     invalidations.clear()
 
     response = client.post(
         "/api/datasets/test/labels/import-from-analysis",
         json={"field": "object", "overwrite": True},
+        headers=_revision_headers(client, "test"),
     )
     assert response.status_code == 200
     assert response.json()["episodes"]["2"] == ["SUCCESS", "OBJECT: NEW"]
@@ -288,6 +352,7 @@ def test_import_analysis_labels_overwrites_stale_namespace_and_is_idempotent(cli
     repeated = client.post(
         "/api/datasets/test/labels/import-from-analysis",
         json={"field": "object", "overwrite": True},
+        headers=_revision_headers(client, "test"),
     )
     assert repeated.status_code == 200
     assert repeated.json()["labels_added"] == []
@@ -296,14 +361,31 @@ def test_import_analysis_labels_overwrites_stale_namespace_and_is_idempotent(cli
 
 
 def test_import_analysis_labels_overwrite_removes_stale_values_without_current_analysis(client):
-    client.put("/api/datasets/test/episodes/0/labels", json={"labels": ["SUCCESS", "OBJECT: OLD"]})
-    client.put("/api/datasets/test/episodes/1/labels", json={"labels": ["OBJECT: STALE"]})
-    client.put("/api/datasets/test/episodes/0/analysis", json={"object": "new"})
-    client.put("/api/datasets/test/episodes/1/analysis", json={"notes": "No object value"})
+    client.put(
+        "/api/datasets/test/episodes/0/labels",
+        json={"labels": ["SUCCESS", "OBJECT: OLD"]},
+        headers=_revision_headers(client, "test"),
+    )
+    client.put(
+        "/api/datasets/test/episodes/1/labels",
+        json={"labels": ["OBJECT: STALE"]},
+        headers=_revision_headers(client, "test"),
+    )
+    client.put(
+        "/api/datasets/test/episodes/0/analysis",
+        json={"object": "new"},
+        headers=_revision_headers(client, "test"),
+    )
+    client.put(
+        "/api/datasets/test/episodes/1/analysis",
+        json={"notes": "No object value"},
+        headers=_revision_headers(client, "test"),
+    )
 
     response = client.post(
         "/api/datasets/test/labels/import-from-analysis",
         json={"field": "object", "overwrite": True},
+        headers=_revision_headers(client, "test"),
     )
 
     assert response.status_code == 200
@@ -319,6 +401,7 @@ def test_import_analysis_labels_rejects_unsupported_field(client):
     response = client.post(
         "/api/datasets/test/labels/import-from-analysis",
         json={"field": "movement_quality"},
+        headers=_revision_headers(client, "test"),
     )
     assert response.status_code == 400
     assert "is not importable" in response.json()["detail"]
@@ -343,6 +426,7 @@ def test_import_analysis_labels_without_values_does_not_persist(client, monkeypa
     response = client.post(
         "/api/datasets/test/labels/import-from-analysis",
         json={"field": "source"},
+        headers=_revision_headers(client, "test"),
     )
 
     assert response.status_code == 200
@@ -433,6 +517,32 @@ def test_blob_label_storage_save_uploads_json():
     client.get_container_client.assert_called_once_with("datasets")
     container.get_blob_client.assert_called_once()
     blob_client.upload_blob.assert_awaited_once()
+
+
+def test_blob_label_storage_save_uses_matching_revision(monkeypatch):
+    """Blob label updates use Azure native ETag matching."""
+    match_conditions = SimpleNamespace(IfNotModified="if-not-modified")
+    monkeypatch.setattr(labels_mod, "MatchConditions", match_conditions)
+    blob_client = SimpleNamespace(upload_blob=AsyncMock(return_value={"etag": '"revision-two"'}))
+    container = MagicMock()
+    container.get_blob_client.return_value = blob_client
+    client = MagicMock()
+    client.get_container_client.return_value = container
+    provider = SimpleNamespace(_get_client=AsyncMock(return_value=client), container_name="datasets")
+    storage = labels_mod.BlobLabelStorage(provider)
+
+    etag = asyncio.run(
+        storage.save(
+            "ds",
+            labels_mod.DatasetLabelsFile(dataset_id="ds"),
+            if_match='"revision-one"',
+        )
+    )
+
+    assert etag == '"revision-two"'
+    kwargs = blob_client.upload_blob.await_args.kwargs
+    assert kwargs["etag"] == '"revision-one"'
+    assert kwargs["match_condition"] == "if-not-modified"
 
 
 def test_blob_label_storage_save_failure_raises_500(monkeypatch):
