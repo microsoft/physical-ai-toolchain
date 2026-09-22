@@ -43,6 +43,7 @@ interface EditState {
   /** Current episode being edited */
   datasetId: string | null
   episodeIndex: number | null
+  principalScopeId: string
 
   /** Global transform applied to all cameras */
   globalTransform: ImageTransform | null
@@ -77,7 +78,7 @@ interface EditState {
 
 interface EditActions {
   /** Initialize edit state for an episode */
-  initializeEdit: (datasetId: string, episodeIndex: number) => void
+  initializeEdit: (datasetId: string, episodeIndex: number, principalScopeId?: string) => void
   /** Load existing edit operations */
   loadEditOperations: (ops: EpisodeEditOperations) => void
 
@@ -152,6 +153,7 @@ type EditStore = EditState & EditActions
 const initialState: EditState = {
   datasetId: null,
   episodeIndex: null,
+  principalScopeId: 'local',
   globalTransform: null,
   cameraTransforms: {},
   removedFrames: new Set(),
@@ -227,7 +229,7 @@ export const useEditStore = create<EditStore>()(
       return {
         ...initialState,
 
-        initializeEdit: (datasetId, episodeIndex) => {
+        initializeEdit: (datasetId, episodeIndex, principalScopeId = 'local') => {
           const draftKey = getEpisodeDraftKey(datasetId, episodeIndex)
           const savedDraft = get().savedEpisodeDrafts[draftKey]
 
@@ -239,6 +241,7 @@ export const useEditStore = create<EditStore>()(
           const newState = {
             datasetId,
             episodeIndex,
+            principalScopeId,
             globalTransform: null,
             cameraTransforms: {},
             removedFrames: new Set<number>(),
@@ -258,33 +261,36 @@ export const useEditStore = create<EditStore>()(
             'initializeEdit',
           )
 
-          void loadPersistedEditDraft(datasetId, episodeIndex).then((persistedDraft) => {
-            if (!persistedDraft) {
-              return
-            }
+          void loadPersistedEditDraft(datasetId, episodeIndex, principalScopeId).then(
+            (persistedDraft) => {
+              if (!persistedDraft) {
+                return
+              }
 
-            const currentState = get()
+              const currentState = get()
 
-            if (
-              currentState.datasetId !== datasetId ||
-              currentState.episodeIndex !== episodeIndex
-            ) {
-              return
-            }
+              if (
+                currentState.datasetId !== datasetId ||
+                currentState.episodeIndex !== episodeIndex ||
+                currentState.principalScopeId !== principalScopeId
+              ) {
+                return
+              }
 
-            set(
-              (state) => ({
-                savedEpisodeDrafts: {
-                  ...state.savedEpisodeDrafts,
-                  [draftKey]: persistedDraft,
-                },
-              }),
-              false,
-              'hydratePersistedEpisodeDraft',
-            )
+              set(
+                (state) => ({
+                  savedEpisodeDrafts: {
+                    ...state.savedEpisodeDrafts,
+                    [draftKey]: persistedDraft.draft,
+                  },
+                }),
+                false,
+                'hydratePersistedEpisodeDraft',
+              )
 
-            get().loadEditOperations(persistedDraft)
-          })
+              get().loadEditOperations(persistedDraft.draft)
+            },
+          )
         },
 
         loadEditOperations: (ops) => {
@@ -327,6 +333,7 @@ export const useEditStore = create<EditStore>()(
           void persistEditStateDraft({
             datasetId: ops.datasetId,
             episodeIndex: ops.episodeIndex,
+            principalScopeId: get().principalScopeId,
             globalTransform: ops.globalTransform ?? null,
             cameraTransforms: ops.cameraTransforms ?? {},
             removedFrames: removedSet,

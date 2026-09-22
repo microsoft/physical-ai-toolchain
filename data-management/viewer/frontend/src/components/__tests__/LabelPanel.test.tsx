@@ -49,8 +49,8 @@ describe('LabelPanel', () => {
     mockAddLabelOption.mockResolvedValue(undefined)
     mockRemoveLabelOption.mockResolvedValue(undefined)
     mockImportAnalysisLabels.mockResolvedValue({
-      labelsAdded: [],
-      episodesUpdated: 0,
+      data: { labelsAdded: [], episodesUpdated: 0 },
+      etag: '"revision-one"',
     })
     mockCurrentLabels = ['SUCCESS']
     useLabelStore.getState().reset()
@@ -62,6 +62,8 @@ describe('LabelPanel', () => {
 
     expect(screen.queryByRole('button', { name: /save all/i })).not.toBeInTheDocument()
     expect(screen.queryByText(/changes save automatically/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'SUCCESS' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'FAILURE' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('protects built-in labels from deletion', () => {
@@ -117,8 +119,11 @@ describe('LabelPanel', () => {
       '3': { object: 'red cube', graspSuccess: true },
     })
     mockImportAnalysisLabels.mockResolvedValueOnce({
-      labelsAdded: ['ITEM: RED CUBE'],
-      episodesUpdated: 1,
+      data: {
+        labelsAdded: ['ITEM: RED CUBE'],
+        episodesUpdated: 1,
+      },
+      etag: '"revision-two"',
     })
 
     render(<LabelPanel episodeIndex={3} />)
