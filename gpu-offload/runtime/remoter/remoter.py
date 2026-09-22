@@ -1132,13 +1132,19 @@ class Remoter:
                 if v.get(
                     "allowterminate", True
                 ):  # and k not in remotedclasskey - even if it is, let it terminate so new class gets created
+                    configured_locations = {
+                        normalize_location(choice)
+                        for choice, weight in zip(
+                            self.runloc[k]["choices"],
+                            self.runloc[k]["weights"],
+                            strict=True,
+                        )
+                        if weight > 0.0
+                    }
                     with self.fnlock:
                         tasks = self.tasksByName.get(k, set())
                         for uid in tasks:
                             loc = self.tasks[uid]["loc"]
-                            configured_locations = {
-                                normalize_location(configured_loc) for configured_loc in v["locations"]
-                            }
                             if normalize_location(loc) not in configured_locations:
                                 logger.debug(f"Cancelling function {uid} at location {loc} due to runloc change")
                                 self.cancelRemotedFunction(uid)  # cancel the function if its location is not allowed

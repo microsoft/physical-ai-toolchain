@@ -201,8 +201,9 @@ def apply_decorators_from_config(configpath) -> bool:
                     f"Decorated function {target_path} with remotetask (taskkey={taskkey}, functype={functype}, module={mod})",  # noqa: E501 vendored from microsoft/xavier, not refactored
                     color="cyan",
                 )
-                rmtclass.setfixedloc(target_path, funcparams)
-                if funcparams[target_path].get("singleinstance", False):
+                if "remoteloc" in params:
+                    remoter.setfixedlocs({target_path: params["remoteloc"]})
+                if params.get("singleinstance", False):
                     remoter.addsingleinstancefunc(target_path)
             else:
                 logger.info(f"Skipped {target_path}: not a function")
@@ -216,6 +217,7 @@ def apply_decorators_from_config(configpath) -> bool:
                         color="cyan",
                     )
                     target_path = cfg["stubs"][target_path]  # use actual class path instead of stub
+                    remoter.remoterclassparams[target_path] = params
 
             # module_path, _, attr_name = target_path.rpartition(".")
             module_path, attr_name = target_path.split("/", 1)
