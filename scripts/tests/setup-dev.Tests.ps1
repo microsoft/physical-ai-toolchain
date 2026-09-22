@@ -40,6 +40,12 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
         function uv {
             'uv 0.11.21'
         }
+
+        if ($null -eq (Get-Command chmod -ErrorAction SilentlyContinue)) {
+            function chmod {
+                $global:LASTEXITCODE = 0
+            }
+        }
     }
 
     BeforeEach {
@@ -137,9 +143,12 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
 
     It 'Restricts the installer directory before downloading' {
         $script:InstallerMode = $null
+        Mock chmod {
+            $script:InstallerMode = @($args)
+            $global:LASTEXITCODE = 0
+        }
         Mock Invoke-VerifiedDownload {
             $script:InstallerDirectory = $DestinationDirectory
-            $script:InstallerMode = [System.IO.File]::GetUnixFileMode($DestinationDirectory)
             $path = Join-Path $DestinationDirectory 'verified.ps1'
             '$global:LASTEXITCODE = 0' | Set-Content -LiteralPath $path
             [pscustomobject]@{ Path = $path }
@@ -150,7 +159,7 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
             -ExpectedHash ('a' * 64) `
             -IsWindowsPlatform $false
 
-        [int]$script:InstallerMode | Should -Be 448
+        $script:InstallerMode | Should -Be @('700', $script:InstallerDirectory)
     }
 
     It 'Adds the POSIX uv installation directories before command validation' {
@@ -254,8 +263,13 @@ Describe 'setup-dev uv bootstrap' -Tag 'Unit' {
     }
 }
 
-$script:GitBashPath = Join-Path $env:ProgramFiles 'Git/bin/bash.exe'
-$script:BashAvailable = (Test-Path -LiteralPath $script:GitBashPath) -or
+$script:GitBashPath = if ($env:ProgramFiles) {
+    Join-Path $env:ProgramFiles 'Git/bin/bash.exe'
+}
+else {
+    $null
+}
+$script:BashAvailable = ($script:GitBashPath -and (Test-Path -LiteralPath $script:GitBashPath)) -or
     $null -ne (Get-Command bash -ErrorAction SilentlyContinue)
 
 Describe 'Bash launcher accessibility contracts' -Tag 'Unit' {
