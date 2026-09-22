@@ -30,14 +30,13 @@ BeforeAll {
         $frontendDockerfile,
         '(?m)^FROM\s+(node:\S+)\s+AS\s+build$'
     ).Groups[1].Value
-    $script:RedisImage = [regex]::Match(
+    $script:PythonImage = [regex]::Match(
         $script:CleanupScript,
-        '(?m)^redis_image="([^"]+)"$'
+        '(?m)^python_image="([^"]+)"$'
     ).Groups[1].Value
-    $script:OpenSslImage = [regex]::Match(
-        $script:CleanupScript,
-        '(?m)^openssl_image="([^"]+)"$'
-    ).Groups[1].Value
+    $script:RedisTlsClient = Get-Content -Raw (
+        Join-Path $script:RepoRoot 'infrastructure/setup/cleanup/redis_tls_client.py'
+    )
     $script:ProductionClients = @(
         Get-ChildItem (Join-Path $script:RepoRoot 'infrastructure/setup') -Recurse -File -Filter '*.sh'
         Get-ChildItem (Join-Path $script:RepoRoot 'data-management/viewer/backend/src') -Recurse -File -Filter '*.py'
@@ -134,10 +133,10 @@ Describe 'Production TLS certificate verification' -Tag 'Unit' {
     }
 
     It 'verifies Azure Managed Redis for preflight and destructive cleanup' {
-        ([regex]::Matches($script:CleanupScript, '"--tls"')).Count | Should -Be 2
-        ([regex]::Matches($script:CleanupScript, '"--sni", \$host')).Count | Should -Be 2
-        ([regex]::Matches($script:CleanupScript, '"-verify_hostname", \$host')).Count | Should -Be 2
-        ([regex]::Matches($script:CleanupScript, 'args: \["-h", \$host, "-p", \$port')).Count | Should -Be 2
+        $script:RedisTlsClient | Should -Match 'ssl\.create_default_context\(\)'
+        $script:RedisTlsClient | Should -Match 'wrap_socket\(raw_socket, server_hostname=host\)'
+        $script:RedisTlsClient | Should -Match '_encode_command\("AUTH", password\)'
+        ([regex]::Matches($script:CleanupScript, 'command: \["python", "-c", \$client\]')).Count | Should -Be 2
         $script:CleanupScript | Should -Match 'redis_hostname=\$\(tf_get .*managed_redis_connection_info\.value\.hostname'
     }
 
@@ -153,7 +152,7 @@ Describe 'Production TLS certificate verification' -Tag 'Unit' {
         $script:DataviewerTerraform | Should -Match 'name\s*=\s*"NGINX_BACKEND_SCHEME"\s+value\s*=\s*"https"'
     }
 
-    It 'rejects untrusted and wrong-host certificates in production clients' -Skip:(
+    It 'rejects invalid certificates before production clients send authenticated requests' -Skip:(
         -not (Get-Command docker -ErrorAction SilentlyContinue)
     ) {
         $fixtureDirectory = Join-Path $TestDrive 'tls-fixture'
@@ -182,9 +181,13 @@ const server = createServer(
     key: readFileSync('/fixture/server.key'),
   },
   (socket) => {
-    socket.once('data', (data) => {
+    let authenticated = false
+    socket.on('data', (data) => {
       appendFileSync('/fixture/requests', data)
-      if (data[0] === 42) {
+      if (data.includes(Buffer.from('AUTH'))) {
+        authenticated = true
+        socket.write('+OK\r\n')
+      } else if (authenticated) {
         socket.end('+PONG\r\n')
       } else {
         socket.end('HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n')
@@ -232,35 +235,40 @@ server.listen(443, '0.0.0.0')
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
-            & docker run --rm --network $network $script:RedisImage `
-                redis-cli -h tls-valid -p 443 --tls PING 2>$null
+            & docker run --rm --network $network `
+                --env REDIS_HOST=tls-valid `
+                --env REDIS_PORT=443 `
+                --env REDIS_PASSWORD=test-secret `
+                --env REDIS_OPERATION=PING `
+                $script:PythonImage `
+                python -c $script:RedisTlsClient 2>$null
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
             & docker run --rm --network $network `
                 --volume "${fixtureDirectory}:/fixture:ro" `
-                $script:OpenSslImage `
-                s_client -connect tls-wrong:443 -servername tls-wrong `
-                -verify_hostname tls-wrong -verify_return_error `
-                -CAfile /fixture/server.crt -brief 2>$null
+                --env SSL_CERT_FILE=/fixture/server.crt `
+                --env REDIS_HOST=tls-wrong `
+                --env REDIS_PORT=443 `
+                --env REDIS_PASSWORD=test-secret `
+                --env REDIS_OPERATION=PING `
+                $script:PythonImage `
+                python -c $script:RedisTlsClient 2>$null
             $LASTEXITCODE | Should -Not -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeFalse
 
             & docker run --rm --network $network `
                 --volume "${fixtureDirectory}:/fixture:ro" `
-                $script:OpenSslImage `
-                s_client -connect tls-valid:443 -servername tls-valid `
-                -verify_hostname tls-valid -verify_return_error `
-                -CAfile /fixture/server.crt -brief 2>$null
-            $LASTEXITCODE | Should -Be 0
-            Test-Path -LiteralPath $requestPath | Should -BeFalse
-
-            & docker run --rm --network $network `
-                --volume "${fixtureDirectory}:/fixture:ro" `
-                $script:RedisImage `
-                redis-cli -h tls-valid -p 443 --tls --sni tls-valid --cacert /fixture/server.crt PING 2>$null
+                --env SSL_CERT_FILE=/fixture/server.crt `
+                --env REDIS_HOST=tls-valid `
+                --env REDIS_PORT=443 `
+                --env REDIS_PASSWORD=test-secret `
+                --env REDIS_OPERATION=PING `
+                $script:PythonImage `
+                python -c $script:RedisTlsClient 2>$null
             $LASTEXITCODE | Should -Be 0
             Test-Path -LiteralPath $requestPath | Should -BeTrue
+            (Get-Content -Raw -LiteralPath $requestPath) | Should -Match 'AUTH'
         }
         finally {
             foreach ($container in $containers) {
