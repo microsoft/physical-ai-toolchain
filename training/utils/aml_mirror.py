@@ -50,6 +50,7 @@ SKIP_FILES = frozenset(
 _PARAM_ENV = (
     "DATA_CONFIG",
     "BASE_MODEL",
+    "BASE_MODEL_REVISION",
     "BATCH_SIZE",
     "MAX_STEPS",
     "SAVE_STEPS",
@@ -138,6 +139,10 @@ def main() -> int:
             mlflow.end_run(status="FAILED")
             return 1
         final = pathlib.Path(ckpts[-1])
+        final_step_text = final.name.rsplit("-", 1)[-1]
+        mlflow.log_metric("training.checkpoint_count", len(ckpts))
+        if final_step_text.isdigit():
+            mlflow.log_metric("training.final_checkpoint_step", int(final_step_text))
 
         staging_root = output_dir / ".aml-staging"
         staging_root.mkdir(exist_ok=True)
@@ -154,6 +159,7 @@ def main() -> int:
                     shutil.copy2(src, dst)
 
             size_gib = sum(p.stat().st_size for p in staged.rglob("*") if p.is_file()) / 1024**3
+            mlflow.log_metric("training.model_size_gib", size_gib)
             print(f"staged {final.name} ({size_gib:.2f} GiB)")
             mlflow.log_artifacts(str(staged), artifact_path="model")
         finally:
