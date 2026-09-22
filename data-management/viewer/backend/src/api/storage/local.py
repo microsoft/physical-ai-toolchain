@@ -14,8 +14,10 @@ from pathlib import Path
 
 import aiofiles
 import aiofiles.os
+from fastapi import HTTPException
 
 from ..models.annotations import EpisodeAnnotationFile
+from ..validation import validate_path_containment
 from .base import RevisionConflictError, StorageAdapter, StorageError, VersionedValue
 from .serializers import DateTimeEncoder
 
@@ -66,10 +68,13 @@ class LocalStorageAdapter(StorageAdapter):
     def _get_annotations_dir(self, dataset_id: str) -> Path:
         """Get the annotations directory for a dataset. Resolves -- to nested dirs."""
         parts = dataset_id.split("--") if "--" in dataset_id else [dataset_id]
-        resolved = self.base_path.joinpath(*parts, "annotations", "episodes").resolve()
-        if not resolved.is_relative_to(self.base_path.resolve()):
-            raise StorageError(f"Invalid dataset_id: path traversal detected in '{dataset_id}'")
-        return resolved
+        try:
+            return validate_path_containment(
+                self.base_path.joinpath(*parts, "annotations", "episodes"),
+                self.base_path,
+            )
+        except HTTPException as exc:
+            raise StorageError(f"Invalid dataset_id: path traversal detected in '{dataset_id}'", cause=exc) from exc
 
     def _get_annotation_path(self, dataset_id: str, episode_index: int) -> Path:
         """Get the file path for an episode's annotations."""

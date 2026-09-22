@@ -323,6 +323,19 @@ class TestPrincipalContext:
         assert context.auth_mode == "local"
         assert context.scope_id
 
+    @pytest.mark.parametrize(
+        "user",
+        [
+            {"sub": "subject", "auth_method": "unsupported"},
+            {"sub": "", "auth_method": "apikey"},
+        ],
+    )
+    def test_given_invalid_identity_claims_when_resolved_then_request_is_rejected(self, user):
+        with pytest.raises(HTTPException) as exc_info:
+            resolve_principal_context(user)
+
+        assert exc_info.value.status_code == 401
+
 
 class TestRequireRole:
     def test_bypass_when_user_none(self):
