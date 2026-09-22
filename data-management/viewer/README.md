@@ -551,6 +551,15 @@ DETECTION_MODEL_DIGESTS={"yolo11n":"<sha256>","yolov8s-world":"<sha256>"}
 `AZURE_STORAGE_SAS_TOKEN` is **not** needed — `DefaultAzureCredential` automatically
 uses the pod/container managed identity when running in Azure.
 
+For an HTTPS backend, configure the frontend proxy with the certificate-valid backend FQDN:
+
+```env
+NGINX_BACKEND_SCHEME=https
+NGINX_BACKEND_HOST=backend.example.com
+```
+
+NGINX verifies the backend certificate and hostname against `/etc/ssl/certs/ca-certificates.crt`. Install a custom backend CA in that frontend container trust bundle before deployment.
+
 Mount the reviewed model directory read-only at `/models`. Update the mount and digest map together during rollout or rollback.
 
 ### Building Images
