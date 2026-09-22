@@ -366,6 +366,17 @@ class TestExportEpisode:
             assert (hdf5_export_dir / f"episode_{ep_idx:06d}.hdf5").exists()
             assert (hdf5_export_dir / f"episode_{ep_idx:06d}.meta.json").exists()
 
+    def test_failed_batch_preserves_aggregate_statistics(self, exporter: HDF5Exporter) -> None:
+        result = exporter.export_episodes(episode_indices=[0, 999])
+
+        assert result.success is False
+        assert result.error is not None
+        assert result.output_files
+        assert result.stats["total_episodes"] == 2
+        assert result.stats["total_frames"] == 10
+        assert result.stats["removed_frames"] == 0
+        assert result.stats["duration_ms"] >= 0
+
     def test_export_with_frame_insertion(self, exporter: HDF5Exporter, hdf5_export_dir: Path):
         edits = EpisodeEditOperations(
             dataset_id="test",
