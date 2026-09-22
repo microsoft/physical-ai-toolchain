@@ -3,7 +3,7 @@ sidebar_position: 3
 title: Deployment Security Guide
 description: Security configuration inventory, deployment responsibilities, and considerations for the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: concept
 keywords:
   - security
@@ -65,10 +65,12 @@ production-ready security posture.
 
 ### Kubernetes Security
 
-| Configuration | Default                    | Reference                                                               |
-|---------------|----------------------------|-------------------------------------------------------------------------|
-| RBAC          | Enabled                    | [AKS RBAC](https://learn.microsoft.com/azure/aks/manage-azure-rbac)     |
-| Pod security  | Default namespace policies | [Pod security standards](https://learn.microsoft.com/azure/aks/use-psa) |
+| Configuration | Default                                                        | Reference                                                               |
+|---------------|----------------------------------------------------------------|-------------------------------------------------------------------------|
+| RBAC          | Enabled                                                        | [AKS RBAC](https://learn.microsoft.com/azure/aks/manage-azure-rbac)     |
+| Pod security  | No repository-managed Pod Security Admission policy identified | [Pod security standards](https://learn.microsoft.com/azure/aks/use-psa) |
+
+Network policy support does not establish workload isolation without policy resources. Verify deployed NetworkPolicy resources and Pod Security Admission settings; repository configuration alone does not establish the cluster's effective policy.
 
 ## Your Deployment Responsibilities
 

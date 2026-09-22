@@ -1,4 +1,10 @@
-# Physical AI Toolchain — Tiered Architecture Proposal
+---
+title: "Physical AI Toolchain — Tiered Architecture Proposal"
+description: Adopted architecture decision framing the Physical AI Toolchain around the T0-T5 adoption tiers
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-15
+ms.topic: concept
+---
 
 - **Date:** June 9th, 2026
 - **Author:** David White
@@ -14,7 +20,7 @@ The Physical AI Toolchain ships a powerful end-to-end stack, but it presents tha
 **all-or-nothing**. A newcomer reading the architecture documentation concludes they must stand up
 Azure Arc, AKS, FluxCD, ACSA, IoT Operations, and a cloud training plane *before they can do
 anything useful*. In reality, the repository's working code can close a complete capture → train →
-evaluate → run loop on a single laptop and one robot with **zero cloud and zero Kubernetes**. The
+evaluate → run loop on a single laptop and one robot with **zero cloud and no required Kubernetes**. The
 gap between what the code supports and what the documentation implies is the single largest barrier
 to entry.
 
@@ -162,19 +168,19 @@ T0–T2 satisfy Goal: Full Training Lifecycle with manual deployment. T3 adds si
 
 ## 5. Tier Detail
 
-### T0 — Dev. One robot, one laptop. No cloud, no Kubernetes
+### T0 — Dev. One robot, one laptop. No cloud, no required Kubernetes
 
 The honest floor for Goal: Full Training Lifecycle.
 
-| Concern      | Implementation                                                                                        |
-|--------------|-------------------------------------------------------------------------------------------------------|
-| Capture      | ROS 2 bag recording to local disk on the robot or laptop. No Arc, no ACSA, no PVC.                    |
-| Move data    | `cp` or `rsync` from robot to laptop.                                                                 |
-| Curate       | Dataviewer in `local` mode on the laptop.                                                             |
-| Train        | `train.py` on a laptop or workstation GPU.                                                            |
+| Concern      | Implementation                                                                                           |
+|--------------|----------------------------------------------------------------------------------------------------------|
+| Capture      | ROS 2 bag recording to local disk on the robot or laptop. No Arc, no ACSA, no PVC.                       |
+| Move data    | `cp` or `rsync` from robot to laptop.                                                                    |
+| Curate       | Dataviewer in `local` mode on the laptop.                                                                |
+| Train        | `train.py` on a laptop or workstation GPU.                                                               |
 | Track        | File-backed MLflow (`file:./mlruns`, no server) or trackio, a local process with no service to stand up. |
-| Validate     | `run-local-lerobot-eval.py` / `play.py` locally.                                                      |
-| Run on robot | The ACT inference node as a plain process or container. No Flux, no gating, no GitOps.                |
+| Validate     | `run-local-lerobot-eval.py` / `play.py` locally.                                                         |
+| Run on robot | The ACT inference node as a plain process or container. No Flux, no gating, no GitOps.                   |
 
 **Edge infra:** ROS 2 and Docker only. **Cloud infra:** none.
 
@@ -184,7 +190,8 @@ The honest floor for Goal: Full Training Lifecycle.
 > reproduce, compare across runs, or use to attribute a regression is an anecdote,
 > not a result, doubly so in the high-variance world of RL and IL.
 > File-backed MLflow and trackio run as local processes with no server, so tracking
-> stays inside the zero-cloud, zero-Kubernetes floor.
+> stays inside the zero-cloud floor. A single-laptop Kubernetes cluster is an
+> optional orchestration profile, not a prerequisite.
 > Tracking as a *hosted server* plus a *model registry* is a separate, later concern
 > (T2).
 
@@ -335,14 +342,14 @@ honest minimal floor" argument).
 
 This proposal is primarily documentation and packaging, not a code rewrite.
 
-| Change                                                                                                    | Effort                         | Impact                                                                                                              |
-|-----------------------------------------------------------------------------------------------------------|--------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| Change                                                                                                    | Effort                        | Impact                                                                                                              |
+|-----------------------------------------------------------------------------------------------------------|-------------------------------|---------------------------------------------------------------------------------------------------------------------|
 | Document T0 as the sanctioned starting path                                                               | Low: code already supports it | Removes the perceived barrier directly                                                                              |
-| Restructure the architecture doc around T0–T5                                                             | Low–medium                     | Reframes the on-ramp; sets correct expectations                                                                     |
-| Split "fleet" into fleet delivery (T4) and fleet intelligence (T5) language, reserving "fleet" for robots | Low                            | Lets multi-site users adopt delivery without intelligence; ends the Azure Kubernetes Fleet Manager naming collision |
-| Mark T5 components explicitly as roadmap                                                                  | Low                            | Stops the unbuilt ceiling from reading as a floor                                                                   |
+| Restructure the architecture doc around T0–T5                                                             | Low–medium                    | Reframes the on-ramp; sets correct expectations                                                                     |
+| Split "fleet" into fleet delivery (T4) and fleet intelligence (T5) language, reserving "fleet" for robots | Low                           | Lets multi-site users adopt delivery without intelligence; ends the Azure Kubernetes Fleet Manager naming collision |
+| Mark T5 components explicitly as roadmap                                                                  | Low                           | Stops the unbuilt ceiling from reading as a floor                                                                   |
 | Name the T5.0–T5.3 autonomy ladder                                                                        | Low: documentation only       | Turns the deferral into a roadmap instead of a cliff                                                                |
-| Add per-tier quick-starts                                                                                 | Medium                         | Gives each audience a concrete entry point                                                                          |
+| Add per-tier quick-starts                                                                                 | Medium                        | Gives each audience a concrete entry point                                                                          |
 | Implement A0–A1 data augmentation (classical CV, local-VLM)                                               | Medium: **net-new code**      | Closes the credibility gap; the only build item in this list                                                        |
 
 The deploy scripts, Terraform modules, and training code do not need to change to support the tier model itself. The tiers describe *which subset* of existing infrastructure a user adopts, and in what order. The one exception is the A0–A1 augmentation rungs, which are an explicit new workstream rather than a re-framing of shipped artifacts.
@@ -361,12 +368,12 @@ The deploy scripts, Terraform modules, and training code do not need to change t
 The four questions above were socialized and resolved as follows. The canonical definitions live in
 [tier-model.md](tier-model.md); downstream documentation cites that file rather than this section.
 
-| # | Decision                                                                                                                                                                                                                                     | Rationale                                                                                                                           |
-|---|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| # | Decision                                                                                                                                                                                                                                    | Rationale                                                                                                                           |
+|---|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
 | 1 | **Adopted.** T0 (Dev) is the documented default; T2 (Pilot) is the recommended-production path; T3–T5 (Production, Scale, Operate) are advanced. Stage names pair with `T#` IDs: IDs for boundary references, names for user-facing labels. | Surfaces the already-working local path as the sanctioned floor and gives every tier a stable, linkable identifier.                 |
-| 2 | **Adopted.** "Fleet delivery" (T4) and "fleet intelligence" (T5) become distinct named concepts; "fleet" refers only to robots; the bare phrase "fleet management" is retired.                                                               | Removes the Azure Kubernetes Fleet Manager collision and lets a multi-site operator adopt delivery without inheriting intelligence. |
-| 3 | **Adopted.** Placeholder/roadmap status is labeled explicitly in both contributor and user-facing docs, most prominently in user-facing docs.                                                                                                | Aligns the documented capability with what the code actually ships and prevents over-advertising the T5 layer.                      |
-| 4 | **Adopted.** Goal: Full Training Lifecycle stays the minimal single-task loop; data augmentation remains a separate optional axis (A0–A2) recommended only when data is scarce. The A0–A1 build is deferred.                                                        | Keeps the on-ramp floor minimal and prevents augmentation work from gating the T0 path.                                             |
+| 2 | **Adopted.** "Fleet delivery" (T4) and "fleet intelligence" (T5) become distinct named concepts; "fleet" refers only to robots; the bare phrase "fleet management" is retired.                                                              | Removes the Azure Kubernetes Fleet Manager collision and lets a multi-site operator adopt delivery without inheriting intelligence. |
+| 3 | **Adopted.** Placeholder/roadmap status is labeled explicitly in both contributor and user-facing docs, most prominently in user-facing docs.                                                                                               | Aligns the documented capability with what the code actually ships and prevents over-advertising the T5 layer.                      |
+| 4 | **Adopted.** Goal: Full Training Lifecycle stays the minimal single-task loop; data augmentation remains a separate optional axis (A0–A2) recommended only when data is scarce. The A0–A1 build is deferred.                                | Keeps the on-ramp floor minimal and prevents augmentation work from gating the T0 path.                                             |
 
 ---
 

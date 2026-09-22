@@ -496,7 +496,11 @@ Without `--write-analysis`, the JSONL and CSV files remain standalone exports an
 ### Docker Compose (local)
 
 ```bash
-# Local storage mode (mount datasets directory)
+# Stage reviewed model weights outside the repository.
+export DATAVIEWER_HOST_MODELS_DIR=/absolute/path/to/models
+export DETECTION_MODEL_DIGESTS='{"yolo11n":"<sha256>","yolov8s-world":"<sha256>"}'
+
+# Local storage mode
 DATAVIEWER_HOST_DATA_DIR=/path/to/datasets docker compose up --build
 
 # Azure Blob Storage mode
@@ -505,6 +509,29 @@ export AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 export AZURE_STORAGE_DATASET_CONTAINER=datasets
 export AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
 docker compose up --build
+```
+
+The backend mounts `DATAVIEWER_HOST_MODELS_DIR` read-only at `/models`. Each active `<model-identifier>.pt` file requires a matching reviewed SHA-256 value in `DETECTION_MODEL_DIGESTS`; missing or mismatched checkpoints return HTTP 503 before deserialization.
+
+Run this preflight before deployment:
+
+```bash
+test -r "$DATAVIEWER_HOST_MODELS_DIR/yolo11n.pt"
+test -r "$DATAVIEWER_HOST_MODELS_DIR/yolov8s-world.pt"
+printf '%s  %s\n' \
+  "$(shasum -a 256 "$DATAVIEWER_HOST_MODELS_DIR/yolo11n.pt" | cut -d' ' -f1)" \
+  "$DATAVIEWER_HOST_MODELS_DIR/yolo11n.pt"
+printf '%s  %s\n' \
+  "$(shasum -a 256 "$DATAVIEWER_HOST_MODELS_DIR/yolov8s-world.pt" | cut -d' ' -f1)" \
+  "$DATAVIEWER_HOST_MODELS_DIR/yolov8s-world.pt"
+docker compose run --rm backend \
+  python -c "from src.api.services.detection_service import get_detection_service; service = get_detection_service(); service._get_model('yolo11n'); service._get_model('yolov8s-world', labels=['robot'])"
+```
+
+Rollback by restoring the previous read-only model directory and its matching `DETECTION_MODEL_DIGESTS` value, then recreate the backend:
+
+```bash
+docker compose up -d --force-recreate backend
 ```
 
 ### Azure Kubernetes Service (AKS) / Container Apps
@@ -517,10 +544,14 @@ AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 AZURE_STORAGE_DATASET_CONTAINER=datasets
 BACKEND_HOST=0.0.0.0
 CORS_ORIGINS=https://your-frontend-url.example.com
+DETECTION_MODELS_DIR=/models
+DETECTION_MODEL_DIGESTS={"yolo11n":"<sha256>","yolov8s-world":"<sha256>"}
 ```
 
 `AZURE_STORAGE_SAS_TOKEN` is **not** needed — `DefaultAzureCredential` automatically
 uses the pod/container managed identity when running in Azure.
+
+Mount the reviewed model directory read-only at `/models`. Update the mount and digest map together during rollout or rollback.
 
 ### Building Images
 

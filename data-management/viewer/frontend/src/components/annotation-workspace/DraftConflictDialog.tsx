@@ -76,7 +76,7 @@ export function DraftConflictDialog() {
           )
         }
         resolveLabelConflict(
-          [...new Set([...latest.data.available_labels, ...availableLabels])],
+          [...new Set([...latest.data.availableLabels, ...availableLabels])],
           mergedEpisodes,
           serverEpisodes,
         )

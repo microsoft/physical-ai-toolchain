@@ -2,7 +2,7 @@
 title: Platform Module
 description: Deploys shared Azure infrastructure services for robotics ML workloads.
 author: Microsoft Robotics-AI Team
-ms.date: 2026-03-22
+ms.date: 2026-09-19
 ms.topic: reference
 ---
 

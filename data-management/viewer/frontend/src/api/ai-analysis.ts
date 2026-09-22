@@ -2,9 +2,7 @@
  * API client for AI analysis endpoints.
  */
 
-import { handleResponse, mutationHeaders } from '@/lib/api-client'
-
-const API_BASE = '/api'
+import { apiRequest } from '@/lib/api-client'
 
 /** Smoothness normalization mode for normalized_smoothness. */
 export type SmoothnessMode = 'log-scaled' | 'radian-based'
@@ -13,21 +11,21 @@ export type SmoothnessMode = 'log-scaled' | 'radian-based'
 export interface TrajectoryData {
   positions: number[][]
   timestamps: number[]
-  gripper_states?: number[]
+  gripperStates?: number[]
   /** Normalization for normalized_smoothness; defaults to 'log-scaled' on the backend. */
-  smoothness_mode?: SmoothnessMode
+  smoothnessMode?: SmoothnessMode
 }
 
 /** Trajectory metrics response */
 export interface TrajectoryMetrics {
   smoothness: number
   /** Rescaled smoothness (0-1) that discriminates across degree-scale episodes. */
-  normalized_smoothness: number
+  normalizedSmoothness: number
   efficiency: number
   jitter: number
-  hesitation_count: number
-  correction_count: number
-  overall_score: number
+  hesitationCount: number
+  correctionCount: number
+  overallScore: number
   flags: string[]
 }
 
@@ -36,11 +34,11 @@ export interface DetectedAnomaly {
   id: string
   type: string
   severity: 'low' | 'medium' | 'high'
-  frame_start: number
-  frame_end: number
+  frameStart: number
+  frameEnd: number
   description: string
   confidence: number
-  auto_detected: boolean
+  autoDetected: boolean
 }
 
 /** Anomaly detection request */
@@ -48,52 +46,52 @@ export interface AnomalyDetectionRequest {
   positions: number[][]
   timestamps: number[]
   forces?: number[][]
-  gripper_states?: number[]
-  gripper_commands?: number[]
+  gripperStates?: number[]
+  gripperCommands?: number[]
 }
 
 /** Anomaly detection response */
 export interface AnomalyDetectionResponse {
   anomalies: DetectedAnomaly[]
-  total_count: number
-  severity_counts: Record<string, number>
+  totalCount: number
+  severityCounts: Record<string, number>
 }
 
 /** Cluster assignment */
 export interface ClusterAssignment {
-  episode_index: number
-  cluster_id: number
-  similarity_score: number
+  episodeIndex: number
+  clusterId: number
+  similarityScore: number
 }
 
 /** Clustering request */
 export interface ClusterRequest {
   trajectories: number[][][]
-  num_clusters?: number
+  numClusters?: number
 }
 
 /** Clustering response */
 export interface ClusterResponse {
-  num_clusters: number
+  numClusters: number
   assignments: ClusterAssignment[]
-  cluster_sizes: Record<string, number>
-  silhouette_score: number
+  clusterSizes: Record<string, number>
+  silhouetteScore: number
 }
 
 /** Annotation suggestion request */
 export interface SuggestAnnotationRequest {
   positions: number[][]
   timestamps: number[]
-  gripper_states?: number[]
+  gripperStates?: number[]
   forces?: number[][]
 }
 
 /** AI annotation suggestion */
 export interface AnnotationSuggestion {
-  task_completion_rating: number
-  trajectory_quality_score: number
-  suggested_flags: string[]
-  detected_anomalies: DetectedAnomaly[]
+  taskCompletionRating: number
+  trajectoryQualityScore: number
+  suggestedFlags: string[]
+  detectedAnomalies: DetectedAnomaly[]
   confidence: number
   reasoning: string
 }
@@ -102,15 +100,16 @@ export interface AnnotationSuggestion {
  * Analyze trajectory quality.
  */
 export async function analyzeTrajectory(data: TrajectoryData): Promise<TrajectoryMetrics> {
-  const response = await fetch(`${API_BASE}/ai/trajectory-analysis`, {
+  return apiRequest<TrajectoryMetrics>('/ai/trajectory-analysis', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(await mutationHeaders()),
-    },
-    body: JSON.stringify(data),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      positions: data.positions,
+      timestamps: data.timestamps,
+      gripper_states: data.gripperStates,
+      smoothness_mode: data.smoothnessMode,
+    }),
   })
-  return handleResponse<TrajectoryMetrics>(response)
 }
 
 /**
@@ -119,30 +118,31 @@ export async function analyzeTrajectory(data: TrajectoryData): Promise<Trajector
 export async function detectAnomalies(
   request: AnomalyDetectionRequest,
 ): Promise<AnomalyDetectionResponse> {
-  const response = await fetch(`${API_BASE}/ai/anomaly-detection`, {
+  return apiRequest<AnomalyDetectionResponse>('/ai/anomaly-detection', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(await mutationHeaders()),
-    },
-    body: JSON.stringify(request),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      positions: request.positions,
+      timestamps: request.timestamps,
+      forces: request.forces,
+      gripper_states: request.gripperStates,
+      gripper_commands: request.gripperCommands,
+    }),
   })
-  return handleResponse<AnomalyDetectionResponse>(response)
 }
 
 /**
  * Cluster episodes by trajectory similarity.
  */
 export async function clusterEpisodes(request: ClusterRequest): Promise<ClusterResponse> {
-  const response = await fetch(`${API_BASE}/ai/cluster`, {
+  return apiRequest<ClusterResponse>('/ai/cluster', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(await mutationHeaders()),
-    },
-    body: JSON.stringify(request),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      trajectories: request.trajectories,
+      num_clusters: request.numClusters,
+    }),
   })
-  return handleResponse<ClusterResponse>(response)
 }
 
 /**
@@ -151,13 +151,14 @@ export async function clusterEpisodes(request: ClusterRequest): Promise<ClusterR
 export async function getAnnotationSuggestion(
   request: SuggestAnnotationRequest,
 ): Promise<AnnotationSuggestion> {
-  const response = await fetch(`${API_BASE}/ai/suggest-annotation`, {
+  return apiRequest<AnnotationSuggestion>('/ai/suggest-annotation', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(await mutationHeaders()),
-    },
-    body: JSON.stringify(request),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      positions: request.positions,
+      timestamps: request.timestamps,
+      gripper_states: request.gripperStates,
+      forces: request.forces,
+    }),
   })
-  return handleResponse<AnnotationSuggestion>(response)
 }

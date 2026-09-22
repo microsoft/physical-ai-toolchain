@@ -14,9 +14,9 @@ packages = ["training/rl"]
 
 [dependency-groups]
 dev = [
-    "hypothesis==6.167.1",
-    "numpy==2.5.2",
-    "ruff==0.16.5",
+    "hypothesis==6.168.0",
+    "numpy==2.5.3",
+    "ruff==0.16.7",
     "pyarrow==25.0.1",
     "imageio==2.37.4",
     "imageio-ffmpeg==0.6.0",
@@ -26,11 +26,11 @@ dev = [
     "pydantic==2.13.5",
     "ipykernel==7.3.0",
     "ipywidgets==8.1.9",
-    "tqdm==4.70.0",
-    "matplotlib==3.11.1",
-    "torch==2.13.0",
-    "azureml-mlflow==1.62.0.post5",
-    "azure-ai-ml==1.34.1",
+    "tqdm==4.70.1",
+    "matplotlib==3.11.2",
+    "torch==2.14.0",
+    "azureml-mlflow==1.62.0.post6",
+    "azure-ai-ml==1.35.0",
 ]
 fuzz = ["atheris==3.1.0"]
 
@@ -113,6 +113,51 @@ select = [
 # GR00T data_config.py fragments are appended onto gr00t/experiment/data_config.py
 # at runtime; So100DataConfig and DATA_CONFIG_MAP are injected by the parent module.
 "training/vla/configs/groot/examples/data_config.py" = ["F821", "RUF012"]
+# gpu-offload SO101 ROS2 bridge modules are faithfully vendored upstream LeRobot
+# reference code carried as lint-only, not-runtime-verified reference (Path D). The
+# remaining findings are upstream style choices we do not refactor; formatting-level
+# issues are already resolved. The authored control loop (run_vla.py) is excluded and
+# stays under the full rule set.
+"gpu-offload/examples/so101-real-hardware/ros2_bridge/robot_ros2.py" = [
+    "B904",
+    "E501",
+    "F401",
+    "F841",
+    "RUF012",
+    "SIM105",
+    "SIM108",
+    "UP040",
+]
+"gpu-offload/examples/so101-real-hardware/ros2_bridge/ros_bridge/*.py" = [
+    "B904",
+    "E501",
+    "F401",
+    "F841",
+    "RUF012",
+    "SIM105",
+    "SIM108",
+    "UP040",
+]
+"gpu-offload/examples/so101-real-hardware/ros2_bridge/so_follower/*.py" = [
+    "B904",
+    "E501",
+    "F401",
+    "F841",
+    "RUF012",
+    "SIM105",
+    "SIM108",
+    "UP040",
+]
+"gpu-offload/examples/so101-real-hardware/ros2_bridge/examples/so101_ros/utils.py" = [
+    "B904",
+    "E501",
+    "F401",
+    "F841",
+    "RUF012",
+    "SIM105",
+    "SIM108",
+    "UP040",
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["training"]

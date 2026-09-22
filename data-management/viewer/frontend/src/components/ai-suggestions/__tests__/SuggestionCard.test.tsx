@@ -9,19 +9,19 @@ const buildAnomaly = (overrides: Partial<DetectedAnomaly> = {}): DetectedAnomaly
   id: 'a-1',
   type: 'sudden_stop',
   severity: 'high',
-  frame_start: 10,
-  frame_end: 20,
+  frameStart: 10,
+  frameEnd: 20,
   description: 'Trajectory stops abruptly',
   confidence: 0.95,
-  auto_detected: true,
+  autoDetected: true,
   ...overrides,
 })
 
 const buildSuggestion = (overrides: Partial<AnnotationSuggestion> = {}): AnnotationSuggestion => ({
-  task_completion_rating: 4,
-  trajectory_quality_score: 3,
-  suggested_flags: ['needs_review', 'partial_success'],
-  detected_anomalies: [buildAnomaly()],
+  taskCompletionRating: 4,
+  trajectoryQualityScore: 3,
+  suggestedFlags: ['needs_review', 'partial_success'],
+  detectedAnomalies: [buildAnomaly()],
   confidence: 0.82,
   reasoning: 'Trajectory shows smooth motion with one anomaly.',
   ...overrides,
@@ -46,12 +46,12 @@ describe('SuggestionCard', () => {
   })
 
   it('hides flags section when no flags are suggested', () => {
-    render(<SuggestionCard suggestion={buildSuggestion({ suggested_flags: [] })} />)
+    render(<SuggestionCard suggestion={buildSuggestion({ suggestedFlags: [] })} />)
     expect(screen.queryByText('Suggested Flags')).not.toBeInTheDocument()
   })
 
   it('hides anomalies section when no anomalies are detected', () => {
-    render(<SuggestionCard suggestion={buildSuggestion({ detected_anomalies: [] })} />)
+    render(<SuggestionCard suggestion={buildSuggestion({ detectedAnomalies: [] })} />)
     expect(screen.queryByText(/Detected Anomalies/)).not.toBeInTheDocument()
   })
 

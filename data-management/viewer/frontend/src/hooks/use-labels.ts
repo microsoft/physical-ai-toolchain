@@ -7,11 +7,9 @@ import { useCallback, useEffect, useRef } from 'react'
 
 import {
   ApiClientError,
-  handleResponse,
-  mutationFetch,
+  apiRequestVersioned,
   type MutationPrecondition,
   mutationPreconditionHeaders,
-  requestHeaders,
   setEpisodeLabels,
   type VersionedResource,
 } from '@/lib/api-client'
@@ -21,11 +19,9 @@ import { useDatasetStore } from '@/stores'
 import { useLabelStore } from '@/stores/label-store'
 import type { EpisodeAnalysisRecord } from '@/types/api'
 
-const API_BASE = '/api'
-
-export interface DatasetLabelsResponse {
-  dataset_id: string
-  available_labels: string[]
+interface DatasetLabelsResponse {
+  datasetId: string
+  availableLabels: string[]
   episodes: Record<string, string[]>
   analysis?: Record<string, EpisodeAnalysisRecord>
 }
@@ -53,13 +49,7 @@ function retainLabelEtag(queryClient: QueryClient, datasetId: string, etag: stri
 }
 
 export async function fetchDatasetLabels(datasetId: string): Promise<VersionedDatasetLabels> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}/labels`, {
-    headers: await requestHeaders(),
-  })
-  return {
-    data: await handleResponse<DatasetLabelsResponse>(response),
-    etag: response.headers.get('ETag'),
-  }
+  return apiRequestVersioned<DatasetLabelsResponse>(`/datasets/${datasetId}/labels`)
 }
 
 async function addLabelOption(
@@ -67,12 +57,11 @@ async function addLabelOption(
   label: string,
   precondition: MutationPrecondition,
 ): Promise<VersionedResource<string[]>> {
-  const res = await mutationFetch(`${API_BASE}/datasets/${datasetId}/labels/options`, {
+  return apiRequestVersioned<string[]>(`/datasets/${datasetId}/labels/options`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...mutationPreconditionHeaders(precondition) },
     body: JSON.stringify({ label }),
   })
-  return { data: await handleResponse<string[]>(res), etag: res.headers.get('ETag') }
 }
 
 async function removeLabelOption(
@@ -80,14 +69,13 @@ async function removeLabelOption(
   label: string,
   precondition: MutationPrecondition,
 ): Promise<VersionedResource<string[]>> {
-  const res = await mutationFetch(
-    `${API_BASE}/datasets/${datasetId}/labels/options/${encodeURIComponent(label.trim().toUpperCase())}`,
+  return apiRequestVersioned<string[]>(
+    `/datasets/${datasetId}/labels/options/${encodeURIComponent(label.trim().toUpperCase())}`,
     {
       method: 'DELETE',
       headers: mutationPreconditionHeaders(precondition),
     },
   )
-  return { data: await handleResponse<string[]>(res), etag: res.headers.get('ETag') }
 }
 
 /** Analysis fields that can be promoted into filterable episode labels. */
@@ -104,13 +92,13 @@ export const IMPORTABLE_ANALYSIS_FIELDS = [
 export type ImportableAnalysisField = (typeof IMPORTABLE_ANALYSIS_FIELDS)[number]
 
 interface ImportAnalysisResult {
-  dataset_id: string
-  available_labels: string[]
+  datasetId: string
+  availableLabels: string[]
   episodes: Record<string, string[]>
   field: string
   prefix: string
-  labels_added: string[]
-  episodes_updated: number
+  labelsAdded: string[]
+  episodesUpdated: number
 }
 
 async function importAnalysisLabels(
@@ -119,19 +107,21 @@ async function importAnalysisLabels(
   options?: { prefix?: string; overwrite?: boolean },
   precondition?: MutationPrecondition,
 ): Promise<VersionedResource<ImportAnalysisResult>> {
-  const res = await mutationFetch(`${API_BASE}/datasets/${datasetId}/labels/import-from-analysis`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...mutationPreconditionHeaders(precondition ?? { createOnly: true }),
+  return apiRequestVersioned<ImportAnalysisResult>(
+    `/datasets/${datasetId}/labels/import-from-analysis`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...mutationPreconditionHeaders(precondition ?? { createOnly: true }),
+      },
+      body: JSON.stringify({
+        field,
+        prefix: options?.prefix,
+        overwrite: options?.overwrite ?? false,
+      }),
     },
-    body: JSON.stringify({
-      field,
-      prefix: options?.prefix,
-      overwrite: options?.overwrite ?? false,
-    }),
-  })
-  return { data: await handleResponse<ImportAnalysisResult>(res), etag: res.headers.get('ETag') }
+  )
 }
 
 /**
@@ -145,9 +135,11 @@ export function useDatasetLabels() {
   })
   const principalScopeId = principalQuery.data?.scopeId
   const currentDataset = useDatasetStore((state) => state.currentDataset)
+  const labelDatasetId = useLabelStore((state) => state.datasetId)
   const prepareDatasetLabels = useLabelStore((state) => state.prepareDatasetLabels)
   const setAvailableLabels = useLabelStore((state) => state.setAvailableLabels)
   const setDatasetEpisodeLabels = useLabelStore((state) => state.setDatasetEpisodeLabels)
+  const reconcileEpisodeLabels = useLabelStore((state) => state.reconcileEpisodeLabels)
   const setAllEpisodeAnalysis = useLabelStore((state) => state.setAllEpisodeAnalysis)
   const restoreLabelDraft = useLabelStore((state) => state.restoreLabelDraft)
   const availableLabels = useLabelStore((state) => state.availableLabels)
@@ -168,12 +160,16 @@ export function useDatasetLabels() {
   }, [currentDataset?.id, prepareDatasetLabels])
 
   useEffect(() => {
-    if (!query.data || query.data.data.dataset_id !== currentDataset?.id || !principalScopeId)
+    if (!query.data || query.data.data.datasetId !== currentDataset?.id || !principalScopeId)
       return
 
-    const datasetId = query.data.data.dataset_id
-    setAvailableLabels(query.data.data.available_labels)
-    setDatasetEpisodeLabels(datasetId, query.data.data.episodes)
+    const datasetId = query.data.data.datasetId
+    setAvailableLabels(query.data.data.availableLabels)
+    if (labelDatasetId === datasetId) {
+      reconcileEpisodeLabels(datasetId, query.data.data.episodes)
+    } else {
+      setDatasetEpisodeLabels(datasetId, query.data.data.episodes)
+    }
     hydratedDatasetRef.current = datasetId
     setAllEpisodeAnalysis(query.data.data.analysis ?? {})
     setLoaded(true)
@@ -201,8 +197,10 @@ export function useDatasetLabels() {
     }
   }, [
     currentDataset?.id,
+    labelDatasetId,
     principalScopeId,
     query.data,
+    reconcileEpisodeLabels,
     setAllEpisodeAnalysis,
     setAvailableLabels,
     restoreLabelDraft,
@@ -369,11 +367,11 @@ export function useImportAnalysisLabels() {
     },
     onSuccess: (versioned) => {
       const data = versioned.data
-      retainLabelEtag(queryClient, data.dataset_id, versioned.etag)
-      queryClient.invalidateQueries({ queryKey: labelKeys.dataset(data.dataset_id) })
-      if (useDatasetStore.getState().currentDataset?.id !== data.dataset_id) return
-      setAvailableLabels(data.available_labels)
-      reconcileEpisodeLabels(data.dataset_id, data.episodes)
+      retainLabelEtag(queryClient, data.datasetId, versioned.etag)
+      queryClient.invalidateQueries({ queryKey: labelKeys.dataset(data.datasetId) })
+      if (useDatasetStore.getState().currentDataset?.id !== data.datasetId) return
+      setAvailableLabels(data.availableLabels)
+      reconcileEpisodeLabels(data.datasetId, data.episodes)
     },
   })
 

@@ -3,7 +3,7 @@ sidebar_position: 4
 title: Contribution Workflow
 description: How to contribute including legal requirements, bug reports, enhancement suggestions, and documentation improvements
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-07
+ms.date: 2026-09-19
 ms.topic: how-to
 keywords:
   - contributing
@@ -36,7 +36,7 @@ Before creating a bug report:
 * Verify you are using tested versions: Terraform >= 1.9.8, Azure CLI >= 2.65.0
 * Check Azure resource quotas and limits: `az vm list-usage --location <region>`
 * Confirm network mode (private/hybrid/public) matches documented requirements
-* Test with minimal configuration first (public network mode before private, single GPU node before multi-node)
+* Test with minimal configuration first (single GPU node before multi-node), retaining the network mode required by your environment
 
 ### How to Submit a Bug Report
 
@@ -99,9 +99,9 @@ Output shows subnet exists but lacks role assignment for AKS managed identity.
 **Configuration:**
 
 ```hcl
-network_mode = "private"
-enable_private_cluster = true
-aks_subnet_cidr = "10.0.2.0/24"
+should_enable_private_endpoint    = true
+should_enable_private_aks_cluster = true
+subnet_address_prefixes_aks       = ["10.0.5.0/24"]
 ```
 
 **Cost Impact:**
@@ -144,7 +144,7 @@ Create a [new issue](https://github.com/microsoft/physical-ai-toolchain/issues/n
 
 ## Your First Code Contribution
 
-This reference architecture validates through deployment rather than automated tests. The validation level depends on your contribution type.
+Run applicable local linting and automated tests before submitting code. Deployment and workflow validation supplement those checks when behavior depends on Azure, Kubernetes, or GPU resources; the required level depends on your contribution type.
 
 ### PR Workflow
 
@@ -164,10 +164,10 @@ This reference architecture validates through deployment rather than automated t
 
 | Contribution Type           | Expected Validation                                                                                                |
 |-----------------------------|--------------------------------------------------------------------------------------------------------------------|
-| Documentation               | Read-through, link check (`npm run lint:md`)                                                                       |
+| Documentation               | Read-through, Markdown lint (`npm run lint:md`), local link and anchor checks                                      |
 | Shell scripts               | ShellCheck validation, test in local/minimal environment                                                           |
 | Terraform modules           | `terraform fmt`, `terraform validate`, `terraform plan` output attached to PR, `npm run test:go` (output contract) |
-| Full infrastructure changes | Deployment testing in dev subscription with cost estimate and teardown confirmation                                |
+| Full infrastructure changes | Deployment testing in dev subscription with cost estimate and resource destruction confirmation                    |
 | Training scripts            | AzureML job submission in test workspace with logs                                                                 |
 | Workflow templates          | Workflow execution validation with job outputs                                                                     |
 | Go modules                  | `npm run lint:go` (golangci-lint), `npm run test:go` (`go test`, requires `terraform-docs`)                        |
@@ -202,7 +202,7 @@ Documentation contributions improve the architecture for the entire robotics and
 Before submitting documentation changes:
 
 * Run `npm run lint:md` to check formatting and style
-* Verify internal links with `npm run lint:links`
+* Run `npm run lint:links` for link-language checks; separately verify that local file targets and heading anchors resolve
 * Test code samples in deployment environment
 * Review against [docs-style-and-conventions.instructions.md](https://github.com/microsoft/physical-ai-toolchain/blob/main/.github/instructions/docs-style-and-conventions.instructions.md)
 

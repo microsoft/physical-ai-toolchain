@@ -1,0 +1,53 @@
+flowchart TB
+    %% cspell:ignore Containerfile rmtconfigkube msgtcp
+    chart["GPU offload Helm chart<br/>helm/gpu-offload/"]
+    robot["Robot site<br/>sensors, actuators, ROS 2 bridge"]
+
+    subgraph cluster["Remote Kubernetes cluster"]
+        direction TB
+
+        subgraph controlPlane["Managed Kubernetes control plane"]
+            api["kube-apiserver"]
+            scheduler["scheduler and controllers"]
+        end
+
+        webhookService["Admission registration and Service<br/>helm/gpu-offload/templates/<br/>mutating-webhook.yaml"]
+        remoteConfig["remote.yaml ConfigMap<br/>examples/* manifests<br/>schema: specifications/remote-spec-schema.md"]
+
+        subgraph workers["Worker nodes"]
+            direction LR
+
+            subgraph cpuNode["CPU worker node"]
+                cpuKubelet["kubelet"]
+                cpuRuntime["container runtime and CNI"]
+                webhook["Mutation controller pod<br/>controller/mutate.py<br/>image: controller/Containerfile"]
+                client["Client / robot control pod<br/>examples/* workload<br/>SDK: runtime/remoter/"]
+            end
+
+            subgraph gpuNode["GPU worker node"]
+                gpuKubelet["kubelet"]
+                gpuRuntime["container runtime and CNI"]
+                devicePlugin["NVIDIA device plugin"]
+                server["Generated server-stage pod<br/>template: controller/mutate.py<br/>entry: runtime/remoter/autoremote.py"]
+            end
+        end
+    end
+
+    chart -.->|"renders"| webhookService
+    chart -.->|"renders"| webhook
+    api ---|"admission endpoint"| webhookService
+    webhookService -->|"selects"| webhook
+    webhook -.->|"Kubernetes API client"| api
+    scheduler -.->|"pod assignments"| cpuKubelet
+    scheduler -.->|"pod assignments"| gpuKubelet
+    cpuKubelet --> cpuRuntime
+    cpuRuntime --> webhook
+    cpuRuntime --> client
+    gpuKubelet --> gpuRuntime
+    devicePlugin -->|"advertise nvidia.com/gpu"| gpuKubelet
+    gpuRuntime --> server
+    remoteConfig -->|"read-only /xavierconfig mount"| client
+    remoteConfig -->|"read-only /xavierconfig mount"| server
+    robot ---|"operator-provided application link"| client
+    client -.->|"pod discovery API"| api
+    client ===|"pod network"| server

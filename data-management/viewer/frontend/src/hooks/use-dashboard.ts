@@ -4,35 +4,35 @@
 
 import { useQuery } from '@tanstack/react-query'
 
-import { handleResponse, requestHeaders } from '@/lib/api-client'
+import { apiRequest, transformKeys } from '@/lib/api-client'
 
 /** Dashboard statistics */
 export interface DashboardStats {
-  total_episodes: number
-  annotated_episodes: number
-  pending_episodes: number
-  annotation_rate: number
-  rating_distribution: Record<string, number>
-  quality_distribution: Record<string, number>
-  annotator_stats: AnnotatorStats[]
-  recent_activity: ActivityItem[]
-  issues_by_type: Record<string, number>
-  anomalies_by_type: Record<string, number>
+  totalEpisodes: number
+  annotatedEpisodes: number
+  pendingEpisodes: number
+  annotationRate: number
+  ratingDistribution: Record<string, number>
+  qualityDistribution: Record<string, number>
+  annotatorStats: AnnotatorStats[]
+  recentActivity: ActivityItem[]
+  issuesByType: Record<string, number>
+  anomaliesByType: Record<string, number>
 }
 
 export interface AnnotatorStats {
-  annotator_id: string
-  annotator_name: string
-  episodes_annotated: number
-  average_rating: number
-  last_active: string
+  annotatorId: string
+  annotatorName: string
+  episodesAnnotated: number
+  averageRating: number
+  lastActive: string
 }
 
 export interface ActivityItem {
   id: string
   type: 'annotation' | 'review' | 'edit'
-  episode_id: string
-  annotator_name: string
+  episodeId: string
+  annotatorName: string
   timestamp: string
   summary: string
 }
@@ -44,16 +44,27 @@ export const dashboardKeys = {
   progress: (datasetId: string) => [...dashboardKeys.all, 'progress', datasetId] as const,
 }
 
-const API_BASE = '/api'
-
 /**
  * Fetch dashboard statistics.
  */
+function transformDashboardStats(data: unknown): DashboardStats {
+  const raw = data as Record<string, unknown>
+  const stats = transformKeys<DashboardStats>(raw)
+  const issuesByType = raw.issues_by_type
+  const anomaliesByType = raw.anomalies_by_type
+
+  if (issuesByType && typeof issuesByType === 'object') {
+    stats.issuesByType = { ...(issuesByType as Record<string, number>) }
+  }
+  if (anomaliesByType && typeof anomaliesByType === 'object') {
+    stats.anomaliesByType = { ...(anomaliesByType as Record<string, number>) }
+  }
+
+  return stats
+}
+
 async function fetchDashboardStats(datasetId: string): Promise<DashboardStats> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}/stats`, {
-    headers: await requestHeaders(),
-  })
-  return handleResponse<DashboardStats>(response)
+  return apiRequest<DashboardStats>(`/datasets/${datasetId}/stats`, {}, transformDashboardStats)
 }
 
 /**
@@ -78,13 +89,13 @@ export function useDashboardMetrics(datasetId: string) {
   const metrics = data
     ? {
         completionPercent: Math.round(
-          (data.annotated_episodes / Math.max(data.total_episodes, 1)) * 100,
+          (data.annotatedEpisodes / Math.max(data.totalEpisodes, 1)) * 100,
         ),
-        averageRating: calculateAverageRating(data.rating_distribution),
-        averageQuality: calculateAverageRating(data.quality_distribution),
-        episodesPerHour: calculateEpisodesPerHour(data.recent_activity),
-        topIssues: getTopItems(data.issues_by_type, 5),
-        topAnomalies: getTopItems(data.anomalies_by_type, 5),
+        averageRating: calculateAverageRating(data.ratingDistribution),
+        averageQuality: calculateAverageRating(data.qualityDistribution),
+        episodesPerHour: calculateEpisodesPerHour(data.recentActivity),
+        topIssues: getTopItems(data.issuesByType, 5),
+        topAnomalies: getTopItems(data.anomaliesByType, 5),
       }
     : null
 

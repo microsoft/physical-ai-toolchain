@@ -1,0 +1,29 @@
+sequenceDiagram
+    %% cspell:ignore AdmissionReview ConfigMap
+    actor Operator
+    box gpu-offload artifacts
+        participant Helm as helm/gpu-offload/
+        participant Webhook as controller/mutate.py
+    end
+    box Kubernetes platform
+        participant API as kube-apiserver
+        participant Scheduler
+        participant CPUKubelet as CPU-node kubelet
+        participant GPUKubelet as GPU-node kubelet
+    end
+
+    Operator->>Helm: Install the control-plane chart
+    Helm->>API: Apply RBAC, Service, controller Deployment, and webhook registration
+    API->>Scheduler: Queue the controller pod
+    Scheduler-->>CPUKubelet: Bind the controller pod
+    CPUKubelet->>Webhook: Start the controller image
+
+    Operator->>API: Create remote.yaml ConfigMap and opted-in client workload
+    API->>Webhook: AdmissionReview for CREATE
+    Webhook-->>API: JSON patch with mount and runtime environment
+    API->>Scheduler: Queue the mutated client pod
+    API-->>Webhook: Workload ADDED watch event
+    Webhook->>API: Read ConfigMap and create server Deployment
+    API->>Scheduler: Queue the GPU-requesting server pod
+    Scheduler-->>CPUKubelet: Bind the client pod
+    Scheduler-->>GPUKubelet: Bind the server pod

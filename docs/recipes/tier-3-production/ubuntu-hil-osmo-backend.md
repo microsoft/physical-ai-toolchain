@@ -13,11 +13,11 @@ Move one Ubuntu desktop through four T3 HiL milestones: host-ready, reachable wh
 
 ## Responsibilities
 
-| Owner             | Responsibilities                                                                                                                                 | Excluded work                                                                                                   |
-|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| Owner             | Responsibilities                                                                                                                                                        | Excluded work                                                                                                   |
+|-------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
 | Environment owner | Verify the existing OSMO endpoint, backend, pool, charts, images, registry access, Key Vault secrets, per-secret roles, Arc workload identity, and coherent publication | Local K3s or Ubuntu mutation                                                                                    |
-| Ubuntu user       | Prepare the host, install owned K3s, optionally connect VPN, consume exact Key Vault inputs, and run validation                                  | AKS credentials, Azure resource administration, Key Vault networking or RBAC changes, remote OSMO desired state |
-| VPN CA owner      | Sign the Ubuntu CSR and publish only the signed leaf and public chain                                                                            | Moving the CA private key or Ubuntu private key                                                                 |
+| Ubuntu user       | Prepare the host, install owned K3s, optionally connect VPN, consume exact Key Vault inputs, and run validation                                                         | AKS credentials, Azure resource administration, Key Vault networking or RBAC changes, remote OSMO desired state |
+| VPN CA owner      | Sign the Ubuntu CSR and publish only the signed leaf and public chain                                                                                                   | Moving the CA private key or Ubuntu private key                                                                 |
 
 ## Transfer Protected Artifacts
 

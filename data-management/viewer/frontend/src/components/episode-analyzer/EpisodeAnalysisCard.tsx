@@ -80,32 +80,32 @@ export const EpisodeAnalysisCard = memo(function EpisodeAnalysisCard({
       ) : (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            {record.pick_from && (
+            {record.pickFrom && (
               <span className="bg-muted inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs">
-                Picks from <strong className="font-semibold">{record.pick_from}</strong>
+                Picks from <strong className="font-semibold">{record.pickFrom}</strong>
               </span>
             )}
             <span className="text-muted-foreground text-xs">Grasp</span>
-            <Outcome value={record.grasp_success} testId="grasp-outcome" />
+            <Outcome value={record.graspSuccess} testId="grasp-outcome" />
             <span className="text-muted-foreground text-xs">Place</span>
-            <Outcome value={record.place_success} testId="place-outcome" />
+            <Outcome value={record.placeSuccess} testId="place-outcome" />
           </div>
 
           {record.object && <Field label="Object" value={record.object} />}
-          {record.movement_quality && (
-            <Field label="Movement quality" value={record.movement_quality} />
+          {record.movementQuality && (
+            <Field label="Movement quality" value={record.movementQuality} />
           )}
           {record.notes && <Field label="Notes" value={record.notes} />}
 
-          {(record.motion_score != null ||
-            (record.motion_flags && record.motion_flags.length > 0)) && (
+          {(record.motionScore != null ||
+            (record.motionFlags && record.motionFlags.length > 0)) && (
             <div className="flex flex-wrap items-center gap-2 border-t pt-2">
-              {record.motion_score != null && (
+              {record.motionScore != null && (
                 <span className="text-muted-foreground text-xs">
-                  Motion score <strong className="text-foreground">{record.motion_score}</strong>/5
+                  Motion score <strong className="text-foreground">{record.motionScore}</strong>/5
                 </span>
               )}
-              {record.motion_flags?.map((flag) => (
+              {record.motionFlags?.map((flag) => (
                 <span
                   key={flag}
                   className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800"

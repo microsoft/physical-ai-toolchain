@@ -6,7 +6,6 @@
 
 import type {
   AnnotationSummary,
-  ApiError,
   AutoQualityAnalysis,
   DatasetCapabilities,
   DatasetInfo,
@@ -21,7 +20,7 @@ import type {
 
 import { getAuthHeaders } from './auth-headers'
 
-const API_BASE = '/api'
+export const API_BASE = '/api'
 
 /** Cached CSRF token fetched from the server. */
 let _csrfToken: string | null = null
@@ -67,10 +66,20 @@ export async function mutationFetch(
   const method = (init.method ?? 'GET').toUpperCase()
   const needsCsrf = method !== 'GET' && method !== 'HEAD'
   const baseHeaders = needsCsrf ? await mutationHeaders() : await requestHeaders()
+  const headers = new Headers(baseHeaders)
+  new Headers(init.headers).forEach((value, name) => headers.set(name, value))
   return fetch(input, {
     ...init,
-    headers: { ...baseHeaders, ...(init.headers ?? {}) },
+    headers: Object.fromEntries(headers.entries()),
   })
+}
+
+export function apiPath(path: string): string {
+  return `${API_BASE}/${path.replace(/^\/+/, '')}`
+}
+
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  return mutationFetch(apiPath(path), init)
 }
 
 /** Reset cached CSRF token (for testing). */
@@ -184,25 +193,92 @@ export function mutationPreconditionHeaders(
   throw new Error('A mutation precondition is required')
 }
 
+function publicErrorMessage(status: number): string {
+  if (status >= 500) {
+    return 'The server could not complete the request'
+  }
+
+  switch (status) {
+    case 400:
+      return 'The request is invalid'
+    case 401:
+      return 'Authentication is required'
+    case 403:
+      return 'You do not have permission to perform this action'
+    case 404:
+      return 'The requested resource was not found'
+    case 409:
+      return 'The request conflicts with the current state'
+    case 413:
+      return 'The request is too large'
+    case 422:
+      return 'The request contains invalid data'
+    case 429:
+      return 'Too many requests; try again later'
+    default:
+      return 'The request could not be completed'
+  }
+}
+
 /**
  * Handle API response, throwing on error.
  */
-export async function handleResponse<T>(response: Response): Promise<T> {
+export async function handleResponse<T>(
+  response: Response,
+  transform: (data: unknown) => T = transformKeys<T>,
+): Promise<T> {
   if (!response.ok) {
-    let error: ApiError
+    let code = `HTTP_${response.status}`
+    let details: Record<string, unknown> | undefined
     try {
-      error = await response.json()
-    } catch {
-      error = {
-        code: 'UNKNOWN_ERROR',
-        message: response.statusText || 'An unknown error occurred',
+      const payload: unknown = await response.json()
+      if (payload !== null && typeof payload === 'object') {
+        if ('code' in payload && typeof payload.code === 'string') {
+          code = payload.code
+        }
+        if (
+          response.status === 412 &&
+          'details' in payload &&
+          payload.details !== null &&
+          typeof payload.details === 'object' &&
+          !Array.isArray(payload.details)
+        ) {
+          details = transformKeys<Record<string, unknown>>(payload.details)
+        }
       }
+    } catch {
+      // Non-JSON errors still surface through the status-derived public error.
     }
 
-    throw new ApiClientError(error.message, error.code, response.status, error.details)
+    throw new ApiClientError(publicErrorMessage(response.status), code, response.status, details)
   }
 
-  return response.json()
+  if (response.status === 204) {
+    return undefined as T
+  }
+
+  return transform(await response.json())
+}
+
+export async function apiRequest<T>(
+  path: string,
+  init: RequestInit = {},
+  transform?: (data: unknown) => T,
+): Promise<T> {
+  const response = await apiFetch(path, init)
+  return transform ? handleResponse(response, transform) : handleResponse<T>(response)
+}
+
+export async function apiRequestVersioned<T>(
+  path: string,
+  init: RequestInit = {},
+  transform?: (data: unknown) => T,
+): Promise<VersionedResource<T>> {
+  const response = await apiFetch(path, init)
+  return {
+    data: transform ? await handleResponse(response, transform) : await handleResponse<T>(response),
+    etag: response.headers.get('ETag'),
+  }
 }
 
 // ============================================================================
@@ -213,33 +289,25 @@ export async function handleResponse<T>(response: Response): Promise<T> {
  * Fetch all available datasets.
  */
 export async function fetchDatasets(): Promise<DatasetInfo[]> {
-  const response = await fetch(`${API_BASE}/datasets`, {
-    headers: await requestHeaders(),
-  })
-  const raw = await handleResponse<Array<Record<string, unknown>>>(response)
-  return raw.map(preserveDatasetFeatureKeys)
+  return apiRequest('/datasets', {}, (data) =>
+    (data as Array<Record<string, unknown>>).map(preserveDatasetFeatureKeys),
+  )
 }
 
 /**
  * Fetch a specific dataset by ID.
  */
 export async function fetchDataset(datasetId: string): Promise<DatasetInfo> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}`, {
-    headers: await requestHeaders(),
-  })
-  const raw = await handleResponse<Record<string, unknown>>(response)
-  return preserveDatasetFeatureKeys(raw)
+  return apiRequest(`/datasets/${datasetId}`, {}, (data) =>
+    preserveDatasetFeatureKeys(data as Record<string, unknown>),
+  )
 }
 
 /**
  * Fetch capabilities for a dataset.
  */
 export async function fetchCapabilities(datasetId: string): Promise<DatasetCapabilities> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}/capabilities`, {
-    headers: await requestHeaders(),
-  })
-  const data = await handleResponse<unknown>(response)
-  return transformKeys<DatasetCapabilities>(data)
+  return apiRequest<DatasetCapabilities>(`/datasets/${datasetId}/capabilities`)
 }
 
 /**
@@ -270,24 +338,17 @@ export async function fetchEpisodes(
   }
 
   const query = params.toString()
-  const url = `${API_BASE}/datasets/${datasetId}/episodes${query ? `?${query}` : ''}`
-
-  const response = await fetch(url, {
-    headers: await requestHeaders(),
-  })
-  const data = await handleResponse<unknown>(response)
-  return transformKeys<EpisodeMeta[]>(data)
+  const path = `/datasets/${datasetId}/episodes${query ? `?${query}` : ''}`
+  return apiRequest<EpisodeMeta[]>(path)
 }
 
 /**
  * Fetch a specific episode by index.
  */
 export async function fetchEpisode(datasetId: string, episodeIndex: number): Promise<EpisodeData> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}`, {
-    headers: await requestHeaders(),
-  })
-  const raw = await handleResponse<Record<string, unknown>>(response)
-  return preserveEpisodeVariableKeys(raw)
+  return apiRequest(`/datasets/${datasetId}/episodes/${episodeIndex}`, {}, (data) =>
+    preserveEpisodeVariableKeys(data as Record<string, unknown>),
+  )
 }
 
 // ============================================================================
@@ -301,14 +362,9 @@ export async function fetchAnnotations(
   datasetId: string,
   episodeIndex: number,
 ): Promise<VersionedResource<EpisodeAnnotationFile>> {
-  const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
-    { headers: await requestHeaders() },
+  return apiRequestVersioned<EpisodeAnnotationFile>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
   )
-  return {
-    data: await handleResponse<EpisodeAnnotationFile>(response),
-    etag: response.headers.get('ETag'),
-  }
 }
 
 /**
@@ -320,22 +376,17 @@ export async function saveAnnotation(
   annotation: EpisodeAnnotation,
   precondition: MutationPrecondition,
 ): Promise<VersionedResource<EpisodeAnnotationFile>> {
-  const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
+  return apiRequestVersioned<EpisodeAnnotationFile>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
     {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         ...mutationPreconditionHeaders(precondition),
-        ...(await mutationHeaders()),
       },
       body: JSON.stringify(annotation),
     },
   )
-  return {
-    data: await handleResponse<EpisodeAnnotationFile>(response),
-    etag: response.headers.get('ETag'),
-  }
 }
 
 /**
@@ -346,14 +397,10 @@ export async function deleteAnnotations(
   episodeIndex: number,
   etag: string,
 ): Promise<{ deleted: boolean; episodeIndex: number }> {
-  const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
-    {
-      method: 'DELETE',
-      headers: { 'If-Match': etag, ...(await mutationHeaders()) },
-    },
+  return apiRequest<{ deleted: boolean; episodeIndex: number }>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
+    { method: 'DELETE', headers: { 'If-Match': etag } },
   )
-  return handleResponse(response)
 }
 
 /**
@@ -363,24 +410,17 @@ export async function triggerAutoAnalysis(
   datasetId: string,
   episodeIndex: number,
 ): Promise<AutoQualityAnalysis> {
-  const response = await fetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/annotations/auto`,
-    {
-      method: 'POST',
-      headers: await mutationHeaders(),
-    },
+  return apiRequest<AutoQualityAnalysis>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/annotations/auto`,
+    { method: 'POST' },
   )
-  return handleResponse<AutoQualityAnalysis>(response)
 }
 
 /**
  * Fetch annotation summary for a dataset.
  */
 export async function fetchAnnotationSummary(datasetId: string): Promise<AnnotationSummary> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}/annotations/summary`, {
-    headers: await requestHeaders(),
-  })
-  return handleResponse<AnnotationSummary>(response)
+  return apiRequest<AnnotationSummary>(`/datasets/${datasetId}/annotations/summary`)
 }
 
 // ============================================================================
@@ -401,20 +441,15 @@ export interface CacheStats {
  * Fetch episode cache performance metrics.
  */
 export async function fetchCacheStats(): Promise<CacheStats> {
-  const response = await fetch(`${API_BASE}/datasets/cache/stats`, {
-    headers: await requestHeaders(),
-  })
-  const data = await handleResponse<unknown>(response)
-  return transformKeys<CacheStats>(data)
+  return apiRequest<CacheStats>('/datasets/cache/stats')
 }
 
 /**
  * Warm the episode cache for a dataset by preloading the first N episodes.
  */
 export async function warmCache(datasetId: string, count = 5): Promise<void> {
-  await fetch(`${API_BASE}/datasets/${datasetId}/cache/warm?count=${count}`, {
+  await apiRequest(`/datasets/${datasetId}/cache/warm?count=${count}`, {
     method: 'POST',
-    headers: await mutationHeaders(),
   })
 }
 
@@ -444,12 +479,9 @@ export async function fetchVlmJudgeStatus(
   datasetId: string,
   episodeIndex: number,
 ): Promise<VlmJudgeStatus> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`, {
-    headers: await requestHeaders(),
-  })
+  const response = await apiFetch(`/datasets/${datasetId}/episodes/${episodeIndex}/judge`)
   if (response.status === 404) return VLM_JUDGE_DISABLED
-  const data = await handleResponse<unknown>(response)
-  return transformKeys<VlmJudgeStatus>(data)
+  return handleResponse<VlmJudgeStatus>(response)
 }
 
 /**
@@ -460,9 +492,9 @@ export async function runVlmJudge(
   episodeIndex: number,
   options: VlmJudgeRunOptions = {},
 ): Promise<VlmJudgeResult> {
-  const response = await fetch(`${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/judge`, {
+  return apiRequest<VlmJudgeResult>(`/datasets/${datasetId}/episodes/${episodeIndex}/judge`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(await mutationHeaders()) },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       instruction: options.instruction,
       views: options.views,
@@ -470,8 +502,6 @@ export async function runVlmJudge(
       force: options.force ?? false,
     }),
   })
-  const data = await handleResponse<unknown>(response)
-  return transformKeys<VlmJudgeResult>(data)
 }
 
 // ============================================================================
@@ -492,8 +522,8 @@ export async function setEpisodeLabels(
   labels: string[],
   precondition: MutationPrecondition,
 ): Promise<VersionedResource<EpisodeLabelsResult>> {
-  const response = await mutationFetch(
-    `${API_BASE}/datasets/${datasetId}/episodes/${episodeIndex}/labels`,
+  return apiRequestVersioned<EpisodeLabelsResult>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/labels`,
     {
       method: 'PUT',
       headers: {
@@ -503,9 +533,4 @@ export async function setEpisodeLabels(
       body: JSON.stringify({ labels }),
     },
   )
-  const data = await handleResponse<unknown>(response)
-  return {
-    data: transformKeys<EpisodeLabelsResult>(data),
-    etag: response.headers.get('ETag'),
-  }
 }

@@ -81,19 +81,19 @@ const buildAnomaly = (overrides: Partial<DetectedAnomaly> = {}): DetectedAnomaly
   id: 'a-1',
   type: 'sudden_stop',
   severity: 'high',
-  frame_start: 10,
-  frame_end: 20,
+  frameStart: 10,
+  frameEnd: 20,
   description: 'Trajectory stops abruptly',
   confidence: 0.95,
-  auto_detected: true,
+  autoDetected: true,
   ...overrides,
 })
 
 const buildSuggestion = (overrides: Partial<AnnotationSuggestion> = {}): AnnotationSuggestion => ({
-  task_completion_rating: 4,
-  trajectory_quality_score: 3,
-  suggested_flags: ['needs_review', 'partial_success'],
-  detected_anomalies: [buildAnomaly()],
+  taskCompletionRating: 4,
+  trajectoryQualityScore: 3,
+  suggestedFlags: ['needs_review', 'partial_success'],
+  detectedAnomalies: [buildAnomaly()],
   confidence: 0.82,
   reasoning: 'Trajectory shows smooth motion with one anomaly.',
   ...overrides,
@@ -204,10 +204,10 @@ describe('AISuggestionPanel', () => {
     expect(onApplySuggestion).toHaveBeenCalledWith(
       ['task_completion', 'trajectory_quality', 'flags', 'anomalies'],
       {
-        task_completion_rating: suggestion.task_completion_rating,
-        trajectory_quality_score: suggestion.trajectory_quality_score,
-        suggested_flags: suggestion.suggested_flags,
-        detected_anomalies: suggestion.detected_anomalies,
+        task_completion_rating: suggestion.taskCompletionRating,
+        trajectory_quality_score: suggestion.trajectoryQualityScore,
+        suggested_flags: suggestion.suggestedFlags,
+        detected_anomalies: suggestion.detectedAnomalies,
       },
     )
     expect(screen.getByTestId('suggestion-card')).toHaveAttribute('data-accepted', 'true')
@@ -236,7 +236,7 @@ describe('AISuggestionPanel', () => {
     )
     fireEvent.click(screen.getByTestId('card-partial-flags'))
     expect(onApplySuggestion).toHaveBeenCalledWith(['flags'], {
-      suggested_flags: suggestion.suggested_flags,
+      suggested_flags: suggestion.suggestedFlags,
     })
     expect(screen.getByTestId('suggestion-card')).toHaveAttribute('data-accepted', 'true')
   })

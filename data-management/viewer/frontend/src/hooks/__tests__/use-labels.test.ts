@@ -521,7 +521,12 @@ describe('use-labels hooks', () => {
       })
 
       await waitFor(() => expect(result.current.isError).toBe(true))
-      expect(result.current.error).toMatchObject({ name: 'ApiClientError', status: 500 })
+      expect(result.current.error).toMatchObject({
+        name: 'ApiClientError',
+        code: 'HTTP_500',
+        status: 500,
+        message: 'The server could not complete the request',
+      })
     })
   })
 
