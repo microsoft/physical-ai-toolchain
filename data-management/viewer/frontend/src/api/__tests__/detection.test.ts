@@ -4,13 +4,20 @@ import type { DetectionRequest, EpisodeDetectionSummary } from '@/types/detectio
 
 import { clearDetections, getDetections, runDetection } from '../detection'
 
-vi.mock('@/lib/api-client', () => ({
-  handleResponse: vi.fn(),
-  mutationHeaders: vi.fn(),
-  requestHeaders: vi.fn(),
-}))
+vi.mock('@/lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api-client')>()
+  return {
+    ...actual,
+    apiRequest: vi.fn(),
+    handleResponse: vi.fn(),
+    mutationHeaders: vi.fn(),
+    requestHeaders: vi.fn(),
+  }
+})
 
-const { handleResponse, mutationHeaders, requestHeaders } = await import('@/lib/api-client')
+const { apiRequest, handleResponse, mutationHeaders, requestHeaders } =
+  await import('@/lib/api-client')
+const mockApiRequest = vi.mocked(apiRequest)
 const mockHandleResponse = vi.mocked(handleResponse)
 const mockMutationHeaders = vi.mocked(mutationHeaders)
 const mockRequestHeaders = vi.mocked(requestHeaders)
@@ -18,11 +25,21 @@ const mockFetch = vi.fn()
 
 beforeEach(() => {
   mockFetch.mockReset()
+  mockApiRequest.mockReset()
   mockHandleResponse.mockReset()
   mockMutationHeaders.mockReset()
   mockRequestHeaders.mockReset()
   mockMutationHeaders.mockResolvedValue({ 'X-CSRF-Token': 'test-token' })
   mockRequestHeaders.mockResolvedValue({ Authorization: 'Bearer test' })
+  mockApiRequest.mockImplementation(async (path, init) => {
+    const method = init?.method ?? 'GET'
+    const baseHeaders = method === 'GET' ? await mockRequestHeaders() : await mockMutationHeaders()
+    const response = await mockFetch(`/api${path}`, {
+      ...init,
+      headers: { ...baseHeaders, ...(init?.headers as Record<string, string> | undefined) },
+    })
+    return mockHandleResponse(response)
+  })
   vi.stubGlobal('fetch', mockFetch)
 })
 
@@ -36,8 +53,8 @@ function okResponse(): Response {
 }
 
 const summary: EpisodeDetectionSummary = {
-  total_frames: 100,
-  processed_frames: 100,
+  totalFrames: 100,
+  processedFrames: 100,
 } as EpisodeDetectionSummary
 
 describe('runDetection', () => {
@@ -49,17 +66,13 @@ describe('runDetection', () => {
     const result = await runDetection('ds-1', 7, request)
 
     expect(result).toBe(summary)
-    expect(mockMutationHeaders).toHaveBeenCalledTimes(1)
     const [url, init] = mockFetch.mock.calls[0]
     expect(url).toBe('/api/datasets/ds-1/episodes/7/detect')
     expect(init).toMatchObject({
       method: 'POST',
       body: JSON.stringify(request),
     })
-    expect(init.headers).toMatchObject({
-      'Content-Type': 'application/json',
-      'X-CSRF-Token': 'test-token',
-    })
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
   })
 
   it('defaults the request body to an empty object', async () => {
@@ -95,6 +108,58 @@ describe('getDetections', () => {
 
     expect(result).toBeNull()
   })
+
+  it('preserves an uncached null response through the real API client', async () => {
+    const { apiRequest: realApiRequest } =
+      await vi.importActual<typeof import('@/lib/api-client')>('@/lib/api-client')
+    mockApiRequest.mockImplementationOnce(realApiRequest)
+    mockFetch.mockResolvedValueOnce(new Response('null', { status: 200 }))
+
+    const result = await getDetections('ds-1', 3)
+
+    expect(result).toBeNull()
+  })
+
+  it('preserves semantic class summary keys while camelCasing the response', async () => {
+    const raw = {
+      total_frames: 1,
+      processed_frames: 1,
+      total_detections: 1,
+      detections_by_frame: [],
+      class_summary: {
+        fire_extinguisher: { count: 1, avg_confidence: 0.9 },
+      },
+    }
+    mockApiRequest.mockImplementationOnce(async (_path, _init, transform) => transform!(raw))
+
+    const result = await getDetections('ds-1', 3)
+
+    expect(result?.classSummary).toEqual({
+      fire_extinguisher: { count: 1, avgConfidence: 0.9 },
+    })
+  })
+
+  it('converts detection summaries without class statistics', async () => {
+    const raw = {
+      total_frames: 1,
+      processed_frames: 1,
+      total_detections: 0,
+      detections_by_frame: [],
+      class_summary: null,
+    }
+    mockApiRequest.mockImplementationOnce(async (_path, _init, transform) => transform!(raw))
+
+    const result = await getDetections('ds-1', 3)
+
+    expect(result).toMatchObject({
+      totalFrames: 1,
+      processedFrames: 1,
+      totalDetections: 0,
+      detectionsByFrame: [],
+      classSummary: {},
+    })
+    expect(result?.classSummary).toEqual({})
+  })
 })
 
 describe('clearDetections', () => {
@@ -105,10 +170,9 @@ describe('clearDetections', () => {
     const result = await clearDetections('ds-1', 9)
 
     expect(result).toEqual({ cleared: true })
-    expect(mockMutationHeaders).toHaveBeenCalledTimes(1)
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/9/detections', {
-      method: 'DELETE',
       headers: { 'X-CSRF-Token': 'test-token' },
+      method: 'DELETE',
     })
   })
 

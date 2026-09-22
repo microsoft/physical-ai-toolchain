@@ -9,9 +9,9 @@
 
 .DESCRIPTION
     Cross-platform PowerShell script that analyzes GitHub Actions workflows, package manifests,
-    workflow-YAML container image and AzureML environment references, and other dependency declarations
-    to verify compliance with pinning security practices. Identifies unpinned dependencies and provides
-    remediation guidance. Dockerfile base-image pinning is covered by OpenSSF Scorecard, not this scanner.
+    workflow-YAML container image and AzureML environment references, Dockerfile/Containerfile
+    base images, and other dependency declarations to verify compliance with pinning security
+    practices. Identifies unpinned dependencies and provides remediation guidance.
 
 .PARAMETER Path
     Root path to scan for dependency files. Defaults to current directory.
@@ -36,7 +36,7 @@
 .PARAMETER IncludeTypes
     Comma-separated list of dependency types to check. Options include: github-actions, npm,
     pip, shell-downloads, shell-inline-pip, gh-extension, powershell-modules, docker,
-    azureml-environments, workflow-npm-commands. Default is all types.
+    dockerfile-base-image, azureml-environments, workflow-npm-commands. Default is all types.
 
 .PARAMETER Threshold
     Minimum compliance score percentage required for passing grade (0-100).
@@ -121,7 +121,7 @@ param(
     [string]$ExcludePaths = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,azureml-environments,workflow-npm-commands",
+    [string]$IncludeTypes = "github-actions,npm,pip,shell-downloads,shell-inline-pip,gh-extension,powershell-modules,docker,dockerfile-base-image,azureml-environments,workflow-npm-commands",
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(0, 100)]
@@ -198,9 +198,16 @@ $DependencyPatterns = @{
     'docker'           = @{
         FilePatterns   = @('**/workflows/**/*.yaml', '**/workflows/**/*.yml',
             '**/infrastructure/setup/manifests/*.yaml', '**/infrastructure/setup/manifests/*.yml',
-            '**/infrastructure/setup/values/*.yaml', '**/infrastructure/setup/values/*.yml')
+            '**/infrastructure/setup/values/*.yaml', '**/infrastructure/setup/values/*.yml',
+            '**/*.sh')
         ValidationFunc = 'Get-DockerImageViolations'
-        Description    = 'Container image references in workflow YAML, Kubernetes manifests, and Helm values must be digest-pinned (@sha256)'
+        Description    = 'Container image references in workflow YAML, Kubernetes manifests, Helm values, and shell scripts must be digest-pinned (@sha256)'
+    }
+
+    'dockerfile-base-image' = @{
+        FilePatterns   = @('**/Dockerfile*', '**/Containerfile*')
+        ValidationFunc = 'Get-DockerfileFromViolations'
+        Description    = 'Dockerfile/Containerfile FROM base images must be digest-pinned (@sha256), excluding intermediate build stages, scratch, and build-arg-driven local images'
     }
 
     'azureml-environments' = @{
@@ -1012,9 +1019,10 @@ function Get-DockerImageViolations {
         Submission-time templated ('{{ ... }}') and shell-variable ('$VAR' / '${VAR}')
         references are injected at submit time and skipped. AzureML asset references are
         versioned assets rather than OCI images and are validated separately.
-        Dockerfile 'FROM' pinning is out of scope (covered by OpenSSF Scorecard). An
-        intentional non-pin opts out with a '# pinning-ignore' comment on the image line or a
-        dedicated comment line directly above it.
+        Dockerfile/Containerfile 'FROM' base-image pinning is handled separately by
+        Get-DockerfileFromViolations (the 'dockerfile-base-image' type). An intentional
+        non-pin opts out with a '# pinning-ignore' comment on the image line or a dedicated
+        comment line directly above it.
     .PARAMETER FileInfo
         Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
     #>
@@ -1085,6 +1093,90 @@ function Get-DockerImageViolations {
         $v.Description = 'Unpinned container image (missing @sha256 digest)'
         $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
         $violations += $v
+    }
+
+    return $violations
+}
+
+function Get-DockerfileFromViolations {
+    <#
+    .SYNOPSIS
+        Detects unpinned base images in Dockerfile/Containerfile FROM instructions.
+    .DESCRIPTION
+        Every external base image pulled by a (possibly multi-stage) Dockerfile/Containerfile
+        must be pinned by an immutable '@sha256:<digest>' so builds are reproducible and
+        tamper-evident. A FROM referencing an earlier 'AS <alias>' stage name declared in the
+        same file is an intra-file reference, not an external pull, and is skipped (stage
+        names are matched case-insensitively, per Docker semantics). 'scratch' and a base that
+        is purely a build-arg/variable reference (e.g. '${REMOTER_IMAGE}' or '$REMOTER_IMAGE')
+        are also skipped, since neither is a concrete, pinnable image reference; a base that is
+        only partially a variable (e.g. 'python:${PYTHON_VERSION}-slim') is not exempt and must
+        still carry a digest. An intentional non-pin opts out with a '# pinning-ignore' comment
+        on the FROM line or a dedicated comment line directly above it.
+    .PARAMETER FileInfo
+        Hashtable with Path, Type, and RelativePath keys from Get-FilesToScan.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$FileInfo
+    )
+
+    $filePath = $FileInfo.Path
+    $relativePath = $FileInfo.RelativePath
+    $type = $FileInfo.Type
+    $violations = @()
+
+    if (-not (Test-Path -Path $filePath -PathType Leaf)) {
+        return $violations
+    }
+
+    $lines = @(Get-Content -Path $filePath)
+    $digestPattern = '@sha256:[a-fA-F0-9]{64}'
+    $bareVarPattern = '^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$'
+    $stageAliases = @{}
+
+    $prevWasIgnoreComment = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        $hasIgnore = $line -match '(^|\s)#[^\n]*pinning-ignore'
+        $exempt = $hasIgnore -or $prevWasIgnoreComment
+        $prevWasIgnoreComment = $hasIgnore -and $line.TrimStart().StartsWith('#')
+
+        if ($line -notmatch '^\s*FROM\s+(\S+)(?:\s+AS\s+(\S+))?') { continue }
+
+        $base = $Matches[1]
+        $alias = $Matches[2]
+
+        # scratch, a bare build-arg/variable reference, and a reference to an earlier stage
+        # alias are not external, pinnable image pulls.
+        $skip = $exempt -or ($base -eq 'scratch') -or ($base -match $bareVarPattern) -or
+            $stageAliases.ContainsKey($base.ToLower())
+
+        if (-not $skip -and $base -notmatch $digestPattern) {
+            # Split the digest-free reference into repository and tag for reporting.
+            $name = $base
+            $version = '(none)'
+            if ($base -match '^(.*):([^:/]+)$') {
+                $name = $Matches[1]
+                $version = $Matches[2]
+            }
+
+            $v = [DependencyViolation]::new()
+            $v.File = $relativePath
+            $v.Line = $i + 1
+            $v.Type = $type
+            $v.Name = $name
+            $v.Version = $version
+            $v.Severity = 'warning'
+            $v.Description = 'Unpinned Dockerfile base image (missing @sha256 digest)'
+            $v.Metadata = @{ Format = (Split-Path $filePath -Leaf); LineContent = $line.Trim() }
+            $violations += $v
+        }
+
+        # Record the stage alias unconditionally so a later stage can reference it, even when
+        # this stage itself was flagged, skipped, or exempted.
+        if ($alias) { $stageAliases[$alias.ToLower()] = $true }
     }
 
     return $violations

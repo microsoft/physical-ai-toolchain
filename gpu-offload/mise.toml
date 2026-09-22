@@ -1,0 +1,231 @@
+# mise tasks for the gpu-offload domain.
+#
+# Run every task from this directory:
+#
+#   cd gpu-offload
+#   mise trust
+#   mise run a-detect
+#   mise run f-10-setup
+#
+# Tasks resolve the target platform and cluster runtime through
+# scripts/detect-platform.sh. Copy .env.example to .env to override detection.
+
+[env]
+# Optional; absent files are ignored. Values here override auto-detection and
+# supply machine-local settings such as a private Python package index.
+_.file = ".env"
+
+# Reference for hosts that must build through an internal package proxy rather
+# than the public registries. Uncomment here, or set the same variables in .env
+# to keep them out of version control. The build tasks forward PIP_INDEX_URL and
+# UV_INDEX_URL to Podman only when they are set, so leaving these commented out
+# keeps public PyPI as the default on an unproxied machine.
+#
+# PIP_INDEX_URL = "https://packagefeedproxy.microsoft.io/pypi/simple/"
+# UV_INDEX_URL = "https://packagefeedproxy.microsoft.io/pypi/simple/"
+# npm_config_registry = "https://packagefeedproxy.microsoft.io/npm/"
+
+# ==============================================================================
+# Resolution
+# ==============================================================================
+
+[tasks."a-detect"]
+description = "Show the resolved platform, cluster runtime, and cluster identifiers"
+run = "scripts/detect-platform.sh"
+
+[tasks."a-env-init"]
+description = "Create .env from .env.example when it does not exist"
+run = "scripts/env-init.sh"
+
+# ==============================================================================
+# Host preparation
+# ==============================================================================
+
+[tasks."b-host-01-packages"]
+description = "Install the Ubuntu host packages required for local Kubernetes"
+run = "scripts/install-host-packages.sh"
+
+[tasks."b-host-02-kubernetes-tools"]
+description = "Install the pinned kind, kubectl, and Helm versions with mise"
+run = "mise use --global kind@0.30.0 kubectl@1.35.1 helm@3.21.3"
+
+[tasks."b-host-03-nvidia-toolkit"]
+description = "Install NVIDIA Container Toolkit and generate the CDI specification"
+run = "scripts/install-nvidia-toolkit.sh"
+
+[tasks."b-host-04-nvidia-verify"]
+description = "Verify host and container runtime NVIDIA access"
+run = "scripts/verify-nvidia-access.sh"
+
+[tasks."b-host-10-preflight"]
+description = "Check local tools and render the GPU offload Helm chart"
+run = "scripts/preflight-check.sh"
+depends = ["a-detect"]
+
+[tasks."b-host-20-registry"]
+description = "Start the host-local image registry and pull-through caches"
+run = "registry/registry-up.sh"
+
+[tasks."b-host-21-registry-status"]
+description = "Report registry state, cache sizes, and runtime registration"
+run = "registry/registry-status.sh"
+
+[tasks."b-host-29-registry-down"]
+description = "Stop the host-local image registry and its caches"
+run = "registry/registry-down.sh"
+
+# ==============================================================================
+# Cluster lifecycle
+# ==============================================================================
+
+[tasks."c-cluster-00-list"]
+description = "List the local clusters for the resolved runtime"
+run = "scripts/cluster-list.sh"
+
+[tasks."c-cluster-20-create"]
+description = "Create the cluster for the resolved platform and runtime"
+run = "scripts/cluster-create.sh"
+depends = ["b-host-10-preflight"]
+
+[tasks."c-cluster-21-check"]
+description = "Run container and Kubernetes CPU smoke checks"
+run = "scripts/cluster-smoke-check.sh"
+depends = ["c-cluster-20-create"]
+
+[tasks."c-cluster-30-gpu-enable"]
+description = "Expose the GPU to the cluster for the resolved platform"
+run = "scripts/cluster-gpu-enable.sh"
+depends = ["c-cluster-21-check"]
+
+[tasks."c-cluster-31-gpu-check"]
+description = "Run a GPU-allocated Kubernetes smoke check"
+run = "scripts/cluster-gpu-check.sh"
+depends = ["c-cluster-30-gpu-enable"]
+
+[tasks."c-cluster-70-start"]
+description = "Start the stopped cluster for the resolved runtime"
+run = "scripts/cluster-start.sh"
+
+[tasks."c-cluster-80-stop"]
+description = "Stop the cluster without deleting it"
+run = "scripts/cluster-stop.sh"
+
+[tasks."c-cluster-81-service-enable"]
+description = "Start k3s on boot (bare-metal k3s only)"
+run = "scripts/cluster-service-enable.sh"
+
+[tasks."c-cluster-82-service-disable"]
+description = "Stop k3s from starting on boot, leaving it installed (bare-metal k3s only)"
+run = "scripts/cluster-service-disable.sh"
+
+[tasks."c-cluster-90-delete"]
+description = "Delete the cluster for the resolved runtime"
+run = "scripts/cluster-delete.sh"
+depends = ["d-offload-90-teardown"]
+
+# ==============================================================================
+# Offload workload
+# ==============================================================================
+
+[tasks."d-offload-40-build-images"]
+description = "Build the controller, client, and GPU server images with Podman"
+run = ["scripts/build-controller-image.sh", "examples/first-run/scripts/build-image.sh"]
+depends = ["c-cluster-31-gpu-check"]
+
+[tasks."d-offload-41-load-images"]
+description = "Load the offload images into the resolved cluster"
+run = "examples/first-run/scripts/load-images.sh"
+depends = ["d-offload-40-build-images"]
+
+[tasks."d-offload-43-install-controller"]
+description = "Install the admission controller in the resolved cluster"
+run = "scripts/install-controller.sh"
+depends = ["d-offload-41-load-images"]
+
+[tasks."d-offload-50-deploy"]
+description = "Deploy the first-offload client and its server stage"
+run = "examples/first-run/scripts/deploy.sh"
+depends = ["d-offload-43-install-controller"]
+
+[tasks."d-offload-51-check-execution"]
+description = "Verify that the remoted function executed on the server stage"
+run = "examples/first-run/scripts/check-execution.sh"
+
+[tasks."d-offload-61-check-gpu-allocation"]
+description = "Verify that only the server stage holds a GPU allocation"
+run = "examples/first-run/scripts/check-gpu-allocation.sh"
+
+[tasks."d-offload-62-check-gpu-model"]
+description = "Verify that the offloaded model ran on the GPU and the client has none"
+run = "examples/first-run/scripts/check-gpu-model.sh"
+
+[tasks."d-offload-90-teardown"]
+description = "Remove the offload workloads and demo state from the cluster"
+run = "examples/first-run/scripts/teardown.sh"
+
+# ==============================================================================
+# ur10e-single example
+# ==============================================================================
+
+[tasks."g-ur10e-30-run-headless-host"]
+description = "Drive the UR10e from the host with the Pi0.5 policy, no display or dataset"
+run = "examples/ur10e-single/scripts/run-headless-host.sh"
+
+[tasks."g-ur10e-40-build-image"]
+description = "Build the ur10e-single workload image with the remoter SDK layered in"
+run = "examples/ur10e-single/scripts/build-image.sh"
+
+[tasks."g-ur10e-41-push-image"]
+description = "Push the ur10e-single image to the host-local registry"
+run = "examples/ur10e-single/scripts/push-image.sh"
+
+[tasks."g-ur10e-50-deploy"]
+description = "Deploy the ur10e-single control loop and its GPU server stage"
+run = "examples/ur10e-single/scripts/deploy.sh"
+
+[tasks."g-ur10e-51-check-inference"]
+description = "Verify that the policy loaded on the GPU stage and returns actions"
+run = "examples/ur10e-single/scripts/check-inference.sh"
+
+[tasks."g-ur10e-52-demo"]
+description = "Demo: run the Pi0.5 policy on the GPU stage and drive the UR10e end to end"
+run = "examples/ur10e-single/scripts/demo.sh"
+
+[tasks."g-ur10e-90-teardown"]
+description = "Remove the ur10e-single workloads and their host-path volumes"
+run = "examples/ur10e-single/scripts/teardown.sh"
+
+# ==============================================================================
+# Orchestration
+# ==============================================================================
+
+[tasks."f-10-setup"]
+description = "Run the full setup sequence for the resolved platform"
+depends = [
+    "a-detect",
+    "b-host-10-preflight",
+    "c-cluster-20-create",
+    "c-cluster-21-check",
+    "c-cluster-30-gpu-enable",
+    "c-cluster-31-gpu-check",
+    "d-offload-40-build-images",
+    "d-offload-41-load-images",
+    "d-offload-43-install-controller",
+    "d-offload-50-deploy",
+]
+
+[tasks."f-20-verify"]
+description = "Run every check for the resolved platform"
+depends = [
+    "d-offload-51-check-execution",
+    "d-offload-61-check-gpu-allocation",
+    "d-offload-62-check-gpu-model",
+]
+
+[tasks."f-30-teardown"]
+description = "Remove the offload workloads, leaving the cluster installed"
+depends = ["d-offload-90-teardown"]
+
+[tasks."f-40-teardown-all"]
+description = "Remove the offload workloads and delete the cluster entirely"
+depends = ["d-offload-90-teardown", "c-cluster-90-delete"]

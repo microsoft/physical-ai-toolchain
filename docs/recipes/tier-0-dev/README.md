@@ -1,9 +1,16 @@
-# T0 — Dev: The Local Training Lifecycle Loop
+---
+title: "T0 — Dev: The Local Training Lifecycle Loop"
+description: Run the full capture, curate, train, validate, and run loop on one laptop and one robot with zero cloud
+author: Microsoft Robotics-AI Team
+ms.date: 2026-09-22
+ms.topic: tutorial
+---
 
 Walk the full training lifecycle loop, capture, curate, train, validate, and run on the robot, on **one laptop
-and one robot**, with **zero cloud** and **zero Kubernetes**. Every step here runs as a plain local
-process against local files. By the end you will have trained an ACT policy, validated it against
-recorded episodes, and be ready to run the policy back on the robot.
+and one robot**, with **zero cloud** and **no required Kubernetes**. The baseline steps run as plain local
+processes against local files. A single-laptop Kubernetes cluster is an optional orchestration profile for
+GPU offload and does not change the T0 tier. By the end you will have trained an ACT policy, validated it
+against recorded episodes, and be ready to run the policy back on the robot.
 
 This is the documented **default** starting path. T0 already exists in the code today; this recipe
 surfaces it.
@@ -11,7 +18,7 @@ surfaces it.
 > [!NOTE]
 > **Full training lifecycle:** capture demonstrations on a robot, train an imitation policy, validate it, and run that
 > policy back on the robot, the full loop for one task. The full training lifecycle is fully achievable at T0 with manual
-> deployment and no Kubernetes, Arc, or fleet infrastructure. For the canonical tier definitions and
+> deployment and no required Kubernetes, Arc, or fleet infrastructure. For the canonical tier definitions and
 > graduation boundaries, see the [tier model](../../design/tier-model.md) and the
 > [architecture tier detail](../../contributing/architecture.md#t0--dev).
 
@@ -19,14 +26,19 @@ surfaces it.
 
 | Concern     | What you need                                                                           |
 |-------------|-----------------------------------------------------------------------------------------|
-| Hardware    | One laptop or workstation, one robot. A local GPU is optional; CPU works.                |
-| Edge infra  | ROS 2 and Docker only. **No** Kubernetes, **no** Arc, **no** Flux, **no** PVC.          |
+| Hardware    | One laptop or workstation, one robot. A local GPU is optional; CPU works.               |
+| Edge infra  | ROS 2 and Docker. Local kind and Helm are optional; Arc, Flux, and PVC are excluded.    |
 | Cloud infra | **None.** No Azure subscription, no storage account, no AzureML workspace.              |
 | Tooling     | Python 3.12+ with [`uv`](https://docs.astral.sh/uv/), Node.js 18+ (for the dataviewer). |
 | Tracking    | Optional. Training outputs are written to local disk; hosted tracking enters at T2.     |
 
 Everything below runs on the single machine in front of you. The only thing that leaves the laptop is
 data you copy off the robot with `cp` or `rsync`.
+
+The default instructions use plain processes. The optional
+[GPU Offload T0 plan](pathname://../../../gpu-offload/docs/05-T0-plan.md) permits a local kind
+cluster on the same laptop when process isolation, GPU allocation, or the Kubernetes
+offload controller is useful. T0 still excludes remote clusters and cloud dependencies.
 
 ## 🔁 The Loop at a Glance
 

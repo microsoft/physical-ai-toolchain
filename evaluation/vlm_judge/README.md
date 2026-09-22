@@ -34,25 +34,25 @@ the CLI and the HTTP API import the service — no parallel paths.
 
 ## 📂 Layout
 
-| File / dir                          | Purpose                                                       |
-|-------------------------------------|---------------------------------------------------------------|
-| `dataset.py`                        | LeRobot v2.1 + v3.0 episode discovery and instruction lookup  |
-| `frames.py`                         | PyAV frame extraction with multi-view tiling                  |
-| `prompts.py`                        | Outcome MCQ + GVL + milestone + failure-mode templates        |
-| `backend.py`                        | Qwen3-VL HF backend, OpenAI-compatible HTTP backend, echo     |
-| `judge.py`                          | `score_episode` + `JudgeResult` + Spearman VOC                |
-| `agent.py`                          | `JudgeAgent` multi-step controller                            |
-| `cache.py`                          | SHA256-keyed JSON disk cache                                  |
-| `service.py`                        | `JudgeService` — single integration surface                   |
-| `api.py`                            | FastAPI router + standalone uvicorn app                       |
-| `run.py`                            | CLI: judge a LeRobot dataset folder                           |
-| `policy_eval.py`                    | CLI: judge a directory of policy-rollout MP4s                 |
-| `scripts/evaluate-dataset.sh`       | Generic dataset wrapper                                       |
-| `scripts/evaluate-cnc-lerobot.sh`   | Wrapper for `datasets/cnc_lerobot`                            |
-| `scripts/evaluate-ur10e-episodes.sh`| Wrapper for `datasets/ur10e_episodes`                         |
-| `scripts/evaluate-leisaac-pick-orange.sh` | Wrapper for `datasets/leisaac-pick-orange`              |
-| `scripts/evaluate-policy-rollouts.sh` | Wrapper for policy rollout dirs (`leisaac-tests/*`)         |
-| `scripts/serve-api.sh`              | Launch the HTTP API                                           |
+| File / dir                                | Purpose                                                      |
+|-------------------------------------------|--------------------------------------------------------------|
+| `dataset.py`                              | LeRobot v2.1 + v3.0 episode discovery and instruction lookup |
+| `frames.py`                               | PyAV frame extraction with multi-view tiling                 |
+| `prompts.py`                              | Outcome MCQ + GVL + milestone + failure-mode templates       |
+| `backend.py`                              | Qwen3-VL HF backend, OpenAI-compatible HTTP backend, echo    |
+| `judge.py`                                | `score_episode` + `JudgeResult` + Spearman VOC               |
+| `agent.py`                                | `JudgeAgent` multi-step controller                           |
+| `cache.py`                                | SHA256-keyed JSON disk cache                                 |
+| `service.py`                              | `JudgeService` — single integration surface                  |
+| `api.py`                                  | FastAPI router + standalone uvicorn app                      |
+| `run.py`                                  | CLI: judge a LeRobot dataset folder                          |
+| `policy_eval.py`                          | CLI: judge a directory of policy-rollout MP4s                |
+| `scripts/evaluate-dataset.sh`             | Generic dataset wrapper                                      |
+| `scripts/evaluate-cnc-lerobot.sh`         | Wrapper for `datasets/cnc_lerobot`                           |
+| `scripts/evaluate-ur10e-episodes.sh`      | Wrapper for `datasets/ur10e_episodes`                        |
+| `scripts/evaluate-leisaac-pick-orange.sh` | Wrapper for `datasets/leisaac-pick-orange`                   |
+| `scripts/evaluate-policy-rollouts.sh`     | Wrapper for policy rollout dirs (`leisaac-tests/*`)          |
+| `scripts/serve-api.sh`                    | Launch the HTTP API                                          |
 
 ## 🚀 Quick Start
 
@@ -151,11 +151,11 @@ episode):
 
 ## 🔌 Backends
 
-| Backend          | Use case                                                     |
-|------------------|--------------------------------------------------------------|
-| `qwen3-vl`       | Local Hugging Face Qwen3-VL (default `Qwen3-VL-4B-Instruct`) |
-| `openai-compat`  | vLLM, NVIDIA NIM, Azure OpenAI — set `--base-url`            |
-| `echo`           | Deterministic stub for offline tests                         |
+| Backend         | Use case                                                     |
+|-----------------|--------------------------------------------------------------|
+| `qwen3-vl`      | Local Hugging Face Qwen3-VL (default `Qwen3-VL-4B-Instruct`) |
+| `openai-compat` | vLLM, NVIDIA NIM, Azure OpenAI — set `--base-url`            |
+| `echo`          | Deterministic stub for offline tests                         |
 
 `Qwen3VLBackend` resolves the correct model class against the installed
 `transformers` (4.57+ ships native Qwen3-VL classes). Adopt larger
