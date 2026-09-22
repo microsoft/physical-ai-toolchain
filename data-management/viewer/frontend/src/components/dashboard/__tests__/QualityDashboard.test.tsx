@@ -34,13 +34,16 @@ import { QualityDashboard } from '@/components/dashboard/QualityDashboard'
 
 const populatedReturn = {
   data: {
-    total_episodes: 10,
-    completion_rating_distribution: { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4 },
-    quality_rating_distribution: { '1': 0, '2': 0, '3': 1, '4': 4, '5': 5 },
-    common_issues: [],
-    anomalies: [],
-    annotators: [],
-    recent_activity: [],
+    totalEpisodes: 10,
+    annotatedEpisodes: 10,
+    pendingEpisodes: 0,
+    annotationRate: 1,
+    ratingDistribution: { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4 },
+    qualityDistribution: { '1': 0, '2': 0, '3': 1, '4': 4, '5': 5 },
+    annotatorStats: [],
+    recentActivity: [],
+    issuesByType: {},
+    anomaliesByType: {},
   },
   metrics: { totalEpisodes: 10, annotatedEpisodes: 10, pendingEpisodes: 0, episodesPerHour: 0 },
   isLoading: false,
