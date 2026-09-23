@@ -1572,13 +1572,13 @@ requires-dist = [
     { name = "python-dotenv", specifier = "==1.2.3" },
     { name = "python-multipart", specifier = "==0.0.32" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.7" },
-    { name = "schemathesis", marker = "extra == 'dev'", specifier = "==4.27.1" },
+    { name = "schemathesis", marker = "extra == 'dev'", specifier = "==4.27.2" },
     { name = "scikit-learn", marker = "extra == 'analysis'", specifier = "==1.9.1" },
     { name = "scipy", marker = "extra == 'analysis'", specifier = "==1.18.1" },
     { name = "slowapi", specifier = "==0.1.10" },
     { name = "torch", marker = "extra == 'vlm-judge'", specifier = "==2.14.0" },
     { name = "transformers", marker = "extra == 'vlm-judge'", specifier = "==5.17.0" },
-    { name = "ultralytics", marker = "extra == 'yolo'", specifier = "==8.4.152" },
+    { name = "ultralytics", marker = "extra == 'yolo'", specifier = "==8.4.153" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.53.0" },
 ]
 provides-extras = ["dev", "azure", "analysis", "huggingface", "auth", "hdf5", "export", "yolo", "vlm-judge"]
@@ -2903,7 +2903,7 @@ wheels = [
 
 [[package]]
 name = "schemathesis"
-version = "4.27.1"
+version = "4.27.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2920,9 +2920,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "werkzeug" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/46/d0/e0ab1d87068e0fbc2d5319ae040279cdde22eee2b94dfa954280b3a6ff2e/schemathesis-4.27.1.tar.gz", hash = "sha256:f83b8b735634d4f202bd820517481f97cb3c48c350c09166b362d67934c1a52e", size = 2684118, upload-time = "2026-09-13T21:39:51.224Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/21/ab/0445e87c4f1bc9991eb641b3f6b97de1ba32583c9c9492e397be868d92da/schemathesis-4.27.2.tar.gz", hash = "sha256:2b249971f4e174a1224000338fe4ff3d09de59dbdecc1d8a52e8747ba14d49c3", size = 2695706, upload-time = "2026-09-15T21:57:02.563Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7b/f3/b1eee021712e5cfdf22bc3f3feda4f1f00be2470a07b6aed0dcc9218d0d5/schemathesis-4.27.1-py3-none-any.whl", hash = "sha256:68173cd021677e1ae70a29f9885e70ef6409e6409d1ab1ce83a8918ff28b512d", size = 950509, upload-time = "2026-09-13T21:39:48.775Z" },
+    { url = "https://files.pythonhosted.org/packages/45/be/0c987cdc1f9b24690728fab33260c264758bd451e77b87656b4f3918c0fe/schemathesis-4.27.2-py3-none-any.whl", hash = "sha256:ebd21dcb5a04d49b1f4ad8d5eeb3253f0c82b5581caf1e0c21f9b46eede66f8c", size = 954681, upload-time = "2026-09-15T21:57:00.633Z" },
 ]
 
 [[package]]
@@ -3317,7 +3317,7 @@ wheels = [
 
 [[package]]
 name = "ultralytics"
-version = "8.4.152"
+version = "8.4.153"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle" },
@@ -3336,9 +3336,9 @@ dependencies = [
     { name = "ultralytics-platform" },
     { name = "ultralytics-thop" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e4/e0/b856d2759aaaae193da40bad96e1802303b059cec572f95b318e41bdbf3a/ultralytics-8.4.152.tar.gz", hash = "sha256:f425b1bda2aaea59454be90a9e662e06dd956fb02e8818fb2f7231f37286e00c", size = 1229546, upload-time = "2026-09-14T10:26:23.342Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/4b/4de6374d192c2e6d2faf1c35d43c54adca90cece7bec61a38470d39d2ea6/ultralytics-8.4.153.tar.gz", hash = "sha256:21408ce3051ed71e0c1dd2364cd3b033e6fad8e479cf8d87775afa131e542f79", size = 1230208, upload-time = "2026-09-15T13:54:34.987Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/14/95a9edd66dc7944378cc04d6049d6ed393a7ed9c923b33931bfbe137136e/ultralytics-8.4.152-py3-none-any.whl", hash = "sha256:02b55fb4395c716366079950af576d394f4a943783c2a069022abffd47d25d93", size = 1446245, upload-time = "2026-09-14T10:26:18.888Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/ea/aaa23dfe0511ce6627c12c5e2098c1492e517598652412d4f424d03f81ee/ultralytics-8.4.153-py3-none-any.whl", hash = "sha256:ba6a8bf60dc8b6106bbd347220d24190b72f98c4a4ad6fd73b32bd44ecefe048", size = 1446768, upload-time = "2026-09-15T13:54:30.123Z" },
 ]
 
 [[package]]
