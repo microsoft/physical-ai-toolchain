@@ -3,7 +3,7 @@ sidebar_position: 8
 title: Deployment Validation Guide
 description: Validation levels, testing templates, and cost optimization for contribution testing
 author: Microsoft Robotics-AI Team
-ms.date: 2026-09-21
+ms.date: 2026-09-22
 ms.topic: how-to
 ---
 
@@ -36,7 +36,7 @@ npm run lint:sh
 npm run lint:md
 ```
 
-Run the applicable component tests as described in [Testing Requirements](../../CONTRIBUTING.md#testing-requirements). Static checks alone do not replace tests for code changes.
+Run the applicable component tests as described in [Testing Requirements](pathname://../../CONTRIBUTING.md#testing-requirements). Static checks alone do not replace tests for code changes.
 
 **When to use:** Every contribution (documentation, code, infrastructure).
 

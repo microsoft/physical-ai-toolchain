@@ -43,7 +43,7 @@ Publish a registered AzureML model as a signed, attested inference image:
 # 1. build + sign
 fleet-deployment/setup/build-aml-model-image.sh --model-name <model>
 
-# 2. attach SBOM + OpenVEX attestations (run separately; can be repeated)
+# 2. attach an SBOM; add --vex-file when an OpenVEX document exists
 fleet-deployment/setup/attest-image.sh \
   --image <acr>.azurecr.io/<model>@sha256:<digest>
 ```
