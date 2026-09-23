@@ -19,11 +19,11 @@ _STATUS_HEARTBEAT_INTERVAL_SECONDS = 300
 class E2EHandle:
     submission_commands: list[tuple[str, ...]] = field(default_factory=list)
     resource_identifiers: dict[str, str] = field(default_factory=dict)
-    attempts: list[str] = field(default_factory=lambda: ["initial"])
+    attempts: dict[str, list[str]] = field(default_factory=dict)
     logs: dict[str, str] = field(default_factory=dict)
     cleanup_registrations: list[str] = field(default_factory=list)
-    retry_classification: str | None = None
-    terminal_state: str | None = None
+    retry_classifications: dict[str, str] = field(default_factory=dict)
+    terminal_states: dict[str, str] = field(default_factory=dict)
 
 
 class FinalizerRegistrar(Protocol):
@@ -47,10 +47,9 @@ def assert_e2e_handle_complete(
     required_resources: Iterable[str],
     required_logs: Iterable[str],
     required_cleanups: Iterable[str],
+    required_executions: Iterable[str],
 ) -> None:
     assert handle.submission_commands and all(handle.submission_commands), "Missing submission command evidence"
-    assert handle.attempts and all(handle.attempts), "Missing attempt evidence"
-    assert handle.terminal_state, "Missing terminal state evidence"
 
     missing_resources = [name for name in required_resources if not handle.resource_identifiers.get(name)]
     assert not missing_resources, f"Missing resource identifier evidence: {missing_resources}"
@@ -60,6 +59,19 @@ def assert_e2e_handle_complete(
 
     missing_cleanups = [name for name in required_cleanups if name not in handle.cleanup_registrations]
     assert not missing_cleanups, f"Missing cleanup registration evidence: {missing_cleanups}"
+
+    missing_attempts = [name for name in required_executions if not handle.attempts.get(name)]
+    assert not missing_attempts, f"Missing attempt evidence: {missing_attempts}"
+
+    missing_retry_classifications = [
+        name for name in required_executions if not handle.retry_classifications.get(name)
+    ]
+    assert not missing_retry_classifications, (
+        f"Missing retry classification evidence: {missing_retry_classifications}"
+    )
+
+    missing_terminal_states = [name for name in required_executions if not handle.terminal_states.get(name)]
+    assert not missing_terminal_states, f"Missing terminal state evidence: {missing_terminal_states}"
 
 
 def parse_provenance_marker(logs: str, marker: str) -> dict[str, object]:

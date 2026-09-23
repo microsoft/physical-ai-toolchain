@@ -131,9 +131,11 @@ def submit_osmo_training(
     max_iterations: int,
     num_envs: int,
     register_model_name: str | None = None,
+    correlation_id: str | None = None,
+    handle: E2EHandle | None = None,
 ) -> OSMOWorkflow:
     experiment_name = f"isaaclab-{task}" if task else "isaaclab-training"
-    correlation_id = _e2e_correlation_id()
+    correlation_id = correlation_id or _e2e_correlation_id()
     register_args = (
         ["--register-checkpoint", register_model_name] if register_model_name else ["--skip-register-checkpoint"]
     )
@@ -158,7 +160,13 @@ def submit_osmo_training(
     if result.returncode != 0:
         raise AssertionError(f"OSMO e2e submission failed\n\n{format_command_failure(result)}")
 
-    return _osmo_workflow_from_submission(result, experiment_name, "OSMO", correlation_id=correlation_id)
+    return _osmo_workflow_from_submission(
+        result,
+        experiment_name,
+        "OSMO",
+        correlation_id=correlation_id,
+        handle=handle,
+    )
 
 
 def submit_osmo_dataset_training(
@@ -344,15 +352,16 @@ def wait_until_osmo_completed(
 def _mark_workflow_terminal(workflow: OSMOWorkflow, terminal_status: str) -> None:
     workflow.is_terminal = True
     workflow.terminal_status = terminal_status
-    workflow.handle.terminal_state = terminal_status
+    workflow.handle.terminal_states["osmo_workflow"] = terminal_status
 
 
 def _restart_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
     log_e2e(f"Restarting OSMO workflow {workflow.workflow_id} after node disruption")
     command = ["osmo", "workflow", "restart", workflow.workflow_id]
     workflow.handle.submission_commands.append(tuple(command))
-    workflow.handle.attempts.append(f"node-disruption-restart-{len(workflow.handle.attempts)}")
-    workflow.handle.retry_classification = "node-disruption"
+    attempts = workflow.handle.attempts.setdefault("osmo_workflow", ["initial"])
+    attempts.append(f"node-disruption-restart-{len(attempts)}")
+    workflow.handle.retry_classifications["osmo_workflow"] = "node-disruption"
     result = run_command(command, cwd=repo_root)
     if result.returncode != 0:
         raise AssertionError(
@@ -463,6 +472,49 @@ def cancel_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
         raise AssertionError(
             f"Failed to cancel OSMO workflow {workflow.workflow_id!r}\n\n{format_command_failure(result)}"
         )
+
+
+def cancel_osmo_workflows_by_identifier(identifier: str, repo_root: Path) -> None:
+    """Cancel non-terminal workflows matching a pre-submission name or correlation identifier."""
+    result = run_command(["osmo", "workflow", "list", "--format-type", "json"], cwd=repo_root)
+    if result.returncode != 0:
+        raise AssertionError(f"Unable to list OSMO workflows for cleanup\n\n{format_command_failure(result)}")
+
+    matches: dict[str, str] = {}
+
+    def _collect(value: Any) -> None:
+        if isinstance(value, Mapping):
+            workflow_id = _find_first_string(value, ("workflow_id", "workflowId", "id"))
+            if workflow_id is not None and _contains_exact_string(value, identifier):
+                matches[workflow_id] = _find_first_string(value, ("status", "state")) or "UNKNOWN"
+            for nested in value.values():
+                _collect(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                _collect(nested)
+
+    _collect(parse_json_from_output(result.stdout))
+    for workflow_id, status in matches.items():
+        if status in OSMO_SUCCESS_STATES or status in OSMO_FAILURE_STATES or status.startswith(OSMO_FAILURE_PREFIXES):
+            log_e2e(f"Skipping recovery cancel for OSMO workflow {workflow_id}; terminal status={status}")
+            continue
+        log_e2e(f"Recovery cancelling OSMO workflow {workflow_id} matched by {identifier}")
+        cancel_result = run_command(["osmo", "workflow", "cancel", workflow_id], cwd=repo_root)
+        if cancel_result.returncode != 0:
+            raise AssertionError(
+                f"Failed to recovery cancel OSMO workflow {workflow_id!r}\n\n"
+                f"{format_command_failure(cancel_result)}"
+            )
+
+
+def _contains_exact_string(value: Any, expected: str) -> bool:
+    if isinstance(value, str):
+        return value == expected
+    if isinstance(value, Mapping):
+        return any(_contains_exact_string(nested, expected) for nested in value.values())
+    if isinstance(value, list):
+        return any(_contains_exact_string(nested, expected) for nested in value)
+    return False
 
 
 @dataclass(frozen=True)
@@ -730,6 +782,7 @@ def _osmo_workflow_from_submission(
     description: str,
     *,
     correlation_id: str = "",
+    handle: E2EHandle | None = None,
 ) -> OSMOWorkflow:
     payload = parse_json_from_output("\n".join(part for part in (result.stdout, result.stderr) if part))
     workflow_id = _find_first_string(payload, ("workflow_id", "workflowId", "id", "name"))
@@ -740,16 +793,18 @@ def _osmo_workflow_from_submission(
         workflow_name = workflow_id
 
     log_e2e(f"Submitted {description} workflow id={workflow_id}, name={workflow_name}")
+    active_handle = handle or E2EHandle()
+    active_handle.submission_commands.append(command_tuple(result.args))
+    active_handle.resource_identifiers["osmo_workflow"] = workflow_id
+    active_handle.attempts["osmo_workflow"] = ["initial"]
+    active_handle.retry_classifications["osmo_workflow"] = "none"
 
     return OSMOWorkflow(
         workflow_id=workflow_id,
         workflow_name=workflow_name,
         experiment_name=experiment_name,
         correlation_id=correlation_id,
-        handle=E2EHandle(
-            submission_commands=[command_tuple(result.args)],
-            resource_identifiers={"osmo_workflow": workflow_id},
-        ),
+        handle=active_handle,
     )
 
 
@@ -1080,11 +1135,8 @@ def _vla_base_model_args() -> list[str]:
     args = []
     if base_model is not None:
         args.extend(["--base-model", base_model])
-        if base_model_revision is None and not Path(base_model).is_absolute():
-            pytest.skip(
-                f"{_VLA_BASE_MODEL_REVISION_ENV} is required when {_VLA_BASE_MODEL_ENV} points at a remote "
-                "HuggingFace model"
-            )
+        if base_model_revision is None:
+            pytest.skip(f"{_VLA_BASE_MODEL_REVISION_ENV} is required when {_VLA_BASE_MODEL_ENV} is configured")
         if base_model_revision is not None:
             args.extend(["--base-model-revision", base_model_revision])
     elif base_model_revision is not None:
@@ -1102,12 +1154,14 @@ def submit_osmo_vla_finetune(
     batch_size: int,
     dataloader_workers: int,
     register_model_name: str,
+    job_name: str | None = None,
+    handle: E2EHandle | None = None,
 ) -> OSMOWorkflow:
     dataset = _resolve_vla_dataset(request, repo_root)
     vla_version = env_value(_VLA_VERSION_ENV, _DEFAULT_VLA_VERSION)
     embodiment_tag = env_value(_VLA_EMBODIMENT_TAG_ENV, _DEFAULT_VLA_EMBODIMENT_TAG)
     platform = env_value(_VLA_PLATFORM_ENV, _DEFAULT_VLA_PLATFORM)
-    job_name = e2e_name("vla-finetune-e2e-osmo")
+    job_name = job_name or e2e_name("vla-finetune-e2e-osmo")
     log_e2e(
         "Submitting OSMO VLA fine-tuning workflow "
         f"for blob_url={dataset.blob_url}, vla_version={vla_version}, data_config={dataset.data_config}, "
@@ -1161,6 +1215,7 @@ def submit_osmo_vla_finetune(
         register_model_name,
         "OSMO VLA fine-tuning",
         correlation_id=job_name,
+        handle=handle,
     )
 
 

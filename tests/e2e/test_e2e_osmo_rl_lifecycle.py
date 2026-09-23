@@ -24,6 +24,7 @@ import pytest
 
 from tests.e2e._aml import AzureMLWorkspace, archive_all_model_versions, resolve_registered_model
 from tests.e2e._common import (
+    E2EHandle,
     assert_e2e_handle_complete,
     e2e_name,
     log_e2e,
@@ -34,6 +35,7 @@ from tests.e2e._mlflow import assert_osmo_workflow_has_mlflow_tracking
 from tests.e2e._osmo import (
     _OSMO_ISAAC_EVAL_CHECKPOINT_URI_ENV,
     assert_workflow_task_succeeded,
+    cancel_osmo_workflows_by_identifier,
     fetch_workflow_task_logs,
     monitor_osmo_workflow,
     resolve_osmo_isaac_eval_checkpoint_override,
@@ -80,18 +82,28 @@ def test_osmo_rl_lifecycle_e2e(
     checkpoint_uri = resolve_osmo_isaac_eval_checkpoint_override()
     if checkpoint_uri is None:
         register_model_name = e2e_name("rl-e2e-osmo-model")
+        correlation_id = e2e_name("osmo-rl-e2e")
+        handle = E2EHandle()
+        register_cleanup(
+            request,
+            handle,
+            "archive_all_model_versions",
+            lambda: archive_all_model_versions(repo_root, aml_workspace, register_model_name),
+        )
+        register_cleanup(
+            request,
+            handle,
+            "cancel_osmo_workflows_by_identifier",
+            lambda: cancel_osmo_workflows_by_identifier(correlation_id, repo_root),
+        )
         workflow = submit_osmo_training(
             repo_root,
             task=_TASK,
             max_iterations=10,
             num_envs=64,
             register_model_name=register_model_name,
-        )
-        register_cleanup(
-            request,
-            workflow.handle,
-            "archive_all_model_versions",
-            lambda: archive_all_model_versions(repo_root, aml_workspace, register_model_name),
+            correlation_id=correlation_id,
+            handle=handle,
         )
         monitor_osmo_workflow(request, workflow, repo_root, _ISAAC_TRAINING_TASK_NAME, phase="training")
         log_e2e("Validating OSMO training MLflow tracking")
@@ -104,6 +116,7 @@ def test_osmo_rl_lifecycle_e2e(
         )
         assert provenance["install_mode"] == "reinstall_from_frozen_lock"
         assert provenance["missing"] == []
+        assert provenance["unresolved"] == []
         assert provenance["actual"] == provenance["expected"]
         expected_lock_sha256 = hashlib.sha256((repo_root / "training/rl/uv.lock").read_bytes()).hexdigest()
         assert provenance["lock_sha256"] == expected_lock_sha256
@@ -118,7 +131,13 @@ def test_osmo_rl_lifecycle_e2e(
             workflow.handle,
             required_resources=("osmo_workflow", "mlflow_run", "azureml_model"),
             required_logs=(_ISAAC_TRAINING_TASK_NAME,),
-            required_cleanups=("archive_all_model_versions", "cancel_osmo_workflow", "stop_task_log_stream"),
+            required_cleanups=(
+                "archive_all_model_versions",
+                "cancel_osmo_workflows_by_identifier",
+                "cancel_osmo_workflow",
+                "stop_task_log_stream",
+            ),
+            required_executions=("osmo_workflow",),
         )
     else:
         log_e2e(f"Using pre-configured eval checkpoint {checkpoint_uri} (training skipped)")
@@ -139,5 +158,6 @@ def test_osmo_rl_lifecycle_e2e(
         required_resources=("osmo_workflow",),
         required_logs=(_ISAAC_INFERENCE_TASK_NAME,),
         required_cleanups=("cancel_osmo_workflow", "stop_task_log_stream"),
+        required_executions=("osmo_workflow",),
     )
     log_e2e("OSMO RL lifecycle e2e test finished successfully")

@@ -24,9 +24,10 @@ def _expected_versions(requirements_file: Path) -> dict[str, str]:
     return expected
 
 
-def _installed_versions(expected: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+def _installed_versions(expected: dict[str, str]) -> tuple[dict[str, str], list[str], list[str]]:
     actual = {}
     missing = []
+    unresolved = []
     install_roots = {
         Path(path).resolve() for name in ("purelib", "platlib") if (path := sysconfig.get_path(name)) is not None
     }
@@ -38,13 +39,13 @@ def _installed_versions(expected: dict[str, str]) -> tuple[dict[str, str], list[
                 for distribution in distributions
                 if any(Path(distribution.locate_file("")).resolve().is_relative_to(root) for root in install_roots)
             ),
-            distributions[0] if distributions else None,
+            None,
         )
         if installed is None:
-            missing.append(name)
+            (unresolved if distributions else missing).append(name)
         else:
             actual[name] = installed.version
-    return actual, missing
+    return actual, missing, unresolved
 
 
 def main() -> None:
@@ -54,13 +55,14 @@ def main() -> None:
     args = parser.parse_args()
 
     expected = _expected_versions(args.requirements_file)
-    actual, missing = _installed_versions(expected)
+    actual, missing, unresolved = _installed_versions(expected)
     provenance = {
         "actual": actual,
         "expected": expected,
         "install_mode": "reinstall_from_frozen_lock",
         "lock_sha256": hashlib.sha256((args.project_dir / "uv.lock").read_bytes()).hexdigest(),
         "missing": missing,
+        "unresolved": unresolved,
     }
     print("RUNTIME_PROVENANCE=" + json.dumps(provenance, sort_keys=True))
 

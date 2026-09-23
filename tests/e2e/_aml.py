@@ -183,6 +183,27 @@ def archive_all_model_versions(repo_root: Path, aml_workspace: AzureMLWorkspace,
 
 
 def archive_aml_data_asset(repo_root: Path, aml_workspace: AzureMLWorkspace, asset_name: str) -> None:
+    result = run_command(
+        [
+            "az",
+            "ml",
+            "data",
+            "list",
+            "--name",
+            asset_name,
+            *aml_workspace_args(aml_workspace),
+            "-o",
+            "json",
+        ],
+        cwd=repo_root,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Failed to list AzureML data asset versions for {asset_name!r}\n\n{format_command_failure(result)}"
+        )
+    payload = parse_json_from_output(result.stdout)
+    if not isinstance(payload, list) or not payload:
+        return
     archive_aml_asset(repo_root, aml_workspace, "data", asset_name, None)
 
 
@@ -604,6 +625,9 @@ def _aml_job_from_submission(
     aml_workspace: AzureMLWorkspace,
     experiment_name: str,
     description: str,
+    *,
+    handle: E2EHandle | None = None,
+    expected_job_name: str | None = None,
 ) -> AzureMLJob:
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     job_name = _parse_azureml_job_name(combined_output)
@@ -611,15 +635,19 @@ def _aml_job_from_submission(
         raise AssertionError(
             f"Unable to parse {description} job name from submission output\n\n{combined_output.strip()}"
         )
+    if expected_job_name is not None and job_name != expected_job_name:
+        raise AssertionError(f"{description} returned job name {job_name!r}, expected {expected_job_name!r}")
     log_e2e(f"Submitted {description} job name={job_name}")
+    active_handle = handle or E2EHandle()
+    active_handle.submission_commands.append(command_tuple(result.args))
+    active_handle.resource_identifiers["azureml_job"] = job_name
+    active_handle.attempts["azureml_job"] = ["initial"]
+    active_handle.retry_classifications["azureml_job"] = "none"
     return AzureMLJob(
         name=job_name,
         workspace=aml_workspace,
         experiment_name=experiment_name,
-        handle=E2EHandle(
-            submission_commands=[command_tuple(result.args)],
-            resource_identifiers={"azureml_job": job_name},
-        ),
+        handle=active_handle,
     )
 
 
@@ -735,7 +763,7 @@ def fetch_aml_job_logs(job: AzureMLJob, repo_root: Path) -> str:
 def _mark_job_terminal(job: AzureMLJob, terminal_status: str) -> None:
     job.is_terminal = True
     job.terminal_status = terminal_status
-    job.handle.terminal_state = terminal_status
+    job.handle.terminal_states["azureml_job"] = terminal_status
 
 
 def assert_job_has_checkpoint(job: AzureMLJob) -> None:

@@ -58,6 +58,8 @@ environment_variables:
   # OSMO workflow YAML path relative to repo root (set by submission script).
   WORKFLOW_YAML: workflows/osmo/smoke-test-proxy-e2e.yaml
   OSMO_OUTPUT_URLS: azure://placeholder/osmo/proxy-smoke-test/
+  OSMO_OUTPUT_STORAGE_ACCOUNT: placeholder
+  OSMO_OUTPUT_CONTAINER: osmo
 
   # Uncomment and set for template variable substitution:
   # OSMO_SET_VARIABLES: '[{"name": "output_url", "value": "azure://account/container/path/"}]'

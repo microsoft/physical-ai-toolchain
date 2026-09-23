@@ -20,6 +20,7 @@ import pytest
 
 from tests.e2e._aml import AzureMLWorkspace, archive_all_model_versions, resolve_registered_model
 from tests.e2e._common import (
+    E2EHandle,
     assert_e2e_handle_complete,
     e2e_name,
     log_e2e,
@@ -31,6 +32,7 @@ from tests.e2e._osmo import (
     _vla_base_model_args,
     assert_workflow_task_succeeded,
     cancel_osmo_workflow,
+    cancel_osmo_workflows_by_identifier,
     fetch_workflow_task_logs,
     start_task_pod_log_stream,
     submit_osmo_vla_finetune,
@@ -61,11 +63,12 @@ def test_vla_base_model_requires_revision_for_remote(monkeypatch: pytest.MonkeyP
         _vla_base_model_args()
 
 
-def test_vla_base_model_allows_absolute_path_without_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_vla_base_model_requires_revision_for_absolute_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("E2E_VLA_BASE_MODEL", "/models/local-groot")
     monkeypatch.delenv("E2E_VLA_BASE_MODEL_REVISION", raising=False)
 
-    assert _vla_base_model_args() == ["--base-model", "/models/local-groot"]
+    with pytest.raises(pytest.skip.Exception):
+        _vla_base_model_args()
 
 
 def test_vla_base_model_revision_without_model_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -86,6 +89,26 @@ def test_osmo_vla_finetune_e2e(
 ) -> None:
     log_e2e("Starting OSMO VLA (GR00T) fine-tuning e2e test")
     register_model_name = e2e_name("vla-e2e-osmo-model")
+    job_name = e2e_name("vla-finetune-e2e-osmo")
+    handle = E2EHandle()
+    register_cleanup(
+        request,
+        handle,
+        "delete_mlflow_experiment",
+        lambda: delete_mlflow_experiment(aml_workspace, register_model_name),
+    )
+    register_cleanup(
+        request,
+        handle,
+        "archive_all_model_versions",
+        lambda: archive_all_model_versions(repo_root, aml_workspace, register_model_name),
+    )
+    register_cleanup(
+        request,
+        handle,
+        "cancel_osmo_workflows_by_identifier",
+        lambda: cancel_osmo_workflows_by_identifier(job_name, repo_root),
+    )
     workflow = submit_osmo_vla_finetune(
         repo_root,
         aml_workspace,
@@ -95,18 +118,8 @@ def test_osmo_vla_finetune_e2e(
         batch_size=1,
         dataloader_workers=0,
         register_model_name=register_model_name,
-    )
-    register_cleanup(
-        request,
-        workflow.handle,
-        "delete_mlflow_experiment",
-        lambda: delete_mlflow_experiment(aml_workspace, register_model_name),
-    )
-    register_cleanup(
-        request,
-        workflow.handle,
-        "archive_all_model_versions",
-        lambda: archive_all_model_versions(repo_root, aml_workspace, register_model_name),
+        job_name=job_name,
+        handle=handle,
     )
     register_cleanup(
         request,
@@ -155,9 +168,11 @@ def test_osmo_vla_finetune_e2e(
         required_cleanups=(
             "delete_mlflow_experiment",
             "archive_all_model_versions",
+            "cancel_osmo_workflows_by_identifier",
             "cancel_osmo_workflow",
             "stop_task_log_stream",
             "delete_mlflow_run",
         ),
+        required_executions=("osmo_workflow",),
     )
     log_e2e("OSMO VLA fine-tuning e2e test finished successfully")

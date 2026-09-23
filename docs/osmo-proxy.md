@@ -36,15 +36,17 @@ workflows/azureml/submit-osmo-proxy-job.sh
 workflows/azureml/submit-osmo-proxy-job.sh \
   --job-name osmo-proxy-smoke \
   --experiment-name osmo-proxy-smoke \
-  --output-url azure://<storage-account>/<container>/proxy-smoke/
+  --output-url azure://<storage-account>/osmo/proxy-smoke/
 
 # Or directly with az ml job create
 az ml job create \
   --file workflows/azureml/osmo-proxy-job.yaml \
   --workspace-name <ws> --resource-group <rg> \
   --set environment_variables.WORKFLOW_YAML=workflows/osmo/smoke-test-proxy-e2e.yaml \
-  --set environment_variables.OSMO_OUTPUT_URLS=azure://<storage-account>/<container>/proxy-smoke/ \
-  --set environment_variables.OSMO_SET_VARIABLES='[{"name":"output_url","value":"azure://<storage-account>/<container>/proxy-smoke/"}]' \
+  --set environment_variables.OSMO_OUTPUT_URLS=azure://<storage-account>/osmo/proxy-smoke/ \
+  --set environment_variables.OSMO_OUTPUT_STORAGE_ACCOUNT=<storage-account> \
+  --set environment_variables.OSMO_OUTPUT_CONTAINER=osmo \
+  --set environment_variables.OSMO_SET_VARIABLES='[{"name":"output_url","value":"azure://<storage-account>/osmo/proxy-smoke/"}]' \
   --set environment_variables.AML_SUBSCRIPTION_ID=<subscription-id> \
   --set environment_variables.AML_RESOURCE_GROUP=<rg> \
   --set environment_variables.AML_WORKSPACE_NAME=<ws>
@@ -107,22 +109,24 @@ Set `OSMO_METRICS_SPEC` to the path of a spec file at submission time. See `work
 
 ## Environment Variables
 
-| Variable              | Required                      | Default                                                    | Description                                                                       |
-|-----------------------|-------------------------------|------------------------------------------------------------|-----------------------------------------------------------------------------------|
-| `WORKFLOW_YAML`       | Yes                           | `workflows/osmo/smoke-test-proxy-e2e.yaml`                 | Path to OSMO workflow YAML (relative to repo root)                                |
-| `OSMO_GATEWAY_URL`    | No                            | `http://osmo-gateway.osmo-control-plane.svc.cluster.local` | OSMO in-cluster gateway URL                                                       |
-| `OSMO_POOL`           | No                            | `default`                                                  | OSMO pool name                                                                    |
-| `OSMO_AUTH_MODE`      | No                            | `dev`                                                      | Auth mode: `dev` or `token`                                                       |
-| `OSMO_USERNAME`       | No                            | `admin`                                                    | Username for dev auth mode                                                        |
-| `OSMO_TOKEN`          | Conditional                   | —                                                          | Bearer token for token auth mode                                                  |
-| `POLL_INTERVAL_SECS`  | No                            | `30`                                                       | Seconds between status polls                                                      |
-| `OSMO_SET_VARIABLES`  | No                            | —                                                          | JSON array `[{"name": "k", "value": "v"}]` for workflow template substitution     |
-| `OSMO_OUTPUT_URLS`    | Required for declared outputs | —                                                          | Comma-separated resolved output URLs used for metrics and data asset registration |
-| `OSMO_METRICS_SPEC`   | No                            | —                                                          | Path to Tier 2 metrics spec YAML file                                             |
-| `AZURE_CLIENT_ID`     | No                            | —                                                          | MSI client ID for blob auth (Tier 2 metrics, data asset registration)             |
-| `AML_SUBSCRIPTION_ID` | Required for declared outputs | —                                                          | Azure subscription for data asset registration                                    |
-| `AML_RESOURCE_GROUP`  | Required for declared outputs | —                                                          | Resource group for data asset registration                                        |
-| `AML_WORKSPACE_NAME`  | Required for declared outputs | —                                                          | AML workspace for data asset registration                                         |
+| Variable                      | Required                      | Default                                                    | Description                                                                       |
+|-------------------------------|-------------------------------|------------------------------------------------------------|-----------------------------------------------------------------------------------|
+| `WORKFLOW_YAML`               | Yes                           | `workflows/osmo/smoke-test-proxy-e2e.yaml`                 | Path to OSMO workflow YAML (relative to repo root)                                |
+| `OSMO_GATEWAY_URL`            | No                            | `http://osmo-gateway.osmo-control-plane.svc.cluster.local` | OSMO in-cluster gateway URL                                                       |
+| `OSMO_POOL`                   | No                            | `default`                                                  | OSMO pool name                                                                    |
+| `OSMO_AUTH_MODE`              | No                            | `dev`                                                      | Auth mode: `dev` or `token`                                                       |
+| `OSMO_USERNAME`               | No                            | `admin`                                                    | Username for dev auth mode                                                        |
+| `OSMO_TOKEN`                  | Conditional                   | —                                                          | Bearer token for token auth mode                                                  |
+| `POLL_INTERVAL_SECS`          | No                            | `30`                                                       | Seconds between status polls                                                      |
+| `OSMO_SET_VARIABLES`          | No                            | —                                                          | JSON array `[{"name": "k", "value": "v"}]` for workflow template substitution     |
+| `OSMO_OUTPUT_URLS`            | Required for declared outputs | —                                                          | Comma-separated resolved output URLs used for metrics and data asset registration |
+| `OSMO_OUTPUT_STORAGE_ACCOUNT` | Required for declared outputs | —                                                          | Trusted deployment storage account for output URL validation                      |
+| `OSMO_OUTPUT_CONTAINER`       | Required for declared outputs | —                                                          | Trusted deployment container for output URL validation                            |
+| `OSMO_METRICS_SPEC`           | No                            | —                                                          | Path to Tier 2 metrics spec YAML file                                             |
+| `AZURE_CLIENT_ID`             | No                            | —                                                          | MSI client ID for blob auth (Tier 2 metrics, data asset registration)             |
+| `AML_SUBSCRIPTION_ID`         | Required for declared outputs | —                                                          | Azure subscription for data asset registration                                    |
+| `AML_RESOURCE_GROUP`          | Required for declared outputs | —                                                          | Resource group for data asset registration                                        |
+| `AML_WORKSPACE_NAME`          | Required for declared outputs | —                                                          | AML workspace for data asset registration                                         |
 
 > [!WARNING]
 > `azureml-mlflow` is required alongside `mlflow-skinny` to register the `azureml://` tracking store plugin. The proxy fails the Azure ML job when plugin initialization, metric logging, or declared-output data asset registration fails. `workflows/azureml/osmo-proxy-job.yaml` installs the frozen runtime from `workflows/azureml/osmo-proxy/uv.lock`.

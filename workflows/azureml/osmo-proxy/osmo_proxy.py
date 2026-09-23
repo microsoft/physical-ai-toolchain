@@ -28,6 +28,9 @@ Environment variables:
   OSMO_SET_VARIABLES    JSON array of {"name": key, "value": val} variable overrides.
                         Example: '[{"name":"dataset","value":"vda-demo"}]'
   OSMO_METRICS_SPEC     Path to or inline YAML of a workflow metrics extraction spec.
+  OSMO_OUTPUT_STORAGE_ACCOUNT
+                        Trusted storage account for declared output URLs.
+  OSMO_OUTPUT_CONTAINER Trusted container for declared output URLs.
   AML_SUBSCRIPTION_ID   Azure subscription for data asset registration (optional)
   AML_RESOURCE_GROUP    Resource group for data asset registration (optional)
   AML_WORKSPACE_NAME    AML workspace name for data asset registration (optional)
@@ -284,6 +287,8 @@ def _validate_output_urls(output_urls: list[str]) -> list[str]:
     """Validate canonical Azure output URLs against the configured storage boundary."""
     expected_account = os.environ.get("OSMO_OUTPUT_STORAGE_ACCOUNT", "").strip()
     expected_container = os.environ.get("OSMO_OUTPUT_CONTAINER", "").strip()
+    if output_urls and (not expected_account or not expected_container):
+        raise ValueError("OSMO output storage account and container boundaries are required")
     validated: list[str] = []
 
     for raw_url in output_urls:
@@ -312,8 +317,6 @@ def _validate_output_urls(output_urls: list[str]) -> list[str]:
         if normalized != raw_url:
             raise ValueError("OSMO output URL must be normalized")
 
-        expected_account = expected_account or parsed.netloc
-        expected_container = expected_container or container
         if parsed.netloc != expected_account or container != expected_container:
             raise ValueError("OSMO output URL is outside the expected storage account or container")
         validated.append(normalized)
