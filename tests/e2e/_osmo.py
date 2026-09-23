@@ -434,6 +434,10 @@ def fetch_workflow_task_logs(
     *,
     namespace: str = OSMO_WORKFLOWS_NAMESPACE,
 ) -> str:
+    cached_logs = workflow.handle.logs.get(task_name, "")
+    if cached_logs:
+        return cached_logs
+
     result = run_command(
         [
             "kubectl",
@@ -448,16 +452,31 @@ def fetch_workflow_task_logs(
         ],
         cwd=repo_root,
     )
-    cached_logs = workflow.handle.logs.get(task_name, "")
-    if cached_logs:
-        return cached_logs
-    if result.returncode != 0:
+    if result.returncode == 0 and result.stdout:
+        workflow.handle.logs[task_name] = result.stdout
+        return result.stdout
+
+    persisted_result = run_command(
+        [
+            "osmo",
+            "workflow",
+            "logs",
+            workflow.workflow_id,
+            "--task",
+            task_name,
+            "-n",
+            "10000",
+        ],
+        cwd=repo_root,
+    )
+    if persisted_result.returncode != 0 or f"[{task_name}]" not in persisted_result.stdout:
         raise AssertionError(
             f"Unable to fetch logs for OSMO workflow {workflow.workflow_id!r} task {task_name!r}\n\n"
-            f"{format_command_failure(result)}"
+            f"Kubernetes logs:\n{format_command_failure(result)}\n\n"
+            f"OSMO persisted logs:\n{format_command_failure(persisted_result)}"
         )
-    workflow.handle.logs[task_name] = result.stdout
-    return result.stdout
+    workflow.handle.logs[task_name] = persisted_result.stdout
+    return persisted_result.stdout
 
 
 def cancel_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
@@ -806,6 +825,8 @@ def monitor_osmo_workflow(
     log_e2e(f"Waiting for {label} {workflow.workflow_id} to complete")
     wait_until_osmo_completed(workflow, repo_root, timeout_minutes=timeout_minutes)
     log_stream.stop()
+    if not workflow.handle.logs.get(task_name):
+        fetch_workflow_task_logs(workflow, repo_root, task_name)
 
 
 def _osmo_workflow_from_submission(
