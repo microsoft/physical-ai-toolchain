@@ -14,13 +14,14 @@ from pathlib import Path
 import pytest
 
 from tests.e2e import _osmo
-from tests.e2e._common import delete_blob_prefix
+from tests.e2e._common import E2EHandle, assert_e2e_handle_complete, delete_blob_prefix
 from tests.e2e._osmo import (
     _OSMO_MAX_NODE_DISRUPTION_RESTARTS,
     OSMOWorkflow,
     _osmo_status,
     _task_statuses,
     cancel_osmo_workflow,
+    cancel_osmo_workflows_by_identifier,
     submit_osmo_replay_output_fixture,
     wait_until_osmo_completed,
     wait_until_osmo_started,
@@ -78,6 +79,69 @@ def test_cancel_osmo_workflow_raises_on_failed_cancel(monkeypatch: pytest.Monkey
 
     with pytest.raises(AssertionError, match="Failed to cancel OSMO workflow"):
         cancel_osmo_workflow(workflow, tmp_path)
+
+
+def test_cancel_osmo_workflows_by_identifier_cancels_only_matching_non_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run_command(
+        args: list[str], *, cwd: Path, input_text: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args)
+        if args[2] == "list":
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout=(
+                    '[{"id":"running-id","status":"RUNNING","tasks":[{"id":"nested-task-id"}]},'
+                    '{"id":"done-id","status":"COMPLETED"}]'
+                ),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("tests.e2e._osmo.run_command", fake_run_command)
+
+    cancel_osmo_workflows_by_identifier("target", tmp_path)
+
+    assert commands == [
+        [
+            "osmo",
+            "workflow",
+            "list",
+            "--name",
+            "target",
+            "--count",
+            "100",
+            "--offset",
+            "0",
+            "--format-type",
+            "json",
+        ],
+        ["osmo", "workflow", "cancel", "running-id"],
+    ]
+
+
+def test_e2e_handle_requires_execution_specific_evidence() -> None:
+    handle = E2EHandle(
+        submission_commands=[("submit",)],
+        resource_identifiers={"azureml_job": "job", "osmo_workflow": "workflow"},
+        attempts={"azureml_job": ["initial"], "osmo_workflow": ["initial"]},
+        retry_classifications={"azureml_job": "none", "osmo_workflow": "none"},
+        terminal_states={"azureml_job": "COMPLETED"},
+    )
+
+    with pytest.raises(AssertionError, match="Missing terminal state evidence: \\['osmo_workflow'\\]"):
+        assert_e2e_handle_complete(
+            handle,
+            required_resources=("azureml_job", "osmo_workflow"),
+            required_logs=(),
+            required_cleanups=(),
+            required_executions=("azureml_job", "osmo_workflow"),
+        )
 
 
 def test_submit_osmo_replay_output_fixture_forwards_safe_values(
