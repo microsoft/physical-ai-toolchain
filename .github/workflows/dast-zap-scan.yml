@@ -51,7 +51,7 @@ jobs:
           rules_file_name: ".zap/rules.tsv"
           allow_issue_writing: true
           issue_title: "DAST ZAP Baseline Scan Report"
-          fail_action: ""
+          fail_action: false
           artifact_name: "zap-baseline-report"
 
       - name: Convert ZAP report to SARIF
@@ -65,10 +65,10 @@ jobs:
       - name: Upload SARIF to Security tab
         if: always()
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
-        continue-on-error: true
         with:
           sarif_file: results/zap-results.sarif
           category: dast-zap-baseline
+          wait-for-processing: true
 
       - name: Upload scan results
         if: always()
@@ -91,6 +91,8 @@ jobs:
       - name: Add job summary
         if: always()
         shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ## DAST ZAP Baseline Scan Results
@@ -98,7 +100,7 @@ jobs:
           | Metric | Value |
           |--------|-------|
           | Target | \`http://localhost:5173/\` |
-          | Status | Completed |
+          | Status | ${JOB_STATUS} |
           | Security Tab | [View alerts](/${{ github.repository }}/security/code-scanning?query=tool%3Azap) |
           | Artifacts | [View run artifacts](/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
 

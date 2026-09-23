@@ -78,7 +78,7 @@ jobs:
             # manifests and Containerfiles), since a change confined to any of
             # those previously merged with zero GPU-offload validation.
             echo "gpu_offload_e2e=$(match '^gpu-offload/(controller|runtime|helm|scripts|registry|examples)/|^gpu-offload/mise\.toml$|^gpu-offload/\.env\.example$|^\.github/workflows/gpu-offload-kind-smoke\.yml$')"
-            echo "shared_ci=$(match '^shared/ci/')"
+            echo "shared_ci=$(match '^shared/ci/|^scripts/security/zap-to-sarif\.py$|^scripts/tests/security/test_zap_to_sarif\.py$|^\.github/workflows/(pytest-shared-ci|dast-zap-scan|pr-validation)\.yml$')"
             echo "dv_backend=$(match '^(data-management/viewer/backend/|data-management/viewer/docker-compose\.yml|shared/ci/smoke-docker\.sh|\.github/workflows/smoke-cpu\.yml)')"
             echo "dv_frontend=$(match '^data-management/viewer/frontend/')"
             echo "fuzz=$(match '^(tests/fuzz|tests/fuzz_harness\.py|tests/generate_fuzz_corpus\.py|data-management/viewer/backend/src/|training/)')"
