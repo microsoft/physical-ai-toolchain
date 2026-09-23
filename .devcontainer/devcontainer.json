@@ -89,7 +89,15 @@
 	},
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	"forwardPorts": [8080],
+	"forwardPorts": [5173, 8000, 8080],
+	"portsAttributes": {
+		"5173": {
+			"label": "Dataviewer frontend"
+		},
+		"8000": {
+			"label": "Dataviewer backend"
+		}
+	},
 
 	// GPU device nodes are group-restricted: /dev/nvmap is root:video and
 	// /dev/dri/renderD* is root:render (GID 993 here). CUDA initialization fails

@@ -6,6 +6,9 @@
     "node": ">=24"
   },
   "description": "Physical AI Toolchain",
+  "workspaces": [
+    "data-management/viewer/frontend"
+  ],
   "scripts": {
     "spell-check": "cspell \"**/*.{md,ts,js,json,yaml,yml,py,sh}\"",
     "spell-check:fix": "cspell \"**/*.{md,ts,js,json,yaml,yml,py,sh}\" --show-suggestions",
@@ -34,10 +37,13 @@
     "docs:start": "cd docs/docusaurus && npm start",
     "docs:test": "cd docs/docusaurus && npm test",
     "docs:serve": "cd docs/docusaurus && npm run serve",
-    "docs:generate:tf": "pwsh -File scripts/Update-TerraformDocs.ps1"
+    "docs:generate:tf": "pwsh -File scripts/Update-TerraformDocs.ps1",
+    "dataviewer:dev": "npm --prefix data-management/viewer run dev",
+    "dataviewer:analyze": "npm run analyze --workspace robotic-training-data-tool"
   },
   "devDependencies": {
     "@taplo/cli": "0.7.0",
+    "concurrently": "10.0.5",
     "cspell": "10.3.1",
     "husky": "9.1.7",
     "lint-staged": "17.5.1",

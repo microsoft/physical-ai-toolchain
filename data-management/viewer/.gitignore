@@ -18,18 +18,24 @@ backend/test-*/
 backend/data/test-*/
 backend/yolo*.pt
 
-# Node modules (should never be committed)
+# Node dependencies
 frontend/node_modules/
 
-# Build output
+# Build and analysis output
 frontend/dist/
+frontend/coverage/
 
 # TypeScript build cache
 *.tsbuildinfo
 
-# Python cache
+# Python environments, caches, and coverage
+backend/.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
 
 # Debug / scratch scripts
 check_structure.py
@@ -38,5 +44,10 @@ check_structure.py
 # local data
 data/
 
-# env
+# Local environment files
 .env
+.env.*
+!.env.example
+!backend/.env.example
+!backend/.env.azure.example
+!frontend/.env.example
