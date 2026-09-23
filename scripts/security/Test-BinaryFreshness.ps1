@@ -270,7 +270,38 @@ function Test-DownloadedArtifact {
         }
     }
     if ($urlPath -match '\.(?:tar\.gz|tgz)$') {
-        return ($length -ge 2 -and $bytes[0] -eq 0x1f -and $bytes[1] -eq 0x8b)
+        if ($length -lt 2 -or $bytes[0] -ne 0x1f -or $bytes[1] -ne 0x8b) {
+            return $false
+        }
+        $archiveStream = [System.IO.File]::OpenRead($Path)
+        try {
+            if ($archiveStream.Length -lt 18) { return $false }
+
+            $archiveStream.Seek(-4, [System.IO.SeekOrigin]::End) | Out-Null
+            $trailer = [byte[]]::new(4)
+            $archiveStream.ReadExactly($trailer)
+            $expectedSize = [System.BitConverter]::ToUInt32($trailer)
+            $archiveStream.Position = 0
+
+            try {
+                $gzip = [System.IO.Compression.GZipStream]::new(
+                    $archiveStream, [System.IO.Compression.CompressionMode]::Decompress, $true
+                )
+                try {
+                    $buffer = [byte[]]::new(65536)
+                    $total = [long]0
+                    while (($read = $gzip.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                        $total += $read
+                    }
+                    return (($total % 4294967296) -eq $expectedSize)
+                }
+                finally { $gzip.Dispose() }
+            }
+            catch [System.IO.InvalidDataException] {
+                return $false
+            }
+        }
+        finally { $archiveStream.Dispose() }
     }
     return $true
 }

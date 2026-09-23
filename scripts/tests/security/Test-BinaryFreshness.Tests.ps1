@@ -186,6 +186,19 @@ Describe 'Invoke-HashCheck' -Tag 'Unit' {
         $script:FakeBytes = [System.Text.Encoding]::UTF8.GetBytes('hello world')
         # SHA-256 of 'hello world'
         $script:KnownHash = 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
+        $output = [System.IO.MemoryStream]::new()
+        try {
+            $gzip = [System.IO.Compression.GZipStream]::new(
+                $output, [System.IO.Compression.CompressionMode]::Compress, $true
+            )
+            try { $gzip.Write($script:FakeBytes, 0, $script:FakeBytes.Length) }
+            finally { $gzip.Dispose() }
+            $script:GzipBytes = $output.ToArray()
+            $script:GzipHash = [Convert]::ToHexString(
+                [System.Security.Cryptography.SHA256]::HashData($script:GzipBytes)
+            ).ToLowerInvariant()
+        }
+        finally { $output.Dispose() }
     }
 
     It 'Returns Match when expected hash equals computed hash' {
@@ -312,11 +325,63 @@ Describe 'Invoke-HashCheck' -Tag 'Unit' {
         Mock Invoke-WebRequest -MockWith {
             param($Uri, $OutFile)
             $null = $Uri
-            [System.IO.File]::WriteAllBytes($OutFile, [byte[]]@(0x1f, 0x8b, 0x08, 0x00))
+            [System.IO.File]::WriteAllBytes($OutFile, $script:GzipBytes)
         }
         $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
             -Expected $script:KnownHash -File 'install.sh'
         $result.Status | Should -Be 'Mismatch'
+    }
+
+    It 'Matches a complete GZIP archive with its pinned hash' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllBytes($OutFile, $script:GzipBytes)
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:GzipHash -File 'install.sh'
+        $result.Status | Should -Be 'Match'
+    }
+
+    It 'Treats a header-only GZIP response as unavailable' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            [System.IO.File]::WriteAllBytes($OutFile, [byte[]]@(0x1f, 0x8b, 0x08, 0x00))
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:GzipHash -File 'install.sh'
+        $result.Status | Should -Be 'DownloadFailed'
+    }
+
+    It 'Treats a GZIP missing <TruncatedBytes> trailer byte(s) as unavailable' -ForEach @(
+        @{ TruncatedBytes = 1 }
+        @{ TruncatedBytes = 4 }
+        @{ TruncatedBytes = 8 }
+    ) {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            $last = $script:GzipBytes.Length - $TruncatedBytes - 1
+            [System.IO.File]::WriteAllBytes($OutFile, [byte[]]$script:GzipBytes[0..$last])
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:GzipHash -File 'install.sh'
+        $result.Status | Should -Be 'DownloadFailed'
+        (ConvertTo-HashCheckSarifResult -Result $result -File 'install.sh').level | Should -Be 'warning'
+    }
+
+    It 'Treats a corrupt GZIP checksum as unavailable' {
+        Mock Invoke-WebRequest -MockWith {
+            param($Uri, $OutFile)
+            $null = $Uri
+            $bytes = [byte[]]$script:GzipBytes.Clone()
+            $bytes[$bytes.Length - 8] = $bytes[$bytes.Length - 8] -bxor 0x01
+            [System.IO.File]::WriteAllBytes($OutFile, $bytes)
+        }
+        $result = Invoke-HashCheck -Name 'Archive' -Url 'https://example/download.tar.gz' `
+            -Expected $script:GzipHash -File 'install.sh'
+        $result.Status | Should -Be 'DownloadFailed'
     }
 }
 
