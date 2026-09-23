@@ -401,11 +401,19 @@ def _task_from_episode_record(record: dict, task_descriptions: dict[int, str]) -
     if isinstance(tasks, str) and tasks.strip():
         return tasks
     if isinstance(tasks, list) and tasks:
-        first_task = tasks[0]
-        if isinstance(first_task, str) and first_task.strip():
-            return first_task
-        if isinstance(first_task, int):
-            return task_descriptions.get(first_task, "")
+        resolved_tasks = {
+            task.strip()
+            if isinstance(task, str)
+            else task_descriptions.get(task, "")
+            if isinstance(task, int)
+            else ""
+            for task in tasks
+        }
+        resolved_tasks.discard("")
+        if len(resolved_tasks) == 1:
+            return resolved_tasks.pop()
+        if resolved_tasks:
+            return ""
 
     task_index = record.get("task_index")
     if isinstance(task_index, int):
@@ -413,20 +421,21 @@ def _task_from_episode_record(record: dict, task_descriptions: dict[int, str]) -
     return ""
 
 
-def _resolve_episode_task(
+def _resolve_frame_task(
+    step: int,
     episode_index: int,
     data: dict[str, list],
     task_descriptions: dict[int, str],
     episode_tasks: dict[int, str],
 ) -> str:
-    if episode_index in episode_tasks:
-        return episode_tasks[episode_index]
-
     task_indices = data.get("task_index", [])
-    if task_indices:
-        task_index = task_indices[0]
+    if step < len(task_indices):
+        task_index = task_indices[step]
         if isinstance(task_index, int) and task_index in task_descriptions:
             return task_descriptions[task_index]
+
+    if episode_index in episode_tasks:
+        return episode_tasks[episode_index]
 
     if len(task_descriptions) == 1:
         return next(iter(task_descriptions.values()))
@@ -584,10 +593,6 @@ def main() -> int:
             print(f"  [WARNING] No data rows for episode {ep}, skipping")
             continue
         n_frames = len(data["timestamp"])
-        task = _resolve_episode_task(ep, data, task_descriptions, episode_tasks)
-        if bundle.policy_type in VLA_POLICY_TYPES and not task:
-            print(f"[ERROR] Episode {ep} has no task description required by {bundle.policy_type}")
-            return 1
 
         # Load video frames
         video_file = _find_video_file(dataset_dir, image_key, ep, episode_record)
@@ -619,6 +624,12 @@ def main() -> int:
                 image_key: torch.from_numpy(image).float().permute(2, 0, 1) / 255.0,
             }
             if bundle.policy_type in VLA_POLICY_TYPES:
+                task = _resolve_frame_task(step, ep, data, task_descriptions, episode_tasks)
+                if not task:
+                    print(
+                        f"[ERROR] Episode {ep} frame {step} has no task description required by {bundle.policy_type}"
+                    )
+                    return 1
                 obs["task"] = task
             processed_obs = bundle.preprocessor(obs)
 

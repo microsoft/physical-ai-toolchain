@@ -66,22 +66,50 @@ def test_load_task_metadata_from_v3_parquet(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("episode_index", "data", "task_descriptions", "episode_tasks", "expected"),
+    ("step", "episode_index", "data", "task_descriptions", "episode_tasks", "expected"),
     [
-        (1, {}, {2: "indexed task"}, {1: "episode task"}, "episode task"),
-        (1, {"task_index": [2]}, {2: "indexed task"}, {}, "indexed task"),
-        (1, {}, {2: "only task"}, {}, "only task"),
-        (1, {}, {2: "first", 3: "second"}, {}, ""),
+        (0, 1, {}, {2: "indexed task"}, {1: "episode task"}, "episode task"),
+        (0, 1, {"task_index": [2]}, {2: "indexed task"}, {}, "indexed task"),
+        (0, 1, {}, {2: "only task"}, {}, "only task"),
+        (0, 1, {}, {2: "first", 3: "second"}, {}, ""),
+        (1, 1, {"task_index": [2]}, {2: "indexed task"}, {1: "episode task"}, "episode task"),
     ],
 )
-def test_resolve_episode_task(
+def test_resolve_frame_task(
+    step: int,
     episode_index: int,
     data: dict[str, list],
     task_descriptions: dict[int, str],
     episode_tasks: dict[int, str],
     expected: str,
 ) -> None:
-    assert _MOD._resolve_episode_task(episode_index, data, task_descriptions, episode_tasks) == expected
+    assert _MOD._resolve_frame_task(step, episode_index, data, task_descriptions, episode_tasks) == expected
+
+
+def test_resolve_frame_task_tracks_transition_within_episode() -> None:
+    data = {"task_index": [2, 2, 3, 3]}
+    task_descriptions = {2: "pick up the block", 3: "place the block"}
+
+    tasks = [
+        _MOD._resolve_frame_task(step, 1, data, task_descriptions, {})
+        for step in range(len(data["task_index"]))
+    ]
+
+    assert tasks == [
+        "pick up the block",
+        "pick up the block",
+        "place the block",
+        "place the block",
+    ]
+
+
+def test_task_from_episode_record_rejects_ambiguous_fallback() -> None:
+    record = {
+        "tasks": ["pick up the block", "place the block"],
+        "task_index": 2,
+    }
+
+    assert _MOD._task_from_episode_record(record, {2: "pick up the block"}) == ""
 
 
 def test_shared_episode_data_and_video_are_bounded(tmp_path: Path) -> None:
