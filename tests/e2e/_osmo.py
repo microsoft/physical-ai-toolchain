@@ -665,7 +665,7 @@ class TaskPodLogStream:
                 )
                 reported[pod.name] = signature
 
-            if pod.started and pod.name not in streamed:
+            if not pod.terminated and pod.name not in streamed:
                 if self._stop.is_set():
                     return
                 streamed.add(pod.name)
@@ -706,7 +706,17 @@ class TaskPodLogStream:
         log_e2e(f"Streaming logs for OSMO task {self._task_name} (pod {pod_name})")
         try:
             proc = subprocess.Popen(
-                ["kubectl", "logs", "-f", "-n", self._namespace, pod_name, "-c", self._task_name],
+                [
+                    "kubectl",
+                    "logs",
+                    "-f",
+                    "--pod-running-timeout=1h",
+                    "-n",
+                    self._namespace,
+                    pod_name,
+                    "-c",
+                    self._task_name,
+                ],
                 cwd=str(self._repo_root),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
