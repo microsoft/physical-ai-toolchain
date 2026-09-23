@@ -35,6 +35,7 @@ export function readWorkflowGraph(root = process.cwd()) {
     const path = `.github/workflows/${name}`;
     graph[path] = readYaml(path);
   }
+  const visiting = new Set();
   const visited = new Set();
   const visitSteps = steps => {
     for (const step of steps ?? []) {
@@ -43,11 +44,17 @@ export function readWorkflowGraph(root = process.cwd()) {
       if (dir.split('/').some(part => part === '..')) throw new Error(`Local action escapes repository: ${dir}`);
       const path = ['action.yml', 'action.yaml'].map(name => `${dir}/${name}`).find(path => existsSync(resolve(root, path)));
       if (!path) throw new Error(`Unresolved local action: ${step.uses}`);
+      if (visiting.has(path)) throw new Error(`Cyclic local action reference: ${[...visiting, path].join(' -> ')}`);
       if (visited.has(path)) continue;
+      visiting.add(path);
+      try {
+        const action = readYaml(path);
+        graph[path] = action;
+        if (action.runs?.using === 'composite') visitSteps(action.runs.steps);
+      } finally {
+        visiting.delete(path);
+      }
       visited.add(path);
-      const action = readYaml(path);
-      graph[path] = action;
-      if (action.runs?.using === 'composite') visitSteps(action.runs.steps);
     }
   };
   for (const workflow of Object.values(graph)) {

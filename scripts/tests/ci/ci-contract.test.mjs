@@ -270,15 +270,71 @@ function writeActionGraph(cwd) {
   writeFixture(cwd, '.github/actions/outer/action.yml', 'name: Outer\nruns:\n  using: composite\n  steps:\n    - uses: ./.github/actions/inner\n');
 }
 
-test('workflow reader: recursively parses real local composite action references', t => {
+test('workflow reader: rejects a composite action cycle with its traversal chain', t => {
   const cwd = temporaryDirectory(t);
   writeActionGraph(cwd);
   writeFixture(cwd, '.github/actions/inner/action.yaml', 'name: Inner\nruns:\n  using: composite\n  steps:\n    - uses: ./.github/actions/outer\n');
+  assert.throws(() => readWorkflowGraph(cwd), {
+    message: 'Cyclic local action reference: .github/actions/outer/action.yml -> .github/actions/inner/action.yaml -> .github/actions/outer/action.yml',
+  });
+});
+
+test('workflow reader: recursively parses acyclic local composite action references', t => {
+  const cwd = temporaryDirectory(t);
+  writeActionGraph(cwd);
+  writeFixture(cwd, '.github/actions/inner/action.yaml', 'name: Inner\nruns:\n  using: composite\n  steps:\n    - run: echo done\n      shell: bash\n');
   const actual = readWorkflowGraph(cwd);
   assert.deepEqual(Object.keys(actual).sort(), [
     '.github/actions/inner/action.yaml', '.github/actions/outer/action.yml', '.github/workflows/test.yml',
   ]);
-  assert.equal(actual['.github/actions/inner/action.yaml'].runs.steps[0].uses, './.github/actions/outer');
+  assert.equal(actual['.github/actions/outer/action.yml'].runs.steps[0].uses, './.github/actions/inner');
+  assert.equal(actual['.github/actions/inner/action.yaml'].runs.steps[0].run, 'echo done');
+});
+
+test('workflow reader: rejects a direct composite self-cycle', t => {
+  const cwd = temporaryDirectory(t);
+  writeActionGraph(cwd);
+  writeFixture(cwd, '.github/actions/inner/action.yaml', 'name: Inner\nruns:\n  using: composite\n  steps:\n    - uses: ./.github/actions/inner\n');
+  assert.throws(() => readWorkflowGraph(cwd), {
+    message: 'Cyclic local action reference: .github/actions/outer/action.yml -> .github/actions/inner/action.yaml -> .github/actions/inner/action.yaml',
+  });
+});
+
+test('workflow reader: accepts shared descendants and repeated actions across jobs and workflows', t => {
+  const cwd = temporaryDirectory(t);
+  writeFixture(cwd, '.github/workflows/test.yml', 'on: workflow_call\njobs:\n  first:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer-a\n      - uses: ./.github/actions/outer-b\n      - uses: ./.github/actions/outer-a\n  second:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer-b\n');
+  writeFixture(cwd, '.github/workflows/reuse.yml', 'on: workflow_call\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ./.github/actions/outer-a\n');
+  for (const name of ['outer-a', 'outer-b']) {
+    writeFixture(cwd, `.github/actions/${name}/action.yml`, `name: ${name}\nruns:\n  using: composite\n  steps:\n    - uses: ./.github/actions/shared\n`);
+  }
+  writeFixture(cwd, '.github/actions/shared/action.yaml', 'name: Shared\nruns:\n  using: composite\n  steps:\n    - run: echo shared\n      shell: bash\n');
+  const actual = readWorkflowGraph(cwd);
+  assert.deepEqual(Object.keys(actual).sort(), [
+    '.github/actions/outer-a/action.yml', '.github/actions/outer-b/action.yml', '.github/actions/shared/action.yaml',
+    '.github/workflows/reuse.yml', '.github/workflows/test.yml',
+  ]);
+  for (const name of ['outer-a', 'outer-b']) {
+    assert.equal(actual[`.github/actions/${name}/action.yml`].runs.steps[0].uses, './.github/actions/shared');
+  }
+  assert.equal(actual['.github/actions/shared/action.yaml'].runs.steps[0].run, 'echo shared');
+});
+
+test('workflow reader: excludes completed siblings from a later cycle diagnostic', t => {
+  const cwd = temporaryDirectory(t);
+  writeActionGraph(cwd);
+  writeFixture(cwd, '.github/actions/outer/action.yml', 'name: Outer\nruns:\n  using: composite\n  steps:\n    - uses: ./.github/actions/shared\n    - uses: ./.github/actions/inner\n');
+  writeFixture(cwd, '.github/actions/shared/action.yml', 'name: Shared\nruns:\n  using: node24\n  main: index.js\n');
+  writeFixture(cwd, '.github/actions/inner/action.yaml', 'name: Inner\nruns:\n  using: composite\n  steps:\n    - uses: ./.github/actions/outer\n');
+  assert.throws(() => readWorkflowGraph(cwd), {
+    message: 'Cyclic local action reference: .github/actions/outer/action.yml -> .github/actions/inner/action.yaml -> .github/actions/outer/action.yml',
+  });
+});
+
+test('workflow reader: propagates malformed nested action YAML', t => {
+  const cwd = temporaryDirectory(t);
+  writeActionGraph(cwd);
+  writeFixture(cwd, '.github/actions/inner/action.yaml', 'name: Inner\nname: Duplicate\n');
+  assert.throws(() => readWorkflowGraph(cwd), /inner\/action\.yaml: Map keys must be unique/);
 });
 
 test('workflow reader: rejects an unresolved nested local action', t => {
