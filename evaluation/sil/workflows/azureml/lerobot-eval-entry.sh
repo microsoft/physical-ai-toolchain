@@ -26,6 +26,7 @@ fi
 
 runtime_modules=(av azure.ai.ml azure.identity azure.storage.blob azureml.mlflow lerobot matplotlib mlflow pyarrow)
 case "${POLICY_TYPE:-act}" in
+  diffusion) runtime_modules+=(diffusers) ;;
   pi0|pi0_fast) runtime_modules+=(scipy tokenizers transformers) ;;
 esac
 ensure_lerobot_runtime \
