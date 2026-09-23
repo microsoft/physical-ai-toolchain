@@ -3,7 +3,7 @@ sidebar_position: 11
 title: Manage Node Pools
 description: Add, remove, and resize AKS node pools on an existing cluster
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-24
+ms.date: 2026-09-22
 ms.topic: how-to
 keywords:
   - node-pools
@@ -35,9 +35,10 @@ Pool changes follow the standard repo flow:
 
 1. Edit `node_pools` in `infrastructure/terraform/terraform.tfvars`.
 2. Run `terraform apply` to create, destroy, or update pool resources.
-3. If the new pool requires different `nodeSelector`, tolerations, or resource overrides, edit `infrastructure/setup/values/osmo-platforms.yaml` and rerun `infrastructure/setup/03-deploy-osmo.sh`.
+3. Regenerate the environment bundle so `infrastructure/setup/generated/<environment>/osmo-platforms.yaml` matches the applied pool configuration.
+4. If the new pool requires different `nodeSelector`, tolerations, or resource overrides, rerun `infrastructure/setup/03-deploy-osmo.sh` with the generated platform values.
 
-Script `03` deploys `osmo-platforms.yaml` as a Helm values overlay. Rerun is only needed when platform configuration changes (nodeSelector, tolerations, resource limits) — not for count-only scaling changes.
+Script `03` deploys the selected `osmo-platforms.yaml` as a Helm values overlay. Pass the generated file with `--platform-values`; the checked-in `infrastructure/setup/values/osmo-platforms.yaml` is an instructional fallback, not environment-specific desired state. Rerun is only needed when platform configuration changes (nodeSelector, tolerations, resource limits) — not for count-only scaling changes.
 
 > [!NOTE]
 > Single-node multi-GPU jobs require an OSMO platform whose pod-template `nodeSelector` targets a multi-GPU node SKU.
@@ -51,6 +52,7 @@ Script `03` deploys `osmo-platforms.yaml` as a Helm values overlay. Rerun is onl
 - Active Azure CLI session (`az login`) with rights to modify the cluster resource group.
 - VPN connection if the cluster is private (default).
 - The same flags you originally passed to `03-deploy-osmo.sh` (for example, `--use-acr`).
+- A refreshed environment bundle under `infrastructure/setup/generated/<environment>/` when pool scheduling properties change.
 
 ## What Can and Cannot Change in Place
 
@@ -116,7 +118,9 @@ Resizing means changing `node_count`, `min_count`, `max_count`, `node_labels`, o
 3. Rerun the OSMO control-plane script if taints or labels changed (not needed for count-only changes):
 
    ```bash
-   bash infrastructure/setup/03-deploy-osmo.sh --use-acr
+   bash infrastructure/setup/03-deploy-osmo.sh \
+     --platform-values infrastructure/setup/generated/<environment>/osmo-platforms.yaml \
+     --use-acr
    ```
 
 ### Add a New Pool
@@ -144,20 +148,24 @@ Use this to add capacity (different SKU, different priority, different zones) wi
    terraform -chdir=infrastructure/terraform apply
    ```
 
-3. Rerun the OSMO control-plane script so the new pool appears in `POOL`, `PLATFORM`, and `POD_TEMPLATE` configs:
+3. Regenerate the environment bundle so its OSMO platform values include the new pool.
+
+4. Rerun the OSMO control-plane script so the new pool appears in `POOL`, `PLATFORM`, and `POD_TEMPLATE` configs:
 
    ```bash
-   bash infrastructure/setup/03-deploy-osmo.sh --use-acr
+   bash infrastructure/setup/03-deploy-osmo.sh \
+     --platform-values infrastructure/setup/generated/<environment>/osmo-platforms.yaml \
+     --use-acr
    ```
 
-4. Verify:
+5. Verify:
 
    ```bash
    kubectl get nodes -l agentpool=sdgcpu
    az aks nodepool list --resource-group <rg> --cluster-name <aks> -o table
    ```
 
-   The OSMO-side pool/platform configuration is applied by the rerun in step 3; a successful run is the confirmation. The pool definition itself lives in [`infrastructure/setup/values/osmo-platforms.yaml`](../../infrastructure/setup/values/osmo-platforms.yaml).
+   The OSMO-side pool/platform configuration is applied by the rerun in step 4; a successful run is the confirmation. The environment-specific pool definition lives in the generated bundle. The checked-in [`infrastructure/setup/values/osmo-platforms.yaml`](../../infrastructure/setup/values/osmo-platforms.yaml) remains an instructional fallback.
 
 ### Remove a Pool
 
@@ -174,10 +182,12 @@ Use this to add capacity (different SKU, different priority, different zones) wi
    terraform -chdir=infrastructure/terraform apply
    ```
 
-3. Edit `infrastructure/setup/values/osmo-platforms.yaml` if it referenced the removed pool, then rerun the OSMO control-plane script:
+3. Regenerate the environment bundle to remove the pool, then rerun the OSMO control-plane script:
 
    ```bash
-   bash infrastructure/setup/03-deploy-osmo.sh --use-acr
+   bash infrastructure/setup/03-deploy-osmo.sh \
+     --platform-values infrastructure/setup/generated/<environment>/osmo-platforms.yaml \
+     --use-acr
    ```
 
 ### Replace a Pool SKU (Two-Step, No Capacity Gap)
@@ -211,20 +221,24 @@ Faster but disruptive. Use only when no workloads are running on the pool, or wh
 
    All nodes in the pool are evicted at once; new nodes come up under the same pool name.
 
-3. Rerun the OSMO control-plane script:
+3. Regenerate the environment bundle, then rerun the OSMO control-plane script:
 
    ```bash
-   bash infrastructure/setup/03-deploy-osmo.sh --use-acr
+   bash infrastructure/setup/03-deploy-osmo.sh \
+     --platform-values infrastructure/setup/generated/<environment>/osmo-platforms.yaml \
+     --use-acr
    ```
 
 ## Operational Notes
 
-- **Subnet planning.** Every pool gets its own subnet. Pick a CIDR that does not overlap `aks_subnet_config` or any other pool's `subnet_address_prefixes`. AKS Overlay mode applies to pods; the node IP space is what you size here.
-- **OSMO flag parity.** Pass the same flags you used for the initial `03-deploy-osmo.sh` run (for example, `--use-acr`). Omitting them reverts the deployment to defaults.
-- **Spot constraints.** Azure rejects `upgrade_settings` for Spot pools; the Terraform module already handles this. `eviction_policy` applies only when `priority = "Spot"`.
-- **Autoscaling.** `min_count = 0` is allowed; the pool scales up on demand from pending pods. KAI/Volcano coscheduling requires whole-pool capacity for gang-scheduled jobs.
-- **Scale-from-zero for AzureML.** GPU pools used by AzureML jobs must declare `node_labels = { accelerator = "nvidia" }`. Without this static label, the cluster autoscaler cannot prove a from-zero scale-up would satisfy AzureML InstanceTypes that select on `accelerator: nvidia`, and refuses to scale. See [Azure ML Training Workflows — Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools).
-- **Rerun script 03 after pool changes.** `03-deploy-osmo.sh` reconciles the unified OSMO deployment, including pool, platform, and backend config.
+| Topic                       | Guidance                                                                                                                                                                                                                                                                                                                                                                                               |
+|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Subnet planning             | Every pool gets its own subnet. Pick a CIDR that does not overlap `aks_subnet_config` or any other pool's `subnet_address_prefixes`. AKS Overlay mode applies to pods; size the node IP space here.                                                                                                                                                                                                    |
+| OSMO flag parity            | Pass the same flags used for the initial `03-deploy-osmo.sh` run, including `--platform-values` and options such as `--use-acr`. Omitting them reverts the deployment to defaults.                                                                                                                                                                                                                     |
+| Spot constraints            | Azure rejects `upgrade_settings` for Spot pools; the Terraform module already handles this. `eviction_policy` applies only when `priority = "Spot"`.                                                                                                                                                                                                                                                   |
+| Autoscaling                 | `min_count = 0` is allowed; the pool scales up on demand from pending pods. KAI/Volcano coscheduling requires whole-pool capacity for gang-scheduled jobs.                                                                                                                                                                                                                                             |
+| Scale-from-zero for AzureML | GPU pools used by AzureML jobs must declare `node_labels = { accelerator = "nvidia" }`. Without this static label, the cluster autoscaler cannot prove a from-zero scale-up would satisfy AzureML InstanceTypes that select on `accelerator: nvidia`, and refuses to scale. See [Azure ML Training Workflows — Scale-from-zero GPU Pools](../training/azureml-training.md#-scale-from-zero-gpu-pools). |
+| OSMO reconciliation         | Regenerate the environment bundle after scheduling-property changes, then rerun `03-deploy-osmo.sh` with its `--platform-values` file to reconcile pool, platform, and backend configuration.                                                                                                                                                                                                          |
 
 ## 🔗 Related
 
