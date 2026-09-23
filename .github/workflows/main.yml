@@ -482,7 +482,6 @@ jobs:
             data-management/viewer/backend/pyproject.toml
             data-management/viewer/backend/uv.lock
             data-management/viewer/frontend/package.json
-            data-management/viewer/frontend/package-lock.json
             docs/docusaurus/package.json
             docs/docusaurus/package-lock.json
             infrastructure/terraform/e2e/go.mod
