@@ -2,10 +2,19 @@
  * TanStack Query hooks for episode label operations.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect } from 'react'
+import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useRef } from 'react'
 
-import { apiRequest, setEpisodeLabels } from '@/lib/api-client'
+import {
+  ApiClientError,
+  apiRequestVersioned,
+  type MutationPrecondition,
+  mutationPreconditionHeaders,
+  setEpisodeLabels,
+  type VersionedResource,
+} from '@/lib/api-client'
+import { loadPersistedLabelDraft, persistLabelDraft } from '@/lib/edit-draft-storage'
+import { fetchPrincipalContext } from '@/lib/principal-context'
 import { useDatasetStore } from '@/stores'
 import { useLabelStore } from '@/stores/label-store'
 import type { EpisodeAnalysisRecord } from '@/types/api'
@@ -25,23 +34,46 @@ export const labelKeys = {
     [...labelKeys.dataset(datasetId), 'episode', episodeIdx] as const,
 }
 
-async function fetchDatasetLabels(datasetId: string): Promise<DatasetLabelsResponse> {
-  return apiRequest<DatasetLabelsResponse>(`/datasets/${datasetId}/labels`)
+type VersionedDatasetLabels = VersionedResource<DatasetLabelsResponse>
+
+function labelPrecondition(queryClient: QueryClient, datasetId: string): MutationPrecondition {
+  const current = queryClient.getQueryData<VersionedDatasetLabels>(labelKeys.dataset(datasetId))
+  return current?.etag ? { etag: current.etag } : { createOnly: true }
 }
 
-async function addLabelOption(datasetId: string, label: string): Promise<string[]> {
-  return apiRequest<string[]>(`/datasets/${datasetId}/labels/options`, {
+function retainLabelEtag(queryClient: QueryClient, datasetId: string, etag: string | null): void {
+  if (!etag) return
+  queryClient.setQueryData<VersionedDatasetLabels>(labelKeys.dataset(datasetId), (current) =>
+    current ? { ...current, etag } : current,
+  )
+}
+
+export async function fetchDatasetLabels(datasetId: string): Promise<VersionedDatasetLabels> {
+  return apiRequestVersioned<DatasetLabelsResponse>(`/datasets/${datasetId}/labels`)
+}
+
+async function addLabelOption(
+  datasetId: string,
+  label: string,
+  precondition: MutationPrecondition,
+): Promise<VersionedResource<string[]>> {
+  return apiRequestVersioned<string[]>(`/datasets/${datasetId}/labels/options`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...mutationPreconditionHeaders(precondition) },
     body: JSON.stringify({ label }),
   })
 }
 
-async function removeLabelOption(datasetId: string, label: string): Promise<string[]> {
-  return apiRequest<string[]>(
+async function removeLabelOption(
+  datasetId: string,
+  label: string,
+  precondition: MutationPrecondition,
+): Promise<VersionedResource<string[]>> {
+  return apiRequestVersioned<string[]>(
     `/datasets/${datasetId}/labels/options/${encodeURIComponent(label.trim().toUpperCase())}`,
     {
       method: 'DELETE',
+      headers: mutationPreconditionHeaders(precondition),
     },
   )
 }
@@ -73,22 +105,35 @@ async function importAnalysisLabels(
   datasetId: string,
   field: ImportableAnalysisField,
   options?: { prefix?: string; overwrite?: boolean },
-): Promise<ImportAnalysisResult> {
-  return apiRequest<ImportAnalysisResult>(`/datasets/${datasetId}/labels/import-from-analysis`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      field,
-      prefix: options?.prefix,
-      overwrite: options?.overwrite ?? false,
-    }),
-  })
+  precondition?: MutationPrecondition,
+): Promise<VersionedResource<ImportAnalysisResult>> {
+  return apiRequestVersioned<ImportAnalysisResult>(
+    `/datasets/${datasetId}/labels/import-from-analysis`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...mutationPreconditionHeaders(precondition ?? { createOnly: true }),
+      },
+      body: JSON.stringify({
+        field,
+        prefix: options?.prefix,
+        overwrite: options?.overwrite ?? false,
+      }),
+    },
+  )
 }
 
 /**
  * Hook to load and sync dataset labels with the label store.
  */
 export function useDatasetLabels() {
+  const principalQuery = useQuery({
+    queryKey: ['auth', 'principal-context'],
+    queryFn: fetchPrincipalContext,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const principalScopeId = principalQuery.data?.scopeId
   const currentDataset = useDatasetStore((state) => state.currentDataset)
   const labelDatasetId = useLabelStore((state) => state.datasetId)
   const prepareDatasetLabels = useLabelStore((state) => state.prepareDatasetLabels)
@@ -96,12 +141,17 @@ export function useDatasetLabels() {
   const setDatasetEpisodeLabels = useLabelStore((state) => state.setDatasetEpisodeLabels)
   const reconcileEpisodeLabels = useLabelStore((state) => state.reconcileEpisodeLabels)
   const setAllEpisodeAnalysis = useLabelStore((state) => state.setAllEpisodeAnalysis)
+  const restoreLabelDraft = useLabelStore((state) => state.restoreLabelDraft)
+  const availableLabels = useLabelStore((state) => state.availableLabels)
+  const episodeLabels = useLabelStore((state) => state.episodeLabels)
+  const savedEpisodeLabels = useLabelStore((state) => state.savedEpisodeLabels)
+  const hydratedDatasetRef = useRef<string | null>(null)
   const setLoaded = useLabelStore((state) => state.setLoaded)
 
   const query = useQuery({
     queryKey: labelKeys.dataset(currentDataset?.id ?? ''),
     queryFn: () => fetchDatasetLabels(currentDataset!.id),
-    enabled: !!currentDataset,
+    enabled: !!currentDataset && !!principalScopeId,
     staleTime: 30 * 1000,
   })
 
@@ -110,25 +160,76 @@ export function useDatasetLabels() {
   }, [currentDataset?.id, prepareDatasetLabels])
 
   useEffect(() => {
-    if (query.data && query.data.datasetId === currentDataset?.id) {
-      setAvailableLabels(query.data.availableLabels)
-      if (labelDatasetId === query.data.datasetId) {
-        reconcileEpisodeLabels(query.data.datasetId, query.data.episodes)
-      } else {
-        setDatasetEpisodeLabels(query.data.datasetId, query.data.episodes)
+    if (!query.data || query.data.data.datasetId !== currentDataset?.id || !principalScopeId) return
+
+    const datasetId = query.data.data.datasetId
+    setAvailableLabels(query.data.data.availableLabels)
+    if (labelDatasetId === datasetId) {
+      reconcileEpisodeLabels(datasetId, query.data.data.episodes)
+    } else {
+      setDatasetEpisodeLabels(datasetId, query.data.data.episodes)
+    }
+    hydratedDatasetRef.current = datasetId
+    setAllEpisodeAnalysis(query.data.data.analysis ?? {})
+    setLoaded(true)
+    const hydrationEditGeneration = useLabelStore.getState().editGeneration
+    let active = true
+    void loadPersistedLabelDraft(datasetId, principalScopeId).then((draft) => {
+      if (
+        !active ||
+        useDatasetStore.getState().currentDataset?.id !== datasetId ||
+        useLabelStore.getState().editGeneration !== hydrationEditGeneration
+      ) {
+        return
       }
-      setAllEpisodeAnalysis(query.data.analysis ?? {})
-      setLoaded(true)
+      if (draft) {
+        restoreLabelDraft(
+          draft.draft.availableLabels,
+          draft.draft.episodeLabels,
+          draft.baseline.episodeLabels,
+        )
+      }
+    })
+
+    return () => {
+      active = false
     }
   }, [
     currentDataset?.id,
     labelDatasetId,
+    principalScopeId,
     query.data,
     reconcileEpisodeLabels,
     setAllEpisodeAnalysis,
     setAvailableLabels,
+    restoreLabelDraft,
     setDatasetEpisodeLabels,
     setLoaded,
+  ])
+
+  useEffect(() => {
+    const datasetId = currentDataset?.id
+    if (!datasetId || !principalScopeId || hydratedDatasetRef.current !== datasetId) return
+    const isDirty = JSON.stringify(episodeLabels) !== JSON.stringify(savedEpisodeLabels)
+    void persistLabelDraft(
+      datasetId,
+      principalScopeId,
+      isDirty
+        ? {
+            availableLabels,
+            episodeLabels,
+            savedEpisodeLabels,
+            baseEtag: query.data?.etag ?? null,
+          }
+        : null,
+    )
+  }, [
+    availableLabels,
+    currentDataset?.id,
+    episodeLabels,
+    principalScopeId,
+    query.data?.etag,
+    savedEpisodeLabels,
   ])
 
   return query
@@ -139,18 +240,36 @@ export function useDatasetLabels() {
  */
 export function useSaveEpisodeLabels() {
   const currentDataset = useDatasetStore((state) => state.currentDataset)
-  const commitEpisodeLabels = useLabelStore((state) => state.commitEpisodeLabels)
+  const commitSubmittedEpisodeLabels = useLabelStore((state) => state.commitSubmittedEpisodeLabels)
+  const setConflict = useLabelStore((state) => state.setConflict)
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
     mutationFn: ({ episodeIdx, labels }: { episodeIdx: number; labels: string[] }) => {
       if (!currentDataset) throw new Error('No dataset selected')
-      return setEpisodeLabels(currentDataset.id, episodeIdx, labels)
+      return setEpisodeLabels(
+        currentDataset.id,
+        episodeIdx,
+        labels,
+        labelPrecondition(queryClient, currentDataset.id),
+      )
     },
-    onSuccess: (data) => {
-      commitEpisodeLabels(data.episodeIndex, data.labels)
+    onSuccess: (versioned, variables) => {
+      commitSubmittedEpisodeLabels(
+        versioned.data.episodeIndex,
+        variables.labels,
+        versioned.data.labels,
+      )
       if (currentDataset) {
+        retainLabelEtag(queryClient, currentDataset.id, versioned.etag)
         queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) })
+      }
+    },
+    onError: (error, variables) => {
+      if (error instanceof ApiClientError && error.status === 412) {
+        const currentEtag =
+          typeof error.details?.currentEtag === 'string' ? error.details.currentEtag : null
+        setConflict(currentEtag, variables.episodeIdx, variables.labels)
       }
     },
   })
@@ -169,11 +288,16 @@ export function useAddLabelOption() {
   const mutation = useMutation({
     mutationFn: (label: string) => {
       if (!currentDataset) throw new Error('No dataset selected')
-      return addLabelOption(currentDataset.id, label)
+      return addLabelOption(
+        currentDataset.id,
+        label,
+        labelPrecondition(queryClient, currentDataset.id),
+      )
     },
-    onSuccess: (data) => {
-      setAvailableLabels(data)
+    onSuccess: (versioned) => {
+      setAvailableLabels(versioned.data)
       if (currentDataset) {
+        retainLabelEtag(queryClient, currentDataset.id, versioned.etag)
         queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) })
       }
     },
@@ -194,12 +318,17 @@ export function useRemoveLabelOption() {
   const mutation = useMutation({
     mutationFn: (label: string) => {
       if (!currentDataset) throw new Error('No dataset selected')
-      return removeLabelOption(currentDataset.id, label)
+      return removeLabelOption(
+        currentDataset.id,
+        label,
+        labelPrecondition(queryClient, currentDataset.id),
+      )
     },
-    onSuccess: (data, label) => {
+    onSuccess: (versioned, label) => {
       removeLabelOptionInStore(label)
-      setAvailableLabels(data)
+      setAvailableLabels(versioned.data)
       if (currentDataset) {
+        retainLabelEtag(queryClient, currentDataset.id, versioned.etag)
         queryClient.invalidateQueries({ queryKey: labelKeys.dataset(currentDataset.id) })
       }
     },
@@ -228,9 +357,16 @@ export function useImportAnalysisLabels() {
       overwrite?: boolean
     }) => {
       if (!currentDataset) throw new Error('No dataset selected')
-      return importAnalysisLabels(currentDataset.id, field, { prefix, overwrite })
+      return importAnalysisLabels(
+        currentDataset.id,
+        field,
+        { prefix, overwrite },
+        labelPrecondition(queryClient, currentDataset.id),
+      )
     },
-    onSuccess: (data) => {
+    onSuccess: (versioned) => {
+      const data = versioned.data
+      retainLabelEtag(queryClient, data.datasetId, versioned.etag)
       queryClient.invalidateQueries({ queryKey: labelKeys.dataset(data.datasetId) })
       if (useDatasetStore.getState().currentDataset?.id !== data.datasetId) return
       setAvailableLabels(data.availableLabels)

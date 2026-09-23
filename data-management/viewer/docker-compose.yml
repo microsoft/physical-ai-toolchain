@@ -45,8 +45,8 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: data-management/viewer/frontend/Dockerfile
       args:
         VITE_AZURE_CLIENT_ID: "${VITE_AZURE_CLIENT_ID:-}"
         VITE_AZURE_TENANT_ID: "${VITE_AZURE_TENANT_ID:-}"
