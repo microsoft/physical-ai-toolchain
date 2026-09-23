@@ -1,0 +1,381 @@
+{
+  "schemaVersion": "1.0.0",
+  "baseUrl": "http://127.0.0.1:5173",
+  "serveMode": "served",
+  "allowlist": ["127.0.0.1:5173/*"],
+  "routes": [
+    {
+      "path": "/",
+      "title": "Dataset Viewer",
+      "surfaceIds": [
+        "V01",
+        "V02",
+        "V03",
+        "V04",
+        "V05",
+        "V06",
+        "V07",
+        "V08",
+        "V09",
+        "V10",
+        "V11",
+        "V12",
+        "V13",
+        "V14",
+        "V15",
+        "V16",
+        "V17",
+        "V18",
+        "V19"
+      ]
+    }
+  ],
+  "surfaces": [
+    {
+      "id": "V01",
+      "type": "page",
+      "route": "/",
+      "selector": "body",
+      "states": [
+        { "state": "default" },
+        { "state": "auth-resolving" },
+        { "state": "denied" },
+        { "state": "expired" }
+      ]
+    },
+    {
+      "id": "V02",
+      "type": "global-chrome",
+      "route": "/",
+      "selector": "header",
+      "states": [
+        { "state": "default" },
+        { "state": "empty" },
+        { "state": "warming" },
+        { "state": "open" },
+        { "state": "filtered" }
+      ]
+    },
+    {
+      "id": "V03",
+      "type": "component",
+      "route": "/",
+      "selector": "[aria-label*='episode' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "loading" },
+        { "state": "error" },
+        { "state": "empty" },
+        { "state": "filtered" }
+      ]
+    },
+    {
+      "id": "V04",
+      "type": "component",
+      "route": "/",
+      "selector": "main",
+      "states": [
+        { "state": "loading" },
+        { "state": "error" },
+        { "state": "empty" },
+        { "state": "loaded" }
+      ]
+    },
+    {
+      "id": "V05",
+      "type": "widget",
+      "route": "/",
+      "selector": "[role^='tab']",
+      "states": [
+        { "state": "default" },
+        { "state": "dirty" },
+        { "state": "saving" },
+        { "state": "error" },
+        { "state": "confirm" }
+      ]
+    },
+    {
+      "id": "V06",
+      "type": "widget",
+      "route": "/",
+      "selector": "video, img",
+      "states": [
+        { "state": "default" },
+        { "state": "loading" },
+        { "state": "error" },
+        { "state": "playing" },
+        { "state": "ended" }
+      ]
+    },
+    {
+      "id": "V07",
+      "type": "widget",
+      "route": "/",
+      "selector": "[aria-label*='display' i]",
+      "states": [{ "state": "default" }, { "state": "open" }, { "state": "adjusted" }]
+    },
+    {
+      "id": "V08",
+      "type": "widget",
+      "route": "/",
+      "selector": "[aria-label*='trajectory' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "empty" },
+        { "state": "focus" },
+        { "state": "range" },
+        { "state": "cancelled" }
+      ]
+    },
+    {
+      "id": "V09",
+      "type": "widget",
+      "route": "/",
+      "selector": "[aria-label*='joint' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "focus" },
+        { "state": "open" },
+        { "state": "reordered" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V10",
+      "type": "widget",
+      "route": "/",
+      "selector": "[aria-label*='subtask' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "empty" },
+        { "state": "selected" },
+        { "state": "reordered" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V11",
+      "type": "widget",
+      "route": "/",
+      "selector": "[aria-label*='label' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "loading" },
+        { "state": "empty" },
+        { "state": "confirm" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V12",
+      "type": "widget",
+      "route": "/",
+      "selector": "[aria-label*='instruction' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "dirty" },
+        { "state": "invalid" },
+        { "state": "saved" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V13",
+      "type": "widget",
+      "route": "/",
+      "selector": "[aria-label*='judge' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "loading" },
+        { "state": "running" },
+        { "state": "partial" },
+        { "state": "complete" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V14",
+      "type": "widget",
+      "route": "/",
+      "selector": "[aria-label*='detection' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "running" },
+        { "state": "empty" },
+        { "state": "results" },
+        { "state": "confirm" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V15",
+      "type": "component",
+      "route": "/",
+      "selector": "[aria-label*='analysis' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "loading" },
+        { "state": "empty" },
+        { "state": "results" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V16",
+      "type": "component",
+      "route": "/",
+      "selector": "[aria-label*='edit' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "open" },
+        { "state": "preview" },
+        { "state": "applied" },
+        { "state": "confirm" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V17",
+      "type": "component",
+      "route": "/",
+      "selector": "[aria-label*='diagnostic' i]",
+      "states": [
+        { "state": "default" },
+        { "state": "open" },
+        { "state": "empty" },
+        { "state": "copied" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V18",
+      "type": "widget",
+      "route": "/",
+      "selector": "[role='dialog']",
+      "states": [
+        { "state": "open" },
+        { "state": "preparing" },
+        { "state": "progress" },
+        { "state": "cancelled" },
+        { "state": "complete" },
+        { "state": "error" }
+      ]
+    },
+    {
+      "id": "V19",
+      "type": "global-chrome",
+      "route": "/",
+      "selector": "body",
+      "states": [
+        { "state": "default" },
+        { "state": "resize-200" },
+        { "state": "reflow-320" },
+        { "state": "text-spacing" },
+        { "state": "forced-colors" },
+        { "state": "reduced-motion" },
+        { "state": "portrait" },
+        { "state": "landscape" }
+      ]
+    }
+  ],
+  "probeScoping": [
+    {
+      "probe": "probe-axe",
+      "surfaces": [
+        "V02",
+        "V03",
+        "V04",
+        "V05",
+        "V06",
+        "V07",
+        "V08",
+        "V09",
+        "V10",
+        "V11",
+        "V12",
+        "V13",
+        "V14",
+        "V15",
+        "V16",
+        "V17",
+        "V18"
+      ],
+      "states": ["default", "open", "error", "empty"]
+    },
+    {
+      "probe": "probe-aria-tree",
+      "surfaces": ["V02", "V03", "V05", "V08", "V09", "V10", "V11", "V12", "V13", "V14", "V18"],
+      "states": ["default", "focus", "open", "error", "empty"]
+    },
+    {
+      "probe": "probe-contrast",
+      "surfaces": ["V02", "V03", "V05", "V08", "V13", "V14", "V18", "V19"],
+      "states": ["default", "forced-colors"]
+    },
+    {
+      "probe": "probe-focus-visible",
+      "surfaces": [
+        "V02",
+        "V03",
+        "V05",
+        "V08",
+        "V09",
+        "V10",
+        "V11",
+        "V12",
+        "V13",
+        "V14",
+        "V18",
+        "V19"
+      ],
+      "states": ["default", "focus", "forced-colors"]
+    },
+    {
+      "probe": "probe-reflow-resize",
+      "surfaces": ["V02", "V03", "V05", "V06", "V08", "V13", "V14", "V18", "V19"],
+      "states": ["default", "reflow-320", "resize-200"]
+    },
+    {
+      "probe": "probe-target-size",
+      "surfaces": [
+        "V02",
+        "V03",
+        "V05",
+        "V06",
+        "V08",
+        "V09",
+        "V10",
+        "V11",
+        "V12",
+        "V13",
+        "V14",
+        "V18",
+        "V19"
+      ],
+      "states": ["default", "reflow-320"]
+    },
+    {
+      "probe": "probe-console-errors",
+      "surfaces": ["V01", "V02", "V03", "V04", "V05", "V06", "V08", "V13", "V14", "V18", "V19"],
+      "states": ["default", "error"]
+    },
+    { "probe": "probe-broken-links", "surfaces": ["V02", "V17"], "states": ["default", "open"] },
+    {
+      "probe": "probe-dom-hygiene",
+      "surfaces": ["V01", "V02", "V03", "V04", "V05", "V19"],
+      "states": ["default"]
+    },
+    { "probe": "probe-title-lang", "surfaces": ["V01", "V19"], "states": ["default"] }
+  ],
+  "visualReview": {
+    "enabled": true,
+    "evidenceRoot": "artifacts/accessibility/current/hve-viewer",
+    "publicLoopbackOnly": true,
+    "rejectPersonalData": true,
+    "operatorConfirmedNoPersonalData": true,
+    "fullPage": true,
+    "traceSnapshots": true,
+    "routes": [{ "path": "/", "state": "default", "surfaceId": "V19" }],
+    "states": ["default", "reflow-320", "forced-colors", "reduced-motion"]
+  }
+}

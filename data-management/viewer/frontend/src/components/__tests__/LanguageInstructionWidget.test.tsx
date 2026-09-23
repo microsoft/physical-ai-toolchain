@@ -204,4 +204,42 @@ describe('LanguageInstructionWidget', () => {
       useAnnotationStore.getState().currentAnnotation?.languageInstruction?.paraphrases,
     ).toEqual([])
   })
+  it('applies the stored language to instruction, paraphrase, and subtask content', () => {
+    useAnnotationStore.getState().updateLanguageInstruction({
+      instruction: 'soulever la boîte',
+      language: 'fr-FR',
+      paraphrases: ['lever la boîte'],
+      subtaskInstructions: ['approcher'],
+    })
+
+    render(<LanguageInstructionWidget />)
+
+    expect(screen.getByLabelText('Task Instruction')).toHaveAttribute('lang', 'fr-FR')
+    expect(screen.getByText('lever la boîte')).toHaveAttribute('lang', 'fr-FR')
+    expect(screen.getByText('approcher')).toHaveAttribute('lang', 'fr-FR')
+  })
+
+  it('marks invalid language input and uses an English rendering fallback', async () => {
+    const user = userEvent.setup()
+    useAnnotationStore
+      .getState()
+      .updateLanguageInstruction({ instruction: 'lift', language: 'bad_tag' })
+
+    render(<LanguageInstructionWidget />)
+
+    expect(screen.getByLabelText('Task Instruction')).toHaveAttribute('lang', 'en')
+    const languageInput = screen.getByLabelText('Language')
+    const guidance = screen.getByText(/use a bcp 47 language tag/i)
+    expect(languageInput).toHaveAttribute('aria-invalid', 'true')
+    expect(languageInput).toHaveAttribute('aria-describedby', guidance.id)
+    expect(screen.getByRole('button', { name: /save annotation/i })).toBeDisabled()
+    await user.clear(screen.getByLabelText('Language'))
+    await user.type(screen.getByLabelText('Language'), 'FR-fr')
+    await user.tab()
+    expect(useAnnotationStore.getState().currentAnnotation?.languageInstruction?.language).toBe(
+      'fr-FR',
+    )
+    expect(screen.queryByText(/use a bcp 47 language tag/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /save annotation/i })).toBeEnabled()
+  })
 })
