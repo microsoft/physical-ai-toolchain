@@ -139,7 +139,7 @@ trap cleanup_probe EXIT
 
 kubectl --context "$CONTEXT" create configmap "$PROBE" \
   --namespace "$NAMESPACE" \
-  --from-literal=remote.yaml=$'encryption: false\nnoserverdeployment: true\n' \
+  --from-literal=remote.yaml=$'encryption: false\nserverstages:\n  - name: ""\n    noserverdeployment: true\n' \
   --dry-run=client -o yaml |
   kubectl --context "$CONTEXT" apply -f -
 

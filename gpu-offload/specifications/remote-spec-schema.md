@@ -29,12 +29,14 @@ keeps the robot container lightweight while GPU capacity is reserved for inferen
 
 ## Top-Level Keys
 
-`remote.yaml` declares six optional top-level keys. At least one of `serverstages`,
-`remoteclasses`, or `remotefuncs` must be present.
+`remote.yaml` requires at least one non-empty execution section:
+`serverstages`, `remoteclasses`, or `remotefuncs`. When classes or functions are
+configured without `serverstages`, the controller materializes the default
+unnamed stage.
 
 | Key              | Type             | Required | Purpose                                      |
 |------------------|------------------|----------|----------------------------------------------|
-| `serverstages`   | list of objects  | Yes      | Define named GPU worker pods                 |
+| `serverstages`   | list of objects  | No       | Define named GPU worker pods                 |
 | `remoteclasses`  | list of mappings | No       | Classes whose methods execute in stages      |
 | `remotefuncs`    | list of mappings | No       | Functions that execute in stages             |
 | `allowedmodules` | list of strings  | No       | Permit additional runtime module imports     |

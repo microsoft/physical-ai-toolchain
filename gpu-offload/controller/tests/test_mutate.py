@@ -654,12 +654,12 @@ def test_validate_xavier_config_accepts_only_top_level_encryption():
     mod = _load_mutate_module()
 
     defaulted = mod.validate_xavier_config(
-        {"remoteablecm": "cm"},
+        {"remoteablecm": "cm", "serverstages": [{"name": "gpu"}]},
         source="annotation",
         require_remoteablecm=True,
     )
     normalized = mod.validate_xavier_config(
-        {"remoteablecm": "cm", "encryption": "false"},
+        {"remoteablecm": "cm", "encryption": "false", "serverstages": [{"name": "gpu"}]},
         source="annotation",
         require_remoteablecm=True,
     )
@@ -671,6 +671,40 @@ def test_validate_xavier_config_accepts_only_top_level_encryption():
             {"remoteablecm": "cm", "serverstages": [{"name": "gpu", "encryption": True}]},
             source="annotation",
             require_remoteablecm=True,
+        )
+
+
+@pytest.mark.parametrize("section", ["serverstages", "remoteclasses", "remotefuncs"])
+def test_validate_xavier_config_accepts_each_non_empty_execution_section(section: str):
+    mod = _load_mutate_module()
+
+    normalized = mod.validate_xavier_config(
+        {"remoteablecm": "cm", section: [{"name": "gpu"}]},
+        source="annotation",
+        require_remoteablecm=True,
+        require_execution_section=True,
+    )
+
+    assert normalized[section] == [{"name": "gpu"}]
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"remoteablecm": "cm"},
+        {"remoteablecm": "cm", "serverstages": []},
+        {"remoteablecm": "cm", "remoteclasses": [], "remotefuncs": []},
+    ],
+)
+def test_validate_xavier_config_rejects_missing_or_empty_execution_sections(config: dict[str, object]):
+    mod = _load_mutate_module()
+
+    with pytest.raises(mod.XavierConfigError, match="non-empty serverstages, remoteclasses, or remotefuncs"):
+        mod.validate_xavier_config(
+            config,
+            source="annotation",
+            require_remoteablecm=True,
+            require_execution_section=True,
         )
 
 

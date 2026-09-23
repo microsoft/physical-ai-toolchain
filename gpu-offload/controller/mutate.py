@@ -216,9 +216,20 @@ def validate_xavier_config(
     *,
     source: str,
     require_remoteablecm: bool,
+    require_execution_section: bool = False,
     materialize_default_stage: bool = True,
 ) -> dict[str, Any]:
     normalized = copy.deepcopy(raw_config)
+    for section in ("remoteclasses", "remotefuncs"):
+        if section in normalized and not isinstance(normalized[section], list):
+            raise XavierConfigError(f"{source}.{section} must be a list")
+    if require_execution_section and not any(
+        isinstance(normalized.get(section), list) and normalized[section]
+        for section in ("serverstages", "remoteclasses", "remotefuncs")
+    ):
+        raise XavierConfigError(
+            f"{source} must define a non-empty serverstages, remoteclasses, or remotefuncs execution section"
+        )
     if require_remoteablecm:
         normalized["remoteablecm"] = _validate_string(normalized.get("remoteablecm"), field=f"{source}.remoteablecm")
     elif "remoteablecm" in normalized:
@@ -935,7 +946,12 @@ def merge_configmap_config(
             else:
                 merged[key] = copy.deepcopy(value)
     merged["remoteablecm"] = xaviercfg["remoteablecm"]
-    return validate_xavier_config(merged, source="merged xavier config", require_remoteablecm=True)
+    return validate_xavier_config(
+        merged,
+        source="merged xavier config",
+        require_remoteablecm=True,
+        require_execution_section=True,
+    )
 
 
 def build_desired_server_deployments(

@@ -35,7 +35,7 @@ trap cleanup EXIT
 
 kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" create configmap "$probe_name" \
   --namespace gpu-offload \
-  --from-literal=remote.yaml=$'encryption: false\nnoserverdeployment: true\n' \
+  --from-literal=remote.yaml=$'encryption: false\nserverstages:\n  - name: ""\n    noserverdeployment: true\n' \
   --dry-run=client -o yaml |
   kubectl --context "$GPU_OFFLOAD_KUBE_CONTEXT" apply -f - >/dev/null
 
