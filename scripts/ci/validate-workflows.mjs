@@ -12,7 +12,8 @@ import { requiredLanes } from './evaluate-checks.mjs';
 const array = value => value === undefined ? [] : Array.isArray(value) ? value : [value];
 const expression = value => String(value ?? '').replace(/^\s*\$\{\{\s*|\s*\}\}\s*$/g, '').trim();
 const events = workflow => typeof workflow.on === 'string' ? [workflow.on] : Array.isArray(workflow.on) ? workflow.on : Object.keys(workflow.on ?? {});
-const isEventOwner = workflow => events(workflow).some(event => ['push', 'pull_request', 'pull_request_target'].includes(event));
+const executableEvents = workflow => events(workflow).filter(event => event !== 'workflow_call');
+const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasOwn = (value, key) => Object.hasOwn(value ?? {}, key);
 
 function effectiveBooleanInput(job, workflow, input) {
@@ -121,22 +122,50 @@ export function validateWorkflows(graph, contract = loadContract()) {
     }
   }
 
-  const checkOwnedDescendants = (path, stack = []) => {
+  const secondaryOwnership = new Map();
+  check(isObject(contract.secondaryCallers), 'secondaryCallers must be an object');
+  for (const [path, config] of Object.entries(isObject(contract.secondaryCallers) ? contract.secondaryCallers : {})) {
+    const errorCount = errors.length;
+    check(/^\.github\/workflows\/[^/]+\.ya?ml$/.test(path), `${path}: invalid secondary caller path`);
+    check(Boolean(graph[path]), `${path}: missing secondary caller workflow`);
+    if (!isObject(config)) { errors.push(`${path}: invalid secondary caller declaration`); continue; }
+    const validEvents = Array.isArray(config.events) && config.events.length > 0 && config.events.every(event => typeof event === 'string' && event.length > 0);
+    check(validEvents, `${path}: secondary caller events must be a nonempty array of event names`);
+    if (validEvents) {
+      check(new Set(config.events).size === config.events.length, `${path}: secondary caller events must be unique`);
+      check(!config.events.includes('workflow_call'), `${path}: workflow_call is not a secondary caller event`);
+      check(isDeepStrictEqual([...config.events].sort(), executableEvents(graph[path] ?? {}).sort()), `${path}: secondary caller event mismatch`);
+    }
+    const validJobs = isObject(config.jobs) && Object.keys(config.jobs).length > 0;
+    check(validJobs, `${path}: secondary caller jobs must be a nonempty object`);
+    if (!validJobs) continue;
+    for (const [id, target] of Object.entries(config.jobs)) {
+      check(typeof target === 'string' && targets.has(target), `${path}:${id}: unknown secondary caller target ${target}`);
+      check(graph[path]?.jobs?.[id]?.uses === `./.github/workflows/${target}`, `${path}:${id}: secondary caller target mismatch`);
+    }
+    if (errors.length === errorCount) {
+      for (const [id, target] of Object.entries(config.jobs)) secondaryOwnership.set(`${path}:${id}`, target);
+    }
+  }
+
+  const checkOwnedDescendants = (path, root, stack = []) => {
     if (stack.includes(path)) { errors.push(`Cyclic local workflow call: ${path}`); return; }
     for (const [id, job] of Object.entries(graph[path]?.jobs ?? {})) {
       if (!job.uses?.startsWith('./')) continue;
       const target = job.uses.slice(2);
       const name = target.replace('.github/workflows/', '');
       if (targets.has(name)) {
-        check(ownership.get(`${path}:${id}`)?.target === name, `${path}:${id}: duplicate event ownership of ${target}`);
+        const key = `${path}:${id}`;
+        const authorized = root === path && (ownership.get(key)?.target === name || secondaryOwnership.get(key) === name);
+        check(authorized, `${key}: duplicate event ownership of ${target} from executable root ${root}; caller is neither a primary owner nor an allowed secondary caller`);
       }
-      checkOwnedDescendants(target, [...stack, path]);
+      checkOwnedDescendants(target, root, [...stack, path]);
     }
   };
 
   for (const [path, workflow] of Object.entries(graph)) {
     if (!path.startsWith('.github/workflows/')) continue;
-    if (isEventOwner(workflow)) checkOwnedDescendants(path);
+    if (executableEvents(workflow).length > 0) checkOwnedDescendants(path, path);
     for (const [id, job] of Object.entries(workflow?.jobs ?? {})) {
       for (const need of array(job.needs)) check(Object.hasOwn(workflow.jobs, need), `${path}:${id}: unresolved needs ${need}`);
       if (job.uses?.startsWith('./')) {

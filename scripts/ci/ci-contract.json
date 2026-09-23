@@ -5,6 +5,12 @@
     "main": { "path": ".github/workflows/main.yml", "events": ["push"], "aggregate": "release-please" },
     "docs": { "path": ".github/workflows/deploy-docs.yml", "events": ["push", "workflow_dispatch"] }
   },
+  "secondaryCallers": {
+    ".github/workflows/weekly-validation.yml": {
+      "events": ["schedule", "workflow_dispatch"],
+      "jobs": { "msdate-freshness": "msdate-freshness-check.yml", "container-rescan": "container-scan.yml" }
+    }
+  },
   "permissionProfiles": {
     "read": { "contents": "read" },
     "coverage": { "contents": "read", "id-token": "write" },

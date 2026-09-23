@@ -33,6 +33,7 @@ const prPath = '.github/workflows/pr-validation.yml';
 const mainPath = '.github/workflows/main.yml';
 const docsPath = '.github/workflows/deploy-docs.yml';
 const smokePath = '.github/workflows/smoke-cpu.yml';
+const weeklyPath = '.github/workflows/weekly-validation.yml';
 const summaryId = 'pr-validation-summary';
 const unknownSha = '0'.repeat(40);
 
@@ -285,6 +286,133 @@ test('workflow reader: rejects an unresolved nested local action', t => {
   writeActionGraph(cwd);
   assert.throws(() => readWorkflowGraph(cwd), /Unresolved local action: \.\/\.github\/actions\/inner/);
 });
+
+for (const on of [{ schedule: [{ cron: '0 9 * * 1' }], workflow_dispatch: null }, 'workflow_dispatch', ['schedule', 'workflow_dispatch']]) {
+  test(`secondary callers: explicitly declared weekly events pass (${JSON.stringify(on)})`, () => {
+    const candidate = { graph: structuredClone(graph), contract: structuredClone(contract) };
+    assert.deepEqual(candidate.contract.secondaryCallers[weeklyPath].jobs, {
+      'msdate-freshness': 'msdate-freshness-check.yml', 'container-rescan': 'container-scan.yml',
+    });
+    candidate.graph[weeklyPath].on = on;
+    candidate.contract.secondaryCallers[weeklyPath].events = typeof on === 'string' ? [on] : Array.isArray(on) ? on : Object.keys(on);
+    assert.deepEqual(validateWorkflows(candidate.graph, candidate.contract), []);
+  });
+}
+
+test('secondary callers: callable weekly root preserves its own declared reuse', () => {
+  const candidate = structuredClone(graph);
+  candidate[weeklyPath].on.workflow_call = {};
+  assert.deepEqual(validateWorkflows(candidate, contract), []);
+});
+
+test('secondary callers: a separately declared caller passes without a validator-specific exception', () => {
+  const candidate = { graph: structuredClone(graph), contract: structuredClone(contract) };
+  const caller = '.github/workflows/manual-validation.yml';
+  candidate.graph[caller] = { on: 'workflow_dispatch', jobs: { check: { uses: './.github/workflows/spell-check.yml' } } };
+  candidate.contract.secondaryCallers[caller] = { events: ['workflow_dispatch'], jobs: { check: 'spell-check.yml' } };
+  assert.deepEqual(validateWorkflows(candidate.graph, candidate.contract), []);
+});
+
+test('secondary callers: pure reusable workflows without an executable root are not event owners', () => {
+  const candidate = structuredClone(graph);
+  candidate['.github/workflows/unused-wrapper.yml'] = {
+    on: 'workflow_call', jobs: { check: { uses: './.github/workflows/spell-check.yml' } },
+  };
+  assert.deepEqual(validateWorkflows(candidate, contract), []);
+});
+
+for (const on of [
+  { workflow_dispatch: {} }, { schedule: [{ cron: '0 9 * * 1' }] },
+  { workflow_run: { workflows: ['CI'], types: ['completed'] } }, { merge_group: {} },
+  'workflow_dispatch', ['workflow_call', 'workflow_dispatch'], { workflow_call: {}, workflow_dispatch: {} },
+]) {
+  test(`secondary callers: undeclared executable root is rejected (${JSON.stringify(on)})`, () => {
+    const candidate = structuredClone(graph);
+    const caller = '.github/workflows/undeclared.yml';
+    candidate[caller] = { on, jobs: { check: { uses: './.github/workflows/spell-check.yml' } } };
+    const errors = validateWorkflows(candidate, contract);
+    assert.ok(errors.some(error => error.includes(`${caller}:check`) && error.includes('spell-check.yml') && error.includes('duplicate event ownership')), JSON.stringify(errors));
+  });
+}
+
+test('secondary callers: nested rejection identifies the executable root and immediate caller', () => {
+  const candidate = structuredClone(graph);
+  candidate['.github/workflows/undeclared.yml'] = {
+    on: { workflow_dispatch: {} }, jobs: { nested: { uses: './.github/workflows/wrapper.yml' } },
+  };
+  candidate['.github/workflows/wrapper.yml'] = {
+    on: 'workflow_call', jobs: { check: { uses: './.github/workflows/spell-check.yml' } },
+  };
+  const errors = validateWorkflows(candidate, contract);
+  assert.ok(errors.some(error => error.includes('undeclared.yml') && error.includes('wrapper.yml:check') && error.includes('spell-check.yml')), JSON.stringify(errors));
+});
+
+test('secondary callers: an undeclared root cannot inherit a weekly caller permission', () => {
+  const candidate = structuredClone(graph);
+  candidate[weeklyPath].on.workflow_call = {};
+  candidate['.github/workflows/undeclared.yml'] = {
+    on: 'workflow_dispatch', jobs: { nested: { uses: `./${weeklyPath}` } },
+  };
+  const errors = validateWorkflows(candidate, contract);
+  assert.ok(errors.some(error => error.includes('undeclared.yml') && error.includes(`${weeklyPath}:container-rescan`) && error.includes('container-scan.yml')), JSON.stringify(errors));
+});
+
+test('secondary callers: workflow cycles from manual roots still fail', () => {
+  const candidate = structuredClone(graph);
+  candidate['.github/workflows/cycle.yml'] = {
+    on: { workflow_dispatch: {}, workflow_call: {} }, jobs: { again: { uses: './.github/workflows/cycle.yml' } },
+  };
+  assert.ok(validateWorkflows(candidate, contract).some(error => error.includes('Cyclic local workflow call: .github/workflows/cycle.yml')));
+});
+
+test('secondary callers: an undeclared root cannot inherit primary ownership', () => {
+  const candidate = structuredClone(graph);
+  candidate[mainPath].on.workflow_call = {};
+  candidate['.github/workflows/undeclared.yml'] = {
+    on: 'workflow_dispatch', jobs: { nested: { uses: `./${mainPath}` } },
+  };
+  const errors = validateWorkflows(candidate, contract);
+  assert.ok(errors.some(error => error.includes('undeclared.yml') && error.includes(`${mainPath}:spell-check`) && error.includes('duplicate event ownership')), JSON.stringify(errors));
+});
+
+test('secondary callers: allowed targets do not stop descendant ownership checks', () => {
+  const candidate = structuredClone(graph);
+  candidate['.github/workflows/container-scan.yml'].jobs.nested = { uses: './.github/workflows/spell-check.yml' };
+  const errors = validateWorkflows(candidate, contract);
+  assert.ok(errors.some(error => error.includes(weeklyPath) && error.includes('container-scan.yml:nested') && error.includes('spell-check.yml')), JSON.stringify(errors));
+});
+
+for (const [name, mutate, diagnostic] of [
+  ['missing policy', candidate => { delete candidate.contract.secondaryCallers; }, 'secondaryCallers must be an object'],
+  ['null policy', candidate => { candidate.contract.secondaryCallers = null; }, 'secondaryCallers must be an object'],
+  ['array policy', candidate => { candidate.contract.secondaryCallers = []; }, 'secondaryCallers must be an object'],
+  ['null declaration', candidate => { candidate.contract.secondaryCallers[weeklyPath] = null; }, 'invalid secondary caller declaration'],
+  ['missing caller', candidate => { delete candidate.graph[weeklyPath]; }, 'missing secondary caller workflow'],
+  ['non-workflow caller', candidate => { candidate.contract.secondaryCallers['.github/actions/setup-node-deps/action.yml'] = candidate.contract.secondaryCallers[weeklyPath]; }, 'invalid secondary caller path'],
+  ['scalar events', candidate => { candidate.contract.secondaryCallers[weeklyPath].events = 'workflow_dispatch'; }, 'secondary caller events must be a nonempty array'],
+  ['empty events', candidate => { candidate.contract.secondaryCallers[weeklyPath].events = []; }, 'secondary caller events must be a nonempty array'],
+  ['duplicate events', candidate => { candidate.contract.secondaryCallers[weeklyPath].events.push('schedule'); }, 'secondary caller events must be unique'],
+  ['non-string event', candidate => { candidate.contract.secondaryCallers[weeklyPath].events = [null]; }, 'secondary caller events must be a nonempty array'],
+  ['workflow_call permission', candidate => { candidate.contract.secondaryCallers[weeklyPath].events.push('workflow_call'); }, 'workflow_call is not a secondary caller event'],
+  ['event drift', candidate => { candidate.graph[weeklyPath].on.push = {}; }, 'secondary caller event mismatch'],
+  ['non-executable caller', candidate => { candidate.graph[weeklyPath].on = 'workflow_call'; }, 'secondary caller event mismatch'],
+  ['missing jobs', candidate => { delete candidate.contract.secondaryCallers[weeklyPath].jobs; }, 'secondary caller jobs must be a nonempty object'],
+  ['empty jobs', candidate => { candidate.contract.secondaryCallers[weeklyPath].jobs = {}; }, 'secondary caller jobs must be a nonempty object'],
+  ['array jobs', candidate => { candidate.contract.secondaryCallers[weeklyPath].jobs = []; }, 'secondary caller jobs must be a nonempty object'],
+  ['missing job', candidate => { delete candidate.graph[weeklyPath].jobs['container-rescan']; }, 'secondary caller target mismatch'],
+  ['unprotected target', candidate => { candidate.contract.secondaryCallers[weeklyPath].jobs['container-rescan'] = 'create-stale-docs-issues.yml'; }, 'unknown secondary caller target'],
+  ['non-string target', candidate => { candidate.contract.secondaryCallers[weeklyPath].jobs['container-rescan'] = null; }, 'unknown secondary caller target'],
+  ['target substitution', candidate => { candidate.graph[weeklyPath].jobs['container-rescan'].uses = './.github/workflows/spell-check.yml'; }, 'secondary caller target mismatch'],
+  ['undeclared weekly job', candidate => { candidate.graph[weeklyPath].jobs.duplicate = { uses: './.github/workflows/container-scan.yml' }; }, 'weekly-validation.yml:duplicate: duplicate event ownership'],
+  ['removed weekly exception', candidate => { delete candidate.contract.secondaryCallers[weeklyPath].jobs['container-rescan']; }, 'weekly-validation.yml:container-rescan: duplicate event ownership'],
+]) {
+  test(`secondary callers: rejects ${name}`, () => {
+    const candidate = { graph: structuredClone(graph), contract: structuredClone(contract) };
+    mutate(candidate);
+    const errors = validateWorkflows(candidate.graph, candidate.contract);
+    assert.ok(errors.some(error => error.includes(diagnostic)), `Expected ${diagnostic}; received ${JSON.stringify(errors)}`);
+  });
+}
 
 const graphMutations = [
   ['missing workflow_call', ({ graph }) => { delete graph['.github/workflows/python-lint.yml'].on.workflow_call; }, 'missing workflow_call'],
