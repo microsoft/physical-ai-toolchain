@@ -117,8 +117,11 @@ describe('LabelPanel', () => {
       '3': { object: 'red cube', graspSuccess: true },
     })
     mockImportAnalysisLabels.mockResolvedValueOnce({
-      labelsAdded: ['ITEM: RED CUBE'],
-      episodesUpdated: 1,
+      data: {
+        labelsAdded: ['ITEM: RED CUBE'],
+        episodesUpdated: 1,
+      },
+      etag: '"revision-two"',
     })
 
     render(<LabelPanel episodeIndex={3} />)

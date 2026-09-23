@@ -172,6 +172,27 @@ export class ApiClientError extends Error {
   }
 }
 
+export interface VersionedResource<T> {
+  data: T
+  etag: string | null
+}
+
+export interface MutationPrecondition {
+  etag?: string
+  createOnly?: boolean
+}
+
+export function mutationPreconditionHeaders(
+  precondition: MutationPrecondition,
+): Record<string, string> {
+  if (precondition.etag && precondition.createOnly) {
+    throw new Error('Specify only one mutation precondition')
+  }
+  if (precondition.etag) return { 'If-Match': precondition.etag }
+  if (precondition.createOnly) return { 'If-None-Match': '*' }
+  throw new Error('A mutation precondition is required')
+}
+
 function publicErrorMessage(status: number): string {
   if (status >= 500) {
     return 'The server could not complete the request'
@@ -208,21 +229,28 @@ export async function handleResponse<T>(
 ): Promise<T> {
   if (!response.ok) {
     let code = `HTTP_${response.status}`
+    let details: Record<string, unknown> | undefined
     try {
       const payload: unknown = await response.json()
-      if (
-        payload !== null &&
-        typeof payload === 'object' &&
-        'code' in payload &&
-        typeof payload.code === 'string'
-      ) {
-        code = payload.code
+      if (payload !== null && typeof payload === 'object') {
+        if ('code' in payload && typeof payload.code === 'string') {
+          code = payload.code
+        }
+        if (
+          response.status === 412 &&
+          'details' in payload &&
+          payload.details !== null &&
+          typeof payload.details === 'object' &&
+          !Array.isArray(payload.details)
+        ) {
+          details = transformKeys<Record<string, unknown>>(payload.details)
+        }
       }
     } catch {
       // Non-JSON errors still surface through the status-derived public error.
     }
 
-    throw new ApiClientError(publicErrorMessage(response.status), code, response.status)
+    throw new ApiClientError(publicErrorMessage(response.status), code, response.status, details)
   }
 
   if (response.status === 204) {
@@ -239,6 +267,18 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const response = await apiFetch(path, init)
   return transform ? handleResponse(response, transform) : handleResponse<T>(response)
+}
+
+export async function apiRequestVersioned<T>(
+  path: string,
+  init: RequestInit = {},
+  transform?: (data: unknown) => T,
+): Promise<VersionedResource<T>> {
+  const response = await apiFetch(path, init)
+  return {
+    data: transform ? await handleResponse(response, transform) : await handleResponse<T>(response),
+    etag: response.headers.get('ETag'),
+  }
 }
 
 // ============================================================================
@@ -321,8 +361,8 @@ export async function fetchEpisode(datasetId: string, episodeIndex: number): Pro
 export async function fetchAnnotations(
   datasetId: string,
   episodeIndex: number,
-): Promise<EpisodeAnnotationFile> {
-  return apiRequest<EpisodeAnnotationFile>(
+): Promise<VersionedResource<EpisodeAnnotationFile>> {
+  return apiRequestVersioned<EpisodeAnnotationFile>(
     `/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
   )
 }
@@ -334,12 +374,16 @@ export async function saveAnnotation(
   datasetId: string,
   episodeIndex: number,
   annotation: EpisodeAnnotation,
-): Promise<EpisodeAnnotationFile> {
-  return apiRequest<EpisodeAnnotationFile>(
+  precondition: MutationPrecondition,
+): Promise<VersionedResource<EpisodeAnnotationFile>> {
+  return apiRequestVersioned<EpisodeAnnotationFile>(
     `/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
     {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...mutationPreconditionHeaders(precondition),
+      },
       body: JSON.stringify(annotation),
     },
   )
@@ -351,12 +395,11 @@ export async function saveAnnotation(
 export async function deleteAnnotations(
   datasetId: string,
   episodeIndex: number,
-  annotatorId?: string,
+  etag: string,
 ): Promise<{ deleted: boolean; episodeIndex: number }> {
-  const params = annotatorId ? `?annotator_id=${annotatorId}` : ''
   return apiRequest<{ deleted: boolean; episodeIndex: number }>(
-    `/datasets/${datasetId}/episodes/${episodeIndex}/annotations${params}`,
-    { method: 'DELETE' },
+    `/datasets/${datasetId}/episodes/${episodeIndex}/annotations`,
+    { method: 'DELETE', headers: { 'If-Match': etag } },
   )
 }
 
@@ -477,10 +520,17 @@ export async function setEpisodeLabels(
   datasetId: string,
   episodeIndex: number,
   labels: string[],
-): Promise<EpisodeLabelsResult> {
-  return apiRequest<EpisodeLabelsResult>(`/datasets/${datasetId}/episodes/${episodeIndex}/labels`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ labels }),
-  })
+  precondition: MutationPrecondition,
+): Promise<VersionedResource<EpisodeLabelsResult>> {
+  return apiRequestVersioned<EpisodeLabelsResult>(
+    `/datasets/${datasetId}/episodes/${episodeIndex}/labels`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...mutationPreconditionHeaders(precondition),
+      },
+      body: JSON.stringify({ labels }),
+    },
+  )
 }

@@ -94,7 +94,9 @@ class TestAnnotationServiceConstruction:
 class TestSaveAndGet:
     def test_save_creates_new_file(self, service: AnnotationService):
         result = _run(service.save_annotation("ds", 0, _build_annotation()))
-        assert len(result.annotations) == 1
+        assert result.value is not None
+        assert len(result.value.annotations) == 1
+        assert result.etag is not None
         fetched = _run(service.get_annotation("ds", 0))
         assert fetched is not None
         assert fetched.annotations[0].annotator_id == "alice"
@@ -102,13 +104,15 @@ class TestSaveAndGet:
     def test_save_updates_existing_annotator(self, service: AnnotationService):
         _run(service.save_annotation("ds", 0, _build_annotation("alice", QualityScore.TWO)))
         updated = _run(service.save_annotation("ds", 0, _build_annotation("alice", QualityScore.FIVE)))
-        assert len(updated.annotations) == 1
-        assert updated.annotations[0].trajectory_quality.overall_score == QualityScore.FIVE.value
+        assert updated.value is not None
+        assert len(updated.value.annotations) == 1
+        assert updated.value.annotations[0].trajectory_quality.overall_score == QualityScore.FIVE.value
 
     def test_save_appends_new_annotator(self, service: AnnotationService):
         _run(service.save_annotation("ds", 0, _build_annotation("alice")))
         result = _run(service.save_annotation("ds", 0, _build_annotation("bob")))
-        assert {a.annotator_id for a in result.annotations} == {"alice", "bob"}
+        assert result.value is not None
+        assert {annotation.annotator_id for annotation in result.value.annotations} == {"alice", "bob"}
 
     def test_get_missing_returns_none(self, service: AnnotationService):
         assert _run(service.get_annotation("ds", 99)) is None

@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-08-27
+ms.date: 2026-09-17
 ms.topic: overview
 ---
 
@@ -10,14 +10,19 @@ A full-stack application for analyzing and annotating robotic training data from
 
 ## 🏗️ Architecture
 
-- **Backend**: FastAPI (Python) - serves REST API on port 8000
-- **Frontend**: React + Vite + TypeScript - runs on port 5173 with API proxy
+| Component | Stack | Default port |
+| --- | --- | --- |
+| Backend | FastAPI and Python | 8000 |
+| Frontend | React, Vite, and TypeScript | 5173 |
 
 ## 📋 Prerequisites
 
-- Python 3.12+
-- Node.js 18+
-- npm
+| Tool | Version |
+| --- | --- |
+| Python | 3.12+ |
+| Node.js | 24+ |
+| npm | Bundled with Node.js |
+| uv | Current stable release |
 
 ## 📦 Installation
 
@@ -37,13 +42,32 @@ uv pip install -e ".[dev,export,azure]"
 ### Frontend Setup
 
 ```bash
-cd frontend
-npm install
+cd ../..
+npm ci
+```
+
+The repository root lockfile is the source of truth for the frontend npm workspace.
+
+### Dev Container
+
+Open the repository in its VS Code devcontainer or GitHub Codespaces for a preconfigured Python, Node.js, npm, and uv environment. Ports 5173 and 8000 are forwarded for the frontend and backend.
+
+Run the cross-platform development command after the container finishes setup:
+
+```bash
+npm run dataviewer:dev
 ```
 
 ## ⚙️ Configuration
 
-Copy `backend/.env.example` to `backend/.env` and set values for your environment.
+Copy the backend and frontend templates, then set values for your environment:
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+```
+
+The cross-platform npm launcher loads backend defaults from `backend/.env.example`, optional overrides from `backend/.env`, and existing shell environment variables with highest precedence.
 
 ### Local File Storage (default)
 
@@ -363,15 +387,31 @@ The backend accesses Azure Storage using managed identity, not the user's token.
 
 ## 🚀 Running the Application
 
-### Quick Start (Recommended)
+### Cross-platform start (recommended)
+
+From the repository root:
+
+```bash
+npm run dataviewer:dev
+```
+
+From `data-management/viewer/`:
+
+```bash
+npm run dev
+```
+
+The npm command starts the backend and frontend together on Windows, macOS, and Linux. Stop both processes with `Ctrl+C`.
+
+### Health-checked Bash launcher
 
 ```bash
 ./start.sh
 ```
 
-This launches both backend and frontend in the correct order, with health checking and graceful shutdown.
+The Bash launcher starts the backend first, waits for its health endpoint, then starts the frontend. Use it on macOS, Linux, WSL, or a compatible shell when ordered startup and health checking are required.
 
-**Options:**
+Available options:
 
 ```bash
 ./start.sh --backend   # Start backend only
@@ -397,6 +437,16 @@ npm run dev
 ```
 
 The application will be available at `http://localhost:5173`.
+
+### Bundle Analysis
+
+Generate an interactive bundle map from the repository root:
+
+```bash
+npm run dataviewer:analyze
+```
+
+The report is written to `data-management/viewer/frontend/dist/stats.html`. The generated `dist/` directory is excluded from Git.
 
 ## 🏷️ Annotation Features
 
@@ -566,10 +616,10 @@ Mount the reviewed model directory read-only at `/models`. Update the mount and 
 
 ```bash
 # Backend
-docker build -t dataviewer-backend ./backend
+docker build --file data-management/viewer/backend/Dockerfile --tag dataviewer-backend data-management/viewer/backend
 
 # Frontend
-docker build -t dataviewer-frontend ./frontend
+docker build --file data-management/viewer/frontend/Dockerfile --tag dataviewer-frontend .
 ```
 
 ## 🧪 Development

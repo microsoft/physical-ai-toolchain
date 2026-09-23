@@ -66,7 +66,6 @@ export function useAnnotationWorkflow(
   const isSaving = useAnnotationStore((state) => state.isSaving)
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)
   const updateNotes = useAnnotationStore((state) => state.updateNotes)
-  const markSaved = useAnnotationStore((state) => state.markSaved)
 
   const nextEpisode = useEpisodeStore((state) => state.nextEpisode)
   const currentDatasetId = useEpisodeStore((state) => state.currentDatasetId)
@@ -77,14 +76,13 @@ export function useAnnotationWorkflow(
     if (!currentAnnotation || !currentDatasetId) return
 
     try {
-      saveMutation.save()
-      markSaved()
+      await saveMutation.save()
       onSaveSuccess?.()
     } catch (error) {
       onSaveError?.(error as Error)
       throw error
     }
-  }, [currentAnnotation, currentDatasetId, saveMutation, markSaved, onSaveSuccess, onSaveError])
+  }, [currentAnnotation, currentDatasetId, saveMutation, onSaveSuccess, onSaveError])
 
   const saveAndAdvance = useCallback(async () => {
     await save()
