@@ -36,4 +36,3 @@ jobs:
         with:
           sarif_file: binary-freshness-results.sarif
           category: binary-freshness
-        continue-on-error: true
