@@ -3,7 +3,7 @@ sidebar_position: 10
 title: Cleanup and Destroy
 description: Remove cluster components, destroy Azure infrastructure, and clean up development environment
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-21
 ms.topic: how-to
 keywords:
   - cleanup
@@ -34,11 +34,11 @@ Run component cleanup before destroying infrastructure. Follow this order to avo
 
 Cleanup scripts remove Kubernetes resources from the AKS cluster without affecting Azure infrastructure.
 
-| Script                                    | Removes                                        |
-|-------------------------------------------|------------------------------------------------|
-| `cleanup/uninstall-osmo.sh`               | OSMO control plane, backend operator, workflows |
-| `cleanup/uninstall-azureml-extension.sh`  | ML extension, compute target, FICs             |
-| `cleanup/uninstall-robotics-charts.sh`    | GPU Operator, KAI Scheduler                    |
+| Script                                   | Removes                                         |
+|------------------------------------------|-------------------------------------------------|
+| `cleanup/uninstall-osmo.sh`              | OSMO control plane, backend operator, workflows |
+| `cleanup/uninstall-azureml-extension.sh` | ML extension, compute target, FICs              |
+| `cleanup/uninstall-robotics-charts.sh`   | GPU Operator, KAI Scheduler                     |
 
 Run scripts from the `infrastructure/setup/cleanup/` directory:
 
@@ -54,13 +54,13 @@ cd infrastructure/setup/cleanup
 
 Uninstall scripts preserve data by default. Use flags for complete removal.
 
-| Script                         | Flag                  | Description                                    |
-|--------------------------------|-----------------------|------------------------------------------------|
-| `uninstall-osmo.sh`           | `--delete-container`  | Deletes blob container with workflow artifacts |
-| `uninstall-osmo.sh`           | `--purge-postgres`    | Drops OSMO tables from PostgreSQL              |
-| `uninstall-osmo.sh`           | `--purge-redis`       | Flushes OSMO keys from Redis                   |
-| `uninstall-robotics-charts.sh` | `--delete-namespaces` | Removes gpu-operator, kai-scheduler namespaces |
-| `uninstall-robotics-charts.sh` | `--delete-crds`       | Removes GPU Operator CRDs                      |
+| Script                         | Flag                  | Description                                               |
+|--------------------------------|-----------------------|-----------------------------------------------------------|
+| `uninstall-osmo.sh`            | `--delete-container`  | Deletes blob container with workflow artifacts            |
+| `uninstall-osmo.sh`            | `--purge-postgres`    | Drops OSMO tables from PostgreSQL                         |
+| `uninstall-osmo.sh`            | `--purge-redis`       | Flushes OSMO keys after Redis TLS and hostname validation |
+| `uninstall-robotics-charts.sh` | `--delete-namespaces` | Removes gpu-operator, kai-scheduler namespaces            |
+| `uninstall-robotics-charts.sh` | `--delete-crds`       | Removes GPU Operator CRDs                                 |
 
 Full cleanup including all data:
 
@@ -112,7 +112,7 @@ Fastest cleanup method. Removes all resources regardless of how they were create
 
 ```bash
 # Get resource group name from Terraform outputs
-terraform output -raw resource_group | jq -r '.name'
+terraform output -json resource_group | jq -r '.name'
 
 # Delete resource group
 az group delete --name <resource-group-name> --yes --no-wait

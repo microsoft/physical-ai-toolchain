@@ -2,7 +2,7 @@
 title: Dataset Analysis Tool
 description: Run and configure the web application for analyzing and annotating episode-based robotics datasets
 author: Microsoft
-ms.date: 2026-08-27
+ms.date: 2026-09-17
 ms.topic: overview
 ---
 
@@ -10,14 +10,19 @@ A full-stack application for analyzing and annotating robotic training data from
 
 ## 🏗️ Architecture
 
-- **Backend**: FastAPI (Python) - serves REST API on port 8000
-- **Frontend**: React + Vite + TypeScript - runs on port 5173 with API proxy
+| Component | Stack | Default port |
+| --- | --- | --- |
+| Backend | FastAPI and Python | 8000 |
+| Frontend | React, Vite, and TypeScript | 5173 |
 
 ## 📋 Prerequisites
 
-- Python 3.12+
-- Node.js 18+
-- npm
+| Tool | Version |
+| --- | --- |
+| Python | 3.12+ |
+| Node.js | 24+ |
+| npm | Bundled with Node.js |
+| uv | Current stable release |
 
 ## 📦 Installation
 
@@ -37,13 +42,32 @@ uv pip install -e ".[dev,export,azure]"
 ### Frontend Setup
 
 ```bash
-cd frontend
-npm install
+cd ../..
+npm ci
+```
+
+The repository root lockfile is the source of truth for the frontend npm workspace.
+
+### Dev Container
+
+Open the repository in its VS Code devcontainer or GitHub Codespaces for a preconfigured Python, Node.js, npm, and uv environment. Ports 5173 and 8000 are forwarded for the frontend and backend.
+
+Run the cross-platform development command after the container finishes setup:
+
+```bash
+npm run dataviewer:dev
 ```
 
 ## ⚙️ Configuration
 
-Copy `backend/.env.example` to `backend/.env` and set values for your environment.
+Copy the backend and frontend templates, then set values for your environment:
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+```
+
+The cross-platform npm launcher loads backend defaults from `backend/.env.example`, optional overrides from `backend/.env`, and existing shell environment variables with highest precedence.
 
 ### Local File Storage (default)
 
@@ -363,15 +387,31 @@ The backend accesses Azure Storage using managed identity, not the user's token.
 
 ## 🚀 Running the Application
 
-### Quick Start (Recommended)
+### Cross-platform start (recommended)
+
+From the repository root:
+
+```bash
+npm run dataviewer:dev
+```
+
+From `data-management/viewer/`:
+
+```bash
+npm run dev
+```
+
+The npm command starts the backend and frontend together on Windows, macOS, and Linux. Stop both processes with `Ctrl+C`.
+
+### Health-checked Bash launcher
 
 ```bash
 ./start.sh
 ```
 
-This launches both backend and frontend in the correct order, with health checking and graceful shutdown.
+The Bash launcher starts the backend first, waits for its health endpoint, then starts the frontend. Use it on macOS, Linux, WSL, or a compatible shell when ordered startup and health checking are required.
 
-**Options:**
+Available options:
 
 ```bash
 ./start.sh --backend   # Start backend only
@@ -397,6 +437,16 @@ npm run dev
 ```
 
 The application will be available at `http://localhost:5173`.
+
+### Bundle Analysis
+
+Generate an interactive bundle map from the repository root:
+
+```bash
+npm run dataviewer:analyze
+```
+
+The report is written to `data-management/viewer/frontend/dist/stats.html`. The generated `dist/` directory is excluded from Git.
 
 ## 🏷️ Annotation Features
 
@@ -496,7 +546,11 @@ Without `--write-analysis`, the JSONL and CSV files remain standalone exports an
 ### Docker Compose (local)
 
 ```bash
-# Local storage mode (mount datasets directory)
+# Stage reviewed model weights outside the repository.
+export DATAVIEWER_HOST_MODELS_DIR=/absolute/path/to/models
+export DETECTION_MODEL_DIGESTS='{"yolo11n":"<sha256>","yolov8s-world":"<sha256>"}'
+
+# Local storage mode
 DATAVIEWER_HOST_DATA_DIR=/path/to/datasets docker compose up --build
 
 # Azure Blob Storage mode
@@ -505,6 +559,29 @@ export AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 export AZURE_STORAGE_DATASET_CONTAINER=datasets
 export AZURE_STORAGE_ANNOTATION_CONTAINER=annotations
 docker compose up --build
+```
+
+The backend mounts `DATAVIEWER_HOST_MODELS_DIR` read-only at `/models`. Each active `<model-identifier>.pt` file requires a matching reviewed SHA-256 value in `DETECTION_MODEL_DIGESTS`; missing or mismatched checkpoints return HTTP 503 before deserialization.
+
+Run this preflight before deployment:
+
+```bash
+test -r "$DATAVIEWER_HOST_MODELS_DIR/yolo11n.pt"
+test -r "$DATAVIEWER_HOST_MODELS_DIR/yolov8s-world.pt"
+printf '%s  %s\n' \
+  "$(shasum -a 256 "$DATAVIEWER_HOST_MODELS_DIR/yolo11n.pt" | cut -d' ' -f1)" \
+  "$DATAVIEWER_HOST_MODELS_DIR/yolo11n.pt"
+printf '%s  %s\n' \
+  "$(shasum -a 256 "$DATAVIEWER_HOST_MODELS_DIR/yolov8s-world.pt" | cut -d' ' -f1)" \
+  "$DATAVIEWER_HOST_MODELS_DIR/yolov8s-world.pt"
+docker compose run --rm backend \
+  python -c "from src.api.services.detection_service import get_detection_service; service = get_detection_service(); service._get_model('yolo11n'); service._get_model('yolov8s-world', labels=['robot'])"
+```
+
+Rollback by restoring the previous read-only model directory and its matching `DETECTION_MODEL_DIGESTS` value, then recreate the backend:
+
+```bash
+docker compose up -d --force-recreate backend
 ```
 
 ### Azure Kubernetes Service (AKS) / Container Apps
@@ -517,19 +594,32 @@ AZURE_STORAGE_ACCOUNT_NAME=mystorageaccount
 AZURE_STORAGE_DATASET_CONTAINER=datasets
 BACKEND_HOST=0.0.0.0
 CORS_ORIGINS=https://your-frontend-url.example.com
+DETECTION_MODELS_DIR=/models
+DETECTION_MODEL_DIGESTS={"yolo11n":"<sha256>","yolov8s-world":"<sha256>"}
 ```
 
 `AZURE_STORAGE_SAS_TOKEN` is **not** needed — `DefaultAzureCredential` automatically
 uses the pod/container managed identity when running in Azure.
 
+For an HTTPS backend, configure the frontend proxy with the certificate-valid backend FQDN:
+
+```env
+NGINX_BACKEND_SCHEME=https
+NGINX_BACKEND_HOST=backend.example.com
+```
+
+NGINX verifies the backend certificate and hostname against `/etc/ssl/certs/ca-certificates.crt`. Install a custom backend CA in that frontend container trust bundle before deployment.
+
+Mount the reviewed model directory read-only at `/models`. Update the mount and digest map together during rollout or rollback.
+
 ### Building Images
 
 ```bash
 # Backend
-docker build -t dataviewer-backend ./backend
+docker build --file data-management/viewer/backend/Dockerfile --tag dataviewer-backend data-management/viewer/backend
 
 # Frontend
-docker build -t dataviewer-frontend ./frontend
+docker build --file data-management/viewer/frontend/Dockerfile --tag dataviewer-frontend .
 ```
 
 ## 🧪 Development

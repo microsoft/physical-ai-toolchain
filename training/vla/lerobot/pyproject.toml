@@ -47,7 +47,7 @@ dependencies = [
     "pyperclip==1.11.0",
     "datasets==5.0.1",
     "pyarrow==25.0.1",
-    "huggingface-hub==1.30.0",
+    "huggingface-hub==1.31.0",
     # lerobot[dataset,pi] supplies the dataset/video runtime plus dependencies
     # required by the pi0 / pi0_fast / pi05 policy implementations.
     "lerobot[dataset,pi]==0.6.1",
@@ -81,7 +81,7 @@ dependencies = [
     # Pin wrapt explicitly to 2.4.0. opentelemetry-instrumentation accepts
     # wrapt>=1.0,<3.0, so the 2.x line is in range; the explicit pin prevents
     # the prerelease resolver from selecting a stray 2.x release candidate.
-    "wrapt==2.4.0",
+    "wrapt==2.4.1",
 ]
 
 [build-system]

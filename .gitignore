@@ -478,6 +478,8 @@ infrastructure/setup/values/osmo-platforms-*.yaml
 
 # Local scanner output (Trivy/Grype via scripts/security/generate-vex.sh)
 .scan/
+*.openvex.json.lock/
+*.openvex.json.tmp.*
 dependency-pinning-artifacts/*
 !dependency-pinning-artifacts/README.md
 
@@ -485,9 +487,11 @@ dependency-pinning-artifacts/*
 .beads/
 external/
 AGENTS.md
-.gitattributes
 
 # Terraform Environments
 envs/
 
 datasets/
+
+# Sources staged into the gpu-offload build context by examples/ur10e-single
+gpu-offload/examples/ur10e-single/.ur10e-src/

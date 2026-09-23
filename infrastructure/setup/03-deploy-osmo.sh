@@ -667,34 +667,6 @@ if [[ -n "$service_url" ]]; then
     fi
 fi
 
-# Assign required roles to admin user for backend operator connectivity.
-# Dev-mode operator authenticates as "admin" — needs osmo-admin, osmo-backend, osmo-ctrl roles.
-# Calls osmo-service directly (port 8000) to bypass gateway authz sidecar.
-# osmo-admin is auto-assigned by the service; osmo-backend and osmo-ctrl need explicit assignment.
-info "Assigning backend roles to admin user..."
-service_pod=$(kubectl get pods -n "$NS_OSMO_CONTROL_PLANE" -l app=osmo-service --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-if [[ -n "$service_pod" ]]; then
-    timeout 30 kubectl --kubeconfig "$kubeconfig" --context "$context" \
-        exec "$service_pod" -n "$NS_OSMO_CONTROL_PLANE" -- python3 -c "
-import urllib.request, json, ssl
-ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE
-headers = {'Content-Type': 'application/json', 'x-osmo-user': 'admin'}
-for role in ['osmo-backend', 'osmo-ctrl']:
-    req = urllib.request.Request(
-        'https://localhost:8000/api/auth/user/admin/roles',
-        data=json.dumps({'role': role}).encode(),
-        headers=headers, method='POST')
-    try:
-        urllib.request.urlopen(req, timeout=5, context=ctx)
-    except urllib.error.HTTPError as e:
-        if e.code not in (409, 422):  # 409=already assigned, 422=system role
-            raise
-print('Admin roles verified: osmo-admin (system), osmo-backend, osmo-ctrl')
-" || warn "Role assignment failed — operator may not authenticate correctly"
-fi
-
 #------------------------------------------------------------------------------
 # Phase 4: Deploy Backend Operator
 #------------------------------------------------------------------------------

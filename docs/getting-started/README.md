@@ -3,7 +3,7 @@ sidebar_position: 1
 title: Getting Started
 description: Entry point for deploying the Physical AI Toolchain
 author: Microsoft Robotics-AI Team
-ms.date: 2026-06-12
+ms.date: 2026-09-19
 ms.topic: overview
 keywords:
   - getting-started
@@ -16,18 +16,18 @@ Deploy the Physical AI Toolchain and submit your first training job. This hub gu
 
 The default path starts on a laptop, not in the cloud. Begin with [Start Here — T0 Dev](#start-here--t0-dev), then graduate to higher tiers only when your scale demands them.
 
-## Choose Your Tier
+## 🪜 Choose Your Tier
 
 Adoption is modeled as six graduated tiers (T0-T5). Each tier states the minimum infrastructure needed to complete the full training lifecycle: capture demonstrations on a robot, train an imitation policy, validate it, and run that policy back on the robot. Each tier is a legitimate stopping point. Start at T0 and graduate only when a concrete trigger forces it.
 
-| Tier                | When to start here                                                   | Graduate when…                                                                                                                                             | Quick start                                                   |
-|---------------------|----------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
-| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and zero Kubernetes.      | No local GPU; the task needs many training iterations as conditions vary; or a second person needs the data.                                               | [Tier 0 — Dev](../recipes/tier-0-dev/README.md)               |
-| **T1 — Lab**        | One site, a few robots, a shared GPU box; first cloud storage.       | Training scale or team size outgrows one GPU box; dataset governance and catalogs become necessary.                                                        | [Tier 1 — Lab](../recipes/tier-1-lab/README.md)               |
-| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.   | The robot count or update cadence makes hand-updating each robot error-prone and version skew real, while everything is still at one reachable site.       | [Tier 2 — Pilot](../recipes/tier-2-pilot/README.md)           |
-| **T3 — Production** | Advanced. Single-site declarative deploy (local k3s + Flux, no Arc). | Robots span multiple sites, or sites become unreachable from a single operator network.                                                                    | [Tier 3 — Production](../recipes/tier-3-production/README.md) |
-| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc reachability broker.    | You explicitly want production signals to drive retraining and fleet-wide health analytics. This is a deliberate decision, not an automatic consequence of scale. | [Tier 4 — Scale](../recipes/tier-4-scale/README.md)           |
-| **T5 — Operate**    | Roadmap. **Fleet intelligence** for drift detection and retraining.  | Available after the roadmap implementation lands.                                                                                                          | [Tier 5 — Operate](../recipes/tier-5-operate/README.md)       |
+| Tier                | When to start here                                                     | Graduate when…                                                                                                                                                    | Quick start                                                   |
+|---------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| **T0 — Dev** ⭐      | Default. One laptop, one robot; zero cloud and no required Kubernetes. | No local GPU; the task needs many training iterations as conditions vary; or a second person needs the data.                                                      | [Tier 0 — Dev](../recipes/tier-0-dev/README.md)               |
+| **T1 — Lab**        | One site, a few robots, a shared GPU box; first cloud storage.         | Training scale or team size outgrows one GPU box; dataset governance and catalogs become necessary.                                                               | [Tier 1 — Lab](../recipes/tier-1-lab/README.md)               |
+| **T2 — Pilot** ✅    | Recommended production. One site at scale; cloud training default.     | The robot count or update cadence makes hand-updating each robot error-prone and version skew real, while everything is still at one reachable site.              | [Tier 2 — Pilot](../recipes/tier-2-pilot/README.md)           |
+| **T3 — Production** | Advanced. Single-site declarative deploy (local k3s + Flux, no Arc).   | Robots span multiple sites, or sites become unreachable from a single operator network.                                                                           | [Tier 3 — Production](../recipes/tier-3-production/README.md) |
+| **T4 — Scale**      | Advanced. Multi-site **fleet delivery**; Arc reachability broker.      | You explicitly want production signals to drive retraining and fleet-wide health analytics. This is a deliberate decision, not an automatic consequence of scale. | [Tier 4 — Scale](../recipes/tier-4-scale/README.md)           |
+| **T5 — Operate**    | Roadmap. **Fleet intelligence** for drift detection and retraining.    | Available after the roadmap implementation lands.                                                                                                                 | [Tier 5 — Operate](../recipes/tier-5-operate/README.md)       |
 
 ⭐ default · ✅ recommended production
 
@@ -45,16 +45,16 @@ See the canonical [Tier Model](../design/tier-model.md) for the authoritative ti
 
 ### Start Here — T0 Dev
 
-The default starting path is **one laptop and one robot**, with zero cloud and zero Kubernetes. You close the full capture -> train -> validate -> run loop entirely on local hardware.
+The default starting path is **one laptop and one robot**, with zero cloud and no required Kubernetes. You close the full capture -> train -> validate -> run loop entirely on local hardware. Plain processes are the baseline; local Kubernetes is optional for workloads such as GPU offload.
 
-1. **Set up:** clone the repo and run `./setup-dev.sh` (Python 3.12 via `uv`, virtual environment, training dependencies). No Azure subscription required.
-2. **Capture:** record ROS 2 bags to local disk on the robot or laptop.
-3. **Move data:** `cp` or `rsync` from robot to laptop.
-4. **Curate:** run the dataviewer in `local` mode on the laptop.
-5. **Train:** run `lerobot-train` on the laptop (CPU or a local GPU).
-6. **Track:** training outputs are written to local disk; hosted experiment tracking enters at T2.
-7. **Validate:** run `run-local-lerobot-eval.py` / `play.py` locally.
-8. **Run on robot:** launch the inference node as a plain process or container. No Flux, no gating, no GitOps.
+1. Clone the repo and prepare a Python 3.12+ environment with `uv`. The repository-wide `./setup-dev.sh` first requires Azure CLI, Terraform, kubectl, Helm, and jq; it is not a Python-only T0 bootstrap. See the [Tier 0 recipe](../recipes/tier-0-dev/README.md) for the local workflow and check each component's prerequisites.
+2. Record ROS 2 bags to local disk on the robot or laptop.
+3. Copy data from robot to laptop with `cp` or `rsync`.
+4. Run the dataviewer in `local` mode on the laptop.
+5. Run `lerobot-train` on the laptop using CPU or a local GPU.
+6. Keep training outputs on local disk; hosted experiment tracking enters at T2.
+7. Use `evaluation/sil/scripts/run-local-lerobot-eval.py` for LeRobot evaluation. Isaac Lab evaluation uses `evaluation/sil/play.py` and requires the Isaac Lab runtime.
+8. Launch the inference node as a plain process or container. No Flux, gating, or GitOps is required for T0.
 
 **Edge infra:** ROS 2 and Docker only. **Cloud infra:** none. See the [Tier 0 — Dev recipe](../recipes/tier-0-dev/README.md) for the step-by-step walkthrough.
 
@@ -63,13 +63,13 @@ The default starting path is **one laptop and one robot**, with zero cloud and z
 
 ## 🚀 Guides
 
-| Guide                                      | Description                                                |
-|--------------------------------------------|------------------------------------------------------------|
-| [Start Here — T0 Dev](#start-here--t0-dev) | Default local-first path: laptop + one robot, no cloud     |
-| [Choose Your Tier](#choose-your-tier)      | Pick a tier and see its graduation triggers                |
+| Guide                                      | Description                                                    |
+|--------------------------------------------|----------------------------------------------------------------|
+| [Start Here — T0 Dev](#start-here--t0-dev) | Default local-first path: laptop + one robot, no cloud         |
+| [Choose Your Tier](#-choose-your-tier)     | Pick a tier and see its graduation triggers                    |
 | [Quickstart](quickstart.md)                | Cloud path (T2 — Pilot): clone to the first cloud training job |
-| Architecture Overview (coming soon)        | System topology, components, and data flow                 |
-| Glossary (coming soon)                     | Term definitions for Azure, NVIDIA, and OSMO               |
+| Architecture Overview (coming soon)        | System topology, components, and data flow                     |
+| Glossary (coming soon)                     | Term definitions for Azure, NVIDIA, and OSMO                   |
 
 ## ⏱️ Time and Cost
 
@@ -86,22 +86,25 @@ The local default path (T0 — Dev) has **no cloud cost**. It runs entirely on y
 
 ## 📋 Prerequisites Summary
 
-The default path (T0 — Dev) needs only **Python ≥3.12** plus ROS 2 and Docker, with no Azure subscription and no Kubernetes tooling. The additional tools below are required only for the cloud path ([Quickstart](quickstart.md), T2 — Pilot and up).
+T0 does not require Azure resources or Kubernetes services by default. Local components require Python ≥3.12, `uv`, ROS 2, and their own runtime dependencies; the dataviewer frontend also needs Node.js.
 
-| Tool      | Version | Required for           |
-|-----------|---------|------------------------|
-| Python    | ≥3.12   | All tiers (incl. T0)   |
-| Terraform | ≥1.9.8  | Cloud path (T2+)       |
-| Azure CLI | ≥2.65.0 | Cloud path (T2+)       |
-| kubectl   | ≥1.31   | Kubernetes tiers (T3+) |
-| Helm      | ≥3.16   | Kubernetes tiers (T3+) |
+Install `kind`, `kubectl`, and Helm only when selecting an optional local Kubernetes profile such as GPU offload; the repository-wide `setup-dev.sh` additionally checks cloud and Kubernetes CLI tools even for a local-only workflow. The additional cloud tools below are required only for the cloud path ([Quickstart](quickstart.md), T2 — Pilot and up).
 
-For the cloud path, an Azure subscription with Contributor + User Access Administrator roles, GPU quota for `Standard_NC24ads_A100_v4`, and an NVIDIA NGC account are required. See [Prerequisites](../contributing/prerequisites.md) for full details.
+| Tool      | Version           | Required for                                         |
+|-----------|-------------------|------------------------------------------------------|
+| Python    | ≥3.12             | All tiers (incl. T0)                                 |
+| Terraform | ≥1.9.8            | Cloud path (T2+)                                     |
+| Azure CLI | ≥2.65.0           | Cloud path (T2+)                                     |
+| kubectl   | ≥1.31             | AKS cloud path, Kubernetes tiers, and `setup-dev.sh` |
+| Helm      | ≥4.2              | AKS cloud path, Kubernetes tiers, and `setup-dev.sh` |
+| jq        | See prerequisites | `setup-dev.sh` and deployment scripts                |
+
+For the cloud path, an Azure subscription with Contributor + User Access Administrator roles, GPU quota for the VM SKU selected in `node_pools` or managed compute, and an NVIDIA NGC account are required. The root Terraform GPU pool defaults to `Standard_NV36ads_A10_v5`; request quota for the family you configure, not a different GPU family. See [Prerequisites](../contributing/prerequisites.md) for full details.
 
 ## 📚 Related Documentation
 
-| Resource                                                                                          | Description                             |
-|---------------------------------------------------------------------------------------------------|-----------------------------------------|
-| [Contributing Guide](../contributing/README.md)                                                   | Development workflow and code standards |
-| [Deployment Guide](https://github.com/microsoft/physical-ai-toolchain/blob/main/deploy/README.md) | Detailed deployment reference           |
-| [Cost Considerations](../contributing/cost-considerations.md)                                     | Pricing breakdown and optimization      |
+| Resource                                                      | Description                             |
+|---------------------------------------------------------------|-----------------------------------------|
+| [Contributing Guide](../contributing/README.md)               | Development workflow and code standards |
+| [Deployment Guide](../infrastructure/README.md)               | Detailed deployment reference           |
+| [Cost Considerations](../contributing/cost-considerations.md) | Pricing breakdown and optimization      |

@@ -12,12 +12,12 @@ import { cn } from '@/lib/utils'
 
 export interface EpisodePreviewItem {
   id: string
-  episode_id: string
-  task_completion_rating?: number
-  trajectory_quality_score?: number
-  has_anomalies: boolean
-  has_issues: boolean
-  thumbnail_url?: string
+  episodeId: string
+  taskCompletionRating?: number
+  trajectoryQualityScore?: number
+  hasAnomalies: boolean
+  hasIssues: boolean
+  thumbnailUrl?: string
 }
 
 export interface CurriculumPreviewProps {
@@ -84,9 +84,9 @@ export function CurriculumPreview({
                   className="bg-card hover:bg-muted/50 flex items-center gap-3 rounded-lg border p-2 transition-colors"
                 >
                   {/* Thumbnail or placeholder */}
-                  {episode.thumbnail_url ? (
+                  {episode.thumbnailUrl ? (
                     <img
-                      src={episode.thumbnail_url}
+                      src={episode.thumbnailUrl}
                       alt=""
                       className="h-10 w-14 rounded-sm object-cover"
                     />
@@ -98,18 +98,18 @@ export function CurriculumPreview({
 
                   {/* Episode info */}
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{episode.episode_id}</p>
+                    <p className="truncate text-sm font-medium">{episode.episodeId}</p>
                     <div className="text-muted-foreground flex items-center gap-3 text-xs">
-                      {episode.task_completion_rating && (
+                      {episode.taskCompletionRating && (
                         <span className="flex items-center gap-0.5">
                           <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                          {episode.task_completion_rating}
+                          {episode.taskCompletionRating}
                         </span>
                       )}
-                      {episode.trajectory_quality_score && (
+                      {episode.trajectoryQualityScore && (
                         <span className="flex items-center gap-0.5">
                           <CheckCircle className="h-3 w-3 text-green-500" />
-                          {episode.trajectory_quality_score}
+                          {episode.trajectoryQualityScore}
                         </span>
                       )}
                     </div>
@@ -117,13 +117,13 @@ export function CurriculumPreview({
 
                   {/* Status badges */}
                   <div className="flex items-center gap-1.5">
-                    {episode.has_anomalies && (
+                    {episode.hasAnomalies && (
                       <Badge variant="outline" className="text-xs text-orange-600">
                         <AlertTriangle className="mr-0.5 h-3 w-3" />
                         Anomaly
                       </Badge>
                     )}
-                    {episode.has_issues && (
+                    {episode.hasIssues && (
                       <Badge variant="outline" className="text-xs text-red-600">
                         Issue
                       </Badge>

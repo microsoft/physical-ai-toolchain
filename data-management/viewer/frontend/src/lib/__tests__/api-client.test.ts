@@ -10,6 +10,8 @@ import {
 import {
   _resetCsrfToken,
   ApiClientError,
+  apiPath,
+  apiRequest,
   deleteAnnotations,
   fetchAnnotations,
   fetchAnnotationSummary,
@@ -45,6 +47,60 @@ describe('ApiClientError', () => {
     expect(err.status).toBe(404)
     expect(err.details).toEqual({ id: '1' })
     expect(err.name).toBe('ApiClientError')
+  })
+
+  describe('canonical transport', () => {
+    it('builds all backend paths from the shared API base', () => {
+      expect(apiPath('/datasets')).toBe('/api/datasets')
+      expect(apiPath('datasets/ds-1')).toBe('/api/datasets/ds-1')
+    })
+
+    it('attaches request headers and camelCases successful JSON responses', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          dataset_id: 'ds-1',
+          nested_value: { frame_count: 12 },
+        }),
+      )
+
+      await expect(
+        apiRequest<{ datasetId: string; nestedValue: { frameCount: number } }>('/datasets/ds-1'),
+      ).resolves.toEqual({
+        datasetId: 'ds-1',
+        nestedValue: { frameCount: 12 },
+      })
+      expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1', { headers: {} })
+    })
+
+    it('does not expose FastAPI detail text for server errors', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ detail: '/srv/data/private: permission denied' }, 500),
+      )
+
+      await expect(apiRequest('/datasets/ds-1')).rejects.toMatchObject({
+        name: 'ApiClientError',
+        code: 'HTTP_500',
+        status: 500,
+        message: 'The server could not complete the request',
+      })
+    })
+
+    it('uses a generic message for 5xx even with a known code and diagnostic details', async () => {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: 'DATASET_NOT_FOUND',
+            message: '/srv/data/private: permission denied',
+            details: { path: '/srv/data/private' },
+          },
+          500,
+        ),
+      )
+      await expect(apiRequest('/datasets/ds-1')).rejects.toMatchObject({
+        message: 'The server could not complete the request',
+        details: undefined,
+      })
+    })
   })
 })
 
@@ -221,10 +277,10 @@ describe('fetchEpisode', () => {
 describe('fetchAnnotations', () => {
   it('calls GET annotations endpoint', async () => {
     const data = { schemaVersion: '1.0', annotations: [] }
-    mockFetch.mockResolvedValueOnce(jsonResponse(data))
+    mockFetch.mockResolvedValueOnce(jsonResponse(data, { headers: { ETag: '"revision-one"' } }))
 
     const result = await fetchAnnotations('ds-1', 0)
-    expect(result).toEqual(data)
+    expect(result).toEqual({ data, etag: '"revision-one"' })
     expect(mockFetch).toHaveBeenCalledWith('/api/datasets/ds-1/episodes/0/annotations', {
       headers: {},
     })
@@ -232,17 +288,50 @@ describe('fetchAnnotations', () => {
 })
 
 describe('saveAnnotation', () => {
-  it('calls PUT with annotation body', async () => {
+  it('calls PUT with a create-only precondition', async () => {
     const annotation = { annotatorId: 'u1' }
-    mockMutationFetch(jsonResponse({ success: true }))
+    mockMutationFetch(jsonResponse({ success: true }, { headers: { ETag: '"created"' } }))
 
-    await saveAnnotation('ds-1', 0, annotation as never)
+    const result = await saveAnnotation('ds-1', 0, annotation as never, { createOnly: true })
 
     const apiCall = mockFetch.mock.calls[1]
     expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
     expect(apiCall[1]).toMatchObject({
       method: 'PUT',
       body: JSON.stringify(annotation),
+    })
+    expect(apiCall[1].headers).toHaveProperty('If-None-Match', '*')
+    expect(result.etag).toBe('"created"')
+  })
+
+  it('sends If-Match for an existing annotation resource', async () => {
+    const annotation = { annotatorId: 'u1' }
+    mockMutationFetch(jsonResponse({ success: true }, { headers: { ETag: '"updated"' } }))
+
+    await saveAnnotation('ds-1', 0, annotation as never, { etag: '"revision-one"' })
+
+    expect(mockFetch.mock.calls[1][1].headers).toHaveProperty('If-Match', '"revision-one"')
+  })
+
+  it('preserves the current ETag from a 412 conflict', async () => {
+    const annotation = { annotatorId: 'u1' }
+    mockMutationFetch(
+      jsonResponse(
+        {
+          code: 'PRECONDITION_FAILED',
+          message: 'Resource revision precondition failed',
+          details: { currentEtag: '"revision-two"' },
+        },
+        { status: 412, headers: { ETag: '"revision-two"' } },
+      ),
+    )
+
+    await expect(
+      saveAnnotation('ds-1', 0, annotation as never, { etag: '"revision-one"' }),
+    ).rejects.toMatchObject({
+      name: 'ApiClientError',
+      status: 412,
+      details: { currentEtag: '"revision-two"' },
     })
   })
 })
@@ -251,18 +340,20 @@ describe('deleteAnnotations', () => {
   it('calls DELETE without annotatorId', async () => {
     mockMutationFetch(jsonResponse({ deleted: true, episodeIndex: 0 }))
 
-    await deleteAnnotations('ds-1', 0)
+    await deleteAnnotations('ds-1', 0, '"revision-one"')
     const apiCall = mockFetch.mock.calls[1]
     expect(apiCall[0]).toBe('/api/datasets/ds-1/episodes/0/annotations')
     expect(apiCall[1]).toMatchObject({ method: 'DELETE' })
+    expect(apiCall[1].headers).toHaveProperty('If-Match', '"revision-one"')
   })
 
-  it('includes annotator_id query param when provided', async () => {
+  it('does not expose an annotator owner selector', async () => {
     mockMutationFetch(jsonResponse({ deleted: true, episodeIndex: 0 }))
 
-    await deleteAnnotations('ds-1', 0, 'u1')
+    await deleteAnnotations('ds-1', 0, '"revision-one"')
+
     const url = mockFetch.mock.calls[1][0] as string
-    expect(url).toContain('annotator_id=u1')
+    expect(url).not.toContain('annotator_id')
   })
 })
 
@@ -324,8 +415,8 @@ describe('error handling', () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ApiClientError)
       const apiErr = err as ApiClientError
-      expect(apiErr.code).toBe('UNKNOWN_ERROR')
-      expect(apiErr.message).toBe('Internal Server Error')
+      expect(apiErr.code).toBe('HTTP_500')
+      expect(apiErr.message).toBe('The server could not complete the request')
     }
   })
 })
@@ -385,8 +476,8 @@ describe('mutationFetch', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1)
     const [url, init] = mockFetch.mock.calls[0]
     expect(url).toBe('/api/thing')
-    const headers = (init as RequestInit).headers as Record<string, string>
-    expect(headers).not.toHaveProperty('X-CSRF-Token')
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.has('X-CSRF-Token')).toBe(false)
   })
 
   it('skips CSRF fetch and omits X-CSRF-Token for HEAD requests', async () => {
@@ -396,8 +487,8 @@ describe('mutationFetch', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1)
     const [, init] = mockFetch.mock.calls[0]
-    const headers = (init as RequestInit).headers as Record<string, string>
-    expect(headers).not.toHaveProperty('X-CSRF-Token')
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.has('X-CSRF-Token')).toBe(false)
   })
 
   it.each(['POST', 'PUT', 'DELETE', 'PATCH'])(
@@ -410,8 +501,8 @@ describe('mutationFetch', () => {
       expect(mockFetch).toHaveBeenCalledTimes(2)
       expect(mockFetch.mock.calls[0][0]).toBe('/api/csrf-token')
       const [, init] = mockFetch.mock.calls[1]
-      const headers = (init as RequestInit).headers as Record<string, string>
-      expect(headers['X-CSRF-Token']).toBe('test-csrf-token')
+      const headers = new Headers((init as RequestInit).headers)
+      expect(headers.get('X-CSRF-Token')).toBe('test-csrf-token')
     },
   )
 
@@ -423,8 +514,8 @@ describe('mutationFetch', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2)
     expect(mockFetch.mock.calls[0][0]).toBe('/api/csrf-token')
     const [, init] = mockFetch.mock.calls[1]
-    const headers = (init as RequestInit).headers as Record<string, string>
-    expect(headers['X-CSRF-Token']).toBe('test-csrf-token')
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.get('X-CSRF-Token')).toBe('test-csrf-token')
   })
 
   it('lets caller-provided headers win on key collision with X-CSRF-Token', async () => {
@@ -436,8 +527,22 @@ describe('mutationFetch', () => {
     })
 
     const [, init] = mockFetch.mock.calls[1]
-    const headers = (init as RequestInit).headers as Record<string, string>
-    expect(headers['X-CSRF-Token']).toBe('caller-override')
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.get('X-CSRF-Token')).toBe('caller-override')
+  })
+
+  it('lets differently-cased caller headers replace generated headers', async () => {
+    mockMutationFetch(jsonResponse({ ok: true }))
+
+    await mutationFetch('/api/thing', {
+      method: 'POST',
+      headers: { 'x-csrf-token': 'caller-override' },
+    })
+
+    const [, init] = mockFetch.mock.calls[1]
+    const headers = new Headers((init as RequestInit).headers)
+    expect(headers.get('X-CSRF-Token')).toBe('caller-override')
+    expect([...headers.keys()].filter((name) => name === 'x-csrf-token')).toHaveLength(1)
   })
 })
 

@@ -452,6 +452,7 @@ flatdict
 flatmap
 flexbox
 Flink
+flushall
 fluentbit
 fluentd
 fluxcd

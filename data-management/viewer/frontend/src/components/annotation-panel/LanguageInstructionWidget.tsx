@@ -38,7 +38,7 @@ const SOURCE_OPTIONS: { value: InstructionSource; label: string }[] = [
 ]
 
 export function LanguageInstructionWidget() {
-  useEpisodeAnnotations('default')
+  useEpisodeAnnotations()
   const saveAnnotation = useSaveCurrentAnnotation()
 
   const currentAnnotation = useAnnotationStore((state) => state.currentAnnotation)

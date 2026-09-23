@@ -119,6 +119,74 @@ class TestAzureBlobStorageAdapter(TestCase):
         assert call_args[1]["content_settings"] == mock_content_settings.return_value
 
     @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.MatchConditions")
+    @patch("src.api.storage.azure.ContentSettings")
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_save_annotation_uses_matching_etag(
+        self,
+        mock_blob_service,
+        mock_content_settings,
+        mock_match_conditions,
+    ):
+        from src.api.storage.azure import AzureBlobStorageAdapter
+
+        mock_client = MagicMock()
+        mock_blob = MagicMock()
+        mock_blob.upload_blob = AsyncMock(return_value={"etag": '"revision-two"'})
+        mock_client.get_container_client.return_value.get_blob_client.return_value = mock_blob
+        adapter = AzureBlobStorageAdapter(
+            account_name="testaccount",
+            container_name="testcontainer",
+            sas_token="test-sas-token",
+        )
+        adapter._client = mock_client
+
+        etag = asyncio.run(
+            adapter.save_annotation(
+                self.dataset_id,
+                5,
+                create_test_annotation(episode_index=5),
+                if_match='"revision-one"',
+            )
+        )
+
+        assert etag == '"revision-two"'
+        kwargs = mock_blob.upload_blob.await_args.kwargs
+        assert kwargs["etag"] == '"revision-one"'
+        assert kwargs["match_condition"] == mock_match_conditions.IfNotModified
+        assert kwargs["overwrite"] is True
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
+    @patch("src.api.storage.azure.ContentSettings")
+    @patch("src.api.storage.azure.BlobServiceClient")
+    def test_save_annotation_uses_create_only_condition(self, mock_blob_service, mock_content_settings):
+        from src.api.storage.azure import AzureBlobStorageAdapter
+
+        mock_client = MagicMock()
+        mock_blob = MagicMock()
+        mock_blob.upload_blob = AsyncMock(return_value={"etag": '"created"'})
+        mock_client.get_container_client.return_value.get_blob_client.return_value = mock_blob
+        adapter = AzureBlobStorageAdapter(
+            account_name="testaccount",
+            container_name="testcontainer",
+            sas_token="test-sas-token",
+        )
+        adapter._client = mock_client
+
+        asyncio.run(
+            adapter.save_annotation(
+                self.dataset_id,
+                5,
+                create_test_annotation(episode_index=5),
+                if_none_match=True,
+            )
+        )
+
+        kwargs = mock_blob.upload_blob.await_args.kwargs
+        assert kwargs["if_none_match"] == "*"
+        assert kwargs["overwrite"] is False
+
+    @patch("src.api.storage.azure.AZURE_AVAILABLE", True)
     @patch("src.api.storage.azure.BlobServiceClient")
     def test_list_annotated_episodes(self, mock_blob_service):
         """Test listing annotated episodes."""

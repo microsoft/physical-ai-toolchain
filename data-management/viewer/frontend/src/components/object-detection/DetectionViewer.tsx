@@ -73,7 +73,7 @@ export function DetectionViewer({
         const sWidth = (x2 - x1) * scale
         const sHeight = (y2 - y1) * scale
 
-        const color = getClassColor(det.class_name)
+        const color = getClassColor(det.className)
 
         // Draw box
         ctx.strokeStyle = color
@@ -83,7 +83,7 @@ export function DetectionViewer({
 
         // Draw label
         if (showLabels) {
-          const label = `${det.class_name} ${(det.confidence * 100).toFixed(0)}%`
+          const label = `${det.className} ${(det.confidence * 100).toFixed(0)}%`
           ctx.font = '12px sans-serif'
           const textWidth = ctx.measureText(label).width
 

@@ -19,6 +19,14 @@ updates:
       update-types:
       - minor
       - patch
+  # Remove when eslint-plugin-jsx-a11y and eslint-plugin-react support ESLint 10.
+  ignore:
+  - dependency-name: "@eslint/js"
+    versions:
+    - ">=10"
+  - dependency-name: eslint
+    versions:
+    - ">=10"
   open-pull-requests-limit: 5
   labels:
   - dependencies
@@ -391,29 +399,6 @@ updates:
     prefix: chore
     include: scope
 - package-ecosystem: npm
-  directory: /data-management/viewer/frontend
-  schedule:
-    interval: weekly
-    day: monday
-  cooldown:
-    default-days: 7
-    semver-major-days: 14
-  groups:
-    dataviewer-frontend-patch-minor:
-      patterns:
-      - "*"
-      update-types:
-      - minor
-      - patch
-  open-pull-requests-limit: 10
-  labels:
-  - dependencies
-  - npm
-  - dataviewer
-  commit-message:
-    prefix: chore
-    include: scope
-- package-ecosystem: npm
   directory: /docs/docusaurus
   schedule:
     interval: weekly
@@ -496,6 +481,94 @@ updates:
   labels:
   - dependencies
   - docker
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /gpu-offload/controller
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    gpu-offload-controller-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - docker
+  - gpu-offload
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /gpu-offload/examples/first-run
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    gpu-offload-examples-first-run-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - docker
+  - gpu-offload
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /gpu-offload/examples/ur10e-single
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    gpu-offload-examples-ur10e-single-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - docker
+  - gpu-offload
+  commit-message:
+    prefix: chore
+    include: scope
+- package-ecosystem: docker
+  directory: /gpu-offload/examples/so101-real-hardware/docker
+  schedule:
+    interval: weekly
+    day: monday
+  cooldown:
+    default-days: 7
+  groups:
+    gpu-offload-examples-so101-real-hardware-docker-dependencies:
+      patterns:
+      - "*"
+      update-types:
+      - minor
+      - patch
+  open-pull-requests-limit: 5
+  labels:
+  - dependencies
+  - docker
+  - gpu-offload
   commit-message:
     prefix: chore
     include: scope

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1.0.0",
+  "baseUrl": "http://127.0.0.1:8000",
+  "serveMode": "served",
+  "allowlist": ["127.0.0.1:8000/docs*", "127.0.0.1:8000/redoc*", "127.0.0.1:8000/openapi.json"],
+  "routes": [
+    {"path": "/docs", "title": "Viewer Swagger UI", "surfaceIds": ["F01"]},
+    {"path": "/redoc", "title": "Viewer ReDoc", "surfaceIds": ["F02"]}
+  ],
+  "surfaces": [
+    {"id": "F01", "type": "page", "route": "/docs", "selector": "#swagger-ui", "states": [{"state": "default"}, {"state": "open"}, {"state": "valid-request"}, {"state": "invalid-request"}, {"state": "auth-error"}, {"state": "response"}, {"state": "focus"}, {"state": "reflow-320"}]},
+    {"id": "F02", "type": "page", "route": "/redoc", "selector": "redoc, .redoc-wrap", "states": [{"state": "default"}, {"state": "navigation"}, {"state": "open"}, {"state": "search"}, {"state": "long-schema"}, {"state": "focus"}, {"state": "reflow-320"}]}
+  ],
+  "probeScoping": [
+    {"probe": "probe-axe", "surfaces": ["F01", "F02"], "states": ["default", "open", "invalid-request", "auth-error"]},
+    {"probe": "probe-aria-tree", "surfaces": ["F01", "F02"], "states": ["default", "open", "focus"]},
+    {"probe": "probe-keyboard-traversal", "surfaces": ["F01", "F02"], "states": ["default", "open", "focus"]},
+    {"probe": "probe-reflow-resize", "surfaces": ["F01", "F02"], "states": ["default", "reflow-320"]},
+    {"probe": "probe-contrast", "surfaces": ["F01", "F02"], "states": ["default"]},
+    {"probe": "probe-console-errors", "surfaces": ["F01", "F02"], "states": ["default", "invalid-request"]},
+    {"probe": "probe-broken-links", "surfaces": ["F01", "F02"], "states": ["default"]},
+    {"probe": "probe-title-lang", "surfaces": ["F01", "F02"], "states": ["default"]}
+  ],
+  "visualReview": {
+    "enabled": true,
+    "evidenceRoot": "artifacts/accessibility/current/hve-viewer-docs",
+    "publicLoopbackOnly": true,
+    "rejectPersonalData": true,
+    "operatorConfirmedNoPersonalData": true,
+    "fullPage": true,
+    "traceSnapshots": true,
+    "routes": [{"path": "/docs", "state": "default", "surfaceId": "F01"}, {"path": "/redoc", "state": "default", "surfaceId": "F02"}],
+    "states": ["default", "open", "reflow-320"]
+  }
+}

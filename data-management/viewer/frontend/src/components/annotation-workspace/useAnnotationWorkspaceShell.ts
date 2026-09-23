@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useSaveEpisodeLabels } from '@/hooks/use-labels'
+import { usePrincipalContext } from '@/hooks/use-principal-context'
 import { isDiagnosticsEnabled, recordDiagnosticEvent } from '@/lib/playback-diagnostics'
 import {
   useDatasetStore,
@@ -48,6 +49,7 @@ export function useAnnotationWorkspaceShell({
   const resumePlaybackRef = useRef((_: number) => {})
 
   const currentDataset = useDatasetStore((state) => state.currentDataset)
+  const principalQuery = usePrincipalContext()
   const currentEpisode = useEpisodeStore((state) => state.currentEpisode)
   const labelDataLoaded = useLabelStore((state) => state.isLoaded)
   const availableLabels = useLabelStore((state) => state.availableLabels)
@@ -60,6 +62,7 @@ export function useAnnotationWorkspaceShell({
   const saveEpisodeDraft = useEditStore((state) => state.saveEpisodeDraft)
   const editDatasetId = useEditStore((state) => state.datasetId)
   const editEpisodeIndex = useEditStore((state) => state.episodeIndex)
+  const editPrincipalScopeId = useEditStore((state) => state.principalScopeId)
   const subtasks = useEditStore((state) => state.subtasks)
   const addSubtask = useEditStore((state) => state.addSubtask)
   const globalTransform = useEditStore((state) => state.globalTransform)
@@ -115,15 +118,27 @@ export function useAnnotationWorkspaceShell({
     })
 
   useEffect(() => {
-    if (currentDataset && currentEpisode) {
+    if (currentDataset && currentEpisode && principalQuery.data) {
       const newDatasetId = currentDataset.id
       const newEpisodeIndex = currentEpisode.meta.index
 
-      if (editDatasetId !== newDatasetId || editEpisodeIndex !== newEpisodeIndex) {
-        initializeEdit(newDatasetId, newEpisodeIndex)
+      if (
+        editDatasetId !== newDatasetId ||
+        editEpisodeIndex !== newEpisodeIndex ||
+        editPrincipalScopeId !== principalQuery.data.scopeId
+      ) {
+        initializeEdit(newDatasetId, newEpisodeIndex, principalQuery.data.scopeId)
       }
     }
-  }, [currentDataset, currentEpisode, editDatasetId, editEpisodeIndex, initializeEdit])
+  }, [
+    currentDataset,
+    currentEpisode,
+    editDatasetId,
+    editEpisodeIndex,
+    editPrincipalScopeId,
+    initializeEdit,
+    principalQuery.data,
+  ])
 
   const originalFrameCount = useMemo(() => {
     if (currentEpisode?.meta.length) {

@@ -2,12 +2,17 @@
 Integration tests for annotation API endpoints.
 """
 
+from __future__ import annotations
+
 import asyncio
+import json
 import tempfile
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from src.api.main import app
 from src.api.models.annotations import (
@@ -25,6 +30,31 @@ from src.api.models.annotations import (
     TrajectoryQualityMetrics,
 )
 from src.api.models.datasources import DatasetInfo, FeatureSchema
+
+_LANGUAGE_TAG_CORPUS = json.loads(
+    (Path(__file__).parents[3] / "specifications" / "language-tag-corpus.json").read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize("language", _LANGUAGE_TAG_CORPUS["valid"])
+def test_accepts_shared_valid_language_tags(language: str) -> None:
+    annotation = LanguageInstructionAnnotation(
+        instruction="pick",
+        source=InstructionSource.HUMAN,
+        language=language,
+    )
+
+    assert annotation.language == language
+
+
+@pytest.mark.parametrize("language", _LANGUAGE_TAG_CORPUS["invalid"])
+def test_rejects_shared_invalid_language_tags(language: str) -> None:
+    with pytest.raises(ValidationError, match="valid BCP 47 tag"):
+        LanguageInstructionAnnotation(
+            instruction="pick",
+            source=InstructionSource.HUMAN,
+            language=language,
+        )
 
 
 @pytest.fixture
@@ -129,20 +159,23 @@ class TestAnnotationEndpoints:
         response = client.put(
             "/api/datasets/test-dataset/episodes/5/annotations",
             json=sample_annotation.model_dump(mode="json"),
+            headers={"If-None-Match": "*"},
         )
         assert response.status_code == 200
 
         data = response.json()
         assert data["episode_index"] == 5
         assert len(data["annotations"]) == 1
-        assert data["annotations"][0]["annotator_id"] == "test-user"
+        assert data["annotations"][0]["annotator_id"].startswith("principal-")
+        assert data["annotations"][0]["annotator_id"] != "test-user"
 
     def test_save_annotation_updates_existing(self, client, registered_dataset, sample_annotation):
         """Test that saving updates existing annotation from same user."""
         # Save initial annotation
-        client.put(
+        created = client.put(
             "/api/datasets/test-dataset/episodes/5/annotations",
             json=sample_annotation.model_dump(mode="json"),
+            headers={"If-None-Match": "*"},
         )
 
         # Update annotation
@@ -150,6 +183,7 @@ class TestAnnotationEndpoints:
         response = client.put(
             "/api/datasets/test-dataset/episodes/5/annotations",
             json=sample_annotation.model_dump(mode="json"),
+            headers={"If-Match": created.headers["etag"]},
         )
         assert response.status_code == 200
 
@@ -157,24 +191,25 @@ class TestAnnotationEndpoints:
         assert len(data["annotations"]) == 1  # Still only one annotation
         assert data["annotations"][0]["notes"] == "Updated notes"
 
-    def test_save_annotation_multiple_annotators(self, client, registered_dataset, sample_annotation):
-        """Test multiple annotators can annotate same episode."""
-        # Save first annotation
-        client.put(
+    def test_save_annotation_ignores_client_selected_annotator(self, client, registered_dataset, sample_annotation):
+        """Client identity cannot create a second owner in the same authenticated scope."""
+        created = client.put(
             "/api/datasets/test-dataset/episodes/5/annotations",
             json=sample_annotation.model_dump(mode="json"),
+            headers={"If-None-Match": "*"},
         )
 
-        # Save second annotation from different user
         sample_annotation.annotator_id = "other-user"
         response = client.put(
             "/api/datasets/test-dataset/episodes/5/annotations",
             json=sample_annotation.model_dump(mode="json"),
+            headers={"If-Match": created.headers["etag"]},
         )
         assert response.status_code == 200
 
         data = response.json()
-        assert len(data["annotations"]) == 2
+        assert len(data["annotations"]) == 1
+        assert data["annotations"][0]["annotator_id"] != "other-user"
 
     def test_save_annotation_dataset_not_found(self, client, sample_annotation):
         """Test saving annotation to non-existent dataset."""
@@ -187,13 +222,17 @@ class TestAnnotationEndpoints:
     def test_delete_annotations_all(self, client, registered_dataset, sample_annotation):
         """Test deleting all annotations for an episode."""
         # Save annotation
-        client.put(
+        created = client.put(
             "/api/datasets/test-dataset/episodes/5/annotations",
             json=sample_annotation.model_dump(mode="json"),
+            headers={"If-None-Match": "*"},
         )
 
         # Delete all annotations
-        response = client.delete("/api/datasets/test-dataset/episodes/5/annotations")
+        response = client.delete(
+            "/api/datasets/test-dataset/episodes/5/annotations",
+            headers={"If-Match": created.headers["etag"]},
+        )
         assert response.status_code == 200
         assert response.json()["deleted"] is True
 
@@ -201,28 +240,40 @@ class TestAnnotationEndpoints:
         get_response = client.get("/api/datasets/test-dataset/episodes/5/annotations")
         assert get_response.json()["annotations"] == []
 
-    def test_delete_annotations_specific_annotator(self, client, registered_dataset, sample_annotation):
-        """Test deleting annotations from specific annotator."""
-        # Save annotations from two users
-        client.put(
+    def test_delete_annotations_ignores_client_selected_annotator(self, client, registered_dataset, sample_annotation):
+        """The ordinary delete route removes only the authenticated owner."""
+        created = client.put(
             "/api/datasets/test-dataset/episodes/5/annotations",
             json=sample_annotation.model_dump(mode="json"),
-        )
-        sample_annotation.annotator_id = "other-user"
-        client.put(
-            "/api/datasets/test-dataset/episodes/5/annotations",
-            json=sample_annotation.model_dump(mode="json"),
+            headers={"If-None-Match": "*"},
         )
 
-        # Delete only test-user's annotation
-        response = client.delete("/api/datasets/test-dataset/episodes/5/annotations?annotator_id=test-user")
+        response = client.delete(
+            "/api/datasets/test-dataset/episodes/5/annotations?annotator_id=other-user",
+            headers={"If-Match": created.headers["etag"]},
+        )
         assert response.status_code == 200
 
-        # Verify only other-user remains
         get_response = client.get("/api/datasets/test-dataset/episodes/5/annotations")
         annotations = get_response.json()["annotations"]
-        assert len(annotations) == 1
-        assert annotations[0]["annotator_id"] == "other-user"
+        assert annotations == []
+
+    def test_rejects_invalid_language_tag(self, client, registered_dataset, sample_annotation):
+        payload = sample_annotation.model_dump(mode="json")
+        payload["language_instruction"] = {
+            "instruction": "lift",
+            "source": "human",
+            "language": "bad_tag",
+            "paraphrases": [],
+            "subtask_instructions": [],
+        }
+
+        response = client.put(
+            "/api/datasets/test-dataset/episodes/3/annotations",
+            json=payload,
+        )
+
+        assert response.status_code == 422
 
 
 class TestAnnotationSummaryEndpoint:
@@ -245,6 +296,7 @@ class TestAnnotationSummaryEndpoint:
             client.put(
                 f"/api/datasets/test-dataset/episodes/{idx}/annotations",
                 json=sample_annotation.model_dump(mode="json"),
+                headers={"If-None-Match": "*"},
             )
 
         response = client.get("/api/datasets/test-dataset/annotations/summary")
@@ -294,6 +346,7 @@ class TestLanguageInstructionRoundTrip:
         save = client.put(
             "/api/datasets/test-dataset/episodes/3/annotations",
             json=sample_annotation.model_dump(mode="json"),
+            headers={"If-None-Match": "*"},
         )
         assert save.status_code == 200
 
