@@ -1,0 +1,12 @@
+**
+!frontend/
+!frontend/**
+!specifications/
+!specifications/language-tag-corpus.json
+
+frontend/node_modules
+frontend/dist
+frontend/.git
+frontend/.env
+frontend/.env.*
+frontend/*.log

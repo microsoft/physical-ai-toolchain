@@ -3,12 +3,13 @@
 # ─── Build stage ─────────────────────────────────────────────────────────────
 FROM node:26.8.2-slim@sha256:f7bb8247fdb16250dbec7fd0e24f091c6f5f0a29d256f3aef5816a7a369166b2 AS build
 
-WORKDIR /app
+WORKDIR /app/frontend
 
-COPY package.json package-lock.json .npmrc ./
+COPY frontend/package.json frontend/package-lock.json frontend/.npmrc ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 
-COPY . .
+COPY frontend/ ./
+COPY specifications/language-tag-corpus.json /app/specifications/language-tag-corpus.json
 
 # VITE_API_BASE_URL can be set at build time to point at the backend.
 # Defaults to empty string (same-host proxy is handled by nginx at runtime).
@@ -31,10 +32,10 @@ USER root
 RUN rm -rf /usr/share/nginx/html/*
 
 # Copy built static assets
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build /app/frontend/dist /usr/share/nginx/html
 
 # nginx config: envsubst replaces ${NGINX_BACKEND_HOST} at container start
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 
 ENV NGINX_BACKEND_HOST=backend:8000
 ENV NGINX_BACKEND_SCHEME=http
