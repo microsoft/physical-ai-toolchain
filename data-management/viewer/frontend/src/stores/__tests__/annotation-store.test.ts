@@ -85,6 +85,18 @@ describe('useAnnotationStore', () => {
     })
   })
 
+  describe('restoreAnnotationDraft', () => {
+    it('restores a dirty draft while retaining the server baseline', () => {
+      const draft = { ...mockAnnotation, notes: 'Unsaved local note' }
+
+      useAnnotationStore.getState().restoreAnnotationDraft(draft, mockAnnotation)
+
+      const state = useAnnotationStore.getState()
+      expect(state.currentAnnotation?.notes).toBe('Unsaved local note')
+      expect(state.originalAnnotation?.notes).toBe('Looks good')
+      expect(state.isDirty).toBe(true)
+    })
+  })
   describe('updateTaskCompleteness', () => {
     beforeEach(() => {
       useAnnotationStore.getState().loadAnnotation(mockAnnotation)

@@ -14,12 +14,14 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from .auth import require_auth
+from .auth import PrincipalContext, require_auth, require_principal_context
 from .csrf import CSRF_COOKIE_NAME, generate_csrf_token
 from .middleware import ContentSizeLimitMiddleware, SecurityHeadersMiddleware
 from .rate_limiter import limiter
 from .routers import analysis, annotations, datasets, detection, export, joint_config, labels, vlm_judge
 from .routes import ai_analysis
+from .storage import RevisionConflictError
+from .swagger_ui import install_responsive_swagger_ui
 
 # Configure logging to show INFO level
 logging.basicConfig(
@@ -63,6 +65,7 @@ app = FastAPI(
     title="LeRobot Annotation API",
     description="API for episode annotation in robot demonstration datasets",
     version="0.1.0",
+    docs_url=None,
     lifespan=lifespan,
     openapi_tags=[
         {"name": "auth", "description": "Authentication utilities"},
@@ -85,9 +88,25 @@ app = FastAPI(
         }
     },
 )
+install_responsive_swagger_ui(app)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(RevisionConflictError)
+async def revision_conflict_handler(_request, exc: RevisionConflictError) -> JSONResponse:
+    """Return the current revision when a conditional write is stale."""
+    headers = {"ETag": exc.current_etag} if exc.current_etag else None
+    return JSONResponse(
+        status_code=412,
+        content={
+            "code": "PRECONDITION_FAILED",
+            "message": "Resource revision precondition failed",
+            "details": {"currentEtag": exc.current_etag},
+        },
+        headers=headers,
+    )
 
 
 @app.exception_handler(Exception)
@@ -190,3 +209,11 @@ async def get_csrf_token() -> JSONResponse:
         path="/",
     )
     return response
+
+
+@app.get("/api/auth/context", response_model=PrincipalContext, tags=["auth"])
+async def get_auth_context(
+    principal: PrincipalContext = Depends(require_principal_context),
+) -> PrincipalContext:
+    """Return the opaque ownership scope for the authenticated principal."""
+    return principal

@@ -1,6 +1,6 @@
 import '@/components/__tests__/support/annotationWorkspaceTestSupport'
 
-import { act, renderHook } from '@testing-library/react'
+import { act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
@@ -9,19 +9,20 @@ import {
   teardownAnnotationWorkspaceTestCase,
 } from '@/components/__tests__/support/annotationWorkspaceTestSupport'
 import { useAnnotationWorkspaceShell } from '@/components/annotation-workspace/useAnnotationWorkspaceShell'
+import { renderHookWithProviders } from '@/test-utils/render'
 
 describe('useAnnotationWorkspaceShell', () => {
   beforeEach(setupAnnotationWorkspaceTestCase)
   afterEach(teardownAnnotationWorkspaceTestCase)
 
   it('defaults the workspace shell to the trajectory tab', () => {
-    const { result } = renderHook(() => useAnnotationWorkspaceShell({}))
+    const { result } = renderHookWithProviders(() => useAnnotationWorkspaceShell({}))
 
     expect(result.current.activeTab).toBe('trajectory')
   })
 
   it('records workspace diagnostics when switching tabs', () => {
-    const { result } = renderHook(() => useAnnotationWorkspaceShell({}))
+    const { result } = renderHookWithProviders(() => useAnnotationWorkspaceShell({}))
 
     act(() => {
       result.current.handleTabChange('other')
@@ -35,7 +36,7 @@ describe('useAnnotationWorkspaceShell', () => {
   })
 
   it('opens the export dialog and records the export event', () => {
-    const { result } = renderHook(() => useAnnotationWorkspaceShell({}))
+    const { result } = renderHookWithProviders(() => useAnnotationWorkspaceShell({}))
 
     act(() => {
       result.current.handleOpenExportDialog()

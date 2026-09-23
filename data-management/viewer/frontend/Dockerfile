@@ -5,10 +5,13 @@ FROM node:26.8.2-slim@sha256:f7bb8247fdb16250dbec7fd0e24f091c6f5f0a29d256f3aef58
 
 WORKDIR /app
 
-COPY package.json package-lock.json .npmrc ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+COPY package.json package-lock.json ./
+COPY data-management/viewer/frontend/package.json data-management/viewer/frontend/package.json
+RUN --mount=type=cache,target=/root/.npm \
+    --mount=type=secret,id=npmrc,target=/root/.npmrc \
+    npm ci --ignore-scripts --workspace robotic-training-data-tool --include-workspace-root=false
 
-COPY . .
+COPY data-management/viewer/frontend data-management/viewer/frontend
 
 # VITE_API_BASE_URL can be set at build time to point at the backend.
 # Defaults to empty string (same-host proxy is handled by nginx at runtime).
@@ -20,7 +23,7 @@ ARG VITE_AZURE_TENANT_ID=""
 ENV VITE_AZURE_CLIENT_ID=${VITE_AZURE_CLIENT_ID}
 ENV VITE_AZURE_TENANT_ID=${VITE_AZURE_TENANT_ID}
 
-RUN npm run build
+RUN npm run build --workspace robotic-training-data-tool
 
 # ─── Serve stage ─────────────────────────────────────────────────────────────
 FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:592b23aa79a6e6c08ba4b20f1fff700e1328895705966722608e115d62e52d39 AS serve
@@ -31,10 +34,10 @@ USER root
 RUN rm -rf /usr/share/nginx/html/*
 
 # Copy built static assets
-COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build /app/data-management/viewer/frontend/dist /usr/share/nginx/html
 
 # nginx config: envsubst replaces ${NGINX_BACKEND_HOST} at container start
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY data-management/viewer/frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 
 ENV NGINX_BACKEND_HOST=backend:8000
 ENV NGINX_BACKEND_SCHEME=http

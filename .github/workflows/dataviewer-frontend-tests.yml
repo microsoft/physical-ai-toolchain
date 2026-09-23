@@ -33,9 +33,10 @@ jobs:
         with:
           node-version-file: data-management/viewer/frontend/.nvmrc
           cache: npm
-          cache-dependency-path: data-management/viewer/frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
+        working-directory: .
         run: npm ci
 
       - name: ESLint
@@ -70,7 +71,7 @@ jobs:
         if: ${{ inputs.code-coverage && always() }}
         uses: codecov/codecov-action@0b35c9ecc4f0529d0eb674914510c22f85b196b4 # v7.1.0
         with:
-          files: coverage/cobertura-coverage.xml
+          files: data-management/viewer/frontend/coverage/cobertura-coverage.xml
           use_oidc: true
           fail_ci_if_error: false
           verbose: true
