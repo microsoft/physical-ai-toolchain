@@ -1696,7 +1696,7 @@ class ReconcileRuntime:
         ):
             for item in list_fn().items:
                 obj = kubernetes_object_to_dict(item)
-                self._reconcile_obj(obj)
+                self._reconcile_obj(obj, raise_api_errors=True)
 
     def _watch_kind(self, kind: str, list_fn: Callable[..., Any]) -> None:
         attempt = 0
@@ -1731,7 +1731,7 @@ class ReconcileRuntime:
                 if self.stop_event.wait(delay):
                     return
 
-    def _reconcile_obj(self, obj: dict[str, Any]) -> None:
+    def _reconcile_obj(self, obj: dict[str, Any], *, raise_api_errors: bool = False) -> None:
         try:
             self.controller.reconcile_object(obj)
         except XavierConfigError as exc:
@@ -1739,6 +1739,8 @@ class ReconcileRuntime:
                 "Skipping reconcile for %s/%s: %s", obj.get("kind"), obj.get("metadata", {}).get("name"), exc
             )
         except client.exceptions.ApiException as exc:
+            if raise_api_errors:
+                raise
             logger.warning(
                 "Kubernetes API error while reconciling %s/%s: %s",
                 obj.get("kind"),

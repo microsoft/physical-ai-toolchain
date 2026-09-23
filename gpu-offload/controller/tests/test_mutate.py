@@ -539,6 +539,67 @@ def test_reconcile_runtime_remains_unready_during_initial_sync_failures():
         thread.join(timeout=5)
 
 
+def test_readyz_remains_unready_until_existing_object_reconciliation_succeeds(monkeypatch):
+    mod = _load_mutate_module()
+    first_failure = threading.Event()
+    allow_success = threading.Event()
+    attempts = 0
+    controller = _reconcile_controller(
+        lambda: types.SimpleNamespace(items=[{"kind": "Pod", "metadata": {"name": "client", "namespace": "default"}}])
+    )
+
+    def reconcile_object(_obj: dict[str, Any]) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            first_failure.set()
+            raise client.exceptions.ApiException(status=503)
+        assert allow_success.wait(timeout=2)
+
+    controller.reconcile_object = reconcile_object
+    runtime = mod.ReconcileRuntime(controller, initial_sync_retry_delays=(0.0,))
+    monkeypatch.setattr(runtime, "_watch_kind", lambda _kind, _list_fn: runtime.stop_event.wait())
+    admission_controller = mod.XavierAdmissionController(readiness_check=runtime.readiness_status)
+    server = mod.AdmissionHTTPServer(("127.0.0.1", 0), admission_controller, ssl_context=None)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    runtime_thread = threading.Thread(target=runtime.start, daemon=True)
+    server_thread.start()
+    runtime_thread.start()
+    try:
+        assert first_failure.wait(timeout=2)
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 503
+        assert json.loads(response.read()) == {
+            "status": "not ready",
+            "reason": "initial reconciliation is pending",
+        }
+
+        allow_success.set()
+        assert runtime.initial_sync_complete.wait(timeout=2)
+        for _ in range(100):
+            ready, _ = runtime.readiness_status()
+            if ready:
+                break
+            threading.Event().wait(0.01)
+        assert ready
+        connection.request("GET", "/readyz")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "ok"}
+        assert attempts == 2
+    finally:
+        allow_success.set()
+        runtime.stop()
+        server.shutdown()
+        server.server_close()
+        runtime_thread.join(timeout=5)
+        server_thread.join(timeout=5)
+        for worker in runtime.threads.values():
+            worker.join(timeout=5)
+
+
 def test_reconcile_runtime_readiness_detects_dead_worker():
     mod = _load_mutate_module()
 
