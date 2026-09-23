@@ -82,6 +82,95 @@ function Get-UvLockProject {
     return @($dirs | Sort-Object -Unique)
 }
 
+function Get-CommittedUvLockProject {
+    <#
+    .SYNOPSIS
+        Discovers repository-relative directories containing committed uv.lock files.
+    .OUTPUTS
+        [string[]] Sorted, unique directory paths (forward-slash, '.' for the root).
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$RepoRoot
+    )
+
+    $lockFiles = @(& git -C $RepoRoot ls-files -- 'uv.lock' ':(glob)**/uv.lock')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to list committed uv.lock files'
+    }
+
+    $excludeDirs = @('.venv', 'external', 'node_modules', '.git', '.copilot-tracking', 'docs/docusaurus')
+    $projects = foreach ($lockFile in $lockFiles) {
+        $normalized = $lockFile -replace '\\', '/'
+        if ($excludeDirs | Where-Object { $normalized -like "$_/*" -or $normalized -like "*/$_/*" }) {
+            continue
+        }
+        $parent = Split-Path $normalized -Parent
+        if ([string]::IsNullOrEmpty($parent)) { '.' } else { $parent -replace '\\', '/' }
+    }
+
+    return @($projects | Sort-Object -Unique)
+}
+
+function Get-UvDependabotProject {
+    <#
+    .SYNOPSIS
+        Reads uv project directories from a Dependabot configuration.
+    .OUTPUTS
+        [string[]] Sorted, unique repository-relative directory paths.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path
+    )
+
+    if (-not (Test-Path $Path -PathType Leaf)) {
+        throw "Dependabot configuration not found: $Path"
+    }
+
+    $projects = [System.Collections.Generic.List[string]]::new()
+    $ecosystem = ''
+    foreach ($line in Get-Content -Path $Path) {
+        if ($line -match '^\s*-\s+package-ecosystem:\s*["'']?([^"'']+)["'']?\s*$') {
+            $ecosystem = $matches[1].Trim()
+            continue
+        }
+        if ($ecosystem -eq 'uv' -and $line -match '^\s+directory:\s*["'']?([^"'']+)["'']?\s*$') {
+            $directory = $matches[1].Trim().Trim('/')
+            $projects.Add($(if ($directory) { $directory } else { '.' }))
+            $ecosystem = ''
+        }
+    }
+
+    return @($projects | Sort-Object -Unique)
+}
+
+function Get-MissingUvDependabotProject {
+    <#
+    .SYNOPSIS
+        Returns committed uv projects without a matching Dependabot uv entry.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$LockProjects,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$DependabotProjects
+    )
+
+    return @($LockProjects | Where-Object { $_ -notin $DependabotProjects } | Sort-Object -Unique)
+}
+
 function Invoke-UvLockCheck {
     <#
     .SYNOPSIS
@@ -267,6 +356,20 @@ function Invoke-UvLockConsistencyCheckCore {
 
     if (-not $OutputPath) {
         $OutputPath = Join-Path $repoRoot 'logs/uv-lock-consistency-results.json'
+    }
+
+    $dependabotPath = Join-Path $repoRoot '.github/dependabot.yml'
+    $lockProjects = @(Get-CommittedUvLockProject -RepoRoot $repoRoot)
+    $dependabotProjects = @(Get-UvDependabotProject -Path $dependabotPath)
+    $missingDependabotProjects = @(
+        Get-MissingUvDependabotProject -LockProjects $lockProjects -DependabotProjects $dependabotProjects
+    )
+    if ($missingDependabotProjects.Count -gt 0) {
+        foreach ($project in $missingDependabotProjects) {
+            Write-CIAnnotation -Level Error -File '.github/dependabot.yml' `
+                -Message "Committed uv project '$project' requires a Dependabot uv entry."
+        }
+        return 1
     }
 
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {

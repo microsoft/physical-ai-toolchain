@@ -53,6 +53,38 @@ Describe 'Get-UvLockProject' -Tag 'Unit' {
     }
 }
 
+Describe 'Get-UvDependabotProject' -Tag 'Unit' {
+    It 'Reads and normalizes uv directories' {
+        $dependabotPath = Join-Path $TestDrive 'dependabot.yml'
+        @'
+version: 2
+updates:
+- package-ecosystem: uv
+  directory: /
+- package-ecosystem: npm
+  directory: /
+- package-ecosystem: "uv"
+  directory: "/training/rl"
+'@ | Set-Content -Path $dependabotPath
+
+        $projects = @(Get-UvDependabotProject -Path $dependabotPath)
+
+        $projects | Should -Be @('.', 'training/rl')
+    }
+}
+
+Describe 'Get-MissingUvDependabotProject' -Tag 'Unit' {
+    It 'Returns lock projects without uv update ownership' {
+        $missing = @(
+            Get-MissingUvDependabotProject `
+                -LockProjects @('.', 'evaluation', 'evaluation/vlm_judge') `
+                -DependabotProjects @('.', 'evaluation')
+        )
+
+        $missing | Should -Be @('evaluation/vlm_judge')
+    }
+}
+
 Describe 'Invoke-UvLockCheck' -Tag 'Unit' {
     It 'Returns the exit code and trimmed output from uv' {
         Mock uv {
@@ -217,6 +249,8 @@ Describe 'Invoke-UvLockConsistencyCheckCore' -Tag 'Unit' {
         Mock Write-CIAnnotation {}
         Mock Write-CIStepSummary {}
         Mock Get-Command { return @{ Source = '/usr/bin/uv' } } -ParameterFilter { $Name -eq 'uv' }
+        Mock Get-CommittedUvLockProject { @('training/rl') }
+        Mock Get-UvDependabotProject { @('training/rl') }
     }
 
     AfterEach {
@@ -229,6 +263,22 @@ Describe 'Invoke-UvLockConsistencyCheckCore' -Tag 'Unit' {
         $result = Invoke-UvLockConsistencyCheckCore -OutputPath $script:OutputPath -Projects @('training/rl')
 
         $result | Should -Be 1
+    }
+
+    It 'Returns 1 when a committed uv project lacks Dependabot ownership' {
+        Mock Get-CommittedUvLockProject { @('training/rl', 'evaluation/vlm_judge') }
+        Mock Get-UvDependabotProject { @('training/rl') }
+        Mock Test-UvLockProject { throw 'should not run' }
+
+        $result = Invoke-UvLockConsistencyCheckCore -OutputPath $script:OutputPath -Projects @('training/rl')
+
+        $result | Should -Be 1
+        Should -Invoke Write-CIAnnotation -ParameterFilter {
+            $Level -eq 'Error' -and
+            $File -eq '.github/dependabot.yml' -and
+            $Message -like "*evaluation/vlm_judge*"
+        }
+        Should -Not -Invoke Test-UvLockProject
     }
 
     It 'Writes an error annotation when uv is missing' {
