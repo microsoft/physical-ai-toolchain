@@ -18,6 +18,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import { Progress } from '@/components/ui/progress'
 import { Slider, SliderRange, SliderThumb, SliderTrack } from '@/components/ui/slider'
 import {
   Table,
@@ -130,6 +131,14 @@ describe('shared ui primitives', () => {
     expect(screen.getByRole('cell', { name: 'person' })).toBeInTheDocument()
   })
 
+  it('forwards determinate progress values to the semantic root', () => {
+    render(<Progress aria-label="Export progress" value={42} />)
+
+    expect(screen.getByRole('progressbar', { name: 'Export progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '42',
+    )
+  })
   it('supports semantic badge tones for repeated status states', () => {
     render(
       <Badge variant="status" tone="warning">

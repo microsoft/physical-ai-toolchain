@@ -73,4 +73,22 @@ describe('ViewerDisplayControls', () => {
     expect(sliders[3]).toHaveAttribute('min', '0.1')
     expect(sliders[3]).toHaveAttribute('max', '3')
   })
+  it('exposes disclosure state and names each display slider', async () => {
+    const user = userEvent.setup()
+    renderWithQuery(<ViewerDisplayControls />)
+
+    const trigger = screen.getByRole('button', { name: /display settings/i })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(trigger)
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    const controlledPanelId = trigger.getAttribute('aria-controls')
+    expect(controlledPanelId).toBeTruthy()
+    expect(document.getElementById(controlledPanelId!)).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: 'Brightness' })).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: 'Contrast' })).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: 'Saturation' })).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: 'Gamma' })).toBeInTheDocument()
+  })
 })

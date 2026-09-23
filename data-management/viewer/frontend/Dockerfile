@@ -12,6 +12,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --ignore-scripts --workspace robotic-training-data-tool --include-workspace-root=false
 
 COPY data-management/viewer/frontend data-management/viewer/frontend
+COPY data-management/viewer/specifications/language-tag-corpus.json data-management/viewer/specifications/language-tag-corpus.json
 
 # VITE_API_BASE_URL can be set at build time to point at the backend.
 # Defaults to empty string (same-host proxy is handled by nginx at runtime).
