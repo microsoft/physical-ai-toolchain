@@ -40,7 +40,7 @@ dependencies = [
     # and hf-xet alpha/dev releases; pin stable versions unless a direct
     # dependency requires them.
     "pydantic==2.13.5",
-    "sentry-sdk==2.69.1",
+    "sentry-sdk==2.69.2",
     "hf-xet==1.6.0",
     "psutil==7.2.2",
     "pynvml==13.0.1",
@@ -73,7 +73,7 @@ dependencies = [
     # mlflow-skinny and wandb).
     "gitpython==3.1.62",
     # Pin urllib3 to address GHSA-qccp-gfcp-xxvc and GHSA-mf9v-mfxr-j63j (transitive via many HTTP clients).
-    "urllib3==2.7.0",
+    "urllib3==2.8.0",
     # Pin cryptography above the 48.0.1 security floor for
     # GHSA-537c-gmf6-5ccf. azureml-mlflow caps below 49.0.0, so this pin is
     # also overridden below.
