@@ -37,7 +37,11 @@ workflows/azureml/submit-osmo-proxy-job.sh \
   --job-name osmo-proxy-smoke \
   --experiment-name osmo-proxy-smoke \
   --output-url azure://<storage-account>/osmo/proxy-smoke/
+```
 
+Set `OSMO_WORKFLOW_BUCKET` when the deployment uses a container other than `osmo`. The wrapper validates `--output-url` against the Terraform storage account and this independently configured container.
+
+```bash
 # Or directly with az ml job create
 az ml job create \
   --file workflows/azureml/osmo-proxy-job.yaml \

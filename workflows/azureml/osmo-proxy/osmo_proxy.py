@@ -976,6 +976,13 @@ def main() -> None:
         _LOGGER.error("OSMO workflow %s did not complete successfully: %s", workflow_id, status)
         sys.exit(1)
 
+    execution_evidence = {
+        "attempts": ["initial"],
+        "retry_classification": "none",
+        "status": status,
+        "workflow_id": workflow_id,
+    }
+    _LOGGER.info("PROXY_EXECUTION_EVIDENCE=%s", json.dumps(execution_evidence, sort_keys=True))
     _LOGGER.info("Done. OSMO workflow %s COMPLETED.", workflow_id)
 
 

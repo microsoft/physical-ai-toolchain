@@ -96,9 +96,8 @@ def test_cancel_osmo_workflows_by_identifier_cancels_only_matching_non_terminal(
                 args=args,
                 returncode=0,
                 stdout=(
-                    '[{"id":"running-id","status":"RUNNING","variables":{"correlation_id":"target"}},'
-                    '{"id":"done-id","status":"COMPLETED","name":"target"},'
-                    '{"id":"other-id","status":"RUNNING","name":"other"}]'
+                    '[{"id":"running-id","status":"RUNNING","tasks":[{"id":"nested-task-id"}]},'
+                    '{"id":"done-id","status":"COMPLETED"}]'
                 ),
                 stderr="",
             )
@@ -109,7 +108,19 @@ def test_cancel_osmo_workflows_by_identifier_cancels_only_matching_non_terminal(
     cancel_osmo_workflows_by_identifier("target", tmp_path)
 
     assert commands == [
-        ["osmo", "workflow", "list", "--format-type", "json"],
+        [
+            "osmo",
+            "workflow",
+            "list",
+            "--name",
+            "target",
+            "--count",
+            "100",
+            "--offset",
+            "0",
+            "--format-type",
+            "json",
+        ],
         ["osmo", "workflow", "cancel", "running-id"],
     ]
 

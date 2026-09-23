@@ -476,24 +476,38 @@ def cancel_osmo_workflow(workflow: OSMOWorkflow, repo_root: Path) -> None:
 
 def cancel_osmo_workflows_by_identifier(identifier: str, repo_root: Path) -> None:
     """Cancel non-terminal workflows matching a pre-submission name or correlation identifier."""
-    result = run_command(["osmo", "workflow", "list", "--format-type", "json"], cwd=repo_root)
-    if result.returncode != 0:
-        raise AssertionError(f"Unable to list OSMO workflows for cleanup\n\n{format_command_failure(result)}")
-
+    page_size = 100
+    offset = 0
     matches: dict[str, str] = {}
+    while True:
+        result = run_command(
+            [
+                "osmo",
+                "workflow",
+                "list",
+                "--name",
+                identifier,
+                "--count",
+                str(page_size),
+                "--offset",
+                str(offset),
+                "--format-type",
+                "json",
+            ],
+            cwd=repo_root,
+        )
+        if result.returncode != 0:
+            raise AssertionError(f"Unable to list OSMO workflows for cleanup\n\n{format_command_failure(result)}")
 
-    def _collect(value: Any) -> None:
-        if isinstance(value, Mapping):
-            workflow_id = _find_first_string(value, ("workflow_id", "workflowId", "id"))
-            if workflow_id is not None and _contains_exact_string(value, identifier):
-                matches[workflow_id] = _find_first_string(value, ("status", "state")) or "UNKNOWN"
-            for nested in value.values():
-                _collect(nested)
-        elif isinstance(value, list):
-            for nested in value:
-                _collect(nested)
+        records = _workflow_list_records(parse_json_from_output(result.stdout))
+        for record in records:
+            workflow_id = _find_first_string(record, ("workflow_id", "workflowId", "id", "name"))
+            if workflow_id is not None:
+                matches[workflow_id] = _find_first_string(record, ("status", "state")) or "UNKNOWN"
+        if len(records) < page_size:
+            break
+        offset += page_size
 
-    _collect(parse_json_from_output(result.stdout))
     for workflow_id, status in matches.items():
         if status in OSMO_SUCCESS_STATES or status in OSMO_FAILURE_STATES or status.startswith(OSMO_FAILURE_PREFIXES):
             log_e2e(f"Skipping recovery cancel for OSMO workflow {workflow_id}; terminal status={status}")
@@ -507,14 +521,15 @@ def cancel_osmo_workflows_by_identifier(identifier: str, repo_root: Path) -> Non
             )
 
 
-def _contains_exact_string(value: Any, expected: str) -> bool:
-    if isinstance(value, str):
-        return value == expected
-    if isinstance(value, Mapping):
-        return any(_contains_exact_string(nested, expected) for nested in value.values())
-    if isinstance(value, list):
-        return any(_contains_exact_string(nested, expected) for nested in value)
-    return False
+def _workflow_list_records(payload: Any) -> list[Mapping[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, Mapping)]
+    if isinstance(payload, Mapping):
+        for key in ("workflows", "items", "results", "data"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, Mapping)]
+    raise AssertionError("OSMO workflow list output did not contain a workflow record list")
 
 
 @dataclass(frozen=True)

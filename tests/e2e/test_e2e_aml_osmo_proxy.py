@@ -31,6 +31,7 @@ from tests.e2e._common import (
     e2e_name,
     format_command_failure,
     log_e2e,
+    parse_provenance_marker,
     register_cleanup,
     run_command,
 )
@@ -187,9 +188,16 @@ def test_aml_osmo_proxy_e2e(
         is_terminal=True,
         terminal_status="COMPLETED",
     )
-    job.handle.attempts["osmo_workflow"] = ["initial"]
-    job.handle.retry_classifications["osmo_workflow"] = "none"
-    job.handle.terminal_states["osmo_workflow"] = "COMPLETED"
+    execution_evidence = parse_provenance_marker(logs, "PROXY_EXECUTION_EVIDENCE=")
+    assert execution_evidence["workflow_id"] == workflow_id
+    assert execution_evidence["status"] == "COMPLETED"
+    assert execution_evidence["attempts"] == ["initial"]
+    assert execution_evidence["retry_classification"] == "none"
+    attempts = execution_evidence["attempts"]
+    assert isinstance(attempts, list)
+    job.handle.attempts["osmo_workflow"] = [str(value) for value in attempts]
+    job.handle.retry_classifications["osmo_workflow"] = str(execution_evidence["retry_classification"])
+    job.handle.terminal_states["osmo_workflow"] = str(execution_evidence["status"])
     register_cleanup(
         request,
         job.handle,
