@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -67,6 +68,8 @@ OSMO_POLL_INTERVAL_SECONDS = 30
 
 OSMO_WORKFLOWS_NAMESPACE = "osmo-workflows"
 _POD_LOG_POLL_INTERVAL_SECONDS = 5
+_OSMO_READ_ATTEMPTS = 12
+_OSMO_READ_RETRY_SECONDS = 5
 
 
 @dataclass
@@ -78,6 +81,22 @@ class OSMOWorkflow:
     handle: E2EHandle = field(default_factory=E2EHandle)
     is_terminal: bool = False
     terminal_status: str | None = None
+
+
+def _run_osmo_read_command(
+    args: list[str],
+    *,
+    cwd: Path,
+    description: str,
+) -> subprocess.CompletedProcess[str]:
+    result = run_command(args, cwd=cwd)
+    for attempt in range(1, _OSMO_READ_ATTEMPTS):
+        if result.returncode == 0:
+            return result
+        log_e2e(f"{description} failed ({attempt}/{_OSMO_READ_ATTEMPTS}); retrying")
+        time.sleep(_OSMO_READ_RETRY_SECONDS)
+        result = run_command(args, cwd=cwd)
+    return result
 
 
 def _find_first_string(payload: Any, keys: tuple[str, ...]) -> str | None:
@@ -207,9 +226,10 @@ def submit_osmo_dataset_training(
 
 
 def _fetch_osmo_workflow_payload(workflow: OSMOWorkflow, repo_root: Path) -> dict[str, Any]:
-    result = run_command(
+    result = _run_osmo_read_command(
         ["osmo", "workflow", "query", workflow.workflow_id, "--format-type", "json"],
         cwd=repo_root,
+        description=f"OSMO workflow query for {workflow.workflow_id}",
     )
     if result.returncode != 0:
         raise AssertionError(
@@ -456,7 +476,7 @@ def fetch_workflow_task_logs(
         workflow.handle.logs[task_name] = result.stdout
         return result.stdout
 
-    persisted_result = run_command(
+    persisted_result = _run_osmo_read_command(
         [
             "osmo",
             "workflow",
@@ -468,6 +488,7 @@ def fetch_workflow_task_logs(
             "10000",
         ],
         cwd=repo_root,
+        description=f"OSMO persisted log read for {workflow.workflow_id}/{task_name}",
     )
     if persisted_result.returncode != 0 or f"[{task_name}]" not in persisted_result.stdout:
         raise AssertionError(
@@ -499,7 +520,7 @@ def cancel_osmo_workflows_by_identifier(identifier: str, repo_root: Path) -> Non
     offset = 0
     matches: dict[str, str] = {}
     while True:
-        result = run_command(
+        result = _run_osmo_read_command(
             [
                 "osmo",
                 "workflow",
@@ -514,6 +535,7 @@ def cancel_osmo_workflows_by_identifier(identifier: str, repo_root: Path) -> Non
                 "json",
             ],
             cwd=repo_root,
+            description=f"OSMO cleanup discovery for {identifier}",
         )
         if result.returncode != 0:
             raise AssertionError(f"Unable to list OSMO workflows for cleanup\n\n{format_command_failure(result)}")
