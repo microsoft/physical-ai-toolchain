@@ -665,11 +665,13 @@ class TaskPodLogStream:
                 )
                 reported[pod.name] = signature
 
-            if not pod.terminated and pod.name not in streamed:
+            if pod.name not in streamed:
                 if self._stop.is_set():
                     return
-                streamed.add(pod.name)
-                self._follow(pod.name)
+                if self._follow(pod.name):
+                    streamed.add(pod.name)
+                elif self._stop.wait(self._poll_interval_seconds):
+                    return
                 continue
 
             if pod.terminated and pod.name in streamed:
@@ -699,9 +701,9 @@ class TaskPodLogStream:
         newest = max(items, key=_pod_created_at)
         return _task_pod_from_item(newest, self._task_name)
 
-    def _follow(self, pod_name: str) -> None:
+    def _follow(self, pod_name: str) -> bool:
         if self._stop.is_set():
-            return
+            return False
 
         log_e2e(f"Streaming logs for OSMO task {self._task_name} (pod {pod_name})")
         try:
@@ -710,7 +712,7 @@ class TaskPodLogStream:
                     "kubectl",
                     "logs",
                     "-f",
-                    "--pod-running-timeout=1h",
+                    "--pod-running-timeout=10s",
                     "-n",
                     self._namespace,
                     pod_name,
@@ -725,8 +727,9 @@ class TaskPodLogStream:
             )
         except OSError as error:
             log_e2e(f"Failed to stream logs for pod {pod_name}: {error}")
-            return
+            return False
 
+        captured_lines: list[str] = []
         with self._proc_lock:
             self._proc = proc
             should_stop = self._stop.is_set()
@@ -736,12 +739,11 @@ class TaskPodLogStream:
             assert proc.stdout is not None
             for line in proc.stdout:
                 rendered_line = line.rstrip()
-                self._captured_lines.append(rendered_line)
+                captured_lines.append(rendered_line)
                 print(f"[pod {pod_name}] {rendered_line}", flush=True)
                 if self._stop.is_set():
                     break
         finally:
-            self._workflow.handle.logs[self._task_name] = "\n".join(self._captured_lines)
             with self._proc_lock:
                 self._proc = None
             if proc.poll() is None:
@@ -750,6 +752,11 @@ class TaskPodLogStream:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+        if proc.returncode != 0 or not captured_lines:
+            return False
+        self._captured_lines.extend(captured_lines)
+        self._workflow.handle.logs[self._task_name] = "\n".join(self._captured_lines)
+        return True
 
 
 def start_task_pod_log_stream(
